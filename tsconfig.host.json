@@ -329,6 +329,7 @@
     { "path": "./packages/workflow/workflow-worker-thread" },
     { "path": "./packages/workflow/tool-workflow" },
     { "path": "./packages/workflow/tool-ralph" },
+    { "path": "./packages/workflow/tool-documentation" },
     { "path": "./packages/webhook/webhook" },
     { "path": "./packages/webhook/webhook-github" },
     { "path": "./packages/todo/tool-todo" },

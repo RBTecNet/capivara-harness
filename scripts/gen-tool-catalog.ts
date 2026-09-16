@@ -68,6 +68,8 @@ import * as ToolWeb from '@deepseek-ai/dsh-tool-web'
 import VmWorkflowEngine from '@deepseek-ai/dsh-workflow-worker-thread'
 import * as ToolRalph from '@deepseek-ai/dsh-tool-ralph'
 import * as ToolWorkflow from '@deepseek-ai/dsh-tool-workflow'
+import * as ToolDocumentation from '@capivara-harness/dsh-tool-documentation'
+import DocumentationModelSelectionConfig from '../packages/workflow/tool-documentation/src/model-selection-settings.ts'
 import { githubSlug } from './verify-md-links.ts'
 
 /** Attachment seam marker that makes the attachments-conditional `read_image` schema harvestable. */
@@ -435,6 +437,25 @@ const TOOL_PACKAGES: ToolPackage[] = [
     },
     note:
       'A fixed foreground workflow starts one fresh structured child per round; the model selects only the immutable objective and an optional round cap.',
+  },
+  {
+    pkg: '@capivara-harness/dsh-tool-documentation',
+    dir: 'tool-documentation',
+    source: 'packages/workflow/tool-documentation/src/index.ts',
+    requires: ['ctx.tools', 'ctx.subagents', 'ctx.userQuestions', 'ctx.systemPrompt', 'ctx.documentationModelSelection', 'a calling Agent (the tool parents every fresh child)'],
+    writes: ['tool/call', 'tool/result', 'interview questions and child session events during execution'],
+    async mount(ctx) {
+      await ctx.plugin(UserQuestionService)
+      await ctx.plugin(DocumentationModelSelectionConfig, {
+        executor: { provider: 'mock', model: 'mock-builder' },
+        validator: { provider: 'mock', model: 'mock-validator' },
+      })
+      await ctx.plugin(SubagentRuntime)
+      registerCatalogSubagentProvider(ctx, 'mock')
+      await ctx.plugin(ToolDocumentation, { subagentProvider: 'mock' })
+    },
+    note:
+      'Every call requires direct-human interview answers, then runs a fresh structured executor and a separate read-only validator. A validator failure starts a bounded correction cycle; the tool result is successful only after a validator pass. Executor and validator routes are deployment settings, not model-call fields.',
   },
   {
     pkg: '@deepseek-ai/dsh-tool-skill',

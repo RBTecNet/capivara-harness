@@ -95,6 +95,7 @@
     "@deepseek-ai/dsh-tool-call-timeout-policy": "workspace:^",
     "@deepseek-ai/dsh-token-meter": "workspace:^",
     "@deepseek-ai/dsh-tool-bash": "workspace:^",
+    "@capivara-harness/dsh-tool-documentation": "workspace:^",
     "@deepseek-ai/dsh-tool-present": "workspace:^",
     "@deepseek-ai/dsh-tool-fs": "workspace:^",
     "@deepseek-ai/dsh-tool-fs-search": "workspace:^",

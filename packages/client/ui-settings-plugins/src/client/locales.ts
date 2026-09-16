@@ -17,6 +17,14 @@ export type PluginsSettingsLocaleKey =
   | 'subagentModelSelectionPartial' | 'subagentModelSelectionUnavailable'
   | 'subagentModelSelectionUnavailableGroup' | 'subagentModelSelectionEmpty'
   | 'subagentModelSelectionRequired' | 'subagentModelSelectionConflict' | 'subagentModelSelectionOff'
+  | 'documentationModelSelectionTitle' | 'documentationModelSelectionDescription'
+  | 'documentationModelSelectionExecutor' | 'documentationModelSelectionExecutorHint'
+  | 'documentationModelSelectionValidator' | 'documentationModelSelectionValidatorHint'
+  | 'documentationModelSelectionChoose' | 'documentationModelSelectionLoading'
+  | 'documentationModelSelectionLoadFailed' | 'documentationModelSelectionRetry'
+  | 'documentationModelSelectionPartial' | 'documentationModelSelectionUnavailable'
+  | 'documentationModelSelectionSameRoute' | 'documentationModelSelectionRequired'
+  | 'documentationModelSelectionConflict'
 
 /** English copy. */
 export const en: Record<PluginsSettingsLocaleKey, string> = {
@@ -72,6 +80,21 @@ export const en: Record<PluginsSettingsLocaleKey, string> = {
   subagentModelSelectionRequired: 'Select at least one model before saving.',
   subagentModelSelectionConflict: 'Settings changed elsewhere. Discard your draft and try again.',
   subagentModelSelectionOff: 'Subagents use configured defaults or inherit the parent agent\'s model. Saved model choices are retained.',
+  documentationModelSelectionTitle: 'Documentation workflow',
+  documentationModelSelectionDescription: 'Choose the model that writes documentation and the model that validates it.',
+  documentationModelSelectionExecutor: 'Executor model',
+  documentationModelSelectionExecutorHint: 'Inspects the project and creates or updates the requested documentation.',
+  documentationModelSelectionValidator: 'Validator model',
+  documentationModelSelectionValidatorHint: 'Checks the actual files against the objective and interview answers.',
+  documentationModelSelectionChoose: 'Select a model',
+  documentationModelSelectionLoading: 'Loading models…',
+  documentationModelSelectionLoadFailed: 'Models could not be loaded.',
+  documentationModelSelectionRetry: 'Retry',
+  documentationModelSelectionPartial: 'Some model providers could not be loaded; saved routes remain selectable.',
+  documentationModelSelectionUnavailable: 'currently unavailable',
+  documentationModelSelectionSameRoute: 'Both roles currently use the same route. They still run as separate fresh agents; choose different routes for model diversity.',
+  documentationModelSelectionRequired: 'Select a model for both roles before saving.',
+  documentationModelSelectionConflict: 'Settings changed elsewhere. Discard your draft and try again.',
 }
 
 /** Simplified Chinese copy. */
@@ -128,4 +151,19 @@ export const zh: Record<PluginsSettingsLocaleKey, string> = {
   subagentModelSelectionRequired: '保存前请至少选择一个模型。',
   subagentModelSelectionConflict: '设置已在其他位置更新。请放弃修改后重试。',
   subagentModelSelectionOff: '关闭后，Subagent 使用配置的默认模型或继承父 Agent 的模型；已选模型会保留。',
+  documentationModelSelectionTitle: '文档工作流',
+  documentationModelSelectionDescription: '选择编写文档的模型和校验文档的模型。',
+  documentationModelSelectionExecutor: '执行模型',
+  documentationModelSelectionExecutorHint: '检查项目并创建或更新请求的文档。',
+  documentationModelSelectionValidator: '校验模型',
+  documentationModelSelectionValidatorHint: '根据目标和访谈回答检查实际文件。',
+  documentationModelSelectionChoose: '选择模型',
+  documentationModelSelectionLoading: '正在加载模型…',
+  documentationModelSelectionLoadFailed: '无法加载模型。',
+  documentationModelSelectionRetry: '重试',
+  documentationModelSelectionPartial: '部分模型提供方无法加载；已保存的路由仍可选择。',
+  documentationModelSelectionUnavailable: '当前不可用',
+  documentationModelSelectionSameRoute: '两个角色当前使用同一路由。它们仍会作为独立的新 agent 运行；如需模型多样性，请选择不同路由。',
+  documentationModelSelectionRequired: '保存前请为两个角色选择模型。',
+  documentationModelSelectionConflict: '设置已在其他位置更新。请放弃修改后重试。',
 }

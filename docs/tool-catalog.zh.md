@@ -36,6 +36,7 @@
 | `@deepseek-ai/dsh-schedule` | `schedule_create`、`schedule_delete`、`schedule_list` | `ctx.tools`、`ctx.sessions`、Session 持久化、未来创建的 live 根 Agent | `tool/call`、`schedule/change create or delete`、`tool/result` | - | 仅在选择启用的 Schedule 插件加载后创建的 live 根 Agent scope 内注册。版本 1 接受 after_seconds、显式绝对 at 和有界固定速率 every_seconds，并披露 session-local 交付；管理读取与变更必须通过共享的 Session 持久化 barrier。 |
 | `@deepseek-ai/dsh-tool-lsp` | `lsp` | `ctx.tools`、`ctx.lsp`、`ctx.systemPrompt` | `tool/call`、`tool/result` | - | lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，因此其模型可见 schema 在更换提供方时保持稳定。运行时要求已注册提供方，例如 `@deepseek-ai/dsh-lsp-stdio`；如果没有提供方，查询会返回结构化 `LSP_UNAVAILABLE` 错误，而不会改变 schema。 |
 | `@deepseek-ai/dsh-tool-ralph` | `ralph` | `ctx.tools`、`ctx.workflowEngine`、`ctx.subagents`、`ctx.systemPrompt`、`a calling Agent (exec.agent parents every fresh round)` | `tool/call`、`tool/result`、`workflow and child session events during execution` | - | 固定的前台工作流会在每个 Round 启动一个全新的结构化子级；模型只能选择不可变目标和可选的 Round 上限。 |
+| `@capivara-harness/dsh-tool-documentation` | `documentation` | `ctx.tools`、`ctx.subagents`、`ctx.userQuestions`、`ctx.systemPrompt`、`ctx.documentationModelSelection`、`a calling Agent (the tool parents every fresh child)` | `tool/call`、`tool/result`、`interview questions and child session events during execution` | - | 每次调用都要求直接人类回答访谈问题，然后运行全新的结构化执行器和单独的只读验证器。验证器失败会启动有界修正循环；只有验证器通过时工具结果才会成功。执行器和验证器路由是部署设置，而不是模型调用字段。 |
 | `@deepseek-ai/dsh-tool-skill` | `skill` | `ctx.tools`、`ctx.agents`、`ctx.skills` | `tool/call`、`tool/result`、`user/message replacement catalogs via agent.inject()` | - | - |
 | `@deepseek-ai/dsh-tool-session-query` | `session_event_read`、`session_event_search`、`session_event_trace`、`session_search`、`session_trace` | `ctx.tools`、`ctx.systemPrompt`、`ctx.sessionQuery`、`a calling Agent for workspace authority` | `tool/call`、`tool/result` | - | 这 5 个只读工具会隐藏提供方游标，并根据不可变的调用 agent 会话为每个结果授权。该包需要选择启用；需要强制截止时间或限制行内输出的组合还会挂载通用超时或 spill 策略。 |
 | `@deepseek-ai/dsh-tool-subagent` | `list_subagent_models`、`subagent` | `ctx.tools`、`ctx.subagents`、`ctx.systemPrompt`、`用于模型发现和所选路由校验的 ctx.llm` | `tool/call`、`tool/result`、`child session events through the chosen provider` | `subagent`、`subagent_fork` | 注册的委派工具名称取决于加载时 `toolName` 配置（默认为 `subagent`）；上述默认 schema 关闭模型选择，而发现 schema 则展示为已启用 Session 中可用的固定配套工具。Web preset 会在每个新顶层 Session 创建时读取插件页偏好，并为其子 Session 保留该决定；`subagent_fork` 始终使用固定路由。每个实例通过 `modelSelectionSettings`、`backgroundMode` 与 `enableRunInBackground` 独立控制是否读取模型选择设置及其后台行为。 |
@@ -1321,6 +1322,33 @@ lsp 工具将提供方选择和语言服务器子进程置于 ctx.lsp 之后，�
 来源：[`packages/workflow/tool-ralph/src/index.ts`](../packages/workflow/tool-ralph/src/index.ts)
 
 固定的前台工作流会在每个 Round 启动一个全新的结构化子级；模型只能选择不可变目标和可选的 Round 上限。
+
+<a id="deepseek-aidsh-tool-documentation"></a>
+
+## `@capivara-harness/dsh-tool-documentation`
+
+### `documentation`
+
+为每个文档交付物运行强制文档工作流。工作流总是在开始工作前访谈人类；需求不完整时提出聚焦的后续问题；使用已配置的执行器模型检查并更新项目；然后使用单独配置的验证器模型，将实际工作区与原始 objective 及访谈回答进行比较。验证失败会把具体发现传回执行器进行有界修正；工作流不会在没有独立验证器通过的情况下报告成功。由于访谈需要实时的人类回答者，该工具仅限根 agent 使用。
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "objective": {
+      "type": "string",
+      "description": "The documentation deliverable the human wants built and independently validated."
+    }
+  },
+  "required": [
+    "objective"
+  ]
+}
+```
+
+来源：[`packages/workflow/tool-documentation/src/index.ts`](../packages/workflow/tool-documentation/src/index.ts)
+
+每次调用都要求直接人类回答访谈问题，然后运行全新的结构化执行器和单独的只读验证器。验证器失败会启动有界修正循环；只有验证器通过时工具结果才会成功。执行器和验证器路由是部署设置，而不是模型调用字段。
 
 <a id="deepseek-aidsh-tool-skill"></a>
 

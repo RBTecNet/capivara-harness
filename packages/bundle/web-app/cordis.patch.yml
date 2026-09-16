@@ -461,6 +461,9 @@
 - id: tool-ralph
   disabled: true
 
+- id: tool-documentation
+  disabled: true
+
 - id: agent-instructions
   disabled: true
 

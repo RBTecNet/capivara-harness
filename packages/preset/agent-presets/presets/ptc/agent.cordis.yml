@@ -243,6 +243,13 @@
         subagentProvider: spawn
         maxRounds: 64
 
+    - id: tool-documentation
+      name: '@capivara-harness/dsh-tool-documentation'
+      config:
+        subagentProvider: spawn
+        maxInterviewRounds: 3
+        maxValidationRounds: 3
+
 # ── remaining model-facing rows ─────────────────────────────────────────────
 
 - id: tool-ask-user

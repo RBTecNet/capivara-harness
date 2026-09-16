@@ -10,6 +10,8 @@ import { BashCard } from '../src/client/BashCard.tsx'
 import type { BashCardProps } from '../src/client/BashCard.tsx'
 import { ConfigurablePluginsTab } from '../src/client/ConfigurablePluginsTab.tsx'
 import type { ConfigurablePluginsTabProps } from '../src/client/ConfigurablePluginsTab.tsx'
+import { DocumentationModelSelectionCard } from '../src/client/DocumentationModelSelectionCard.tsx'
+import type { DocumentationModelSelectionCardProps } from '../src/client/DocumentationModelSelectionCard.tsx'
 import { PluginsSettingsSection } from '../src/client/PluginsSettingsSection.tsx'
 import type { PluginsSettingsSectionProps, PluginsSettingsTabEntry } from '../src/client/PluginsSettingsSection.tsx'
 import { SubagentModelSelectionCard } from '../src/client/SubagentModelSelectionCard.tsx'
@@ -22,6 +24,7 @@ import type { CardFieldState, CardShell } from '../src/client/card-form.ts'
 import type { ConfigurablePluginsTabState } from '../src/client/tab-store.ts'
 import type { WebSearchCardState } from '../src/client/web-search-card-controller.ts'
 import type { SubagentModelSelectionCardState } from '../src/client/subagent-model-selection-card-controller.ts'
+import type { DocumentationModelSelectionCardState } from '../src/client/documentation-model-selection-card-controller.ts'
 import { en } from '../src/client/locales.ts'
 
 afterEach(cleanup)
@@ -109,6 +112,33 @@ function renderSubagentModelSelection(state: Partial<SubagentModelSelectionCardS
     useSubagentModelSelectionCard: bindSnapshotSelector(store),
   } as unknown as SubagentModelSelectionCardProps
   render(<SubagentModelSelectionCard {...props} />)
+  return actions
+}
+
+function renderDocumentationModelSelection(state: Partial<DocumentationModelSelectionCardState> = {}) {
+  const store = createSnapshotStore<DocumentationModelSelectionCardState>({
+    ...settled,
+    executor: { provider: 'alpha', model: 'writer' },
+    validator: { provider: 'alpha', model: 'writer' },
+    candidates: [],
+    catalogStatus: 'idle',
+    catalogPartial: false,
+    conflicted: false,
+    sameRoute: true,
+    ...state,
+  })
+  const actions = {
+    selectRole: vi.fn(),
+    retryCatalog: vi.fn(),
+    save: vi.fn(),
+    discard: vi.fn(),
+  }
+  const props = {
+    ...actions,
+    t,
+    useDocumentationModelSelectionCard: bindSnapshotSelector(store),
+  } as unknown as DocumentationModelSelectionCardProps
+  render(<DocumentationModelSelectionCard {...props} />)
   return actions
 }
 
@@ -455,6 +485,48 @@ describe('SubagentModelSelectionCard', () => {
     expect(control.disabled).toBe(true)
     fireEvent.click(control)
     expect(actions.toggleEnabled).not.toHaveBeenCalled()
+  })
+})
+
+describe('DocumentationModelSelectionCard', () => {
+  it('renders independent executor and validator selectors', () => {
+    const actions = renderDocumentationModelSelection({
+      candidates: [
+        {
+          key: 'alpha\0writer',
+          provider: 'alpha',
+          model: 'writer',
+          providerName: 'Alpha',
+          modelName: 'Writer',
+          available: true,
+        },
+        {
+          key: 'alpha\0checker',
+          provider: 'alpha',
+          model: 'checker',
+          providerName: 'Alpha',
+          modelName: 'Checker',
+          available: true,
+        },
+      ],
+      catalogStatus: 'ready',
+    })
+    fireEvent.click(screen.getByText(en.documentationModelSelectionTitle))
+
+    expect(screen.getByLabelText(en.documentationModelSelectionExecutor)).toBeTruthy()
+    fireEvent.change(screen.getByLabelText(en.documentationModelSelectionValidator), { target: { value: 'alpha\0checker' } })
+    expect(actions.selectRole).toHaveBeenCalledWith('validator', 'alpha\0checker')
+    expect(screen.getByText(en.documentationModelSelectionSameRoute)).toBeTruthy()
+  })
+
+  it('shows loading and read-only behavior', () => {
+    const actions = renderDocumentationModelSelection({ catalogStatus: 'loading', writable: false })
+    fireEvent.click(screen.getByText(en.documentationModelSelectionTitle))
+
+    expect(screen.getByText(en.documentationModelSelectionLoading)).toBeTruthy()
+    expect(screen.getByLabelText(en.documentationModelSelectionExecutor)).toHaveProperty('disabled', true)
+    fireEvent.click(screen.getByRole('button', { name: en.save }))
+    expect(actions.save).not.toHaveBeenCalled()
   })
 })
 

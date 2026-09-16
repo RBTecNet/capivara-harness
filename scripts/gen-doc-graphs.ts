@@ -263,6 +263,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns the default-off settings namespace that Agent-scoped delegation tools sample when composing a new top-level Session.',
   },
   {
+    key: 'documentationModelSelection',
+    pkg: 'tool-documentation',
+    title: 'Documentation executor and validator model selection',
+    mode: 'core',
+    consumers: ['tool-documentation'],
+    note: 'Owns the persistent executor and validator routes sampled at the start of each documentation run; the two roles may share a route but always run as separate children.',
+  },
+  {
     key: 'credentials',
     pkg: 'credentials',
     title: 'Credential seam',
@@ -574,8 +582,8 @@ const SERVICE_ROLES: ServiceRole[] = [
     title: 'Subagent provider and continuation service',
     mode: 'seam',
     implementations: ['subagent-spawn-in-process', 'subagent-fork-in-process', 'subagent-acp', 'subagent-codex', 'subagent-claude-code', 'subagent-dsh-sdk'],
-    consumers: ['tool-subagent', 'tool-subagent-control', 'tool-ralph'],
-    note: 'Providers implement transports; the service also owns optional Activation-based continuation orchestration, tool-subagent selects one-shot or continuable delegation, tool-subagent-control delivers follow-ups, and tool-ralph requires one fresh structured-output route.',
+    consumers: ['tool-subagent', 'tool-subagent-control', 'tool-ralph', 'tool-documentation'],
+    note: 'Providers implement transports; the service also owns optional Activation-based continuation orchestration, tool-subagent selects one-shot or continuable delegation, tool-subagent-control delivers follow-ups, tool-ralph requires one fresh structured-output route, and tool-documentation requires fresh executor and validator routes.',
   },
   {
     key: 'agentTeams',
@@ -651,7 +659,7 @@ const SERVICE_ROLES: ServiceRole[] = [
     mode: 'seam',
     implementations: ['workflow-worker-thread'],
     consumers: ['tool-workflow', 'tool-ralph'],
-    note: 'One engine per context, as in bash, with no named-provider registry; the general workflow and fixed Ralph consumers start runs whose agent() calls fan out through ctx.subagents.',
+    note: 'One engine per context, as in bash, with no named-provider registry; the general workflow and fixed Ralph consumers start runs whose agent() calls fan out through ctx.subagents. Documentation execution is a fixed consumer over userQuestions and subagents and does not require this engine.',
   },
   {
     key: 'webhookRuntime',

@@ -1525,6 +1525,9 @@ importers:
       '@deepseek-ai/dsh-tool-call-timeout-policy':
         specifier: workspace:^
         version: link:../../guard/timeout-policy
+      '@capivara-harness/dsh-tool-documentation':
+        specifier: workspace:^
+        version: link:../../workflow/tool-documentation
       '@deepseek-ai/dsh-tool-fs':
         specifier: workspace:^
         version: link:../../fs/tool-fs
@@ -1976,6 +1979,9 @@ importers:
       '@deepseek-ai/dsh-subprocess':
         specifier: workspace:^
         version: link:../../subprocess/subprocess
+      '@capivara-harness/dsh-tool-documentation':
+        specifier: workspace:^
+        version: link:../../workflow/tool-documentation
       '@deepseek-ai/dsh-tool-subagent':
         specifier: workspace:^
         version: link:../../subagent/tool-subagent
@@ -10718,6 +10724,52 @@ importers:
         specifier: workspace:^
         version: link:../webhook
 
+  packages/workflow/tool-documentation:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@capivara-harness/dsh-agent':
+        specifier: workspace:^
+        version: link:../../core/agent
+      '@capivara-harness/dsh-agent-loop':
+        specifier: workspace:^
+        version: link:../../core/agent-loop
+      '@capivara-harness/dsh-agent-loop-testkit':
+        specifier: workspace:^
+        version: link:../../test-support/agent-loop-testkit
+      '@capivara-harness/dsh-llm':
+        specifier: workspace:^
+        version: link:../../llm/llm
+      '@capivara-harness/dsh-session':
+        specifier: workspace:^
+        version: link:../../core/session
+      '@capivara-harness/dsh-settings':
+        specifier: workspace:^
+        version: link:../../settings/settings
+      '@capivara-harness/dsh-subagent':
+        specifier: workspace:^
+        version: link:../../subagent/subagent
+      '@capivara-harness/dsh-subagent-in-process-driver':
+        specifier: workspace:^
+        version: link:../../subagent/subagent-in-process-driver
+      '@capivara-harness/dsh-subagent-spawn-in-process':
+        specifier: workspace:^
+        version: link:../../subagent/subagent-spawn-in-process
+      '@capivara-harness/dsh-system-prompt':
+        specifier: workspace:^
+        version: link:../../core/system-prompt
+      '@capivara-harness/dsh-tools':
+        specifier: workspace:^
+        version: link:../../core/tools
+      '@capivara-harness/dsh-user-questions':
+        specifier: workspace:^
+        version: link:../../interaction/user-questions
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+
   packages/workflow/tool-ralph:
     dependencies:
       '@deepseek-ai/schemastery':
@@ -11213,6 +11265,9 @@ importers:
       '@deepseek-ai/dsh-tool-cordis':
         specifier: workspace:^
         version: link:../../packages/extensions/tool-cordis
+      '@capivara-harness/dsh-tool-documentation':
+        specifier: workspace:^
+        version: link:../../packages/workflow/tool-documentation
       '@deepseek-ai/dsh-tool-fs':
         specifier: workspace:^
         version: link:../../packages/fs/tool-fs

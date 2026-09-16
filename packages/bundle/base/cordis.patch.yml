@@ -415,6 +415,26 @@
         subagentProvider: spawn
         maxRounds: 64
 
+    # Documentation work always passes through a human interview, an executor,
+    # and an independent validator. The two routes are user-editable through
+    # the documentation-model-selection settings section.
+    - id: documentation-model-selection-settings
+      name: '@capivara-harness/dsh-tool-documentation/settings'
+      config:
+        executor:
+          provider: deepseek-official
+          model: deepseek-flash
+        validator:
+          provider: deepseek-official
+          model: deepseek-flash
+
+    - id: tool-documentation
+      name: '@capivara-harness/dsh-tool-documentation'
+      config:
+        subagentProvider: spawn
+        maxInterviewRounds: 3
+        maxValidationRounds: 3
+
     # Consecutive-repeat reminders on the tool chain.
     - id: repeat-tool-reminder
       name: '@deepseek-ai/dsh-repeat-tool-reminder'

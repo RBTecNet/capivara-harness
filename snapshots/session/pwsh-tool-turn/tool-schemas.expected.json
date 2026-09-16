@@ -1,6 +1,22 @@
 {
   "initial": [
     {
+      "name": "documentation",
+      "description": "Run the mandatory documentation workflow for every documentation deliverable. The workflow always interviews the human before work begins, asks focused follow-up questions when the requirements are incomplete, uses the configured executor model to inspect and update the project, then uses a separate configured validator model to compare the actual workspace with the original objective and interview answers. Validation failures send concrete findings back to the executor for bounded correction; the workflow never reports success without an independent validator pass. This tool is root-agent only because the interview requires a live human answerer.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "objective": {
+            "type": "string",
+            "description": "The documentation deliverable the human wants built and independently validated."
+          }
+        },
+        "required": [
+          "objective"
+        ]
+      }
+    },
+    {
       "name": "edit",
       "description": "Edit an existing UTF-8 text file by replacing literal text.",
       "parameters": {

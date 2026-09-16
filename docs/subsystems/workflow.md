@@ -4,7 +4,7 @@ English | [中文](workflow.zh.md)
 
 The workflow seam lets an agent run a model-written orchestration SCRIPT that starts subagents. Like [subagent](subagent.md) it is **one optional capability**, not part of the agent loop, so its types and operations live here rather than in [core.md](core.md). Like bash, it permits ONE engine implementation per context to provide `ctx.workflowEngine`; there is no named-provider registry (a second engine replaces the first through plugin configuration rather than running beside it).
 
-Service Definition: [dsh-workflow](../../packages/workflow/workflow) (`ctx.workflowEngine` + the vocabulary below). The Service Provider is [dsh-workflow-worker-thread](../../packages/workflow/workflow-worker-thread) (a `node:worker_threads` engine — one worker per run, the script's vm context inside it); the model-facing Consumer is [dsh-tool-workflow](../../packages/workflow/tool-workflow). The proposal and rationale: [the dynamic-workflows Agent Note](../../.agents/notes/implemented/feature/2026-07-05-dynamic-workflows.md).
+Service Definition: [dsh-workflow](../../packages/workflow/workflow) (`ctx.workflowEngine` + the vocabulary below). The Service Provider is [dsh-workflow-worker-thread](../../packages/workflow/workflow-worker-thread) (a `node:worker_threads` engine — one worker per run, the script's vm context inside it); the model-facing Consumers are [dsh-tool-workflow](../../packages/workflow/tool-workflow), and [dsh-tool-documentation](../../packages/workflow/tool-documentation). `dsh-tool-documentation` is a fixed foreground consumer over the user-question and subagent seams: it interviews the direct human, runs an executor child, and requires a separate validator child before success. The proposal and rationale: [the dynamic-workflows Agent Note](../../.agents/notes/implemented/feature/2026-07-05-dynamic-workflows.md) and [the documentation executor and validator Agent Note](../../.agents/notes/implemented/feature/2026-09-16-documentation-executor-validator.md).
 
 Sources: browser-safe vocabulary in [`packages/workflow/workflow/src/types.ts`](../../packages/workflow/workflow/src/types.ts), Host request and live-run handles in [`runtime-types.ts`](../../packages/workflow/workflow/src/runtime-types.ts).
 
@@ -134,6 +134,22 @@ The top-level `dsh-tool-workflow` consumer projects display facts into its calli
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxdocumentationmodelselection--documentationmodelselectionconfig"></a>
+
+### `ctx.documentationModelSelection` — `DocumentationModelSelectionConfig`
+
+Singleton settings owner read when the documentation tool starts a run.
+
+```ts cordis-catalog
+/**
+ * Read detached routes for a new documentation run.
+ * @returns The executor and validator routes.
+ */
+current(): DocumentationModelSelectionSettings
+```
+
+Source: [`packages/workflow/tool-documentation/src/model-selection-settings.ts`](../../packages/workflow/tool-documentation/src/model-selection-settings.ts)
 
 <a id="ctxworkflowengine--workflowengine-abstract-seam"></a>
 

@@ -2744,6 +2744,34 @@ export interface Config {
 
 Source: [`packages/shell/tool-bash-persistent/src/index.ts:435`](../packages/shell/tool-bash-persistent/src/index.ts)
 
+<a id="deepseek-aidsh-tool-documentation"></a>
+
+## `@capivara-harness/dsh-tool-documentation`
+
+Requires: `tools` · `subagents` · `userQuestions` · `systemPrompt` · `documentationModelSelection`
+
+```ts config-catalog
+/** Deployment policy for the documentation workflow. */
+export interface Config {
+  /** Fresh child provider used for analysis, execution, and validation. */
+  subagentProvider?: string
+  /** Maximum human interview rounds, including the mandatory first round. */
+  maxInterviewRounds?: number
+  /** Maximum execute/validate cycles for one documentation request. */
+  maxValidationRounds?: number
+  /** Maximum characters in the model-authored objective. */
+  maxObjectiveChars?: number
+  /** Maximum serialized interview transcript characters. */
+  maxInterviewChars?: number
+  /** Maximum serialized structured child report characters. */
+  maxReportChars?: number
+  /** Maximum characters rendered back to the parent model. */
+  maxResultChars?: number
+}
+```
+
+Source: [`packages/workflow/tool-documentation/src/index.ts:37`](../packages/workflow/tool-documentation/src/index.ts)
+
 <a id="deepseek-aidsh-tool-fs"></a>
 
 ## `@deepseek-ai/dsh-tool-fs`

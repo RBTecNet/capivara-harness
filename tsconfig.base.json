@@ -252,6 +252,8 @@
       // session-log-export lives under session-query/, so the generated aliases map only its
       // bare name; the browser half needs this explicit subpath for source-mode dynamic imports.
       "@deepseek-ai/dsh-session-log-export/client": ["./packages/session-query/session-log-export/src/client"],
+      // The documentation package exposes its settings installer as a source-launch subpath.
+      "@capivara-harness/dsh-tool-documentation/settings": ["./packages/workflow/tool-documentation/src/model-selection-settings.ts"],
       // BEGIN generated package aliases — pnpm run gen-tsconfig-paths
       "@deepseek-ai/dsh-acp": ["./packages/acp/acp/src"],
       "@deepseek-ai/dsh-acp-app": ["./packages/bundle/acp-app/src"],
@@ -426,6 +428,7 @@
       "@deepseek-ai/dsh-tool-present": ["./packages/fs/tool-present/src"],
       "@deepseek-ai/dsh-tool-pwsh-persistent": ["./packages/shell/tool-pwsh-persistent/src"],
       "@deepseek-ai/dsh-tool-ralph": ["./packages/workflow/tool-ralph/src"],
+      "@capivara-harness/dsh-tool-documentation": ["./packages/workflow/tool-documentation/src"],
       "@deepseek-ai/dsh-tool-session-query": ["./packages/session-query/tool-session-query/src"],
       "@deepseek-ai/dsh-tool-skill": ["./packages/skill/tool-skill/src"],
       "@deepseek-ai/dsh-tool-str-replace-editor": ["./packages/fs/tool-str-replace-editor/src"],

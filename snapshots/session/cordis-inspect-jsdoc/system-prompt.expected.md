@@ -133,6 +133,8 @@ return {
 
 Use the workflow tool ONLY when the user explicitly asks for a workflow or for large multi-agent orchestration: you write a JavaScript script (the tool description documents the exact format) that fans work out across many subagents with phases and structured results. For one or two delegations, prefer plain subagent calls.
 
+Use the documentation tool for every request whose deliverable is project documentation. It always starts with a human interview, including for simple requests, and it must not replace missing requirements with assumptions. The executor model changes the documentation; a separate validator model checks the actual workspace against the original objective and the complete interview transcript. A validator failure triggers bounded correction and revalidation. The tool is available only to a root agent because it needs the human-facing user-questions service.
+
 Use the ralph tool ONLY when the direct human explicitly asks for a Ralph loop or fresh-agent iterative execution. Each Ralph round starts a fresh child with no conversation seed and uses the shared workspace as durable memory. Completion and blockers are worker reports, not independent evaluation. Use same-session goal tools for ordinary long-running objectives, and plain subagents or workflows for bounded delegation and fan-out.
 
 Use subagent in the background by default. Start independent delegations together in one assistant message and continue useful work while they run. Set `run_in_background: false` only when your next action depends on that subagent's result. When a background run settles, the runtime sends you a notice containing its outcome and any final assistant message.

@@ -4,7 +4,7 @@
 
 工作流 seam 允许 agent（智能体）运行由模型编写、会启动 subagent 的编排脚本。与 [subagent](subagent.zh.md) 一样，它是**一项可选能力**，不属于 agent loop，因此其类型和操作记录在此处，而非 [core.md](core.zh.md)。与 bash 一样，每个上下文只允许一个引擎实现提供 `ctx.workflowEngine`；没有命名提供方注册表（第二个引擎通过插件配置替换第一个，而不与它同时运行）。
 
-Service Definition：[dsh-workflow](../../packages/workflow/workflow)（`ctx.workflowEngine` + 下文词汇）。Service Provider 是 [dsh-workflow-worker-thread](../../packages/workflow/workflow-worker-thread)（一个 `node:worker_threads` 引擎——每个 run 一个 worker，脚本的 vm 上下文位于其中）；面向模型的 Consumer 是 [dsh-tool-workflow](../../packages/workflow/tool-workflow)。提案与设计理由见 [dynamic-workflows Agent Note](../../.agents/notes/implemented/feature/2026-07-05-dynamic-workflows.zh.md)。
+Service Definition：[dsh-workflow](../../packages/workflow/workflow)（`ctx.workflowEngine` + 下文词汇）。Service Provider 是 [dsh-workflow-worker-thread](../../packages/workflow/workflow-worker-thread)（一个 `node:worker_threads` 引擎——每个 run 一个 worker，脚本的 vm 上下文位于其中）；面向模型的 Consumer 包括 [dsh-tool-workflow](../../packages/workflow/tool-workflow) 和 [dsh-tool-documentation](../../packages/workflow/tool-documentation)。`dsh-tool-documentation` 是基于 user-question 与 subagent seam 的固定前台 Consumer：它访谈直接用户，运行执行器子 agent，并在成功前要求独立的验证器子 agent。提案与设计理由见 [dynamic-workflows Agent Note](../../.agents/notes/implemented/feature/2026-07-05-dynamic-workflows.zh.md)和[文档执行器与验证器 Agent Note](../../.agents/notes/implemented/feature/2026-09-16-documentation-executor-validator.zh.md)。
 
 源码：浏览器安全词汇位于 [`packages/workflow/workflow/src/types.ts`](../../packages/workflow/workflow/src/types.ts)，Host 请求与活跃运行句柄位于 [`runtime-types.ts`](../../packages/workflow/workflow/src/runtime-types.ts)。
 
@@ -134,6 +134,22 @@ interface WorkflowRun {
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.zh.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxdocumentationmodelselection--documentationmodelselectionconfig"></a>
+
+### `ctx.documentationModelSelection` — `DocumentationModelSelectionConfig`
+
+Singleton settings owner read when the documentation tool starts a run.
+
+```ts cordis-catalog
+/**
+ * Read detached routes for a new documentation run.
+ * @returns The executor and validator routes.
+ */
+current(): DocumentationModelSelectionSettings
+```
+
+Source: [`packages/workflow/tool-documentation/src/model-selection-settings.ts`](../../packages/workflow/tool-documentation/src/model-selection-settings.ts)
 
 <a id="ctxworkflowengine--workflowengine-abstract-seam"></a>
 

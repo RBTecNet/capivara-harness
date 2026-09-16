@@ -1,0 +1,62 @@
+{
+  "name": "@capivara-harness/dsh-tool-documentation",
+  "description": "Model-facing documentation workflow with mandatory interview, execution, and independent validation",
+  "version": "0.1.5-rc.2",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/capivara-harness/capivara-harness.git",
+    "directory": "packages/workflow/tool-documentation"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./settings": {
+      "types": "./lib/types/model-selection-settings.d.ts",
+      "default": "./lib/model-selection-settings.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/model-selection-settings.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@capivara-harness/dsh-agent": "workspace:^",
+    "@capivara-harness/dsh-llm": "workspace:^",
+    "@capivara-harness/dsh-settings": "workspace:^",
+    "@capivara-harness/dsh-subagent": "workspace:^",
+    "@capivara-harness/dsh-system-prompt": "workspace:^",
+    "@capivara-harness/dsh-tools": "workspace:^",
+    "@capivara-harness/dsh-user-questions": "workspace:^",
+    "@deepseek-ai/cordis": "workspace:^"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "workspace:^"
+  },
+  "devDependencies": {
+    "@capivara-harness/dsh-agent": "workspace:^",
+    "@capivara-harness/dsh-agent-loop": "workspace:^",
+    "@capivara-harness/dsh-agent-loop-testkit": "workspace:^",
+    "@capivara-harness/dsh-llm": "workspace:^",
+    "@capivara-harness/dsh-session": "workspace:^",
+    "@capivara-harness/dsh-settings": "workspace:^",
+    "@capivara-harness/dsh-subagent": "workspace:^",
+    "@capivara-harness/dsh-subagent-in-process-driver": "workspace:^",
+    "@capivara-harness/dsh-subagent-spawn-in-process": "workspace:^",
+    "@capivara-harness/dsh-system-prompt": "workspace:^",
+    "@capivara-harness/dsh-tools": "workspace:^",
+    "@capivara-harness/dsh-user-questions": "workspace:^",
+    "@deepseek-ai/cordis": "workspace:^"
+  }
+}

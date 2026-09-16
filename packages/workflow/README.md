@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-The workflow group lets an agent run a model-authored orchestration script that fans work out across many subagents and returns a final value. The `workflow` package provides the run service, the worker-thread package executes scripts in isolated threads, and two model-facing tools expose orchestration: the general `workflow` tool for scripted fan-out and the fixed `ralph` tool for fresh-agent iterative loops. The script coordinates agents with hooks while the agents do the actual work. The engine keeps a script's synchronous work off the host event loop but is containment, not a security boundary.
+The workflow group lets an agent run model-authored orchestration or fixed multi-agent documentation execution. The `workflow` package provides the run service, the worker-thread package executes scripts in isolated threads, the `workflow` tool exposes scripted fan-out, `ralph` exposes fresh-agent iterative loops, and `documentation` combines mandatory human interviews with executor and validator children. The script or fixed consumer coordinates agents while the agents do the actual work. The engine keeps a script's synchronous work off the host event loop but is containment, not a security boundary.
 
 ## Table of Contents
 
@@ -28,6 +28,7 @@ The workflow group lets an agent run a model-authored orchestration script that 
 | [`workflow-worker-thread`](workflow-worker-thread/README.md) | Executes each workflow script in its own worker thread, off the host event loop | registers on `ctx.workflowEngine` |
 | [`tool-workflow`](tool-workflow/README.md) | Gives the model the `workflow` tool for scripted multi-agent orchestration | registers on `ctx.tools` |
 | [`tool-ralph`](tool-ralph/README.md) | Gives the model the `ralph` tool for fresh-agent iterative loops | registers on `ctx.tools` |
+| [`tool-documentation`](tool-documentation/README.md) | Gives the model the `documentation` tool for interviewed, executor-validated documentation work | registers on `ctx.tools` |
 
 -----
 
@@ -37,7 +38,9 @@ The workflow group lets an agent run a model-authored orchestration script that 
 - [Workflow subsystem](../../docs/subsystems/workflow.md) — the seam's types, start request, and `workflow/*` events.
 - [Generated tool catalog](../../docs/tool-catalog.md#deepseek-aidsh-tool-workflow) — the `workflow` tool schema the model receives.
 - [Generated tool catalog](../../docs/tool-catalog.md#deepseek-aidsh-tool-ralph) — the `ralph` tool schema the model receives.
+- [Generated tool catalog](../../docs/tool-catalog.md#deepseek-aidsh-tool-documentation) — the `documentation` tool schema the model receives.
 - [Generated configuration catalog](../../docs/config-catalog.md#deepseek-aidsh-workflow-worker-thread) — every accepted engine config field.
+- [Documentation executor and validator Agent Note](../../.agents/notes/implemented/feature/2026-09-16-documentation-executor-validator.md) — mandatory interview, model routing, and validation policy.
 - [Dynamic workflows Agent Note](../../.agents/notes/implemented/feature/2026-07-05-dynamic-workflows.md) — the seam design and its decisions.
 - [Harness-level goal-based execution Agent Note](../../.agents/notes/implemented/feature/2026-07-16-harness-level-loop.md) — the fixed fresh-agent loop design and deferred work.
 

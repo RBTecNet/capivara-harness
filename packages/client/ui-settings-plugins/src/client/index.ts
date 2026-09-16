@@ -23,6 +23,7 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import { AgentLoopCard } from './AgentLoopCard.tsx'
 import { BashCard } from './BashCard.tsx'
 import { ConfigurablePluginsTab } from './ConfigurablePluginsTab.tsx'
+import { DocumentationModelSelectionCard } from './DocumentationModelSelectionCard.tsx'
 import { PluginsSettingsSection } from './PluginsSettingsSection.tsx'
 import type { PluginsSettingsSectionInjected, PluginsSettingsTabEntry } from './PluginsSettingsSection.tsx'
 import { SubagentModelSelectionCard } from './SubagentModelSelectionCard.tsx'
@@ -33,6 +34,9 @@ import { ConfigurablePluginsTabController } from './tab-store.ts'
 import {
   SUBAGENT_MODEL_SELECTION_NS, SubagentModelSelectionCardController,
 } from './subagent-model-selection-card-controller.ts'
+import {
+  DOCUMENTATION_MODEL_SELECTION_NS, DocumentationModelSelectionCardController,
+} from './documentation-model-selection-card-controller.ts'
 import { WEB_SEARCH_NS, WebSearchCardController } from './web-search-card-controller.ts'
 import { en, zh } from './locales.ts'
 
@@ -48,6 +52,13 @@ export type {
 export type { AgentLoopCardFace, AgentLoopCardState } from './agent-loop-card-controller.ts'
 export type { BashCardFace, BashCardState } from './bash-card-controller.ts'
 export type { WebSearchCardFace, WebSearchCardState } from './web-search-card-controller.ts'
+export type {
+  DocumentationModelRoute,
+  DocumentationModelCandidate,
+  DocumentationModelSelectionCardFace,
+  DocumentationModelSelectionCardState,
+  DocumentationModelSelectionSettings,
+} from './documentation-model-selection-card-controller.ts'
 
 /** Dictionary namespace owned by this plugin. */
 const NS = 'settings.plugins'
@@ -73,6 +84,10 @@ export function apply(ctx: ClientContext): void {
     ctx.settingsScope.bind({ namespace: SUBAGENT_MODEL_SELECTION_NS }),
     ctx,
   )
+  const documentationModelSelection = new DocumentationModelSelectionCardController(
+    ctx.settingsScope.bind({ namespace: DOCUMENTATION_MODEL_SELECTION_NS }),
+    ctx,
+  )
 
   // The credential a card reports is not part of any settings section, so its
   // scope publishes nothing when one is written. This is the only signal that
@@ -86,14 +101,29 @@ export function apply(ctx: ClientContext): void {
     'ui-settings-plugins: subagent adapter invalidations',
   )
   ctx.effect(
+    () => ctx.remote.$on('llm/adapters-updated', () => { documentationModelSelection.refreshCatalog() }),
+    'ui-settings-plugins: documentation adapter invalidations',
+  )
+  ctx.effect(
     () => ctx.remote.$on('settings/document-updated', () => { subagentModelSelection.refreshCatalog() }),
     'ui-settings-plugins: subagent settings invalidations',
+  )
+  ctx.effect(
+    () => ctx.remote.$on('settings/document-updated', () => { documentationModelSelection.refreshCatalog() }),
+    'ui-settings-plugins: documentation settings invalidations',
   )
   ctx.effect(
     () => ctx.on('connection/reset', () => { subagentModelSelection.resetConnection() }),
     'ui-settings-plugins: subagent connection generation',
   )
-  ctx.effect(() => () => { subagentModelSelection.dispose() }, 'ui-settings-plugins: subagent preference')
+  ctx.effect(
+    () => ctx.on('connection/reset', () => { documentationModelSelection.resetConnection() }),
+    'ui-settings-plugins: documentation connection generation',
+  )
+  ctx.effect(() => () => {
+    subagentModelSelection.dispose()
+    documentationModelSelection.dispose()
+  }, 'ui-settings-plugins: model preferences')
 
   // The shared SettingsScope mirror updates after document commits and reconnects.
   const configurable = new ConfigurablePluginsTabController(
@@ -183,6 +213,12 @@ export function apply(ctx: ClientContext): void {
       locale: NS,
       inject: () => subagentModelSelection.inject(),
     }, SubagentModelSelectionCard)
+    yield ctx.slots.register({
+      name: 'settings.plugin.item',
+      key: DOCUMENTATION_MODEL_SELECTION_NS,
+      locale: NS,
+      inject: () => documentationModelSelection.inject(),
+    }, DocumentationModelSelectionCard)
     yield ctx.slots.register({
       name: 'settings.plugin.item',
       key: WEB_SEARCH_NS,

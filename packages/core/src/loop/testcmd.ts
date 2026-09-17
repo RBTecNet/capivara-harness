@@ -73,10 +73,13 @@ export async function resolveTestCommand(
     return { command: "npm test", source: "package.json scripts.test", containerized: false };
   }
 
-  if (await has("pytest.ini")) return { command: "pytest", source: "pytest.ini", containerized: false };
+  // `python3 -m pytest` funciona sempre que o pytest é importável pelo
+  // interpretador ativo; o `pytest` pelado depende de ele estar no PATH, e no
+  // piloto 2 isso queimou os três ciclos de uma fase com "comando não encontrado".
+  if (await has("pytest.ini")) return { command: "python3 -m pytest", source: "pytest.ini", containerized: false };
   if (await has("pyproject.toml")) {
     const pyproject = await readFile(join(projectRoot, "pyproject.toml"), "utf8").catch(() => "");
-    if (pyproject.includes("[tool.pytest")) return { command: "pytest", source: "pyproject.toml", containerized: false };
+    if (pyproject.includes("[tool.pytest")) return { command: "python3 -m pytest", source: "pyproject.toml", containerized: false };
   }
 
   if (await has("go.mod")) return { command: "go test ./...", source: "go.mod", containerized: false };

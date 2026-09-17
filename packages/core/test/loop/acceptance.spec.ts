@@ -21,15 +21,54 @@ async function manifest(scripts: Record<string, string>): Promise<void> {
 
 describe("derivação dos passos", () => {
   it("deriva do que o projeto declara, sem adivinhar", () => {
-    const steps = deriveAcceptance(JSON.stringify({ scripts: { build: "vite build", migrate: "node migrate.js", start: "node server.js" } }));
+    const steps = deriveAcceptance({ packageJson: JSON.stringify({ scripts: { build: "vite build", migrate: "node migrate.js", start: "node server.js" } }) });
     expect(steps.map((step) => step.id)).toEqual(["install", "build", "migrate", "start"]);
     expect(steps.find((step) => step.id === "start")?.service).toBe(true);
   });
 
   it("projeto que não declara nada não tem o que aceitar", () => {
-    expect(deriveAcceptance(JSON.stringify({ scripts: { test: "vitest" } }))).toEqual([]);
-    expect(deriveAcceptance(null)).toEqual([]);
-    expect(deriveAcceptance("não é json")).toEqual([]);
+    expect(deriveAcceptance({ packageJson: JSON.stringify({ scripts: { test: "vitest" } }) })).toEqual([]);
+    expect(deriveAcceptance({})).toEqual([]);
+    expect(deriveAcceptance({ packageJson: "não é json" })).toEqual([]);
+  });
+});
+
+describe("ecossistemas além do Node", () => {
+  it("um pacote Python instala num ambiente próprio e roda o entrypoint declarado", () => {
+    const pyproject = [
+      "[project]",
+      'name = "resumo"',
+      "",
+      "[project.scripts]",
+      'resumo = "resumo.cli:main"',
+      "",
+      "[tool.pytest.ini_options]",
+      'testpaths = ["tests"]',
+    ].join("\n");
+
+    const steps = deriveAcceptance({ pyproject });
+    expect(steps.map((step) => step.id)).toEqual(["venv", "install", "start"]);
+    expect(steps[2]?.command).toBe(".venv-aceitacao/bin/resumo --help");
+    // O ambiente próprio é o que dispensa sudo e prova que o pacote se instala.
+    expect(steps[0]?.command).toContain("venv");
+  });
+
+  it("pacote Python sem entrypoint declarado ainda prova que instala", () => {
+    const steps = deriveAcceptance({ pyproject: '[project]\nname = "lib"' });
+    expect(steps.map((step) => step.id)).toEqual(["venv", "install"]);
+  });
+
+  it("Go e Rust são aceitos pelo build", () => {
+    expect(deriveAcceptance({ goMod: "module x" }).map((s) => s.command)).toEqual(["go build ./..."]);
+    expect(deriveAcceptance({ cargoToml: "[package]" }).map((s) => s.command)).toEqual(["cargo build --release"]);
+  });
+
+  it("o Node continua tendo precedência quando os dois existem", () => {
+    const steps = deriveAcceptance({
+      packageJson: JSON.stringify({ scripts: { start: "node x.js" } }),
+      pyproject: "[project]",
+    });
+    expect(steps[0]?.command).toContain("npm");
   });
 });
 

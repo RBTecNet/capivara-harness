@@ -152,7 +152,10 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       const g2 = await gate2(options.projectRoot, testeAgora?.command ?? null, options.testRunner);
       if (!g2.green) {
         lastGate = g2.gate;
-        lastCause = `${noChangeNote}${g2.cause}`;
+        // Ferramenta ausente não ganha o prefixo de "não escreveu nada": a sessão
+        // corretamente não mexeu no código, porque o defeito é de ambiente.
+        lastCause = g2.toolMissing === true ? g2.cause : `${noChangeNote}${g2.cause}`;
+        if (g2.toolMissing === true) announce(`[${session.id}] o runner de testes não está instalado; o executor tem acesso de sistema para instalá-lo`);
       } else {
         if (g2.skipped) announce(`[${session.id}] gate 2 pulado: nenhum comando de teste resolvido`);
         const verification = await options.call({

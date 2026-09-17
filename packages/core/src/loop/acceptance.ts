@@ -41,14 +41,43 @@ export type AcceptanceResult =
 /** Diretórios que não atravessam para a cópia limpa. */
 const EXCLUDED = new Set([".git", "node_modules", ".capivara", "dist", "build", "coverage", ".next", ".venv"]);
 
+/** Manifestos que o projeto pode declarar. Ausente é `null`. */
+export interface Manifests {
+  packageJson?: string | null;
+  pyproject?: string | null;
+  goMod?: string | null;
+  cargoToml?: string | null;
+}
+
 /**
- * Deriva os passos do próprio projeto.
+ * Deriva os passos do ecossistema que o projeto declara.
  *
- * Sem contrato operacional e sem adivinhação: o que o `package.json` declara é o
- * que o produto sabe fazer. Um projeto que não declara nada não é reprovado —
- * ele simplesmente não tem o que aceitar operacionalmente.
+ * A primeira versão olhava só para `package.json`, porque foi escrita com o
+ * piloto 1 na mão, que era Node. O piloto 2 é uma CLI Python: sem
+ * `package.json`, a aceitação pularia inteira e a ferramenta declararia sucesso
+ * sem ter tentado rodar nada.
+ *
+ * Continua sem adivinhação: o que o manifesto declara é o que o produto sabe
+ * fazer. Ecossistema que eu não reconheço simplesmente não tem aceitação — e
+ * isso não é reprovação.
  */
-export function deriveAcceptance(packageJson: string | null): AcceptanceStep[] {
+export function deriveAcceptance(manifests: Manifests): AcceptanceStep[] {
+  const node = nodeSteps(manifests.packageJson ?? null);
+  if (node.length > 0) return node;
+
+  const python = pythonSteps(manifests.pyproject ?? null);
+  if (python.length > 0) return python;
+
+  if ((manifests.goMod ?? null) !== null) {
+    return [{ id: "build", command: "go build ./...", service: false }];
+  }
+  if ((manifests.cargoToml ?? null) !== null) {
+    return [{ id: "build", command: "cargo build --release", service: false }];
+  }
+  return [];
+}
+
+function nodeSteps(packageJson: string | null): AcceptanceStep[] {
   if (packageJson === null) return [];
   let scripts: Record<string, unknown> = {};
   try {
@@ -64,6 +93,32 @@ export function deriveAcceptance(packageJson: string | null): AcceptanceStep[] {
 
   // Só install não prova nada sobre o produto.
   return steps.length > 1 ? steps : [];
+}
+
+/**
+ * Para um pacote Python, aceitar é instalar e rodar o que ele declara.
+ *
+ * O ambiente virtual existe para que a aceitação não dependa de nada instalado
+ * na máquina nem precise de sudo: o pacote tem de se instalar sozinho, a partir
+ * do que foi commitado.
+ */
+function pythonSteps(pyproject: string | null): AcceptanceStep[] {
+  if (pyproject === null) return [];
+
+  const steps: AcceptanceStep[] = [
+    { id: "venv", command: "python3 -m venv .venv-aceitacao", service: false },
+    { id: "install", command: ".venv-aceitacao/bin/pip install --disable-pip-version-check -e .", service: false },
+  ];
+
+  // `[project.scripts]` declara os entrypoints do pacote. Leitura deliberadamente
+  // rasa: o primeiro nome basta para provar que o console script foi instalado.
+  const section = /^\[project\.scripts\]\s*$([\s\S]*?)(?=^\[|\Z)/m.exec(pyproject)?.[1] ?? "";
+  const entrypoint = /^\s*["']?([A-Za-z][A-Za-z0-9._-]*)["']?\s*=/m.exec(section)?.[1];
+  if (entrypoint !== undefined) {
+    steps.push({ id: "start", command: `.venv-aceitacao/bin/${entrypoint} --help`, service: true });
+  }
+
+  return steps;
 }
 
 export type CommandRunner = (command: string, cwd: string, seconds: number) => Promise<{ exitCode: number; output: string }>;
@@ -169,12 +224,20 @@ export interface AcceptanceOptions {
   cleanRoom?: boolean;
 }
 
+async function lerManifesto(projectRoot: string, nome: string): Promise<string | null> {
+  return readFile(join(projectRoot, nome), "utf8").catch(() => null);
+}
+
 export async function runAcceptance(options: AcceptanceOptions): Promise<AcceptanceResult> {
-  const manifest = await readFile(join(options.projectRoot, "package.json"), "utf8").catch(() => null);
-  const steps = deriveAcceptance(manifest);
+  const steps = deriveAcceptance({
+    packageJson: await lerManifesto(options.projectRoot, "package.json"),
+    pyproject: await lerManifesto(options.projectRoot, "pyproject.toml"),
+    goMod: await lerManifesto(options.projectRoot, "go.mod"),
+    cargoToml: await lerManifesto(options.projectRoot, "Cargo.toml"),
+  });
 
   if (steps.length === 0) {
-    return { accepted: true, steps: [], skipped: "o projeto não declara build, migração nem entrypoint: nada a aceitar operacionalmente" };
+    return { accepted: true, steps: [], skipped: "o projeto não declara um ecossistema com build, instalação ou entrypoint: nada a aceitar operacionalmente" };
   }
 
   const runner = options.runner ?? defaultRunner;

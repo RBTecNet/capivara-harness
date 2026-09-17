@@ -84,7 +84,7 @@ describe("comando de teste", () => {
       ["package.json", '{"scripts":{"test":"vitest"}}', "npm test"],
       ["go.mod", "module x", "go test ./..."],
       ["Cargo.toml", "[package]", "cargo test"],
-      ["pytest.ini", "[pytest]", "pytest"],
+      ["pytest.ini", "[pytest]", "python3 -m pytest"],
     ];
     for (const [file, content, expected] of casos) {
       const root = await mkdtemp(join(tmpdir(), "capivara-stack-"));

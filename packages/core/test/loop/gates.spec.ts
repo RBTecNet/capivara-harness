@@ -140,6 +140,37 @@ describe("G2 — a suíte roda fora da sessão do agente", () => {
     expect(result.cause).toContain("npm test");
   });
 
+  it("código 127 é ferramenta ausente, não suíte vermelha", async () => {
+    const result = await gate2(projectRoot, "pytest", async () => ({
+      exitCode: 127,
+      output: "bash: linha 1: pytest: comando não encontrado",
+    }));
+    if (result.green) throw new Error("deveria reprovar");
+    expect((result as { toolMissing?: boolean }).toolMissing).toBe(true);
+    expect(result.cause).toContain("NÃO ESTÁ INSTALADO");
+    expect(result.cause).toContain("não é um teste vermelho");
+    expect(result.cause).toContain("acesso de sistema");
+  });
+
+  it("reconhece a ferramenta ausente também pela saída, não só pelo código", async () => {
+    const result = await gate2(projectRoot, "pytest", async () => ({
+      exitCode: 1,
+      output: "pytest: command not found",
+    }));
+    if (result.green) throw new Error("deveria reprovar");
+    expect((result as { toolMissing?: boolean }).toolMissing).toBe(true);
+  });
+
+  it("suíte vermelha de verdade não é confundida com ferramenta ausente", async () => {
+    const result = await gate2(projectRoot, "pytest", async () => ({
+      exitCode: 1,
+      output: "FAILED test_resumo.py::test_total - assert 10 == 11",
+    }));
+    if (result.green) throw new Error("deveria reprovar");
+    expect((result as { toolMissing?: boolean }).toolMissing).toBeUndefined();
+    expect(result.cause).toContain("assert 10 == 11");
+  });
+
   it("sem comando resolvido, é pulado e marcado como tal", async () => {
     const result = await gate2(projectRoot, null);
     expect(result.green).toBe(true);

@@ -15,7 +15,9 @@ import { BUILDER_COMPLETE_MARKER, parseVerification } from "../prompts/index.js"
 
 export type GateName = "gate 0 — engine" | "gate 1 — escrita" | "gate 2 — suíte do projeto" | "gate 3 — verificação independente";
 
-export type GateResult = { green: true } | { green: false; gate: GateName; cause: string };
+export type GateResult =
+  | { green: true }
+  | { green: false; gate: GateName; cause: string; toolMissing?: boolean };
 
 const green: GateResult = { green: true };
 
@@ -74,6 +76,19 @@ export const defaultTestRunner: TestRunner = async (command, projectRoot) =>
     child.stdin?.end();
   });
 
+/**
+ * Código 127 é "comando não encontrado", não "teste falhou".
+ *
+ * São falhas de naturezas diferentes e exigem correções diferentes: uma pede
+ * mudança de código, a outra pede instalar uma ferramenta. O piloto 2 queimou os
+ * três ciclos porque recebia a causa genérica — o executor tem acesso de
+ * sistema e podia ter instalado o pytest na primeira tentativa, mas nada dizia
+ * isso a ele.
+ */
+function ferramentaAusente(exitCode: number, output: string): boolean {
+  return exitCode === 127 || /command not found|comando n[ãa]o encontrado|No such file or directory/i.test(output);
+}
+
 /** G2 — a suíte do projeto, rodada PELO LOOP, fora da sessão do agente. */
 export async function gate2(
   projectRoot: string,
@@ -82,6 +97,20 @@ export async function gate2(
 ): Promise<GateResult & { skipped?: boolean }> {
   if (!testCommand) return { green: true, skipped: true };
   const result = await runner(testCommand, projectRoot);
+  if (ferramentaAusente(result.exitCode, result.output)) {
+    return {
+      green: false,
+      gate: "gate 2 — suíte do projeto",
+      toolMissing: true,
+      cause:
+        `O runner de testes do projeto NÃO ESTÁ INSTALADO neste ambiente: '${testCommand}' terminou com código ` +
+        `${result.exitCode}. Isto não é um teste vermelho — é uma ferramenta ausente, e a correção é instalá-la, ` +
+        `não mexer no código nem trocar o runner. Você tem acesso de sistema: instale o runner declarado pelo ` +
+        `projeto (por exemplo, criando e populando o ambiente do projeto, ou instalando o pacote correspondente) ` +
+        `e garanta que '${testCommand}' passe a funcionar a partir da raiz do projeto. Saída:\n${tail(result.output, 60)}`,
+    };
+  }
+
   if (result.exitCode !== 0) {
     return {
       green: false,

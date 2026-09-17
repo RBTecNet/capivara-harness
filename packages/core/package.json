@@ -1,0 +1,38 @@
+{
+  "name": "@capivara/core",
+  "version": "0.1.0",
+  "description": "Harness documental e loop de execucao: do prompt a aplicacao final",
+  "type": "module",
+  "bin": {
+    "capivara": "dist/cli.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "//": {
+    "dependencies": "commander e a UNICA dependencia de runtime. Ver secao 21.3 de docs/PLANO.md; um teste de arquitetura da Phase 1 falha se uma segunda for adicionada.",
+    "@types/node": "A tag 'latest' de @types/node aponta para 22.x, quatro majors atras. A linha corrente sai pelas tags ts5.9/ts6.0 = 26.x. Nunca instalar via @latest.",
+    "typescript": "TypeScript 7 e o port nativo. O esbuild faz o bundle e o tsc so faz typecheck e .d.ts, entao a rota de fuga e cair para ~6 sem tocar no build."
+  },
+  "scripts": {
+    "build": "node ./scripts/build.mjs && tsc --emitDeclarationOnly --project tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "commander": "^15.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.1",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

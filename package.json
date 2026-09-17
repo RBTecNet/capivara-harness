@@ -1,0 +1,19 @@
+{
+  "name": "capivara",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/core"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "check": "npm run build && npm run typecheck && npm test",
+    "install:user": "npm install --global --prefix \"$HOME/.local\" ./packages/core"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

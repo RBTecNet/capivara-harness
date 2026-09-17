@@ -1,0 +1,47 @@
+# Capivara
+
+Ferramenta de terminal que transforma um prompt livre em documentação `RALPH READY`
+(`capivara init`) e, num segundo comando, constrói a aplicação a partir dela
+(`capivara build`).
+
+## Especificação
+
+**`docs/PLANO.md` é a autoridade deste repositório.** Leia antes de escrever qualquer código.
+Ele define o contrato, os quatro documentos, os motores de entrevista e auditoria, os quatro
+gates do loop, os prompts literais de cada papel (Apêndice A) e o provider falso (Apêndice B).
+
+Uma mudança de comportamento começa no plano, não no código.
+
+## Comandos
+
+| Comando | O que faz |
+|---|---|
+| `npm run build` | Gera `packages/core/dist/cli.js` e os `.d.ts` |
+| `npm run typecheck` | `tsc --noEmit` sobre `src/` e `test/` |
+| `npm test` | Suíte com vitest |
+| `npm run check` | build + typecheck + test — o portão antes de qualquer commit |
+| `npm run install:user` | Instala o binário `capivara` em `~/.local` |
+
+## Convenções
+
+- Node ≥22, TypeScript ESM estrito, `module: NodeNext`. Imports relativos terminam em `.js`.
+- `commander` é a **única** dependência de runtime. Todo o resto é `devDependency`.
+- esbuild faz o bundle; o `tsc` só faz typecheck e emite `.d.ts`.
+- Prosa e mensagens no idioma do usuário; chaves de máquina sempre em inglês.
+
+## Proibições
+
+Estas não são preferências. São o que mantém o produto coerente:
+
+1. **Nenhuma regex de fase fora de `packages/core/src/contract/`.** O loop não tem parser próprio: ele importa o mesmo módulo que o `init` usa para validar. É a tese do projeto e existe um teste de arquitetura que falha se for violada.
+2. **Nenhuma segunda dependência de runtime** sem mudar o plano antes.
+3. **Nunca traduzir chave de protocolo ou rótulo estrutural** — `CAPIVARA_AUDIT_STATUS`, `TASK <n>: DONE`, `## Phase`, `**Acceptance criteria:**`, `**Traces:**` e companhia são casados literalmente pelo parser.
+4. **Todo campo novo no contrato precisa responder:** *"qual decisão do loop quebra sem ele?"*. Se a resposta for "nenhuma", o campo não existe. Superfície de contrato é superfície de falha.
+5. **`.capivara/init/` é leitura para o executor; `.capivara/runs/` é plano de controle.** Escrever no segundo invalida a tentativa.
+
+## Estado atual
+
+Bootstrap concluído: repositório, manifestos, tsconfigs e o plano versionado.
+`src/` está vazio de propósito — a **Phase 1** do §17 do plano é a próxima, e é ela que cria
+o contrato, os 14 invariantes e os testes de arquitetura. Até lá, `npm run build` ainda não
+passa: falta `scripts/build.mjs` e `src/cli.ts`, que pertencem àquela fase.

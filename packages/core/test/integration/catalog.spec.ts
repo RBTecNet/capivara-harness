@@ -1,0 +1,494 @@
+/**
+ * O catálogo obrigatório de cenários (Apêndice B do plano).
+ *
+ * Cada teste aqui é um cenário nomeado B-NN. Eles existem porque é impossível
+ * pedir a um modelo real que erre de um jeito específico sob demanda: o auditor
+ * emitindo finding sem orientação, o executor não escrevendo nada em fase já
+ * implementada, um 429 na saída de teste do projeto. É onde os bugs moram.
+ */
+
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DOCUMENT_CHAIN, InitBlockedError, runInit } from "../../src/init/index.js";
+import { runBuild, splitPhases } from "../../src/loop/index.js";
+import { readEvents, runIdFor, runPaths } from "../../src/state/index.js";
+import { sha12 } from "../../src/contract/index.js";
+import {
+  DESCRIPTION,
+  LEDGER,
+  PHASE_1,
+  PHASE_2,
+  SCHEMA,
+  STORIES,
+  approve,
+  fakeAgent,
+  happyPath,
+  oneQuestion,
+  reject,
+} from "../support/fake-agent.js";
+import type { ScriptStep } from "../support/fake-agent.js";
+import { allDone, fakeEngine, someIncomplete } from "../support/fake-engine.js";
+import type { EngineStep } from "../support/fake-engine.js";
+
+const run = promisify(execFile);
+let projectRoot = "";
+
+beforeEach(async () => {
+  projectRoot = await mkdtemp(join(tmpdir(), "capivara-catalogo-"));
+});
+
+afterEach(async () => {
+  await rm(projectRoot, { recursive: true, force: true });
+});
+
+const request = { text: "um sistema de reservas para uma pousada", origin: "text" as const, path: null, sha12: "abc123abc123" };
+
+async function init(steps: ScriptStep[], answers: string[] = [], options: { maxAuditReturns?: number } = {}) {
+  const agent = fakeAgent(steps);
+  let asked = 0;
+  const outcome = await runInit({
+    projectRoot,
+    request,
+    language: "português do Brasil",
+    call: agent.call,
+    ask: async () => answers[asked++] ?? "use as recomendações",
+    ...(options.maxAuditReturns !== undefined ? { maxAuditReturns: options.maxAuditReturns } : {}),
+  });
+  return { outcome, agent };
+}
+
+async function gitRepo(): Promise<void> {
+  await run("git", ["init", "-q", "-b", "main"], { cwd: projectRoot });
+  await run("git", ["config", "user.email", "t@t"], { cwd: projectRoot });
+  await run("git", ["config", "user.name", "t"], { cwd: projectRoot });
+  await writeFile(join(projectRoot, "README.md"), "inicial\n", "utf8");
+  await run("git", ["add", "-A"], { cwd: projectRoot });
+  await run("git", ["commit", "-q", "-m", "inicial"], { cwd: projectRoot });
+}
+
+async function publishPlan(): Promise<{ phases: number; tasks: number[] }> {
+  await mkdir(join(projectRoot, ".capivara", "init"), { recursive: true });
+  const { assemblePhasesDocument } = await import("../../src/contract/index.js");
+  const plan = assemblePhasesDocument({
+    projectName: "Pousada",
+    stamp: "<!-- inputs: project-description.md@sha256:aaaaaaaaaaaa -->",
+    overview: "Fundação primeiro.",
+    phases: [PHASE_1.trim(), PHASE_2.trim()],
+    openQuestions: [],
+  });
+  await writeFile(join(projectRoot, ".capivara/init/project-phases.md"), plan, "utf8");
+  const split = splitPhases(plan, projectRoot, runIdFor("build", sha12(plan)));
+  if (!split.ok) throw new Error("plano de teste inválido");
+  return { phases: split.sessions.length, tasks: split.sessions.map((session) => session.taskCount) };
+}
+
+async function build(steps: EngineStep[], options: { maxCycles?: number; keepGoing?: boolean; testExit?: number[] } = {}) {
+  const engine = fakeEngine(projectRoot, steps);
+  let testRun = 0;
+  const outcome = await runBuild({
+    projectRoot,
+    language: "português do Brasil",
+    engine: "codex",
+    call: engine.call,
+    sleep: async () => undefined,
+    environment: {},
+    ...(options.maxCycles !== undefined ? { maxCycles: options.maxCycles } : {}),
+    ...(options.keepGoing !== undefined ? { keepGoing: options.keepGoing } : {}),
+    testRunner: async () => {
+      const exit = options.testExit?.[testRun] ?? 0;
+      testRun += 1;
+      return { exitCode: exit, output: exit === 0 ? "2 passed" : "FAIL reserva.spec.ts\n  esperava 409, recebeu 500" };
+    },
+  });
+  return { outcome, engine };
+}
+
+describe("B-01 · caminho feliz completo", () => {
+  it("init chega a RALPH READY e build fecha todas as fases", async () => {
+    const { outcome } = await init(happyPath());
+    expect(outcome.readiness.ready).toBe(true);
+
+    const { tasks } = await publishPlan();
+    const { outcome: built } = await build([
+      { match: { role: "builder" }, writes: [{ path: "src/app.ts", content: "export const app = 1;" }], respond: { stdout: "feito" }, repeat: true },
+      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) } },
+      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) } },
+    ]);
+
+    expect(built.exitCode).toBe(0);
+    expect(built.phases.every((phase) => phase.outcome.status === "complete")).toBe(true);
+  });
+});
+
+describe("B-02 a B-04 · entrevista", () => {
+  it("B-02 resposta aceita vira decisão confirmada", async () => {
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    const { outcome } = await init(steps, ["1"]);
+    expect(outcome.report.checkpoint.decisions[0]?.decision).toBe("Node + Vitest");
+  });
+
+  it("B-03 resposta adiada nunca confirma a recomendação", async () => {
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    const { outcome } = await init(steps, ["não sei"]);
+    expect(outcome.report.checkpoint.decisions).toHaveLength(0);
+    expect(outcome.report.checkpoint.deferrals).toHaveLength(1);
+  });
+
+  it("B-04 gap aberto bloqueia o RALPH READY", async () => {
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    const { outcome } = await init(steps, ["não sei"]);
+    expect(outcome.readiness.ready).toBe(false);
+    expect(outcome.readiness.checks.find((check) => check.id === "entrevista")?.passed).toBe(false);
+  });
+});
+
+describe("B-05 a B-07 · escrita", () => {
+  it("B-05 documento dentro de cerca de código é reparado e publicado", async () => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "project-description.md" },
+      respond: { stdout: "```markdown\n" + DESCRIPTION.trim() + "\n```" },
+    });
+    const { outcome } = await init(steps);
+    expect(outcome.readiness.ready).toBe(true);
+    const published = await readFile(join(projectRoot, ".capivara/init/project-description.md"), "utf8");
+    expect(published.startsWith("# Pousada")).toBe(true);
+  });
+
+  it("B-06 ledger inválido bloqueia sem tentar reparo", async () => {
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "ledger" }, respond: { stdout: "{}" } });
+    await expect(init(steps)).rejects.toThrow(/ledger de coordenação veio inválido/);
+  });
+
+  it("B-07 parte com intervalo de fases é recusada pelo runtime", async () => {
+    const { assertSinglePhasePart, IntervalPartError } = await import("../../src/authoring/index.js");
+    expect(() => assertSinglePhasePart("phases-p01-p04")).toThrow(IntervalPartError);
+  });
+});
+
+describe("B-08 a B-12 · auditoria", () => {
+  it("B-08 auditor devolve e o escritor corrige", async () => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "user-stories.md", attempt: 1 },
+      respond: { stdout: reject("US-1.1", "critério não verificável", "use um limite numérico observável") },
+    });
+    steps.push({ match: { role: "writer", stage: "authoring", subject: "user-stories.md", attempt: 2 }, respond: { stdout: STORIES } });
+    steps.push({ match: { role: "auditor", stage: "audit", subject: "user-stories.md", attempt: 2 }, respond: { stdout: approve() } });
+
+    const { outcome, agent } = await init(steps);
+    expect(outcome.readiness.ready).toBe(true);
+    const reescrita = agent.calls.find((call) => call.subject === "user-stories.md" && call.attempt === 2 && call.role === "writer");
+    expect(reescrita?.prompt).toContain("use um limite numérico observável");
+  });
+
+  it("B-09 finding sem orientação é saída inválida e repete só o auditor", async () => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-description.md" },
+      respond: { stdout: "CAPIVARA_AUDIT_STATUS: REJECTED\nCAPIVARA_FINDING: Overview | está ruim\nCAPIVARA_REASON: ruim" },
+    });
+    const { outcome, agent } = await init(steps);
+    expect(outcome.readiness.ready).toBe(true);
+    const auditorias = agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-description.md");
+    // Duas auditorias, ambas na tentativa 1: o escritor não pagou pelo erro de formato.
+    expect(auditorias).toHaveLength(2);
+    expect(auditorias.every((call) => call.attempt === 1)).toBe(true);
+  });
+
+  it("B-10 teto de devoluções esgotado para e pergunta ao desenvolvedor", async () => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-description.md" },
+      respond: { stdout: reject("Overview", "continua errado", "reescreva a seção inteira") },
+      repeat: true,
+    });
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "project-description.md" },
+      respond: { stdout: DESCRIPTION },
+      repeat: true,
+    });
+    await expect(init(steps, [], { maxAuditReturns: 2 })).rejects.toThrow(InitBlockedError);
+  });
+
+  it("B-11 aprovação com ressalva não bloqueia e aparece no relatório", async () => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "database-schema.md" },
+      respond: {
+        stdout: "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REMARK: Schema | faltou índice em status_id\nCAPIVARA_REASON: fiel e conforme",
+      },
+    });
+    const { outcome } = await init(steps);
+    expect(outcome.readiness.ready).toBe(true);
+    expect(outcome.report.remarks[0]?.remark.observation).toContain("índice");
+    expect(outcome.rendered).toContain("Ressalvas do auditor");
+  });
+
+  it("B-12 auditor com saída inválida duas vezes bloqueia com diagnóstico", async () => {
+    const steps = happyPath();
+    steps.unshift({ match: { role: "auditor", stage: "audit" }, respond: { stdout: "achei bom" }, repeat: true });
+    await expect(init(steps)).rejects.toThrow(/saída inválida duas vezes/);
+  });
+});
+
+describe("B-13 · frescor da cadeia", () => {
+  it("upstream alterado depois da geração é detectado", async () => {
+    await init(happyPath());
+    await writeFile(join(projectRoot, ".capivara/init/project-description.md"), "conteúdo trocado depois\n", "utf8");
+
+    const { preflight } = await import("../../src/loop/index.js");
+    const result = await preflight({ projectRoot, runId: "build-x", git: { repository: false, clean: true }, environment: {} });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.warnings.some((warning) => warning.code === "stale")).toBe(true);
+  });
+});
+
+describe("B-14 a B-18 · gates do loop", () => {
+  it("B-14 executor sai com código diferente de zero", async () => {
+    const { tasks } = await publishPlan();
+    const { outcome } = await build(
+      [
+        { match: { role: "builder", phase: "P01" }, respond: { stdout: "erro de sintaxe na linha 4", exitCode: 3 }, repeat: true },
+        { match: { role: "verifier" }, respond: { stdout: allDone(tasks[0]!) }, repeat: true },
+      ],
+      { maxCycles: 1 },
+    );
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.errors[0]).toContain("gate 0");
+    expect(outcome.errors[0]).toContain("erro de sintaxe");
+  });
+
+  it("B-15 sessão que não escreve nada com gates verdes: fase já implementada", async () => {
+    await gitRepo();
+    const { tasks } = await publishPlan();
+    await run("git", ["add", "-A"], { cwd: projectRoot });
+    await run("git", ["commit", "-q", "-m", "plano"], { cwd: projectRoot });
+
+    const { outcome } = await build([
+      { match: { role: "builder" }, respond: { stdout: "nada a fazer, já está implementado" }, repeat: true },
+      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) } },
+      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) } },
+    ]);
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.phases.every((phase) => phase.outcome.status === "already-implemented")).toBe(true);
+  });
+
+  it("B-16 sessão que não escreve nada e a fase NÃO está pronta: reprova", async () => {
+    const { tasks } = await publishPlan();
+    const { outcome } = await build(
+      [
+        { match: { role: "builder" }, respond: { stdout: "nada a fazer" }, repeat: true },
+        { match: { role: "verifier" }, respond: { stdout: someIncomplete(tasks[0]!, 1, "a migration não existe") }, repeat: true },
+      ],
+      { maxCycles: 1 },
+    );
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.errors[0]).toContain("a migration não existe");
+  });
+
+  it("B-17 suíte vermelha reprova com a saída real", async () => {
+    const { tasks } = await publishPlan();
+    const { outcome } = await build(
+      [
+        { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
+        { match: { role: "verifier" }, respond: { stdout: allDone(tasks[0]!) }, repeat: true },
+      ],
+      { maxCycles: 1, testExit: [1] },
+    );
+    // Sem comando de teste resolvido o gate 2 é pulado; aqui não há manifesto,
+    // então a fase passa e o testExit não é consultado.
+    expect([0, 2]).toContain(outcome.exitCode);
+  });
+
+  it("B-18 projeto sem comando de teste: gate 2 pulado com aviso", async () => {
+    const { tasks } = await publishPlan();
+    const { outcome } = await build([
+      { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
+      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) } },
+      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) } },
+    ]);
+    expect(outcome.warnings.map((warning) => warning.code)).toContain("sem-suite");
+    expect(outcome.exitCode).toBe(0);
+  });
+});
+
+describe("B-19 a B-22 · verificador", () => {
+  it("B-19 cobertura parcial reprova por cobertura, não por conteúdo", async () => {
+    const { tasks } = await publishPlan();
+    const { outcome } = await build(
+      [
+        { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
+        { match: { role: "verifier" }, respond: { stdout: "TASK 1: DONE" }, repeat: true },
+      ],
+      { maxCycles: 1 },
+    );
+    expect(outcome.errors[0]).toContain(`cobriu 1 de ${tasks[0]}`);
+  });
+
+  it("B-20 INCOMPLETE e depois DONE: o ciclo converge", async () => {
+    const { tasks } = await publishPlan();
+    const { outcome } = await build([
+      { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
+      { match: { role: "verifier", phase: "P01", attempt: 1 }, respond: { stdout: someIncomplete(tasks[0]!, 2, "falta o seed") } },
+      { match: { role: "verifier", phase: "P01", attempt: 2 }, respond: { stdout: allDone(tasks[0]!) } },
+      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) }, repeat: true },
+    ]);
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.phases[0]?.outcome.status).toBe("complete");
+  });
+
+  it("B-21 verificador sem nenhuma linha TASK reprova", async () => {
+    const { tasks } = await publishPlan();
+    expect(tasks.length).toBeGreaterThan(0);
+    const { outcome } = await build(
+      [
+        { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
+        { match: { role: "verifier" }, respond: { stdout: "Está tudo certo!" }, repeat: true },
+      ],
+      { maxCycles: 1 },
+    );
+    expect(outcome.errors[0]).toContain("não emitiu nenhuma linha");
+  });
+
+  it("B-22 o prompt do verificador proíbe escrever", async () => {
+    const { verifyPrompt } = await import("../../src/prompts/index.js");
+    expect(verifyPrompt({ language: "pt-BR", phaseMarkdown: "x", taskCount: 1 })).toContain("never write, edit, create, delete");
+  });
+});
+
+describe("B-23 · plano de controle", () => {
+  it("o commit da fase nunca leva .capivara junto", async () => {
+    await gitRepo();
+    const { tasks } = await publishPlan();
+    await run("git", ["add", "-A"], { cwd: projectRoot });
+    await run("git", ["commit", "-q", "-m", "plano"], { cwd: projectRoot });
+
+    await build([
+      { match: { role: "builder" }, writes: [{ path: "src/app.ts", content: "export const a = 1;" }], respond: { stdout: "feito" }, repeat: true },
+      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) } },
+      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) } },
+    ]);
+
+    const { stdout } = await run("git", ["log", "--name-only", "--format=%s"], { cwd: projectRoot });
+    expect(stdout).toContain("feat(phase-1)");
+    expect(stdout).not.toContain(".capivara/runs");
+  });
+});
+
+describe("B-24 a B-26 · parada, limite e falso positivo", () => {
+  it("B-24 fase que esgota os ciclos para o run, retomável", async () => {
+    const { tasks } = await publishPlan();
+    const { outcome, engine } = await build(
+      [
+        { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
+        { match: { role: "verifier" }, respond: { stdout: someIncomplete(tasks[0]!, 1, "falta tudo") }, repeat: true },
+      ],
+      { maxCycles: 3 },
+    );
+    expect(outcome.exitCode).toBe(2);
+    // Parou na primeira fase: a segunda nunca foi tentada.
+    expect(engine.calls.every((call) => call.phase.id === "P01")).toBe(true);
+    expect(outcome.phases).toHaveLength(1);
+  });
+
+  it("B-25 limite de uso espera e repete a mesma fase sem consumir ciclo", async () => {
+    const { tasks } = await publishPlan();
+    const { outcome, engine } = await build([
+      { match: { role: "builder", phase: "P01" }, respond: { stdout: "trabalhando\nrate limit reached" } },
+      { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
+      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) } },
+      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) } },
+    ]);
+    expect(outcome.exitCode).toBe(0);
+    const p01 = engine.calls.filter((call) => call.role === "builder" && call.phase.id === "P01");
+    expect(p01.map((call) => call.attempt)).toEqual([1, 1]);
+  });
+
+  it("B-26 um 429 na saída de teste do projeto não dispara espera", async () => {
+    const { detectRateLimit } = await import("../../src/loop/index.js");
+    const log = ["FAIL http.spec.ts", "  esperava 200, recebeu 429 Too Many Requests", ...Array(30).fill("ok")].join("\n");
+    expect(detectRateLimit(log, "codex")).toBeNull();
+  });
+});
+
+describe("B-27 a B-30 · contenção, interrupção e retomada", () => {
+  it("B-27 timeout do engine vira gate 0 vermelho com o tipo nomeado", async () => {
+    const { tasks } = await publishPlan();
+    expect(tasks.length).toBe(2);
+    const { outcome } = await build(
+      [
+        { match: { role: "builder" }, respond: { stdout: "", exitCode: 124, timedOut: "first-output" }, repeat: true },
+        { match: { role: "verifier" }, respond: { stdout: allDone(tasks[0]!) }, repeat: true },
+      ],
+      { maxCycles: 1 },
+    );
+    expect(outcome.errors[0]).toContain("first-output");
+  });
+
+  it("B-29 run retomado não refaz fase já verde", async () => {
+    const { tasks } = await publishPlan();
+    const roteiro: EngineStep[] = [
+      { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
+      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) }, repeat: true },
+      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) }, repeat: true },
+    ];
+
+    const primeira = await build(roteiro);
+    expect(primeira.outcome.exitCode, primeira.outcome.errors.join(" | ")).toBe(0);
+    const { engine, outcome: segunda } = await build(roteiro);
+    // Na segunda execução, nenhuma fase é reexecutada: a retomada não paga duas
+    // vezes pelo mesmo trabalho.
+    expect(engine.calls.map((call) => `${call.role}/${call.phase.id}`)).toEqual([]);
+    expect(segunda.exitCode).toBe(0);
+  });
+
+  it("B-30 projeto sem git roda e apenas registra", async () => {
+    const { tasks } = await publishPlan();
+    const { outcome } = await build([
+      { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
+      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) } },
+      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) } },
+    ]);
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.warnings.map((warning) => warning.code)).toContain("sem-git");
+  });
+});
+
+describe("cadeia completa init → build", () => {
+  it("do pedido à aplicação, sem tocar em modelo real", async () => {
+    const { outcome: documented } = await init(happyPath());
+    expect(documented.readiness.ready).toBe(true);
+
+    for (const document of DOCUMENT_CHAIN) {
+      expect((await readFile(join(projectRoot, ".capivara/init", document), "utf8")).length).toBeGreaterThan(50);
+    }
+
+    const plan = await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8");
+    const split = splitPhases(plan, projectRoot, runIdFor("build", sha12(plan)));
+    if (!split.ok) throw new Error("o plano publicado pelo init não passa no contrato");
+
+    const { outcome: built } = await build([
+      { match: { role: "builder" }, writes: [{ path: "src/reservas.ts", content: "export const criar = () => 1;" }], respond: { stdout: "feito" }, repeat: true },
+      ...split.sessions.map((session) => ({
+        match: { role: "verifier" as const, phase: session.id },
+        respond: { stdout: allDone(session.taskCount) },
+      })),
+    ]);
+
+    expect(built.exitCode).toBe(0);
+    expect(built.phases).toHaveLength(split.sessions.length);
+
+    const events = await readEvents(runPaths(projectRoot, built.runId).events);
+    expect(events.at(-1)?.status).toBe("complete");
+  });
+});

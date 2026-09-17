@@ -160,3 +160,51 @@ describe("prompt de correção da aceitação", () => {
     expect(acceptancePrompt(context)).toContain("you have system access");
   });
 });
+
+describe("contenção — nenhum processo sobrevive à aceitação", () => {
+  it("o serviço é encerrado com toda a árvore, netos inclusive", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const { serviceRunner } = await import("../../src/loop/index.js");
+
+    // Dois níveis de processo, como `npm start` → `node server.js`: o filho
+    // direto sai de cena e o neto ficaria vivo se a morte não alcançasse o grupo.
+    const comando = `node -e "const {spawn}=require('node:child_process'); const n=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'}); console.log('NETO:'+n.pid); setInterval(()=>{},1000);"`;
+
+    const result = await serviceRunner(comando, projectRoot, 1.5);
+    const pid = Number(/NETO:(\d+)/.exec(result.output)?.[1]);
+    expect(Number.isInteger(pid), result.output).toBe(true);
+    expect(result.exitCode).toBe(0);
+
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const vivo = (() => {
+      try {
+        execFileSync("ps", ["-p", String(pid)], { stdio: "pipe" });
+        return true;
+      } catch {
+        return false;
+      }
+    })();
+    expect(vivo, `o neto ${pid} sobreviveu à aceitação`).toBe(false);
+  }, 20000);
+
+  it("um passo que nunca termina é encerrado pelo tempo, não deixado de pé", async () => {
+    const { defaultRunner } = await import("../../src/loop/index.js");
+    const inicio = Date.now();
+    const result = await defaultRunner("sleep 30", projectRoot, 1);
+    expect(result.exitCode).toBe(124);
+    expect(result.output).toContain("excedeu");
+    expect(Date.now() - inicio).toBeLessThan(10000);
+  }, 20000);
+
+  it("o serviço que sobrevive à janela é aprovado", async () => {
+    const { serviceRunner } = await import("../../src/loop/index.js");
+    const result = await serviceRunner("node -e \"setInterval(()=>{},1000)\"", projectRoot, 1);
+    expect(result.exitCode).toBe(0);
+  }, 20000);
+
+  it("o serviço que morre sozinho reprova", async () => {
+    const { serviceRunner } = await import("../../src/loop/index.js");
+    const result = await serviceRunner("node -e \"process.exit(0)\"", projectRoot, 5);
+    expect(result.exitCode).not.toBe(0);
+  }, 20000);
+});

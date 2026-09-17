@@ -14,10 +14,11 @@
  * aplicação tem de funcionar a partir do que foi commitado.
  */
 
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { killTree } from "../provider/supervisor.js";
 
 export interface AcceptanceStep {
   id: string;
@@ -69,16 +70,33 @@ export type CommandRunner = (command: string, cwd: string, seconds: number) => P
 
 export const defaultRunner: CommandRunner = (command, cwd, seconds) =>
   new Promise((resolve) => {
-    const child = execFile(
-      "bash",
-      ["-c", command],
-      { cwd, timeout: seconds * 1000, maxBuffer: 16 * 1024 * 1024 },
-      (error, stdout, stderr) => {
-        const code = error && typeof (error as { code?: number }).code === "number" ? (error as { code: number }).code : error ? 1 : 0;
-        resolve({ exitCode: code, output: `${stdout}${stderr}` });
-      },
-    );
-    child.stdin?.end();
+    // Grupo próprio também aqui: um `npm run build` pode deixar watcher de pé, e
+    // um passo que não termina segura o CLI do mesmo jeito que um serviço.
+    const child = spawn("bash", ["-c", command], { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    let output = "";
+    let settled = false;
+
+    child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString("utf8")));
+    child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString("utf8")));
+
+    const encerrar = (exitCode: number): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(vigia);
+      if (child.pid !== undefined) killTree(child.pid, "SIGKILL");
+      child.stdout.destroy();
+      child.stderr.destroy();
+      child.unref();
+      resolve({ exitCode, output });
+    };
+
+    const vigia = setTimeout(() => {
+      output += `\n[capivara] o passo excedeu ${seconds}s e foi encerrado`;
+      encerrar(124);
+    }, seconds * 1000);
+
+    child.on("exit", (code, signal) => encerrar(code ?? (signal ? 124 : 1)));
+    child.on("error", () => encerrar(127));
   });
 
 /**
@@ -90,22 +108,40 @@ export const defaultRunner: CommandRunner = (command, cwd, seconds) =>
  */
 export const serviceRunner: CommandRunner = (command, cwd, seconds) =>
   new Promise((resolve) => {
-    const child = execFile("bash", ["-c", command], { cwd, maxBuffer: 8 * 1024 * 1024 });
+    /*
+     * `detached` é o que torna o filho líder do próprio grupo, e sem isso a
+     * morte não alcança os netos: o piloto 1b deixou um `node src/server.js`
+     * rodando numa pasta temporária já apagada, com os pipes abertos, e o CLI
+     * ficou preso porque o Node não encerra enquanto houver handle vivo.
+     *
+     * `npm start` cria pelo menos dois níveis — bash, npm, node — então matar o
+     * filho direto nunca bastou.
+     */
+    const child = spawn("bash", ["-c", command], { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
     let settled = false;
 
-    child.stdout?.on("data", (chunk: Buffer) => (output += chunk.toString("utf8")));
-    child.stderr?.on("data", (chunk: Buffer) => (output += chunk.toString("utf8")));
+    child.stdout.on("data", (chunk: Buffer) => (output += chunk.toString("utf8")));
+    child.stderr.on("data", (chunk: Buffer) => (output += chunk.toString("utf8")));
 
     const encerrar = (exitCode: number): void => {
       if (settled) return;
       settled = true;
       clearTimeout(vigia);
-      try {
-        if (child.pid !== undefined) process.kill(-child.pid, "SIGTERM");
-      } catch {
-        child.kill("SIGTERM");
+
+      if (child.pid !== undefined) {
+        killTree(child.pid, "SIGTERM");
+        const duro = setTimeout(() => {
+          if (child.pid !== undefined) killTree(child.pid, "SIGKILL");
+        }, 1500);
+        duro.unref();
       }
+
+      // Solta os pipes: enquanto eles vivem, o event loop do CLI não termina.
+      child.stdout.destroy();
+      child.stderr.destroy();
+      child.unref();
+
       resolve({ exitCode, output });
     };
 

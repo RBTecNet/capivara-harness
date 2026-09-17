@@ -56,12 +56,14 @@ Estas não são preferências. São o que mantém o produto coerente:
 
 ## Estado atual
 
-**Phase 1 concluída.** O contrato `capivara-phases/v1` existe como código executável em
-`packages/core/src/contract/`, com os 14 invariantes, as três coberturas, o stamp de
-frescor e os testes de arquitetura que protegem a proibição nº 1. `npm run check` passa:
-build, typecheck e 58 testes.
+**Phases 1 e 2 concluídas.** O contrato `capivara-phases/v1` existe como código executável
+em `packages/core/src/contract/`, com os 14 invariantes, as três coberturas, o stamp de
+frescor e os testes de arquitetura que protegem a proibição nº 1. O estado durável vive em
+`packages/core/src/state/`: escrita atômica, log append-only de eventos, lock por diretório
+com verificação de dono vivo e retomada reconstruída a partir dos eventos. `npm run check`
+passa: build, typecheck e 102 testes.
 
 `docs/capivara-phases-v1.md` é **gerado** por `npm run docs:contract` a partir do módulo —
 não edite à mão; um teste falha se a página divergir do código.
 
-Próxima: **Phase 2** do §17 do plano — estado durável, lock e retomada.
+Próxima: **Phase 3** do §17 do plano — camada de providers e supervisão de processo.

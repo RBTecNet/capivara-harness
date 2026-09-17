@@ -1,0 +1,88 @@
+import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { LockBusyError, acquireLock, isProcessAlive, runPaths } from "../../src/state/index.js";
+
+let projectRoot = "";
+const RUN = "init-abc123abc123";
+
+beforeEach(async () => {
+  projectRoot = await mkdtemp(join(tmpdir(), "capivara-lock-"));
+});
+
+afterEach(async () => {
+  await rm(projectRoot, { recursive: true, force: true });
+});
+
+const base = { projectRoot: "", runId: RUN, command: "init", hostname: "maquina-de-teste" };
+
+function options(overrides: Partial<Parameters<typeof acquireLock>[0]> = {}) {
+  return { ...base, projectRoot, ...overrides };
+}
+
+describe("isProcessAlive", () => {
+  it("reconhece o próprio processo", () => {
+    expect(isProcessAlive(process.pid)).toBe(true);
+  });
+
+  it("rejeita pid inválido", () => {
+    expect(isProcessAlive(0)).toBe(false);
+    expect(isProcessAlive(-1)).toBe(false);
+  });
+});
+
+describe("acquireLock", () => {
+  it("adquire e registra o dono", async () => {
+    const lock = await acquireLock(options());
+    expect(lock.owner.pid).toBe(process.pid);
+    expect(lock.owner.runId).toBe(RUN);
+    await lock.release();
+  });
+
+  it("um segundo run com dono vivo falha com mensagem acionável", async () => {
+    const lock = await acquireLock(options({ isAlive: () => true }));
+    await expect(acquireLock(options({ isAlive: () => true }))).rejects.toBeInstanceOf(LockBusyError);
+    await expect(acquireLock(options({ isAlive: () => true }))).rejects.toThrow(/já está em execução no pid/);
+    await lock.release();
+  });
+
+  it("depois do release o lock volta a ser adquirível", async () => {
+    const first = await acquireLock(options());
+    await first.release();
+    const second = await acquireLock(options());
+    expect(second.owner.pid).toBe(process.pid);
+    await second.release();
+  });
+
+  it("lock órfão é recuperado e a quarentena não fica para trás", async () => {
+    const first = await acquireLock(options({ isAlive: () => true }));
+    // O processo morre sem liberar: o diretório e o owner.json continuam lá.
+    const recovered = await acquireLock(options({ isAlive: () => false }));
+    expect(recovered.owner.pid).toBe(process.pid);
+
+    const runDirectory = runPaths(projectRoot, RUN).root;
+    const restos = (await readdir(runDirectory)).filter((entry) => entry.includes("quarantine"));
+    expect(restos).toEqual([]);
+    expect(first.path).toBe(recovered.path);
+    await recovered.release();
+  });
+
+  it("lock sem owner.json é tratado como órfão", async () => {
+    await mkdir(runPaths(projectRoot, RUN).lock, { recursive: true });
+    const lock = await acquireLock(options({ isAlive: () => true }));
+    expect(lock.owner.pid).toBe(process.pid);
+    await lock.release();
+  });
+
+  it("lock de outra máquina nunca é recuperado automaticamente", async () => {
+    const paths = runPaths(projectRoot, RUN);
+    await mkdir(paths.lock, { recursive: true });
+    await writeFile(
+      join(paths.lock, "owner.json"),
+      JSON.stringify({ pid: 4242, hostname: "outra-maquina", startedAt: "2026-09-16T00:00:00.000Z", runId: RUN, command: "init" }),
+      "utf8",
+    );
+    await expect(acquireLock(options({ isAlive: () => false }))).rejects.toThrow(/outra-maquina/);
+  });
+});

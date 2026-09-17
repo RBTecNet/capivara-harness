@@ -149,6 +149,52 @@ describe("B-02 a B-04 · entrevista", () => {
   });
 });
 
+describe("B-31 · levantamento malformado", () => {
+  it("repete SÓ o levantamento com os defeitos nomeados, e o desenvolvedor não paga por isso", async () => {
+    const semMotivo = JSON.stringify({
+      contract: "capivara-questions/v1",
+      questions: [
+        {
+          id: "Q-01",
+          topic: "stack",
+          evidence: "O diretório está vazio.",
+          decision: "Qual stack o projeto usa?",
+          options: [
+            { label: "Node + Vitest", consequence: "suíte rápida" },
+            { label: "Python + pytest", consequence: "bom para dados" },
+          ],
+          recommended: "Node + Vitest",
+          recommendationBasis: "stack dos seus projetos",
+        },
+      ],
+    });
+
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md" }, respond: { stdout: semMotivo } });
+
+    const { outcome, agent } = await init(steps, ["1"]);
+    expect(outcome.readiness.ready).toBe(true);
+
+    const levantamentos = agent.calls.filter(
+      (call) => call.stage === "interview" && call.subject === "project-description.md" && call.role === "writer",
+    );
+    // A segunda chamada carrega o defeito nomeado e continua na mesma rodada.
+    expect(levantamentos[1]?.prompt).toContain("sem o motivo");
+    expect(levantamentos[1]?.prompt).toContain("rejected before it reached the developer");
+    expect(levantamentos[0]?.attempt).toBe(levantamentos[1]?.attempt);
+  });
+
+  it("malformado duas vezes bloqueia nomeando qual pergunta", async () => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-description.md" },
+      respond: { stdout: JSON.stringify({ contract: "capivara-questions/v1", questions: [{ id: "Q-07", topic: "t" }] }) },
+      repeat: true,
+    });
+    await expect(init(steps)).rejects.toThrow(/malformado duas vezes.*Q-07/s);
+  });
+});
+
 describe("B-05 a B-07 · escrita", () => {
   it("B-05 documento dentro de cerca de código é reparado e publicado", async () => {
     const steps = happyPath();

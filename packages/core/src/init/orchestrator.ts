@@ -162,18 +162,30 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         disposition: answer.disposition,
       }));
 
-      const output = await track({
-        role: "writer",
-        stage: "interview",
-        subject: document,
-        attempt: round,
-        prompt: interviewPrompt(document, writer, inventoryText, previous),
-      });
+      // Lote malformado repete SÓ o levantamento, com os defeitos nomeados.
+      // O desenvolvedor não paga por um erro de formato de quem levanta as
+      // perguntas, e nomear o defeito quase sempre resolve na segunda.
+      const base = interviewPrompt(document, writer, inventoryText, previous);
+      let batch = parseQuestionBatch(await track({ role: "writer", stage: "interview", subject: document, attempt: round, prompt: base }));
 
-      const batch = parseQuestionBatch(output);
+      if (!batch.ok) {
+        const corrective = [
+          base,
+          "",
+          "## Your previous answer was rejected before it reached the developer",
+          ...batch.defects.map((defect) => `- ${defect.questionId}: ${defect.problem} — ${defect.hint}`),
+          "",
+          "Emit the whole batch again, complete. Every question carries id, topic, evidence, decision and why.",
+        ].join("\n");
+        batch = parseQuestionBatch(
+          await track({ role: "writer", stage: "interview", subject: document, attempt: round, prompt: corrective }),
+        );
+      }
+
       if (!batch.ok) {
         throw new InitBlockedError(
-          `o levantamento de perguntas de ${document} veio malformado: ${batch.defects.map((defect) => defect.problem).join("; ")}`,
+          `o levantamento de perguntas de ${document} veio malformado duas vezes: ` +
+            batch.defects.map((defect) => `${defect.questionId}: ${defect.problem}`).join("; "),
           runId,
         );
       }

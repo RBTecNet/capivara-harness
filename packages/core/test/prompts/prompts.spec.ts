@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { languageBlock, ledgerPrompt, phasePartPrompt, writerPrompt } from "../../src/prompts/index.js";
+import { interviewPrompt, languageBlock, ledgerPrompt, phasePartPrompt, writerPrompt } from "../../src/prompts/index.js";
 import type { WriterContext } from "../../src/prompts/index.js";
 import { STRUCTURAL_LABELS } from "../../src/contract/index.js";
 
@@ -83,6 +83,25 @@ describe("autoridade e proibições", () => {
     const prompt = writerPrompt("project-description.md", context);
     expect(prompt).toContain("um sistema de reservas para uma pousada");
     expect(prompt).toContain("Stack: Node 22 com Vitest");
+  });
+});
+
+describe("levantamento de perguntas", () => {
+  const prompt = interviewPrompt("project-description.md", context, "Projeto vazio.", []);
+
+  it("lista os cinco campos obrigatórios", () => {
+    for (const campo of ["id", "topic", "evidence", "decision", "why"]) {
+      expect(prompt).toContain(`- ${campo}`);
+    }
+  });
+
+  it("declara que omitir um campo é resposta inválida", () => {
+    expect(prompt).toContain("invalid response: the developer never sees it");
+  });
+
+  it("declara a regra de decisão restritiva e aceita lista vazia", () => {
+    expect(prompt).toContain("Ask only when ALL of these are true");
+    expect(prompt).toContain("An empty question list is a valid and good answer");
   });
 });
 

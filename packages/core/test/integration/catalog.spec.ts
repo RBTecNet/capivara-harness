@@ -792,6 +792,55 @@ describe("B-38 · a fase que cria a própria suíte", () => {
   });
 });
 
+describe("B-39 · a causa aparece uma vez só", () => {
+  it("o erro de preflight não é anunciado e reimpresso", async () => {
+    await mkdir(join(projectRoot, ".capivara", "init"), { recursive: true });
+    await writeFile(join(projectRoot, ".capivara/init/project-phases.md"), "isto não é um plano", "utf8");
+
+    const avisos: string[] = [];
+    const outcome = await runBuild({
+      projectRoot,
+      language: "português do Brasil",
+      engine: "codex",
+      call: async () => {
+        throw new Error("nenhum modelo deveria ser chamado");
+      },
+      announce: (mensagem) => avisos.push(mensagem),
+      environment: {},
+    });
+
+    expect(outcome.exitCode).toBe(1);
+    const anunciado = avisos.filter((aviso) => aviso.includes("nenhuma chamada de modelo"));
+    expect(anunciado).toHaveLength(1);
+  });
+
+  it("a causa da fase que para sai inteira pelo anúncio", async () => {
+    const { tasks } = await publishPlan();
+    const avisos: string[] = [];
+
+    const outcome = await runBuild({
+      projectRoot,
+      language: "português do Brasil",
+      engine: "codex",
+      maxCycles: 1,
+      sleep: async () => undefined,
+      environment: {},
+      announce: (mensagem) => avisos.push(mensagem),
+      call: fakeEngine(projectRoot, [
+        { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
+        { match: { role: "verifier" }, respond: { stdout: someIncomplete(tasks[0]!, 1, "falta a migration inteira") }, repeat: true },
+      ]).call,
+    });
+
+    expect(outcome.exitCode).toBe(2);
+    const texto = avisos.join("\n");
+    expect(texto).toContain("PAROU");
+    expect(texto).toContain("falta a migration inteira");
+    // Uma vez só, no anúncio; `errors` é dado para quem consome, não segunda via.
+    expect(texto.split("falta a migration inteira").length - 1).toBe(1);
+  });
+});
+
 describe("B-13 · frescor da cadeia", () => {
   it("upstream alterado depois da geração é detectado", async () => {
     await init(happyPath());

@@ -161,7 +161,11 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
 
       if (outcome.status === "failed" || outcome.status === "rate-limit-exhausted") {
         const detail = outcome.status === "failed" ? `${outcome.gate}: ${outcome.cause}` : "limite de uso esgotado";
-        announce(`[${session.id}] PAROU — ${detail.split("\n")[0] ?? ""}`);
+        const [primeira, ...resto] = detail.split("\n");
+        announce(`[${session.id}] PAROU — ${primeira ?? ""}`);
+        // A causa inteira sai aqui, e só aqui: quem chama recebe o mesmo texto
+        // em `errors` para uso programático, não para reimprimir.
+        for (const linha of resto) announce(`           ${linha}`);
         if (!options.keepGoing) {
           await appendEvent(paths.events, {
             timestamp: now().toISOString(),

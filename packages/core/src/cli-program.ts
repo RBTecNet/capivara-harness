@@ -170,7 +170,8 @@ export function createProgram(): Command {
       },
     });
 
-    for (const error of outcome.errors) stdout.write(`${error}\n`);
+    // Nada a reimprimir: o `announce` acima já é a saída do build, e
+    // `outcome.errors` existe para quem consome o resultado como dado.
     process.exitCode = outcome.exitCode;
   });
 

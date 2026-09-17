@@ -8,7 +8,7 @@
 
 import type { Checkpoint } from "../interview/types.js";
 import type { Remark } from "../audit/protocol.js";
-import type { Readiness } from "./readiness.js";
+import { renderReadiness, type Readiness } from "./readiness.js";
 
 export interface RoleCost {
   role: string;
@@ -77,6 +77,12 @@ export function renderReport(report: InitReport): string {
     lines.push(`  ${cost.role.padEnd(9)} ${cost.calls} chamada(s) · ${tokens} · ${Math.round(cost.milliseconds / 1000)}s`);
   }
 
-  lines.push("", report.ready ? "RALPH READY — rode `capivara build` para construir a aplicação." : "NOT READY");
+  if (report.ready) {
+    lines.push("", "RALPH READY — rode `capivara build` para construir a aplicação.");
+  } else {
+    // NOT READY sem dizer o que falta obriga o desenvolvedor a abrir os quatro
+    // documentos para descobrir. O checklist é o relatório.
+    lines.push("", renderReadiness(report.readiness));
+  }
   return lines.join("\n");
 }

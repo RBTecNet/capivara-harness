@@ -286,6 +286,135 @@ describe("B-08 a B-12 · auditoria", () => {
   });
 });
 
+describe("B-32 · reescrita do plano após devolução", () => {
+  it("reescreve APENAS a fase que o finding nomeia e remonta o documento inteiro", async () => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md", attempt: 1 },
+      respond: { stdout: reject("Phase 2", "o critério de sobreposição não é observável", "declare o código HTTP devolvido") },
+    });
+    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02", attempt: 2 }, respond: { stdout: PHASE_2 } });
+    steps.push({ match: { role: "auditor", stage: "audit", subject: "project-phases.md", attempt: 2 }, respond: { stdout: approve() } });
+
+    const { outcome, agent } = await init(steps);
+    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+
+    // A fase 1 NÃO foi reescrita: o finding falava só da fase 2.
+    const reescritas = agent.calls.filter((call) => call.stage === "authoring" && call.attempt === 2);
+    expect(reescritas.map((call) => call.subject)).toEqual(["phase-p02"]);
+  });
+
+  it("o documento remontado mantém título, stamp e TODAS as fases", async () => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md", attempt: 1 },
+      respond: { stdout: reject("Phase 2", "critério vago", "declare o código HTTP") },
+    });
+    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02", attempt: 2 }, respond: { stdout: PHASE_2 } });
+    steps.push({ match: { role: "auditor", stage: "audit", subject: "project-phases.md", attempt: 2 }, respond: { stdout: approve() } });
+
+    await init(steps);
+    const plano = await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8");
+    expect(plano.split("\n")[0]).toMatch(/^# .+ — Project Phases$/);
+    expect(plano.split("\n")[2]).toMatch(/^<!-- inputs:/);
+    expect(plano).toContain("## Phase 1:");
+    expect(plano).toContain("## Phase 2:");
+
+    const { parsePhases } = await import("../../src/contract/index.js");
+    const parsed = parsePhases(plano);
+    expect(parsed.ok, parsed.ok ? "" : parsed.errors.map((e) => `${e.code} ${e.message}`).join("; ")).toBe(true);
+  });
+
+  it("finding sem fase identificada reescreve todas, pelo conservador", async () => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md", attempt: 1 },
+      respond: { stdout: reject("Overview", "a ordem das fases não é fundação-primeiro", "reordene as fases") },
+    });
+    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p01", attempt: 2 }, respond: { stdout: PHASE_1 } });
+    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02", attempt: 2 }, respond: { stdout: PHASE_2 } });
+    steps.push({ match: { role: "auditor", stage: "audit", subject: "project-phases.md", attempt: 2 }, respond: { stdout: approve() } });
+
+    const { agent } = await init(steps);
+    const reescritas = agent.calls.filter((call) => call.stage === "authoring" && call.attempt === 2);
+    expect(reescritas.map((call) => call.subject).sort()).toEqual(["phase-p01", "phase-p02"]);
+  });
+});
+
+describe("B-33 · decisões da entrevista não se embaralham entre documentos", () => {
+  it("o mesmo Q-01 em documentos diferentes vira decisões distintas", async () => {
+    const pergunta = (topic: string, decision: string, label: string) =>
+      JSON.stringify({
+        contract: "capivara-questions/v1",
+        questions: [
+          {
+            id: "Q-01",
+            topic,
+            evidence: "evidência suficiente",
+            decision,
+            why: "muda o resultado",
+            options: [
+              { label, consequence: "consequência a" },
+              { label: `${label} (não)`, consequence: "consequência b" },
+            ],
+            recommended: label,
+            recommendationBasis: "base",
+          },
+        ],
+      });
+
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 },
+      respond: { stdout: pergunta("stack", "Qual stack?", "Node + Vitest") },
+    });
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "user-stories.md", attempt: 1 },
+      respond: { stdout: pergunta("prioridade", "Qual a prioridade da primeira story?", "Alta") },
+    });
+
+    const { outcome } = await init(steps, ["1", "1"]);
+    const decisoes = outcome.report.checkpoint.decisions;
+    expect(decisoes.map((decision) => `${decision.topic}=${decision.decision}`).sort()).toEqual([
+      "prioridade=Alta",
+      "stack=Node + Vitest",
+    ]);
+  });
+
+  it("a entrevista do documento seguinte recebe o que já foi respondido antes", async () => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 },
+      respond: {
+        stdout: JSON.stringify({
+          contract: "capivara-questions/v1",
+          questions: [
+            {
+              id: "Q-01",
+              topic: "stack",
+              evidence: "diretório vazio",
+              decision: "Qual stack o projeto usa?",
+              why: "define build e teste",
+              options: [
+                { label: "Node + Vitest", consequence: "rápido" },
+                { label: "Python + pytest", consequence: "dados" },
+              ],
+              recommended: "Node + Vitest",
+              recommendationBasis: "stack dos seus projetos",
+            },
+          ],
+        }),
+      },
+    });
+
+    const { agent } = await init(steps, ["1"]);
+    const seguinte = agent.calls.find((call) => call.stage === "interview" && call.subject === "user-stories.md");
+    expect(seguinte?.prompt).toContain("Already answered");
+    expect(seguinte?.prompt).toContain("Qual stack o projeto usa?");
+    expect(seguinte?.prompt).toContain("Node + Vitest");
+  });
+});
+
 describe("B-13 · frescor da cadeia", () => {
   it("upstream alterado depois da geração é detectado", async () => {
     await init(happyPath());

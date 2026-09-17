@@ -13,7 +13,7 @@
 import { assemblePhasesDocument, buildStamp, extractEntities, extractStoryIds, extractWorkflows, parsePhases, sha12 } from "../contract/index.js";
 import type { StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
-import type { AuditAttempt, AuditVerdict, Remark } from "../audit/index.js";
+import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
 import { allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Question } from "../interview/index.js";
@@ -58,6 +58,40 @@ export interface InitOutcome {
   readiness: Readiness;
   report: InitReport;
   rendered: string;
+}
+
+/**
+ * Um id de pergunta só é único DENTRO de um documento: o modelo começa em Q-01
+ * em cada levantamento. Agregar sem qualificar embaralha as decisões — o piloto
+ * 1 produziu "Atores e acesso: Definir uma stack web completa agora" porque a
+ * resposta do Q-01 de um documento sobrescreveu a de outro.
+ */
+function scoped(document: string, questionId: string): string {
+  return `${document}#${questionId}`;
+}
+
+/** Um documento escrito, com a forma de reescrevê-lo quando o auditor devolve. */
+interface Authored {
+  content: string;
+  rewrite: (findings: Finding[], attempt: number) => Promise<Authored>;
+}
+
+/**
+ * De quais fases os findings falam.
+ *
+ * Um finding costuma citar "Phase 3" ou "Phase 1.5". Quando nenhum identifica
+ * uma fase, o conservador é reescrever todas: melhor pagar a mais do que
+ * publicar um plano com um defeito que ninguém atribuiu.
+ */
+function affectedPhases(findings: readonly Finding[], total: number): number[] {
+  const named = new Set<number>();
+  for (const finding of findings) {
+    for (const match of `${finding.where} ${finding.problem}`.matchAll(/\b(?:phase|fase)\s*(\d+)/gi)) {
+      const phase = Number(match[1]);
+      if (phase >= 1 && phase <= total) named.add(phase);
+    }
+  }
+  return named.size > 0 ? [...named].sort((left, right) => left - right) : Array.from({ length: total }, (_, index) => index + 1);
 }
 
 export class InitBlockedError extends Error {
@@ -118,8 +152,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       .map((name) => ({ name, content: published[name] ?? "" }));
 
     const answers = await interview(document, upstream);
-    allAnswers.push(...answers.answers);
-    allQuestions.push(...answers.questions);
+    allAnswers.push(...answers.answers.map((answer) => ({ ...answer, questionId: scoped(document, answer.questionId) })));
+    allQuestions.push(...answers.questions.map((question) => ({ ...question, id: scoped(document, question.id) })));
 
     const writer: WriterContext = {
       language: options.language,
@@ -131,10 +165,10 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     };
 
     await event("authoring", document, "started");
-    const content = document === "project-phases.md" ? await writePhases(writer) : await writeSimple(document, writer);
+    const authored = document === "project-phases.md" ? await writePhases(writer) : await writeSimple(document, writer);
 
     await event("audit", document, "started");
-    const verdict = await auditLoop(document, content, writer, upstream);
+    const verdict = await auditLoop(document, authored, writer, upstream);
     published[document] = verdict.content;
     approved.push(document);
     remarks.push(...verdict.remarks.map((remark) => ({ document, remark })));
@@ -156,11 +190,24 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         assumptions: [],
         upstream,
       };
-      const previous = answers.map((answer) => ({
-        question: questions.find((entry) => entry.id === answer.questionId)?.decision ?? answer.questionId,
-        answer: answer.raw,
-        disposition: answer.disposition,
-      }));
+      // Já respondido inclui os documentos anteriores da cadeia. Sem isso, cada
+      // documento reabre a mesma decisão: no piloto 1 a stack foi perguntada
+      // quatro vezes, com quatro nomes diferentes.
+      const previous = [
+        ...allQuestions.map((question) => {
+          const answer = allAnswers.find((entry) => entry.questionId === question.id);
+          return {
+            question: `${question.topic}: ${question.decision}`,
+            answer: answer?.disposition === "ACCEPTED" ? answer.decision : (answer?.raw ?? ""),
+            disposition: answer?.disposition ?? "UNANSWERED",
+          };
+        }),
+        ...answers.map((answer) => ({
+          question: questions.find((entry) => entry.id === answer.questionId)?.decision ?? answer.questionId,
+          answer: answer.raw,
+          disposition: answer.disposition,
+        })),
+      ];
 
       // Lote malformado repete SÓ o levantamento, com os defeitos nomeados.
       // O desenvolvedor não paga por um erro de formato de quem levanta as
@@ -249,7 +296,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     };
   }
 
-  async function writeSimple(document: ChainDocument, writer: WriterContext): Promise<string> {
+  async function writeSimple(document: ChainDocument, writer: WriterContext): Promise<Authored> {
     const output = await track({
       role: "writer",
       stage: "authoring",
@@ -272,12 +319,35 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           ...defects.map((defect) => `- ${defect.problem}\n  what to do: ${defect.hint}`),
         ].join("\n"),
       });
-      return repairDeterministically(retry, writer.stamp).content;
+      return simple(document, writer, repairDeterministically(retry, writer.stamp).content);
     }
-    return repaired.content;
+    return simple(document, writer, repaired.content);
   }
 
-  async function writePhases(writer: WriterContext): Promise<string> {
+  function simple(document: ChainDocument, writer: WriterContext, content: string): Authored {
+    return {
+      content,
+      rewrite: async (findings, attempt) => {
+        const rewritten = await track({
+          role: "writer",
+          stage: "authoring",
+          subject: document,
+          attempt,
+          prompt: [
+            writerPrompt(document as Exclude<DocumentName, "project-phases.md">, writer),
+            "",
+            rewriteInstruction(findings),
+            "",
+            "## The version you must fix",
+            content,
+          ].join("\n"),
+        });
+        return simple(document, writer, repairDeterministically(rewritten, writer.stamp).content);
+      },
+    };
+  }
+
+  async function writePhases(writer: WriterContext): Promise<Authored> {
     const ledgerOutput = await track({ role: "writer", stage: "authoring", subject: "ledger", attempt: 1, prompt: ledgerPrompt(writer) });
     const ledger = parseLedger(ledgerOutput);
     if (!ledger.ok) {
@@ -312,25 +382,61 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       maxRounds: maxInterviewRounds,
     }).map((item) => `${item.topic}: ${item.statement}`);
 
-    return assemblePhasesDocument({
-      projectName: projectName(published),
-      stamp: writer.stamp ?? "",
-      overview: `${ledger.ledger.phases.length} fases, fundação primeiro. O MVP fecha na fase ${ledger.ledger.mvpCutPhase}.`,
-      phases,
-      openQuestions,
+    const overview = `${ledger.ledger.phases.length} fases, fundação primeiro. O MVP fecha na fase ${ledger.ledger.mvpCutPhase}.`;
+
+    /**
+     * A reescrita do plano NUNCA pode passar pelo prompt de parte sem remontar.
+     *
+     * O piloto 1 provou por quê: o prompt de parte manda escrever uma fase e
+     * proibir o cabeçalho, então a resposta do modelo substituiu o documento
+     * inteiro por uma fase só, sem título — e o parser reprovou o que o auditor
+     * tinha acabado de aprovar. Aqui a devolução reescreve APENAS as fases que
+     * os findings nomeiam, e o documento é remontado em código, como sempre.
+     */
+    const build = (current: string[]): Authored => ({
+      content: assemblePhasesDocument({ projectName: projectName(published), stamp: writer.stamp ?? "", overview, phases: current, openQuestions }),
+      rewrite: async (findings, attempt) => {
+        const targeted = affectedPhases(findings, parts.length);
+        announce(`  reescrevendo ${targeted.length} de ${parts.length} fase(s)`);
+        const next = [...current];
+        for (const phaseNumber of targeted) {
+          const part = parts.find((entry) => entry.phaseNumber === phaseNumber);
+          if (!part) continue;
+          const entry = ledger.ledger.phases.find((phase) => phase.number === phaseNumber);
+          const output = await track({
+            role: "writer",
+            stage: "authoring",
+            subject: part.id,
+            attempt,
+            prompt: [
+              phasePartPrompt({ ...writer, phaseNumber, ledgerEntry: JSON.stringify(entry) }),
+              "",
+              rewriteInstruction(findings),
+              "",
+              `## The version of phase ${phaseNumber} you must fix`,
+              current[phaseNumber - 1] ?? "",
+            ].join("\n"),
+          });
+          next[phaseNumber - 1] = repairDeterministically(output).content.trim();
+        }
+        return build(next);
+      },
     });
+
+    return build(phases);
   }
 
   async function auditLoop(
     document: ChainDocument,
-    initial: string,
+    initial: Authored,
     writer: WriterContext,
     upstream: { name: string; content: string }[],
   ): Promise<{ content: string; remarks: Remark[] }> {
-    let content = initial;
+    let authored = initial;
     const history: AuditAttempt[] = [];
 
     for (let attempt = 1; attempt <= maxAuditReturns + 1; attempt += 1) {
+      const content = authored.content;
       const verdict = await auditOnce(document, content, writer, upstream, attempt);
       history.push({ attempt, verdict, writerSummary: `tentativa ${attempt}: escreveu ${document}` });
 
@@ -349,23 +455,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       await event("audit", document, "retry", action.findings.map((finding) => finding.problem).join("; "), attempt);
       announce(`  auditor devolveu ${document} (${action.findings.length} finding)`);
 
-      const rewritten = await track({
-        role: "writer",
-        stage: "authoring",
-        subject: document,
-        attempt: action.attempt,
-        prompt: [
-          document === "project-phases.md"
-            ? phasePartPrompt({ ...writer, phaseNumber: 1, ledgerEntry: "{}" })
-            : writerPrompt(document as Exclude<DocumentName, "project-phases.md">, writer),
-          "",
-          rewriteInstruction(action.findings),
-          "",
-          "## The version you must fix",
-          content,
-        ].join("\n"),
-      });
-      content = repairDeterministically(rewritten, writer.stamp).content;
+      authored = await authored.rewrite(action.findings, action.attempt);
     }
 
     throw new InitBlockedError(`o ciclo de auditoria de ${document} não convergiu`, runId);

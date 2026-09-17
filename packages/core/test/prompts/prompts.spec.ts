@@ -136,10 +136,11 @@ describe("ausência de design e limites do DBML", () => {
     expect(gapPrompt("project-phases.md", context, ["caminho do design"])).toContain("Never ask for the path of a design artifact");
   });
 
-  it("o schema ganha um lugar estrutural para o que o DBML não expressa", () => {
+  it("o documento de dados declara regras com semântica exata, sem DDL", () => {
     const prompt = writerPrompt("database-schema.md", context);
-    expect(prompt).toContain("### Constraints");
-    expect(prompt).toContain("not in Notes & Conventions");
+    expect(prompt).toContain("### Structural rules");
+    expect(prompt).toContain("NO DDL, NO SQL, NO triggers");
+    expect(prompt).toContain("new_check_in < existing_check_out");
   });
 });
 

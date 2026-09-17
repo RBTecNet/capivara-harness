@@ -528,6 +528,28 @@ describe("B-35 · impasse do auditor", () => {
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
   });
 
+  it("decidido uma vez, o auditor não volta a perguntar: findings viram ressalva", async () => {
+    const steps = impasse(happyPath());
+    const agent = fakeAgent(steps);
+    let vezesPerguntado = 0;
+
+    const outcome = await runInit({
+      projectRoot,
+      request,
+      language: "português do Brasil",
+      maxAuditReturns: 2,
+      call: agent.call,
+      ask: async () => "use as recomendações",
+      decideStandoff: async () => {
+        vezesPerguntado += 1;
+        return "as restrições ficam declaradas; implementá-las é tarefa do plano";
+      },
+    });
+
+    expect(vezesPerguntado).toBe(1);
+    expect(outcome.report.remarks.some((entry) => entry.remark.observation.includes("decisão do desenvolvedor"))).toBe(true);
+  });
+
   it("abortar encerra o run com o impasse no diagnóstico", async () => {
     const steps = impasse(happyPath());
     await expect(

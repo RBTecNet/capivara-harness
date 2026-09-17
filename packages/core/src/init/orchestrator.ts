@@ -518,6 +518,10 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   ): Promise<{ content: string; remarks: Remark[] }> {
     let authored = initial;
     const history: AuditAttempt[] = [];
+    // Uma vez que o desenvolvedor decidiu, ele decidiu. Voltar a perguntar a cada
+    // nova devolução do auditor transforma a autoridade dele em sugestão, e foi
+    // o que o piloto 1 fez: o mesmo documento pediu decisão três vezes.
+    let developerRuled = false;
 
     for (let attempt = 1; attempt <= maxAuditReturns + 1; attempt += 1) {
       const content = authored.content;
@@ -526,6 +530,23 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
       const action = nextAuditAction({ document, history, maxReturns: maxAuditReturns });
       if (action.action === "publish") return { content, remarks: verdict.remarks };
+
+      if (action.action === "ask-developer" && developerRuled) {
+        // Findings que sobrevivem à decisão do desenvolvedor não bloqueiam: eles
+        // viram ressalva no relatório, onde ficam visíveis sem travar o run.
+        announce(`  publicando ${document} sob a decisão do desenvolvedor; ${verdict.findings.length} finding(s) viram ressalva`);
+        await event("audit", document, "complete", "publicado sob decisão do desenvolvedor", attempt);
+        return {
+          content,
+          remarks: [
+            ...verdict.remarks,
+            ...verdict.findings.map((finding) => ({
+              where: finding.where,
+              observation: `${finding.problem} (mantido por decisão do desenvolvedor)`,
+            })),
+          ],
+        };
+      }
 
       if (action.action === "ask-developer") {
         const rendered = renderStandoff(action.standoff);
@@ -543,6 +564,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         // A resposta do desenvolvedor É a decisão: ela volta ao escritor como
         // autoridade, acima do auditor. Perguntar "o que vale?" e descartar a
         // resposta é pior do que não ter perguntado.
+        developerRuled = true;
         await event("audit", document, "retry", `decisão do desenvolvedor: ${decision}`, attempt);
         announce(`  decisão aplicada; reescrevendo ${document}`);
         authored = await authored.rewrite(

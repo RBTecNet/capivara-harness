@@ -415,6 +415,68 @@ describe("B-33 · decisões da entrevista não se embaralham entre documentos", 
   });
 });
 
+describe("B-34 · gap descoberto na escrita volta para a entrevista", () => {
+  const COM_GAP = DESCRIPTION.replace(
+    "## Core Workflows",
+    "## Open Questions\n\n[NEEDS DECISION] qual stack web exatamente\n\n## Core Workflows",
+  );
+
+  const perguntaDaStack = JSON.stringify({
+    contract: "capivara-questions/v1",
+    questions: [
+      {
+        id: "Q-01",
+        topic: "stack",
+        evidence: "O documento marcou a stack como pendente.",
+        decision: "Qual stack web exatamente?",
+        why: "Define build, teste e a forma de todas as fases.",
+        options: [
+          { label: "Node 26 + Fastify + Vitest", consequence: "ecossistema que você já usa" },
+          { label: "Python + FastAPI + pytest", consequence: "outro runner" },
+        ],
+        recommended: "Node 26 + Fastify + Vitest",
+        recommendationBasis: "stack dos seus projetos",
+      },
+    ],
+  });
+
+  it("o marcador vira pergunta, a resposta vira decisão e o documento é reescrito", async () => {
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "project-description.md" }, respond: { stdout: COM_GAP } });
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md:gaps" }, respond: { stdout: perguntaDaStack } });
+
+    const { outcome, agent } = await init(steps, ["1"]);
+    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+
+    const reescrita = agent.calls.find(
+      (call) => call.stage === "authoring" && call.subject === "project-description.md" && call.prompt.includes("estava marcada como pendente"),
+    );
+    expect(reescrita?.prompt).toContain("Node 26 + Fastify + Vitest");
+    expect(reescrita?.prompt).toContain("remova o marcador");
+  });
+
+  it("a decisão fechada aparece no relatório final", async () => {
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "project-description.md" }, respond: { stdout: COM_GAP } });
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md:gaps" }, respond: { stdout: perguntaDaStack } });
+
+    const { outcome } = await init(steps, ["1"]);
+    expect(outcome.report.checkpoint.decisions.map((decision) => decision.decision)).toContain("Node 26 + Fastify + Vitest");
+  });
+
+  it("gap que o desenvolvedor adia sobrevive e o gate bloqueia dizendo onde", async () => {
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "project-description.md" }, respond: { stdout: COM_GAP }, repeat: true });
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md:gaps" }, respond: { stdout: perguntaDaStack }, repeat: true });
+
+    const { outcome } = await init(steps, ["não sei", "não sei", "não sei"]);
+    expect(outcome.readiness.ready).toBe(false);
+    const decisoes = outcome.readiness.checks.find((check) => check.id === "decisoes");
+    expect(decisoes?.passed).toBe(false);
+    expect(decisoes?.detail).toContain("project-description.md");
+  });
+});
+
 describe("B-13 · frescor da cadeia", () => {
   it("upstream alterado depois da geração é detectado", async () => {
     await init(happyPath());

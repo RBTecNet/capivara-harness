@@ -288,11 +288,51 @@ export function interviewPrompt(
     "Options are optional: omit them for a genuinely open question. When you give options, give",
     "two to four, each with its consequence, and recommend exactly one of them.",
     "",
+    "Every option must be a CONCRETE, FINAL answer to the decision. An option that only postpones",
+    'it — "define a specific stack", "decide during implementation", "choose later" — is a deferral',
+    "wearing the clothes of a choice: the developer picks it, the decision is recorded as made, and",
+    "the writer still has nothing to write. If the honest answer is that it can be decided later,",
+    "do not ask the question at all.",
+    "",
     "## Project evidence",
     inventory,
     ...(previous.length > 0
       ? ["", "## Already answered — never ask these again", ...previous.map((entry) => `- ${entry.question} → ${entry.answer} [${entry.disposition}]`)]
       : []),
+    "",
+    context(writer),
+  ].join("\n");
+}
+
+/**
+ * Perguntas para os gaps que o ESCRITOR descobriu.
+ *
+ * A entrevista prévia não alcança tudo: só ao escrever é que se descobre qual
+ * decisão falta de verdade. Sem este caminho de volta, um `[NEEDS DECISION]`
+ * viraria um bloqueio no fim do run, com o desenvolvedor descobrindo tarde algo
+ * que ele teria respondido em dez segundos.
+ */
+export function gapPrompt(document: DocumentName, writer: WriterContext, markers: readonly string[]): string {
+  return [
+    languageBlock(writer.language),
+    "",
+    FRAME,
+    "",
+    "## Your task",
+    `While writing ${document} you marked these decisions as still open:`,
+    ...markers.map((marker) => `- ${marker}`),
+    "",
+    "Turn each of them into one question for the developer. Write no document.",
+    "Ask only about what is genuinely blocking the text; if one of the markers can be resolved by a",
+    "low-risk explicit assumption, leave it out.",
+    "",
+    "Return only JSON, same shape as the interview batch:",
+    '{ "contract": "capivara-questions/v1", "questions": [ { "id": "Q-01", "topic": "...",',
+    '  "evidence": "...", "decision": "...", "why": "...", "options": [ { "label": "...",',
+    '  "consequence": "..." } ], "recommended": "...", "recommendationBasis": "..." } ] }',
+    "",
+    "Every option must be a concrete, final answer. An option that postpones the decision is not an",
+    "option: it is what put this marker here in the first place.",
     "",
     context(writer),
   ].join("\n");

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { interviewPrompt, languageBlock, ledgerPrompt, phasePartPrompt, writerPrompt } from "../../src/prompts/index.js";
+import { gapPrompt, interviewPrompt, languageBlock, ledgerPrompt, phasePartPrompt, writerPrompt } from "../../src/prompts/index.js";
 import type { WriterContext } from "../../src/prompts/index.js";
 import { STRUCTURAL_LABELS } from "../../src/contract/index.js";
 
@@ -102,6 +102,26 @@ describe("levantamento de perguntas", () => {
   it("declara a regra de decisão restritiva e aceita lista vazia", () => {
     expect(prompt).toContain("Ask only when ALL of these are true");
     expect(prompt).toContain("An empty question list is a valid and good answer");
+  });
+});
+
+describe("opção não pode ser adiamento disfarçado", () => {
+  it("o levantamento proíbe opção que só adia a decisão", () => {
+    const prompt = interviewPrompt("project-description.md", context, "vazio", []);
+    expect(prompt).toContain("CONCRETE, FINAL answer");
+    expect(prompt).toContain("deferral");
+    expect(prompt).toContain("do not ask the question at all");
+  });
+
+  it("o levantamento de gaps repete a mesma proibição", () => {
+    const prompt = gapPrompt("database-schema.md", context, ["qual stack web exatamente"]);
+    expect(prompt).toContain("qual stack web exatamente");
+    expect(prompt).toContain("concrete, final answer");
+    expect(prompt).toContain("what put this marker here");
+  });
+
+  it("o levantamento de gaps manda escrever nenhum documento", () => {
+    expect(gapPrompt("user-stories.md", context, ["x"])).toContain("Write no document");
   });
 });
 

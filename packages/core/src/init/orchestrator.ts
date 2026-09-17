@@ -17,7 +17,7 @@ import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index
 import { allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Question } from "../interview/index.js";
-import { auditorPrompt, interviewPrompt, ledgerPrompt, phasePartPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
+import { auditorPrompt, gapPrompt, interviewPrompt, ledgerPrompt, phasePartPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
 import type { DocumentName, WriterContext } from "../prompts/index.js";
 import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, runIdFor, runPaths, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
@@ -50,6 +50,8 @@ export interface InitOptions {
   announce?: (message: string) => void;
   maxAuditReturns?: number;
   maxInterviewRounds?: number;
+  /** Rodadas para fechar gaps que o escritor descobre ao escrever. */
+  maxGapRounds?: number;
   now?: () => Date;
 }
 
@@ -108,6 +110,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const announce = options.announce ?? (() => undefined);
   const maxAuditReturns = options.maxAuditReturns ?? DEFAULT_MAX_RETURNS;
   const maxInterviewRounds = options.maxInterviewRounds ?? 3;
+  const maxGapRounds = options.maxGapRounds ?? 2;
 
   const runId = runIdFor("init", options.request.sha12);
   const paths = runPaths(options.projectRoot, runId);
@@ -167,8 +170,10 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     await event("authoring", document, "started");
     const authored = document === "project-phases.md" ? await writePhases(writer) : await writeSimple(document, writer);
 
+    const closed = await closeGaps(document, authored, writer);
+
     await event("audit", document, "started");
-    const verdict = await auditLoop(document, authored, writer, upstream);
+    const verdict = await auditLoop(document, closed, writer, upstream);
     published[document] = verdict.content;
     approved.push(document);
     remarks.push(...verdict.remarks.map((remark) => ({ document, remark })));
@@ -424,6 +429,69 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     });
 
     return build(phases);
+  }
+
+  /**
+   * Fecha os gaps que o ESCRITOR descobriu.
+   *
+   * A entrevista prévia não alcança tudo: só ao escrever é que se sabe qual
+   * decisão falta de verdade. Sem este caminho de volta, um [NEEDS DECISION]
+   * atravessaria toda a cadeia para virar bloqueio no fim do run — com o
+   * desenvolvedor descobrindo tarde algo que responderia em dez segundos.
+   *
+   * O teto existe porque um marcador que sobrevive a duas rodadas de perguntas
+   * não é falta de informação: é uma decisão que ninguém quer tomar agora, e o
+   * gate de prontidão é o lugar certo para isso aparecer.
+   */
+  async function closeGaps(document: ChainDocument, initial: Authored, writer: WriterContext): Promise<Authored> {
+    let authored = initial;
+
+    for (let round = 1; round <= maxGapRounds; round += 1) {
+      const markers = [...authored.content.matchAll(/\[NEEDS DECISION\]\s*(.+)/g)]
+        .map((match) => (match[1] ?? "").trim())
+        .filter((marker) => marker !== "");
+      if (markers.length === 0) return authored;
+
+      announce(`  ${markers.length} decisão(ões) pendente(s) em ${document}; reabrindo a entrevista`);
+      await event("interview", document, "retry", `${markers.length} gap(s) descobertos na escrita`, round);
+
+      const batch = parseQuestionBatch(
+        await track({ role: "writer", stage: "interview", subject: `${document}:gaps`, attempt: round, prompt: gapPrompt(document, writer, markers) }),
+      );
+      if (!batch.ok || batch.questions.length === 0) return authored;
+
+      const answered: Answer[] = [];
+      let index = 0;
+      for (const question of batch.questions) {
+        index += 1;
+        const raw = await options.ask(question, index, batch.questions.length);
+        const local = classifyLocally(question, raw);
+        const classification = local.settled ? local : await classifyWithModel(document, question, raw, round);
+        answered.push(buildAnswer(question, raw, classification, round, now));
+      }
+
+      allQuestions.push(...batch.questions.map((question) => ({ ...question, id: scoped(document, question.id) })));
+      allAnswers.push(...answered.map((answer) => ({ ...answer, questionId: scoped(document, answer.questionId) })));
+
+      const accepted = answered.filter((answer) => answer.disposition === "ACCEPTED");
+      if (accepted.length === 0) return authored;
+
+      writer.decisions = allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision);
+
+      authored = await authored.rewrite(
+        accepted.map((answer) => {
+          const question = batch.questions.find((entry) => entry.id === answer.questionId);
+          return {
+            where: question?.topic ?? document,
+            problem: `a decisão "${question?.decision ?? answer.questionId}" estava marcada como pendente`,
+            fix: `o desenvolvedor decidiu: ${answer.decision}. Escreva isso e remova o marcador [NEEDS DECISION] correspondente`,
+          };
+        }),
+        round,
+      );
+    }
+
+    return authored;
   }
 
   async function auditLoop(

@@ -240,3 +240,52 @@ export function phasePartPrompt(part: PhasePartContext): string {
     context(part),
   ].join("\n");
 }
+
+/**
+ * Levantamento de perguntas, antes de escrever o documento.
+ *
+ * A regra de decisão é restritiva de propósito: perguntar o descobrível gasta a
+ * paciência de quem responde e não melhora o documento.
+ */
+export function interviewPrompt(
+  document: DocumentName,
+  writer: WriterContext,
+  inventory: string,
+  previous: { question: string; answer: string; disposition: string }[],
+): string {
+  return [
+    languageBlock(writer.language),
+    "",
+    FRAME,
+    "",
+    "## Your task",
+    `Raise the questions that must be answered before ${document} can be written. Write no document.`,
+    "",
+    "Ask only when ALL of these are true:",
+    "1. Neither the request nor the project evidence answers it safely.",
+    "2. At least two plausible answers exist.",
+    "3. The choice changes observable behaviour, scope, contracts, security, data or architecture.",
+    "4. A wrong assumption creates meaningful rework or risk.",
+    "",
+    "Never ask about a discoverable command, path, dependency or convention. Record a low-risk",
+    "explicit assumption instead. An empty question list is a valid and good answer.",
+    "",
+    "Return only JSON:",
+    '{ "contract": "capivara-questions/v1", "questions": [ {',
+    '  "id": "Q-01", "topic": "...", "evidence": "what you already found",',
+    '  "decision": "the missing decision as a question", "why": "what changes with the answer",',
+    '  "options": [ { "label": "...", "consequence": "..." } ],',
+    '  "recommended": "<exactly one option label>", "recommendationBasis": "..." } ] }',
+    "",
+    "Options are optional: omit them for a genuinely open question. When you give options, give",
+    "two to four, each with its consequence, and recommend exactly one of them.",
+    "",
+    "## Project evidence",
+    inventory,
+    ...(previous.length > 0
+      ? ["", "## Already answered — never ask these again", ...previous.map((entry) => `- ${entry.question} → ${entry.answer} [${entry.disposition}]`)]
+      : []),
+    "",
+    context(writer),
+  ].join("\n");
+}

@@ -1,0 +1,226 @@
+/**
+ * Provider falso roteirizado.
+ *
+ * Um roteiro casa por papel, estágio e assunto e devolve bytes fixos. Chamada
+ * não casada FALHA o teste de propósito: um default silencioso esconderia
+ * exatamente a regressão que o roteiro existe para pegar.
+ */
+
+import { QUESTIONS_CONTRACT } from "../../src/interview/index.js";
+import { LEDGER_CONTRACT } from "../../src/authoring/index.js";
+import type { AgentCall } from "../../src/init/index.js";
+
+export interface ScriptStep {
+  match: { role?: string; stage?: string; subject?: string; attempt?: number };
+  respond: { stdout: string; exitCode?: number };
+  /** Passo reutilizável. Útil para a rodada extra de entrevista, em que o
+   *  modelo é consultado de novo para ver se as respostas abriram perguntas. */
+  repeat?: boolean;
+}
+
+export interface FakeAgent {
+  call: (call: AgentCall) => Promise<{ stdout: string; exitCode: number }>;
+  calls: AgentCall[];
+  unmatched: AgentCall[];
+}
+
+export function fakeAgent(steps: ScriptStep[]): FakeAgent {
+  const used = new Set<number>();
+  const agent: FakeAgent = {
+    calls: [],
+    unmatched: [],
+    call: async (call) => {
+      agent.calls.push(call);
+      const index = steps.findIndex((step, position) => {
+        if (used.has(position) && step.match.attempt === undefined && step.repeat !== true) return false;
+        const { role, stage, subject, attempt } = step.match;
+        if (role !== undefined && role !== call.role) return false;
+        if (stage !== undefined && stage !== call.stage) return false;
+        if (subject !== undefined && subject !== call.subject) return false;
+        if (attempt !== undefined && attempt !== call.attempt) return false;
+        return true;
+      });
+      if (index === -1) {
+        agent.unmatched.push(call);
+        // Falha alto: um default silencioso esconderia a regressão que o
+        // roteiro existe para pegar.
+        throw new Error(
+          `chamada sem roteiro: role=${call.role} stage=${call.stage} subject=${call.subject} attempt=${call.attempt}`,
+        );
+      }
+      if (steps[index]!.match.attempt === undefined && steps[index]!.repeat !== true) used.add(index);
+      const respond = steps[index]!.respond;
+      return { stdout: respond.stdout, exitCode: respond.exitCode ?? 0 };
+    },
+  };
+  return agent;
+}
+
+export const NO_QUESTIONS = JSON.stringify({ contract: QUESTIONS_CONTRACT, questions: [] });
+
+export function oneQuestion(id = "Q-01"): string {
+  return JSON.stringify({
+    contract: QUESTIONS_CONTRACT,
+    questions: [
+      {
+        id,
+        topic: "stack",
+        evidence: "O diretório está vazio; nada indica linguagem.",
+        decision: "Qual stack o projeto usa?",
+        why: "Define os comandos de build e teste.",
+        options: [
+          { label: "Node + Vitest", consequence: "suíte rápida" },
+          { label: "Python + pytest", consequence: "bom para dados" },
+        ],
+        recommended: "Node + Vitest",
+        recommendationBasis: "é a stack dos seus projetos",
+      },
+    ],
+  });
+}
+
+export const approve = (reason = "fiel ao pedido e às decisões aceitas") =>
+  `CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: ${reason}`;
+
+export const reject = (where: string, problem: string, fix: string) =>
+  [`CAPIVARA_AUDIT_STATUS: REJECTED`, `CAPIVARA_FINDING: ${where} | ${problem} | ${fix}`, `CAPIVARA_REASON: ${problem}`].join("\n");
+
+export const DESCRIPTION = `# Pousada — Project Description
+
+## Overview
+
+Um sistema de reservas para uma pousada pequena.
+
+### Key Concepts
+
+- **Reserva:** período entre check-in e check-out, com status.
+
+## Tech Stack
+
+| Camada | Tecnologia |
+| --- | --- |
+| Runtime | Node 26 |
+| Testes | Vitest 5 |
+
+## Core Workflows
+
+### 1. Criar reserva
+
+1. O hóspede escolhe as datas.
+2. O sistema cria a reserva com status pendente.
+`;
+
+export const STORIES = `# Pousada — User Stories
+
+## Overview
+
+Reservas para uma pousada pequena.
+
+**User Types:**
+- **Hóspede** - quem reserva um quarto
+
+## 1. Reservas
+
+### US-1.1: Criar reserva
+**As a** hóspede
+**I want to** reservar um quarto por um período
+**So that** eu tenha onde ficar
+
+**Acceptance Criteria:**
+- [ ] a reserva nasce com status pendente
+- [ ] datas sobrepostas para o mesmo quarto são recusadas
+
+**Expected Result:** uma reserva persistida com status pendente.
+
+## Appendix: User Story Status
+
+| ID | Story | Priority | Status |
+|----|-------|----------|--------|
+| US-1.1 | Criar reserva | High | Pending |
+`;
+
+export const SCHEMA = `# Pousada — Database Schema
+
+## Overview
+
+Duas entidades: **reservations** e a lookup **statuses**.
+
+## Schema
+
+\`\`\`dbml
+Table statuses {
+  id bigint [pk, increment]
+  name varchar [not null]
+}
+
+Table reservations {
+  id bigint [pk, increment]
+  status_id bigint [ref: > statuses.id, not null]
+}
+\`\`\`
+
+## Relationships
+
+- Uma **reservation** pertence a um **status**.
+
+## Lookup Table Seeds
+
+- statuses: pendente, confirmada, cancelada
+
+## Notes & Conventions
+
+- Sem enum: status vira lookup com chave estrangeira.
+`;
+
+export const LEDGER = JSON.stringify({
+  contract: LEDGER_CONTRACT,
+  phases: [
+    { number: 1, title: "Fundação de dados", goal: "migrations e seeds existem", dependsOn: "none", covers: ["reservations", "statuses"], taskCount: 2 },
+    { number: 2, title: "Criar reserva", goal: "o hóspede cria uma reserva", dependsOn: "Phase 1", covers: ["US-1.1"], taskCount: 1 },
+  ],
+  mvpCutPhase: 2,
+  coverage: { stories: { "US-1.1": [2] }, entities: { reservations: [1], statuses: [1] }, workflows: { "1": [2] } },
+});
+
+export const PHASE_1 = `## Phase 1: Fundação de dados
+
+**Goal:** migrations e seeds existem · **Depends on:** none · **Covers:** reservations, statuses
+
+- [ ] **Task:** Criar a migration de statuses e semear as três linhas
+  - **Acceptance criteria:**
+    - A tabela statuses existe e contém exatamente pendente, confirmada e cancelada
+  - **Feature tests:** statuses_seed → as três linhas existem após o seed
+  - **Traces:** statuses
+
+- [ ] **Task:** Criar a migration de reservations com a chave estrangeira
+  - **Acceptance criteria:**
+    - A tabela reservations existe com status_id referenciando statuses
+  - **Feature tests:** reservations_migration → a FK aponta para statuses
+  - **Traces:** reservations
+`;
+
+export const PHASE_2 = `## Phase 2: Criar reserva
+
+**Goal:** o hóspede cria uma reserva · **Depends on:** Phase 1 · **Covers:** US-1.1, workflow 1
+
+- [ ] **Task:** Implementar a criação de reserva com recusa de datas sobrepostas
+  - **Acceptance criteria:**
+    - Uma reserva nova nasce com status pendente
+    - Datas sobrepostas no mesmo quarto devolvem erro e não persistem nada
+  - **Feature tests:** reserva_sobreposta → a segunda reserva é recusada
+  - **Traces:** US-1.1, reservations, workflow 1
+`;
+
+/** O roteiro do caminho feliz: cenário B-01 do catálogo. */
+export function happyPath(): ScriptStep[] {
+  return [
+    { match: { role: "writer", stage: "interview" }, respond: { stdout: NO_QUESTIONS }, repeat: true },
+    { match: { role: "writer", stage: "authoring", subject: "project-description.md" }, respond: { stdout: DESCRIPTION } },
+    { match: { role: "writer", stage: "authoring", subject: "user-stories.md" }, respond: { stdout: STORIES } },
+    { match: { role: "writer", stage: "authoring", subject: "database-schema.md" }, respond: { stdout: SCHEMA } },
+    { match: { role: "writer", stage: "authoring", subject: "ledger" }, respond: { stdout: LEDGER } },
+    { match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: PHASE_1 } },
+    { match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 } },
+    { match: { role: "auditor", stage: "audit" }, respond: { stdout: approve() }, repeat: true },
+  ];
+}

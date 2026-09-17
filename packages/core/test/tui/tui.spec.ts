@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  BLOCK_FONT_ROWS,
+  CAPYBARA_ASCII,
+  CAPYBARA_COLS,
+  CAPYBARA_ROWS,
   DEFAULT_LANGUAGE,
   PHASE_GATES,
+  blockText,
+  renderCapybara,
   detectLanguage,
   padVisible,
   paint,
@@ -112,49 +118,129 @@ describe("tela da entrevista", () => {
 
 describe("dashboard", () => {
   const model = {
-    command: "build" as const,
+    version: "0.1.0",
+    command: "build",
+    subtitle: "build · implementação · harness control plane",
+    project: "/home/bruno/pilotos/piloto-1",
     stage: "implement",
-    subject: "P02",
-    attempt: 2,
-    maxAttempts: 3,
-    active: { role: "builder", model: "gpt-5", elapsedSeconds: 42 },
-    gates: [
-      { name: "G0 engine", state: "verde" as const },
-      { name: "G2 suíte", state: "vermelho" as const },
-      { name: "G3 verificação", state: "pendente" as const },
+    status: { label: "em andamento", state: "em andamento" as const },
+    durationSeconds: 754,
+    pipeline: [
+      { label: "preflight", state: "concluído" as const },
+      { label: "P01", state: "concluído" as const },
+      { label: "P02", state: "em andamento" as const },
+      { label: "P03", state: "aguardando" as const },
     ],
-    phases: [
-      { id: "P01", title: "Fundação de dados", state: "verde" as const },
-      { id: "P02", title: "Criar reserva", state: "rodando" as const },
+    provider: { perfil: "codex:gpt-5.6-luna", transporte: "codex-cli", contabilidade: "opaca" },
+    telemetry: [
+      { label: "INVOCAÇÕES", value: "12" },
+      { label: "CORREÇÕES", value: "1" },
+      { label: "TOKENS", value: "não medido" },
     ],
-    costs: [{ role: "builder", calls: 3, seconds: 120 }],
-    recent: ["gate 2 vermelho", "ciclo de correção 2/3"],
+    events: [
+      { time: "10:21:05", text: "fase P01 concluída" },
+      { time: "10:22:41", text: "gate 2 vermelho" },
+    ],
     style: plain,
+    environment: {} as NodeJS.ProcessEnv,
   };
 
-  it("mostra estágio, assunto e tentativa", () => {
+  it("mostra projeto, etapa, status e duração", () => {
     const view = renderDashboard(model);
+    expect(view).toContain("piloto-1");
     expect(view).toContain("implement");
-    expect(view).toContain("P02");
-    expect(view).toContain("tentativa 2/3");
+    expect(view).toContain("em andamento");
+    expect(view).toContain("12m 34s");
   });
 
-  it("mostra a grade de fases e a de gates", () => {
+  it("rótulo longo de fase não empurra o estado para fora da coluna", () => {
+    const view = renderDashboard({
+      ...model,
+      pipeline: [{ label: "P01 Fundação de dados com nome bem comprido", state: "concluído" as const }],
+    });
+    const linha = view.split("\n").find((line) => line.includes("concluído") && line.includes("P01"));
+    expect(linha).toBeDefined();
+    expect(visibleWidth(linha ?? "")).toBeLessThanOrEqual(110);
+  });
+
+  it("mostra o pipeline com o estado de cada passo", () => {
     const view = renderDashboard(model);
-    expect(view).toContain("Fundação de dados");
-    expect(view).toContain("G2 suíte");
+    expect(view).toContain("preflight");
+    expect(view).toContain("P02");
+    expect(view).toContain("aguardando");
   });
 
-  it("mostra o custo ao lado do progresso", () => {
-    expect(renderDashboard(model)).toContain("3 chamada(s) · 120s");
+  it("mostra o provedor e a telemetria", () => {
+    const view = renderDashboard(model);
+    expect(view).toContain("codex:gpt-5.6-luna");
+    expect(view).toContain("INVOCAÇÕES");
+    expect(view).toContain("não medido");
+  });
+
+  it("mostra os eventos recentes com horário", () => {
+    expect(renderDashboard(model)).toContain("[10:22:41]");
+  });
+
+  it("declara que observa sem alterar, e que segredo não entra", () => {
+    const view = renderDashboard(model);
+    expect(view).toContain("não altera a execução");
+    expect(view).toContain("segredos nunca entram");
+  });
+
+  it("nenhuma linha passa da largura pedida", () => {
+    const view = renderDashboard({ ...model, width: 90 });
+    for (const line of view.split("\n")) {
+      expect(visibleWidth(line), line).toBeLessThanOrEqual(90);
+    }
   });
 
   it("os quatro gates da fase são nomeados", () => {
     expect(PHASE_GATES).toHaveLength(4);
   });
 
-  it("aguenta um modelo sem chamada ativa", () => {
-    expect(() => renderDashboard({ ...model, active: null, phases: [], gates: [], costs: [], recent: [] })).not.toThrow();
+  it("aguenta um modelo sem pipeline, telemetria nem eventos", () => {
+    expect(() => renderDashboard({ ...model, pipeline: [], telemetry: [], events: [] })).not.toThrow();
+  });
+});
+
+describe("capivara", () => {
+  it("sem cor verdadeira, cai no mascote ASCII", () => {
+    const linhas = renderCapybara({ style: plain, environment: {} });
+    expect(linhas).toEqual([...CAPYBARA_ASCII]);
+  });
+
+  it("com cor verdadeira, desenha em meio-blocos", () => {
+    const linhas = renderCapybara({ style: colored, environment: { COLORTERM: "truecolor" } });
+    expect(linhas).toHaveLength(CAPYBARA_ROWS);
+    expect(linhas.join("")).toContain("▀");
+    expect(linhas.join("")).toContain(`${ESC}[38;2;`);
+  });
+
+  it("cada linha cobre a largura do desenho", () => {
+    const linhas = renderCapybara({ style: colored, environment: { COLORTERM: "truecolor" } });
+    expect(visibleWidth(linhas[5] ?? "")).toBeLessThanOrEqual(CAPYBARA_COLS);
+  });
+
+  it("CAPIVARA_ASCII_MASCOT força o desenho simples", () => {
+    const linhas = renderCapybara({ style: colored, environment: { COLORTERM: "truecolor", CAPIVARA_ASCII_MASCOT: "1" } });
+    expect(linhas).toEqual([...CAPYBARA_ASCII]);
+  });
+
+  it("o recuo desloca todas as linhas", () => {
+    const linhas = renderCapybara({ style: plain, environment: {}, indent: 4 });
+    expect(linhas.every((line) => line.startsWith("    "))).toBe(true);
+  });
+});
+
+describe("fonte de blocos", () => {
+  it("rende o título em cinco linhas", () => {
+    const linhas = blockText("CAPIVARA");
+    expect(linhas).toHaveLength(BLOCK_FONT_ROWS);
+    expect(linhas.every((line) => line.length > 30)).toBe(true);
+  });
+
+  it("ignora o que não conhece em vez de quebrar", () => {
+    expect(() => blockText("CAPIVARA 2026!")).not.toThrow();
   });
 });
 

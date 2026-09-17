@@ -1,11 +1,14 @@
-export { cursor, padVisible, paint, supportsColor, truncateVisible, visibleWidth } from "./ansi.js";
+export { cursor, padVisible, paint, supportsColor, truncatePath, truncateVisible, visibleWidth } from "./ansi.js";
 export type { Color, Style } from "./ansi.js";
 export { renderSplash } from "./splash.js";
 export type { SplashOptions } from "./splash.js";
 export { BACK, renderQuestion, wrap } from "./interview.js";
 export type { QuestionScreen } from "./interview.js";
-export { PHASE_GATES, renderDashboard } from "./dashboard.js";
-export type { DashboardModel, GateState } from "./dashboard.js";
+export { PHASE_GATES, dashboardWidth, renderDashboard } from "./dashboard.js";
+export type { DashboardEvent, DashboardModel, Metric, PipelineStep, StepState } from "./dashboard.js";
+export { BLOCK_FONT_ROWS, blockText } from "./blockfont.js";
+export { CAPYBARA_ASCII, CAPYBARA_COLS, CAPYBARA_ROWS, renderCapybara, supportsTrueColor } from "./capybara.js";
+export type { CapybaraOptions } from "./capybara.js";
 export { DEFAULT_LANGUAGE, detectLanguage } from "./language.js";
 export { renderCommand, wizardSteps } from "./wizard.js";
 export type { WizardAnswers, WizardStep } from "./wizard.js";

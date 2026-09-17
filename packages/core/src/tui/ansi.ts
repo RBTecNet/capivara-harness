@@ -53,6 +53,17 @@ export function truncateVisible(value: string, width: number): string {
   return `${plain.slice(0, Math.max(0, width - 1))}…`;
 }
 
+/**
+ * Encurta um caminho pela ESQUERDA.
+ *
+ * O fim de um caminho é o que identifica o projeto; cortar pela direita esconde
+ * exatamente a parte que a pessoa procura na tela.
+ */
+export function truncatePath(value: string, width: number): string {
+  if (value.length <= width) return value;
+  return `…${value.slice(-(width - 1))}`;
+}
+
 export const cursor = {
   hide: "\u001B[?25l",
   show: "\u001B[?25h",

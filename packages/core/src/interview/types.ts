@@ -1,0 +1,80 @@
+/**
+ * O vocabulário da entrevista.
+ *
+ * `ACCEPTED` é a única disposição que vira decisão confirmada. As outras quatro
+ * existem para impedir o erro que mais custa caro: transformar uma resposta
+ * vaga em prosa confiante, e depois construir uma aplicação sobre ela.
+ */
+
+export const QUESTIONS_CONTRACT = "capivara-questions/v1" as const;
+
+export type Disposition = "ACCEPTED" | "PARTIAL" | "AMBIGUOUS" | "DEFERRED" | "CONTRADICTED";
+
+/** As disposições que exigem repergunta enquanto a parte aberta for material. */
+export const UNRESOLVED: readonly Disposition[] = ["PARTIAL", "AMBIGUOUS", "CONTRADICTED"];
+
+export interface QuestionOption {
+  label: string;
+  /** O que acontece se esta opção for escolhida. */
+  consequence: string;
+}
+
+export interface Question {
+  id: string;
+  topic: string;
+  /** O que já se descobriu sem perguntar. Perguntar o descobrível é proibido. */
+  evidence: string;
+  /** A decisão que falta, em forma de pergunta. */
+  decision: string;
+  /** Por que importa: o que muda no resultado conforme a resposta. */
+  why: string;
+  options: QuestionOption[];
+  /** Opção recomendada, quando há opções. Deve ser uma delas. */
+  recommended: string;
+  recommendationBasis: string;
+}
+
+export interface Answer {
+  questionId: string;
+  /** A resposta crua, preservada sempre e nunca sobrescrita pela normalização. */
+  raw: string;
+  disposition: Disposition;
+  /** A decisão normalizada; vazia quando a disposição não é ACCEPTED. */
+  decision: string;
+  /** O que continua aberto, para a repergunta estreita. */
+  open: string;
+  round: number;
+  answeredAt: string;
+}
+
+export interface Assumption {
+  topic: string;
+  statement: string;
+  /** Por que assumir isto é de baixo risco. */
+  basis: string;
+}
+
+export interface OpenDecision {
+  questionId: string;
+  topic: string;
+  statement: string;
+}
+
+export interface Checkpoint {
+  decisions: { questionId: string; topic: string; decision: string }[];
+  assumptions: Assumption[];
+  deferrals: OpenDecision[];
+  ambiguities: OpenDecision[];
+}
+
+export interface Handoff {
+  contract: "capivara-handoff/v1";
+  runId: string;
+  language: string;
+  document: string;
+  round: number;
+  questions: Question[];
+  answers: Answer[];
+  assumptions: Assumption[];
+  updatedAt: string;
+}

@@ -159,6 +159,7 @@ describe("prompt do auditor", () => {
     decisions: ["Stack: Node"],
     dispositions: ["Q-01 ACCEPTED"],
     upstream: [],
+    upstreamRemarks: [],
     content: "# X — User Stories",
   };
 
@@ -212,6 +213,27 @@ describe("prompt do auditor", () => {
 
   it("avisa que um finding impossível de fechar para o run", () => {
     expect(auditorPrompt(context)).toContain("a finding the writer cannot close");
+  });
+
+  it("as ressalvas de montante chegam à auditoria seguinte", () => {
+    const prompt = auditorPrompt({
+      ...context,
+      document: "project-phases.md",
+      executable: true,
+      upstreamRemarks: [
+        { document: "user-stories.md", where: "US-3.1", observation: "a ausência de dependências não é explicitada" },
+      ],
+    });
+    expect(prompt).toContain("Remarks from earlier audits");
+    expect(prompt).toContain("a ausência de dependências não é explicitada");
+    expect(prompt).toContain("becomes a defect the loop pays for");
+  });
+
+  it("o eixo de executabilidade recusa critério insatisfazível", () => {
+    const prompt = auditorPrompt({ ...context, document: "project-phases.md", executable: true });
+    expect(prompt).toContain("UNSATISFIABLE");
+    expect(prompt).toContain("reject");
+    expect(prompt).toContain("must name the absence instead");
   });
 
   it("carrega o bloco de idioma resolvido", () => {

@@ -23,6 +23,8 @@ export interface AuditorContext {
   decisions: string[];
   dispositions: string[];
   upstream: { name: string; content: string }[];
+  /** Ressalvas das auditorias anteriores desta cadeia. */
+  upstreamRemarks: { document: string; where: string; observation: string }[];
   content: string;
 }
 
@@ -61,6 +63,10 @@ const AXIS_EXECUTABILITY = [
   `   ${MAX_TASKS_PER_PHASE} tasks including its sub-phases)? Is any acceptance criterion too vague for an`,
   "   independent verifier to answer DONE or INCOMPLETE? Does the foundation come first, with",
   "   models relationship-complete?",
+  "   Is any criterion UNSATISFIABLE — asserting the presence of something the confirmed decisions say",
+  "   does not exist? A project with no dependencies cannot have them listed in its artifact metadata,",
+  "   and a criterion demanding it can never be proven: the verifier will look, not find, and reject",
+  "   the phase for being correct. Such a criterion must name the absence instead.",
 ].join("\n");
 
 const SCOPE_RULE = [
@@ -128,6 +134,13 @@ export function auditorPrompt(context: AuditorContext): string {
     "",
     "## Answer dispositions",
     context.dispositions.length > 0 ? context.dispositions.map((entry) => `- ${entry}`).join("\n") : "- (none)",
+    "",
+    "## Remarks from earlier audits in this chain",
+    "These did not block the documents they were raised on. Check whether this document inherited the",
+    "same ambiguity: a remark that travels down the chain unresolved becomes a defect the loop pays for.",
+    context.upstreamRemarks.length > 0
+      ? context.upstreamRemarks.map((remark) => `- ${remark.document} · ${remark.where}: ${remark.observation}`).join("\n")
+      : "- (none)",
     ...(upstream.length > 0 ? ["", ...upstream] : []),
     "",
     `## Document under audit: ${context.document}`,

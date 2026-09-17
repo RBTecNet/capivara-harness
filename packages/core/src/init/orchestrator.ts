@@ -667,6 +667,14 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           decisions: writer.decisions,
           dispositions: allAnswers.map((answer) => `${answer.questionId} ${answer.disposition}`),
           upstream,
+          // Ressalva que atravessa a cadeia sem ser resolvida vira defeito que o
+          // loop paga: no piloto 2, "a ausência de dependências não é
+          // explicitada" custou três ciclos e parou o run três fases depois.
+          upstreamRemarks: remarks.map((entry) => ({
+            document: entry.document,
+            where: entry.remark.where,
+            observation: entry.remark.observation,
+          })),
           content,
         }),
       });

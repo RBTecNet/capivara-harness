@@ -544,6 +544,119 @@ describe("B-35 · impasse do auditor", () => {
   });
 });
 
+describe("B-36 · enxurrada de gaps idênticos", () => {
+  const COM_27_MARCADORES = [
+    "# Pousada — Project Description",
+    "",
+    "## Overview",
+    "",
+    ...Array.from({ length: 27 }, () => "[NEEDS DECISION] qual o caminho do artefato de design"),
+    "",
+    "### Key Concepts",
+    "",
+    "- **Reserva:** período entre entrada e saída.",
+    "",
+    "## Tech Stack",
+    "",
+    "| Camada | Tecnologia |",
+    "| --- | --- |",
+    "| Runtime | Node 26 |",
+    "",
+    "## Core Workflows",
+    "",
+    "### 1. Criar reserva",
+    "",
+    "passos",
+    "",
+  ].join("\n");
+
+  it("marcadores idênticos viram UMA pergunta, não vinte e sete", async () => {
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "project-description.md" }, respond: { stdout: COM_27_MARCADORES } });
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-description.md:gaps" },
+      respond: {
+        stdout: JSON.stringify({
+          contract: "capivara-questions/v1",
+          questions: [
+            {
+              id: "Q-01",
+              topic: "design",
+              evidence: "marcador aberto",
+              decision: "Existe artefato de design?",
+              why: "define se a task carrega Design ref",
+              options: [
+                { label: "Não existe", consequence: "sem Design ref" },
+                { label: "Existe", consequence: "com Design ref" },
+              ],
+              recommended: "Não existe",
+              recommendationBasis: "o diretório está ausente",
+            },
+          ],
+        }),
+      },
+      repeat: true,
+    });
+
+    let perguntas = 0;
+    const agent = fakeAgent(steps);
+    await runInit({
+      projectRoot,
+      request,
+      language: "português do Brasil",
+      call: agent.call,
+      ask: async () => {
+        perguntas += 1;
+        return "1";
+      },
+    }).catch(() => undefined);
+
+    expect(perguntas).toBeLessThanOrEqual(2);
+  });
+
+  it("as perguntas de gap não sobrescrevem as decisões da entrevista principal", async () => {
+    const pergunta = (topic: string, decision: string, label: string) =>
+      JSON.stringify({
+        contract: "capivara-questions/v1",
+        questions: [
+          {
+            id: "Q-01",
+            topic,
+            evidence: "evidência",
+            decision,
+            why: "muda o resultado",
+            options: [
+              { label, consequence: "a" },
+              { label: `${label} (não)`, consequence: "b" },
+            ],
+            recommended: label,
+            recommendationBasis: "base",
+          },
+        ],
+      });
+
+    const COM_GAP = DESCRIPTION.replace("## Core Workflows", "## Open Questions\n\n[NEEDS DECISION] qual stack exatamente\n\n## Core Workflows");
+
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "project-description.md" }, respond: { stdout: COM_GAP } });
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-description.md:gaps" },
+      respond: { stdout: pergunta("stack", "Qual stack exatamente?", "Node 26 + Fastify") },
+    });
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 },
+      respond: { stdout: pergunta("identificação dos quartos", "Como identificar os quartos?", "Números de 1 a 8") },
+    });
+
+    const { outcome } = await init(steps, ["1", "1"]);
+    const decisoes = new Map(outcome.report.checkpoint.decisions.map((decision) => [decision.topic, decision.decision]));
+    // Cada tema guarda a SUA resposta: no piloto 1, "Identificação dos quartos"
+    // aparecia com a resposta da stack.
+    expect(decisoes.get("identificação dos quartos")).toBe("Números de 1 a 8");
+    expect(decisoes.get("stack")).toBe("Node 26 + Fastify");
+  });
+});
+
 describe("B-13 · frescor da cadeia", () => {
   it("upstream alterado depois da geração é detectado", async () => {
     await init(happyPath());

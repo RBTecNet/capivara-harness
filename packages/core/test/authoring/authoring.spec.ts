@@ -143,6 +143,27 @@ describe("reparo determinístico — o que não custa chamada de modelo", () => 
     expect(repair.content.split("\n")[2]).toBe(stamp);
   });
 
+  it("remove Design ref pendente: a ausência de design nunca é decisão aberta", () => {
+    const fase = [
+      "- [ ] **Task:** Construir a tela de reservas",
+      "  - **Acceptance criteria:**",
+      "    - A tela lista os oito quartos",
+      "  - **Design ref:** [NEEDS DECISION] qual o caminho do artefato de design",
+      "  - **Traces:** US-1.1",
+      "",
+    ].join("\n");
+    const repair = repairDeterministically(fase);
+    expect(repair.content).not.toContain("Design ref");
+    expect(repair.content).not.toContain("NEEDS DECISION");
+    expect(repair.content).toContain("**Traces:** US-1.1");
+    expect(repair.applied.join(" ")).toContain("nunca é decisão aberta");
+  });
+
+  it("preserva Design ref que aponta para um caminho de verdade", () => {
+    const fase = "  - **Design ref:** .capivara/init/design/reservas.png\n";
+    expect(repairDeterministically(fase).content).toContain("design/reservas.png");
+  });
+
   it("não inventa reparo quando não há o que fazer", () => {
     expect(repairDeterministically("# T — Project Phases\n").applied).toEqual([]);
   });

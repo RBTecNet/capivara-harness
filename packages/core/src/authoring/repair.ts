@@ -47,6 +47,17 @@ export function repairDeterministically(source: string, expectedStamp?: string):
   const applied: string[] = [];
   let content = source;
 
+  // Uma `Design ref` marcada como pendente não é decisão: o diretório de design
+  // é opcional e sua ausência nunca é erro (D-18). O piloto 1 provou que pedir
+  // isso ao modelo não basta — ele marcou 27 vezes e o desenvolvedor foi
+  // interrogado 39 vezes sobre o caminho de um arquivo que não existe. O que se
+  // resolve em código não pode depender da disciplina de quem escreve.
+  const withoutPendingDesign = content.replace(/^[ \t]*-[ \t]*\*\*Design ref:\*\*[^\n]*\[NEEDS DECISION\][^\n]*\n/gm, "");
+  if (withoutPendingDesign !== content) {
+    content = withoutPendingDesign;
+    applied.push("removeu Design ref pendente: a ausência de artefato de design nunca é decisão aberta");
+  }
+
   if (content.includes("\r\n")) {
     content = content.replace(/\r\n/g, "\n");
     applied.push("normalizou CRLF para LF");

@@ -52,6 +52,8 @@ export interface InitOptions {
   maxInterviewRounds?: number;
   /** Rodadas para fechar gaps que o escritor descobre ao escrever. */
   maxGapRounds?: number;
+  /** Teto de perguntas por rodada de gap: ninguém responde a uma enxurrada. */
+  maxGapQuestions?: number;
   now?: () => Date;
 }
 
@@ -68,8 +70,8 @@ export interface InitOutcome {
  * 1 produziu "Atores e acesso: Definir uma stack web completa agora" porque a
  * resposta do Q-01 de um documento sobrescreveu a de outro.
  */
-function scoped(document: string, questionId: string): string {
-  return `${document}#${questionId}`;
+function scoped(document: string, questionId: string, stage = "interview"): string {
+  return `${document}#${stage}#${questionId}`;
 }
 
 /** Um documento escrito, com a forma de reescrevê-lo quando o auditor devolve. */
@@ -111,6 +113,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const maxAuditReturns = options.maxAuditReturns ?? DEFAULT_MAX_RETURNS;
   const maxInterviewRounds = options.maxInterviewRounds ?? 3;
   const maxGapRounds = options.maxGapRounds ?? 2;
+  const maxGapQuestions = options.maxGapQuestions ?? 5;
 
   const runId = runIdFor("init", options.request.sha12);
   const paths = runPaths(options.projectRoot, runId);
@@ -450,9 +453,15 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     const asked = new Set<string>();
 
     for (let round = 1; round <= maxGapRounds; round += 1) {
-      const markers = [...authored.content.matchAll(/\[NEEDS DECISION\]\s*(.+)/g)]
-        .map((match) => (match[1] ?? "").trim())
-        .filter((marker) => marker !== "" && !asked.has(marker.toLowerCase()));
+      // Marcadores idênticos são UMA decisão, não uma por ocorrência: no piloto 1
+      // o mesmo marcador apareceu 27 vezes e virou 27 perguntas iguais.
+      const markers = [
+        ...new Set(
+          [...authored.content.matchAll(/\[NEEDS DECISION\]\s*(.+)/g)]
+            .map((match) => (match[1] ?? "").trim())
+            .filter((marker) => marker !== "" && !asked.has(marker.toLowerCase())),
+        ),
+      ].slice(0, maxGapQuestions);
       if (markers.length === 0) return authored;
       for (const marker of markers) asked.add(marker.toLowerCase());
 
@@ -474,8 +483,11 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         answered.push(buildAnswer(question, raw, classification, round, now));
       }
 
-      allQuestions.push(...batch.questions.map((question) => ({ ...question, id: scoped(document, question.id) })));
-      allAnswers.push(...answered.map((answer) => ({ ...answer, questionId: scoped(document, answer.questionId) })));
+      // Escopo próprio: as perguntas de gap reusam Q-01, Q-02… e sobrescreveriam
+      // as respostas da entrevista principal do mesmo documento.
+      const stage = `gap${round}`;
+      allQuestions.push(...batch.questions.map((question) => ({ ...question, id: scoped(document, question.id, stage) })));
+      allAnswers.push(...answered.map((answer) => ({ ...answer, questionId: scoped(document, answer.questionId, stage) })));
 
       const accepted = answered.filter((answer) => answer.disposition === "ACCEPTED");
       if (accepted.length === 0) return authored;

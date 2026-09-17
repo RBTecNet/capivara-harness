@@ -61,6 +61,21 @@ const AXIS_EXECUTABILITY = [
   "   models relationship-complete?",
 ].join("\n");
 
+const SCOPE_RULE = [
+  "## Scope boundary",
+  "A specification document DECLARES what must be true. It does not implement it. Seed migrations,",
+  "triggers, application-level locking, runtime validation and immutability enforcement are work,",
+  "and work belongs to the execution plan — never to the document that describes the data model,",
+  "the stories or the scope.",
+  "",
+  "Never reject a document for not implementing what it correctly declares. When a declared rule has",
+  "no structural expression available in the notation, the document states it as a rule and the plan",
+  "carries a task for it: that is correct and complete, not a defect.",
+  "",
+  "A finding asking this document to do another document's job is a finding the writer cannot close,",
+  "and three of them in a row stop the run.",
+].join("\n");
+
 const DOUBT_RULE = [
   "## Doubt rule",
   "Reject only on a material defect you can demonstrate by citing a section or an ID and the",
@@ -96,6 +111,8 @@ export function auditorPrompt(context: AuditorContext): string {
     FRAME,
     "",
     axes,
+    "",
+    SCOPE_RULE,
     "",
     DOUBT_RULE,
     "",

@@ -196,6 +196,24 @@ describe("prompt do auditor", () => {
     expect(prompt).toContain("structural and conformant");
   });
 
+  it("declara a fronteira entre declarar e implementar", () => {
+    const prompt = auditorPrompt(context);
+    expect(prompt).toContain("DECLARES what must be true");
+    expect(prompt).toContain("belongs to the execution plan");
+    expect(prompt).toContain("Never reject a document for not implementing what it correctly declares");
+  });
+
+  it("nomeia o que é trabalho e não pertence ao documento", () => {
+    const prompt = auditorPrompt(context);
+    for (const trabalho of ["Seed migrations", "triggers", "runtime validation", "immutability enforcement"]) {
+      expect(prompt).toContain(trabalho);
+    }
+  });
+
+  it("avisa que um finding impossível de fechar para o run", () => {
+    expect(auditorPrompt(context)).toContain("a finding the writer cannot close");
+  });
+
   it("carrega o bloco de idioma resolvido", () => {
     expect(auditorPrompt(context)).toContain("português do Brasil");
   });

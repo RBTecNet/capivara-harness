@@ -16,6 +16,8 @@ export interface AgentBridgeOptions {
   roles: Record<RoleName, RoleConfig>;
   limits: SupervisorLimits;
   credentialsFile?: string;
+  /** Permite ao executor instalar pré-requisitos de sistema. */
+  systemInstall?: boolean;
 }
 
 export interface BridgeRequest {
@@ -42,6 +44,7 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
       runId: options.runId,
       stage: request.stage,
       language: options.language,
+      ...(options.systemInstall !== undefined ? { systemInstall: options.systemInstall } : {}),
       ...(credential ? { secret: credential.secret } : {}),
     });
 

@@ -43,6 +43,8 @@ export interface BuildOptions {
   sleep?: (seconds: number) => Promise<void>;
   now?: () => Date;
   environment?: NodeJS.ProcessEnv;
+  /** Permite ao executor instalar pré-requisitos de sistema. */
+  systemInstall?: boolean;
 }
 
 export interface PhaseReport {
@@ -86,6 +88,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     runId,
     ...(options.explicitTestCommand !== undefined ? { explicitTestCommand: options.explicitTestCommand } : {}),
     git: { repository, clean: repository ? await isClean(options.projectRoot) : true },
+    ...(options.systemInstall !== undefined ? { systemInstall: options.systemInstall } : {}),
     ...(options.environment !== undefined ? { environment: options.environment } : {}),
   });
 
@@ -95,6 +98,11 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     return { runId, exitCode: 1, phases: [], warnings: [], errors: checked.errors };
   }
 
+  if (options.systemInstall === true) {
+    // Default perigoso não pode rodar calado.
+    announce("ATENÇÃO: o executor roda com acesso de sistema e pode instalar pacotes com sudo nesta máquina.");
+    announce("         Use --no-system-install para mantê-lo dentro do workspace.");
+  }
   for (const warning of checked.warnings) announce(`aviso: ${warning.message}`);
 
   const lock = await acquireLock({ projectRoot: options.projectRoot, runId, command: "build", now });

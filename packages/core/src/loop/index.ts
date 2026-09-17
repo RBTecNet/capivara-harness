@@ -14,3 +14,5 @@ export { DEFAULT_MAX_CYCLES, DEFAULT_MAX_LIMIT_WAITS, runPhase } from "./runner.
 export type { EngineCall, EngineCaller, EngineResult, PhaseOutcome, PhaseRunOptions } from "./runner.js";
 export { runBuild } from "./build.js";
 export type { BuildOptions, BuildOutcome, PhaseReport } from "./build.js";
+export { checkPrerequisites, describeMissing, detectPrerequisites } from "./prerequisites.js";
+export type { Prerequisite, PrerequisiteStatus } from "./prerequisites.js";

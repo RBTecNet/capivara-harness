@@ -21,6 +21,13 @@ export interface RoleDefinition {
   requiresCli: boolean;
   /** Só o executor instala dependências e baixa scaffolding. */
   network: boolean;
+  /**
+   * Só o executor pode instalar pré-requisitos de sistema, e só quando o
+   * operador liga isso. É a permissão mais perigosa do produto: dá a um agente
+   * acesso irrestrito à máquina. Por isso é declarada aqui, aparece no splash e
+   * no início do build, e pode ser desligada com --no-system-install.
+   */
+  systemInstall: boolean;
   description: string;
 }
 
@@ -31,6 +38,7 @@ export const ROLES: Readonly<Record<RoleName, RoleDefinition>> = {
     permission: "read-only",
     requiresCli: false,
     network: false,
+    systemInstall: false,
     description: "lê o projeto e devolve o texto dos documentos",
   },
   auditor: {
@@ -39,6 +47,7 @@ export const ROLES: Readonly<Record<RoleName, RoleDefinition>> = {
     permission: "read-only",
     requiresCli: false,
     network: false,
+    systemInstall: false,
     description: "lê os documentos e devolve aprovação ou devolução com orientação",
   },
   builder: {
@@ -47,6 +56,7 @@ export const ROLES: Readonly<Record<RoleName, RoleDefinition>> = {
     permission: "workspace-write",
     requiresCli: true,
     network: true,
+    systemInstall: true,
     description: "implementa a fase: escreve arquivos, instala dependências e roda a suíte",
   },
   verifier: {
@@ -55,6 +65,7 @@ export const ROLES: Readonly<Record<RoleName, RoleDefinition>> = {
     permission: "read-only",
     requiresCli: false,
     network: false,
+    systemInstall: false,
     description: "lê o código real e emite TASK <n>: DONE|INCOMPLETE",
   },
 };

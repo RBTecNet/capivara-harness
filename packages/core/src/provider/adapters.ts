@@ -16,6 +16,8 @@ import { cliProvider, decideReasoning, directProvider, isCliProvider, isDirectPr
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:\/-]*$/;
 
 export interface InvocationContext {
+  /** Liga o acesso de sistema do executor. Desligado, ele fica no workspace. */
+  systemInstall?: boolean;
   projectRoot: string;
   runId: string;
   stage: string;
@@ -64,6 +66,9 @@ export function buildInvocation(role: RoleName, config: RoleConfig, context: Inv
   const effort = safe(config.effort, "effort");
   const env = baseEnvironment(role, config, context);
   const readOnly = definition.permission === "read-only";
+  // Acesso de sistema é do executor, e só quando o operador liga.
+  const systemAccess = !readOnly && definition.systemInstall && context.systemInstall === true;
+  if (systemAccess) env.CAPIVARA_SYSTEM_INSTALL = "1";
 
   if (isDirectProvider(config.provider)) {
     if (definition.requiresCli) {
@@ -107,7 +112,7 @@ export function buildInvocation(role: RoleName, config: RoleConfig, context: Inv
       "--cd", context.projectRoot,
       "--skip-git-repo-check",
       "--color", "never",
-      "--sandbox", readOnly ? "read-only" : "workspace-write",
+      "--sandbox", readOnly ? "read-only" : systemAccess ? "danger-full-access" : "workspace-write",
     ];
     if (model) args.push("--model", model);
     if (effort) args.push("-c", `model_reasoning_effort="${effort}"`);
@@ -116,7 +121,7 @@ export function buildInvocation(role: RoleName, config: RoleConfig, context: Inv
   }
 
   if (config.provider === "claude") {
-    const args = ["-p", "--output-format", "json", "--permission-mode", readOnly ? "plan" : "acceptEdits"];
+    const args = ["-p", "--output-format", "json", "--permission-mode", readOnly ? "plan" : systemAccess ? "bypassPermissions" : "acceptEdits"];
     if (model) args.push("--model", model);
     if (effort) args.push("--effort", effort);
     const { CLAUDECODE: _ignored, ...withoutMarker } = env;

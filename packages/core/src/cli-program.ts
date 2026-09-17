@@ -134,9 +134,10 @@ export function createProgram(): Command {
       .description("Constrói a aplicação a partir da documentação RALPH READY")
       .option("--test-cmd <comando>", "comando de teste do projeto (gate 2)")
       .option("--max-cycles <n>", "ciclos de correção por fase", "3")
-      .option("--keep-going", "continua mesmo depois de uma fase falhar"),
+      .option("--keep-going", "continua mesmo depois de uma fase falhar")
+      .option("--no-system-install", "mantém o executor dentro do workspace, sem instalar pacotes de sistema"),
     ["builder", "verifier"],
-  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; keepGoing?: boolean }) => {
+  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; keepGoing?: boolean; systemInstall?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const roles = rolesFromFlags(flags);
     const language = flags.language ?? "português do Brasil";
@@ -151,10 +152,18 @@ export function createProgram(): Command {
       engine: roles.builder.provider || "codex",
       ...(flags.testCmd !== undefined ? { explicitTestCommand: flags.testCmd } : {}),
       maxCycles: Number(flags.maxCycles),
+      systemInstall: flags.systemInstall !== false,
       ...(flags.keepGoing !== undefined ? { keepGoing: flags.keepGoing } : {}),
       announce: (message) => stdout.write(`${message}\n`),
       call: async (call) => {
-        const bridge = createAgentBridge({ projectRoot, runId: "build", language, roles, limits: DEFAULT_LIMITS });
+        const bridge = createAgentBridge({
+          projectRoot,
+          runId: "build",
+          language,
+          roles,
+          limits: DEFAULT_LIMITS,
+          systemInstall: flags.systemInstall !== false,
+        });
         return bridge({ role: call.role, stage: "implement", prompt: call.prompt });
       },
     });

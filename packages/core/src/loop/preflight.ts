@@ -13,6 +13,7 @@ import type { ContractError, StampInput } from "../contract/index.js";
 import { artifactPaths } from "../state/paths.js";
 import { resolveTestCommand, type TestCommand } from "./testcmd.js";
 import { splitPhases, type PhaseSession } from "./split.js";
+import { checkPrerequisites, describeMissing, detectPrerequisites, type PrerequisiteStatus } from "./prerequisites.js";
 
 export interface PreflightOptions {
   projectRoot: string;
@@ -20,6 +21,8 @@ export interface PreflightOptions {
   explicitTestCommand?: string;
   /** Estado do repositório, injetado para o preflight continuar testável. */
   git: { repository: boolean; clean: boolean };
+  /** Quando ligado, faltar um pré-requisito é aviso: o executor vai instalar. */
+  systemInstall?: boolean;
   environment?: NodeJS.ProcessEnv;
 }
 
@@ -34,6 +37,7 @@ export type PreflightResult =
       sessions: PhaseSession[];
       testCommand: TestCommand | null;
       commitsEnabled: boolean;
+      prerequisites: PrerequisiteStatus[];
       warnings: PreflightWarning[];
     }
   | { ok: false; errors: string[]; contractErrors: ContractError[] };
@@ -101,6 +105,16 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
     });
   }
 
+  // A stack decidida exige o quê, e o que existe nesta máquina? Descobrir aqui
+  // custa uma chamada a `which`; descobrir na terceira fase custa três sessões.
+  const description = await readFile(join(init, "project-description.md"), "utf8").catch(() => "");
+  const prerequisites = await checkPrerequisites(detectPrerequisites(description));
+  const missing = describeMissing(prerequisites, options.systemInstall === true);
+  if (missing !== "") {
+    if (options.systemInstall === true) warnings.push({ code: "instala-sistema", message: missing });
+    else errors.push(missing);
+  }
+
   if (errors.length > 0) return { ok: false, errors, contractErrors: [] };
 
   return {
@@ -108,6 +122,7 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
     sessions: split.sessions,
     testCommand,
     commitsEnabled: options.git.repository,
+    prerequisites,
     warnings,
   };
 }

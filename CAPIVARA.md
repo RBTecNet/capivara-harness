@@ -53,6 +53,15 @@ Estas não são preferências. São o que mantém o produto coerente:
 3. **Nunca traduzir chave de protocolo ou rótulo estrutural** — `CAPIVARA_AUDIT_STATUS`, `TASK <n>: DONE`, `## Phase`, `**Acceptance criteria:**`, `**Traces:**` e companhia são casados literalmente pelo parser.
 4. **Todo campo novo no contrato precisa responder:** *"qual decisão do loop quebra sem ele?"*. Se a resposta for "nenhuma", o campo não existe. Superfície de contrato é superfície de falha.
 5. **`.capivara/init/` é leitura para o executor; `.capivara/runs/` é plano de controle.** Escrever no segundo invalida a tentativa.
+6. **O que é verificável em código é verificado em código.** Instruir o modelo é a última defesa, nunca a única: nove dos quinze defeitos do piloto 1 voltaram porque eu tentei resolvê-los por persuasão.
+
+## Acesso de sistema
+
+O papel `builder` roda com **acesso de sistema por padrão**: ele pode instalar
+pacotes com `sudo` nesta máquina, não só dependências do projeto. É a permissão
+mais perigosa do produto e vale para todo projeto, não só para um. O `build`
+anuncia isso em toda execução; `--no-system-install` mantém o executor dentro do
+workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 ## Estado atual
 

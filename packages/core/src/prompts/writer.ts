@@ -106,6 +106,10 @@ const TASKS: Record<DocumentName, string> = {
     "  or explicitly excluded with the reason the developer gave. Never assume an exclusion.",
     "- Acceptance criteria state limits, states and failure paths, with numbers where they exist.",
     "- Story IDs are stable. The IDs in the body and in the appendix must be the same set.",
+    "- Priority and Status in the appendix are documentation metadata, not decisions: they change no",
+    "  behaviour, no scope, no contract and no data. Default every story to High and Pending unless",
+    '  the developer said otherwise. NEVER write [NEEDS DECISION] in those columns and never ask',
+    "  about them — two pilots wasted four questions on exactly this.",
   ].join("\n"),
 
   "database-schema.md": [

@@ -58,6 +58,18 @@ export function repairDeterministically(source: string, expectedStamp?: string):
     applied.push("removeu Design ref pendente: a ausência de artefato de design nunca é decisão aberta");
   }
 
+  // Um [NEEDS DECISION] dentro de uma célula de tabela não carrega afirmação
+  // nenhuma: não dá para transformá-lo em pergunta, e ele bloquearia o gate por
+  // um acidente de formatação. Vira travessão, e a linha da tabela sobrevive.
+  const semMarcadorEmTabela = content
+    .split("\n")
+    .map((line) => (line.trimStart().startsWith("|") ? line.replace(/\[NEEDS DECISION\][^|]*?(\s*)(?=\||$)/g, "—$1") : line))
+    .join("\n");
+  if (semMarcadorEmTabela !== content) {
+    content = semMarcadorEmTabela;
+    applied.push("trocou marcador em célula de tabela por travessão: ali ele não declara decisão nenhuma");
+  }
+
   if (content.includes("\r\n")) {
     content = content.replace(/\r\n/g, "\n");
     applied.push("normalizou CRLF para LF");

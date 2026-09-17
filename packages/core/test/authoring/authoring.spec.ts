@@ -187,6 +187,25 @@ describe("reparo determinístico — o que não custa chamada de modelo", () => 
     expect(stripResolvedMarkers(documento, ["outra coisa"]).applied).toEqual([]);
   });
 
+  it("marcador dentro de célula de tabela vira travessão e a linha sobrevive", () => {
+    const apendice = [
+      "## Appendix: User Story Status",
+      "",
+      "| ID | Story | Priority | Status |",
+      "|----|-------|----------|--------|",
+      "| US-1.1 | Ler o CSV | [NEEDS DECISION] | [NEEDS DECISION] |",
+      "",
+      "[NEEDS DECISION] qual o provedor de email",
+      "",
+    ].join("\n");
+
+    const repair = repairDeterministically(apendice);
+    expect(repair.content).toContain("| US-1.1 | Ler o CSV | — | — |");
+    // O marcador de verdade, fora da tabela, continua lá para virar pergunta.
+    expect(repair.content).toContain("[NEEDS DECISION] qual o provedor de email");
+    expect(repair.applied.join(" ")).toContain("célula de tabela");
+  });
+
   it("não inventa reparo quando não há o que fazer", () => {
     expect(repairDeterministically("# T — Project Phases\n").applied).toEqual([]);
   });

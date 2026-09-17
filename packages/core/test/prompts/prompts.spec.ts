@@ -105,6 +105,15 @@ describe("levantamento de perguntas", () => {
   });
 });
 
+describe("metadado de documentação não vira pergunta", () => {
+  it("prioridade e status têm padrão e nunca são marcados como pendentes", () => {
+    const prompt = writerPrompt("user-stories.md", context);
+    expect(prompt).toContain("documentation metadata, not decisions");
+    expect(prompt).toContain("Default every story to High and Pending");
+    expect(prompt).toContain("NEVER write [NEEDS DECISION] in those columns");
+  });
+});
+
 describe("opção não pode ser adiamento disfarçado", () => {
   it("o levantamento proíbe opção que só adia a decisão", () => {
     const prompt = interviewPrompt("project-description.md", context, "vazio", []);

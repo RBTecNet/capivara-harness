@@ -26,7 +26,7 @@ export interface FixContext extends BuilderContext {
 
 export const BUILDER_COMPLETE_MARKER = "CAPIVARA_BUILDER_STATUS: COMPLETE";
 
-function discoveryPreamble(): string {
+export function discoveryPreamble(): string {
   return [
     "## Discover the stack and the conventions before writing code",
     "This project may use any language or framework. Assume nothing. Before you start, read the",
@@ -45,7 +45,7 @@ function discoveryPreamble(): string {
   ].join("\n");
 }
 
-function testBlock(context: BuilderContext): string {
+export function testBlock(context: BuilderContext): string {
   if (!context.testCommand) return "";
   const lines = [
     "",
@@ -135,5 +135,47 @@ export function fixPrompt(context: FixContext): string {
     "",
     "## The phase to complete",
     context.phaseMarkdown,
+  ].join("\n");
+}
+
+/**
+ * Prompt de correção da aceitação operacional.
+ *
+ * Aqui a evidência não é um teste vermelho: é o produto que não subiu numa cópia
+ * limpa. O executor precisa saber disso, porque a correção é de outra natureza —
+ * migração que não roda, dependência de sistema ausente, configuração que só
+ * existia na máquina de quem escreveu.
+ */
+export function acceptancePrompt(context: BuilderContext & { cause: string; attempt: number }): string {
+  return [
+    languageBlock(context.language),
+    "",
+    "You are a senior developer fixing a product that does not run.",
+    "",
+    discoveryPreamble(),
+    testBlock(context),
+    "",
+    "## Situation",
+    "Every phase is implemented and the test suite is green, but the product failed operational",
+    "acceptance: it was copied to a clean directory — no node_modules, no untracked files, nothing",
+    "but what is committed — and there it did not build, did not migrate, or did not stay up.",
+    "",
+    "A green suite proves the rules. This proves the product runs. They are not the same thing, and",
+    "this is the one the developer will hit first.",
+    "",
+    "## Mandatory rules",
+    "- Fix the cause, not the symptom. Do not weaken the acceptance to make it pass.",
+    "- Never delete, skip or disable a test to get past this.",
+    "- A missing system prerequisite is installable: you have system access.",
+    "- Configuration that only worked on the author's machine is the defect, not the environment.",
+    "- Keep the suite green: run it before finishing.",
+    "",
+    "## What failed",
+    "````",
+    context.cause,
+    "````",
+    "",
+    "When the product genuinely runs from a clean copy, end your answer with this line, alone:",
+    BUILDER_COMPLETE_MARKER,
   ].join("\n");
 }

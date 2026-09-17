@@ -16,3 +16,5 @@ export { runBuild } from "./build.js";
 export type { BuildOptions, BuildOutcome, PhaseReport } from "./build.js";
 export { checkPrerequisites, describeMissing, detectPrerequisites } from "./prerequisites.js";
 export type { Prerequisite, PrerequisiteStatus } from "./prerequisites.js";
+export { deriveAcceptance, defaultRunner, runAcceptance, serviceRunner } from "./acceptance.js";
+export type { AcceptanceOptions, AcceptanceResult, AcceptanceStep, CommandRunner, StepResult } from "./acceptance.js";

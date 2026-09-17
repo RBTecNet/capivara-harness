@@ -29,6 +29,8 @@ import { materializeSessions } from "./split.js";
 import { preflight, type PreflightWarning } from "./preflight.js";
 import { resolveTestCommand } from "./testcmd.js";
 import { runPhase, type EngineCaller, type PhaseOutcome } from "./runner.js";
+import { runAcceptance, type AcceptanceResult, type CommandRunner } from "./acceptance.js";
+import { acceptancePrompt } from "../prompts/index.js";
 import type { TestRunner } from "./gates.js";
 
 export interface BuildOptions {
@@ -46,6 +48,10 @@ export interface BuildOptions {
   environment?: NodeJS.ProcessEnv;
   /** Permite ao executor instalar pré-requisitos de sistema. */
   systemInstall?: boolean;
+  /** Desliga a aceitação operacional final. */
+  skipAcceptance?: boolean;
+  acceptanceRunner?: CommandRunner;
+  acceptanceService?: CommandRunner;
 }
 
 export interface PhaseReport {
@@ -61,6 +67,7 @@ export interface BuildOutcome {
   phases: PhaseReport[];
   warnings: PreflightWarning[];
   errors: string[];
+  acceptance: AcceptanceResult | null;
 }
 
 export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
@@ -78,6 +85,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       phases: [],
       warnings: [],
       errors: ["não há .capivara/init/project-phases.md; rode `capivara init` antes de `capivara build`"],
+      acceptance: null,
     };
   }
 
@@ -96,7 +104,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   if (!checked.ok) {
     for (const error of checked.errors) announce(`erro: ${error}`);
     for (const error of checked.contractErrors) announce(`  linha ${error.line}: ${error.code} ${error.message} → ${error.hint}`);
-    return { runId, exitCode: 1, phases: [], warnings: [], errors: checked.errors };
+    return { runId, exitCode: 1, phases: [], warnings: [], errors: checked.errors, acceptance: null };
   }
 
   if (options.systemInstall === true) {
@@ -163,9 +171,72 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
             status: "paused",
             detail,
           });
-          return { runId, exitCode: 2, phases, warnings: checked.warnings, errors: [detail] };
+          return { runId, exitCode: 2, phases, warnings: checked.warnings, errors: [detail], acceptance: null };
         }
       }
+    }
+
+    // Todas as fases verdes provam que as regras estão implementadas e testadas.
+    // Não provam que o produto sobe: o piloto 1b entregou 30 testes verdes sem
+    // que ninguém tivesse aplicado uma migração ou aberto uma conexão.
+    let acceptance: AcceptanceResult | null = null;
+    if (options.skipAcceptance !== true) {
+      announce("aceitação operacional: copiando o projeto para uma pasta limpa");
+      acceptance = await runAcceptance({
+        projectRoot: options.projectRoot,
+        ...(options.acceptanceRunner !== undefined ? { runner: options.acceptanceRunner } : {}),
+        ...(options.acceptanceService !== undefined ? { service: options.acceptanceService } : {}),
+      });
+
+      for (let tentativa = 1; !acceptance.accepted && tentativa <= (options.maxCycles ?? 3); tentativa += 1) {
+        const causa = acceptance.failure.cause;
+        announce(`aceitação reprovou em "${acceptance.failure.id}"; ciclo de correção ${tentativa}`);
+        await appendEvent(paths.events, {
+          timestamp: now().toISOString(),
+          stage: "validate",
+          subject: "aceitação",
+          attempt: tentativa,
+          status: "retry",
+          detail: causa.split("\n")[0] ?? "",
+        });
+
+        const ultima = checked.sessions.at(-1);
+        if (!ultima) break;
+        await options.call({
+          role: "builder",
+          phase: ultima,
+          attempt: tentativa,
+          prompt: acceptancePrompt({
+            language: options.language,
+            testCommand: checked.testCommand?.command ?? null,
+            containerized: checked.testCommand?.containerized ?? false,
+            phaseMarkdown: "",
+            cause: causa,
+            attempt: tentativa,
+          }),
+        });
+
+        acceptance = await runAcceptance({
+          projectRoot: options.projectRoot,
+          ...(options.acceptanceRunner !== undefined ? { runner: options.acceptanceRunner } : {}),
+          ...(options.acceptanceService !== undefined ? { service: options.acceptanceService } : {}),
+        });
+      }
+
+      if (!acceptance.accepted) {
+        announce(`aceitação operacional REPROVOU: ${acceptance.failure.cause.split("\n")[0] ?? ""}`);
+        await appendEvent(paths.events, {
+          timestamp: now().toISOString(),
+          stage: "validate",
+          subject: "aceitação",
+          attempt: 1,
+          status: "paused",
+          detail: acceptance.failure.cause,
+        });
+        return { runId, exitCode: 2, phases, warnings: checked.warnings, errors: [acceptance.failure.cause], acceptance };
+      }
+
+      announce(acceptance.skipped !== "" ? `aceitação operacional: ${acceptance.skipped}` : "aceitação operacional: o produto sobe a partir de uma cópia limpa");
     }
 
     await appendEvent(paths.events, {
@@ -177,7 +248,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       detail: `${phases.length} fase(s)`,
     });
     announce("aplicação concluída: todas as fases verdes");
-    return { runId, exitCode: 0, phases, warnings: checked.warnings, errors: [] };
+    return { runId, exitCode: 0, phases, warnings: checked.warnings, errors: [], acceptance };
   } finally {
     await lock.release();
   }

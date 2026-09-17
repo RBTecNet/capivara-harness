@@ -1639,3 +1639,46 @@ aceitação da Phase 11.
 Ele prova **mecânica**, nunca **qualidade semântica**: não diz se a documentação gerada é boa,
 se as fases estão bem dimensionadas ou se o auditor calibra bem. Isso só os três pilotos com
 modelo real da Phase 11 respondem. Os dois são complementares e nenhum substitui o outro.
+
+
+---
+
+## 22. Revisão da D-05 — a aceitação operacional entra
+
+Decidido em 2026-09-17, com evidência do piloto 1b.
+
+A D-05 original descartou a aceitação operacional em ambiente limpo. O piloto 1b
+mostrou o custo dessa escolha: quatro fases verdes, gate 2 rodando em todas, 30
+testes passando — e **ninguém provou que a aplicação sobe**. Os testes exercitavam
+um repositório em memória; a camada PostgreSQL, a migração e o servidor jamais
+foram tocados. O produto podia não conectar no banco e o loop declararia sucesso.
+
+Gate 2 verde significa "a suíte passa". Não significa "o produto funciona". Nesta
+rodada as duas coisas divergiram, e só ficaram visíveis porque alguém foi conferir
+à mão.
+
+### O que entrou
+
+Uma fase final, depois da última fase verde:
+
+1. O projeto é copiado para uma pasta temporária — sem `.git`, sem `node_modules`,
+   sem `.capivara`. Cópia limpa é o que prova que nada depende de estado não
+   versionado: a aplicação tem de funcionar a partir do que foi commitado.
+2. Os passos são **derivados do próprio projeto**, não de um contrato: `install`
+   sempre, mais `build`, `migrate` e `start` quando o `package.json` os declara.
+   Projeto que não declara entrypoint não tem o que aceitar, e isso não é falha.
+3. Cada passo exige código zero. O serviço é aprovado por continuar de pé: subiu,
+   não morreu, não gritou. É uma prova fraca de propósito — e teria pego a
+   aplicação do piloto 1b, que cairia na conexão com o banco.
+4. Reprovação vira ciclo de correção com a causa real, e o executor é lembrado de
+   que pré-requisito de sistema é instalável e de que enfraquecer a aceitação ou
+   apagar teste não é correção.
+
+### O que NÃO entrou
+
+Nada do `rb-operational/v1`: sem contrato declarativo, sem cenários, sem probes
+HTTP/TCP/arquivo, sem matriz de plataformas. Aquilo continua sendo superfície de
+contrato que o escritor pode errar. Aqui o produto declara o que sabe fazer pelo
+`package.json`, e o loop apenas executa.
+
+`--no-acceptance` desliga.

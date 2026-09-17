@@ -3,7 +3,7 @@ export { gapPrompt, interviewPrompt, ledgerPrompt, phasePartPrompt, writerPrompt
 export type { DocumentName, PhasePartContext, WriterContext } from "./writer.js";
 export { auditorPrompt, rewriteInstruction } from "./auditor.js";
 export type { AuditorContext } from "./auditor.js";
-export { BUILDER_COMPLETE_MARKER, fixPrompt, implementPrompt } from "./builder.js";
+export { BUILDER_COMPLETE_MARKER, acceptancePrompt, fixPrompt, implementPrompt } from "./builder.js";
 export type { BuilderContext, FixContext } from "./builder.js";
 export { VERIFY_HEADER, parseVerification, verifyPrompt } from "./verifier.js";
 export type { TaskVerdict, VerifierContext } from "./verifier.js";

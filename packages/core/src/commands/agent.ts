@@ -1,0 +1,63 @@
+/**
+ * A ponte entre um papel e um processo de verdade.
+ *
+ * Os orquestradores recebem esta função por parâmetro; nos testes ela é
+ * substituída por um roteiro. É o que permite exercitar init e build inteiros
+ * sem tocar em provider real, e o que mantém o custo do desenvolvimento honesto.
+ */
+
+import { buildInvocation, readCredentials, runProvider, selectCredential } from "../provider/index.js";
+import type { RoleConfig, RoleName, SupervisorLimits } from "../provider/index.js";
+
+export interface AgentBridgeOptions {
+  projectRoot: string;
+  runId: string;
+  language: string;
+  roles: Record<RoleName, RoleConfig>;
+  limits: SupervisorLimits;
+  credentialsFile?: string;
+}
+
+export interface BridgeRequest {
+  role: RoleName;
+  stage: string;
+  prompt: string;
+}
+
+export interface BridgeResponse {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  timedOut: string | null;
+}
+
+export function createAgentBridge(options: AgentBridgeOptions): (request: BridgeRequest) => Promise<BridgeResponse> {
+  return async (request) => {
+    const config = options.roles[request.role];
+    const stored = await readCredentials(options.credentialsFile);
+    const credential = selectCredential(stored, config.provider, config.credential);
+
+    const invocation = buildInvocation(request.role, config, {
+      projectRoot: options.projectRoot,
+      runId: options.runId,
+      stage: request.stage,
+      language: options.language,
+      ...(credential ? { secret: credential.secret } : {}),
+    });
+
+    const result = await runProvider({ invocation, prompt: request.prompt, limits: options.limits });
+    return {
+      exitCode: result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      timedOut: result.timedOut,
+    };
+  };
+}
+
+export const DEFAULT_LIMITS: SupervisorLimits = {
+  firstOutputSeconds: 300,
+  idleSeconds: 300,
+  wallSeconds: 3600,
+  maxOutputBytes: 8 * 1024 * 1024,
+};

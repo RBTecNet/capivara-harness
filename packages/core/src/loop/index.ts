@@ -12,3 +12,5 @@ export { declaredComplete, defaultTestRunner, gate0, gate1, gate2, gate3 } from 
 export type { GateName, GateResult, TestRun, TestRunner } from "./gates.js";
 export { DEFAULT_MAX_CYCLES, DEFAULT_MAX_LIMIT_WAITS, runPhase } from "./runner.js";
 export type { EngineCall, EngineCaller, EngineResult, PhaseOutcome, PhaseRunOptions } from "./runner.js";
+export { runBuild } from "./build.js";
+export type { BuildOptions, BuildOutcome, PhaseReport } from "./build.js";

@@ -10,11 +10,11 @@
  * pedido ao gate, sem tocar em provider real.
  */
 
-import { assemblePhasesDocument, buildStamp, extractEntities, extractStoryIds, extractWorkflows, parsePhases, sha12 } from "../contract/index.js";
+import { assemblePhasesDocument, buildStamp, extractEntities, extractStoryIds, extractWorkflows, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
 import type { StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
-import { allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, substanceDefects } from "../authoring/index.js";
+import { MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Question } from "../interview/index.js";
 import { auditorPrompt, gapPrompt, interviewPrompt, ledgerPrompt, phasePartPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
@@ -374,7 +374,12 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         attempt: 1,
         prompt: phasePartPrompt({ ...writer, phaseNumber: part.phaseNumber, ledgerEntry: JSON.stringify(entry) }),
       });
-      phases.push(repairDeterministically(output).content.trim());
+      const normalized = normalizePhasePart(repairDeterministically(output).content, {
+        phaseNumber: part.phaseNumber,
+        dependsOn: entry?.dependsOn || "none",
+      });
+      for (const fix of normalized.applied) announce(`    ${part.id}: ${fix}`);
+      phases.push(normalized.markdown.trim());
       await event("authoring", part.id, "complete");
     }
 
@@ -425,7 +430,10 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               current[phaseNumber - 1] ?? "",
             ].join("\n"),
           });
-          next[phaseNumber - 1] = repairDeterministically(output).content.trim();
+          next[phaseNumber - 1] = normalizePhasePart(repairDeterministically(output).content, {
+            phaseNumber,
+            dependsOn: entry?.dependsOn || "none",
+          }).markdown.trim();
         }
         return build(next);
       },
@@ -600,6 +608,25 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     // Self-check mecânico antes do auditor: erro de forma não custa modelo.
     if (document === "project-phases.md") {
       const parsed = parsePhases(content);
+
+      // Dimensionamento é contável, então é contado aqui e não descoberto pelo
+      // auditor três devoluções depois: uma fase é uma sessão de agente.
+      if (parsed.ok) {
+        const grandes = parsed.document.phases.filter((phase) => phase.tasks.length > MAX_TASKS_PER_PHASE);
+        if (grandes.length > 0) {
+          return {
+            status: "REJECTED",
+            findings: grandes.map((phase) => ({
+              where: `Phase ${phase.number}`,
+              problem: `a fase declara ${phase.tasks.length} tasks e uma fase é uma sessão de agente`,
+              fix: `divida em mais fases de topo até nenhuma passar de ${MAX_TASKS_PER_PHASE} tasks, preservando a ordem de dependências`,
+            })),
+            remarks: [],
+            reason: "há fase acima do que cabe numa sessão",
+          };
+        }
+      }
+
       if (!parsed.ok && !isRepairable(parsed.errors)) {
         return {
           status: "REJECTED",

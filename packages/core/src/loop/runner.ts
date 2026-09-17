@@ -13,7 +13,7 @@ import { appendEvent } from "../state/events.js";
 import { runPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
 import { fixPrompt, implementPrompt, verifyPrompt } from "../prompts/index.js";
-import { commitPhase, treeSignature } from "./git.js";
+import { commitPhase, hasPendingChanges, treeSignature } from "./git.js";
 import { declaredComplete, gate0, gate1, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
 import { detectRateLimit, planWait } from "./ratelimit.js";
 import type { PhaseSession } from "./split.js";
@@ -197,5 +197,18 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   }
 
   await event("blocked", `${lastGate ?? "desconhecido"}: ${lastCause.split("\n")[0] ?? ""}`, maxCycles);
+
+  /*
+   * A fase parou deixando trabalho na árvore, e o preflight da próxima execução
+   * exige árvore limpa. Sem dizer isto aqui, o operador cai num beco: o loop
+   * para por causa do trabalho parcial e depois se recusa a retomar por causa do
+   * mesmo trabalho parcial.
+   */
+  if (await hasPendingChanges(options.projectRoot)) {
+    announce(`[${session.id}] o trabalho parcial desta fase ficou na árvore. Antes de rodar de novo, escolha uma:`);
+    announce("           git add -A && git commit -m \"wip: trabalho parcial\"   → o loop revalida a fase e segue");
+    announce("           git checkout -- . && git clean -fd                      → descarta e a fase recomeça do zero");
+  }
+
   return { status: "failed", gate: lastGate ?? "gate 0 — engine", cause: lastCause, cycles: maxCycles };
 }

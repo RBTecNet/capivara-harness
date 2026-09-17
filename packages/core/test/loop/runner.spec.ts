@@ -228,3 +228,62 @@ describe("limite de uso", () => {
     expect(builderCalls).toEqual([1, 1]);
   });
 });
+
+describe("fase que para deixando trabalho na árvore", () => {
+  it("diz as duas saídas, em vez de deixar o operador num beco", async () => {
+    await run("git", ["init", "-q", "-b", "main"], { cwd: projectRoot });
+    await run("git", ["config", "user.email", "t@t"], { cwd: projectRoot });
+    await run("git", ["config", "user.name", "t"], { cwd: projectRoot });
+    await writeFile(join(projectRoot, "README.md"), "inicial\n", "utf8");
+    await run("git", ["add", "-A"], { cwd: projectRoot });
+    await run("git", ["commit", "-q", "-m", "inicial"], { cwd: projectRoot });
+
+    const avisos: string[] = [];
+    const target = session();
+
+    const outcome = await runPhase({
+      projectRoot,
+      runId: RUN,
+      language: "pt-BR",
+      engine: "codex",
+      session: target,
+      testCommand: null,
+      commitsEnabled: true,
+      maxCycles: 1,
+      sleep: async () => undefined,
+      announce: (mensagem) => avisos.push(mensagem),
+      call: async (call) => {
+        if (call.role === "verifier") return ok("TASK 1: INCOMPLETE — falta tudo");
+        await writeFile(join(projectRoot, "parcial.ts"), "export const x = 1;", "utf8");
+        return ok("escrevi algo mas não terminei");
+      },
+    });
+
+    expect(outcome.status).toBe("failed");
+    const texto = avisos.join("\n");
+    expect(texto).toContain("trabalho parcial desta fase ficou na árvore");
+    expect(texto).toContain("git commit");
+    expect(texto).toContain("git clean -fd");
+  }, 20000);
+
+  it("fase que para sem ter escrito nada não sugere commit de coisa nenhuma", async () => {
+    const avisos: string[] = [];
+    const target = session();
+
+    await runPhase({
+      projectRoot,
+      runId: RUN,
+      language: "pt-BR",
+      engine: "codex",
+      session: target,
+      testCommand: null,
+      commitsEnabled: false,
+      maxCycles: 1,
+      sleep: async () => undefined,
+      announce: (mensagem) => avisos.push(mensagem),
+      call: async (call) => (call.role === "verifier" ? ok("TASK 1: INCOMPLETE — falta tudo") : ok("nada a fazer")),
+    });
+
+    expect(avisos.join("\n")).not.toContain("trabalho parcial");
+  }, 20000);
+});

@@ -80,8 +80,15 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
 
   if (options.git.repository && !options.git.clean) {
     errors.push(
-      "a árvore de trabalho tem alterações não commitadas; o loop precisa distinguir o que cada fase escreveu — " +
-        "commite ou descarte antes de rodar",
+      [
+        "a árvore de trabalho tem alterações não commitadas, e o loop precisa distinguir o que cada fase escreveu.",
+        "",
+        "Se isto é trabalho parcial de uma fase que parou, escolha uma saída:",
+        '  git add -A && git commit -m "wip: trabalho parcial"   → o loop revalida a fase e segue de onde parou',
+        "  git checkout -- . && git clean -fd                    → descarta e a fase recomeça do zero",
+        "",
+        "Se são alterações suas, commite-as antes de rodar o build.",
+      ].join("\n"),
     );
   }
 

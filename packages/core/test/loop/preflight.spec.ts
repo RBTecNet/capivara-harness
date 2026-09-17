@@ -116,11 +116,18 @@ describe("preflight", () => {
     }
   });
 
-  it("árvore suja aborta explicando por quê", async () => {
+  it("árvore suja aborta explicando por quê E como sair", async () => {
     await plan();
     const result = await preflight({ projectRoot, runId: RUN, git: { repository: true, clean: false } });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.errors[0]).toContain("não commitadas");
+    if (result.ok) return;
+    const erro = result.errors[0] ?? "";
+    expect(erro).toContain("não commitadas");
+    // Sem as duas saídas concretas, o operador cai num beco: o loop para por
+    // causa do trabalho parcial e recusa retomar por causa do mesmo trabalho.
+    expect(erro).toContain("git commit");
+    expect(erro).toContain("git clean -fd");
+    expect(erro).toContain("revalida a fase");
   });
 
   it("sem git, o loop roda e avisa que não haverá commit", async () => {

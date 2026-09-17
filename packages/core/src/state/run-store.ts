@@ -35,9 +35,13 @@ export type RunStage =
 
 export type RunStatus = "running" | "paused" | "blocked" | "complete";
 
-export type RoleName = "writer" | "auditor" | "builder" | "verifier";
-
-export interface RoleConfig {
+/**
+ * Fotografia do que foi resolvido para cada papel, gravada no snapshot.
+ *
+ * O vocabulário de papéis pertence a `provider/roles.ts`; aqui basta o registro
+ * do que valeu neste run, sem acoplar o estado ao catálogo de providers.
+ */
+export interface RunRoleSnapshot {
   provider: string;
   model: string;
   effort: string;
@@ -56,7 +60,7 @@ export interface RunState {
   attempt: number;
   createdAt: string;
   updatedAt: string;
-  roles: Partial<Record<RoleName, RoleConfig>>;
+  roles: Record<string, RunRoleSnapshot>;
   /** Hashes das fontes que definem a identidade deste run. */
   sources: { name: string; sha12: string }[];
 }
@@ -65,7 +69,7 @@ export interface NewRunOptions {
   runId: string;
   command: RunCommand;
   language: string;
-  roles?: Partial<Record<RoleName, RoleConfig>>;
+  roles?: Record<string, RunRoleSnapshot>;
   sources?: { name: string; sha12: string }[];
   now?: () => Date;
 }

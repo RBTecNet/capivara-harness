@@ -12,9 +12,8 @@ export {
 } from "./run-store.js";
 export type {
   NewRunOptions,
-  RoleConfig,
-  RoleName,
   RunCommand,
+  RunRoleSnapshot,
   RunStage,
   RunState,
   RunStatus,

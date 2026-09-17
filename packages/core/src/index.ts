@@ -9,6 +9,8 @@ export * from "./loop/index.js";
 export * from "./tui/index.js";
 export * from "./prompts/index.js";
 export { listProviders, renderProviderList } from "./commands/providers.js";
+export { diagnose, renderDiagnosis } from "./commands/doctor.js";
+export type { Diagnosis, DoctorOptions, Health } from "./commands/doctor.js";
 export { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
 export type { AgentBridgeOptions, BridgeRequest, BridgeResponse } from "./commands/agent.js";
 export { describeRoles, rolesFromFlags } from "./commands/options.js";

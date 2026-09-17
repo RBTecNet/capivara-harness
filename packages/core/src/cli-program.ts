@@ -2,6 +2,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { Command } from "commander";
 import { listProviders, renderProviderList } from "./commands/providers.js";
+import { diagnose, renderDiagnosis } from "./commands/doctor.js";
 import { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
 import { describeRoles, rolesFromFlags, type CliRoleFlags } from "./commands/options.js";
 import { InitBlockedError, resolveRequest, runInit } from "./init/index.js";
@@ -55,6 +56,17 @@ export function createProgram(): Command {
     .action(async (options: { json?: boolean }) => {
       const listing = await listProviders();
       stdout.write(options.json ? `${JSON.stringify(listing, null, 2)}\n` : `${renderProviderList(listing)}\n`);
+    });
+
+  program
+    .command("doctor")
+    .description("Diagnostica ambiente, providers, projeto e documentação antes de gastar")
+    .option("--project <caminho>", "raiz do projeto", ".")
+    .option("--json", "emite JSON")
+    .action(async (options: { project?: string; json?: boolean }) => {
+      const diagnoses = await diagnose({ projectRoot: options.project ?? "." });
+      stdout.write(options.json ? `${JSON.stringify(diagnoses, null, 2)}\n` : `${renderDiagnosis(diagnoses)}\n`);
+      process.exitCode = diagnoses.some((diagnosis) => diagnosis.health === "ausente") ? 1 : 0;
     });
 
   roleFlags(

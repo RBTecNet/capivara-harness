@@ -1,3 +1,4 @@
+import { stat } from "node:fs/promises";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { Command } from "commander";
@@ -7,7 +8,8 @@ import { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
 import { BUILD_ROLES, INIT_ROLES, describeRoles, renderUnresolved, rolesFromFlags, unresolvedRoles, type CliRoleFlags } from "./commands/options.js";
 import { InitBlockedError, resolveRequest, runInit } from "./init/index.js";
 import { runBuild } from "./loop/index.js";
-import { BACK, detectLanguage, renderCommand, renderQuestion, renderSplash, supportsColor } from "./tui/index.js";
+import { BACK, detectLanguage, renderQuestion, renderSplash, supportsColor } from "./tui/index.js";
+import { createLineIO, runWizard } from "./commands/wizard.js";
 import { runIdFor } from "./state/index.js";
 import { VERSION } from "./version.js";
 
@@ -193,34 +195,38 @@ export function createProgram(): Command {
     process.exitCode = outcome.exitCode;
   });
 
-  program
-    .command("wizard")
-    .description("Monta o comando interativamente e imprime o equivalente")
-    .argument("[comando]", "init ou build", "init")
-    .action(async (comando: string) => {
-      const terminal = createInterface({ input: stdin, output: stdout });
-      try {
-        const target = comando === "build" ? "build" : "init";
-        const answers = {
-          command: target as "init" | "build",
-          global: {} as { provider?: string; model?: string },
-          roles: {},
-        } as Parameters<typeof renderCommand>[0];
+  /**
+   * O wizard monta o comando e reexecuta ESTE MESMO programa com o argv que
+   * acabou de imprimir. Nada de um segundo caminho de execução: o que ele ensina
+   * é literalmente o que ele roda.
+   */
+  const wizard = async (): Promise<void> => {
+    const terminal = createInterface({ input: stdin, output: stdout });
+    let resultado;
+    try {
+      resultado = await runWizard({
+        io: createLineIO(terminal, (text) => void stdout.write(text)),
+        cwd: process.cwd(),
+        fileExists: (path) => stat(path).then((info) => info.isFile()).catch(() => false),
+        directoryExists: (path) => stat(path).then((info) => info.isDirectory()).catch(() => false),
+      });
+    } finally {
+      terminal.close();
+    }
 
-        if (target === "init") {
-          const request = await terminal.question("O que você quer construir? ");
-          if (request.trim()) answers.request = request.trim();
-        }
-        const provider = await terminal.question("Provider padrão (codex, claude, opencode, …): ");
-        if (provider.trim()) answers.global.provider = provider.trim();
-        const model = await terminal.question("Modelo (vazio para o padrão do provider): ");
-        if (model.trim()) answers.global.model = model.trim();
+    if (!resultado) {
+      process.exitCode = 2;
+      return;
+    }
+    if (!resultado.execute) {
+      stdout.write("Nada foi executado. O comando acima faz o mesmo quando você quiser.\n");
+      return;
+    }
+    await program.parseAsync(resultado.argv, { from: "user" });
+  };
 
-        stdout.write(`\nComando equivalente:\n\n  ${renderCommand(answers)}\n\n`);
-      } finally {
-        terminal.close();
-      }
-    });
+  program.command("wizard").description("Monta o comando interativamente e executa").action(wizard);
+  program.action(wizard);
 
   return program;
 }

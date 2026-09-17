@@ -14,7 +14,7 @@ import { assemblePhasesDocument, buildStamp, extractEntities, extractStoryIds, e
 import type { StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
-import { MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, substanceDefects } from "../authoring/index.js";
+import { MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Question } from "../interview/index.js";
 import { auditorPrompt, gapPrompt, interviewPrompt, ledgerPrompt, phasePartPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
@@ -502,6 +502,10 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
       writer.decisions = allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision);
 
+      const resolvidos = accepted
+        .map((answer) => markers[batch.questions.findIndex((entry) => entry.id === answer.questionId)] ?? "")
+        .filter((marker) => marker !== "");
+
       authored = await authored.rewrite(
         accepted.map((answer) => {
           const question = batch.questions.find((entry) => entry.id === answer.questionId);
@@ -513,6 +517,14 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         }),
         round,
       );
+
+      // O escritor deveria ter apagado o marcador; quando não apaga, o marcador
+      // bloquearia o gate por uma decisão que já existe. Isso é mecânico.
+      const limpo = stripResolvedMarkers(authored.content, resolvidos);
+      if (limpo.applied.length > 0) {
+        for (const fix of limpo.applied) announce(`    ${fix}`);
+        authored = { content: limpo.content, rewrite: authored.rewrite };
+      }
     }
 
     return authored;

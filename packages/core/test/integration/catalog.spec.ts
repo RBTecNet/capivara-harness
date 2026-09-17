@@ -679,6 +679,52 @@ describe("B-36 · enxurrada de gaps idênticos", () => {
   });
 });
 
+describe("B-37 · marcador obsoleto após a decisão", () => {
+  it("o marcador some quando a decisão é tomada, mesmo se o escritor não apagar", async () => {
+    const COM_GAP = DESCRIPTION.replace(
+      "## Core Workflows",
+      "## Open Questions\n\n[NEEDS DECISION] Stack escolhida: SQLite; faltam as versões\n\n## Core Workflows",
+    );
+
+    const steps = happyPath();
+    // O escritor devolve o MESMO documento na reescrita, sem apagar o marcador.
+    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "project-description.md" }, respond: { stdout: COM_GAP }, repeat: true });
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-description.md:gaps" },
+      respond: {
+        stdout: JSON.stringify({
+          contract: "capivara-questions/v1",
+          questions: [
+            {
+              id: "Q-01",
+              topic: "stack",
+              evidence: "marcador aberto sobre a stack",
+              decision: "Qual stack e quais versões?",
+              why: "define build, teste e todas as fases",
+              options: [
+                { label: "Node 20, TypeScript 5, PostgreSQL 16", consequence: "banco relacional completo" },
+                { label: "Node 20, TypeScript 5, SQLite 3", consequence: "banco em arquivo" },
+              ],
+              recommended: "Node 20, TypeScript 5, PostgreSQL 16",
+              recommendationBasis: "o modelo de dados usa restrições relacionais",
+            },
+          ],
+        }),
+      },
+      repeat: true,
+    });
+
+    const { outcome } = await init(steps, ["1"]);
+
+    const decisoes = outcome.report.checkpoint.decisions.map((decision) => decision.decision);
+    expect(decisoes).toContain("Node 20, TypeScript 5, PostgreSQL 16");
+
+    // O gate NÃO pode bloquear por uma decisão que já existe.
+    const pendentes = outcome.readiness.checks.find((check) => check.id === "decisoes");
+    expect(pendentes?.passed, pendentes?.detail).toBe(true);
+  });
+});
+
 describe("B-13 · frescor da cadeia", () => {
   it("upstream alterado depois da geração é detectado", async () => {
     await init(happyPath());

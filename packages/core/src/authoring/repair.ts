@@ -91,3 +91,33 @@ export function repairDeterministically(source: string, expectedStamp?: string):
 
   return { content, applied };
 }
+
+/**
+ * Remove marcadores cuja decisão JÁ FOI TOMADA.
+ *
+ * Quando o desenvolvedor responde um gap, o escritor deveria apagar o marcador
+ * na reescrita. Nem sempre apaga — e o marcador então atravessa a cadeia inteira
+ * e bloqueia o gate por uma decisão que já existe. O piloto 1 terminou NOT READY
+ * exibindo, lado a lado, "PostgreSQL 16" como decisão confirmada e "SQLite,
+ * faltam versões" como pendência.
+ *
+ * Apagar é seguro porque a pendência deixou de existir: a decisão está no
+ * relatório e nos documentos.
+ */
+export function stripResolvedMarkers(content: string, resolved: readonly string[]): DeterministicRepair {
+  const applied: string[] = [];
+  let next = content;
+
+  for (const marker of resolved) {
+    const trimmed = marker.trim();
+    if (trimmed === "") continue;
+    const lines = next.split("\n");
+    const kept = lines.filter((line) => !(line.includes("[NEEDS DECISION]") && line.includes(trimmed)));
+    if (kept.length !== lines.length) {
+      next = kept.join("\n");
+      applied.push(`removeu marcador já decidido: ${trimmed.slice(0, 60)}`);
+    }
+  }
+
+  return { content: next, applied };
+}

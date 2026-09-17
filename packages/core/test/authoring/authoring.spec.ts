@@ -17,6 +17,7 @@ import {
   readStaged,
   repairDeterministically,
   stage,
+  stripResolvedMarkers,
   substanceDefects,
 } from "../../src/authoring/index.js";
 import { assemblePhasesDocument, parsePhases } from "../../src/contract/index.js";
@@ -162,6 +163,28 @@ describe("reparo determinístico — o que não custa chamada de modelo", () => 
   it("preserva Design ref que aponta para um caminho de verdade", () => {
     const fase = "  - **Design ref:** .capivara/init/design/reservas.png\n";
     expect(repairDeterministically(fase).content).toContain("design/reservas.png");
+  });
+
+  it("remove marcador cuja decisão já foi tomada", () => {
+    const documento = [
+      "# Pousada — Project Description",
+      "",
+      "## Open Questions",
+      "",
+      "[NEEDS DECISION] Stack escolhida: TypeScript, Node.js e SQLite; faltam as versões",
+      "[NEEDS DECISION] qual o provedor de email",
+      "",
+    ].join("\n");
+
+    const repair = stripResolvedMarkers(documento, ["Stack escolhida: TypeScript, Node.js e SQLite; faltam as versões"]);
+    expect(repair.content).not.toContain("SQLite");
+    expect(repair.content).toContain("provedor de email");
+    expect(repair.applied.join(" ")).toContain("já decidido");
+  });
+
+  it("não remove nada quando nenhum marcador foi decidido", () => {
+    const documento = "[NEEDS DECISION] qual o provedor de email\n";
+    expect(stripResolvedMarkers(documento, ["outra coisa"]).applied).toEqual([]);
   });
 
   it("não inventa reparo quando não há o que fazer", () => {

@@ -1011,6 +1011,23 @@ quatro majors. A linha corrente sai pelas tags `ts5.9`/`ts6.0`, em `26.6.1`. Ins
 uma API do Node que "não existe". Pinar `^26.6.1` explicitamente, com comentário no
 `package.json` registrando o motivo.
 
+**Ressalva — o runtime de desenvolvimento é mais restrito que o publicado.**
+`engines.node: ">=22"` descreve quem **usa** o `capivara`: o binário só carrega `commander`.
+Quem **desenvolve** está preso à faixa do vitest 5 — `^22.12.0 || ^24.0.0 || >=26.0.0` —, que
+exclui deliberadamente as linhas ímpares. A máquina de desenvolvimento rodava Node 25.1.0,
+uma linha ímpar não-LTS, e foi migrada para **v26.9.0** em 2026-09-16
+(`nvm install 26 && nvm alias default 26`; o `.bashrc` já fazia `nvm use default`).
+
+Node 26 é a linha **Current**, ainda não promovida a LTS: em 2026-09-16 a Latest LTS era a
+v24.21.0 (Krypton), que também satisfaz o vitest e é a escolha conservadora equivalente.
+Não use Node 25 nem qualquer outra linha ímpar para desenvolver este projeto.
+
+**Nota — `npm warn install-scripts` do esbuild.** A partir do npm 11.19 o postinstall de um
+pacote exige aprovação explícita, e o do esbuild não roda. Ele **não precisa rodar**: o binário
+vem da dependência opcional `@esbuild/linux-x64` e o postinstall é apenas validação —
+`./node_modules/.bin/esbuild --version` responde normalmente. Não aprove o script e não
+rebaixe o npm por causa desse aviso.
+
 **Regra de dependência de runtime:** `commander` é a **única** entrada de `dependencies`.
 Todo o resto é `devDependency`. Não é frugalidade estética — é o que mantém a instalação
 standalone (`npm install --global --prefix "$HOME/.local"`) leve e auditável. Um teste de

@@ -59,8 +59,13 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
 }
 
 export const DEFAULT_LIMITS: SupervisorLimits = {
-  firstOutputSeconds: 300,
-  idleSeconds: 300,
+  /*
+   * Uma CLI que não transmite nada antes de terminar transforma este limite num
+   * relógio sobre a resposta inteira. O piloto 3 morreu em 300s no levantamento
+   * de user-stories.md, com o provider ainda pensando — não travado.
+   */
+  firstOutputSeconds: 900,
+  idleSeconds: 600,
   wallSeconds: 3600,
   maxOutputBytes: 8 * 1024 * 1024,
 };

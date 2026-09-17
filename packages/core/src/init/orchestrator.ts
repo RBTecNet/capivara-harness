@@ -17,8 +17,8 @@ import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index
 import { MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Question } from "../interview/index.js";
-import { assessRehearsal, auditorPrompt, enumerateCriteria, gapPrompt, interviewPrompt, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
-import type { CriterionRef, DocumentName, WriterContext } from "../prompts/index.js";
+import { assessRehearsal, auditorPrompt, languageBlock, enumerateCriteria, gapPrompt, interviewPrompt, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
+import type { AskedQuestion, CriterionRef, DocumentName, WriterContext } from "../prompts/index.js";
 import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, runIdFor, runPaths, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
@@ -130,17 +130,48 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   await writeRunState(options.projectRoot, state, now);
 
   const costs = new Map<string, RoleCost>();
+
+  /**
+   * Uma chamada, contabilizada — e um timeout não conta como recusa.
+   *
+   * O piloto 3 morreu no levantamento de user-stories.md com código 124 depois de
+   * doze perguntas respondidas à mão. Estouro de tempo não diz nada sobre o
+   * conteúdo: a mesma chamada costuma passar na segunda. Desistir na primeira
+   * joga fora meia hora de entrevista para economizar uma chamada.
+   */
   const track = async (call: AgentCall): Promise<string> => {
-    const startedAt = Date.now();
-    const response = await options.call(call);
-    const cost = costs.get(call.role) ?? { role: call.role, calls: 0, inputTokens: null, outputTokens: null, milliseconds: 0 };
-    cost.calls += 1;
-    cost.milliseconds += Date.now() - startedAt;
-    costs.set(call.role, cost);
-    if (response.exitCode !== 0) {
-      throw new InitBlockedError(`o papel ${call.role} falhou com código ${response.exitCode} em ${call.subject}`, runId);
+    for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
+      const startedAt = Date.now();
+      const response = await options.call(call);
+      const cost = costs.get(call.role) ?? { role: call.role, calls: 0, inputTokens: null, outputTokens: null, milliseconds: 0 };
+      cost.calls += 1;
+      cost.milliseconds += Date.now() - startedAt;
+      costs.set(call.role, cost);
+
+      if (response.exitCode === 0) return response.stdout;
+
+      const estouro = response.exitCode === 124;
+      if (estouro && tentativa === 1) {
+        announce(`  a chamada de ${call.role} em ${call.subject} estourou o tempo; tentando uma segunda vez`);
+        await event(call.stage, call.subject, "retry", "timeout do provider", call.attempt);
+        continue;
+      }
+
+      throw new InitBlockedError(
+        estouro
+          ? [
+              `A chamada de ${call.role} em ${call.subject} estourou o tempo duas vezes.`,
+              "",
+              "O provider não respondeu dentro do limite. Nada do que já foi publicado se perdeu.",
+              "Rode o mesmo comando de novo; se repetir, tente um modelo mais rápido para esse papel:",
+              `    capivara init ... --${call.role}-model <modelo>`,
+            ].join("\n")
+          : `o papel ${call.role} falhou com código ${response.exitCode} em ${call.subject}`,
+        runId,
+      );
     }
-    return response.stdout;
+
+    throw new InitBlockedError(`o papel ${call.role} não respondeu em ${call.subject}`, runId);
   };
 
   const event = async (stage: RunStage, subject: string, status: "started" | "complete" | "retry" | "blocked", detail = "", attempt = 1): Promise<void> => {
@@ -270,11 +301,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       for (const question of plan.ask) {
         index += 1;
         const raw = await options.ask(question, index, plan.ask.length);
-        const local = classifyLocally(question, raw);
-        const classification = local.settled
-          ? local
-          : await classifyWithModel(document, question, raw, round);
-        answers.push(buildAnswer(question, raw, classification, round, now));
+        answers.push(await settle(document, question, raw, round, index, plan.ask.length));
       }
 
       await writeHandoff(options.projectRoot, {
@@ -294,6 +321,48 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     return { questions, answers };
   }
 
+  /**
+   * Classifica a resposta e NUNCA a descarta em silêncio.
+   *
+   * O piloto 3 mostrou o estrago: o desenvolvedor escreveu uma decisão completa
+   * em texto livre, o classificador devolveu DEFERRED por causa de um pedaço da
+   * pergunta que a própria resposta havia abolido, e a tela não disse nada. A
+   * rodada de gaps perguntou de novo, recomendou o contrário, e o documento foi
+   * publicado dizendo o oposto do que o desenvolvedor tinha decidido.
+   *
+   * Resposta que não fecha volta para quem a escreveu, com o que falta na tela.
+   */
+  async function settle(
+    document: ChainDocument,
+    question: Question,
+    raw: string,
+    round: number,
+    index: number,
+    total: number,
+  ): Promise<Answer> {
+    const local = classifyLocally(question, raw);
+    if (local.settled) return buildAnswer(question, raw, local, round, now);
+
+    let texto = raw;
+    let classification = await classifyWithModel(document, question, texto, round);
+
+    if (classification.disposition !== "ACCEPTED") {
+      announce(`  Sua resposta não fechou a decisão: ${classification.open}`);
+      announce("  Responda de novo fechando esse ponto — ou deixe vazio para mantê-la em aberto.");
+      const segunda = await options.ask(question, index, total);
+      if (segunda.trim() !== "") {
+        const localDaSegunda = classifyLocally(question, segunda);
+        texto = segunda;
+        classification = localDaSegunda.settled ? localDaSegunda : await classifyWithModel(document, question, segunda, round);
+      }
+      if (classification.disposition !== "ACCEPTED") {
+        announce("  Segue em aberto; ela volta antes do gate.");
+      }
+    }
+
+    return buildAnswer(question, texto, classification, round, now);
+  }
+
   async function classifyWithModel(document: ChainDocument, question: Question, raw: string, round: number) {
     const output = await track({
       role: "auditor",
@@ -301,13 +370,28 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       subject: `${document}:${question.id}`,
       attempt: round,
       prompt: [
-        `Classify the developer's answer. Reply with exactly one line and nothing else:`,
+        languageBlock(options.language),
+        "",
+        "Classify the developer's answer. Reply with exactly one line and nothing else:",
         `CAPIVARA_ANSWER: ${question.id} | <ACCEPTED|PARTIAL|AMBIGUOUS|DEFERRED|CONTRADICTED> | <normalized decision, or what is still missing>`,
         "",
         "ACCEPTED requires one single material interpretation that answers the decision asked.",
         "Never add precision the answer did not supply.",
         "",
+        "A question may ask several things at once. An answer that REMOVES THE PREMISE of one of them",
+        "has answered it: if the developer rules out deleting columns, then what happens to the cards of",
+        "a deleted column is settled, not missing. Do not hold an answer open for failing to describe a",
+        "case the answer itself abolished.",
+        "",
+        "The developer is the authority. An answer that decides is ACCEPTED even when it decides against",
+        "the recommendation, against the options offered, or against what the question assumed.",
+        "",
+        `What the question was about: ${question.topic}`,
+        `What had been observed: ${question.evidence}`,
         `Question: ${question.decision}`,
+        ...(question.options.length > 0
+          ? ["Options that had been offered:", ...question.options.map((option) => `- ${option.label}`)]
+          : []),
         `Answer: ${raw}`,
       ].join("\n"),
     });
@@ -470,6 +554,21 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * não é falta de informação: é uma decisão que ninguém quer tomar agora, e o
    * gate de prontidão é o lugar certo para isso aparecer.
    */
+  /** As perguntas deste documento e como o desenvolvedor as respondeu. */
+  function perguntadas(document: ChainDocument): AskedQuestion[] {
+    const prefixo = `${document}#`;
+    return allAnswers
+      .filter((answer) => answer.questionId.startsWith(prefixo))
+      .map((answer) => {
+        const pergunta = allQuestions.find((entry) => entry.id === answer.questionId);
+        return {
+          decision: pergunta?.decision ?? answer.questionId,
+          disposition: answer.disposition,
+          answer: answer.raw,
+        };
+      });
+  }
+
   async function closeGaps(document: ChainDocument, initial: Authored, writer: WriterContext): Promise<Authored> {
     let authored = initial;
     // Um marcador já perguntado não volta. Reperguntar o que a pessoa acabou de
@@ -493,7 +592,17 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       await event("interview", document, "retry", `${markers.length} gap(s) descobertos na escrita`, round);
 
       const batch = parseQuestionBatch(
-        await track({ role: "writer", stage: "interview", subject: `${document}:gaps`, attempt: round, prompt: gapPrompt(document, writer, markers) }),
+        await track({
+          role: "writer",
+          stage: "interview",
+          subject: `${document}:gaps`,
+          attempt: round,
+          // O que já foi perguntado vai junto, com as palavras do desenvolvedor.
+          // Sem isso a rodada de gaps reabre o que a entrevista fechou e chega a
+          // recomendar o contrário — foi assim que o piloto 3 publicou colunas
+          // gerenciáveis depois de o desenvolvedor as ter fixado.
+          prompt: gapPrompt(document, writer, markers, perguntadas(document)),
+        }),
       );
       if (!batch.ok || batch.questions.length === 0) return authored;
 
@@ -502,9 +611,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       for (const question of batch.questions) {
         index += 1;
         const raw = await options.ask(question, index, batch.questions.length);
-        const local = classifyLocally(question, raw);
-        const classification = local.settled ? local : await classifyWithModel(document, question, raw, round);
-        answered.push(buildAnswer(question, raw, classification, round, now));
+        answered.push(await settle(document, question, raw, round, index, batch.questions.length));
       }
 
       // Escopo próprio: as perguntas de gap reusam Q-01, Q-02… e sobrescreveriam

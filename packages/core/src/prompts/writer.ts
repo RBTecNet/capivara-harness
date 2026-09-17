@@ -329,7 +329,19 @@ export function interviewPrompt(
  * viraria um bloqueio no fim do run, com o desenvolvedor descobrindo tarde algo
  * que ele teria respondido em dez segundos.
  */
-export function gapPrompt(document: DocumentName, writer: WriterContext, markers: readonly string[]): string {
+/** O que já foi perguntado neste documento, com as palavras do desenvolvedor. */
+export interface AskedQuestion {
+  decision: string;
+  disposition: string;
+  answer: string;
+}
+
+export function gapPrompt(
+  document: DocumentName,
+  writer: WriterContext,
+  markers: readonly string[],
+  asked: readonly AskedQuestion[] = [],
+): string {
   return [
     languageBlock(writer.language),
     "",
@@ -342,6 +354,20 @@ export function gapPrompt(document: DocumentName, writer: WriterContext, markers
     "Turn each of them into one question for the developer. Write no document.",
     "Ask only about what is genuinely blocking the text; if one of the markers can be resolved by a",
     "low-risk explicit assumption, leave it out.",
+    "",
+    ...(asked.length > 0
+      ? [
+          "## Already asked in this document, with the developer's own words",
+          ...asked.map((entry) => `- ${entry.decision}\n  [${entry.disposition}] ${entry.answer}`),
+          "",
+          "Never ask again what the developer already answered. A marker that one of those answers",
+          "settles is closed: drop it. A marker that one of them settles PARTLY becomes a question about",
+          "the remaining part only — never about the part already decided.",
+          "Never offer an option that contradicts what the developer said above. Their answer outranks",
+          "your recommendation: re-proposing the opposite as the recommended option is how a document",
+          "ends up published against the decision that created it.",
+        ]
+      : []),
     "",
     "Never ask for the path of a design artifact. The design directory is optional and usually",
     "absent: a task with no matching artifact simply carries no Design ref. That is not a gap.",

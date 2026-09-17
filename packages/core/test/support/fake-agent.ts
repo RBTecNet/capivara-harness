@@ -14,7 +14,7 @@ export interface ScriptStep {
   match: { role?: string; stage?: string; subject?: string; attempt?: number };
   /** `stdout` como função quando a resposta depende do que foi perguntado —
    *  o ensaio precisa devolver uma linha por endereço que recebeu. */
-  respond: { stdout: string | ((call: AgentCall) => string); exitCode?: number };
+  respond: { stdout: string | ((call: AgentCall) => string); exitCode?: number | ((call: AgentCall) => number) };
   /** Passo reutilizável. Útil para a rodada extra de entrevista, em que o
    *  modelo é consultado de novo para ver se as respostas abriram perguntas. */
   repeat?: boolean;
@@ -54,7 +54,7 @@ export function fakeAgent(steps: ScriptStep[]): FakeAgent {
       const respond = steps[index]!.respond;
       return {
         stdout: typeof respond.stdout === "function" ? respond.stdout(call) : respond.stdout,
-        exitCode: respond.exitCode ?? 0,
+        exitCode: typeof respond.exitCode === "function" ? respond.exitCode(call) : (respond.exitCode ?? 0),
       };
     },
   };

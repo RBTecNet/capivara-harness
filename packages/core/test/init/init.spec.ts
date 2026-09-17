@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DOCUMENT_CHAIN, InitBlockedError, evaluateReadiness, inspectProject, resolveRequest, runInit, summarizeInventory } from "../../src/init/index.js";
 import { readEvents, runIdFor, runPaths } from "../../src/state/index.js";
-import { PHASE_1, PHASE_2, approve, fakeAgent, happyPath, oneQuestion, reject, rehearsedAddresses } from "../support/fake-agent.js";
+import { DESCRIPTION, PHASE_1, PHASE_2, approve, fakeAgent, happyPath, oneQuestion, reject, rehearsedAddresses } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
 
 let projectRoot = "";
@@ -21,15 +21,17 @@ const request = { text: "um sistema de reservas para uma pousada", origin: "text
 
 async function run(steps: ScriptStep[], answers: string[] = []) {
   const agent = fakeAgent(steps);
+  const dito: string[] = [];
   let asked = 0;
   const outcome = await runInit({
     projectRoot,
     request,
     language: "português do Brasil",
+    announce: (message) => void dito.push(message),
     call: agent.call,
     ask: async () => answers[asked++] ?? "use as recomendações",
   });
-  return { outcome, agent };
+  return { outcome, agent, anunciado: dito.join("\n") };
 }
 
 describe("resolveRequest", () => {
@@ -164,6 +166,60 @@ describe("entrevista dentro do init", () => {
     expect(outcome.report.checkpoint.deferrals).toHaveLength(1);
   });
 
+  it("resposta em texto livre que não fecha volta para quem a escreveu", async () => {
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    // Primeiro veredito: falta algo. Segundo: fechou.
+    let vez = 0;
+    steps.unshift({
+      match: { role: "auditor", stage: "interview" },
+      respond: {
+        stdout: () => {
+          vez += 1;
+          return vez === 1
+            ? "CAPIVARA_ANSWER: Q-01 | PARTIAL | falta dizer o que acontece com os cartões"
+            : "CAPIVARA_ANSWER: Q-01 | ACCEPTED | Três colunas fixas, sem gerenciamento";
+        },
+      },
+      repeat: true,
+    });
+
+    const { outcome, anunciado } = await run(steps, ["três colunas fixas", "três colunas fixas, e não há remoção"]);
+    expect(anunciado).toContain("Sua resposta não fechou a decisão");
+    expect(anunciado).toContain("falta dizer o que acontece com os cartões");
+    expect(outcome.report.checkpoint.decisions).toHaveLength(1);
+  });
+
+  it("o que segue em aberto é dito, nunca sumido", async () => {
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    steps.unshift({
+      match: { role: "auditor", stage: "interview" },
+      respond: { stdout: "CAPIVARA_ANSWER: Q-01 | DEFERRED | não dá para saber a stack" },
+      repeat: true,
+    });
+
+    const { outcome, anunciado } = await run(steps, ["sei lá, o que for melhor", ""]);
+    expect(anunciado).toContain("Segue em aberto");
+    expect(outcome.report.checkpoint.decisions).toHaveLength(0);
+  });
+
+  it("o classificador recebe a evidência e as opções, não só a pergunta", async () => {
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    steps.unshift({
+      match: { role: "auditor", stage: "interview" },
+      respond: { stdout: "CAPIVARA_ANSWER: Q-01 | ACCEPTED | Node com Vitest" },
+      repeat: true,
+    });
+
+    const { agent } = await run(steps, ["node mesmo"]);
+    const classificacao = agent.calls.find((call) => call.role === "auditor" && call.stage === "interview");
+    expect(classificacao?.prompt).toContain("What had been observed");
+    expect(classificacao?.prompt).toContain("REMOVES THE PREMISE");
+    expect(classificacao?.prompt).toContain("The developer is the authority");
+  });
+
   it("pergunta adiada bloqueia o RALPH READY com [NEEDS DECISION]", async () => {
     const steps = happyPath();
     steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
@@ -171,6 +227,39 @@ describe("entrevista dentro do init", () => {
     expect(outcome.readiness.ready).toBe(false);
     const entrevista = outcome.readiness.checks.find((check) => check.id === "entrevista");
     expect(entrevista?.passed).toBe(false);
+  });
+});
+
+describe("timeout do provider", () => {
+  it("estouro de tempo tenta de novo antes de desistir", async () => {
+    const steps = happyPath();
+    // A primeira chamada estoura; a segunda responde.
+    let vez = 0;
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "project-description.md" },
+      respond: {
+        stdout: () => (vez === 0 ? "" : DESCRIPTION),
+        exitCode: () => {
+          vez += 1;
+          return vez === 1 ? 124 : 0;
+        },
+      },
+      repeat: true,
+    });
+
+    const { outcome, anunciado } = await run(steps);
+    expect(anunciado).toContain("estourou o tempo");
+    expect(outcome.readiness.ready).toBe(true);
+  });
+
+  it("estouro duas vezes para o run dizendo o que fazer", async () => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "project-description.md" },
+      respond: { stdout: "", exitCode: 124 },
+      repeat: true,
+    });
+    await expect(run(steps)).rejects.toThrow(/estourou o tempo duas vezes/);
   });
 });
 

@@ -146,6 +146,23 @@ describe("ausência de design e limites do DBML", () => {
     expect(gapPrompt("project-phases.md", context, ["caminho do design"])).toContain("Never ask for the path of a design artifact");
   });
 
+  it("a rodada de gaps recebe o que já foi perguntado, com as palavras do desenvolvedor", () => {
+    const prompt = gapPrompt("project-description.md", context, ["ciclo de vida das colunas"], [
+      {
+        decision: "Quais colunas devem existir inicialmente e qual o ciclo de vida delas?",
+        disposition: "DEFERRED",
+        answer: "três colunas fixas; não podem ser criadas nem apagadas",
+      },
+    ]);
+    expect(prompt).toContain("três colunas fixas");
+    expect(prompt).toContain("Never ask again what the developer already answered");
+    expect(prompt).toContain("Never offer an option that contradicts what the developer said");
+  });
+
+  it("sem histórico, a rodada de gaps não inventa uma seção vazia", () => {
+    expect(gapPrompt("user-stories.md", context, ["x"])).not.toContain("Already asked in this document");
+  });
+
   it("o documento de dados declara regras com semântica exata, sem DDL", () => {
     const prompt = writerPrompt("database-schema.md", context);
     expect(prompt).toContain("### Structural rules");

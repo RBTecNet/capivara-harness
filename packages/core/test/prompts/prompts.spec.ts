@@ -1,0 +1,119 @@
+import { describe, expect, it } from "vitest";
+import { languageBlock, ledgerPrompt, phasePartPrompt, writerPrompt } from "../../src/prompts/index.js";
+import type { WriterContext } from "../../src/prompts/index.js";
+import { STRUCTURAL_LABELS } from "../../src/contract/index.js";
+
+const context: WriterContext = {
+  language: "português do Brasil",
+  request: "um sistema de reservas para uma pousada",
+  decisions: ["Stack: Node 22 com Vitest"],
+  assumptions: [],
+  upstream: [],
+};
+
+const todos = [
+  writerPrompt("project-description.md", context),
+  writerPrompt("user-stories.md", context),
+  writerPrompt("database-schema.md", context),
+  ledgerPrompt(context),
+  phasePartPrompt({ ...context, phaseNumber: 1, ledgerEntry: "{}" }),
+];
+
+describe("regra de idioma", () => {
+  it("todo prompto do escritor carrega o bloco de idioma resolvido", () => {
+    for (const prompt of todos) {
+      expect(prompt).toContain("## Language");
+      expect(prompt).toContain("português do Brasil");
+      expect(prompt).not.toContain("{{USER_LANGUAGE}}");
+    }
+  });
+
+  it("o bloco nomeia as chaves e os rótulos que não podem ser traduzidos", () => {
+    const block = languageBlock("pt-BR");
+    expect(block).toContain("CAPIVARA_AUDIT_STATUS");
+    expect(block).toContain("TASK <n>: DONE");
+    for (const label of STRUCTURAL_LABELS) expect(block).toContain(label);
+  });
+
+  it("declara que traduzir chave ou rótulo é resposta inválida", () => {
+    expect(languageBlock("pt-BR")).toContain("invalid response");
+  });
+});
+
+describe("neutralidade de execução", () => {
+  it("nenhum prompt do escritor menciona provider, modelo, effort ou CLI", () => {
+    const proibidos = ["codex", "claude", "opencode", "openai", "anthropic", "deepseek", "--effort", "--model"];
+    for (const prompt of todos) {
+      for (const termo of proibidos) {
+        expect(prompt.toLowerCase(), `prompt vazou "${termo}"`).not.toContain(termo);
+      }
+    }
+  });
+
+  it("o escritor é instruído a não citar provider nem topologia de agentes", () => {
+    expect(writerPrompt("project-description.md", context)).toContain("Never mention a provider");
+  });
+});
+
+describe("papel read-only", () => {
+  it("o escritor é proibido de escrever código, rodar comandos e commitar", () => {
+    const prompt = writerPrompt("project-description.md", context);
+    expect(prompt).toContain("never run build or test commands");
+    expect(prompt).toContain("never commit");
+  });
+});
+
+describe("autoridade e proibições", () => {
+  it("declara a ordem de autoridade e que só ACCEPTED é decisão", () => {
+    const prompt = writerPrompt("user-stories.md", context);
+    expect(prompt).toContain("Authority order");
+    expect(prompt).toContain("is not a");
+    expect(prompt).toContain("DEFERRED, PARTIAL, AMBIGUOUS or CONTRADICTED");
+  });
+
+  it("proíbe inventar precisão que a fonte não deu", () => {
+    expect(writerPrompt("database-schema.md", context)).toContain("Never add precision the source did not supply");
+  });
+
+  it("manda marcar decisão aberta com [NEEDS DECISION]", () => {
+    expect(writerPrompt("project-description.md", context)).toContain("[NEEDS DECISION]");
+  });
+
+  it("carrega o pedido original verbatim e as decisões aceitas", () => {
+    const prompt = writerPrompt("project-description.md", context);
+    expect(prompt).toContain("um sistema de reservas para uma pousada");
+    expect(prompt).toContain("Stack: Node 22 com Vitest");
+  });
+});
+
+describe("escrita de project-phases em partes", () => {
+  it("o ledger planeja tudo e escreve nenhuma fase", () => {
+    const prompt = ledgerPrompt(context);
+    expect(prompt).toContain("write NO phase yet");
+    expect(prompt).toContain("capivara-ledger/v1");
+  });
+
+  it("o ledger declara o dimensionamento como restrição dura", () => {
+    expect(ledgerPrompt(context)).toContain("hard constraint");
+    expect(ledgerPrompt(context)).toContain("ONE agent session");
+  });
+
+  it("a parte escreve EXATAMENTE uma fase e nada do envelope", () => {
+    const prompt = phasePartPrompt({ ...context, phaseNumber: 3, ledgerEntry: '{"number":3}' });
+    expect(prompt).toContain("EXACTLY ONE phase");
+    expect(prompt).toContain("phase 3");
+    expect(prompt).toContain("Do not write the document header");
+  });
+
+  it("a parte recebe a gramática vinda do módulo do contrato", () => {
+    const prompt = phasePartPrompt({ ...context, phaseNumber: 2, ledgerEntry: "{}" });
+    expect(prompt).toContain("**Acceptance criteria:**");
+    expect(prompt).toContain("**Traces:**");
+  });
+
+  it("exige critério binário e recusa linguagem vaga", () => {
+    const prompt = phasePartPrompt({ ...context, phaseNumber: 1, ledgerEntry: "{}" });
+    expect(prompt).toContain("binary and observable");
+    expect(prompt).toContain("are rejected");
+  });
+});

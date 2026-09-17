@@ -57,14 +57,25 @@ describe("kill -9 durante a escrita", () => {
 
     let observouArquivo = false;
 
-    for (let attempt = 0; attempt < 6; attempt += 1) {
+    // Espera o laço do filho começar de verdade antes de matar. Sem isso, uma
+    // máquina carregada faz o teste passar sem ter exercitado nada.
+    const esperarPrimeiraEscrita = async (): Promise<boolean> => {
+      for (let tentativa = 0; tentativa < 200; tentativa += 1) {
+        if ((await readFile(target, "utf8").catch(() => null)) !== null) return true;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      return false;
+    };
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
       const child = spawn(process.execPath, [script], { stdio: "ignore" });
-      await new Promise((resolve) => setTimeout(resolve, 40 + attempt * 25));
+      const comecou = await esperarPrimeiraEscrita();
+      await new Promise((resolve) => setTimeout(resolve, 5 + attempt * 7));
       child.kill("SIGKILL");
       await once(child, "exit");
 
       const content = await readFile(target, "utf8").catch(() => null);
-      if (content === null) continue;
+      if (!comecou || content === null) continue;
       observouArquivo = true;
       // O alvo só passa a existir pelo rename, então ou não existe, ou está inteiro.
       const parsed = JSON.parse(content) as { round: number; payload: string };

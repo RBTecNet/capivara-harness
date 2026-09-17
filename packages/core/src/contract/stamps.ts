@@ -9,6 +9,11 @@
 import { createHash } from "node:crypto";
 import type { ContractError, PhasesDocument } from "./phases.js";
 
+/** Reconhece a linha de stamp. Saber a cara dela é conhecimento do contrato. */
+export function isStampLine(line: string): boolean {
+  return /^<!-- inputs:/.test(line);
+}
+
 /** Os 12 primeiros caracteres do sha256 dos bytes, minúsculos. */
 export function sha12(content: string | Uint8Array): string {
   return createHash("sha256").update(content).digest("hex").slice(0, 12);

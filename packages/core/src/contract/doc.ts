@@ -6,6 +6,7 @@
  */
 
 import { INVARIANTS, PHASES_CONTRACT } from "./invariants.js";
+import { GRAMMAR_BLOCK } from "./templates.js";
 
 /** Campos do contrato anterior removidos de propósito, com o motivo. */
 const REMOVED_FIELDS: readonly { field: string; reason: string }[] = [
@@ -39,31 +40,7 @@ export function renderContractDocument(): string {
   lines.push("## Gramática");
   lines.push("");
   lines.push("```markdown");
-  lines.push("# <Projeto> — Project Phases");
-  lines.push("");
-  lines.push("<!-- inputs: project-description.md@sha256:abc123abc123 user-stories.md@sha256:def456def456 database-schema.md@sha256:789abc789abc -->");
-  lines.push("");
-  lines.push("## Overview");
-  lines.push("");
-  lines.push("<estratégia de build, número de fases, linha de corte do MVP>");
-  lines.push("");
-  lines.push("**Conventions:**");
-  lines.push("- `[ ]` pendente · `[x]` concluído");
-  lines.push("");
-  lines.push("## Phase 1: <título>");
-  lines.push("");
-  lines.push("**Goal:** <resultado observável> · **Depends on:** <none | Phase N> · **Covers:** <stories/entidades/workflows>");
-  lines.push("");
-  lines.push("### Phase 1.1: <sub-fase>");
-  lines.push("");
-  lines.push("- [ ] **Task:** <o que construir>");
-  lines.push("  - **Acceptance criteria:**");
-  lines.push("    - <condição concreta e validável>");
-  lines.push("  - **Feature tests:** <nome do teste → a regra de negócio que ele afirma>");
-  lines.push("  - **Design ref:** <caminho sob o diretório de design>");
-  lines.push("  - **Traces:** US-1.1, users, workflow 2");
-  lines.push("");
-  lines.push("## Open Questions");
+  for (const line of GRAMMAR_BLOCK) lines.push(line);
   lines.push("```");
   lines.push("");
   lines.push("`**Feature tests:**` e `**Design ref:**` são opcionais: o primeiro é exigido de");

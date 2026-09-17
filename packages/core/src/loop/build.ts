@@ -27,6 +27,7 @@ import {
 import { isClean, isRepository } from "./git.js";
 import { materializeSessions } from "./split.js";
 import { preflight, type PreflightWarning } from "./preflight.js";
+import { resolveTestCommand } from "./testcmd.js";
 import { runPhase, type EngineCaller, type PhaseOutcome } from "./runner.js";
 import type { TestRunner } from "./gates.js";
 
@@ -134,6 +135,11 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         engine: options.engine,
         session,
         testCommand: checked.testCommand,
+        resolveTest: () =>
+          resolveTestCommand(options.projectRoot, {
+            ...(options.explicitTestCommand !== undefined ? { explicit: options.explicitTestCommand } : {}),
+            ...(options.environment !== undefined ? { environment: options.environment } : {}),
+          }),
         call: options.call,
         ...(options.testRunner !== undefined ? { testRunner: options.testRunner } : {}),
         ...(options.maxCycles !== undefined ? { maxCycles: options.maxCycles } : {}),

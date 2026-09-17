@@ -725,6 +725,73 @@ describe("B-37 · marcador obsoleto após a decisão", () => {
   });
 });
 
+describe("B-38 · a fase que cria a própria suíte", () => {
+  it("o gate 2 roda a suíte que a fase acabou de criar", async () => {
+    const { tasks } = await publishPlan();
+    let rodou: string[] = [];
+
+    const engine = fakeEngine(projectRoot, [
+      {
+        match: { role: "builder", phase: "P01" },
+        // A fase 1 cria o package.json com o script de teste, como num greenfield.
+        writes: [
+          { path: "package.json", content: JSON.stringify({ name: "app", scripts: { test: "vitest run" } }) },
+          { path: "src/app.ts", content: "export const app = 1;" },
+        ],
+        respond: { stdout: "feito" },
+      },
+      { match: { role: "builder" }, writes: [{ path: "src/b.ts", content: "export const b = 2;" }], respond: { stdout: "feito" }, repeat: true },
+      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) }, repeat: true },
+      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) }, repeat: true },
+    ]);
+
+    const outcome = await runBuild({
+      projectRoot,
+      language: "português do Brasil",
+      engine: "codex",
+      call: engine.call,
+      sleep: async () => undefined,
+      environment: {},
+      testRunner: async (command) => {
+        rodou.push(command);
+        return { exitCode: 0, output: "27 passed" };
+      },
+    });
+
+    expect(outcome.exitCode).toBe(0);
+    // O preflight não achou comando nenhum (diretório vazio), mas a fase 1
+    // criou a suíte e o gate 2 da PRÓPRIA fase 1 já a executou.
+    expect(rodou).toEqual(["npm test", "npm test"]);
+  });
+
+  it("sem suíte em fase nenhuma, o gate 2 segue pulado e o run continua", async () => {
+    const { tasks } = await publishPlan();
+    let rodou = 0;
+
+    const engine = fakeEngine(projectRoot, [
+      { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
+      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) }, repeat: true },
+      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) }, repeat: true },
+    ]);
+
+    const outcome = await runBuild({
+      projectRoot,
+      language: "português do Brasil",
+      engine: "codex",
+      call: engine.call,
+      sleep: async () => undefined,
+      environment: {},
+      testRunner: async () => {
+        rodou += 1;
+        return { exitCode: 0, output: "" };
+      },
+    });
+
+    expect(outcome.exitCode).toBe(0);
+    expect(rodou).toBe(0);
+  });
+});
+
 describe("B-13 · frescor da cadeia", () => {
   it("upstream alterado depois da geração é detectado", async () => {
     await init(happyPath());

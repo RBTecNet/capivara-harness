@@ -42,6 +42,16 @@ export interface PhaseRunOptions {
   engine: string;
   session: PhaseSession;
   testCommand: TestCommand | null;
+  /**
+   * Redetecta o comando de teste DEPOIS da sessão do executor.
+   *
+   * Num greenfield a suíte não existe quando a fase começa e existe quando ela
+   * termina: a própria fase 1 cria o package.json. Resolver uma vez, no
+   * preflight, com o diretório vazio, condena o gate 2 a ficar pulado para
+   * sempre — foi o que aconteceu no piloto 1, que entregou 27 testes passando
+   * sem que o loop tivesse rodado um único deles.
+   */
+  resolveTest?: () => Promise<TestCommand | null>;
   call: EngineCaller;
   testRunner?: TestRunner;
   maxCycles?: number;
@@ -121,6 +131,13 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       continue;
     }
 
+    // A fase pode ter acabado de criar a suíte. Perguntar de novo custa um
+    // acesso a disco; não perguntar custa a fase inteira sem validação.
+    const testeAgora = options.resolveTest ? await options.resolveTest() : options.testCommand;
+    if (testeAgora && testeAgora.command !== options.testCommand?.command) {
+      announce(`[${session.id}] comando de teste detectado: ${testeAgora.command} (${testeAgora.source})`);
+    }
+
     const wrote = gate1(signatureBefore, await treeSignature(options.projectRoot));
     previousWroteNothing = !wrote;
     if (!wrote) announce(`[${session.id}] a sessão não escreveu nada; validando o código existente`);
@@ -132,7 +149,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       lastGate = g0.gate;
       lastCause = g0.cause;
     } else {
-      const g2 = await gate2(options.projectRoot, options.testCommand?.command ?? null, options.testRunner);
+      const g2 = await gate2(options.projectRoot, testeAgora?.command ?? null, options.testRunner);
       if (!g2.green) {
         lastGate = g2.gate;
         lastCause = `${noChangeNote}${g2.cause}`;

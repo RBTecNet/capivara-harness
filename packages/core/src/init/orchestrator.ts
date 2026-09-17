@@ -19,7 +19,7 @@ import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, pa
 import type { Answer, Question } from "../interview/index.js";
 import { auditorPrompt, interviewPrompt, ledgerPrompt, phasePartPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
 import type { DocumentName, WriterContext } from "../prompts/index.js";
-import { appendEvent, artifactPaths, createRunState, runIdFor, runPaths, writeRunState } from "../state/index.js";
+import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, runIdFor, runPaths, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
 import { DOCUMENT_CHAIN, evaluateReadiness } from "./readiness.js";
@@ -77,6 +77,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
   const runId = runIdFor("init", options.request.sha12);
   const paths = runPaths(options.projectRoot, runId);
+  await ensureArtifactTree(options.projectRoot);
   const state = createRunState({ runId, command: "init", language: options.language, now });
   await writeRunState(options.projectRoot, state, now);
 

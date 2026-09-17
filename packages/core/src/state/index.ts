@@ -22,3 +22,4 @@ export { LockBusyError, acquireLock, isProcessAlive } from "./lock.js";
 export type { AcquireLockOptions, LockHandle, LockOwner } from "./lock.js";
 export { nextSubject, replayEvents, restoreRun } from "./resume.js";
 export type { RestoredRun, RunProgress } from "./resume.js";
+export { CONTROL_PLANE_IGNORE, ensureArtifactTree } from "./artifact-tree.js";

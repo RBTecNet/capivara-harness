@@ -4,7 +4,7 @@ import { Command } from "commander";
 import { listProviders, renderProviderList } from "./commands/providers.js";
 import { diagnose, renderDiagnosis } from "./commands/doctor.js";
 import { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
-import { describeRoles, rolesFromFlags, type CliRoleFlags } from "./commands/options.js";
+import { BUILD_ROLES, INIT_ROLES, describeRoles, renderUnresolved, rolesFromFlags, unresolvedRoles, type CliRoleFlags } from "./commands/options.js";
 import { InitBlockedError, resolveRequest, runInit } from "./init/index.js";
 import { runBuild } from "./loop/index.js";
 import { BACK, detectLanguage, renderCommand, renderQuestion, renderSplash, supportsColor } from "./tui/index.js";
@@ -79,14 +79,25 @@ export function createProgram(): Command {
       .option("--max-interview-rounds <n>", "rodadas de entrevista por documento", "3"),
   ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; maxAuditReturns: string; maxInterviewRounds: string }) => {
     const projectRoot = flags.project ?? ".";
+    const configured = rolesFromFlags(flags);
+    const semProvider = unresolvedRoles(configured, INIT_ROLES);
+    if (semProvider.length > 0) {
+      stdout.write(`${renderUnresolved("init", semProvider)}\n`);
+      process.exitCode = 2;
+      return;
+    }
     const request = await resolveRequest(projectRoot, {
       ...(pedido !== undefined ? { prompt: pedido } : {}),
       ...(flags.file !== undefined ? { file: flags.file } : {}),
     });
     const language = detectLanguage(request.text, flags.language);
-    const roles = rolesFromFlags(flags);
+    const roles = configured;
 
-    if (flags.splash !== false) stdout.write(renderSplash({ version: VERSION, roles: describeRoles(roles), style: style() }));
+    // O init não constrói nada: mostrar o executor aqui só confunde quem lê.
+    if (flags.splash !== false) {
+      const papeis = describeRoles(roles).filter((role) => (INIT_ROLES as readonly string[]).includes(role.role));
+      stdout.write(renderSplash({ version: VERSION, roles: papeis, style: style() }));
+    }
 
     const runId = runIdFor("init", request.sha12);
     const bridge = createAgentBridge({ projectRoot, runId, language, roles, limits: DEFAULT_LIMITS });
@@ -141,16 +152,23 @@ export function createProgram(): Command {
   ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const roles = rolesFromFlags(flags);
+    const semProvider = unresolvedRoles(roles, BUILD_ROLES);
+    if (semProvider.length > 0) {
+      stdout.write(`${renderUnresolved("build", semProvider)}\n`);
+      process.exitCode = 2;
+      return;
+    }
     const language = flags.language ?? "português do Brasil";
 
     if (flags.splash !== false) {
-      stdout.write(renderSplash({ version: VERSION, roles: describeRoles(roles).filter((role) => role.role === "builder" || role.role === "verifier"), style: style() }));
+      const papeis = describeRoles(roles).filter((role) => (BUILD_ROLES as readonly string[]).includes(role.role));
+      stdout.write(renderSplash({ version: VERSION, roles: papeis, style: style() }));
     }
 
     const outcome = await runBuild({
       projectRoot,
       language,
-      engine: roles.builder.provider || "codex",
+      engine: roles.builder.provider,
       ...(flags.testCmd !== undefined ? { explicitTestCommand: flags.testCmd } : {}),
       maxCycles: Number(flags.maxCycles),
       systemInstall: flags.systemInstall !== false,

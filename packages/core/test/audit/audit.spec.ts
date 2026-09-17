@@ -189,6 +189,13 @@ describe("prompt do auditor", () => {
     expect(auditorPrompt(context)).toContain("Do not re-audit the shape the parser owns");
   });
 
+  it("proíbe exigir do DBML o que o DBML não tem sintaxe para expressar", () => {
+    const prompt = auditorPrompt({ ...context, document: "database-schema.md" });
+    expect(prompt).toContain("demand that DBML express what DBML has no syntax for");
+    expect(prompt).toContain("a finding the writer cannot");
+    expect(prompt).toContain("structural and conformant");
+  });
+
   it("carrega o bloco de idioma resolvido", () => {
     expect(auditorPrompt(context)).toContain("português do Brasil");
   });

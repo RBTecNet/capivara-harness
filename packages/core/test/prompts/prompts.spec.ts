@@ -125,6 +125,24 @@ describe("opção não pode ser adiamento disfarçado", () => {
   });
 });
 
+describe("ausência de design e limites do DBML", () => {
+  it("a ausência de artefato de design nunca é decisão pendente", () => {
+    const prompt = phasePartPrompt({ ...context, phaseNumber: 1, ledgerEntry: "{}" });
+    expect(prompt).toContain("OMIT the Design ref line entirely");
+    expect(prompt).toContain("NEVER an open decision");
+  });
+
+  it("o levantamento de gaps não pergunta caminho de design", () => {
+    expect(gapPrompt("project-phases.md", context, ["caminho do design"])).toContain("Never ask for the path of a design artifact");
+  });
+
+  it("o schema ganha um lugar estrutural para o que o DBML não expressa", () => {
+    const prompt = writerPrompt("database-schema.md", context);
+    expect(prompt).toContain("### Constraints");
+    expect(prompt).toContain("not in Notes & Conventions");
+  });
+});
+
 describe("escrita de project-phases em partes", () => {
   it("o ledger planeja tudo e escreve nenhuma fase", () => {
     const prompt = ledgerPrompt(context);

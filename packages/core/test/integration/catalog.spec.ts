@@ -477,6 +477,73 @@ describe("B-34 · gap descoberto na escrita volta para a entrevista", () => {
   });
 });
 
+describe("B-35 · impasse do auditor", () => {
+  function impasse(steps: ScriptStep[]): ScriptStep[] {
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "database-schema.md" },
+      respond: { stdout: reject("Schema", "a regra não é estrutural", "modele a restrição no esquema") },
+      repeat: true,
+    });
+    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "database-schema.md" }, respond: { stdout: SCHEMA }, repeat: true });
+    return steps;
+  }
+
+  it("a decisão do desenvolvedor volta ao escritor como autoridade, acima do auditor", async () => {
+    const steps = impasse(happyPath());
+    const agent = fakeAgent(steps);
+    let perguntado = "";
+
+    await runInit({
+      projectRoot,
+      request,
+      language: "português do Brasil",
+      maxAuditReturns: 2,
+      call: agent.call,
+      ask: async () => "use as recomendações",
+      decideStandoff: async (rendered) => {
+        perguntado = rendered;
+        return "PostgreSQL 16; as restrições que o DBML não expressa vão num bloco DDL abaixo";
+      },
+    }).catch(() => undefined);
+
+    expect(perguntado).toContain("O auditor insiste em:");
+    const reescrita = agent.calls.find(
+      (call) => call.stage === "authoring" && call.subject === "database-schema.md" && call.prompt.includes("acima do auditor"),
+    );
+    expect(reescrita?.prompt).toContain("PostgreSQL 16");
+  });
+
+  it("publicar aceita como está e o run segue", async () => {
+    const steps = impasse(happyPath());
+    const agent = fakeAgent(steps);
+    const outcome = await runInit({
+      projectRoot,
+      request,
+      language: "português do Brasil",
+      maxAuditReturns: 2,
+      call: agent.call,
+      ask: async () => "use as recomendações",
+      decideStandoff: async () => "publicar",
+    });
+    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+  });
+
+  it("abortar encerra o run com o impasse no diagnóstico", async () => {
+    const steps = impasse(happyPath());
+    await expect(
+      runInit({
+        projectRoot,
+        request,
+        language: "português do Brasil",
+        maxAuditReturns: 2,
+        call: fakeAgent(steps).call,
+        ask: async () => "use as recomendações",
+        decideStandoff: async () => "abortar",
+      }),
+    ).rejects.toThrow(/Decisão do desenvolvedor: abortar/);
+  });
+});
+
 describe("B-13 · frescor da cadeia", () => {
   it("upstream alterado depois da geração é detectado", async () => {
     await init(happyPath());

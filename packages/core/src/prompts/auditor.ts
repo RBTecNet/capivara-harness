@@ -47,6 +47,10 @@ const AXES_COMMON = [
   "   or silently reinterpreted? Is any claim more precise than its source?",
   "2. CONFORMANCE — does the content match what this document is for? Is the stack the one decided",
   "   in the interview? Are enumerable fields modelled as lookup tables? Is every claim traceable?",
+  "   DBML cannot express CHECK constraints, partial unique indexes or exclusion constraints: a rule",
+  "   carried by the `### Constraints` DDL block below the DBML is structural and conformant. Never",
+  "   demand that DBML express what DBML has no syntax for — that is a finding the writer cannot",
+  "   close, and three of them in a row stop the run.",
 ].join("\n");
 
 const AXIS_EXECUTABILITY = [

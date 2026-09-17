@@ -445,12 +445,16 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    */
   async function closeGaps(document: ChainDocument, initial: Authored, writer: WriterContext): Promise<Authored> {
     let authored = initial;
+    // Um marcador já perguntado não volta. Reperguntar o que a pessoa acabou de
+    // responder é a forma mais rápida de fazê-la desistir da entrevista.
+    const asked = new Set<string>();
 
     for (let round = 1; round <= maxGapRounds; round += 1) {
       const markers = [...authored.content.matchAll(/\[NEEDS DECISION\]\s*(.+)/g)]
         .map((match) => (match[1] ?? "").trim())
-        .filter((marker) => marker !== "");
+        .filter((marker) => marker !== "" && !asked.has(marker.toLowerCase()));
       if (markers.length === 0) return authored;
+      for (const marker of markers) asked.add(marker.toLowerCase());
 
       announce(`  ${markers.length} decisão(ões) pendente(s) em ${document}; reabrindo a entrevista`);
       await event("interview", document, "retry", `${markers.length} gap(s) descobertos na escrita`, round);
@@ -515,9 +519,32 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         const rendered = renderStandoff(action.standoff);
         await event("audit", document, "blocked", "teto de devoluções esgotado", attempt);
         if (!options.decideStandoff) throw new InitBlockedError(rendered, runId);
-        const decision = await options.decideStandoff(rendered);
-        if (decision.trim().toLowerCase().startsWith("publicar")) return { content, remarks: verdict.remarks };
-        throw new InitBlockedError(`${rendered}\n\nDecisão do desenvolvedor: ${decision}`, runId);
+
+        const decision = (await options.decideStandoff(rendered)).trim();
+        const normalized = decision.toLowerCase();
+
+        if (normalized.startsWith("publicar")) return { content, remarks: verdict.remarks };
+        if (normalized.startsWith("abortar") || decision === "") {
+          throw new InitBlockedError(`${rendered}\n\nDecisão do desenvolvedor: abortar`, runId);
+        }
+
+        // A resposta do desenvolvedor É a decisão: ela volta ao escritor como
+        // autoridade, acima do auditor. Perguntar "o que vale?" e descartar a
+        // resposta é pior do que não ter perguntado.
+        await event("audit", document, "retry", `decisão do desenvolvedor: ${decision}`, attempt);
+        announce(`  decisão aplicada; reescrevendo ${document}`);
+        authored = await authored.rewrite(
+          [
+            {
+              where: document,
+              problem: `o auditor e o escritor não convergiram em ${action.standoff.returns} devoluções`,
+              fix: `o desenvolvedor decidiu e esta decisão é a autoridade, acima do auditor: ${decision}`,
+            },
+            ...action.standoff.auditorInsists,
+          ],
+          attempt + 1,
+        );
+        continue;
       }
 
       await event("audit", document, "retry", action.findings.map((finding) => finding.problem).join("; "), attempt);

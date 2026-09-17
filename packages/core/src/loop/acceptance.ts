@@ -100,11 +100,15 @@ export const defaultRunner: CommandRunner = (command, cwd, seconds) =>
   });
 
 /**
- * Serviço aprovado é serviço que continua de pé.
+ * O entrypoint é aprovado por não falhar.
  *
- * Não há contrato dizendo porta nem rota, então a prova possível é esta: subiu,
- * não morreu, e não gritou. É fraca de propósito — e teria pego a aplicação que
- * este piloto entregou, porque ela cairia na conexão com o banco.
+ * Duas formas de passar, porque `npm start` significa coisas diferentes: um
+ * servidor sobe e fica de pé; uma CLI roda e termina com código zero. As duas
+ * são sucesso, e não há como saber de antemão qual delas o projeto é.
+ *
+ * Reprova só o que falha de verdade: código diferente de zero. Foi assim que a
+ * aplicação do piloto 1 seria pega — ela caía na conexão com o banco — e é o que
+ * evita reprovar uma CLI por ela fazer exatamente o que devia.
  */
 export const serviceRunner: CommandRunner = (command, cwd, seconds) =>
   new Promise((resolve) => {
@@ -145,10 +149,12 @@ export const serviceRunner: CommandRunner = (command, cwd, seconds) =>
       resolve({ exitCode, output });
     };
 
-    // Sobreviveu à janela inteira: está de pé.
+    // Sobreviveu à janela inteira: é um serviço e está de pé.
     const vigia = setTimeout(() => encerrar(0), seconds * 1000);
 
-    child.on("exit", (code) => encerrar(code === 0 ? 1 : (code ?? 1)));
+    // Terminou sozinho: vale o código com que terminou. Zero é uma CLI que fez o
+    // seu trabalho; diferente de zero é um entrypoint que não sobe.
+    child.on("exit", (code, signal) => encerrar(code ?? (signal ? 1 : 0)));
     child.on("error", () => encerrar(127));
   });
 

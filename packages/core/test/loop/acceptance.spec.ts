@@ -72,7 +72,7 @@ describe("aceitação operacional", () => {
     expect(result.failure.cause).toContain("cópia limpa");
   });
 
-  it("serviço que morre sozinho reprova — é a aplicação que não sobe", async () => {
+  it("entrypoint que falha reprova — é a aplicação que não sobe", async () => {
     await manifest({ start: "y" });
     const result = await runAcceptance({
       projectRoot,
@@ -202,9 +202,17 @@ describe("contenção — nenhum processo sobrevive à aceitação", () => {
     expect(result.exitCode).toBe(0);
   }, 20000);
 
-  it("o serviço que morre sozinho reprova", async () => {
+  it("uma CLI que roda e termina com zero é aprovada", async () => {
     const { serviceRunner } = await import("../../src/loop/index.js");
-    const result = await serviceRunner("node -e \"process.exit(0)\"", projectRoot, 5);
-    expect(result.exitCode).not.toBe(0);
+    const result = await serviceRunner("node -e \"console.log('resumo emitido'); process.exit(0)\"", projectRoot, 5);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("resumo emitido");
+  }, 20000);
+
+  it("um entrypoint que falha ao subir reprova com o código real", async () => {
+    const { serviceRunner } = await import("../../src/loop/index.js");
+    const result = await serviceRunner("node -e \"console.error('ECONNREFUSED'); process.exit(3)\"", projectRoot, 5);
+    expect(result.exitCode).toBe(3);
+    expect(result.output).toContain("ECONNREFUSED");
   }, 20000);
 });

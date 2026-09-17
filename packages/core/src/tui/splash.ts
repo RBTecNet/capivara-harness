@@ -8,15 +8,23 @@
 
 import { paint, type Style } from "./ansi.js";
 
+/**
+ * A capivara.
+ *
+ * A primeira versão tinha dois olhos redondos e uma boca aberta: lia como uma
+ * coruja assustada. Capivara é o animal menos assustado que existe — olhos meio
+ * fechados, focinho largo e nenhuma pressa.
+ */
 const CAPIVARA = [
-  "        ___       ___",
-  "     .-'   `'.-'`   `'-.",
-  "    /   o        o      \\",
-  "   |      .-\"\"\"-.        |",
-  "   |     /       \\       |",
-  "    \\    \\_.---._/      /",
-  "     '-.__       __.-'",
-  "          `'---'`",
+  "       ___         ___",
+  "      /   \\       /   \\",
+  "     |     '-----'     |",
+  "     |   --       --   |",
+  "     |                 |",
+  "     |    _________    |",
+  "     |   /  .   .  \\   |",
+  "      \\  \\_________/  /",
+  "       '-------------'",
 ];
 
 export interface SplashOptions {

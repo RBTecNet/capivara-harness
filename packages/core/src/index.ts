@@ -5,6 +5,7 @@ export * from "./interview/index.js";
 export * from "./authoring/index.js";
 export * from "./audit/index.js";
 export * from "./init/index.js";
+export * from "./loop/index.js";
 export * from "./prompts/index.js";
 export { listProviders, renderProviderList } from "./commands/providers.js";
 export type { ConfigurationState, ProviderListing, ProviderKind } from "./commands/providers.js";

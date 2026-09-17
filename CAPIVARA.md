@@ -56,7 +56,12 @@ Estas não são preferências. São o que mantém o produto coerente:
 
 ## Estado atual
 
-Bootstrap concluído: repositório, manifestos, tsconfigs e o plano versionado.
-`src/` está vazio de propósito — a **Phase 1** do §17 do plano é a próxima, e é ela que cria
-o contrato, os 14 invariantes e os testes de arquitetura. Até lá, `npm run build` ainda não
-passa: falta `scripts/build.mjs` e `src/cli.ts`, que pertencem àquela fase.
+**Phase 1 concluída.** O contrato `capivara-phases/v1` existe como código executável em
+`packages/core/src/contract/`, com os 14 invariantes, as três coberturas, o stamp de
+frescor e os testes de arquitetura que protegem a proibição nº 1. `npm run check` passa:
+build, typecheck e 58 testes.
+
+`docs/capivara-phases-v1.md` é **gerado** por `npm run docs:contract` a partir do módulo —
+não edite à mão; um teste falha se a página divergir do código.
+
+Próxima: **Phase 2** do §17 do plano — estado durável, lock e retomada.

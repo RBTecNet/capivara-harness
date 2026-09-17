@@ -21,7 +21,8 @@
     "build": "node ./scripts/build.mjs && tsc --emitDeclarationOnly --project tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "docs:contract": "node ./scripts/generate-contract-doc.mjs"
   },
   "dependencies": {
     "commander": "^15.0.0"

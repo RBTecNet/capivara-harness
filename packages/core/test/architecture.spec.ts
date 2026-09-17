@@ -1,0 +1,81 @@
+/**
+ * Os testes que protegem a tese do produto contra quem o implementa.
+ *
+ * O contrato só permanece único enquanto nenhum outro módulo recriar a
+ * gramática por conta própria. É fácil demais, no meio de uma fase futura,
+ * escrever um `/^## Phase/` no divisor do loop "só para ir rápido" — e é
+ * exatamente assim que o harness e o ralph voltam a divergir.
+ */
+
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import { INVARIANTS } from "../src/contract/index.js";
+
+const SRC = fileURLToPath(new URL("../src", import.meta.url));
+const CONTRACT = join(SRC, "contract");
+const PACKAGE = new URL("../package.json", import.meta.url);
+
+/** Marcadores que só o módulo do contrato pode conhecer. */
+const GRAMMAR_MARKERS = [
+  "## Phase",
+  "### Phase",
+  "**Task:**",
+  "**Acceptance criteria:**",
+  "**Feature tests:**",
+  "**Design ref:**",
+  "**Traces:**",
+  "**Goal:**",
+  "<!-- inputs:",
+];
+
+async function typescriptFiles(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files: string[] = [];
+  for (const entry of entries) {
+    const full = join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...(await typescriptFiles(full)));
+    else if (entry.name.endsWith(".ts")) files.push(full);
+  }
+  return files;
+}
+
+describe("arquitetura", () => {
+  it("nenhum módulo fora de src/contract/ conhece a gramática de fases", async () => {
+    const files = (await typescriptFiles(SRC)).filter((file) => !file.startsWith(CONTRACT));
+    const violations: string[] = [];
+    for (const file of files) {
+      const content = await readFile(file, "utf8");
+      for (const marker of GRAMMAR_MARKERS) {
+        if (content.includes(marker)) violations.push(`${file.slice(SRC.length + 1)} contém "${marker}"`);
+      }
+    }
+    expect(violations, "a gramática pertence a src/contract/; importe parsePhases em vez de recriá-la").toEqual([]);
+  });
+
+  it("src/contract/ não está vazio — o teste acima precisa ter o que proteger", async () => {
+    const files = await typescriptFiles(CONTRACT);
+    expect(files.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("commander é a única dependência de runtime", async () => {
+    const pkg = JSON.parse(await readFile(PACKAGE, "utf8")) as { dependencies?: Record<string, string> };
+    expect(Object.keys(pkg.dependencies ?? {})).toEqual(["commander"]);
+  });
+
+  it("todo invariante registrado é implementado por algum módulo do contrato", async () => {
+    const files = await typescriptFiles(CONTRACT);
+    const implementation = (
+      await Promise.all(
+        files
+          .filter((file) => !file.endsWith("invariants.ts") && !file.endsWith("doc.ts"))
+          .map((file) => readFile(file, "utf8")),
+      )
+    ).join("\n");
+    const missing = INVARIANTS.filter(
+      (item) => item.enforcement === "rejects" && !implementation.includes(`"${item.code}"`),
+    ).map((item) => item.code);
+    expect(missing, "invariante registrado mas nunca reportado por nenhum validador").toEqual([]);
+  });
+});

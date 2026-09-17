@@ -61,6 +61,23 @@ describe("splash", () => {
     expect(splash).toContain("codex/gpt-5");
   });
 
+  it("com cor verdadeira, o splash traz a capivara em meio-blocos", () => {
+    const splash = renderSplash({
+      version: "0.1.0",
+      roles: [],
+      style: colored,
+      environment: { COLORTERM: "truecolor" },
+    });
+    expect(splash).toContain("▀");
+    expect(splash).toContain(`${ESC}[38;2;`);
+  });
+
+  it("sem cor verdadeira, o splash cai no mascote simples", () => {
+    const splash = renderSplash({ version: "0.1.0", roles: [], style: plain, environment: {} });
+    expect(splash).toContain(CAPYBARA_ASCII[0]);
+    expect(splash).not.toContain("▀");
+  });
+
   it("papel sem provider aparece como não configurado", () => {
     const splash = renderSplash({ version: "0.1.0", roles: [{ role: "builder", provider: "", model: "" }], style: plain });
     expect(splash).toContain("não configurado");

@@ -24,7 +24,23 @@ export interface NormalizedPart {
 }
 
 const LEVEL_2 = /^##\s+(.*)$/;
+const DEPENDS_TOKEN = /(?:phase\s*)?0*(\d+)/gi;
 const DEPENDS_ON = /(\*\*Depends on:\*\*\s*)([^·\n]*)/;
+
+/**
+ * Forma canônica de `Depends on`.
+ *
+ * O ledger devolve o que o modelo escreveu: "1", "Phase 1", "P01", "fase 1" ou
+ * vazio. O documento precisa de `none` ou `Phase N` — publicar "1" é trocar um
+ * valor errado mas bem-formado por um errado e malformado.
+ */
+export function canonicalDependsOn(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed === "" || /^(?:none|nenhuma?|nenhum)$/i.test(trimmed)) return "none";
+  const phases = [...trimmed.matchAll(DEPENDS_TOKEN)].map((match) => Number(match[1]));
+  if (phases.length === 0) return "none";
+  return [...new Set(phases)].sort((left, right) => left - right).map((phase) => `Phase ${phase}`).join(", ");
+}
 
 export function normalizePhasePart(markdown: string, expectation: PhasePartExpectation): NormalizedPart {
   const applied: string[] = [];
@@ -52,10 +68,11 @@ export function normalizePhasePart(markdown: string, expectation: PhasePartExpec
 
   let content = lines.join("\n").replace(/\s+$/, "");
 
+  const esperado = canonicalDependsOn(expectation.dependsOn);
   const metadata = DEPENDS_ON.exec(content);
-  if (metadata && metadata[2]?.trim() !== expectation.dependsOn) {
-    content = content.replace(DEPENDS_ON, `$1${expectation.dependsOn} `);
-    applied.push(`corrigiu Depends on para "${expectation.dependsOn}", conforme o ledger`);
+  if (metadata && canonicalDependsOn(metadata[2] ?? "") !== esperado) {
+    content = content.replace(DEPENDS_ON, `$1${esperado} `);
+    applied.push(`corrigiu Depends on para "${esperado}", conforme o ledger`);
   }
 
   return { markdown: `${content}\n`, applied };

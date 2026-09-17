@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizePhasePart, parsePhases } from "../../src/contract/index.js";
+import { canonicalDependsOn, normalizePhasePart, parsePhases } from "../../src/contract/index.js";
 
 const FASE = [
   "## Phase 2: Cadastro de hóspedes",
@@ -12,9 +12,27 @@ const FASE = [
   "  - **Traces:** US-1.1",
 ].join("\n");
 
+describe("canonicalDependsOn", () => {
+  it("o ledger devolve o que o modelo escreveu; o documento recebe a forma canônica", () => {
+    for (const cru of ["1", "Phase 1", "phase 1", "P01", "fase 1"]) {
+      expect(canonicalDependsOn(cru), cru).toBe("Phase 1");
+    }
+  });
+
+  it("vazio e nenhuma variação de 'nenhum' viram none", () => {
+    for (const cru of ["", "  ", "none", "None", "nenhuma", "nenhum"]) {
+      expect(canonicalDependsOn(cru), cru).toBe("none");
+    }
+  });
+
+  it("várias fases viram uma lista ordenada e sem repetição", () => {
+    expect(canonicalDependsOn("Phase 3, 1, P01")).toBe("Phase 1, Phase 3");
+  });
+});
+
 describe("normalizePhasePart", () => {
-  it("corrige Depends on para o que o ledger alocou", () => {
-    const normalized = normalizePhasePart(FASE, { phaseNumber: 2, dependsOn: "Phase 1" });
+  it("corrige Depends on para o que o ledger alocou, na forma canônica", () => {
+    const normalized = normalizePhasePart(FASE, { phaseNumber: 2, dependsOn: "1" });
     expect(normalized.markdown).toContain("**Depends on:** Phase 1");
     expect(normalized.markdown).not.toContain("**Depends on:** none");
     expect(normalized.applied.join(" ")).toContain("conforme o ledger");
@@ -23,6 +41,12 @@ describe("normalizePhasePart", () => {
   it("não mexe quando o Depends on já está certo", () => {
     const certa = FASE.replace("**Depends on:** none", "**Depends on:** Phase 1");
     expect(normalizePhasePart(certa, { phaseNumber: 2, dependsOn: "Phase 1" }).applied).toEqual([]);
+  });
+
+  it("nunca publica o valor cru do ledger", () => {
+    const normalized = normalizePhasePart(FASE, { phaseNumber: 2, dependsOn: "2" });
+    expect(normalized.markdown).toContain("**Depends on:** Phase 2");
+    expect(normalized.markdown).not.toMatch(/\*\*Depends on:\*\* \d/);
   });
 
   it("remove seção de nível 2 escrita dentro da fase, que encerraria a captura", () => {

@@ -17,8 +17,8 @@ import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index
 import { MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Question } from "../interview/index.js";
-import { auditorPrompt, gapPrompt, interviewPrompt, ledgerPrompt, phasePartPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
-import type { DocumentName, WriterContext } from "../prompts/index.js";
+import { assessRehearsal, auditorPrompt, enumerateCriteria, gapPrompt, interviewPrompt, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
+import type { CriterionRef, DocumentName, WriterContext } from "../prompts/index.js";
 import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, runIdFor, runPaths, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
@@ -29,7 +29,12 @@ import { checkDocumentShape } from "./selfcheck.js";
 import { renderReport, type InitReport, type RoleCost } from "./report.js";
 
 export interface AgentCall {
-  role: "writer" | "auditor";
+  /**
+   * `verifier` aparece no init por uma razão só: o ensaio. Quem vai decidir
+   * DONE ou INCOMPLETE no build é consultado antes de existir código, porque
+   * depois cada descoberta custa um ciclo de correção.
+   */
+  role: "writer" | "auditor" | "verifier";
   stage: RunStage;
   subject: string;
   attempt: number;
@@ -54,6 +59,8 @@ export interface InitOptions {
   maxGapRounds?: number;
   /** Teto de perguntas por rodada de gap: ninguém responde a uma enxurrada. */
   maxGapQuestions?: number;
+  /** Reescritas do plano motivadas pelo ensaio do verificador. */
+  maxRehearsalRounds?: number;
   now?: () => Date;
 }
 
@@ -114,6 +121,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const maxInterviewRounds = options.maxInterviewRounds ?? 3;
   const maxGapRounds = options.maxGapRounds ?? 2;
   const maxGapQuestions = options.maxGapQuestions ?? 5;
+  const maxRehearsalRounds = options.maxRehearsalRounds ?? 1;
 
   const runId = runIdFor("init", options.request.sha12);
   const paths = runPaths(options.projectRoot, runId);
@@ -148,6 +156,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const allAnswers: Answer[] = [];
   const allQuestions: Question[] = [];
   const remarks: { document: string; remark: Remark }[] = [];
+  /** Ausente até o ensaio rodar; o gate trata ausência como reprovação. */
+  let rehearsal: { blocked: string[] } | undefined;
 
   for (const document of DOCUMENT_CHAIN) {
     announce(`— ${document}`);
@@ -177,11 +187,17 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
     await event("audit", document, "started");
     const verdict = await auditLoop(document, closed, writer, upstream);
-    published[document] = verdict.content;
-    approved.push(document);
     remarks.push(...verdict.remarks.map((remark) => ({ document, remark })));
 
-    await publish(options.projectRoot, [{ name: document, content: verdict.content }]);
+    // O plano aprovado ainda não é um plano implementável: quem decide isso é
+    // quem vai julgar cada task no build, e ele é chamado aqui.
+    const final =
+      document === "project-phases.md" ? await rehearse(verdict.authored, writer, upstream) : { content: verdict.content };
+
+    published[document] = final.content;
+    approved.push(document);
+
+    await publish(options.projectRoot, [{ name: document, content: final.content }]);
     await event("publish", document, "complete");
     announce(`  publicado: ${document}`);
   }
@@ -530,12 +546,141 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     return authored;
   }
 
+  /**
+   * O ensaio do verificador.
+   *
+   * O auditor pergunta se o documento está bem escrito; o ensaio pergunta se o
+   * critério pode ser provado por alguém. São perguntas diferentes, feitas por
+   * papéis com regras da dúvida opostas, e foi entre elas que o piloto 2 escapou:
+   * plano aprovado, critério impossível, três ciclos de correção queimados sobre
+   * código que estava certo.
+   *
+   * Reprovou, volta ao escritor como finding, igual a qualquer devolução de
+   * auditoria. Sobreviveu à última rodada, bloqueia o RALPH READY com o endereço
+   * na tela — porque o preço de barrar um plano bom é o desenvolvedor reler uma
+   * linha, e o de liberar um plano impossível é o build inteiro.
+   */
+  async function rehearse(
+    initial: Authored,
+    writer: WriterContext,
+    upstream: { name: string; content: string }[],
+  ): Promise<{ content: string }> {
+    let authored = initial;
+
+    for (let round = 1; round <= maxRehearsalRounds + 1; round += 1) {
+      const parsed = parsePhases(authored.content);
+      if (!parsed.ok) {
+        // Plano que não passa no parser já é reprovado pelo gate do contrato, e
+        // ensaiar critério que ninguém conseguiu ler não acrescenta nada.
+        rehearsal = { blocked: [] };
+        return { content: authored.content };
+      }
+
+      const criteria = enumerateCriteria(parsed.document);
+      if (criteria.length === 0) {
+        rehearsal = { blocked: [] };
+        return { content: authored.content };
+      }
+
+      await event("verify", "project-phases.md", "started", `${criteria.length} critério(s)`, round);
+      const assessment = await judge(criteria, writer, upstream, round);
+
+      const blocked = [
+        ...assessment.blocking.map(
+          ({ criterion, ruling, reason }) =>
+            `${criterion.address} · ${criterion.taskTitle} — ${ruling}: ${reason || criterion.text}`,
+        ),
+        ...assessment.unrehearsed.map(
+          (criterion) => `${criterion.address} · ${criterion.taskTitle} — NÃO ENSAIADO: o verificador não julgou este critério`,
+        ),
+      ];
+
+      if (blocked.length === 0) {
+        announce(`  ensaio do verificador: ${criteria.length} critério(s), todos observáveis`);
+        await event("verify", "project-phases.md", "complete", `${criteria.length} critério(s) observáveis`, round);
+        rehearsal = { blocked: [] };
+        return { content: authored.content };
+      }
+
+      // Sem finding não há o que reescrever: critério não julgado é falha do
+      // ensaio, não do plano, e mandar o escritor mexer no que ninguém acusou só
+      // troca um documento bom por outro.
+      if (round > maxRehearsalRounds || assessment.blocking.length === 0) {
+        announce(`  ensaio do verificador reprovou ${blocked.length} critério(s); o plano segue publicado e o gate bloqueia`);
+        await event("verify", "project-phases.md", "blocked", blocked.join(" | "), round);
+        rehearsal = { blocked };
+        return { content: authored.content };
+      }
+
+      announce(`  ensaio do verificador reprovou ${assessment.blocking.length} critério(s); reescrevendo o plano`);
+      await event("verify", "project-phases.md", "retry", blocked.join(" | "), round);
+
+      authored = await authored.rewrite(
+        assessment.blocking.map(({ criterion, ruling, reason }) => ({
+          where: `Phase ${criterion.phase}`,
+          problem:
+            ruling === "UNSATISFIABLE"
+              ? `o critério ${criterion.address}, na task "${criterion.taskTitle}", afirma a presença do que as decisões confirmadas negam: ${reason}. Nenhuma implementação correta consegue prová-lo, e o verificador vai reprovar a fase por ela estar certa`
+              : `o critério ${criterion.address}, na task "${criterion.taskTitle}", não nomeia nada que alguém possa observar no código: ${reason}. Dois verificadores honestos leriam o mesmo código e discordariam`,
+          fix:
+            ruling === "UNSATISFIABLE"
+              ? `reescreva esse critério para afirmar o que é verdade segundo as decisões — inclusive a ausência, quando for o caso. Mexa só nele; o resto da fase está aprovado. O critério atual é: "${criterion.text}"`
+              : `troque esse critério por uma condição observável: um arquivo, um comando e sua saída, um teste nomeado, um campo presente. Mexa só nele; o resto da fase está aprovado. O critério atual é: "${criterion.text}"`,
+        })),
+        maxAuditReturns + round + 1,
+      );
+    }
+
+    return { content: authored.content };
+  }
+
+  /**
+   * Uma passada do ensaio, com uma segunda chance para o que ficou sem linha.
+   *
+   * Omissão é erro de formatação, não veredito: vale relembrar os endereços
+   * antes de tratar silêncio como reprovação.
+   */
+  async function judge(
+    criteria: CriterionRef[],
+    writer: WriterContext,
+    upstream: { name: string; content: string }[],
+    round: number,
+  ) {
+    const prompt = rehearsalPrompt({
+      language: options.language,
+      request: options.request.text,
+      decisions: writer.decisions,
+      upstream,
+      criteria,
+    });
+
+    const verdicts = parseRehearsal(
+      await track({ role: "verifier", stage: "verify", subject: "project-phases.md", attempt: round, prompt }),
+    );
+    let assessment = assessRehearsal(criteria, verdicts);
+    if (assessment.unrehearsed.length === 0) return assessment;
+
+    const corrective = [
+      prompt,
+      "",
+      "## The previous answer left criteria unjudged",
+      "Emit one line for EACH address below, in this order, and nothing else.",
+      ...assessment.unrehearsed.map((criterion) => `${criterion.address} ${criterion.text}`),
+    ].join("\n");
+
+    const completed = parseRehearsal(
+      await track({ role: "verifier", stage: "verify", subject: "project-phases.md", attempt: round, prompt: corrective }),
+    );
+    assessment = assessRehearsal(criteria, [...verdicts, ...completed]);
+    return assessment;
+  }
+
   async function auditLoop(
     document: ChainDocument,
     initial: Authored,
     writer: WriterContext,
     upstream: { name: string; content: string }[],
-  ): Promise<{ content: string; remarks: Remark[] }> {
+  ): Promise<{ content: string; remarks: Remark[]; authored: Authored }> {
     let authored = initial;
     const history: AuditAttempt[] = [];
     // Uma vez que o desenvolvedor decidiu, ele decidiu. Voltar a perguntar a cada
@@ -549,7 +694,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       history.push({ attempt, verdict, writerSummary: `tentativa ${attempt}: escreveu ${document}` });
 
       const action = nextAuditAction({ document, history, maxReturns: maxAuditReturns });
-      if (action.action === "publish") return { content, remarks: verdict.remarks };
+      if (action.action === "publish") return { content, remarks: verdict.remarks, authored };
 
       if (action.action === "ask-developer" && developerRuled) {
         // Findings que sobrevivem à decisão do desenvolvedor não bloqueiam: eles
@@ -558,6 +703,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         await event("audit", document, "complete", "publicado sob decisão do desenvolvedor", attempt);
         return {
           content,
+          authored,
           remarks: [
             ...verdict.remarks,
             ...verdict.findings.map((finding) => ({
@@ -576,7 +722,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         const decision = (await options.decideStandoff(rendered)).trim();
         const normalized = decision.toLowerCase();
 
-        if (normalized.startsWith("publicar")) return { content, remarks: verdict.remarks };
+        if (normalized.startsWith("publicar")) return { content, remarks: verdict.remarks, authored };
         if (normalized.startsWith("abortar") || decision === "") {
           throw new InitBlockedError(`${rendered}\n\nDecisão do desenvolvedor: abortar`, runId);
         }
@@ -711,6 +857,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     }),
     designRoot: artifactPaths(options.projectRoot).design,
     designExists: () => true,
+    rehearsal,
   });
 
   const tasks = parsedPhases.ok ? parsedPhases.document.phases.reduce((total, phase) => total + phase.tasks.length, 0) : 0;

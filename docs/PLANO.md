@@ -1682,3 +1682,72 @@ contrato que o escritor pode errar. Aqui o produto declara o que sabe fazer pelo
 `package.json`, e o loop apenas executa.
 
 `--no-acceptance` desliga.
+
+## 23. O ensaio do verificador — o plano impossível para no init
+
+Decidido em 2026-09-17, com evidência do piloto 2.
+
+O piloto 2 fechou quatro fases verdes e parou na quinta contra uma task cujo
+critério exigia que o wheel declarasse "as dependências fixadas do projeto". O
+projeto, por decisão confirmada na entrevista, **não tem dependência alguma**: é
+Python 3.12 com o `csv` da biblioteca padrão. O pacote correto não declarava
+nada, o verificador procurou, não achou, e reprovou a fase por ela estar certa.
+Três ciclos de correção pagos sobre código que não tinha defeito.
+
+O critério era **insatisfazível**: afirmava a presença do que as decisões negam.
+Nenhuma implementação poderia prová-lo.
+
+E o auditor havia previsto. A ressalva estava no relatório do `init`, três
+documentos antes — "a ausência de dependências não é explicitada" — emitida sob a
+regra da dúvida dele, que manda aprovar e ressalvar. A regra continua certa: o
+auditor julga prosa, e travar o init numa discordância que não muda o resultado
+custa mais do que deixar passar. O defeito foi de ordem, não de rigor.
+
+### A pergunta que faltava
+
+O auditor pergunta se o documento está bem escrito. Ninguém perguntava se o
+critério pode ser provado — e quem responde isso não é o auditor, é **quem vai
+julgar a task no build**. Só que ele era consultado depois de o código existir,
+quando cada descoberta custa um ciclo de correção.
+
+O ensaio inverte a ordem. Antes de o plano ser publicado, o papel `verifier` — o
+mesmo que dirá `TASK n: DONE` ou `INCOMPLETE` — lê todos os critérios, com a
+árvore vazia de propósito, e responde uma linha por critério:
+
+```
+CRITERION P5.T9.C1: OBSERVABLE     — a observação que eu faria para decidi-lo
+CRITERION P5.T9.C1: UNSATISFIABLE  — o que afirma, e qual decisão diz que não existe
+CRITERION P5.T9.C1: UNOBSERVABLE   — por que nenhuma observação o decide
+```
+
+Ele **não** verifica implementação: tudo está ausente, e ausência não prova nada
+ali. Critério que depende de arquivo, rota, esquema ou teste que ainda não existe
+é OBSERVABLE — é exatamente o que a fase vai criar.
+
+### A regra da dúvida, estreita de propósito
+
+Dúvida sobre se uma implementação vai *satisfazer* o critério é trabalho do
+build: responde OBSERVABLE. Só bloqueia o que nenhuma implementação resolve —
+o critério que afirma o que as decisões negam, e o critério que não nomeia
+observação alguma ("código limpo", "performance adequada"), em que dois
+verificadores honestos leriam o mesmo código e discordariam.
+
+Sem essa estreiteza o ensaio viraria uma segunda auditoria, com o churn de uma.
+
+### O que acontece com o que ele reprova
+
+Volta ao escritor como finding, pelo mesmo caminho de qualquer devolução de
+auditoria: só as fases nomeadas são reescritas, e o documento é remontado em
+código. Uma rodada de reescrita. O que sobreviver bloqueia o RALPH READY com o
+endereço na tela.
+
+Critério que o ensaio deixou sem linha **não passa por omissão**: vale uma
+segunda chamada relembrando os endereços, e depois disso conta como bloqueio. A
+assimetria é deliberada, e é a do verificador: barrar um plano bom custa ao
+desenvolvedor reler uma linha; liberar um plano impossível custa o piloto 2
+inteiro.
+
+### O nono item do gate
+
+`evaluateReadiness` passou a oito para nove itens. O ensaio ausente **reprova**:
+não ter rodado não aprova nada.

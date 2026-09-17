@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { gapPrompt, interviewPrompt, languageBlock, ledgerPrompt, phasePartPrompt, writerPrompt } from "../../src/prompts/index.js";
+import { assessRehearsal, enumerateCriteria, gapPrompt, interviewPrompt, languageBlock, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, writerPrompt } from "../../src/prompts/index.js";
 import type { WriterContext } from "../../src/prompts/index.js";
+import { parsePhases } from "../../src/contract/index.js";
 import { STRUCTURAL_LABELS } from "../../src/contract/index.js";
 
 const context: WriterContext = {
@@ -182,5 +183,92 @@ describe("escrita de project-phases em partes", () => {
     const prompt = phasePartPrompt({ ...context, phaseNumber: 1, ledgerEntry: "{}" });
     expect(prompt).toContain("binary and observable");
     expect(prompt).toContain("are rejected");
+  });
+});
+
+describe("ensaio do verificador", () => {
+  const plano = [
+    "# Pousada — Project Phases",
+    "",
+    "<!-- inputs: project-description.md@sha256:000000000000 -->",
+    "",
+    "## Phase 1: Fundação de dados",
+    "",
+    "**Goal:** criar o esquema · **Depends on:** none · **Covers:** US-1.1",
+    "",
+    "- [ ] **Task:** Criar a tabela de quartos.",
+    "  - **Acceptance criteria:**",
+    "    - A migração cria a tabela `quartos` com as colunas decididas.",
+    "    - O pacote publicado declara as dependências fixadas.",
+    "  - **Feature tests:** migracao_vazia → a migração roda numa base vazia",
+    "  - **Traces:** US-1.1",
+    "",
+  ].join("\n");
+
+  const parsed = parsePhases(plano);
+  const criteria = parsed.ok ? enumerateCriteria(parsed.document) : [];
+
+  it("endereça cada critério por fase, task e posição", () => {
+    expect(criteria.map((criterion) => criterion.address)).toEqual(["P1.T1.C1", "P1.T1.C2"]);
+    expect(criteria[1]?.taskTitle).toContain("tabela de quartos");
+  });
+
+  it("o prompt diz que a árvore está vazia de propósito", () => {
+    const prompt = rehearsalPrompt({ language: "português do Brasil", request: "uma pousada", decisions: [], upstream: [], criteria });
+    expect(prompt).toContain("there is no code at all");
+    expect(prompt).toContain("P1.T1.C2");
+  });
+
+  it("dúvida sobre satisfazer é do build; dúvida sobre observar é do ensaio", () => {
+    const prompt = rehearsalPrompt({ language: "português do Brasil", request: "x", decisions: [], upstream: [], criteria });
+    expect(prompt).toContain("Answer OBSERVABLE");
+    expect(prompt).toContain("is your problem");
+  });
+
+  it("as decisões confirmadas entram como autoridade sobre o que existe", () => {
+    const prompt = rehearsalPrompt({
+      language: "português do Brasil",
+      request: "x",
+      decisions: ["Sem dependências externas: só a biblioteca padrão"],
+      upstream: [],
+      criteria,
+    });
+    expect(prompt).toContain("Sem dependências externas");
+  });
+
+  it("lê os vereditos ignorando prosa em volta", () => {
+    const verdicts = parseRehearsal(
+      [
+        "Segue minha análise:",
+        "CRITERION P1.T1.C1: OBSERVABLE — abro a migração e procuro a tabela",
+        "  CRITERION P1.T1.C2: UNSATISFIABLE — o projeto foi decidido sem dependências",
+      ].join("\n"),
+    );
+    expect(verdicts).toHaveLength(2);
+    expect(verdicts[1]?.ruling).toBe("UNSATISFIABLE");
+    expect(verdicts[1]?.reason).toContain("sem dependências");
+  });
+
+  it("o impossível bloqueia e o observável passa", () => {
+    const resultado = assessRehearsal(criteria, [
+      { address: "P1.T1.C1", ruling: "OBSERVABLE", reason: "" },
+      { address: "P1.T1.C2", ruling: "UNSATISFIABLE", reason: "não há dependências" },
+    ]);
+    expect(resultado.blocking).toHaveLength(1);
+    expect(resultado.blocking[0]?.criterion.address).toBe("P1.T1.C2");
+    expect(resultado.unrehearsed).toHaveLength(0);
+  });
+
+  it("critério sem linha vira não ensaiado, nunca aprovado", () => {
+    const resultado = assessRehearsal(criteria, [{ address: "P1.T1.C1", ruling: "OBSERVABLE", reason: "" }]);
+    expect(resultado.unrehearsed.map((criterion) => criterion.address)).toEqual(["P1.T1.C2"]);
+  });
+
+  it("critério que não nomeia observação também bloqueia", () => {
+    const resultado = assessRehearsal(criteria, [
+      { address: "P1.T1.C1", ruling: "UNOBSERVABLE", reason: "\"código limpo\" não é algo que se olhe" },
+      { address: "P1.T1.C2", ruling: "OBSERVABLE", reason: "" },
+    ]);
+    expect(resultado.blocking[0]?.ruling).toBe("UNOBSERVABLE");
   });
 });

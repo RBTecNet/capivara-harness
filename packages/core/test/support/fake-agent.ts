@@ -12,7 +12,9 @@ import type { AgentCall } from "../../src/init/index.js";
 
 export interface ScriptStep {
   match: { role?: string; stage?: string; subject?: string; attempt?: number };
-  respond: { stdout: string; exitCode?: number };
+  /** `stdout` como função quando a resposta depende do que foi perguntado —
+   *  o ensaio precisa devolver uma linha por endereço que recebeu. */
+  respond: { stdout: string | ((call: AgentCall) => string); exitCode?: number };
   /** Passo reutilizável. Útil para a rodada extra de entrevista, em que o
    *  modelo é consultado de novo para ver se as respostas abriram perguntas. */
   repeat?: boolean;
@@ -50,7 +52,10 @@ export function fakeAgent(steps: ScriptStep[]): FakeAgent {
       }
       if (steps[index]!.match.attempt === undefined && steps[index]!.repeat !== true) used.add(index);
       const respond = steps[index]!.respond;
-      return { stdout: respond.stdout, exitCode: respond.exitCode ?? 0 };
+      return {
+        stdout: typeof respond.stdout === "function" ? respond.stdout(call) : respond.stdout,
+        exitCode: respond.exitCode ?? 0,
+      };
     },
   };
   return agent;
@@ -212,6 +217,25 @@ export const PHASE_2 = `## Phase 2: Criar reserva
 `;
 
 /** O roteiro do caminho feliz: cenário B-01 do catálogo. */
+/** Endereços que o prompt do ensaio listou, na ordem em que apareceram. */
+export function rehearsedAddresses(prompt: string): string[] {
+  return [...prompt.matchAll(/^(P\d+\.T\d+\.C\d+) /gm)].map((match) => match[1] ?? "");
+}
+
+/** Ensaio que aprova tudo, respondendo a cada endereço que recebeu. */
+export function rehearsalApproves(): ScriptStep {
+  return {
+    match: { role: "verifier", stage: "verify" },
+    respond: {
+      stdout: (call) =>
+        rehearsedAddresses(call.prompt)
+          .map((address) => `CRITERION ${address}: OBSERVABLE — dá para abrir o arquivo e olhar`)
+          .join("\n"),
+    },
+    repeat: true,
+  };
+}
+
 export function happyPath(): ScriptStep[] {
   return [
     { match: { role: "writer", stage: "interview" }, respond: { stdout: NO_QUESTIONS }, repeat: true },
@@ -222,5 +246,6 @@ export function happyPath(): ScriptStep[] {
     { match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: PHASE_1 } },
     { match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 } },
     { match: { role: "auditor", stage: "audit" }, respond: { stdout: approve() }, repeat: true },
+    rehearsalApproves(),
   ];
 }

@@ -7,3 +7,5 @@ export { BUILDER_COMPLETE_MARKER, acceptancePrompt, fixPrompt, implementPrompt }
 export type { BuilderContext, FixContext } from "./builder.js";
 export { VERIFY_HEADER, parseVerification, verifyPrompt } from "./verifier.js";
 export type { TaskVerdict, VerifierContext } from "./verifier.js";
+export { REHEARSAL_HEADER, assessRehearsal, enumerateCriteria, parseRehearsal, rehearsalPrompt } from "./rehearsal.js";
+export type { CriterionRef, CriterionRuling, CriterionVerdict, RehearsalContext, RehearsalResult } from "./rehearsal.js";

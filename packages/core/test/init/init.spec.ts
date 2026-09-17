@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DOCUMENT_CHAIN, InitBlockedError, evaluateReadiness, inspectProject, resolveRequest, runInit, summarizeInventory } from "../../src/init/index.js";
 import { readEvents, runIdFor, runPaths } from "../../src/state/index.js";
-import { approve, fakeAgent, happyPath, oneQuestion, reject } from "../support/fake-agent.js";
+import { PHASE_1, PHASE_2, approve, fakeAgent, happyPath, oneQuestion, reject, rehearsedAddresses } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
 
 let projectRoot = "";
@@ -229,7 +229,82 @@ describe("gate de prontidão", () => {
     expect(readiness.checks.find((check) => check.id === "decisoes")?.passed).toBe(false);
   });
 
-  it("são exatamente oito verificações", () => {
-    expect(evaluateReadiness(base).checks).toHaveLength(8);
+  it("são exatamente nove verificações", () => {
+    expect(evaluateReadiness(base).checks).toHaveLength(9);
+  });
+
+  it("ensaio que não rodou não aprova por omissão", () => {
+    const readiness = evaluateReadiness(base);
+    expect(readiness.checks.find((check) => check.id === "ensaio")?.passed).toBe(false);
+  });
+
+  it("critério reprovado no ensaio aparece com endereço", () => {
+    const readiness = evaluateReadiness({
+      ...base,
+      rehearsal: { blocked: ["P5.T9.C1 · Verificar metadados — UNSATISFIABLE: o projeto não tem dependências"] },
+    });
+    const check = readiness.checks.find((item) => item.id === "ensaio");
+    expect(check?.passed).toBe(false);
+    expect(check?.detail).toContain("P5.T9.C1");
+  });
+});
+
+describe("ensaio do verificador", () => {
+  /** Reprova o primeiro critério de cada task 1 e aprova todo o resto. */
+  function rehearsalRejects(rounds: number): ScriptStep {
+    let round = 0;
+    return {
+      match: { role: "verifier", stage: "verify" },
+      respond: {
+        stdout: (call) => {
+          round += 1;
+          const alvo = round <= rounds;
+          return rehearsedAddresses(call.prompt)
+            .map((address, position) =>
+              alvo && position === 0
+                ? `CRITERION ${address}: UNSATISFIABLE — exige dependência fixada num projeto decidido sem dependências`
+                : `CRITERION ${address}: OBSERVABLE — dá para abrir o arquivo e olhar`,
+            )
+            .join("\n");
+        },
+      },
+      repeat: true,
+    };
+  }
+
+  /** O escritor devolve a mesma fase quando o ensaio manda reescrever. */
+  const reescreve: ScriptStep[] = [
+    { match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: PHASE_1 }, repeat: true },
+    { match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 }, repeat: true },
+  ];
+
+  it("critério impossível volta ao escritor antes de o build existir", async () => {
+    const steps = [...happyPath().filter((step) => step.match.role !== "verifier"), ...reescreve];
+    steps.push(rehearsalRejects(1));
+
+    const { outcome, agent } = await run(steps);
+    const reescrita = agent.calls.find((call) => call.stage === "authoring" && call.subject.startsWith("phase-") && call.attempt > 1);
+    expect(reescrita?.prompt).toContain("as decisões confirmadas negam");
+    expect(outcome.readiness.checks.find((check) => check.id === "ensaio")?.passed).toBe(true);
+  });
+
+  it("critério que sobrevive à reescrita bloqueia o RALPH READY com o endereço", async () => {
+    const steps = [...happyPath().filter((step) => step.match.role !== "verifier"), ...reescreve];
+    steps.push(rehearsalRejects(9));
+
+    const { outcome } = await run(steps);
+    expect(outcome.readiness.ready).toBe(false);
+    const check = outcome.readiness.checks.find((item) => item.id === "ensaio");
+    expect(check?.passed).toBe(false);
+    expect(check?.detail).toMatch(/P\d+\.T\d+\.C\d+/);
+    expect(check?.detail).toContain("UNSATISFIABLE");
+  });
+
+  it("critério sem veredito não passa por omissão", async () => {
+    const steps = happyPath().filter((step) => step.match.role !== "verifier");
+    steps.push({ match: { role: "verifier", stage: "verify" }, respond: { stdout: "achei tudo ótimo" }, repeat: true });
+
+    const { outcome } = await run(steps);
+    expect(outcome.readiness.checks.find((check) => check.id === "ensaio")?.detail).toContain("NÃO ENSAIADO");
   });
 });

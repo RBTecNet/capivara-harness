@@ -193,3 +193,72 @@ export function readTranscript(kind: TranscriptKind, stdout: string): Transcript
   if (kind === "opencode-jsonl") return parseOpencodeJsonl(stdout);
   return parseCodexJsonl(stdout);
 }
+
+/**
+ * Uma linha de evento vira uma linha de log legível.
+ *
+ * O que interessa a quem olha a tela é saber que ALGO está acontecendo e o quê,
+ * não reconstituir a sessão. Evento que não se reconhece devolve `null` e
+ * simplesmente não aparece — poluir a janela com JSON cru seria pior que o
+ * silêncio que isto veio resolver.
+ */
+export function summarizeCodexEvent(line: string): string | null {
+  const trimmed = line.trim();
+  if (trimmed === "" || !trimmed.startsWith("{")) return null;
+
+  let event: Record<string, unknown>;
+  try {
+    event = JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+
+  const tipo = typeof event["type"] === "string" ? (event["type"] as string) : "";
+  const item = event["item"] as Record<string, unknown> | undefined;
+  const itemType = typeof item?.["type"] === "string" ? (item["type"] as string) : "";
+
+  if (tipo === "thread.started") return "sessão aberta";
+  if (tipo === "turn.started") return "pensando";
+
+  if (itemType === "reasoning") return "raciocinando";
+  if (itemType === "command_execution" || itemType === "local_shell_call") {
+    const comando = primeiraLinha(item?.["command"]);
+    return comando ? `$ ${comando}` : "rodando um comando";
+  }
+  if (itemType === "file_change" || itemType === "patch_apply") return "alterando arquivo";
+  if (itemType === "web_search") return "buscando na web";
+  if (itemType === "agent_message") {
+    const texto = typeof item?.["text"] === "string" ? (item["text"] as string) : "";
+    return `resposta recebida (${texto.length} caracteres)`;
+  }
+
+  if (tipo === "turn.completed") {
+    const usage = event["usage"] as Record<string, unknown> | undefined;
+    const saida = inteiro(usage, "output_tokens");
+    return saida > 0 ? `turno concluído · ${saida} tokens de saída` : "turno concluído";
+  }
+  if (tipo === "turn.failed" || tipo === "error") return "o provider reportou erro";
+
+  return null;
+}
+
+function primeiraLinha(valor: unknown): string {
+  const texto = typeof valor === "string" ? valor : Array.isArray(valor) ? valor.join(" ") : "";
+  const linha = texto.split("\n")[0] ?? "";
+  return linha.length > 70 ? `${linha.slice(0, 69)}…` : linha;
+}
+
+/**
+ * Acumula pedaços e entrega linhas inteiras.
+ *
+ * Um chunk de stdout corta no meio de uma linha com frequência; entregar o
+ * pedaço partido ao parser produziria lixo ou silêncio.
+ */
+export function createLineSplitter(onLine: (line: string) => void): (chunk: string) => void {
+  let resto = "";
+  return (chunk) => {
+    const partes = `${resto}${chunk}`.split("\n");
+    resto = partes.pop() ?? "";
+    for (const parte of partes) onLine(parte);
+  };
+}

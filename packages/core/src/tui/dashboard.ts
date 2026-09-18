@@ -12,7 +12,7 @@
 
 import { paint, padVisible, truncatePath, truncateVisible, visibleWidth, type Style } from "./ansi.js";
 import { blockText } from "./blockfont.js";
-import { renderCapybara } from "./capybara.js";
+import { CAPYBARA_COLS, renderCapybara } from "./capybara.js";
 
 export type StepState = "concluído" | "em andamento" | "aguardando" | "falhou" | "pulado";
 
@@ -31,6 +31,20 @@ export interface DashboardEvent {
   text: string;
 }
 
+/**
+ * O que está acontecendo AGORA.
+ *
+ * Sem isto, o painel parado e o painel trabalhando são idênticos, e quem olha
+ * não sabe se deve responder alguma coisa, esperar, ou se o processo morreu.
+ * `since` é o que permite dizer há quanto tempo — um número que anda é a prova
+ * de vida mais barata que existe.
+ */
+export interface Activity {
+  kind: "modelo" | "você" | "parado";
+  detail: string;
+  sinceSeconds: number;
+}
+
 export interface DashboardModel {
   version: string;
   /** `init` ou `build`; nomeia a linha de subtítulo e o workflow. */
@@ -44,6 +58,10 @@ export interface DashboardModel {
   provider: { perfil: string; transporte: string; contabilidade: string };
   telemetry: Metric[];
   events: DashboardEvent[];
+  activity: Activity;
+  /** Gira enquanto há trabalho; é o batimento visível do painel. */
+  frame?: number;
+  roles?: { role: string; provider: string; model: string }[];
   width?: number;
   style: Style;
   environment?: NodeJS.ProcessEnv;
@@ -65,12 +83,23 @@ const TONE: Record<StepState, "green" | "yellow" | "gray" | "red"> = {
   pulado: "gray",
 };
 
-const MIN_WIDTH = 72;
-const DEFAULT_WIDTH = 110;
+/**
+ * Abaixo disso não há painel que caiba; acima, ele acompanha o terminal.
+ *
+ * O teto fixo de 110 colunas fazia o painel ficar encolhido num terminal largo e
+ * cortar a informação mais útil — a etapa atual — enquanto sobrava espaço vazio
+ * à direita. A largura é recalculada a cada desenho, então redimensionar a
+ * janela ajusta o painel na repintura seguinte.
+ */
+const MIN_WIDTH = 60;
+const DEFAULT_WIDTH = 100;
 
 export function dashboardWidth(model: DashboardModel): number {
   return Math.max(MIN_WIDTH, model.width ?? DEFAULT_WIDTH);
 }
+
+/** Quando o terminal é estreito, as colunas viram linhas em vez de sumirem. */
+const NARROW = 80;
 
 function duration(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
@@ -93,6 +122,15 @@ function box(title: string, body: string[], width: number, style: Style): string
 /** Campos lado a lado, separados por barra pontilhada. */
 function columns(fields: { label: string; value: string; path?: boolean }[], width: number, style: Style): string[] {
   const inner = width - 2;
+
+  // Num terminal estreito, dividir em colunas só produz reticências. Empilhar
+  // preserva o conteúdo, que é o ponto do painel.
+  if (width < NARROW) {
+    return fields.map(
+      (field) => `${paint(padVisible(truncateVisible(field.label, 14), 15), "cyan", style)}${truncateVisible(field.value, inner - 15)}`,
+    );
+  }
+
   const cell = Math.floor((inner - (fields.length - 1) * 3) / fields.length);
   const labels = fields.map((field) => padVisible(paint(truncateVisible(field.label, cell), "cyan", style), cell));
   const values = fields.map((field) =>
@@ -102,21 +140,61 @@ function columns(fields: { label: string; value: string; path?: boolean }[], wid
   return [labels.join(separator), values.join(separator)];
 }
 
+/** Um pulso, não uma animação: o que importa é mudar de quadro. */
+const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
+
+const ACTIVITY_TONE: Record<Activity["kind"], "yellow" | "cyan" | "red"> = {
+  modelo: "yellow",
+  "você": "cyan",
+  parado: "red",
+};
+
+function activityLine(model: DashboardModel): string {
+  const { activity, style } = model;
+  const tempo = duration(activity.sinceSeconds);
+
+  if (activity.kind === "você") {
+    return paint(`▸ aguardando sua resposta — há ${tempo}`, "cyan", style);
+  }
+  if (activity.kind === "parado") {
+    return paint(`✗ parado — ${activity.detail}`, "red", style);
+  }
+
+  const pulso = SPINNER[(model.frame ?? 0) % SPINNER.length] ?? "⠋";
+  const detalhe = activity.detail === "" ? "" : ` ${activity.detail}`;
+  return paint(`${pulso}${detalhe} — há ${tempo} nesta chamada`, ACTIVITY_TONE.modelo, style);
+}
+
 export function renderDashboard(model: DashboardModel): string {
   const width = dashboardWidth(model);
   const { style } = model;
   const lines: string[] = [];
 
-  // Cabeçalho: título em blocos à esquerda, capivara à direita.
-  const title = blockText("CAPIVARA").map((line) => paint(line, "cyan", style));
-  const mascot = renderCapybara({ style, ...(model.environment !== undefined ? { environment: model.environment } : {}) });
+  /*
+   * Cabeçalho: título em blocos à esquerda, capivara à direita — quando cabem.
+   *
+   * Num terminal estreito os dois juntos passam da largura e o painel inteiro
+   * vaza. A capivara é a primeira a sair, depois o título em blocos; o nome do
+   * produto em texto simples cabe em qualquer lugar.
+   */
   const titleWidth = Math.max(...blockText("CAPIVARA").map((line) => line.length));
-  const gap = Math.max(2, width - titleWidth - 40 - 2);
+  const cabeCapivara = width >= titleWidth + CAPYBARA_COLS + 4;
+  const cabeTitulo = width >= titleWidth + 2;
 
-  const header = Math.max(title.length, mascot.length);
-  for (let row = 0; row < header; row += 1) {
-    const left = padVisible(title[row] ?? "", titleWidth);
-    lines.push(`${left}${" ".repeat(gap)}${mascot[row] ?? ""}`.replace(/\s+$/, ""));
+  if (cabeTitulo) {
+    const title = blockText("CAPIVARA").map((line) => paint(line, "cyan", style));
+    const mascot = cabeCapivara
+      ? renderCapybara({ style, ...(model.environment !== undefined ? { environment: model.environment } : {}) })
+      : [];
+    const gap = cabeCapivara ? Math.max(2, width - titleWidth - CAPYBARA_COLS - 2) : 0;
+
+    const header = Math.max(title.length, mascot.length);
+    for (let row = 0; row < header; row += 1) {
+      const left = padVisible(title[row] ?? "", titleWidth);
+      lines.push(truncateVisible(`${left}${" ".repeat(gap)}${mascot[row] ?? ""}`.replace(/\s+$/, ""), width));
+    }
+  } else {
+    lines.push(paint("capivara", "cyan", style));
   }
 
   lines.push("");
@@ -152,6 +230,7 @@ export function renderDashboard(model: DashboardModel): string {
         ),
         "",
         `${paint(padVisible("ETAPA ATUAL", 16), "cyan", style)}${model.stage}`,
+        `${paint(padVisible("AGORA", 16), "cyan", style)}${activityLine(model)}`,
       ],
       width,
       style,
@@ -176,7 +255,12 @@ export function renderDashboard(model: DashboardModel): string {
     ...box(
       "PROVEDOR ATUAL",
       [
-        `${paint(padVisible("perfil", 16), "cyan", style)}${model.provider.perfil}`,
+        ...(model.roles === undefined
+          ? [`${paint(padVisible("perfil", 16), "cyan", style)}${model.provider.perfil}`]
+          : model.roles.map(
+              (role) =>
+                `${paint(padVisible(role.role, 16), "cyan", style)}${role.provider || "não configurado"}${role.model ? `/${role.model}` : ""}`,
+            )),
         `${paint(padVisible("transporte", 16), "cyan", style)}${model.provider.transporte}`,
         `${paint(padVisible("contabilidade", 16), "cyan", style)}${model.provider.contabilidade}`,
       ],
@@ -192,8 +276,8 @@ export function renderDashboard(model: DashboardModel): string {
   if (model.events.length > 0) {
     lines.push(
       ...box(
-        "EVENTOS RECENTES",
-        model.events.slice(-6).map((event) => `${paint(`[${event.time}]`, "gray", style)} ${event.text}`),
+        "O QUE ESTÁ ACONTECENDO",
+        model.events.slice(-10).map((event) => `${paint(`[${event.time}]`, "gray", style)} ${event.text}`),
         width,
         style,
       ),
@@ -201,7 +285,14 @@ export function renderDashboard(model: DashboardModel): string {
   }
 
   lines.push("");
-  lines.push(paint("Ctrl-C interrompe com estado retomável · segredos nunca entram neste painel", "gray", style));
+  // O rodapé também cabe: num terminal estreito ele vira a metade que importa.
+  lines.push(
+    paint(
+      width < NARROW ? "Ctrl-C interrompe com estado retomável" : "Ctrl-C interrompe com estado retomável · segredos nunca entram neste painel",
+      "gray",
+      style,
+    ),
+  );
 
   return lines.join("\n");
 }

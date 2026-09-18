@@ -45,6 +45,14 @@ export interface RunOptions {
   prompt: string;
   limits: SupervisorLimits;
   signal?: AbortSignal;
+  /**
+   * Cada pedaço de saída, na hora em que chega.
+   *
+   * Sem isto, tudo o que a CLI conta enquanto trabalha só existe depois que ela
+   * termina — e uma chamada de dez minutos fica indistinguível de um travamento.
+   * Quem recebe decide o que fazer; o supervisor continua acumulando igual.
+   */
+  onOutput?: (chunk: string, stream: "out" | "err") => void;
 }
 
 /** Mata o grupo de processos; cai no pid isolado quando o grupo não existe. */
@@ -126,6 +134,12 @@ export async function runProvider(options: RunOptions): Promise<RunResult> {
   const absorb = (chunk: Buffer, into: "out" | "err"): void => {
     if (firstOutputMilliseconds === null) firstOutputMilliseconds = Date.now() - startedAt;
     armIdle();
+    // Nunca deixa um observador derrubar a chamada que ele só queria assistir.
+    try {
+      options.onOutput?.(chunk.toString("utf8"), into);
+    } catch {
+      /* observador quebrado não é problema do processo observado */
+    }
     bytes += chunk.length;
     if (bytes > limits.maxOutputBytes) {
       truncated = true;

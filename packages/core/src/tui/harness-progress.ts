@@ -11,7 +11,7 @@
  */
 
 import { DOCUMENT_CHAIN_LABELS } from "./labels.js";
-import type { DashboardModel, DashboardEvent, PipelineStep, StepState } from "./dashboard.js";
+import type { Activity, DashboardModel, DashboardEvent, PipelineStep, StepState } from "./dashboard.js";
 import type { Style } from "./ansi.js";
 
 export interface ProgressEvent {
@@ -25,6 +25,7 @@ export interface ProgressEvent {
 export interface HarnessProgressOptions {
   version: string;
   project: string;
+  roles?: { role: string; provider: string; model: string }[];
   provider: { perfil: string; transporte: string; contabilidade: string };
   style: Style;
   width?: number;
@@ -52,6 +53,12 @@ export class HarnessProgress {
 
   private etapa = "preflight";
   private situacao: { label: string; state: StepState } = { label: "iniciando", state: "em andamento" };
+  private atividade: { kind: Activity["kind"]; detail: string; desde: number } = {
+    kind: "modelo",
+    detail: "preparando",
+    desde: Date.now(),
+  };
+  private quadro = 0;
   private chamadas = 0;
   private entrada = 0;
   private saida = 0;
@@ -83,6 +90,26 @@ export class HarnessProgress {
     if (event.status === "blocked") this.situacao = { label: "bloqueado", state: "falhou" };
     else if (event.stage === "ready" && event.status === "complete") this.situacao = { label: "RALPH READY", state: "concluído" };
     else this.situacao = { label: "em andamento", state: "em andamento" };
+  }
+
+  /** Chamando o provider: é a espera mais longa e a que mais parece travamento. */
+  beginCall(detail: string): void {
+    this.atividade = { kind: "modelo", detail, desde: this.now().getTime() };
+  }
+
+  /** A vez é do desenvolvedor: a tela precisa dizer isso com todas as letras. */
+  waitingForDeveloper(): void {
+    this.atividade = { kind: "você", detail: "", desde: this.now().getTime() };
+  }
+
+  /** Parou, e por quê. */
+  halted(detail: string): void {
+    this.atividade = { kind: "parado", detail, desde: this.now().getTime() };
+  }
+
+  /** Avança o pulso. Quadro que muda é prova de vida; número parado não é. */
+  tick(): void {
+    this.quadro += 1;
   }
 
   /** Uma linha para o log visível. Mantém só as últimas; painel não é histórico. */
@@ -126,6 +153,13 @@ export class HarnessProgress {
         { label: "DEVOLUÇÕES", value: String(this.correcoes) },
       ],
       events: [...this.linhas],
+      activity: {
+        kind: this.atividade.kind,
+        detail: this.atividade.detail,
+        sinceSeconds: Math.max(0, Math.round((this.now().getTime() - this.atividade.desde) / 1000)),
+      },
+      frame: this.quadro,
+      ...(this.options.roles !== undefined ? { roles: this.options.roles } : {}),
       style: this.options.style,
       ...(this.options.width !== undefined ? { width: this.options.width } : {}),
       ...(this.options.environment !== undefined ? { environment: this.options.environment } : {}),

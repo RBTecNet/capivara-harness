@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises";
+import { resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { Command } from "commander";
@@ -98,8 +99,13 @@ export function createProgram(): Command {
     const language = detectLanguage(request.text, flags.language);
     const roles = configured;
 
-    // O init não constrói nada: mostrar o executor aqui só confunde quem lê.
-    if (flags.splash !== false) {
+    /*
+     * Com o painel ligado, o splash seria um segundo cabeçalho: o painel já traz
+     * o mesmo título, a mesma capivara e os mesmos papéis. Sem painel — saída
+     * para arquivo, pipe, CI — ele continua sendo a abertura.
+     */
+    const comPainel = flags.dashboard !== false && stdout.isTTY === true;
+    if (flags.splash !== false && !comPainel) {
       const papeis = describeRoles(roles).filter((role) => (INIT_ROLES as readonly string[]).includes(role.role));
       stdout.write(renderSplash({ version: VERSION, roles: papeis, style: style() }));
     }
@@ -115,18 +121,29 @@ export function createProgram(): Command {
      */
     const progress = new HarnessProgress({
       version: VERSION,
-      project: projectRoot,
+      project: resolve(projectRoot),
+      roles: describeRoles(roles).filter((role) => (INIT_ROLES as readonly string[]).includes(role.role)),
       provider: {
         perfil: `${roles.writer.provider}${roles.writer.model ? `:${roles.writer.model}` : ""}`,
         transporte: `${roles.writer.provider}-cli`,
         contabilidade: "por chamada",
       },
       style: style(),
-      ...(stdout.columns ? { width: Math.min(stdout.columns, 110) } : {}),
       environment: process.env,
     });
-    const live = createLiveRegion((text) => void stdout.write(text), flags.dashboard !== false && stdout.isTTY === true);
-    const repaint = (): void => live.draw(renderDashboard(progress.model()));
+
+    const live = createLiveRegion((text) => void stdout.write(text), comPainel);
+
+    // A largura é lida a cada desenho: redimensionar a janela ajusta o painel na
+    // repintura seguinte, sem precisar ouvir evento de resize.
+    const desenhar = (): string => renderDashboard({ ...progress.model(), ...(stdout.columns ? { width: stdout.columns } : {}) });
+    const repaint = (): void => live.draw(desenhar());
+
+    // O pulso é o que separa "trabalhando" de "morto" na tela.
+    live.beat(() => {
+      progress.tick();
+      return desenhar();
+    });
 
     try {
       const outcome = await runInit({
@@ -147,7 +164,20 @@ export function createProgram(): Command {
           repaint();
         },
         call: async (call) => {
-          const response = await bridge({ role: call.role, stage: call.stage, prompt: call.prompt });
+          const quem = `${call.role} · ${call.subject.replace(/\.md$/, "")}`;
+          progress.beginCall(quem);
+          repaint();
+          const response = await bridge({
+            role: call.role,
+            stage: call.stage,
+            prompt: call.prompt,
+            // A janela de log recebe o que a CLI conta enquanto trabalha; sem
+            // isso o terminal fica com cara de travado durante minutos.
+            onActivity: (line) => {
+              progress.note(`${quem}: ${line}`);
+              repaint();
+            },
+          });
           progress.charge(response.usage);
           repaint();
           return {
@@ -165,8 +195,11 @@ export function createProgram(): Command {
           };
         },
         ask: async (question, index, total) => {
-          // A pergunta é dona da tela enquanto durar: o painel solta a região e
-          // o que estava desenhado vira histórico acima dela.
+          // A pergunta é dona da tela enquanto durar: o painel diz que a vez é
+          // do desenvolvedor, solta a região, e o que estava desenhado vira
+          // histórico logo acima da pergunta.
+          progress.waitingForDeveloper();
+          repaint();
           live.release();
           stdout.write(renderQuestion({ question, index, total, document: "entrevista", style: style() }));
           const answer = await terminal.question("> ");
@@ -181,6 +214,8 @@ export function createProgram(): Command {
         ...(stdin.isTTY === true
           ? {
               decideStandoff: async (rendered: string) => {
+                progress.waitingForDeveloper();
+                repaint();
                 live.release();
                 stdout.write(`\n${rendered}\n`);
                 return terminal.question('> (responda, ou "publicar" para aceitar como está) ');
@@ -202,6 +237,8 @@ export function createProgram(): Command {
       process.exitCode = outcome.readiness.ready ? 0 : 2;
     } catch (error) {
       if (error instanceof InitBlockedError) {
+        progress.halted(error.message.split("\n")[0] ?? "");
+        repaint();
         live.release();
         stdout.write(`\n${error.message}\n`);
         process.exitCode = 2;

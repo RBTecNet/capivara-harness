@@ -111,6 +111,71 @@ describe("painel do harness", () => {
   });
 });
 
+describe("o painel diz o que está acontecendo agora", () => {
+  it("chamando o provider, mostra o que está sendo feito e há quanto tempo", () => {
+    let agora = new Date("2026-09-18T03:00:00Z");
+    const p = new HarnessProgress({
+      version: "0.1.0",
+      project: "/p",
+      provider: { perfil: "codex", transporte: "codex-cli", contabilidade: "por chamada" },
+      style: plain,
+      environment: {},
+      now: () => agora,
+    });
+
+    p.beginCall("writer · project-phases");
+    agora = new Date("2026-09-18T03:00:47Z");
+
+    const view = renderDashboard(p.model());
+    expect(view).toContain("writer · project-phases");
+    expect(view).toContain("0m 47s nesta chamada");
+  });
+
+  it("esperando o desenvolvedor, diz isso com todas as letras", () => {
+    const p = progresso();
+    p.waitingForDeveloper();
+    expect(renderDashboard(p.model())).toContain("aguardando sua resposta");
+  });
+
+  it("parado, diz o motivo em vez de parecer vivo", () => {
+    const p = progresso();
+    p.halted("impasse em project-phases.md");
+    const view = renderDashboard(p.model());
+    expect(view).toContain("parado");
+    expect(view).toContain("impasse em project-phases.md");
+  });
+
+  it("o quadro do pulso muda a cada tick: é a prova de vida", () => {
+    const p = progresso();
+    p.beginCall("escrevendo");
+    const antes = renderDashboard(p.model());
+    p.tick();
+    expect(renderDashboard(p.model())).not.toBe(antes);
+  });
+
+  it("documento reaproveitado aparece concluído, não aguardando", () => {
+    const p = progresso();
+    p.apply(evento({ stage: "publish", status: "complete", detail: "reaproveitado deste run" }));
+    expect(p.model().pipeline[0]?.state).toBe("concluído");
+  });
+});
+
+describe("largura", () => {
+  it("acompanha o terminal em vez de parar num teto fixo", () => {
+    const p = progresso();
+    const largo = renderDashboard({ ...p.model(), width: 160 });
+    expect(Math.max(...largo.split("\n").map((line) => line.length))).toBeGreaterThan(120);
+  });
+
+  it("em terminal estreito, as colunas empilham em vez de virar reticências", () => {
+    const p = progresso();
+    const estreito = renderDashboard({ ...p.model(), width: 64 });
+    for (const line of estreito.split("\n")) expect(line.length).toBeLessThanOrEqual(64);
+    expect(estreito).toContain("DURAÇÃO");
+    expect(estreito).toContain("STATUS");
+  });
+});
+
 describe("região viva", () => {
   it("sem terminal, não escreve nada — o log continua sendo a saída", () => {
     const escrito: string[] = [];

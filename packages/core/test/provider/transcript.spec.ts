@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { buildInvocation, parseClaudeJson, parseCodexJsonl, parseOpencodeJsonl, readTranscript } from "../../src/provider/index.js";
+import {
+  buildInvocation,
+  createLineSplitter,
+  parseClaudeJson,
+  parseCodexJsonl,
+  parseOpencodeJsonl,
+  readTranscript,
+  summarizeCodexEvent,
+} from "../../src/provider/index.js";
 
 const transcrito = [
   '{"type":"thread.started","thread_id":"01a0"}',
@@ -153,5 +161,37 @@ describe("cada provider lê o seu próprio formato", () => {
     expect(readTranscript("claude-json", CLAUDE).text).toBe("# Documento\n\ncorpo");
     expect(readTranscript("opencode-jsonl", OPENCODE).text).toBe("# Documento\n\ncorpo");
     expect(readTranscript("codex-jsonl", transcrito).text).toBe("# Documento\n\ncorpo");
+  });
+});
+
+describe("janela de log ao vivo", () => {
+  it("traduz o evento em uma linha legível", () => {
+    expect(summarizeCodexEvent('{"type":"thread.started","thread_id":"x"}')).toBe("sessão aberta");
+    expect(summarizeCodexEvent('{"type":"turn.started"}')).toBe("pensando");
+    expect(summarizeCodexEvent('{"type":"item.completed","item":{"type":"reasoning"}}')).toBe("raciocinando");
+  });
+
+  it("comando aparece com o que foi rodado", () => {
+    const linha = summarizeCodexEvent('{"type":"item.completed","item":{"type":"command_execution","command":"ls -la src"}}');
+    expect(linha).toBe("$ ls -la src");
+  });
+
+  it("evento desconhecido não polui a janela com JSON cru", () => {
+    expect(summarizeCodexEvent('{"type":"algo.que.nao.conheco","payload":{"a":1}}')).toBeNull();
+    expect(summarizeCodexEvent("isto não é json")).toBeNull();
+    expect(summarizeCodexEvent("")).toBeNull();
+  });
+
+  it("o fim do turno traz os tokens de saída", () => {
+    const linha = summarizeCodexEvent('{"type":"turn.completed","usage":{"output_tokens":612}}');
+    expect(linha).toContain("612 tokens");
+  });
+
+  it("linha partida entre pedaços não vira lixo nem some", () => {
+    const recebidas: string[] = [];
+    const alimentar = createLineSplitter((line) => void recebidas.push(line));
+    alimentar('{"type":"turn.st');
+    alimentar('arted"}\n{"type":"thread.started"}\n');
+    expect(recebidas).toEqual(['{"type":"turn.started"}', '{"type":"thread.started"}']);
   });
 });

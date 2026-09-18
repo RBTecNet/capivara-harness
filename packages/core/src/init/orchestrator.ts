@@ -290,6 +290,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           allAnswers.push(...handoff.answers.map((answer) => ({ ...answer, questionId: scoped(document, answer.questionId) })));
           allQuestions.push(...handoff.questions.map((question) => ({ ...question, id: scoped(document, question.id) })));
         }
+        // Publicado é publicado: sem este evento, o painel mostra "aguardando"
+        // um documento que está pronto em disco desde a tentativa anterior.
+        await event("publish", document, "complete", "reaproveitado deste run");
         announce(`— ${document} (reaproveitado deste run; --fresh recomeça do zero)`);
         continue;
       }

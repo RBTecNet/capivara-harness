@@ -158,6 +158,7 @@ describe("dashboard", () => {
       { time: "10:21:05", text: "fase P01 concluída" },
       { time: "10:22:41", text: "gate 2 vermelho" },
     ],
+    activity: { kind: "modelo" as const, detail: "escrevendo project-phases", sinceSeconds: 42 },
     style: plain,
     environment: {} as NodeJS.ProcessEnv,
   };

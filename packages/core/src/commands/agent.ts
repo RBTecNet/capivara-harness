@@ -6,7 +6,15 @@
  * sem tocar em provider real, e o que mantém o custo do desenvolvimento honesto.
  */
 
-import { buildInvocation, readCredentials, readTranscript, runProvider, selectCredential } from "../provider/index.js";
+import {
+  buildInvocation,
+  createLineSplitter,
+  readCredentials,
+  readTranscript,
+  runProvider,
+  selectCredential,
+  summarizeCodexEvent,
+} from "../provider/index.js";
 import type { RoleConfig, RoleName, SupervisorLimits, TokenUsage } from "../provider/index.js";
 
 export interface AgentBridgeOptions {
@@ -24,6 +32,8 @@ export interface BridgeRequest {
   role: RoleName;
   stage: string;
   prompt: string;
+  /** Uma linha por acontecimento, enquanto a chamada acontece. */
+  onActivity?: (line: string) => void;
 }
 
 export interface BridgeResponse {
@@ -50,7 +60,25 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
       ...(credential ? { secret: credential.secret } : {}),
     });
 
-    const result = await runProvider({ invocation, prompt: request.prompt, limits: options.limits });
+    /*
+     * A atividade é transmitida enquanto a chamada corre, não no fim. Só faz
+     * sentido para CLI que fala em eventos; para as demais, não há o que contar
+     * antes do resultado.
+     */
+    const observador =
+      request.onActivity && invocation.transcript === "codex-jsonl"
+        ? createLineSplitter((line) => {
+            const resumo = summarizeCodexEvent(line);
+            if (resumo) request.onActivity?.(resumo);
+          })
+        : null;
+
+    const result = await runProvider({
+      invocation,
+      prompt: request.prompt,
+      limits: options.limits,
+      ...(observador ? { onOutput: (chunk: string, stream: "out" | "err") => stream === "out" && observador(chunk) } : {}),
+    });
 
     // O transcrito é lido aqui para que os orquestradores continuem recebendo
     // texto: quem chama não precisa saber que a CLI fala em eventos.

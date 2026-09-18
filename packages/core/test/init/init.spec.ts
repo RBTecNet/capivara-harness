@@ -318,6 +318,22 @@ describe("retomada", () => {
     expect(outcome.report.checkpoint.decisions).toHaveLength(1);
   });
 
+  it("plano publicado que não passa mais nas verificações é reescrito, não reaproveitado", async () => {
+    /*
+     * É a situação do piloto 3: um plano publicado por uma versão anterior, que
+     * o gate reprova. Reaproveitá-lo devolveria o mesmo NOT READY para sempre.
+     */
+    await run(happyPath());
+
+    const plano = join(projectRoot, ".capivara", "init", "project-phases.md");
+    const publicado = await readFile(plano, "utf8");
+    await writeFile(plano, publicado.replace(/\*\*Traces:\*\* .*/g, "**Traces:** nada"), "utf8");
+
+    const { agent, anunciado } = await run(happyPath());
+    expect(anunciado).toContain("não passa mais nas verificações mecânicas");
+    expect(agent.calls.some((call) => call.subject === "phase-p01")).toBe(true);
+  });
+
   it("--fresh ignora tudo e recomeça", async () => {
     const primeiro = happyPath();
     primeiro.unshift({ match: { role: "writer", stage: "authoring", subject: "user-stories.md" }, respond: { stdout: "", exitCode: 124 }, repeat: true });

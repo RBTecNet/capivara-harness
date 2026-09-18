@@ -238,7 +238,21 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     if (jaPublicados.has(document)) {
       const conteudo = await readFile(join(artifactPaths(options.projectRoot).init, document), "utf8").catch(() => "");
       const handoff = await readHandoff(options.projectRoot, runId, document);
-      if (conteudo.trim() !== "") {
+
+      /*
+       * Reaproveita o que continua válido, refaz o que não está.
+       *
+       * O plano é o único documento com verificação mecânica, e reaproveitá-lo
+       * sem conferir transformaria a retomada numa armadilha: o piloto 3 saiu
+       * NOT READY por cobertura, e repetir o comando devolveria o mesmo plano
+       * defeituoso e o mesmo NOT READY, para sempre.
+       */
+      const aindaValido = document !== "project-phases.md" || planoAindaValido(conteudo);
+      if (!aindaValido) {
+        announce(`— ${document} foi reescrito: o que estava publicado não passa mais nas verificações mecânicas`);
+      }
+
+      if (conteudo.trim() !== "" && aindaValido) {
         published[document] = conteudo;
         approved.push(document);
         // As decisões precisam descer a cadeia: um documento reaproveitado sem
@@ -649,6 +663,14 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * não é falta de informação: é uma decisão que ninguém quer tomar agora, e o
    * gate de prontidão é o lugar certo para isso aparecer.
    */
+  /** Um plano publicado só vale a retomada se ainda passa no que é conferível. */
+  function planoAindaValido(conteudo: string): boolean {
+    const parsed = parsePhases(conteudo);
+    if (!parsed.ok) return false;
+    if (checkCoverage(parsed.document, coberturaAtual()).length > 0) return false;
+    return checkDesignRefs(parsed.document, artifactPaths(options.projectRoot).design, (caminho) => existsSync(caminho)).length === 0;
+  }
+
   /** As fontes de cobertura a partir do que já foi publicado nesta cadeia. */
   function coberturaAtual(): CoverageSources {
     return {

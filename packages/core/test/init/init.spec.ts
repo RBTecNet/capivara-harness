@@ -399,6 +399,40 @@ describe("retomada", () => {
   });
 });
 
+describe("o canal de suposição", () => {
+  it("o que o escritor supõe não vira pergunta, e aparece no relatório", async () => {
+    // 47 perguntas em três documentos, incluindo quais hexadecimais usar numa
+    // paleta: sem canal para supor, tudo o que não estava decidido virava
+    // pergunta.
+    const comSuposicao = JSON.stringify({
+      contract: "capivara-questions/v1",
+      assumptions: [
+        { topic: "Paleta", statement: "seis cores fixas em hexadecimal", basis: "cor de etiqueta não muda comportamento observável" },
+      ],
+      questions: [],
+    });
+
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 },
+      respond: { stdout: comSuposicao },
+    });
+
+    const { outcome, agent, anunciado } = await run(steps);
+    expect(anunciado).toContain("suposição(ões) registrada(s)");
+    expect(outcome.report.checkpoint.assumptions.map((item) => item.statement)).toContain("seis cores fixas em hexadecimal");
+
+    // E o escritor do documento seguinte trabalha sabendo do que foi suposto.
+    const escrita = agent.calls.find((call) => call.stage === "authoring" && call.subject === "user-stories.md");
+    expect(escrita?.prompt).toContain("seis cores fixas em hexadecimal");
+  });
+
+  it("lote sem o campo continua válido: suposição é opcional", async () => {
+    const { outcome } = await run(happyPath());
+    expect(outcome.readiness.ready).toBe(true);
+  });
+});
+
 describe("resposta de gap sobrevive ao run", () => {
   it("decisão tomada na rodada de gaps fica gravada onde a retomada lê", async () => {
     // O piloto 3 decidiu a stack numa rodada de gaps e, ao regenerar os

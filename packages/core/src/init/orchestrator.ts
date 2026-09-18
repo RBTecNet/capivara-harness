@@ -19,7 +19,7 @@ import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
-import type { Answer, Question } from "../interview/index.js";
+import type { Answer, Assumption, Question } from "../interview/index.js";
 import { amendPhasePrompt, assessRehearsal, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, gapPrompt, interviewPrompt, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
 import type { AskedQuestion, CriterionRef, DocumentName, RehearsalResult, WriterContext } from "../prompts/index.js";
 import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEvents, runIdFor, runPaths, writeRunState } from "../state/index.js";
@@ -259,6 +259,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const approved: ChainDocument[] = [];
   const allAnswers: Answer[] = [];
   const allQuestions: Question[] = [];
+  /** Suposições que o escritor registrou em vez de perguntar; o relatório as mostra. */
+  const allAssumptions: Assumption[] = [];
   const remarks: { document: string; remark: Remark }[] = [];
   /** Ausente até o ensaio rodar; o gate trata ausência como reprovação. */
   let rehearsal: { blocked: string[] } | undefined;
@@ -341,7 +343,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       language: options.language,
       request: options.request.text,
       decisions: allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision),
-      assumptions: [],
+      assumptions: allAssumptions.map((assumption) => `${assumption.topic}: ${assumption.statement} (${assumption.basis})`),
       upstream,
       ...(stampFor(document, published) !== null ? { stamp: stampFor(document, published) as string } : {}),
     };
@@ -382,6 +384,21 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       questions.push(...retomado.questions);
       answers.push(...retomado.answers);
       announce(`  ${retomado.answers.length} resposta(s) retomada(s) de ${document}; não vou perguntar de novo`);
+
+      /*
+       * Tudo respondido não precisa de levantamento.
+       *
+       * O piloto 3 pagou 4,5 minutos de modelo para perguntar o que perguntar,
+       * duas vezes no mesmo documento, com as 24 respostas já em mãos — e o lote
+       * que voltou foi inteiro deduplicado contra elas. A convergência é
+       * verificável antes da chamada; verificá-la depois é pagar para descobrir
+       * o que já se sabia.
+       */
+      const jaConvergiu = planRound({ round: 1, questions, answers, assumptions: [], maxRounds: maxInterviewRounds });
+      if (jaConvergiu.converged || jaConvergiu.ask.length === 0) {
+        await event("interview", document, "complete", `${answers.length} resposta(s) retomada(s)`);
+        return { questions, answers };
+      }
     }
 
     for (let round = 1; round <= maxInterviewRounds; round += 1) {
@@ -440,6 +457,12 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }
 
       for (const question of batch.questions) if (!questions.some((entry) => entry.id === question.id)) questions.push(question);
+      for (const assumption of batch.assumptions) {
+        if (!allAssumptions.some((entry) => entry.statement === assumption.statement)) allAssumptions.push(assumption);
+      }
+      if (batch.assumptions.length > 0) {
+        announce(`  ${batch.assumptions.length} suposição(ões) registrada(s) em vez de perguntar; estão no relatório`);
+      }
 
       const plan = planRound({ round, questions, answers, assumptions: [], maxRounds: maxInterviewRounds });
       if (plan.converged || plan.ask.length === 0) break;
@@ -878,7 +901,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       language: options.language,
       request: options.request.text,
       decisions: allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision),
-      assumptions: [],
+      assumptions: allAssumptions.map((assumption) => `${assumption.topic}: ${assumption.statement} (${assumption.basis})`),
       upstream,
     };
   }
@@ -1576,7 +1599,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     tasks,
     mvpCutPhase: parsedPhases.ok ? parsedPhases.document.phases.length : 0,
     coverage: { stories: coverage.storyIds.length, entities: coverage.entities.length, workflows: coverage.workflows.length },
-    checkpoint: buildCheckpoint({ round: maxInterviewRounds, questions: allQuestions, answers: allAnswers, assumptions: [], maxRounds: maxInterviewRounds }),
+    checkpoint: buildCheckpoint({ round: maxInterviewRounds, questions: allQuestions, answers: allAnswers, assumptions: allAssumptions, maxRounds: maxInterviewRounds }),
     remarks,
     costs: [...costs.values()],
     readiness,

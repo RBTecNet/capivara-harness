@@ -7,7 +7,7 @@
  * entrevista e um interrogatório.
  */
 
-import { QUESTIONS_CONTRACT, type Question, type QuestionOption } from "./types.js";
+import { QUESTIONS_CONTRACT, type Assumption, type Question, type QuestionOption } from "./types.js";
 
 export interface QuestionDefect {
   index: number;
@@ -17,7 +17,7 @@ export interface QuestionDefect {
 }
 
 export type QuestionBatch =
-  | { ok: true; questions: Question[] }
+  | { ok: true; questions: Question[]; assumptions: Assumption[] }
   | { ok: false; defects: QuestionDefect[] };
 
 const ID = /^Q-\d{2,}$/;
@@ -104,7 +104,27 @@ export function parseQuestionBatch(source: string): QuestionBatch {
     questions.push(question);
   });
 
-  return defects.length > 0 ? { ok: false, defects } : { ok: true, questions };
+  /*
+   * A suposição precisa de um canal.
+   *
+   * O prompt sempre mandou "registre uma suposição de baixo risco em vez de
+   * perguntar", e o contrato só aceitava perguntas — então tudo virava pergunta.
+   * O piloto 3 chegou a 47 perguntas em três documentos, incluindo quais valores
+   * hexadecimais usar numa paleta de etiquetas. Sem saída, a regra de não
+   * perguntar o dispensável não tinha como ser obedecida.
+   */
+  const assumptions: Assumption[] = Array.isArray(root.assumptions)
+    ? root.assumptions
+        .map((item) => (item ?? {}) as Record<string, unknown>)
+        .map((item) => ({
+          topic: text(item.topic),
+          statement: text(item.statement),
+          basis: text(item.basis),
+        }))
+        .filter((assumption) => assumption.statement !== "")
+    : [];
+
+  return defects.length > 0 ? { ok: false, defects } : { ok: true, questions, assumptions };
 }
 
 function stripFence(source: string): string {

@@ -1797,3 +1797,61 @@ Não no juiz. Nas idas e vindas: menos devoluções por auditoria, prompts que n
 recarregam a cadeia inteira a cada tentativa, e paralelismo onde as unidades são
 independentes — como as fases, que eram sete chamadas em fila sem nenhuma
 esperar pela outra.
+
+## 25. A auditoria do plano, medida
+
+Decidido em 2026-09-18, com medição sobre o plano do piloto 3: 65 KB, 6 fases,
+312 critérios, 44 decisões confirmadas. Os dois desenhos rodaram contra o mesmo
+input, com as mesmas decisões, no mesmo provider.
+
+| | tempo | entrada | saída | findings |
+|---|---|---|---|---|
+| plano inteiro, uma chamada | 526s | 42k (14k cache) | 23k | **1** |
+| por fase + coerência, em paralelo | 606s | 195k (74k cache) | 99k | **12** |
+
+O motivo da mudança era tempo. O resultado interessante não foi esse.
+
+### O que a medição mostrou
+
+**A leitura única estava perdendo quase tudo.** Uma chamada sobre 65 KB relatou
+um defeito; seis leituras de uma fase cada, mais a passada de coerência,
+relataram doze — atomicidade ausente entre remover conteúdo e gravar marcador,
+recompactação que não nomeia as duas colunas afetadas, `data_referencia` sem
+declarar que é livre e informativa, o que permite inventar regra de vencimento.
+Nada disso é sutileza de redação; é o tipo de lacuna que o loop descobre
+implementando.
+
+A explicação provável é banal: varrer um documento grande procurando tudo ao
+mesmo tempo produz os dois ou três defeitos mais salientes e para. Ler dez
+páginas com uma pergunta específica não.
+
+**A passada de coerência não perdeu o defeito global.** Era o risco declarado da
+divisão. Ela encontrou exatamente a contradição que a leitura inteira encontrou —
+a interface que só pode refletir alteração depois da persistência contra o tema
+que atualiza na hora — e a nomeou com endereços precisos, `P6.T11.C1 vs P3.T5.C4
+e P4.T13.C3`, em vez de citar seções.
+
+**E achou um segundo defeito global que a leitura inteira não achou:** o plano
+exigia suporte e validação para dois navegadores específicos, que nenhuma decisão
+autoriza. Foi a primeira execução da pergunta de fidelidade do plano inteiro,
+acrescentada justamente porque a primeira medição mostrou que ela não tinha dono.
+
+### O custo
+
+Quatro vezes e meia mais tokens de entrada, quatro vezes mais de saída, 15% mais
+relógio na primeira passada. A entrada multiplica porque cada chamada de fase
+reenvia os documentos acima; 38% dela volta como cache.
+
+O ganho de tempo prometido não estava na primeira passada, e sim no ciclo: uma
+devolução passa a reauditar a fase reescrita, não o plano inteiro. No piloto 3
+foram três devoluções, 41 dos 65 minutos do run.
+
+### O que fica registrado
+
+O paralelismo inclui a coerência na mesma fila das fases — serializá-la custou
+318s de relógio numa medição, em troca de nada.
+
+E a conclusão que não era sobre desempenho: os planos que passaram nas auditorias
+dos pilotos anteriores provavelmente carregavam defeitos que a leitura única não
+via. Parte do que o loop descobriu implementando estava no documento desde o
+começo.

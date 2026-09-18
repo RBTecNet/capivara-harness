@@ -737,26 +737,6 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     const fases = parsed.document.phases;
     const base = auditBase(writer, upstream);
 
-    const veredictos: AuditVerdict[] = [];
-    const fila = [...fases];
-    const trabalhadores = Array.from({ length: Math.min(maxParallelParts, fila.length) }, async () => {
-      for (;;) {
-        const fase = fila.shift();
-        if (!fase) return;
-        veredictos.push(
-          await auditCall(`project-phases.md#P${fase.number}`, attempt, () =>
-            phaseAuditPrompt({
-              ...base,
-              phaseMarkdown: fase.markdown,
-              phaseNumber: fase.number,
-              totalPhases: fases.length,
-            }),
-          ),
-        );
-      }
-    });
-    await Promise.all(trabalhadores);
-
     // A coerência recebe só o esquema entre os upstream: contradição entre fases
     // é quase sempre sobre dado, e os outros documentos dobrariam o prompt sem
     // acrescentar evidência para esta pergunta.
@@ -764,15 +744,38 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       .map((criterion) => `${criterion.address} [${criterion.taskTitle}] ${criterion.text}`)
       .join("\n");
 
-    veredictos.push(
-      await auditCall("project-phases.md#coerência", attempt, () =>
-        coherencePrompt({
-          ...base,
-          upstream: upstream.filter((documento) => documento.name === "database-schema.md"),
-          digest,
-          totalPhases: fases.length,
-        }),
+    /*
+     * A coerência entra na MESMA fila das fases, não depois delas. Ela não
+     * depende de nenhuma e serializá-la custou 318s numa medição — cinco minutos
+     * de relógio em troca de nada.
+     */
+    const tarefas: (() => Promise<AuditVerdict>)[] = [
+      ...fases.map((fase) => () =>
+        auditCall(`project-phases.md#P${fase.number}`, attempt, () =>
+          phaseAuditPrompt({ ...base, phaseMarkdown: fase.markdown, phaseNumber: fase.number, totalPhases: fases.length }),
+        ),
       ),
+      () =>
+        auditCall("project-phases.md#coerência", attempt, () =>
+          coherencePrompt({
+            ...base,
+            upstream: upstream.filter((documento) => documento.name === "database-schema.md"),
+            digest,
+            totalPhases: fases.length,
+          }),
+        ),
+    ];
+
+    const veredictos: AuditVerdict[] = [];
+    const fila = [...tarefas];
+    await Promise.all(
+      Array.from({ length: Math.min(maxParallelParts + 1, fila.length) }, async () => {
+        for (;;) {
+          const tarefa = fila.shift();
+          if (!tarefa) return;
+          veredictos.push(await tarefa());
+        }
+      }),
     );
 
     const findings = veredictos.flatMap((veredicto) => veredicto.findings);

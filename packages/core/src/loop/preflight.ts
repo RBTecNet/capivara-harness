@@ -13,7 +13,7 @@ import type { ContractError, StampInput } from "../contract/index.js";
 import { artifactPaths } from "../state/paths.js";
 import { resolveTestCommand, type TestCommand } from "./testcmd.js";
 import { splitPhases, type PhaseSession } from "./split.js";
-import { checkPrerequisites, describeMissing, detectPrerequisites, type PrerequisiteStatus } from "./prerequisites.js";
+import { checkPrerequisites, describeMissing, detectPrerequisites, unverifiedTechnologies, type PrerequisiteStatus } from "./prerequisites.js";
 
 export interface PreflightOptions {
   projectRoot: string;
@@ -40,7 +40,13 @@ export type PreflightResult =
       prerequisites: PrerequisiteStatus[];
       warnings: PreflightWarning[];
     }
-  | { ok: false; errors: string[]; contractErrors: ContractError[] };
+  | {
+      ok: false;
+      errors: string[];
+      contractErrors: ContractError[];
+      /** O que falta instalar, para quem puder oferecer uma saída em vez de só reprovar. */
+      missingPrerequisites: PrerequisiteStatus[];
+    };
 
 export async function preflight(options: PreflightOptions): Promise<PreflightResult> {
   const init = artifactPaths(options.projectRoot).init;
@@ -51,6 +57,7 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
   if (plan === null) {
     return {
       ok: false,
+      missingPrerequisites: [],
       errors: ["não há .capivara/init/project-phases.md; rode `capivara init` antes de `capivara build`"],
       contractErrors: [],
     };
@@ -60,6 +67,7 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
   if (!split.ok) {
     return {
       ok: false,
+      missingPrerequisites: [],
       errors: ["o plano não passa no contrato; nenhuma chamada de modelo foi feita"],
       contractErrors: split.errors,
     };
@@ -117,12 +125,26 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
   const description = await readFile(join(init, "project-description.md"), "utf8").catch(() => "");
   const prerequisites = await checkPrerequisites(detectPrerequisites(description));
   const missing = describeMissing(prerequisites, options.systemInstall === true);
+  const ausentes = prerequisites.filter((status) => !status.present);
   if (missing !== "") {
     if (options.systemInstall === true) warnings.push({ code: "instala-sistema", message: missing });
     else errors.push(missing);
   }
 
-  if (errors.length > 0) return { ok: false, errors, contractErrors: [] };
+  /*
+   * O catálogo é pequeno de propósito, então ele DIZ o que deixou de fora: quem
+   * lê um preflight limpo conclui que tudo foi conferido, e silêncio aqui é a
+   * pior resposta possível.
+   */
+  const naoVerificadas = unverifiedTechnologies(description);
+  if (naoVerificadas.length > 0) {
+    warnings.push({
+      code: "nao-verificada",
+      message: `não verifiquei, o catálogo não reconhece: ${naoVerificadas.join(", ")}`,
+    });
+  }
+
+  if (errors.length > 0) return { ok: false, errors, contractErrors: [], missingPrerequisites: ausentes };
 
   return {
     ok: true,

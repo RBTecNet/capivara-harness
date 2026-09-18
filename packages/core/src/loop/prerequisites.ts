@@ -74,3 +74,112 @@ export function describeMissing(statuses: readonly PrerequisiteStatus[], systemI
     ? `a stack decidida exige ${list}, ausente(s) nesta máquina; o executor tem permissão de sistema e vai instalar`
     : `a stack decidida exige ${list}, ausente(s) nesta máquina. Instale, ou rode com --allow-system-install para o executor instalar`;
 }
+
+/**
+ * O que a Tech Stack cita e o catálogo não reconhece.
+ *
+ * Silêncio aqui seria a pior resposta: quem lê um preflight limpo conclui que
+ * tudo foi conferido. O catálogo é pequeno de propósito, então ele diz o que
+ * deixou de fora em vez de deixar entender que não havia nada.
+ */
+export function unverifiedTechnologies(projectDescription: string): string[] {
+  const section = /^##\s+Tech Stack\s*$([\s\S]*?)(?=^##\s|\Z)/m.exec(projectDescription)?.[1] ?? "";
+  const decisoes = [...section.matchAll(/^\|[^|\n]+\|([^|\n]+)\|/gm)]
+    .map((linha) => (linha[1] ?? "").trim())
+    .filter((valor) => valor !== "" && !/^-+$/.test(valor) && !/^decisão$/i.test(valor));
+
+  return [...new Set(decisoes)].filter((decisao) => !CATALOG.some((entrada) => entrada.pattern.test(decisao)));
+}
+
+export type PrerequisiteChoice = "instalar" | "verificar" | "abortar";
+
+export interface ResolutionIO {
+  /** Mostra a situação e devolve a escolha do desenvolvedor. */
+  choose: (missing: readonly PrerequisiteStatus[]) => Promise<PrerequisiteChoice>;
+  /** Uma sessão focada do executor, com escopo de instalar e nada mais. */
+  install: (missing: readonly PrerequisiteStatus[]) => Promise<void>;
+  announce: (message: string) => void;
+}
+
+export type Resolution =
+  | { resolved: true; installed: string[] }
+  | { resolved: false; reason: string; missing: PrerequisiteStatus[] };
+
+/**
+ * Resolve o que falta ANTES de qualquer chamada de modelo do build.
+ *
+ * Três saídas, e só uma delas segue em frente. A instalação é feita por uma
+ * sessão do executor com escopo estreito — instalar, nada mais — e o resultado
+ * dela **não vale como prova**: a verificação é refeita com `which`. Agente que
+ * diz ter instalado e não instalou é precisamente o caso que este gate existe
+ * para pegar, e aceitar a palavra dele seria repetir o erro do gate 1, que
+ * confundia "escreveu arquivo" com "fez o trabalho".
+ */
+export async function resolvePrerequisites(
+  statuses: readonly PrerequisiteStatus[],
+  io: ResolutionIO,
+  maxRounds = 5,
+): Promise<Resolution> {
+  let atual = [...statuses];
+  const instalados: string[] = [];
+
+  for (let rodada = 1; rodada <= maxRounds; rodada += 1) {
+    const faltando = atual.filter((status) => !status.present);
+    if (faltando.length === 0) return { resolved: true, installed: instalados };
+
+    const escolha = await io.choose(faltando);
+    if (escolha === "abortar") {
+      return {
+        resolved: false,
+        reason: "o desenvolvedor optou por não seguir sem os pré-requisitos",
+        missing: faltando,
+      };
+    }
+
+    if (escolha === "instalar") {
+      io.announce(`  instalando ${faltando.map((status) => status.technology).join(", ")} numa sessão focada do executor`);
+      await io.install(faltando);
+    }
+
+    // A palavra de quem instalou não conta: pergunta-se ao sistema.
+    const reverificados = await checkPrerequisites(faltando);
+    for (const status of reverificados) {
+      if (status.present) {
+        instalados.push(status.technology);
+        io.announce(`  ${status.technology} encontrado em ${status.path}`);
+      } else {
+        io.announce(`  ${status.technology} continua ausente (${status.binary} não está no PATH)`);
+      }
+    }
+    atual = [...atual.filter((status) => status.present), ...reverificados];
+  }
+
+  const faltando = atual.filter((status) => !status.present);
+  return {
+    resolved: false,
+    reason: `os pré-requisitos continuaram ausentes depois de ${maxRounds} tentativas`,
+    missing: faltando,
+  };
+}
+
+/** A tela da decisão, numerada: escolha fechada não se responde em texto livre. */
+export function renderPrerequisiteChoice(missing: readonly PrerequisiteStatus[]): string {
+  return [
+    `A stack decidida exige ${missing.map((status) => `${status.technology} (${status.binary})`).join(", ")},`,
+    "ausente(s) nesta máquina. O build não começa sem isso — descobrir na terceira fase",
+    "custa três sessões de agente.",
+    "",
+    "  1) instalar agora, numa sessão do executor com escopo de instalar e nada mais",
+    "  2) já instalei em outro terminal; verifique de novo",
+    "  3) abortar",
+  ].join("\n");
+}
+
+/** Lê a escolha numérica; qualquer outra coisa é recusada, nunca adivinhada. */
+export function readPrerequisiteChoice(answer: string): PrerequisiteChoice | null {
+  const texto = answer.trim();
+  if (texto === "1") return "instalar";
+  if (texto === "2") return "verificar";
+  if (texto === "3") return "abortar";
+  return null;
+}

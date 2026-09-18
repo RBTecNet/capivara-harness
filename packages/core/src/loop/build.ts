@@ -27,10 +27,11 @@ import {
 import { isClean, isRepository } from "./git.js";
 import { materializeSessions } from "./split.js";
 import { preflight, type PreflightWarning } from "./preflight.js";
+import { readPrerequisiteChoice, renderPrerequisiteChoice, resolvePrerequisites } from "./prerequisites.js";
 import { resolveTestCommand } from "./testcmd.js";
 import { runPhase, type EngineCaller, type PhaseOutcome } from "./runner.js";
 import { runAcceptance, type AcceptanceResult, type CommandRunner } from "./acceptance.js";
-import { acceptancePrompt } from "../prompts/index.js";
+import { acceptancePrompt, installPrompt } from "../prompts/index.js";
 import type { TestRunner } from "./gates.js";
 
 export interface BuildOptions {
@@ -48,6 +49,14 @@ export interface BuildOptions {
   environment?: NodeJS.ProcessEnv;
   /** Permite ao executor instalar pré-requisitos de sistema. */
   systemInstall?: boolean;
+  /**
+   * Como perguntar ao desenvolvedor o que fazer com pré-requisito ausente.
+   * Sem isso, faltar pré-requisito continua sendo erro de preflight: um build
+   * não interativo não tem a quem perguntar e não deve adivinhar.
+   */
+  askPrerequisite?: (rendered: string) => Promise<string>;
+  /** Uma sessão do executor com escopo de instalar e nada mais. */
+  installPrerequisites?: (prompt: string) => Promise<void>;
   /** Desliga a aceitação operacional final. */
   skipAcceptance?: boolean;
   acceptanceRunner?: CommandRunner;
@@ -100,6 +109,47 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     ...(options.systemInstall !== undefined ? { systemInstall: options.systemInstall } : {}),
     ...(options.environment !== undefined ? { environment: options.environment } : {}),
   });
+
+  /*
+   * Pré-requisito ausente é resolvido ANTES de qualquer chamada de modelo.
+   * Três saídas — instalar agora, já instalei, abortar — e só se prossegue com a
+   * dependência satisfeita de fato, confirmada por nova verificação e não pela
+   * promessa de ninguém.
+   */
+  if (!checked.ok && options.askPrerequisite !== undefined && checked.missingPrerequisites.length > 0) {
+    const resolucao = await resolvePrerequisites(checked.missingPrerequisites, {
+      choose: async (faltando) => {
+        for (;;) {
+          const perguntar = options.askPrerequisite;
+          if (!perguntar) return "abortar";
+          const escolha = readPrerequisiteChoice(await perguntar(renderPrerequisiteChoice(faltando)));
+          if (escolha) return escolha;
+          announce("  responda com 1, 2 ou 3.");
+        }
+      },
+      install: async (faltando) => {
+        await options.installPrerequisites?.(
+          installPrompt({
+            language: options.language,
+            missing: faltando.map((status) => ({ technology: status.technology, binary: status.binary })),
+          }),
+        );
+      },
+      announce,
+    });
+
+    if (!resolucao.resolved) {
+      announce(`erro: ${resolucao.reason}`);
+      for (const status of resolucao.missing) announce(`  ${status.technology} não foi encontrado (${status.binary})`);
+      return { runId, exitCode: 1, phases: [], warnings: [], errors: [resolucao.reason], acceptance: null };
+    }
+
+    announce(`pré-requisitos satisfeitos: ${resolucao.installed.join(", ") || "nada faltava"}`);
+    // Sem a pergunta na segunda passada: o que faltava foi resolvido, e um build
+    // que voltasse a perguntar entraria em laço.
+    const { askPrerequisite: _resolvido, ...semPergunta } = options;
+    return runBuild(semPergunta);
+  }
 
   if (!checked.ok) {
     for (const error of checked.errors) announce(`erro: ${error}`);

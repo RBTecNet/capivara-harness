@@ -228,8 +228,32 @@ export function createProgram(): Command {
       stdout.write(renderSplash({ version: VERSION, roles: papeis, style: style() }));
     }
 
+    // O build pergunta ao desenvolvedor quando falta pré-requisito — mas só
+    // quando há um desenvolvedor para responder. Sem terminal, faltar
+    // pré-requisito continua sendo erro de preflight, e não um palpite.
+    const terminalBuild = stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
+
     const outcome = await runBuild({
       projectRoot,
+      ...(terminalBuild
+        ? {
+            askPrerequisite: async (rendered: string) => {
+              stdout.write(`\n${rendered}\n`);
+              return terminalBuild.question("> ");
+            },
+            installPrerequisites: async (prompt: string) => {
+              const bridge = createAgentBridge({
+                projectRoot,
+                runId: "build",
+                language,
+                roles,
+                limits: DEFAULT_LIMITS,
+                systemInstall: flags.systemInstall !== false,
+              });
+              await bridge({ role: "builder", stage: "preflight", prompt });
+            },
+          }
+        : {}),
       language,
       engine: roles.builder.provider,
       ...(flags.testCmd !== undefined ? { explicitTestCommand: flags.testCmd } : {}),
@@ -250,6 +274,8 @@ export function createProgram(): Command {
         return bridge({ role: call.role, stage: "implement", prompt: call.prompt });
       },
     });
+
+    terminalBuild?.close();
 
     // Nada a reimprimir: o `announce` acima já é a saída do build, e
     // `outcome.errors` existe para quem consome o resultado como dado.

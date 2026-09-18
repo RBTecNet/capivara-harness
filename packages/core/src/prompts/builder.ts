@@ -179,3 +179,45 @@ export function acceptancePrompt(context: BuilderContext & { cause: string; atte
     BUILDER_COMPLETE_MARKER,
   ].join("\n");
 }
+
+export interface InstallContext {
+  language: string;
+  /** O que falta, com o executável que prova a presença. */
+  missing: { technology: string; binary: string }[];
+}
+
+/**
+ * Uma sessão do executor com um escopo só: instalar.
+ *
+ * Escopo estreito é o que impede a sessão de "aproveitar a viagem". Um executor
+ * solto numa máquina com permissão de sistema e um prompt vago instala
+ * dependência que ninguém pediu, mexe em configuração global e começa a
+ * implementar o projeto — e nada disso passa por gate nenhum, porque acontece
+ * antes de a primeira fase existir.
+ *
+ * A saída dele não é evidência: quem confirma é `which`, depois.
+ */
+export function installPrompt(context: InstallContext): string {
+  return [
+    languageBlock(context.language),
+    "",
+    "You are installing system prerequisites on this machine, and doing nothing else.",
+    "",
+    "## What is missing",
+    ...context.missing.map((item) => `- ${item.technology} — proven present when \`which ${item.binary}\` finds it`),
+    "",
+    "## Your entire task",
+    "Install exactly those, using the package manager this system already uses. Start whatever",
+    "service each one needs to be usable. Then stop.",
+    "",
+    "## What you must not do",
+    "- Do not install anything that is not on the list above, however useful it looks.",
+    "- Do not create, edit or delete any file of the project. Not a config, not a fixture, not a",
+    "  migration. The project has not started being built yet.",
+    "- Do not implement, scaffold or prepare any part of the application.",
+    "- Do not change global configuration beyond what installing these requires.",
+    "",
+    "Your report is not evidence: when you finish, the harness runs `which` again and that is what",
+    "decides. Say plainly what you installed and what failed, including the command that failed.",
+  ].join("\n");
+}

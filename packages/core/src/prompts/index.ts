@@ -3,8 +3,8 @@ export { gapPrompt, interviewPrompt, ledgerPrompt, phasePartPrompt, writerPrompt
 export type { AskedQuestion, DocumentName, PhasePartContext, WriterContext } from "./writer.js";
 export { auditorPrompt, rewriteInstruction } from "./auditor.js";
 export type { AuditorContext } from "./auditor.js";
-export { BUILDER_COMPLETE_MARKER, acceptancePrompt, fixPrompt, implementPrompt } from "./builder.js";
-export type { BuilderContext, FixContext } from "./builder.js";
+export { BUILDER_COMPLETE_MARKER, acceptancePrompt, fixPrompt, implementPrompt, installPrompt } from "./builder.js";
+export type { BuilderContext, FixContext, InstallContext } from "./builder.js";
 export { VERIFY_HEADER, parseVerification, verifyPrompt } from "./verifier.js";
 export type { TaskVerdict, VerifierContext } from "./verifier.js";
 export { REHEARSAL_HEADER, assessRehearsal, enumerateCriteria, parseRehearsal, rehearsalPrompt } from "./rehearsal.js";

@@ -399,6 +399,39 @@ describe("retomada", () => {
   });
 });
 
+describe("o levantamento não roda à toa", () => {
+  it("tudo aceito encerra a entrevista sem pagar outra chamada", async () => {
+    // O laço pagava um levantamento a mais por documento só para descobrir que
+    // não havia o que perguntar: quatro minutos de modelo, e o lote voltava
+    // inteiro descartado por duplicidade.
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 },
+      respond: { stdout: oneQuestion() },
+    });
+
+    const { agent } = await run(steps, ["1"]);
+    const levantamentos = agent.calls.filter(
+      (call) => call.stage === "interview" && call.subject === "project-description.md",
+    );
+    expect(levantamentos).toHaveLength(1);
+  });
+
+  it("resposta em aberto ainda abre a rodada seguinte", async () => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 },
+      respond: { stdout: oneQuestion() },
+    });
+
+    const { agent } = await run(steps, ["não sei"]);
+    const levantamentos = agent.calls.filter(
+      (call) => call.stage === "interview" && call.subject === "project-description.md",
+    );
+    expect(levantamentos.length).toBeGreaterThan(1);
+  });
+});
+
 describe("o canal de suposição", () => {
   it("o que o escritor supõe não vira pergunta, e aparece no relatório", async () => {
     // 47 perguntas em três documentos, incluindo quais hexadecimais usar numa

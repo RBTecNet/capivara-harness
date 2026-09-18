@@ -485,6 +485,22 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         assumptions: [],
         updatedAt: now().toISOString(),
       });
+
+      /*
+       * A rodada seguinte existe para fechar o que ficou aberto.
+       *
+       * Sem esta saída, o laço sempre paga um levantamento a mais só para
+       * descobrir que não há o que perguntar — quatro minutos de modelo por
+       * documento, dezesseis num run de quatro, e o lote que volta é
+       * inteiramente descartado por duplicidade. Medido no piloto 3: a
+       * entrevista consumiu 49% do tempo com o desenvolvedor respondendo tudo
+       * pelo número recomendado, em segundos.
+       *
+       * Quando TUDO foi aceito, não há pendência para uma rodada seguinte
+       * resolver. O que o escritor descobrir ao escrever ainda volta pela rodada
+       * de gaps, que é o caminho certo para isso.
+       */
+      if (answers.every((answer) => answer.disposition === "ACCEPTED")) break;
     }
 
     await event("interview", document, "complete", `${answers.length} resposta(s)`);

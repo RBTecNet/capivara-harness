@@ -11,7 +11,8 @@
  */
 
 import { ROLES, type RoleConfig, type RoleName } from "./roles.js";
-import { cliProvider, decideReasoning, directProvider, isCliProvider, isDirectProvider } from "./registry.js";
+import { decideReasoning, directProvider, isCliProvider, isDirectProvider } from "./registry.js";
+import { cliAdapter } from "./cli/index.js";
 import type { TranscriptKind } from "./transcript.js";
 
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:\/-]*$/;
@@ -101,53 +102,28 @@ export function buildInvocation(role: RoleName, config: RoleConfig, context: Inv
     throw new Error(`provider desconhecido: ${config.provider || "(vazio)"}`);
   }
 
-  if (config.provider === "custom") {
-    if (config.command.trim() === "") throw new Error("o provider custom exige o caminho do executável do adapter");
-    return { command: config.command.trim(), args: [], env, stdinIsPrompt: true };
-  }
+  /*
+   * Daqui para baixo quem decide é o adaptador da CLI. Cada uma vive no próprio
+   * arquivo sob `cli/`, e acrescentar outra é escrever um arquivo e citá-lo na
+   * lista — nada de mais um `if` aqui dentro.
+   */
+  const adapter = cliAdapter(config.provider);
+  const binary = env[adapter.binaryEnv]?.trim() || adapter.defaultBinary;
+  const built = adapter.build({
+    projectRoot: context.projectRoot,
+    model,
+    effort,
+    access: readOnly ? "read-only" : systemAccess ? "system" : "workspace",
+    binary,
+    env,
+    command: config.command,
+  });
 
-  const cli = cliProvider(config.provider);
-  const binary = env[cli.binaryEnv]?.trim() || cli.defaultBinary;
-
-  if (config.provider === "codex") {
-    /*
-     * `--json` não é preferência de formato: é o que torna a chamada observável.
-     * Sem ele a CLI fica muda enquanto pensa — indistinguível de travada para o
-     * relógio de ocioso —, a resposta precisa ser raspada do relatório de
-     * progresso, e o custo em tokens simplesmente não existe.
-     */
-    const args = [
-      "exec",
-      "--cd", context.projectRoot,
-      "--skip-git-repo-check",
-      "--color", "never",
-      "--json",
-      "--sandbox", readOnly ? "read-only" : systemAccess ? "danger-full-access" : "workspace-write",
-    ];
-    if (model) args.push("--model", model);
-    if (effort) args.push("-c", `model_reasoning_effort="${effort}"`);
-    args.push("-");
-    return { command: binary, args, env, stdinIsPrompt: true, transcript: "codex-jsonl" };
-  }
-
-  if (config.provider === "claude") {
-    const args = ["-p", "--output-format", "json", "--permission-mode", readOnly ? "plan" : systemAccess ? "bypassPermissions" : "acceptEdits"];
-    if (model) args.push("--model", model);
-    if (effort) args.push("--effort", effort);
-    const { CLAUDECODE: _ignored, ...withoutMarker } = env;
-    return { command: binary, args, env: withoutMarker, stdinIsPrompt: true, transcript: "claude-json" };
-  }
-
-  const args = ["run", "--dir", context.projectRoot, "--format", "json"];
-  if (model) args.push("--model", model);
-  if (effort) args.push("--variant", effort);
   return {
-    command: binary,
-    args,
-    env: readOnly
-      ? { ...env, OPENCODE_PERMISSION: '{"edit":"deny","bash":"deny","task":"deny","external_directory":"deny"}' }
-      : env,
+    command: built.command ?? binary,
+    args: built.args,
+    env: built.env ?? env,
     stdinIsPrompt: true,
-    transcript: "opencode-jsonl",
+    ...(adapter.transcript ? { transcript: adapter.transcript } : {}),
   };
 }

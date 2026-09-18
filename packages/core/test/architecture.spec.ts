@@ -11,6 +11,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { CLI_ADAPTERS, CLI_CATALOG, CLI_PROVIDERS } from "../src/provider/index.js";
 import { INVARIANTS } from "../src/contract/index.js";
 
 const SRC = fileURLToPath(new URL("../src", import.meta.url));
@@ -57,6 +58,37 @@ describe("arquitetura", () => {
   it("src/contract/ não está vazio — o teste acima precisa ter o que proteger", async () => {
     const files = await typescriptFiles(CONTRACT);
     expect(files.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it("cada CLI tem id e variável de binário próprios", () => {
+    const ids = CLI_ADAPTERS.map((adapter) => adapter.id);
+    const variaveis = CLI_ADAPTERS.map((adapter) => adapter.binaryEnv);
+    expect(new Set(ids).size, "dois adaptadores com o mesmo id").toBe(ids.length);
+    expect(new Set(variaveis).size, "dois adaptadores apontando para a mesma variável").toBe(variaveis.length);
+  });
+
+  it("a lista de providers e o catálogo nascem dos adaptadores, não de cópias", () => {
+    // Duas listas do mesmo conjunto divergem, e a que ninguém atualiza é sempre
+    // a que o usuário lê.
+    expect([...CLI_PROVIDERS]).toEqual(CLI_ADAPTERS.map((adapter) => adapter.id));
+    expect(CLI_CATALOG.map((provider) => provider.id)).toEqual(CLI_ADAPTERS.map((adapter) => adapter.id));
+  });
+
+  it("todo adaptador monta uma chamada para cada nível de acesso", () => {
+    for (const adapter of CLI_ADAPTERS) {
+      for (const access of ["read-only", "workspace", "system"] as const) {
+        const built = adapter.build({
+          projectRoot: "/projeto",
+          model: "",
+          effort: "",
+          access,
+          binary: adapter.defaultBinary || "meu-adapter",
+          env: {},
+          command: "/usr/local/bin/meu-adapter",
+        });
+        expect(Array.isArray(built.args), `${adapter.id} não devolveu args`).toBe(true);
+      }
+    }
   });
 
   it("commander é a única dependência de runtime", async () => {

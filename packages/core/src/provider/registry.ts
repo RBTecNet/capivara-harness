@@ -8,11 +8,20 @@
  * em vez de testar um id no ponto de chamada.
  */
 
-export const CLI_PROVIDERS = ["codex", "claude", "opencode", "custom"] as const;
+import { CLI_ADAPTERS, isCliProvider } from "./cli/index.js";
+import type { CliProviderId } from "./cli/index.js";
+
+/*
+ * A lista de CLIs vem dos adaptadores, não de uma constante paralela: duas
+ * listas do mesmo conjunto acabam divergindo, e a que ninguém atualiza é sempre
+ * a que o usuário lê.
+ */
+export const CLI_PROVIDERS = CLI_ADAPTERS.map((adapter) => adapter.id) as readonly CliProviderId[];
 export const DIRECT_PROVIDERS = ["openai", "anthropic", "gemini", "deepseek", "minimax", "openrouter"] as const;
 
-export type CliProviderId = (typeof CLI_PROVIDERS)[number];
+export type { CliProviderId };
 export type DirectProviderId = (typeof DIRECT_PROVIDERS)[number];
+export { isCliProvider };
 export type ProviderId = CliProviderId | DirectProviderId;
 
 export type Dialect = "openai-chat" | "anthropic-messages";
@@ -42,12 +51,13 @@ export interface CliProvider {
   defaultBinary: string;
 }
 
-export const CLI_CATALOG: readonly CliProvider[] = [
-  { id: "codex", label: "Codex CLI", binaryEnv: "CAPIVARA_CODEX_BIN", defaultBinary: "codex" },
-  { id: "claude", label: "Claude Code", binaryEnv: "CAPIVARA_CLAUDE_BIN", defaultBinary: "claude" },
-  { id: "opencode", label: "OpenCode", binaryEnv: "CAPIVARA_OPENCODE_BIN", defaultBinary: "opencode" },
-  { id: "custom", label: "Adapter custom", binaryEnv: "CAPIVARA_CUSTOM_BIN", defaultBinary: "" },
-];
+/** O catálogo é a própria lista de adaptadores, vista de fora. */
+export const CLI_CATALOG: readonly CliProvider[] = CLI_ADAPTERS.map((adapter) => ({
+  id: adapter.id,
+  label: adapter.label,
+  binaryEnv: adapter.binaryEnv,
+  defaultBinary: adapter.defaultBinary,
+}));
 
 const OFF: ReasoningPolicy = { defaultMode: "disabled", supported: ["low", "medium", "high"] };
 
@@ -59,10 +69,6 @@ export const DIRECT_CATALOG: readonly DirectProvider[] = [
   { id: "minimax", label: "MiniMax API", dialect: "openai-chat", endpoint: "https://api.minimax.io/v1/text/chatcompletion_v2", envKey: "MINIMAX_API_KEY", reasoning: OFF },
   { id: "openrouter", label: "OpenRouter", dialect: "openai-chat", endpoint: "https://openrouter.ai/api/v1/chat/completions", envKey: "OPENROUTER_API_KEY", reasoning: OFF },
 ];
-
-export function isCliProvider(id: string): id is CliProviderId {
-  return (CLI_PROVIDERS as readonly string[]).includes(id);
-}
 
 export function isDirectProvider(id: string): id is DirectProviderId {
   return (DIRECT_PROVIDERS as readonly string[]).includes(id);

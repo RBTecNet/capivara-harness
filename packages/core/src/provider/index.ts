@@ -40,3 +40,5 @@ export {
 export type { CredentialRecord, SafeCredential } from "./credentials.js";
 export { parseClaudeJson, parseCodexJsonl, parseOpencodeJsonl, readTranscript } from "./transcript.js";
 export type { TokenUsage, Transcript, TranscriptKind } from "./transcript.js";
+export { CLI_ADAPTERS, cliAdapter } from "./cli/index.js";
+export type { AccessLevel, CliAdapter, CliInvocation, CliInvocationInput } from "./cli/index.js";

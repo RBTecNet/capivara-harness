@@ -1,0 +1,131 @@
+/**
+ * O que o painel do `init` mostra, derivado dos eventos do run.
+ *
+ * Projeção pura: entra evento, sai modelo. O painel nunca pergunta nada ao
+ * orquestrador e nunca altera o que quer que seja — ele observa, e é por isso
+ * que pode ser exercitado inteiro sem provider, sem terminal e sem relógio.
+ *
+ * O painel do loop é outro: as unidades dele são fases e gates, não documentos e
+ * auditorias. Misturar os dois num modelo só produziria um painel que não serve
+ * direito para nenhum dos dois.
+ */
+
+import { DOCUMENT_CHAIN_LABELS } from "./labels.js";
+import type { DashboardModel, DashboardEvent, PipelineStep, StepState } from "./dashboard.js";
+import type { Style } from "./ansi.js";
+
+export interface ProgressEvent {
+  stage: string;
+  subject: string;
+  status: "started" | "complete" | "retry" | "blocked";
+  detail: string;
+  attempt: number;
+}
+
+export interface HarnessProgressOptions {
+  version: string;
+  project: string;
+  provider: { perfil: string; transporte: string; contabilidade: string };
+  style: Style;
+  width?: number;
+  environment?: NodeJS.ProcessEnv;
+  now?: () => Date;
+}
+
+/** Quanto do trabalho de um documento já passou, para o rótulo da etapa. */
+const STAGE_LABEL: Record<string, string> = {
+  interview: "entrevista",
+  authoring: "escrita",
+  "self-check": "self-check",
+  audit: "auditoria",
+  verify: "ensaio do verificador",
+  publish: "publicação",
+  ready: "prontidão",
+};
+
+export class HarnessProgress {
+  private readonly startedAt: number;
+  private readonly options: HarnessProgressOptions;
+  private readonly now: () => Date;
+  private readonly estados = new Map<string, StepState>();
+  private readonly linhas: DashboardEvent[] = [];
+
+  private etapa = "preflight";
+  private situacao: { label: string; state: StepState } = { label: "iniciando", state: "em andamento" };
+  private chamadas = 0;
+  private entrada = 0;
+  private saida = 0;
+  private custo: number | null = null;
+  private correcoes = 0;
+
+  constructor(options: HarnessProgressOptions) {
+    this.options = options;
+    this.now = options.now ?? (() => new Date());
+    this.startedAt = this.now().getTime();
+    for (const documento of DOCUMENT_CHAIN_LABELS) this.estados.set(documento.id, "aguardando");
+  }
+
+  /** Um evento do run. Documento publicado fecha o passo; devolução marca correção. */
+  apply(event: ProgressEvent): void {
+    const documento = event.subject.split(":")[0] ?? event.subject;
+    this.etapa = `${STAGE_LABEL[event.stage] ?? event.stage}${documento && documento !== "-" ? ` · ${documento}` : ""}`;
+
+    if (this.estados.has(documento)) {
+      if (event.stage === "publish" && event.status === "complete") this.estados.set(documento, "concluído");
+      else if (event.status === "blocked") this.estados.set(documento, "falhou");
+      else if (this.estados.get(documento) !== "concluído") this.estados.set(documento, "em andamento");
+    }
+
+    if (event.status === "retry") this.correcoes += 1;
+    if (event.status === "blocked") this.situacao = { label: "bloqueado", state: "falhou" };
+    else if (event.stage === "ready" && event.status === "complete") this.situacao = { label: "RALPH READY", state: "concluído" };
+    else this.situacao = { label: "em andamento", state: "em andamento" };
+  }
+
+  /** Uma linha para o log visível. Mantém só as últimas; painel não é histórico. */
+  note(text: string): void {
+    this.linhas.push({ time: this.now().toISOString().slice(11, 19), text });
+    if (this.linhas.length > 12) this.linhas.splice(0, this.linhas.length - 12);
+  }
+
+  /** Contabilidade de uma chamada ao provider. */
+  charge(usage?: { inputTokens: number; outputTokens: number; costUsd?: number }): void {
+    this.chamadas += 1;
+    if (!usage) return;
+    this.entrada += usage.inputTokens;
+    this.saida += usage.outputTokens;
+    if (usage.costUsd !== undefined) this.custo = (this.custo ?? 0) + usage.costUsd;
+  }
+
+  private pipeline(): PipelineStep[] {
+    return DOCUMENT_CHAIN_LABELS.map((documento) => ({
+      label: documento.label,
+      state: this.estados.get(documento.id) ?? "aguardando",
+    }));
+  }
+
+  model(): DashboardModel {
+    return {
+      version: this.options.version,
+      command: "init",
+      subtitle: "init · documentação · do prompt ao RALPH READY",
+      project: this.options.project,
+      stage: this.etapa,
+      status: this.situacao,
+      durationSeconds: Math.max(0, Math.round((this.now().getTime() - this.startedAt) / 1000)),
+      pipeline: this.pipeline(),
+      provider: this.options.provider,
+      telemetry: [
+        { label: "CHAMADAS", value: String(this.chamadas) },
+        { label: "ENTRADA", value: this.entrada === 0 ? "não medido" : this.entrada.toLocaleString("pt-BR") },
+        { label: "SAÍDA", value: this.saida === 0 ? "não medido" : this.saida.toLocaleString("pt-BR") },
+        { label: "CUSTO", value: this.custo === null ? "não informado" : `US$ ${this.custo.toFixed(4)}` },
+        { label: "DEVOLUÇÕES", value: String(this.correcoes) },
+      ],
+      events: [...this.linhas],
+      style: this.options.style,
+      ...(this.options.width !== undefined ? { width: this.options.width } : {}),
+      ...(this.options.environment !== undefined ? { environment: this.options.environment } : {}),
+    };
+  }
+}

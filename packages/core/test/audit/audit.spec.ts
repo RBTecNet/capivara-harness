@@ -240,3 +240,36 @@ describe("prompt do auditor", () => {
     expect(auditorPrompt(context)).toContain("português do Brasil");
   });
 });
+
+describe("o impasse fala da versão atual", () => {
+  const rejeita = (where: string, problem: string) => ({
+    status: "REJECTED" as const,
+    findings: [{ where, problem, fix: "corrija" }],
+    remarks: [],
+    reason: "há defeito",
+  });
+
+  it("finding já corrigido não é apresentado como insistência", () => {
+    const history = [
+      { attempt: 1, verdict: rejeita("Phase 1", "faltava o índice"), writerSummary: "escreveu" },
+      { attempt: 2, verdict: rejeita("Phase 2", "falta a regra de unicidade"), writerSummary: "reescreveu" },
+      { attempt: 3, verdict: rejeita("Phase 2", "falta a regra de unicidade"), writerSummary: "reescreveu" },
+    ];
+    const action = nextAuditAction({ document: "project-phases.md", history, maxReturns: 3 });
+    expect(action.action).toBe("ask-developer");
+    if (action.action !== "ask-developer") return;
+    expect(action.standoff.auditorInsists).toHaveLength(1);
+    expect(action.standoff.auditorInsists[0]?.problem).toContain("unicidade");
+  });
+
+  it("o que sobreviveu a mais de uma tentativa é marcado como repetido", () => {
+    const history = [
+      { attempt: 1, verdict: rejeita("Phase 2", "falta a regra de unicidade"), writerSummary: "escreveu" },
+      { attempt: 2, verdict: rejeita("Phase 2", "falta a regra de unicidade"), writerSummary: "reescreveu" },
+      { attempt: 3, verdict: rejeita("Phase 2", "falta a regra de unicidade"), writerSummary: "reescreveu" },
+    ];
+    const action = nextAuditAction({ document: "project-phases.md", history, maxReturns: 3 });
+    if (action.action !== "ask-developer") throw new Error("esperava impasse");
+    expect(renderStandoff(action.standoff)).toContain("repetido em mais de uma tentativa");
+  });
+});

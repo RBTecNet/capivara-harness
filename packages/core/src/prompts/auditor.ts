@@ -55,6 +55,14 @@ const AXES_COMMON = [
   "   the comparison named? — and never for implementation. Never review SQL here, never ask for",
   "   DDL here, and never demand that a notation express what it has no syntax for: each of those is",
   "   a finding the writer cannot close, and three in a row stop the run.",
+  "3. PRECISION — every rule that names an OPERATION must name what it operates ON, and when.",
+  "   \"Trimming surrounding whitespace\" — of the stored value, of the query, or of both? \"Comparing",
+  "   without accents\" — is the stored text changed, or only the comparison? A sentence that reads",
+  "   as precise and leaves the target unnamed is worse than an open question: nobody notices it,",
+  "   and the plan below inherits it as a guess. Different phases then guess differently, and the",
+  "   contradiction surfaces two documents later as an argument no rewrite can settle.",
+  "   So: name the value affected, name the moment it is affected, and say explicitly what is NOT",
+  "   affected. This is a finding here, in the document that states the rule — never downstream.",
 ].join("\n");
 
 const AXIS_EXECUTABILITY = [

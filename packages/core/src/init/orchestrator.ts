@@ -20,7 +20,7 @@ import { MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish,
 import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Question } from "../interview/index.js";
 import { assessRehearsal, auditorPrompt, languageBlock, enumerateCriteria, gapPrompt, interviewPrompt, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
-import type { AskedQuestion, CriterionRef, DocumentName, WriterContext } from "../prompts/index.js";
+import type { AskedQuestion, CriterionRef, DocumentName, RehearsalResult, WriterContext } from "../prompts/index.js";
 import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEvents, runIdFor, runPaths, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
@@ -784,7 +784,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }
 
       await event("verify", "project-phases.md", "started", `${criteria.length} critério(s)`, round);
-      const assessment = await judge(criteria, writer, upstream, round);
+      const assessment = await judgeAll(criteria, writer, upstream, round);
 
       const blocked = [
         ...assessment.blocking.map(
@@ -833,6 +833,47 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     }
 
     return { content: authored.content };
+  }
+
+  /**
+   * O ensaio vai em lotes, um por fase.
+   *
+   * O piloto 3 chegou ao ensaio com 404 critérios. Pedir 404 linhas numa resposta
+   * só é pedir para o modelo esquecer metade no meio — e silêncio, aqui, conta
+   * como bloqueio. Uma fase é um recorte natural: o modelo julga um conjunto que
+   * cabe, e as fases são independentes, então os lotes correm juntos.
+   */
+  async function judgeAll(
+    criteria: CriterionRef[],
+    writer: WriterContext,
+    upstream: { name: string; content: string }[],
+    round: number,
+  ): Promise<{ blocking: RehearsalResult["blocking"]; unrehearsed: CriterionRef[] }> {
+    const porFase = new Map<number, CriterionRef[]>();
+    for (const criterion of criteria) {
+      const lote = porFase.get(criterion.phase) ?? [];
+      lote.push(criterion);
+      porFase.set(criterion.phase, lote);
+    }
+
+    const lotes = [...porFase.entries()].sort(([esquerda], [direita]) => esquerda - direita);
+    announce(`  ensaiando ${criteria.length} critério(s) em ${lotes.length} lote(s), até ${maxParallelParts} por vez`);
+
+    const resultados: { blocking: RehearsalResult["blocking"]; unrehearsed: CriterionRef[] }[] = [];
+    const fila = [...lotes];
+    const trabalhadores = Array.from({ length: Math.min(maxParallelParts, fila.length) }, async () => {
+      for (;;) {
+        const proximo = fila.shift();
+        if (!proximo) return;
+        resultados.push(await judge(proximo[1], writer, upstream, round));
+      }
+    });
+    await Promise.all(trabalhadores);
+
+    return {
+      blocking: resultados.flatMap((resultado) => resultado.blocking),
+      unrehearsed: resultados.flatMap((resultado) => resultado.unrehearsed),
+    };
   }
 
   /**

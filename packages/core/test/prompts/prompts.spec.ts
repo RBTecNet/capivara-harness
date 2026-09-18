@@ -203,6 +203,33 @@ describe("escrita de project-phases em partes", () => {
   });
 });
 
+describe("eixo de precisão do auditor", () => {
+  const base = {
+    language: "português do Brasil",
+    document: "database-schema.md",
+    executable: false,
+    request: "um quadro kanban",
+    decisions: [],
+    dispositions: [],
+    upstream: [],
+    upstreamRemarks: [],
+    content: "## Notes\n\n- A busca remove espaços das extremidades.",
+  };
+
+  it("exige que a regra nomeie o alvo da operação e o momento", async () => {
+    const { auditorPrompt } = await import("../../src/prompts/index.js");
+    const prompt = auditorPrompt(base);
+    expect(prompt).toContain("PRECISION");
+    expect(prompt).toContain("name what it operates ON");
+    expect(prompt).toContain("say explicitly what is NOT");
+  });
+
+  it("diz que o lugar de pegar isso é o documento que enuncia a regra", async () => {
+    const { auditorPrompt } = await import("../../src/prompts/index.js");
+    expect(auditorPrompt(base)).toContain("never downstream");
+  });
+});
+
 describe("ensaio do verificador", () => {
   const plano = [
     "# Pousada — Project Phases",

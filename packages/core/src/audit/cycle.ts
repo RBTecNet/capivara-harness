@@ -37,8 +37,10 @@ export type AuditAction =
 export interface Standoff {
   document: string;
   returns: number;
-  /** O que o auditor continua rejeitando, sem duplicatas. */
+  /** O que o auditor rejeita na versão atual do documento. */
   auditorInsists: Finding[];
+  /** Marcas dos findings que já tinham aparecido em tentativa anterior. */
+  repeated: Set<string>;
   /** O que o escritor fez a cada tentativa. */
   writerDid: string[];
   question: string;
@@ -49,12 +51,39 @@ function fingerprint(finding: Finding): string {
 }
 
 /** Findings que sobreviveram a todas as devoluções, sem repetir o equivalente. */
+/**
+ * No que o auditor insiste AGORA.
+ *
+ * A versão anterior somava tudo o que ele havia dito em qualquer tentativa, e o
+ * resultado era um impasse que citava defeitos já corrigidos. No piloto 3 isso
+ * chegou ao absurdo de apresentar dois findings contraditórios lado a lado —
+ * cada um descrevendo uma versão diferente do documento — e pedir que o
+ * desenvolvedor decidisse entre eles.
+ *
+ * Insistência é sobre o texto que está na mesa: vale a última reprovação.
+ */
 export function persistentFindings(history: readonly AuditAttempt[]): Finding[] {
-  const seen = new Map<string, Finding>();
-  for (const attempt of history) {
-    for (const finding of attempt.verdict.findings) seen.set(fingerprint(finding), finding);
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const attempt = history[index];
+    if (attempt?.verdict.status === "REJECTED") return attempt.verdict.findings;
   }
-  return [...seen.values()];
+  return [];
+}
+
+/**
+ * Quais desses findings já tinham aparecido antes.
+ *
+ * É o sinal que importa no impasse: o ponto que sobreviveu a reescritas é o que
+ * provavelmente não se resolve escrevendo melhor.
+ */
+export function repeatedFindings(history: readonly AuditAttempt[]): Set<string> {
+  const contagem = new Map<string, number>();
+  for (const attempt of history) {
+    for (const marca of new Set(attempt.verdict.findings.map(fingerprint))) {
+      contagem.set(marca, (contagem.get(marca) ?? 0) + 1);
+    }
+  }
+  return new Set([...contagem.entries()].filter(([, vezes]) => vezes > 1).map(([marca]) => marca));
 }
 
 export function nextAuditAction(state: AuditCycleState): AuditAction {
@@ -76,6 +105,7 @@ export function nextAuditAction(state: AuditCycleState): AuditAction {
       document: state.document,
       returns,
       auditorInsists: persistentFindings(state.history),
+      repeated: repeatedFindings(state.history),
       writerDid: state.history.map((attempt) => attempt.writerSummary),
       question:
         `O auditor devolveu ${state.document} ${returns} vezes e o escritor não fechou o ponto. ` +
@@ -91,7 +121,10 @@ export function renderStandoff(standoff: Standoff): string {
     "O auditor insiste em:",
   ];
   for (const finding of standoff.auditorInsists) {
-    lines.push(`  · ${finding.where}: ${finding.problem}`);
+    // O ponto que sobreviveu a reescritas é o que provavelmente não se resolve
+    // escrevendo melhor, e é nele que a decisão do desenvolvedor costuma morar.
+    const insistente = standoff.repeated.has(fingerprint(finding)) ? " (repetido em mais de uma tentativa)" : "";
+    lines.push(`  · ${finding.where}: ${finding.problem}${insistente}`);
     lines.push(`    correção pedida: ${finding.fix}`);
   }
   lines.push("", "O escritor fez:");

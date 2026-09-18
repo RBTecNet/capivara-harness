@@ -258,6 +258,49 @@ describe("referência de design", () => {
   });
 });
 
+describe("orçamento por task", () => {
+  it("task inchada volta para ser dividida, antes de qualquer auditoria", async () => {
+    const inchada = [
+      "## Phase 1: Fundação",
+      "",
+      "**Goal:** base · **Depends on:** none · **Covers:** statuses",
+      "",
+      "- [ ] **Task:** Fazer tudo de uma vez",
+      "  - **Acceptance criteria:**",
+      ...Array.from({ length: 9 }, (_unused, posicao) => `    - condição observável ${posicao + 1}`),
+      "  - **Feature tests:** t → t",
+      "  - **Traces:** statuses",
+      "",
+    ].join("\n");
+
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "phase-p01", attempt: 1 }, respond: { stdout: inchada } });
+    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: PHASE_1 }, repeat: true });
+    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 }, repeat: true });
+
+    const { agent } = await run(steps);
+    const emenda = agent.calls.find((call) => call.subject === "phase-p01" && call.attempt > 1);
+    expect(emenda?.prompt).toContain("está fazendo mais de uma coisa");
+  });
+});
+
+describe("a devolução emenda, não reescreve", () => {
+  it("o escritor recebe o texto atual e a ordem de não mexer no resto", async () => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2", attempt: 1 },
+      respond: { stdout: reject("Phase 2", "o critério de sobreposição não é observável", "declare o código HTTP") },
+    });
+    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 }, repeat: true });
+
+    const { agent } = await run(steps);
+    const emenda = agent.calls.find((call) => call.subject === "phase-p02" && call.attempt > 1);
+    expect(emenda?.prompt).toContain("You are amending a phase");
+    expect(emenda?.prompt).toContain("comes back byte-identical");
+    expect(emenda?.prompt).not.toContain("EXACTLY ONE phase");
+  });
+});
+
 describe("dimensionamento de fase", () => {
   it("fase densa demais volta ao escritor mesmo cabendo em tasks", async () => {
     // Mesmo número de tasks, o dobro do trabalho: é a medida que faltava.

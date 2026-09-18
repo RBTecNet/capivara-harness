@@ -9,3 +9,5 @@ export { VERIFY_HEADER, parseVerification, verifyPrompt } from "./verifier.js";
 export type { TaskVerdict, VerifierContext } from "./verifier.js";
 export { REHEARSAL_HEADER, assessRehearsal, enumerateCriteria, parseRehearsal, rehearsalPrompt } from "./rehearsal.js";
 export type { CriterionRef, CriterionRuling, CriterionVerdict, RehearsalContext, RehearsalResult } from "./rehearsal.js";
+export { amendPhasePrompt } from "./amend.js";
+export type { AmendContext } from "./amend.js";

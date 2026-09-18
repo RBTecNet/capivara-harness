@@ -54,6 +54,24 @@ export const MAX_TASKS_PER_PHASE = 15;
  */
 export const MAX_CRITERIA_PER_PHASE = 60;
 
+/**
+ * Teto de critérios por task.
+ *
+ * É a âncora mais estável que os pilotos produziram: os três que fecharam
+ * ficaram entre 2,1 e 2,5 critérios por task — pousada, CLI Python e o primeiro
+ * kanban —, e o piloto 3 saiu com 4,3. O escopo dele era o dobro do da pousada;
+ * o plano saiu três vezes e meia maior.
+ *
+ * O teto não é sobre tamanho de documento. Uma task que precisa de nove critérios
+ * está fazendo nove coisas, e a lista de critérios está compensando um enunciado
+ * vago. Forçar o corte produz tasks menores e mais claras, que é o que a sessão
+ * de agente do build precisa.
+ *
+ * Com 15 tasks e 4 critérios, uma fase fecha em 60 — o mesmo teto por fase, agora
+ * consequência de uma regra por task em vez de um número solto.
+ */
+export const MAX_CRITERIA_PER_TASK = 4;
+
 export function parseLedger(source: string): LedgerResult {
   let parsed: unknown;
   try {

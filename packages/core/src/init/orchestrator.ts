@@ -13,14 +13,14 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, extractEntities, extractStoryIds, extractWorkflows, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
+import { assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkRewriteDrift, extractEntities, parsePhaseFragment, extractStoryIds, extractWorkflows, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
 import type { CoverageSources, StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
-import { MAX_CRITERIA_PER_PHASE, MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
+import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Question } from "../interview/index.js";
-import { assessRehearsal, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, gapPrompt, interviewPrompt, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
+import { amendPhasePrompt, assessRehearsal, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, gapPrompt, interviewPrompt, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
 import type { AskedQuestion, CriterionRef, DocumentName, RehearsalResult, WriterContext } from "../prompts/index.js";
 import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEvents, runIdFor, runPaths, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
@@ -103,6 +103,20 @@ export interface InitOutcome {
  * 1 produziu "Atores e acesso: Definir uma stack web completa agora" porque a
  * resposta do Q-01 de um documento sobrescreveu a de outro.
  */
+/**
+ * O que a emenda mudou além do pedido, comparando as duas versões da fase.
+ *
+ * A leitura de uma fase solta é do contrato; aqui só se compara o que ele
+ * devolve.
+ */
+function driftBetween(antes: string, depois: string, findings: readonly Finding[]): string[] {
+  const faseAntes = parsePhaseFragment(antes);
+  const faseDepois = parsePhaseFragment(depois);
+  if (!faseAntes || !faseDepois) return [];
+
+  return checkRewriteDrift({ before: faseAntes.tasks, after: faseDepois.tasks, findings });
+}
+
 /** Quantas esperas por chamada antes de desistir: duas janelas de reset bastam. */
 const MAX_ESPERAS_POR_CHAMADA = 2;
 
@@ -667,29 +681,61 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         const targeted = affectedPhases(findings, parts.length);
         announce(`  reescrevendo ${targeted.length} de ${parts.length} fase(s)`);
         const next = [...current];
-        for (const phaseNumber of targeted) {
+
+        /*
+         * Emendar, não reescrever. E conferir que emendou: a instrução "mude só
+         * o que os findings citam" já estava no prompt antigo e o modelo
+         * reescrevia a fase inteira assim mesmo. O que é verificável em código
+         * não se pede por favor.
+         */
+        const emendas = targeted.map((phaseNumber) => async () => {
           const part = parts.find((entry) => entry.phaseNumber === phaseNumber);
-          if (!part) continue;
+          if (!part) return;
           const entry = ledger.ledger.phases.find((phase) => phase.number === phaseNumber);
-          const output = await track({
-            role: "writer",
-            stage: "authoring",
-            subject: part.id,
-            attempt,
-            prompt: [
-              phasePartPrompt({ ...writer, phaseNumber, ledgerEntry: JSON.stringify(entry) }),
-              "",
-              rewriteInstruction(findings),
-              "",
-              `## The version of phase ${phaseNumber} you must fix`,
-              current[phaseNumber - 1] ?? "",
-            ].join("\n"),
-          });
-          next[phaseNumber - 1] = normalizePhasePart(repairDeterministically(output).content, {
-            phaseNumber,
-            dependsOn: entry?.dependsOn || "none",
-          }).markdown.trim();
-        }
+          const anterior = current[phaseNumber - 1] ?? "";
+
+          let desvios: string[] = [];
+          for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
+            const output = await track({
+              role: "writer",
+              stage: "authoring",
+              subject: part.id,
+              attempt: attempt + tentativa - 1,
+              prompt: amendPhasePrompt({
+                language: options.language,
+                current: anterior,
+                findings,
+                ...(desvios.length > 0 ? { drift: desvios } : {}),
+              }),
+            });
+
+            const emendada = normalizePhasePart(repairDeterministically(output).content, {
+              phaseNumber,
+              dependsOn: entry?.dependsOn || "none",
+            }).markdown.trim();
+
+            desvios = driftBetween(anterior, emendada, findings);
+            if (desvios.length === 0 || tentativa === 2) {
+              if (desvios.length > 0) {
+                announce(`  ${part.id}: a emenda mexeu no que ninguém pediu (${desvios.length}); seguindo com o que veio`);
+              }
+              next[phaseNumber - 1] = emendada;
+              return;
+            }
+            announce(`  ${part.id}: a emenda derivou; pedindo de novo com o desvio nomeado`);
+          }
+        });
+
+        const filaDeEmendas = [...emendas];
+        await Promise.all(
+          Array.from({ length: Math.min(maxParallelParts, filaDeEmendas.length) }, async () => {
+            for (;;) {
+              const emenda = filaDeEmendas.shift();
+              if (!emenda) return;
+              await emenda();
+            }
+          }),
+        );
         return build(next);
       },
     });
@@ -1341,6 +1387,34 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             })),
             remarks: [],
             reason: "há item da cadeia que nenhuma task rastreia",
+            mechanical: true,
+          };
+        }
+      }
+
+      /*
+       * Task inchada é o defeito de origem: o piloto 3 saiu com 4,3 critérios por
+       * task contra 2,1 a 2,5 dos três planos que construíram. Cortado aqui, o
+       * teto por fase vira consequência — 15 tasks de até 4 critérios fecham em 60.
+       */
+      if (parsed.ok) {
+        const inchadas = parsed.document.phases.flatMap((phase) =>
+          phase.tasks
+            .filter((task) => task.acceptanceCriteria.length > MAX_CRITERIA_PER_TASK)
+            .map((task) => ({ phase: phase.number, task })),
+        );
+        if (inchadas.length > 0) {
+          return {
+            status: "REJECTED",
+            findings: inchadas.map(({ phase, task }) => ({
+              where: `Phase ${phase} · ${task.title}`,
+              problem: `a task declara ${task.acceptanceCriteria.length} critérios de aceite`,
+              fix:
+                `uma task com mais de ${MAX_CRITERIA_PER_TASK} critérios está fazendo mais de uma coisa: divida-a em tasks` +
+                ` que façam uma coisa cada, com dois ou três critérios. Nenhuma condição verificável pode desaparecer no corte`,
+            })),
+            remarks: [],
+            reason: "há task fazendo mais de uma coisa",
             mechanical: true,
           };
         }

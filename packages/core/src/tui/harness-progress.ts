@@ -59,6 +59,8 @@ export class HarnessProgress {
     desde: Date.now(),
   };
   private quadro = 0;
+  private pergunta: { title: string; body: string[] } | null = null;
+  private projeto: string;
   private chamadas = 0;
   private entrada = 0;
   private saida = 0;
@@ -69,6 +71,7 @@ export class HarnessProgress {
     this.options = options;
     this.now = options.now ?? (() => new Date());
     this.startedAt = this.now().getTime();
+    this.projeto = options.project;
     for (const documento of DOCUMENT_CHAIN_LABELS) this.estados.set(documento.id, "aguardando");
   }
 
@@ -90,6 +93,21 @@ export class HarnessProgress {
     if (event.status === "blocked") this.situacao = { label: "bloqueado", state: "falhou" };
     else if (event.stage === "ready" && event.status === "complete") this.situacao = { label: "RALPH READY", state: "concluído" };
     else this.situacao = { label: "em andamento", state: "em andamento" };
+  }
+
+  /**
+   * O nome do produto, quando ele passa a existir.
+   *
+   * Até a documentação nascer, o que há é uma pasta; depois dela, o projeto tem
+   * nome próprio, e é ele que diz a quem olha de que trabalho se trata.
+   */
+  setProject(nome: string): void {
+    if (nome.trim() !== "") this.projeto = nome.trim();
+  }
+
+  /** A pergunta da vez ocupa o corpo do painel; `null` devolve a janela de log. */
+  asking(pergunta: { title: string; body: string[] } | null): void {
+    this.pergunta = pergunta;
   }
 
   /** Chamando o provider: é a espera mais longa e a que mais parece travamento. */
@@ -139,7 +157,7 @@ export class HarnessProgress {
       version: this.options.version,
       command: "init",
       subtitle: "init · documentação · do prompt ao RALPH READY",
-      project: this.options.project,
+      project: this.projeto,
       stage: this.etapa,
       status: this.situacao,
       durationSeconds: Math.max(0, Math.round((this.now().getTime() - this.startedAt) / 1000)),
@@ -153,6 +171,7 @@ export class HarnessProgress {
         { label: "DEVOLUÇÕES", value: String(this.correcoes) },
       ],
       events: [...this.linhas],
+      ...(this.pergunta ? { question: this.pergunta } : {}),
       activity: {
         kind: this.atividade.kind,
         detail: this.atividade.detail,

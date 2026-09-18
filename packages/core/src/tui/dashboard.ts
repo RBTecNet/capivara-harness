@@ -58,6 +58,15 @@ export interface DashboardModel {
   provider: { perfil: string; transporte: string; contabilidade: string };
   telemetry: Metric[];
   events: DashboardEvent[];
+  /**
+   * A pergunta da vez, desenhada DENTRO do painel.
+   *
+   * Uma pergunta impressa fora da moldura parece outra tela, e passa a impressão
+   * de que o trabalho de verdade acontece em outro lugar — o painel vira enfeite.
+   * Aqui ela ocupa o corpo do painel, no lugar da janela de log, porque enquanto
+   * a vez é do desenvolvedor não há nada acontecendo para registrar.
+   */
+  question?: { title: string; body: string[] };
   activity: Activity;
   /** Gira enquanto há trabalho; é o batimento visível do painel. */
   frame?: number;
@@ -273,7 +282,9 @@ export function renderDashboard(model: DashboardModel): string {
     lines.push(...box("TELEMETRIA", columns(model.telemetry.map((metric) => ({ label: metric.label, value: metric.value })), width, style), width, style));
   }
 
-  if (model.events.length > 0) {
+  if (model.question) {
+    lines.push(...box(model.question.title, model.question.body, width, style));
+  } else if (model.events.length > 0) {
     lines.push(
       ...box(
         "O QUE ESTÁ ACONTECENDO",

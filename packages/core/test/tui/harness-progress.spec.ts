@@ -160,6 +160,40 @@ describe("o painel diz o que está acontecendo agora", () => {
   });
 });
 
+describe("a pergunta mora dentro do painel", () => {
+  it("ocupa o corpo no lugar da janela de log", () => {
+    const p = progresso();
+    p.note("isto não deve aparecer enquanto a pergunta estiver na tela");
+    p.asking({ title: "PERGUNTA 1/3 · entrevista", body: ["Qual stack?", "  1. Node"] });
+
+    const view = renderDashboard(p.model());
+    expect(view).toContain("PERGUNTA 1/3");
+    expect(view).toContain("Qual stack?");
+    expect(view).not.toContain("O QUE ESTÁ ACONTECENDO");
+  });
+
+  it("respondida, a janela de log volta", () => {
+    const p = progresso();
+    p.note("escrevendo");
+    p.asking({ title: "PERGUNTA 1/3", body: ["Qual stack?"] });
+    p.asking(null);
+    expect(renderDashboard(p.model())).toContain("O QUE ESTÁ ACONTECENDO");
+  });
+
+  it("o nome do produto substitui o da pasta assim que ele existe", () => {
+    const p = progresso();
+    expect(renderDashboard(p.model())).toContain("piloto-3");
+    p.setProject("Quadro Kanban Pessoal");
+    expect(renderDashboard(p.model())).toContain("Quadro Kanban Pessoal");
+  });
+
+  it("nome vazio não apaga o que já havia", () => {
+    const p = progresso();
+    p.setProject("   ");
+    expect(renderDashboard(p.model())).toContain("piloto-3");
+  });
+});
+
 describe("largura", () => {
   it("acompanha o terminal em vez de parar num teto fixo", () => {
     const p = progresso();

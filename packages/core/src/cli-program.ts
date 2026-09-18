@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { Command } from "commander";
@@ -9,7 +10,18 @@ import { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
 import { BUILD_ROLES, INIT_ROLES, describeRoles, renderUnresolved, rolesFromFlags, unresolvedRoles, type CliRoleFlags } from "./commands/options.js";
 import { InitBlockedError, resolveRequest, runInit } from "./init/index.js";
 import { commitSpecification, runBuild } from "./loop/index.js";
-import { BACK, HarnessProgress, createLiveRegion, detectLanguage, renderDashboard, renderQuestion, renderSplash, supportsColor } from "./tui/index.js";
+import {
+  BACK,
+  HarnessProgress,
+  createLiveRegion,
+  detectLanguage,
+  paint,
+  questionBox,
+  renderDashboard,
+  renderQuestion,
+  renderSplash,
+  supportsColor,
+} from "./tui/index.js";
 import { createLineIO, runWizard } from "./commands/wizard.js";
 import { runIdFor } from "./state/index.js";
 import { VERSION } from "./version.js";
@@ -121,7 +133,7 @@ export function createProgram(): Command {
      */
     const progress = new HarnessProgress({
       version: VERSION,
-      project: resolve(projectRoot),
+      project: basename(resolve(projectRoot)),
       roles: describeRoles(roles).filter((role) => (INIT_ROLES as readonly string[]).includes(role.role)),
       provider: {
         perfil: `${roles.writer.provider}${roles.writer.model ? `:${roles.writer.model}` : ""}`,
@@ -136,7 +148,8 @@ export function createProgram(): Command {
 
     // A largura é lida a cada desenho: redimensionar a janela ajusta o painel na
     // repintura seguinte, sem precisar ouvir evento de resize.
-    const desenhar = (): string => renderDashboard({ ...progress.model(), ...(stdout.columns ? { width: stdout.columns } : {}) });
+    const larguraAtual = (): number => stdout.columns ?? 100;
+    const desenhar = (): string => renderDashboard({ ...progress.model(), width: larguraAtual() });
     const repaint = (): void => live.draw(desenhar());
 
     // O pulso é o que separa "trabalhando" de "morto" na tela.
@@ -161,6 +174,15 @@ export function createProgram(): Command {
         },
         onProgress: (evento) => {
           progress.apply(evento);
+          // O nome do produto vem do documento que o nomeia, assim que ele existe.
+          if (evento.stage === "publish" && evento.subject === "project-description.md") {
+            readFile(join(projectRoot, ".capivara", "init", "project-description.md"), "utf8")
+              .then((conteudo) => {
+                const titulo = /^#\s+(.+?)\s+—/m.exec(conteudo)?.[1];
+                if (titulo) progress.setProject(titulo);
+              })
+              .catch(() => undefined);
+          }
           repaint();
         },
         call: async (call) => {
@@ -195,12 +217,23 @@ export function createProgram(): Command {
           };
         },
         ask: async (question, index, total) => {
-          // A pergunta é dona da tela enquanto durar: o painel diz que a vez é
-          // do desenvolvedor, solta a região, e o que estava desenhado vira
-          // histórico logo acima da pergunta.
+          /*
+           * A pergunta é desenhada DENTRO do painel, no lugar da janela de log —
+           * enquanto a vez é do desenvolvedor não há nada acontecendo para
+           * registrar ali. A linha de resposta fica colada embaixo da moldura,
+           * fora dela de propósito: um painel que se repinta por cima de um
+           * prompt de leitura come o que a pessoa está digitando.
+           */
           progress.waitingForDeveloper();
-          repaint();
-          live.release();
+          if (live.enabled) {
+            progress.asking(questionBox({ question, index, total, document: "entrevista", style: style() }, larguraAtual()));
+            repaint();
+            live.release();
+            progress.asking(null);
+            const answer = await terminal.question(paint("  ▸ sua resposta: ", "cyan", style()));
+            return answer.trim().toLowerCase() === BACK ? "" : answer;
+          }
+
           stdout.write(renderQuestion({ question, index, total, document: "entrevista", style: style() }));
           const answer = await terminal.question("> ");
           return answer.trim().toLowerCase() === BACK ? "" : answer;
@@ -215,8 +248,13 @@ export function createProgram(): Command {
           ? {
               decideStandoff: async (rendered: string) => {
                 progress.waitingForDeveloper();
-                repaint();
-                live.release();
+                if (live.enabled) {
+                  progress.asking({ title: "IMPASSE · precisa da sua decisão", body: rendered.split("\n") });
+                  repaint();
+                  live.release();
+                  progress.asking(null);
+                  return terminal.question(paint('  ▸ sua decisão (ou "publicar" para aceitar como está): ', "cyan", style()));
+                }
                 stdout.write(`\n${rendered}\n`);
                 return terminal.question('> (responda, ou "publicar" para aceitar como está) ');
               },

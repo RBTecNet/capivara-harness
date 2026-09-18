@@ -89,3 +89,52 @@ export function wrap(value: string, width: number): string[] {
   flush();
   return lines.length > 0 ? lines : [""];
 }
+
+/**
+ * A mesma pergunta, dobrada para caber dentro do painel.
+ *
+ * O conteúdo é o de `renderQuestion` — evidência antes da pergunta, opções
+ * numeradas, recomendação marcada — só que sem as margens verticais e limitado à
+ * largura da moldura, para virar o corpo de uma caixa em vez de uma tela solta.
+ */
+export function questionBox(screen: QuestionScreen, width: number): { title: string; body: string[] } {
+  const { question, style } = screen;
+  const inner = Math.max(20, width - 4);
+  const body: string[] = [];
+
+  body.push(paint("Já descobri:", "gray", style));
+  for (const line of wrap(question.evidence, inner - 2)) body.push(`  ${line}`);
+  body.push("");
+  for (const line of wrap(question.decision, inner)) body.push(paint(line, "bold", style));
+  body.push("");
+  body.push(paint("Por que importa:", "gray", style));
+  for (const line of wrap(question.why, inner - 2)) body.push(`  ${line}`);
+
+  if (question.options.length > 0) {
+    body.push("");
+    question.options.forEach((option, position) => {
+      const marcada = option.label === question.recommended ? paint(" ← recomendada", "green", style) : "";
+      body.push(`  ${paint(String(position + 1), "cyan", style)}. ${option.label}${marcada}`);
+      for (const line of wrap(option.consequence, inner - 5)) body.push(`     ${paint(line, "gray", style)}`);
+    });
+    if (question.recommendationBasis) {
+      body.push("");
+      for (const line of wrap(`recomendo porque: ${question.recommendationBasis}`, inner - 2)) {
+        body.push(`  ${paint(line, "gray", style)}`);
+      }
+    }
+  }
+
+  body.push("");
+  body.push(
+    paint(
+      question.options.length > 0
+        ? `responda com o número, com texto livre, "use as recomendações", "não sei" ou "${BACK}"`
+        : `responda com texto livre, "não sei" ou "${BACK}"`,
+      "gray",
+      style,
+    ),
+  );
+
+  return { title: `PERGUNTA ${screen.index}/${screen.total} · ${screen.document.replace(/\.md$/, "")}`, body };
+}

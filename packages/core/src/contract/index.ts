@@ -28,5 +28,5 @@ export {
   phaseHeading,
 } from "./templates.js";
 export type { PhasesDocumentParts } from "./templates.js";
-export { canonicalDependsOn, normalizePhasePart } from "./phase-part.js";
+export { canonicalDependsOn, canonicalWorkflowTraces, normalizePhasePart } from "./phase-part.js";
 export type { NormalizedPart, PhasePartExpectation } from "./phase-part.js";

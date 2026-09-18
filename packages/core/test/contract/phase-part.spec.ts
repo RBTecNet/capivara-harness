@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalDependsOn, normalizePhasePart, parsePhases } from "../../src/contract/index.js";
+import { canonicalDependsOn, canonicalWorkflowTraces, normalizePhasePart, parsePhases } from "../../src/contract/index.js";
 
 const FASE = [
   "## Phase 2: Cadastro de hóspedes",
@@ -93,5 +93,30 @@ describe("normalizePhasePart", () => {
     ].join("\n");
     const parsed = parsePhases(documento);
     expect(parsed.ok, parsed.ok ? "" : parsed.errors.map((e) => e.message).join("; ")).toBe(true);
+  });
+});
+
+describe("rótulo de workflow nos Traces", () => {
+  it("devolve ao canônico o que o documento traduziu", () => {
+    const { content, applied } = canonicalWorkflowTraces("  - **Traces:** US-1.1 / fluxo 1 / fluxo 9 / `cartoes`");
+    expect(applied).toBe(true);
+    expect(content).toContain("workflow 1");
+    expect(content).toContain("workflow 9");
+    expect(content).not.toContain("fluxo");
+  });
+
+  it("não mexe em prosa: fluxo dentro de um critério continua sendo fluxo", () => {
+    const criterio = "    - O fluxo 1 exibe o quadro restaurado.";
+    expect(canonicalWorkflowTraces(criterio).content).toBe(criterio);
+    expect(canonicalWorkflowTraces(criterio).applied).toBe(false);
+  });
+
+  it("o que já está canônico não conta como correção", () => {
+    const linha = "  - **Traces:** US-1.1 / workflow 1";
+    expect(canonicalWorkflowTraces(linha).applied).toBe(false);
+  });
+
+  it("zeros à esquerda e plural também voltam ao canônico", () => {
+    expect(canonicalWorkflowTraces("  - **Traces:** flujos 03").content).toContain("workflow 3");
   });
 });

@@ -24,6 +24,21 @@ export interface NormalizedPart {
 }
 
 const LEVEL_2 = /^##\s+(.*)$/;
+
+/**
+ * `workflow <n>` é rótulo estrutural, não palavra do texto.
+ *
+ * O piloto 3 saiu com o plano inteiro rastreando "fluxo 1", "fluxo 9" — o
+ * documento é em português e o modelo traduziu o rótulo junto com a prosa. A
+ * cobertura procura `workflow <n>`, não achou nenhum, e o run terminou NOT READY
+ * depois de três horas por causa de uma palavra.
+ *
+ * A lista é curta e explícita de propósito: são as traduções que já apareceram,
+ * não uma tentativa de cobrir todos os idiomas. O que o runtime reconhece, ele
+ * conserta; o que não reconhecer vira finding de cobertura antes do gate.
+ */
+const TRANSLATED_WORKFLOW = /\b(?:fluxos?|flujos?|flows?|workflows)\s+0*(\d+)\b/gi;
+const TRACES_LINE = /^(\s*-\s*\*\*Traces:\*\*\s*)(.*)$/;
 const DEPENDS_TOKEN = /(?:phase\s*)?0*(\d+)/gi;
 const DEPENDS_ON = /(\*\*Depends on:\*\*\s*)([^·\n]*)/;
 
@@ -68,6 +83,12 @@ export function normalizePhasePart(markdown: string, expectation: PhasePartExpec
 
   let content = lines.join("\n").replace(/\s+$/, "");
 
+  const traduzidos = canonicalWorkflowTraces(content);
+  if (traduzidos.applied) {
+    content = traduzidos.content;
+    applied.push("traduziu de volta a referência de workflow nos Traces, que é rótulo estrutural");
+  }
+
   const esperado = canonicalDependsOn(expectation.dependsOn);
   const metadata = DEPENDS_ON.exec(content);
   if (metadata && canonicalDependsOn(metadata[2] ?? "") !== esperado) {
@@ -76,4 +97,28 @@ export function normalizePhasePart(markdown: string, expectation: PhasePartExpec
   }
 
   return { markdown: `${content}\n`, applied };
+}
+
+/**
+ * Devolve `workflow <n>` às linhas de Traces que o traduziram.
+ *
+ * Só mexe em linha de Traces: "fluxo" no meio de um critério é prosa legítima e
+ * continua prosa. O rótulo estrutural é o que a cobertura lê, e só ele.
+ */
+export function canonicalWorkflowTraces(markdown: string): { content: string; applied: boolean } {
+  let applied = false;
+  const content = markdown
+    .split("\n")
+    .map((line) => {
+      const traces = TRACES_LINE.exec(line);
+      if (!traces) return line;
+      const corrigido = (traces[2] ?? "").replace(TRANSLATED_WORKFLOW, (inteiro, numero: string) => {
+        const canonico = `workflow ${Number(numero)}`;
+        if (inteiro.toLowerCase() !== canonico) applied = true;
+        return canonico;
+      });
+      return `${traces[1]}${corrigido}`;
+    })
+    .join("\n");
+  return { content, applied };
 }

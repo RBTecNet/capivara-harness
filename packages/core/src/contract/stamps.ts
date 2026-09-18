@@ -44,6 +44,21 @@ export function checkStamp(document: PhasesDocument, inputs: StampInput[]): Cont
   const recorded = new Map(stamp.inputs.map((entry) => [entry.name, entry.sha12]));
 
   for (const input of inputs) {
+    /*
+     * Um validador do contrato NUNCA lança. Ele é a última coisa entre três
+     * horas de trabalho e o veredito de prontidão; morrer aqui com um TypeError
+     * do Node troca um diagnóstico acionável por um stack trace. Entrada
+     * malformada é erro reportado, como qualquer outro.
+     */
+    if (typeof input?.content !== "string") {
+      errors.push({
+        code: "I-02",
+        line: stamp.line,
+        message: `o input ${input?.name ?? "(sem nome)"} foi passado sem conteúdo para conferência de frescor`,
+        hint: "quem chama checkStamp precisa enviar os bytes atuais de cada input, não só o nome",
+      });
+      continue;
+    }
     const current = sha12(input.content);
     const registered = recorded.get(input.name);
     if (registered === undefined) {

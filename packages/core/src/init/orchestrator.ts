@@ -12,8 +12,8 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { assemblePhasesDocument, buildStamp, extractEntities, extractStoryIds, extractWorkflows, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
-import type { StampInput } from "../contract/index.js";
+import { assemblePhasesDocument, buildStamp, checkCoverage, extractEntities, extractStoryIds, extractWorkflows, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
+import type { CoverageSources, StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
 import { MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
@@ -648,6 +648,16 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * não é falta de informação: é uma decisão que ninguém quer tomar agora, e o
    * gate de prontidão é o lugar certo para isso aparecer.
    */
+  /** As fontes de cobertura a partir do que já foi publicado nesta cadeia. */
+  function coberturaAtual(): CoverageSources {
+    return {
+      storyIds: extractStoryIds(published["user-stories.md"] ?? ""),
+      entities: extractEntities(published["database-schema.md"] ?? ""),
+      workflows: extractWorkflows(published["project-description.md"] ?? ""),
+      excludedWorkflows: [],
+    };
+  }
+
   /** As perguntas deste documento e como o desenvolvedor as respondeu. */
   function perguntadas(document: ChainDocument): AskedQuestion[] {
     const prefixo = `${document}#`;
@@ -1008,6 +1018,28 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     // Self-check mecânico antes do auditor: erro de forma não custa modelo.
     if (document === "project-phases.md") {
       const parsed = parsePhases(content);
+
+      /*
+       * Cobertura é mecânica e era conferida SÓ no gate final. O piloto 3 gastou
+       * três horas para terminar em NOT READY porque nenhuma task citava
+       * `workflow <n>` — o modelo traduziu o rótulo junto com a prosa. Conferida
+       * aqui, a mesma falha vira uma devolução dentro do ciclo que já existe.
+       */
+      if (parsed.ok) {
+        const semCobertura = checkCoverage(parsed.document, coberturaAtual());
+        if (semCobertura.length > 0) {
+          return {
+            status: "REJECTED",
+            findings: semCobertura.map((erro) => ({
+              where: "Traces",
+              problem: erro.message,
+              fix: erro.hint,
+            })),
+            remarks: [],
+            reason: "há item da cadeia que nenhuma task rastreia",
+          };
+        }
+      }
 
       // Dimensionamento é contável, então é contado aqui e não descoberto pelo
       // auditor três devoluções depois: uma fase é uma sessão de agente.

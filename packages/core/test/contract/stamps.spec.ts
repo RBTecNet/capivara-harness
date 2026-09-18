@@ -60,3 +60,16 @@ describe("checkStamp — I-02", () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe("um validador do contrato nunca lança", () => {
+  it("input sem conteúdo vira erro reportado, não exceção", () => {
+    const documento = parsePhases(
+      ["# X — Project Phases", "", "<!-- inputs: a.md@sha256:000000000000 -->", "", "## Phase 1: F", "", "**Goal:** g · **Depends on:** none · **Covers:** US-1.1", "", "- [ ] **Task:** T", "  - **Acceptance criteria:**", "    - c", "  - **Feature tests:** t → t", "  - **Traces:** US-1.1", ""].join("\n"),
+    );
+    if (!documento.ok) throw new Error("fixture inválida");
+
+    const malformado = [{ name: "a.md" }] as unknown as Parameters<typeof checkStamp>[1];
+    expect(() => checkStamp(documento.document, malformado)).not.toThrow();
+    expect(checkStamp(documento.document, malformado)[0]?.message).toContain("sem conteúdo");
+  });
+});

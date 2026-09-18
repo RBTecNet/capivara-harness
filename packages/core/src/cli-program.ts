@@ -172,11 +172,21 @@ export function createProgram(): Command {
           const answer = await terminal.question("> ");
           return answer.trim().toLowerCase() === BACK ? "" : answer;
         },
-        decideStandoff: async (rendered) => {
-          live.release();
-          stdout.write(`\n${rendered}\n`);
-          return terminal.question('> (responda, ou "publicar" para aceitar como está) ');
-        },
+        /*
+         * Sem terminal não há a quem perguntar, e o orquestrador já sabe parar
+         * com o impasse na tela quando ninguém decide. Oferecer a pergunta a uma
+         * entrada que não existe termina em ERR_USE_AFTER_CLOSE do readline —
+         * stack trace no lugar de um diagnóstico, no fim de horas de trabalho.
+         */
+        ...(stdin.isTTY === true
+          ? {
+              decideStandoff: async (rendered: string) => {
+                live.release();
+                stdout.write(`\n${rendered}\n`);
+                return terminal.question('> (responda, ou "publicar" para aceitar como está) ');
+              },
+            }
+          : {}),
       });
       live.release();
       stdout.write(`\n${outcome.rendered}\n`);

@@ -345,6 +345,70 @@ describe("retomada", () => {
   });
 });
 
+describe("decisão de impasse", () => {
+  /** Leva o documento ao impasse: o auditor reprova sempre, o escritor insiste. */
+  function semConvergencia(): ScriptStep[] {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-description.md" },
+      respond: { stdout: reject("Tech Stack", "a regra não diz sobre o que a operação incide", "nomeie o alvo") },
+      repeat: true,
+    });
+    steps.push({
+      match: { role: "writer", stage: "authoring", subject: "project-description.md" },
+      respond: { stdout: DESCRIPTION },
+      repeat: true,
+    });
+    return steps;
+  }
+
+  async function comImpasse(decisao: string) {
+    const agent = fakeAgent(semConvergencia());
+    const dito: string[] = [];
+    const outcome = await runInit({
+      projectRoot,
+      request,
+      language: "português do Brasil",
+      announce: (message) => void dito.push(message),
+      call: agent.call,
+      ask: async () => "use as recomendações",
+      decideStandoff: async () => decisao,
+    });
+    return { outcome, agent, anunciado: dito.join("\n") };
+  }
+
+  it("a decisão do desenvolvedor vira decisão confirmada, não recado", async () => {
+    const regra = "o valor é aparado na gravação e a comparação ignora caixa";
+    const { outcome, anunciado } = await comImpasse(regra);
+
+    expect(anunciado).toContain("decisão registrada");
+    expect(
+      outcome.report.checkpoint.decisions.some((entry) => entry.decision.includes("aparado na gravação")),
+    ).toBe(true);
+  });
+
+  it("ela sobrevive ao run: fica gravada onde a retomada lê", async () => {
+    const regra = "o valor é aparado na gravação e a comparação ignora caixa";
+    await comImpasse(regra);
+
+    const handoff = JSON.parse(
+      await readFile(join(projectRoot, ".capivara", "handoffs", `${runIdFor("init", request.sha12)}.project-description.md.json`), "utf8"),
+    ) as { answers: { questionId: string; disposition: string; decision: string }[] };
+
+    const registrada = handoff.answers.find((answer) => answer.questionId.startsWith("SD-"));
+    expect(registrada?.disposition).toBe("ACCEPTED");
+    expect(registrada?.decision).toContain("aparado na gravação");
+  });
+
+  it("e desce a cadeia: o documento seguinte é escrito sabendo dela", async () => {
+    const regra = "o valor é aparado na gravação e a comparação ignora caixa";
+    const { agent } = await comImpasse(regra);
+
+    const seguinte = agent.calls.find((call) => call.stage === "authoring" && call.subject === "user-stories.md");
+    expect(seguinte?.prompt).toContain("aparado na gravação");
+  });
+});
+
 describe("limite de uso", () => {
   it("espera e repete sem gastar a tentativa, em vez de matar a entrevista", async () => {
     const dormidas: number[] = [];

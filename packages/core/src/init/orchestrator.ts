@@ -710,6 +710,65 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     };
   }
 
+  /**
+   * A decisão que fecha um impasse é uma decisão, não um recado.
+   *
+   * O piloto 3 pagou por isso duas vezes. Na primeira madrugada, a regra precisa
+   * sobre espaços em `cartoes.titulo` foi escrita pelo desenvolvedor, aplicada ao
+   * plano daquele momento e publicada. No run seguinte o plano foi reescrito, a
+   * decisão não existia em lugar nenhum além de uma linha de log, e o auditor
+   * levantou exatamente a mesma ambiguidade — três devoluções e um segundo
+   * impasse sobre a mesma coisa.
+   *
+   * Ela passa a valer como resposta ACEITA: entra nas decisões que alimentam
+   * todo escritor daqui para frente e é gravada no handoff, que é o que a
+   * retomada lê.
+   */
+  async function recordDeveloperDecision(document: ChainDocument, findings: readonly Finding[], decision: string): Promise<void> {
+    const anteriores = allAnswers.filter((answer) => answer.questionId.includes("#standoff#")).length;
+    const id = `SD-${String(anteriores + 1).padStart(2, "0")}`;
+    const pergunta: Question = {
+      id,
+      topic: "impasse de auditoria",
+      evidence: findings.map((finding) => `${finding.where}: ${finding.problem}`).join(" · "),
+      decision: `O auditor e o escritor não convergiram em ${document}. O que vale?`,
+      why: "a decisão do desenvolvedor é autoridade acima do auditor e vale para os documentos seguintes",
+      options: [],
+      recommended: "",
+      recommendationBasis: "",
+    };
+
+    allQuestions.push({ ...pergunta, id: scoped(document, id, "standoff") });
+    allAnswers.push({
+      questionId: scoped(document, id, "standoff"),
+      raw: decision,
+      disposition: "ACCEPTED",
+      decision,
+      open: "",
+      round: 1,
+      answeredAt: now().toISOString(),
+    });
+
+    // No handoff os ids são locais ao documento: é assim que a retomada os lê.
+    const anterior = await readHandoff(options.projectRoot, runId, document);
+    await writeHandoff(options.projectRoot, {
+      contract: "capivara-handoff/v1",
+      runId,
+      language: options.language,
+      document,
+      round: anterior?.round ?? 1,
+      questions: [...(anterior?.questions ?? []), pergunta],
+      answers: [
+        ...(anterior?.answers ?? []),
+        { questionId: id, raw: decision, disposition: "ACCEPTED", decision, open: "", round: 1, answeredAt: now().toISOString() },
+      ],
+      assumptions: anterior?.assumptions ?? [],
+      updatedAt: now().toISOString(),
+    });
+
+    announce("  decisão registrada: vale para este documento e para os seguintes");
+  }
+
   /** As perguntas deste documento e como o desenvolvedor as respondeu. */
   function perguntadas(document: ChainDocument): AskedQuestion[] {
     const prefixo = `${document}#`;
@@ -1035,6 +1094,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         // autoridade, acima do auditor. Perguntar "o que vale?" e descartar a
         // resposta é pior do que não ter perguntado.
         developerRuled = true;
+        await recordDeveloperDecision(document, action.standoff.auditorInsists, decision);
         await event("audit", document, "retry", `decisão do desenvolvedor: ${decision}`, attempt);
         announce(`  decisão aplicada; reescrevendo ${document}`);
         authored = await authored.rewrite(

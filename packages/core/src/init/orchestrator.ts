@@ -10,9 +10,10 @@
  * pedido ao gate, sem tocar em provider real.
  */
 
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { assemblePhasesDocument, buildStamp, checkCoverage, extractEntities, extractStoryIds, extractWorkflows, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
+import { assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, extractEntities, extractStoryIds, extractWorkflows, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
 import type { CoverageSources, StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
@@ -1020,6 +1021,24 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       const parsed = parsePhases(content);
 
       /*
+       * Referência de design morta tem o mesmo destino da cobertura: conferida
+       * só no gate, custa o run; conferida aqui, custa uma devolução.
+       */
+      if (parsed.ok) {
+        const mortas = checkDesignRefs(parsed.document, artifactPaths(options.projectRoot).design, (caminho) =>
+          existsSync(caminho),
+        );
+        if (mortas.length > 0) {
+          return {
+            status: "REJECTED",
+            findings: mortas.map((erro) => ({ where: "Design ref", problem: erro.message, fix: erro.hint })),
+            remarks: [],
+            reason: "há referência de design que não existe em disco",
+          };
+        }
+      }
+
+      /*
        * Cobertura é mecânica e era conferida SÓ no gate final. O piloto 3 gastou
        * três horas para terminar em NOT READY porque nenhuma task citava
        * `workflow <n>` — o modelo traduziu o rótulo junto com a prosa. Conferida
@@ -1141,7 +1160,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       maxRounds: maxInterviewRounds,
     }),
     designRoot: artifactPaths(options.projectRoot).design,
-    designExists: () => true,
+    // Perguntar ao disco, não responder "sim" por padrão: o gate existe para
+    // conferir, e um verificador que sempre aprova não está conferindo nada.
+    designExists: (caminho) => existsSync(caminho),
     rehearsal,
   });
 

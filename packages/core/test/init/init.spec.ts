@@ -231,6 +231,33 @@ describe("entrevista dentro do init", () => {
   });
 });
 
+describe("referência de design", () => {
+  it("caminho que não existe em disco volta ao escritor, não ao gate", async () => {
+    const comDesign = [
+      "## Phase 1: Fundação",
+      "",
+      "**Goal:** base · **Depends on:** none · **Covers:** statuses",
+      "",
+      "- [ ] **Task:** Montar a tela inicial",
+      "  - **Acceptance criteria:**",
+      "    - A tela existe e lista os quartos.",
+      "  - **Feature tests:** tela → renderiza",
+      "  - **Design ref:** telas/inicial.png",
+      "  - **Traces:** statuses",
+      "",
+    ].join("\n");
+
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "phase-p01", attempt: 1 }, respond: { stdout: comDesign } });
+    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: PHASE_1 }, repeat: true });
+    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 }, repeat: true });
+
+    const { agent } = await run(steps);
+    const reescrita = agent.calls.find((call) => call.subject === "phase-p01" && call.attempt > 1);
+    expect(reescrita?.prompt).toContain("telas/inicial.png");
+  });
+});
+
 describe("dimensionamento de fase", () => {
   it("fase densa demais volta ao escritor mesmo cabendo em tasks", async () => {
     // Mesmo número de tasks, o dobro do trabalho: é a medida que faltava.

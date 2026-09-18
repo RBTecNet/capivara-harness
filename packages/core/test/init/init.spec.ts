@@ -345,6 +345,40 @@ describe("retomada", () => {
   });
 });
 
+describe("limite de uso", () => {
+  it("espera e repete sem gastar a tentativa, em vez de matar a entrevista", async () => {
+    const dormidas: number[] = [];
+    const steps = happyPath();
+    let vez = 0;
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "project-description.md" },
+      respond: {
+        stdout: () => {
+          vez += 1;
+          return vez === 1 ? "rate limit reached" : DESCRIPTION;
+        },
+      },
+      repeat: true,
+    });
+
+    const agent = fakeAgent(steps);
+    const dito: string[] = [];
+    const outcome = await runInit({
+      projectRoot,
+      request,
+      language: "português do Brasil",
+      announce: (message) => void dito.push(message),
+      sleep: async (seconds) => void dormidas.push(seconds),
+      call: agent.call,
+      ask: async () => "use as recomendações",
+    });
+
+    expect(dormidas).toHaveLength(1);
+    expect(dito.join("\n")).toContain("limite de uso");
+    expect(outcome.readiness.ready).toBe(true);
+  });
+});
+
 describe("timeout do provider", () => {
   it("estouro de tempo tenta de novo antes de desistir", async () => {
     const steps = happyPath();

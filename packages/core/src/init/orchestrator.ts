@@ -24,6 +24,7 @@ import { assessRehearsal, auditorPrompt, languageBlock, enumerateCriteria, gapPr
 import type { AskedQuestion, CriterionRef, DocumentName, RehearsalResult, WriterContext } from "../prompts/index.js";
 import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEvents, runIdFor, runPaths, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
+import { detectRateLimit, planWait } from "../loop/ratelimit.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
 import { DOCUMENT_CHAIN, evaluateReadiness } from "./readiness.js";
 import type { ChainDocument, Readiness } from "./readiness.js";
@@ -73,6 +74,10 @@ export interface InitOptions {
   fresh?: boolean;
   /** Fases escritas ao mesmo tempo. Elas são independentes; o teto é de cortesia. */
   maxParallelParts?: number;
+  /** Provider de cada papel, só para reconhecer o formato do limite de uso. */
+  providers?: Partial<Record<AgentCall["role"], string>>;
+  /** Injetada para o teste não dormir de verdade. */
+  sleep?: (seconds: number) => Promise<void>;
   /**
    * Espelho dos eventos do run, para quem quiser desenhar progresso.
    * O painel observa por aqui e nunca pergunta nada ao orquestrador.
@@ -94,6 +99,9 @@ export interface InitOutcome {
  * 1 produziu "Atores e acesso: Definir uma stack web completa agora" porque a
  * resposta do Q-01 de um documento sobrescreveu a de outro.
  */
+/** Quantas esperas por chamada antes de desistir: duas janelas de reset bastam. */
+const MAX_ESPERAS_POR_CHAMADA = 2;
+
 function scoped(document: string, questionId: string, stage = "interview"): string {
   return `${document}#${stage}#${questionId}`;
 }
@@ -140,6 +148,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const maxGapQuestions = options.maxGapQuestions ?? 5;
   const maxRehearsalRounds = options.maxRehearsalRounds ?? 1;
   const maxParallelParts = Math.max(1, options.maxParallelParts ?? 3);
+  const esperar = options.sleep ?? ((seconds: number) => new Promise<void>((resolve) => setTimeout(resolve, seconds * 1000)));
+  const providerDoPapel = (role: AgentCall["role"]): string => options.providers?.[role] ?? "default";
 
   const runId = runIdFor("init", options.request.sha12);
   const paths = runPaths(options.projectRoot, runId);
@@ -158,6 +168,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * joga fora meia hora de entrevista para economizar uma chamada.
    */
   const track = async (call: AgentCall): Promise<string> => {
+    let esperas = 0;
+
     for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
       const startedAt = Date.now();
       const response = await options.call(call);
@@ -170,6 +182,23 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         if (response.usage.costUsd !== undefined) cost.costUsd = (cost.costUsd ?? 0) + response.usage.costUsd;
       }
       costs.set(call.role, cost);
+
+      /*
+       * Limite de uso não é resposta ruim nem defeito do documento: é o provider
+       * indisponível. O loop já esperava e repetia sem consumir ciclo; o init
+       * simplesmente morria, e com ele a entrevista inteira. Esperar aqui custa
+       * tempo de relógio; não esperar custa o run.
+       */
+      const limite = detectRateLimit(response.stdout, providerDoPapel(call.role));
+      if (limite && esperas < MAX_ESPERAS_POR_CHAMADA) {
+        esperas += 1;
+        const plano = planWait(limite);
+        announce(`  ${plano.reason}; aguardando ${plano.seconds}s antes de repetir ${call.subject}`);
+        await event(call.stage, call.subject, "retry", `limite de uso: ${plano.reason}`, call.attempt);
+        await esperar(plano.seconds);
+        tentativa -= 1; // a espera não gasta a tentativa: não houve defeito.
+        continue;
+      }
 
       if (response.exitCode === 0) return response.stdout;
 

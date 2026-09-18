@@ -135,6 +135,7 @@ export function createProgram(): Command {
         language,
         maxAuditReturns: Number(flags.maxAuditReturns),
         maxInterviewRounds: Number(flags.maxInterviewRounds),
+        providers: { writer: roles.writer.provider, auditor: roles.auditor.provider, verifier: roles.verifier.provider },
         ...(flags.fresh === true ? { fresh: true } : {}),
         announce: (message) => {
           progress.note(message.trim());

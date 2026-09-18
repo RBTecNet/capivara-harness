@@ -66,6 +66,18 @@ describe("os três timeouts são distintos", () => {
     expect(result.timedOut).toBe("idle");
   }, 15000);
 
+  it("o relógio de ocioso não corre antes da primeira saída", async () => {
+    // Armado desde o início, um idle curto mataria este provider aos 0,4s, e o
+    // limite de primeira saída — o que deveria mandar aqui — nunca valeria.
+    const result = await runProvider({
+      invocation: node("setTimeout(()=>process.stdout.write('cheguei'),700)"),
+      prompt: "",
+      limits: { ...limits, firstOutputSeconds: 5, idleSeconds: 0.4 },
+    });
+    expect(result.timedOut).toBeNull();
+    expect(result.stdout).toContain("cheguei");
+  }, 15000);
+
   it("idle não mata quem continua produzindo saída", async () => {
     const result = await runProvider({
       invocation: node("let n=0;const t=setInterval(()=>{process.stdout.write('.');if(++n>6){clearInterval(t)}},60)"),

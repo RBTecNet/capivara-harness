@@ -64,7 +64,7 @@ export const DEFAULT_LIMITS: SupervisorLimits = {
    * relógio sobre a resposta inteira. O piloto 3 morreu em 300s no levantamento
    * de user-stories.md, com o provider ainda pensando — não travado.
    */
-  firstOutputSeconds: 900,
+  firstOutputSeconds: 1200,
   idleSeconds: 600,
   wallSeconds: 3600,
   maxOutputBytes: 8 * 1024 * 1024,

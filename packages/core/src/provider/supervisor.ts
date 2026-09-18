@@ -115,7 +115,13 @@ export async function runProvider(options: RunOptions): Promise<RunResult> {
     const timer = setTimeout(() => terminate("wall"), limits.wallSeconds * 1000);
     timers.add(timer);
   }
-  armIdle();
+
+  /*
+   * O relógio de ocioso só começa depois da primeira saída — "parou de produzir"
+   * pressupõe ter começado. Armado desde o início, ele corre contra o de primeira
+   * saída e o menor dos dois é que vale: no piloto 3 o limite de 900s virou 600s
+   * na prática, e a chamada morreu com o provider ainda pensando.
+   */
 
   const absorb = (chunk: Buffer, into: "out" | "err"): void => {
     if (firstOutputMilliseconds === null) firstOutputMilliseconds = Date.now() - startedAt;

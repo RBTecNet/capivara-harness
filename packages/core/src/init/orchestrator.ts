@@ -76,6 +76,15 @@ export interface InitOptions {
   maxParallelParts?: number;
   /** Rodadas para fechar defeito mecânico, separadas do teto do auditor. */
   maxMechanicalRounds?: number;
+  /**
+   * Levantar perguntas ANTES de escrever cada documento.
+   *
+   * Desligado, o escritor escreve direto — assumindo o que é de baixo risco e
+   * marcando o que travou — e a rodada de gaps pergunta só o que sobrou. São
+   * dois caminhos para a mesma coisa; a questão é qual custa menos, e isso se
+   * mede em vez de se argumentar.
+   */
+  upfrontInterview?: boolean;
   /** Critérios por chamada do ensaio. Lote grande volta sem julgamento. */
   maxCriteriaPerRehearsalBatch?: number;
   /** Provider de cada papel, só para reconhecer o formato do limite de uso. */
@@ -336,6 +345,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       .map((name) => ({ name, content: published[name] ?? "" }));
 
     const answers = await interview(document, upstream);
+
     allAnswers.push(...answers.answers.map((answer) => ({ ...answer, questionId: scoped(document, answer.questionId) })));
     allQuestions.push(...answers.questions.map((question) => ({ ...question, id: scoped(document, question.id) })));
 
@@ -399,6 +409,13 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         await event("interview", document, "complete", `${answers.length} resposta(s) retomada(s)`);
         return { questions, answers };
       }
+    }
+
+    // Sem levantamento prévio, quem pergunta é a escrita, pelo que ela não
+    // conseguir resolver sozinha.
+    if (options.upfrontInterview === false) {
+      await event("interview", document, "complete", "sem levantamento prévio: a escrita pergunta o que travar");
+      return { questions, answers };
     }
 
     for (let round = 1; round <= maxInterviewRounds; round += 1) {

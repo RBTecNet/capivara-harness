@@ -399,6 +399,60 @@ describe("retomada", () => {
   });
 });
 
+describe("o laço de auditoria cabe os dois orçamentos", () => {
+  it("duas devoluções mecânicas mais duas do auditor não estouram a volta", async () => {
+    /*
+     * A medição de 95 minutos morreu aqui: "o ciclo de auditoria não convergiu",
+     * sem impasse, sem pergunta e sem documento. O teto do laço continuou sendo o
+     * do auditor depois que o defeito mecânico ganhou contagem própria.
+     */
+    const inchada = [
+      "## Phase 1: Fundação",
+      "",
+      "**Goal:** base · **Depends on:** none · **Covers:** statuses",
+      "",
+      "- [ ] **Task:** Fazer tudo",
+      "  - **Acceptance criteria:**",
+      ...Array.from({ length: 9 }, (_unused, posicao) => `    - condição ${posicao + 1}`),
+      "  - **Feature tests:** t → t",
+      "  - **Traces:** statuses",
+      "",
+    ].join("\n");
+
+    let escritas = 0;
+    let auditorias = 0;
+    const steps = happyPath();
+
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "phase-p01" },
+      respond: {
+        stdout: () => {
+          escritas += 1;
+          return escritas <= 2 ? inchada : PHASE_1;
+        },
+      },
+      repeat: true,
+    });
+    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 }, repeat: true });
+
+    // Passadas as mecânicas, o auditor do plano ainda devolve duas vezes.
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#coerência" },
+      respond: {
+        stdout: () => {
+          auditorias += 1;
+          return auditorias <= 2 ? reject("Phase 2", "o critério não nomeia o alvo", "nomeie o alvo") : approve();
+        },
+      },
+      repeat: true,
+    });
+
+    const { outcome } = await run(steps);
+    expect(outcome.readiness.checks.find((check) => check.id === "contrato")?.passed).toBe(true);
+    expect(outcome.readiness.checks.find((check) => check.id === "auditoria")?.passed).toBe(true);
+  });
+});
+
 describe("o levantamento não roda à toa", () => {
   it("tudo aceito encerra a entrevista sem pagar outra chamada", async () => {
     // O laço pagava um levantamento a mais por documento só para descobrir que

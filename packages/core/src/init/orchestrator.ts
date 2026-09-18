@@ -1349,7 +1349,15 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     // o que o piloto 1 fez: o mesmo documento pediu decisão três vezes.
     let developerRuled = false;
 
-    for (let attempt = 1; attempt <= maxAuditReturns + 1; attempt += 1) {
+    /*
+     * O laço precisa caber os DOIS orçamentos.
+     *
+     * Quando o defeito mecânico ganhou contagem própria, o teto do laço continuou
+     * sendo o do auditor: três devoluções mecânicas mais uma do auditor já
+     * estouravam a volta e o run morria com "o ciclo não convergiu" — sem impasse,
+     * sem pergunta, sem documento. Foi assim que a medição de 95 minutos terminou.
+     */
+    for (let attempt = 1; attempt <= maxAuditReturns + maxMechanicalRounds + 1; attempt += 1) {
       const content = authored.content;
       const verdict = await auditOnce(document, content, writer, upstream, attempt);
       history.push({ attempt, verdict, writerSummary: `tentativa ${attempt}: escreveu ${document}` });

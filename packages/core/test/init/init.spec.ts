@@ -602,6 +602,54 @@ describe("ensaio do verificador", () => {
     expect(check?.detail).toContain("UNSATISFIABLE");
   });
 
+  it("lote grande é quebrado: fase com muitos critérios vira várias chamadas", async () => {
+    // O piloto 3 perdeu a fase 1 inteira com 51 critérios num lote só: o modelo
+    // derivou e voltou sem julgamento nenhum, duas vezes.
+    const densa = [
+      "## Phase 1: Fundação",
+      "",
+      "**Goal:** base · **Depends on:** none · **Covers:** statuses",
+      "",
+      ...Array.from({ length: 5 }, (_unused, indice) => [
+        `- [ ] **Task:** Tarefa ${indice + 1}`,
+        "  - **Acceptance criteria:**",
+        ...Array.from({ length: 4 }, (_ignora, posicao) => `    - condição observável ${posicao + 1}`),
+        "  - **Feature tests:** t → t",
+        "  - **Traces:** statuses",
+        "",
+      ].join("\n")),
+    ].join("\n");
+
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: densa }, repeat: true });
+
+    const agent = fakeAgent(steps);
+    await runInit({
+      projectRoot,
+      request,
+      language: "português do Brasil",
+      maxCriteriaPerRehearsalBatch: 6,
+      call: agent.call,
+      ask: async () => "use as recomendações",
+    });
+
+    const ensaios = agent.calls.filter((call) => call.role === "verifier" && call.stage === "verify");
+    expect(ensaios.length).toBeGreaterThan(1);
+    for (const chamada of ensaios) {
+      const enderecos = chamada.prompt.match(/^P\d+\.T\d+\.C\d+ /gm) ?? [];
+      expect(enderecos.length).toBeLessThanOrEqual(6);
+    }
+  });
+
+  it("lote sem julgamento acusa o ensaio, não o plano", async () => {
+    const steps = happyPath().filter((step) => step.match.role !== "verifier");
+    steps.push({ match: { role: "verifier", stage: "verify" }, respond: { stdout: "achei tudo ótimo" }, repeat: true });
+
+    const { outcome } = await run(steps);
+    const detalhe = outcome.readiness.checks.find((check) => check.id === "ensaio")?.detail ?? "";
+    expect(detalhe).toContain("falha do ensaio, não do plano");
+  });
+
   it("critério sem veredito não passa por omissão", async () => {
     const steps = happyPath().filter((step) => step.match.role !== "verifier");
     steps.push({ match: { role: "verifier", stage: "verify" }, respond: { stdout: "achei tudo ótimo" }, repeat: true });

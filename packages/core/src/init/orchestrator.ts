@@ -74,6 +74,8 @@ export interface InitOptions {
   fresh?: boolean;
   /** Fases escritas ao mesmo tempo. Elas são independentes; o teto é de cortesia. */
   maxParallelParts?: number;
+  /** Critérios por chamada do ensaio. Lote grande volta sem julgamento. */
+  maxCriteriaPerRehearsalBatch?: number;
   /** Provider de cada papel, só para reconhecer o formato do limite de uso. */
   providers?: Partial<Record<AgentCall["role"], string>>;
   /** Injetada para o teste não dormir de verdade. */
@@ -148,6 +150,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const maxGapQuestions = options.maxGapQuestions ?? 5;
   const maxRehearsalRounds = options.maxRehearsalRounds ?? 1;
   const maxParallelParts = Math.max(1, options.maxParallelParts ?? 3);
+  const maxCriteriosPorLote = Math.max(1, options.maxCriteriaPerRehearsalBatch ?? 20);
   const esperar = options.sleep ?? ((seconds: number) => new Promise<void>((resolve) => setTimeout(resolve, seconds * 1000)));
   const providerDoPapel = (role: AgentCall["role"]): string => options.providers?.[role] ?? "default";
 
@@ -915,8 +918,15 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           ({ criterion, ruling, reason }) =>
             `${criterion.address} · ${criterion.taskTitle} — ${ruling}: ${reason || criterion.text}`,
         ),
+        /*
+         * Silêncio não aprova — mas também não acusa o critério. Quando um lote
+         * volta sem julgamento, o defeito está no ensaio, não no plano, e a
+         * mensagem precisa dizer isso para ninguém sair reescrevendo texto bom.
+         */
         ...assessment.unrehearsed.map(
-          (criterion) => `${criterion.address} · ${criterion.taskTitle} — NÃO ENSAIADO: o verificador não julgou este critério`,
+          (criterion) =>
+            `${criterion.address} · ${criterion.taskTitle} — NÃO ENSAIADO: o ensaio não conseguiu julgar este critério` +
+            ` (falha do ensaio, não do plano; rode de novo para ensaiar só o que faltou)`,
         ),
       ];
 
@@ -960,12 +970,16 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   }
 
   /**
-   * O ensaio vai em lotes, um por fase.
+   * O ensaio vai em lotes pequenos.
    *
-   * O piloto 3 chegou ao ensaio com 404 critérios. Pedir 404 linhas numa resposta
-   * só é pedir para o modelo esquecer metade no meio — e silêncio, aqui, conta
-   * como bloqueio. Uma fase é um recorte natural: o modelo julga um conjunto que
-   * cabe, e as fases são independentes, então os lotes correm juntos.
+   * Primeiro tentei um lote por fase, e o piloto 3 mostrou que ainda era grande:
+   * a fase 1 tinha 51 critérios e voltou inteira sem julgamento, duas vezes, num
+   * run em que as outras seis passaram. Pedir cinquenta linhas exatas é pedir
+   * para o modelo derivar no meio — e derivar, aqui, conta como bloqueio.
+   *
+   * O corte é por TAMANHO, respeitando a fronteira da fase quando ela cabe. Uma
+   * fase grande vira dois ou três lotes; nenhuma resposta precisa carregar mais
+   * do que cabe com folga.
    */
   async function judgeAll(
     criteria: CriterionRef[],
@@ -973,14 +987,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     upstream: { name: string; content: string }[],
     round: number,
   ): Promise<{ blocking: RehearsalResult["blocking"]; unrehearsed: CriterionRef[] }> {
-    const porFase = new Map<number, CriterionRef[]>();
-    for (const criterion of criteria) {
-      const lote = porFase.get(criterion.phase) ?? [];
-      lote.push(criterion);
-      porFase.set(criterion.phase, lote);
-    }
-
-    const lotes = [...porFase.entries()].sort(([esquerda], [direita]) => esquerda - direita);
+    const lotes = agruparCriterios(criteria);
     announce(`  ensaiando ${criteria.length} critério(s) em ${lotes.length} lote(s), até ${maxParallelParts} por vez`);
 
     const resultados: { blocking: RehearsalResult["blocking"]; unrehearsed: CriterionRef[] }[] = [];
@@ -989,7 +996,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       for (;;) {
         const proximo = fila.shift();
         if (!proximo) return;
-        resultados.push(await judge(proximo[1], writer, upstream, round));
+        resultados.push(await judge(proximo, writer, upstream, round));
       }
     });
     await Promise.all(trabalhadores);
@@ -998,6 +1005,24 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       blocking: resultados.flatMap((resultado) => resultado.blocking),
       unrehearsed: resultados.flatMap((resultado) => resultado.unrehearsed),
     };
+  }
+
+  /** Lotes de no máximo `maxCriteriosPorLote`, sem misturar fases. */
+  function agruparCriterios(criteria: CriterionRef[]): CriterionRef[][] {
+    const porFase = new Map<number, CriterionRef[]>();
+    for (const criterion of criteria) {
+      const lote = porFase.get(criterion.phase) ?? [];
+      lote.push(criterion);
+      porFase.set(criterion.phase, lote);
+    }
+
+    const lotes: CriterionRef[][] = [];
+    for (const [, daFase] of [...porFase.entries()].sort(([esquerda], [direita]) => esquerda - direita)) {
+      for (let inicio = 0; inicio < daFase.length; inicio += maxCriteriosPorLote) {
+        lotes.push(daFase.slice(inicio, inicio + maxCriteriosPorLote));
+      }
+    }
+    return lotes;
   }
 
   /**

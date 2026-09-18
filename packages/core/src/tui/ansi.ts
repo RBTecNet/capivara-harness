@@ -70,3 +70,31 @@ export const cursor = {
   up: (lines: number) => (lines > 0 ? `\u001B[${lines}A` : ""),
   clearLine: "\u001B[2K",
 };
+
+/**
+ * Pinta o fundo de um bloco inteiro.
+ *
+ * Fundo de terminal não se muda por bloco: o que existe é cor de fundo POR
+ * CÉLULA, então cada linha é preenchida até a largura do painel e ganha a cor.
+ * Sem esse preenchimento, o tom apareceria só atrás do texto e o resultado
+ * seriam faixas irregulares em vez de um painel.
+ *
+ * O detalhe que faz funcionar: cada `reset` dentro da linha apaga TUDO, cor de
+ * fundo inclusive. Por isso o fundo é reposto logo após cada um — do contrário o
+ * tom morreria na primeira palavra colorida e voltaria o preto do terminal.
+ */
+export function tint(text: string, hex: string, width: number): string {
+  const rgb = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
+  if (!rgb) return text;
+
+  const fundo = `\u001B[48;2;${parseInt(rgb[1] ?? "0", 16)};${parseInt(rgb[2] ?? "0", 16)};${parseInt(rgb[3] ?? "0", 16)}m`;
+  const reset = "\u001B[0m";
+
+  return text
+    .split("\n")
+    .map((line) => `${fundo}${line.split(reset).join(`${reset}${fundo}`)}${" ".repeat(Math.max(0, width - visibleWidth(line)))}${reset}`)
+    .join("\n");
+}
+
+/** O aubergine do Ubuntu: escuro, mas com vermelho suficiente para não ser preto. */
+export const UBUNTU_AUBERGINE = "#300A24";

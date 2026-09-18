@@ -15,12 +15,14 @@ import {
   HarnessProgress,
   createLiveRegion,
   detectLanguage,
+  UBUNTU_AUBERGINE,
   paint,
   questionBox,
   renderDashboard,
   renderQuestion,
   renderSplash,
   supportsColor,
+  supportsTrueColor,
 } from "./tui/index.js";
 import { createLineIO, runWizard } from "./commands/wizard.js";
 import { runIdFor } from "./state/index.js";
@@ -149,7 +151,25 @@ export function createProgram(): Command {
     // A largura é lida a cada desenho: redimensionar a janela ajusta o painel na
     // repintura seguinte, sem precisar ouvir evento de resize.
     const larguraAtual = (): number => stdout.columns ?? 100;
-    const desenhar = (): string => renderDashboard({ ...progress.model(), width: larguraAtual() });
+
+    /*
+     * O fundo só é pintado onde há cor verdadeira: em 16 cores, um tom escuro
+     * vira um bloco chapado que atrapalha mais do que ajuda. CAPIVARA_BG troca o
+     * tom, e "none" devolve o fundo do terminal.
+     */
+    const fundo = ((): string | undefined => {
+      const escolhido = process.env.CAPIVARA_BG?.trim();
+      if (escolhido === "none") return undefined;
+      if (!supportsTrueColor(process.env)) return undefined;
+      return escolhido && escolhido !== "" ? escolhido : UBUNTU_AUBERGINE;
+    })();
+
+    const desenhar = (): string =>
+      renderDashboard({
+        ...progress.model(),
+        width: larguraAtual(),
+        ...(fundo !== undefined ? { background: fundo } : {}),
+      });
     const repaint = (): void => live.draw(desenhar());
 
     // O pulso é o que separa "trabalhando" de "morto" na tela.

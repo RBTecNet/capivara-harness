@@ -1,4 +1,4 @@
-export { cursor, padVisible, paint, supportsColor, truncatePath, truncateVisible, visibleWidth } from "./ansi.js";
+export { UBUNTU_AUBERGINE, cursor, padVisible, paint, supportsColor, tint, truncatePath, truncateVisible, visibleWidth } from "./ansi.js";
 export type { Color, Style } from "./ansi.js";
 export { renderSplash } from "./splash.js";
 export type { SplashOptions } from "./splash.js";

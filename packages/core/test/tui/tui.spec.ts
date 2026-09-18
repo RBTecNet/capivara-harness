@@ -16,6 +16,7 @@ import {
   renderQuestion,
   renderSplash,
   supportsColor,
+  tint,
   truncateVisible,
   visibleWidth,
   wizardSteps,
@@ -218,6 +219,49 @@ describe("dashboard", () => {
 
   it("aguenta um modelo sem pipeline, telemetria nem eventos", () => {
     expect(() => renderDashboard({ ...model, pipeline: [], telemetry: [], events: [] })).not.toThrow();
+  });
+});
+
+describe("fundo do painel", () => {
+  const simples = {
+    version: "0.1.0",
+    command: "init",
+    subtitle: "init",
+    project: "p",
+    stage: "escrita",
+    status: { label: "em andamento", state: "em andamento" as const },
+    durationSeconds: 10,
+    pipeline: [],
+    provider: { perfil: "codex", transporte: "codex-cli", contabilidade: "opaca" },
+    telemetry: [],
+    events: [],
+    activity: { kind: "modelo" as const, detail: "escrevendo", sinceSeconds: 3 },
+    style: colored,
+    environment: {} as NodeJS.ProcessEnv,
+  };
+
+  it("sem cor pedida, o painel não mexe no fundo do terminal", () => {
+    const view = renderDashboard(simples);
+    expect(view).not.toContain("48;2;");
+  });
+
+  it("com cor, cada linha é preenchida até a largura", () => {
+    const view = renderDashboard({ ...simples, background: "#300A24", width: 90 });
+    for (const line of view.split("\n")) {
+      expect(line).toContain("48;2;48;10;36m");
+      expect(visibleWidth(line)).toBe(90);
+    }
+  });
+
+  it("o fundo é reposto depois de cada reset, senão morreria na primeira palavra colorida", () => {
+    const pintado = tint(`${paint("verde", "green", colored)} e resto`, "#300A24", 40);
+    const depoisDoReset = pintado.slice(pintado.indexOf(`${ESC}[0m`) + 4);
+    expect(depoisDoReset).toContain("48;2;48;10;36m");
+  });
+
+  it("hexadecimal inválido não quebra: devolve o texto como estava", () => {
+    const texto = "linha";
+    expect(tint(texto, "vermelho", 20)).toBe(texto);
   });
 });
 

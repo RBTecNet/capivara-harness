@@ -10,7 +10,7 @@
  * e nenhuma parte do painel toca no estado do run. O painel observa; nunca altera.
  */
 
-import { paint, padVisible, truncatePath, truncateVisible, visibleWidth, type Style } from "./ansi.js";
+import { paint, padVisible, tint, truncatePath, truncateVisible, visibleWidth, type Style } from "./ansi.js";
 import { blockText } from "./blockfont.js";
 import { CAPYBARA_COLS, renderCapybara } from "./capybara.js";
 
@@ -68,6 +68,12 @@ export interface DashboardModel {
    */
   question?: { title: string; body: string[] };
   activity: Activity;
+  /**
+   * Cor de fundo do painel, em hexadecimal. Ausente deixa o fundo do terminal.
+   * Só tem efeito onde há cor verdadeira — em 16 cores, um tom escuro vira um
+   * bloco chapado que atrapalha mais do que ajuda.
+   */
+  background?: string;
   /** Gira enquanto há trabalho; é o batimento visível do painel. */
   frame?: number;
   roles?: { role: string; provider: string; model: string }[];
@@ -305,7 +311,8 @@ export function renderDashboard(model: DashboardModel): string {
     ),
   );
 
-  return lines.join("\n");
+  const rendered = lines.join("\n");
+  return model.background === undefined ? rendered : tint(rendered, model.background, width);
 }
 
 export const PHASE_GATES = ["G0 engine", "G1 escrita", "G2 suíte", "G3 verificação"] as const;

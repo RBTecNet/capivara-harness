@@ -334,6 +334,17 @@ describe("retomada", () => {
     expect(agent.calls.some((call) => call.subject === "phase-p01")).toBe(true);
   });
 
+  it("plano reaproveitado ainda é ensaiado: reaproveitar texto não reaproveita veredito", async () => {
+    // Sem isto o gate reprovaria por o ensaio não ter rodado, e a tentativa
+    // seguinte reaproveitaria de novo — reprovado para sempre.
+    await run(happyPath());
+
+    const { agent, outcome } = await run(happyPath());
+    const ensaios = agent.calls.filter((call) => call.role === "verifier" && call.stage === "verify");
+    expect(ensaios.length).toBeGreaterThan(0);
+    expect(outcome.readiness.checks.find((check) => check.id === "ensaio")?.passed).toBe(true);
+  });
+
   it("--fresh ignora tudo e recomeça", async () => {
     const primeiro = happyPath();
     primeiro.unshift({ match: { role: "writer", stage: "authoring", subject: "user-stories.md" }, respond: { stdout: "", exitCode: 124 }, repeat: true });

@@ -297,6 +297,14 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         // um documento que está pronto em disco desde a tentativa anterior.
         await event("publish", document, "complete", "reaproveitado deste run");
         announce(`— ${document} (reaproveitado deste run; --fresh recomeça do zero)`);
+
+        /*
+         * O ensaio roda mesmo sobre plano reaproveitado, senão o gate reprova
+         * por ele não ter rodado — e a cada nova tentativa o plano seria
+         * reaproveitado de novo, reprovado de novo, para sempre. Reaproveitar o
+         * texto não reaproveita o veredito.
+         */
+        if (document === "project-phases.md") await rehearse(authoredFromPublished(conteudo), writerContext(upstreamFor(document)), upstreamFor(document));
         continue;
       }
     }
@@ -806,6 +814,38 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     if (!parsed.ok) return false;
     if (checkCoverage(parsed.document, coberturaAtual()).length > 0) return false;
     return checkDesignRefs(parsed.document, artifactPaths(options.projectRoot).design, (caminho) => existsSync(caminho)).length === 0;
+  }
+
+  /** Os documentos acima de `document` que já estão publicados. */
+  function upstreamFor(document: ChainDocument): { name: string; content: string }[] {
+    return DOCUMENT_CHAIN.filter((name) => name !== document && published[name] !== undefined)
+      .filter((name) => DOCUMENT_CHAIN.indexOf(name) < DOCUMENT_CHAIN.indexOf(document))
+      .map((name) => ({ name, content: published[name] ?? "" }));
+  }
+
+  /** O contexto do escritor para um documento, montado do que já foi decidido. */
+  function writerContext(upstream: { name: string; content: string }[]): WriterContext {
+    return {
+      language: options.language,
+      request: options.request.text,
+      decisions: allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision),
+      assumptions: [],
+      upstream,
+    };
+  }
+
+  /**
+   * Um documento já publicado, embrulhado para o ensaio.
+   *
+   * Ele não precisa saber reescrever: se o ensaio reprovar um critério de um
+   * plano reaproveitado, o caminho é o gate bloquear com o endereço na tela — a
+   * reescrita exige o ledger e as partes, que este run não tem.
+   */
+  function authoredFromPublished(content: string): Authored {
+    return {
+      content,
+      rewrite: async () => authoredFromPublished(content),
+    };
   }
 
   /** As fontes de cobertura a partir do que já foi publicado nesta cadeia. */

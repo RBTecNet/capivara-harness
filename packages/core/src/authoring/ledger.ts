@@ -40,6 +40,20 @@ export type LedgerResult = { ok: true; ledger: Ledger } | { ok: false; defects: 
 /** Teto de tasks por fase: acima disso a fase não cabe numa sessão de agente. */
 export const MAX_TASKS_PER_PHASE = 15;
 
+/**
+ * Teto de critérios por fase.
+ *
+ * Contar tasks mede a coisa errada. Os três pilotos que fecharam ficaram entre
+ * 2,1 e 2,5 critérios por task, com no máximo 46 critérios numa fase. O piloto 3
+ * saiu com 84 numa fase só — o mesmo número de tasks, o dobro do trabalho, e uma
+ * sessão de agente que ninguém nunca testou desse tamanho.
+ *
+ * O número é empírico e revisável: 60 fica acima de tudo o que já funcionou e
+ * abaixo do que nunca foi tentado. Quando houver evidência de fase maior
+ * fechando, ele sobe.
+ */
+export const MAX_CRITERIA_PER_PHASE = 60;
+
 export function parseLedger(source: string): LedgerResult {
   let parsed: unknown;
   try {

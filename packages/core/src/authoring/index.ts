@@ -1,4 +1,4 @@
-export { LEDGER_CONTRACT, MAX_TASKS_PER_PHASE, parseLedger } from "./ledger.js";
+export { LEDGER_CONTRACT, MAX_CRITERIA_PER_PHASE, MAX_TASKS_PER_PHASE, parseLedger } from "./ledger.js";
 export type { Ledger, LedgerCoverage, LedgerDefect, LedgerPhase, LedgerResult } from "./ledger.js";
 export { IntervalPartError, allocateParts, assertSinglePhasePart, partId } from "./parts.js";
 export type { Part } from "./parts.js";

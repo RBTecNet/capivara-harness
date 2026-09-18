@@ -16,7 +16,7 @@ import { assemblePhasesDocument, buildStamp, checkCoverage, extractEntities, ext
 import type { CoverageSources, StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
-import { MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
+import { MAX_CRITERIA_PER_PHASE, MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Question } from "../interview/index.js";
 import { assessRehearsal, auditorPrompt, languageBlock, enumerateCriteria, gapPrompt, interviewPrompt, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
@@ -1044,14 +1044,25 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       // Dimensionamento é contável, então é contado aqui e não descoberto pelo
       // auditor três devoluções depois: uma fase é uma sessão de agente.
       if (parsed.ok) {
-        const grandes = parsed.document.phases.filter((phase) => phase.tasks.length > MAX_TASKS_PER_PHASE);
+        const criterios = (phase: (typeof parsed.document.phases)[number]): number =>
+          phase.tasks.reduce((total, task) => total + task.acceptanceCriteria.length, 0);
+
+        const grandes = parsed.document.phases.filter(
+          (phase) => phase.tasks.length > MAX_TASKS_PER_PHASE || criterios(phase) > MAX_CRITERIA_PER_PHASE,
+        );
         if (grandes.length > 0) {
           return {
             status: "REJECTED",
             findings: grandes.map((phase) => ({
               where: `Phase ${phase.number}`,
-              problem: `a fase declara ${phase.tasks.length} tasks e uma fase é uma sessão de agente`,
-              fix: `divida em mais fases de topo até nenhuma passar de ${MAX_TASKS_PER_PHASE} tasks, preservando a ordem de dependências`,
+              problem:
+                phase.tasks.length > MAX_TASKS_PER_PHASE
+                  ? `a fase declara ${phase.tasks.length} tasks e uma fase é uma sessão de agente`
+                  : `a fase declara ${criterios(phase)} critérios de aceite em ${phase.tasks.length} tasks, e uma fase é uma sessão de agente`,
+              fix:
+                phase.tasks.length > MAX_TASKS_PER_PHASE
+                  ? `divida em mais fases de topo até nenhuma passar de ${MAX_TASKS_PER_PHASE} tasks, preservando a ordem de dependências`
+                  : `divida em mais fases de topo até nenhuma passar de ${MAX_CRITERIA_PER_PHASE} critérios, preservando a ordem de dependências; não apague critério para caber`,
             })),
             remarks: [],
             reason: "há fase acima do que cabe numa sessão",

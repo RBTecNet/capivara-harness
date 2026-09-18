@@ -231,6 +231,36 @@ describe("entrevista dentro do init", () => {
   });
 });
 
+describe("dimensionamento de fase", () => {
+  it("fase densa demais volta ao escritor mesmo cabendo em tasks", async () => {
+    // Mesmo número de tasks, o dobro do trabalho: é a medida que faltava.
+    const densa = [
+      "## Phase 1: Fundação",
+      "",
+      "**Goal:** base · **Depends on:** none · **Covers:** statuses",
+      "",
+      ...Array.from({ length: 10 }, (_unused, indice) => [
+        `- [ ] **Task:** Tarefa ${indice + 1}`,
+        "  - **Acceptance criteria:**",
+        ...Array.from({ length: 7 }, (_ignora, posicao) => `    - condição observável ${posicao + 1}`),
+        "  - **Feature tests:** t → t",
+        "  - **Traces:** statuses",
+        "",
+      ].join("\n")),
+    ].join("\n");
+
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "phase-p01", attempt: 1 }, respond: { stdout: densa } });
+    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: PHASE_1 }, repeat: true });
+    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 }, repeat: true });
+
+    const { agent, anunciado } = await run(steps);
+    expect(anunciado).toContain("auditor devolveu project-phases.md");
+    const reescrita = agent.calls.find((call) => call.subject === "phase-p01" && call.attempt > 1);
+    expect(reescrita?.prompt).toContain("critérios de aceite");
+  });
+});
+
 describe("retomada", () => {
   it("documento já publicado neste run não é reescrito, e suas decisões descem a cadeia", async () => {
     const primeiro = happyPath();

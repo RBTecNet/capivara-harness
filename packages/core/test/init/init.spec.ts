@@ -399,6 +399,33 @@ describe("retomada", () => {
   });
 });
 
+describe("resposta de gap sobrevive ao run", () => {
+  it("decisão tomada na rodada de gaps fica gravada onde a retomada lê", async () => {
+    // O piloto 3 decidiu a stack numa rodada de gaps e, ao regenerar os
+    // documentos no dia seguinte, o escritor perguntou a stack de novo: a
+    // resposta existia só na memória do processo.
+    const comMarcador = DESCRIPTION.replace("## Tech Stack", "[NEEDS DECISION] qual banco de dados\n\n## Tech Stack");
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "project-description.md", attempt: 1 }, respond: { stdout: comMarcador } });
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-description.md:gaps" },
+      respond: { stdout: oneQuestion("Q-09") },
+      repeat: true,
+    });
+    steps.push({ match: { role: "writer", stage: "authoring", subject: "project-description.md" }, respond: { stdout: DESCRIPTION }, repeat: true });
+
+    await run(steps, ["1"]);
+
+    const handoff = JSON.parse(
+      await readFile(join(projectRoot, ".capivara", "handoffs", `${runIdFor("init", request.sha12)}.project-description.md.json`), "utf8"),
+    ) as { answers: { questionId: string; disposition: string; decision: string }[] };
+
+    const daRodadaDeGaps = handoff.answers.find((answer) => answer.questionId === "Q-09");
+    expect(daRodadaDeGaps?.disposition).toBe("ACCEPTED");
+    expect(daRodadaDeGaps?.decision).toContain("Node");
+  });
+});
+
 describe("decisão de impasse", () => {
   /** Leva o documento ao impasse: o auditor reprova sempre, o escritor insiste. */
   function semConvergencia(): ScriptStep[] {

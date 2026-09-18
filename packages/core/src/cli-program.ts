@@ -238,6 +238,29 @@ export function createProgram(): Command {
         },
         ask: async (question, index, total) => {
           /*
+           * Sem terminal não há a quem perguntar. Oferecer a pergunta a uma
+           * entrada que não existe termina em ERR_USE_AFTER_CLOSE do readline —
+           * stack trace no lugar de diagnóstico, no fim de horas de trabalho. Foi
+           * o que derrubou um run inteiro do piloto 3 numa única pergunta.
+           */
+          if (stdin.isTTY !== true) {
+            throw new InitBlockedError(
+              [
+                `O escritor precisa de uma decisão para seguir e não há terminal para perguntar:`,
+                "",
+                `  ${question.decision}`,
+                "",
+                ...(question.options.length > 0
+                  ? question.options.map((option, posicao) => `  ${posicao + 1}) ${option.label}`)
+                  : ["  (pergunta aberta)"]),
+                "",
+                "Rode o mesmo comando num terminal para responder. Nada do que já foi publicado se perdeu.",
+              ].join("\n"),
+              runId,
+            );
+          }
+
+          /*
            * A pergunta é desenhada DENTRO do painel, no lugar da janela de log —
            * enquanto a vez é do desenvolvedor não há nada acontecendo para
            * registrar ali. A linha de resposta fica colada embaixo da moldura,

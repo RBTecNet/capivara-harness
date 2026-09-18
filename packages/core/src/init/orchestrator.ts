@@ -947,23 +947,34 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     });
 
     // No handoff os ids são locais ao documento: é assim que a retomada os lê.
+    await persistAnswers(document, [pergunta], [
+      { questionId: id, raw: decision, disposition: "ACCEPTED", decision, open: "", round: 1, answeredAt: now().toISOString() },
+    ]);
+
+    announce("  decisão registrada: vale para este documento e para os seguintes");
+  }
+
+  /**
+   * Junta perguntas e respostas ao handoff do documento, sem perder o que já havia.
+   *
+   * Os ids ficam locais ao documento, que é como a retomada os lê; o escopo por
+   * etapa é acrescentado só na agregação em memória.
+   */
+  async function persistAnswers(document: ChainDocument, questions: readonly Question[], answers: readonly Answer[]): Promise<void> {
     const anterior = await readHandoff(options.projectRoot, runId, document);
+    const conhecidas = new Set((anterior?.questions ?? []).map((question) => question.id));
+
     await writeHandoff(options.projectRoot, {
       contract: "capivara-handoff/v1",
       runId,
       language: options.language,
       document,
       round: anterior?.round ?? 1,
-      questions: [...(anterior?.questions ?? []), pergunta],
-      answers: [
-        ...(anterior?.answers ?? []),
-        { questionId: id, raw: decision, disposition: "ACCEPTED", decision, open: "", round: 1, answeredAt: now().toISOString() },
-      ],
+      questions: [...(anterior?.questions ?? []), ...questions.filter((question) => !conhecidas.has(question.id))],
+      answers: [...(anterior?.answers ?? []), ...answers],
       assumptions: anterior?.assumptions ?? [],
       updatedAt: now().toISOString(),
     });
-
-    announce("  decisão registrada: vale para este documento e para os seguintes");
   }
 
   /** As perguntas deste documento e como o desenvolvedor as respondeu. */
@@ -1031,6 +1042,18 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       const stage = `gap${round}`;
       allQuestions.push(...batch.questions.map((question) => ({ ...question, id: scoped(document, question.id, stage) })));
       allAnswers.push(...answered.map((answer) => ({ ...answer, questionId: scoped(document, answer.questionId, stage) })));
+      allQuestions.push(...batch.questions.map((question) => ({ ...question, id: scoped(document, question.id, stage) })));
+
+      /*
+       * A rodada de gaps grava no handoff como a entrevista grava.
+       *
+       * Sem isto, decisão tomada aqui existe só na memória do processo. O piloto
+       * 3 decidiu a stack numa rodada de gaps e, ao regenerar os documentos no
+       * dia seguinte, o escritor perguntou a stack de novo — a resposta não
+       * estava em lugar nenhum que a retomada lesse. É o mesmo defeito da
+       * decisão de impasse, no outro caminho que sai da entrevista principal.
+       */
+      await persistAnswers(document, batch.questions, answered);
 
       const accepted = answered.filter((answer) => answer.disposition === "ACCEPTED");
       if (accepted.length === 0) return authored;

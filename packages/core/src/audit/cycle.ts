@@ -27,6 +27,8 @@ export interface AuditCycleState {
   document: string;
   history: AuditAttempt[];
   maxReturns: number;
+  /** Rodadas para fechar defeito mecânico, separadas do teto do auditor. */
+  maxMechanical: number;
 }
 
 export type AuditAction =
@@ -94,8 +96,23 @@ export function nextAuditAction(state: AuditCycleState): AuditAction {
     return { action: "publish", remarks: last.verdict.remarks };
   }
 
-  const returns = state.history.filter((attempt) => attempt.verdict.status === "REJECTED").length;
-  if (returns < state.maxReturns) {
+  /*
+   * Defeito mecânico tem orçamento próprio.
+   *
+   * Contagem de critérios, dimensionamento, cobertura, referência morta: são
+   * determinísticos, e o escritor converge para eles — no piloto 3 uma fase caiu
+   * de 74 critérios para 61 numa única devolução. Gastar o teto do auditor nisso
+   * deixou uma rodada só para o desacordo de verdade, e o run terminou em impasse
+   * sobre uma contagem que mais uma volta teria resolvido.
+   */
+  const mechanical = state.history.filter((attempt) => attempt.verdict.status === "REJECTED" && attempt.verdict.mechanical === true).length;
+  const returns = state.history.filter((attempt) => attempt.verdict.status === "REJECTED" && attempt.verdict.mechanical !== true).length;
+
+  if (last.verdict.mechanical === true) {
+    if (mechanical < state.maxMechanical) {
+      return { action: "return-to-writer", findings: last.verdict.findings, attempt: last.attempt + 1 };
+    }
+  } else if (returns < state.maxReturns) {
     return { action: "return-to-writer", findings: last.verdict.findings, attempt: last.attempt + 1 };
   }
 
@@ -108,8 +125,11 @@ export function nextAuditAction(state: AuditCycleState): AuditAction {
       repeated: repeatedFindings(state.history),
       writerDid: state.history.map((attempt) => attempt.writerSummary),
       question:
-        `O auditor devolveu ${state.document} ${returns} vezes e o escritor não fechou o ponto. ` +
-        "Isso costuma ser um gap de entrevista disfarçado de desacordo. O que vale?",
+        last.verdict.mechanical === true
+          ? `O self-check devolveu ${state.document} ${mechanical} vezes e a forma não fechou. ` +
+            "Isso não é desacordo: é dimensionamento que o escritor não consegue resolver reescrevendo no lugar. O que vale?"
+          : `O auditor devolveu ${state.document} ${returns} vezes e o escritor não fechou o ponto. ` +
+            "Isso costuma ser um gap de entrevista disfarçado de desacordo. O que vale?",
     },
   };
 }

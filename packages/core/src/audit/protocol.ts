@@ -30,6 +30,16 @@ export interface AuditVerdict {
   findings: Finding[];
   remarks: Remark[];
   reason: string;
+  /**
+   * Verdadeiro quando a reprovação veio de um self-check, não do auditor.
+   *
+   * Defeito mecânico não é discordância: ele é determinístico, verificável em
+   * código, e o escritor converge para ele — no piloto 3 uma fase foi de 74
+   * critérios para 61 em uma devolução. Contar isso contra o teto de devoluções
+   * do auditor esgotou o orçamento em contagem e sobrou uma rodada só para o
+   * desacordo de verdade.
+   */
+  mechanical?: boolean;
 }
 
 export type AuditParse =

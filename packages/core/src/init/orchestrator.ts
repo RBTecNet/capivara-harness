@@ -74,6 +74,8 @@ export interface InitOptions {
   fresh?: boolean;
   /** Fases escritas ao mesmo tempo. Elas são independentes; o teto é de cortesia. */
   maxParallelParts?: number;
+  /** Rodadas para fechar defeito mecânico, separadas do teto do auditor. */
+  maxMechanicalRounds?: number;
   /** Critérios por chamada do ensaio. Lote grande volta sem julgamento. */
   maxCriteriaPerRehearsalBatch?: number;
   /** Provider de cada papel, só para reconhecer o formato do limite de uso. */
@@ -151,6 +153,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const maxRehearsalRounds = options.maxRehearsalRounds ?? 1;
   const maxParallelParts = Math.max(1, options.maxParallelParts ?? 3);
   const maxCriteriosPorLote = Math.max(1, options.maxCriteriaPerRehearsalBatch ?? 20);
+  const maxMechanicalRounds = Math.max(1, options.maxMechanicalRounds ?? 3);
   const esperar = options.sleep ?? ((seconds: number) => new Promise<void>((resolve) => setTimeout(resolve, seconds * 1000)));
   const providerDoPapel = (role: AgentCall["role"]): string => options.providers?.[role] ?? "default";
 
@@ -1226,7 +1229,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       const verdict = await auditOnce(document, content, writer, upstream, attempt);
       history.push({ attempt, verdict, writerSummary: `tentativa ${attempt}: escreveu ${document}` });
 
-      const action = nextAuditAction({ document, history, maxReturns: maxAuditReturns });
+      const action = nextAuditAction({ document, history, maxReturns: maxAuditReturns, maxMechanical: maxMechanicalRounds });
       if (action.action === "publish") return { content, remarks: verdict.remarks, authored };
 
       if (action.action === "ask-developer" && developerRuled) {
@@ -1315,6 +1318,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             findings: mortas.map((erro) => ({ where: "Design ref", problem: erro.message, fix: erro.hint })),
             remarks: [],
             reason: "há referência de design que não existe em disco",
+            mechanical: true,
           };
         }
       }
@@ -1337,6 +1341,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             })),
             remarks: [],
             reason: "há item da cadeia que nenhuma task rastreia",
+            mechanical: true,
           };
         }
       }
@@ -1362,10 +1367,14 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               fix:
                 phase.tasks.length > MAX_TASKS_PER_PHASE
                   ? `divida em mais fases de topo até nenhuma passar de ${MAX_TASKS_PER_PHASE} tasks, preservando a ordem de dependências`
-                  : `divida em mais fases de topo até nenhuma passar de ${MAX_CRITERIA_PER_PHASE} critérios, preservando a ordem de dependências; não apague critério para caber`,
+                  : `consolide critérios redundantes desta fase até ela caber em ${MAX_CRITERIA_PER_PHASE}: dois critérios que` +
+                    ` verificam a mesma condição com palavras diferentes viram um só. Nenhuma condição verificável pode desaparecer —` +
+                    ` se depois de consolidar ainda não couber, diga isso em vez de apagar critério. Reescreva apenas esta fase:` +
+                    ` criar fases novas é decisão do plano, não desta reescrita`,
             })),
             remarks: [],
             reason: "há fase acima do que cabe numa sessão",
+            mechanical: true,
           };
         }
       }

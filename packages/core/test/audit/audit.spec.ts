@@ -110,19 +110,19 @@ describe("ciclo de devolução", () => {
   });
 
   it("aprovado publica", () => {
-    const action = nextAuditAction({ document: "user-stories.md", history: [attempt(1, "APPROVED")], maxReturns: 3 });
+    const action = nextAuditAction({ document: "user-stories.md", history: [attempt(1, "APPROVED")], maxReturns: 3, maxMechanical: 3 });
     expect(action.action).toBe("publish");
   });
 
   it("devolve ao escritor enquanto houver teto", () => {
-    const action = nextAuditAction({ document: "user-stories.md", history: [attempt(1, "REJECTED")], maxReturns: 3 });
+    const action = nextAuditAction({ document: "user-stories.md", history: [attempt(1, "REJECTED")], maxReturns: 3, maxMechanical: 3 });
     expect(action.action).toBe("return-to-writer");
     if (action.action === "return-to-writer") expect(action.findings[0]?.fix).toContain("limite numérico");
   });
 
   it("esgotado o teto, pergunta ao desenvolvedor em vez de aceitar ou desistir", () => {
     const history = [attempt(1, "REJECTED"), attempt(2, "REJECTED"), attempt(3, "REJECTED")];
-    const action = nextAuditAction({ document: "user-stories.md", history, maxReturns: DEFAULT_MAX_RETURNS });
+    const action = nextAuditAction({ document: "user-stories.md", history, maxReturns: DEFAULT_MAX_RETURNS, maxMechanical: 3 });
     expect(action.action).toBe("ask-developer");
     if (action.action !== "ask-developer") return;
     expect(action.standoff.returns).toBe(3);
@@ -131,7 +131,7 @@ describe("ciclo de devolução", () => {
 
   it("o impasse mostra lado a lado a insistência do auditor e o que o escritor fez", () => {
     const history = [attempt(1, "REJECTED", "US-1.2"), attempt(2, "REJECTED", "US-2.1"), attempt(3, "REJECTED", "US-1.2")];
-    const action = nextAuditAction({ document: "user-stories.md", history, maxReturns: 3 });
+    const action = nextAuditAction({ document: "user-stories.md", history, maxReturns: 3, maxMechanical: 3 });
     if (action.action !== "ask-developer") throw new Error("esperava impasse");
     const texto = renderStandoff(action.standoff);
     expect(texto).toContain("O auditor insiste em:");
@@ -146,7 +146,7 @@ describe("ciclo de devolução", () => {
 
   it("uma aprovação depois de devoluções publica e encerra", () => {
     const history = [attempt(1, "REJECTED"), attempt(2, "APPROVED")];
-    expect(nextAuditAction({ document: "x.md", history, maxReturns: 3 }).action).toBe("publish");
+    expect(nextAuditAction({ document: "x.md", history, maxReturns: 3, maxMechanical: 3 }).action).toBe("publish");
   });
 });
 
@@ -255,7 +255,7 @@ describe("o impasse fala da versão atual", () => {
       { attempt: 2, verdict: rejeita("Phase 2", "falta a regra de unicidade"), writerSummary: "reescreveu" },
       { attempt: 3, verdict: rejeita("Phase 2", "falta a regra de unicidade"), writerSummary: "reescreveu" },
     ];
-    const action = nextAuditAction({ document: "project-phases.md", history, maxReturns: 3 });
+    const action = nextAuditAction({ document: "project-phases.md", history, maxReturns: 3, maxMechanical: 3 });
     expect(action.action).toBe("ask-developer");
     if (action.action !== "ask-developer") return;
     expect(action.standoff.auditorInsists).toHaveLength(1);
@@ -268,8 +268,58 @@ describe("o impasse fala da versão atual", () => {
       { attempt: 2, verdict: rejeita("Phase 2", "falta a regra de unicidade"), writerSummary: "reescreveu" },
       { attempt: 3, verdict: rejeita("Phase 2", "falta a regra de unicidade"), writerSummary: "reescreveu" },
     ];
-    const action = nextAuditAction({ document: "project-phases.md", history, maxReturns: 3 });
+    const action = nextAuditAction({ document: "project-phases.md", history, maxReturns: 3, maxMechanical: 3 });
     if (action.action !== "ask-developer") throw new Error("esperava impasse");
     expect(renderStandoff(action.standoff)).toContain("repetido em mais de uma tentativa");
+  });
+});
+
+describe("defeito mecânico tem orçamento próprio", () => {
+  const mecanico = (problema: string) => ({
+    status: "REJECTED" as const,
+    findings: [{ where: "Phase 1", problem: problema, fix: "consolide" }],
+    remarks: [],
+    reason: "há fase acima do que cabe numa sessão",
+    mechanical: true,
+  });
+  const doAuditor = (problema: string) => ({
+    status: "REJECTED" as const,
+    findings: [{ where: "Phase 2", problem: problema, fix: "corrija" }],
+    remarks: [],
+    reason: "há defeito",
+  });
+
+  it("contagem não gasta o teto do auditor", () => {
+    // O piloto 3 parou em impasse com duas devoluções mecânicas e uma real: a
+    // fase ia de 74 para 61 critérios e mais uma volta teria fechado.
+    const history = [
+      { attempt: 1, verdict: mecanico("74 critérios"), writerSummary: "escreveu" },
+      { attempt: 2, verdict: doAuditor("ambiguidade de espaços"), writerSummary: "reescreveu" },
+      { attempt: 3, verdict: mecanico("61 critérios"), writerSummary: "reescreveu" },
+    ];
+    const action = nextAuditAction({ document: "project-phases.md", history, maxReturns: 3, maxMechanical: 3 });
+    expect(action.action).toBe("return-to-writer");
+  });
+
+  it("mas ele também acaba: mecânico que não fecha vira impasse próprio", () => {
+    const history = [1, 2, 3].map((attempt) => ({
+      attempt,
+      verdict: mecanico(`${80 - attempt} critérios`),
+      writerSummary: "reescreveu",
+    }));
+    const action = nextAuditAction({ document: "project-phases.md", history, maxReturns: 3, maxMechanical: 3 });
+    expect(action.action).toBe("ask-developer");
+    if (action.action !== "ask-developer") return;
+    expect(action.standoff.question).toContain("não é desacordo");
+  });
+
+  it("o teto do auditor continua valendo para desacordo de verdade", () => {
+    const history = [1, 2, 3].map((attempt) => ({
+      attempt,
+      verdict: doAuditor("a regra não nomeia o alvo"),
+      writerSummary: "reescreveu",
+    }));
+    const action = nextAuditAction({ document: "project-phases.md", history, maxReturns: 3, maxMechanical: 3 });
+    expect(action.action).toBe("ask-developer");
   });
 });

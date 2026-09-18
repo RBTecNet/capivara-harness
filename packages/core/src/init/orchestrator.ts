@@ -72,6 +72,11 @@ export interface InitOptions {
   fresh?: boolean;
   /** Fases escritas ao mesmo tempo. Elas são independentes; o teto é de cortesia. */
   maxParallelParts?: number;
+  /**
+   * Espelho dos eventos do run, para quem quiser desenhar progresso.
+   * O painel observa por aqui e nunca pergunta nada ao orquestrador.
+   */
+  onProgress?: (event: { stage: RunStage; subject: string; status: "started" | "complete" | "retry" | "blocked"; detail: string; attempt: number }) => void;
   now?: () => Date;
 }
 
@@ -193,6 +198,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
   const event = async (stage: RunStage, subject: string, status: "started" | "complete" | "retry" | "blocked", detail = "", attempt = 1): Promise<void> => {
     await appendEvent(paths.events, { timestamp: now().toISOString(), stage, subject, attempt, status, detail });
+    options.onProgress?.({ stage, subject, status, detail, attempt });
   };
 
   const inventory = await inspectProject(options.projectRoot);

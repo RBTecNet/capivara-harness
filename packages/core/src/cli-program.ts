@@ -8,7 +8,7 @@ import { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
 import { BUILD_ROLES, INIT_ROLES, describeRoles, renderUnresolved, rolesFromFlags, unresolvedRoles, type CliRoleFlags } from "./commands/options.js";
 import { InitBlockedError, resolveRequest, runInit } from "./init/index.js";
 import { runBuild } from "./loop/index.js";
-import { BACK, detectLanguage, renderQuestion, renderSplash, supportsColor } from "./tui/index.js";
+import { BACK, HarnessProgress, createLiveRegion, detectLanguage, renderDashboard, renderQuestion, renderSplash, supportsColor } from "./tui/index.js";
 import { createLineIO, runWizard } from "./commands/wizard.js";
 import { runIdFor } from "./state/index.js";
 import { VERSION } from "./version.js";
@@ -79,8 +79,9 @@ export function createProgram(): Command {
       .option("--file <caminho>", "lê o pedido de um arquivo")
       .option("--max-audit-returns <n>", "devoluções do auditor por documento", "3")
       .option("--max-interview-rounds <n>", "rodadas de entrevista por documento", "3")
-      .option("--fresh", "ignora o que este run já publicou e recomeça a cadeia do zero"),
-  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; maxAuditReturns: string; maxInterviewRounds: string; fresh?: boolean }) => {
+      .option("--fresh", "ignora o que este run já publicou e recomeça a cadeia do zero")
+      .option("--no-dashboard", "não desenha o painel; só as linhas de progresso"),
+  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; maxAuditReturns: string; maxInterviewRounds: string; fresh?: boolean; dashboard?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const configured = rolesFromFlags(flags);
     const semProvider = unresolvedRoles(configured, INIT_ROLES);
@@ -106,6 +107,26 @@ export function createProgram(): Command {
     const bridge = createAgentBridge({ projectRoot, runId, language, roles, limits: DEFAULT_LIMITS });
     const terminal = createInterface({ input: stdin, output: stdout });
 
+    /*
+     * O painel observa e nunca altera: ele lê os eventos que o orquestrador já
+     * grava e se redesenha no lugar. Sem terminal, não desenha nada — as linhas
+     * de progresso continuam sendo a saída, e o log segue legível.
+     */
+    const progress = new HarnessProgress({
+      version: VERSION,
+      project: projectRoot,
+      provider: {
+        perfil: `${roles.writer.provider}${roles.writer.model ? `:${roles.writer.model}` : ""}`,
+        transporte: `${roles.writer.provider}-cli`,
+        contabilidade: "por chamada",
+      },
+      style: style(),
+      ...(stdout.columns ? { width: Math.min(stdout.columns, 110) } : {}),
+      environment: process.env,
+    });
+    const live = createLiveRegion((text) => void stdout.write(text), flags.dashboard !== false && stdout.isTTY === true);
+    const repaint = (): void => live.draw(renderDashboard(progress.model()));
+
     try {
       const outcome = await runInit({
         projectRoot,
@@ -114,9 +135,19 @@ export function createProgram(): Command {
         maxAuditReturns: Number(flags.maxAuditReturns),
         maxInterviewRounds: Number(flags.maxInterviewRounds),
         ...(flags.fresh === true ? { fresh: true } : {}),
-        announce: (message) => stdout.write(`${message}\n`),
+        announce: (message) => {
+          progress.note(message.trim());
+          if (live.enabled) repaint();
+          else stdout.write(`${message}\n`);
+        },
+        onProgress: (evento) => {
+          progress.apply(evento);
+          repaint();
+        },
         call: async (call) => {
           const response = await bridge({ role: call.role, stage: call.stage, prompt: call.prompt });
+          progress.charge(response.usage);
+          repaint();
           return {
             stdout: response.stdout,
             exitCode: response.exitCode,
@@ -132,19 +163,25 @@ export function createProgram(): Command {
           };
         },
         ask: async (question, index, total) => {
+          // A pergunta é dona da tela enquanto durar: o painel solta a região e
+          // o que estava desenhado vira histórico acima dela.
+          live.release();
           stdout.write(renderQuestion({ question, index, total, document: "entrevista", style: style() }));
           const answer = await terminal.question("> ");
           return answer.trim().toLowerCase() === BACK ? "" : answer;
         },
         decideStandoff: async (rendered) => {
+          live.release();
           stdout.write(`\n${rendered}\n`);
           return terminal.question('> (responda, ou "publicar" para aceitar como está) ');
         },
       });
+      live.release();
       stdout.write(`\n${outcome.rendered}\n`);
       process.exitCode = outcome.readiness.ready ? 0 : 2;
     } catch (error) {
       if (error instanceof InitBlockedError) {
+        live.release();
         stdout.write(`\n${error.message}\n`);
         process.exitCode = 2;
         return;

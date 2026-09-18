@@ -1,0 +1,140 @@
+/**
+ * O painel do harness, exercitado sem terminal e sem provider.
+ *
+ * Tudo aqui é projeção pura: entra evento, sai modelo. É o que permite afirmar
+ * que o painel observa sem alterar — ele nem tem como.
+ */
+
+import { describe, expect, it } from "vitest";
+import { DOCUMENT_CHAIN_LABELS, HarnessProgress, createLiveRegion, renderDashboard } from "../../src/tui/index.js";
+import type { ProgressEvent } from "../../src/tui/index.js";
+
+const plain = { enabled: false };
+
+function progresso(now = () => new Date("2026-09-18T03:00:00Z")): HarnessProgress {
+  return new HarnessProgress({
+    version: "0.1.0",
+    project: "/home/bruno/pilotos/piloto-3",
+    provider: { perfil: "codex", transporte: "codex-cli", contabilidade: "por chamada" },
+    style: plain,
+    environment: {},
+    now,
+  });
+}
+
+function evento(partial: Partial<ProgressEvent>): ProgressEvent {
+  return { stage: "interview", subject: "project-description.md", status: "started", detail: "", attempt: 1, ...partial };
+}
+
+describe("painel do harness", () => {
+  it("começa com os quatro documentos aguardando", () => {
+    const model = progresso().model();
+    expect(model.pipeline).toHaveLength(DOCUMENT_CHAIN_LABELS.length);
+    expect(model.pipeline.every((step) => step.state === "aguardando")).toBe(true);
+  });
+
+  it("documento em trabalho fica em andamento e publicado fica concluído", () => {
+    const p = progresso();
+    p.apply(evento({ stage: "authoring" }));
+    expect(p.model().pipeline[0]?.state).toBe("em andamento");
+
+    p.apply(evento({ stage: "publish", status: "complete" }));
+    expect(p.model().pipeline[0]?.state).toBe("concluído");
+  });
+
+  it("publicado não volta a em andamento por um evento atrasado", () => {
+    const p = progresso();
+    p.apply(evento({ stage: "publish", status: "complete" }));
+    p.apply(evento({ stage: "audit" }));
+    expect(p.model().pipeline[0]?.state).toBe("concluído");
+  });
+
+  it("a etapa nomeia o que está acontecendo e em qual documento", () => {
+    const p = progresso();
+    p.apply(evento({ stage: "audit", subject: "database-schema.md" }));
+    expect(p.model().stage).toBe("auditoria · database-schema");
+  });
+
+  it("assunto com sufixo de gaps ainda aponta para o documento", () => {
+    const p = progresso();
+    p.apply(evento({ stage: "interview", subject: "user-stories.md:gaps", status: "retry" }));
+    expect(p.model().pipeline[1]?.state).toBe("em andamento");
+  });
+
+  it("devolução conta como correção", () => {
+    const p = progresso();
+    p.apply(evento({ stage: "audit", status: "retry" }));
+    p.apply(evento({ stage: "audit", status: "retry" }));
+    expect(p.model().telemetry.find((metric) => metric.label === "DEVOLUÇÕES")?.value).toBe("2");
+  });
+
+  it("bloqueio aparece como falha, no passo e na situação", () => {
+    const p = progresso();
+    p.apply(evento({ stage: "authoring", status: "blocked", subject: "project-phases.md" }));
+    expect(p.model().status.state).toBe("falhou");
+    expect(p.model().pipeline[3]?.state).toBe("falhou");
+  });
+
+  it("RALPH READY fecha a situação", () => {
+    const p = progresso();
+    p.apply(evento({ stage: "ready", subject: "-", status: "complete" }));
+    expect(p.model().status.label).toBe("RALPH READY");
+  });
+
+  it("tokens e custo somam por chamada; sem relato, dizem que não mediram", () => {
+    const p = progresso();
+    p.charge({ inputTokens: 1000, outputTokens: 50, costUsd: 0.01 });
+    p.charge({ inputTokens: 500, outputTokens: 25, costUsd: 0.005 });
+    p.charge();
+
+    const telemetria = new Map(p.model().telemetry.map((metric) => [metric.label, metric.value]));
+    expect(telemetria.get("CHAMADAS")).toBe("3");
+    expect(telemetria.get("ENTRADA")).toBe("1.500");
+    expect(telemetria.get("CUSTO")).toBe("US$ 0.0150");
+    expect(progresso().model().telemetry.find((m) => m.label === "ENTRADA")?.value).toBe("não medido");
+  });
+
+  it("o log mantém só as últimas linhas: painel não é histórico", () => {
+    const p = progresso();
+    for (let i = 0; i < 30; i += 1) p.note(`linha ${i}`);
+    expect(p.model().events.length).toBeLessThanOrEqual(12);
+    expect(p.model().events.at(-1)?.text).toBe("linha 29");
+  });
+
+  it("o modelo rende sem quebrar e cabe na largura pedida", () => {
+    const p = progresso();
+    p.apply(evento({ stage: "authoring", subject: "project-phases.md" }));
+    p.note("escrevendo 7 fase(s), até 3 por vez");
+    const view = renderDashboard({ ...p.model(), width: 90 });
+    expect(view).toContain("plano executável");
+    for (const line of view.split("\n")) expect(line.length).toBeLessThanOrEqual(90);
+  });
+});
+
+describe("região viva", () => {
+  it("sem terminal, não escreve nada — o log continua sendo a saída", () => {
+    const escrito: string[] = [];
+    const region = createLiveRegion((text) => void escrito.push(text), false);
+    region.draw("qualquer coisa");
+    expect(escrito).toEqual([]);
+    expect(region.enabled).toBe(false);
+  });
+
+  it("o segundo desenho sobe e apaga o primeiro", () => {
+    const escrito: string[] = [];
+    const region = createLiveRegion((text) => void escrito.push(text), true);
+    region.draw("uma\nduas\ntrês");
+    region.draw("nova");
+    expect(escrito[0]).not.toContain("[3A");
+    expect(escrito[1]).toContain("[3A");
+  });
+
+  it("depois de soltar, o desenho seguinte não apaga o que virou histórico", () => {
+    const escrito: string[] = [];
+    const region = createLiveRegion((text) => void escrito.push(text), true);
+    region.draw("uma\nduas");
+    region.release();
+    region.draw("nova");
+    expect(escrito[1]).not.toContain("A");
+  });
+});

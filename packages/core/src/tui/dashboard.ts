@@ -134,17 +134,25 @@ export function renderDashboard(model: DashboardModel): string {
   lines.push(
     ...box(
       "SITUAÇÃO",
-      columns(
-        [
-          { label: "PROJETO", value: model.project, path: true },
-          { label: "WORKFLOW", value: model.command },
-          { label: "ETAPA ATUAL", value: model.stage },
-          { label: "STATUS", value: `${MARK[model.status.state]} ${model.status.label}` },
-          { label: "DURAÇÃO", value: duration(model.durationSeconds) },
-        ],
-        width,
-        style,
-      ),
+      /*
+       * A etapa atual ganha uma linha inteira, não uma coluna.
+       * Ela é o campo mais informativo do painel — diz o que está acontecendo
+       * agora — e era justamente o que aparecia cortado quando dividia a largura
+       * com outros quatro. O workflow saiu: o subtítulo já o nomeia.
+       */
+      [
+        ...columns(
+          [
+            { label: "PROJETO", value: model.project, path: true },
+            { label: "STATUS", value: `${MARK[model.status.state]} ${model.status.label}` },
+            { label: "DURAÇÃO", value: duration(model.durationSeconds) },
+          ],
+          width,
+          style,
+        ),
+        "",
+        `${paint(padVisible("ETAPA ATUAL", 16), "cyan", style)}${model.stage}`,
+      ],
       width,
       style,
     ),

@@ -68,7 +68,10 @@ export class HarnessProgress {
   /** Um evento do run. Documento publicado fecha o passo; devolução marca correção. */
   apply(event: ProgressEvent): void {
     const documento = event.subject.split(":")[0] ?? event.subject;
-    this.etapa = `${STAGE_LABEL[event.stage] ?? event.stage}${documento && documento !== "-" ? ` · ${documento}` : ""}`;
+    // Sem a extensão: o nome do arquivo já é longo e a extensão não informa nada
+    // que a linha inteira não diga.
+    const curto = documento.replace(/\.md$/, "");
+    this.etapa = `${STAGE_LABEL[event.stage] ?? event.stage}${curto && curto !== "-" ? ` · ${curto}` : ""}`;
 
     if (this.estados.has(documento)) {
       if (event.stage === "publish" && event.status === "complete") this.estados.set(documento, "concluído");

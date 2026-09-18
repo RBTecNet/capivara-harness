@@ -12,3 +12,8 @@ export type { CapybaraOptions } from "./capybara.js";
 export { DEFAULT_LANGUAGE, detectLanguage } from "./language.js";
 export { readChoice, renderChoices, renderCommand, roleHint, toArgv, wizardSteps } from "./wizard.js";
 export type { Choice, ChoiceReading, WizardAnswers, WizardStep } from "./wizard.js";
+export { createLiveRegion } from "./live.js";
+export type { LiveRegion } from "./live.js";
+export { HarnessProgress } from "./harness-progress.js";
+export type { HarnessProgressOptions, ProgressEvent } from "./harness-progress.js";
+export { DOCUMENT_CHAIN_LABELS } from "./labels.js";

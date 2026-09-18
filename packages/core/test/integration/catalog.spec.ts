@@ -290,7 +290,7 @@ describe("B-32 · reescrita do plano após devolução", () => {
   it("reescreve APENAS a fase que o finding nomeia e remonta o documento inteiro", async () => {
     const steps = happyPath();
     steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md", attempt: 1 },
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2", attempt: 1 },
       respond: { stdout: reject("Phase 2", "o critério de sobreposição não é observável", "declare o código HTTP devolvido") },
     });
     steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02", attempt: 2 }, respond: { stdout: PHASE_2 } });
@@ -307,7 +307,7 @@ describe("B-32 · reescrita do plano após devolução", () => {
   it("o documento remontado mantém título, stamp e TODAS as fases", async () => {
     const steps = happyPath();
     steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md", attempt: 1 },
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2", attempt: 1 },
       respond: { stdout: reject("Phase 2", "critério vago", "declare o código HTTP") },
     });
     steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02", attempt: 2 }, respond: { stdout: PHASE_2 } });
@@ -328,7 +328,7 @@ describe("B-32 · reescrita do plano após devolução", () => {
   it("finding sem fase identificada reescreve todas, pelo conservador", async () => {
     const steps = happyPath();
     steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md", attempt: 1 },
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#coerência", attempt: 1 },
       respond: { stdout: reject("Overview", "a ordem das fases não é fundação-primeiro", "reordene as fases") },
     });
     steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p01", attempt: 2 }, respond: { stdout: PHASE_1 } });

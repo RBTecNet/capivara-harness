@@ -166,3 +166,125 @@ export function rewriteInstruction(findings: { where: string; problem: string; f
     ...findings.map((finding) => `- ${finding.where}: ${finding.problem}\n  what to do: ${finding.fix}`),
   ].join("\n");
 }
+
+/**
+ * A auditoria do plano em duas perguntas, em vez de uma só.
+ *
+ * Medido no piloto 3: a auditoria e as reescritas que ela provoca consumiram 41
+ * dos 65 minutos do run, e a primeira leitura do plano — 68 KB — levou seis
+ * minutos sozinha. O custo é proporcional ao tamanho do projeto e as passadas
+ * são seriais, então num MVP de verdade a conta vira horas antes de existir uma
+ * linha de código.
+ *
+ * A separação segue o que cada pergunta precisa enxergar:
+ *
+ * LOCAL — esta fase é fiel às decisões? seus critérios são observáveis? suas
+ * regras nomeiam o alvo? Para responder isso basta a fase. São N chamadas
+ * pequenas e paralelas, e uma devolução volta a custar UMA fase relida em vez do
+ * plano inteiro.
+ *
+ * GLOBAL — duas fases afirmam coisas incompatíveis sobre a mesma coisa? Essa
+ * precisa de visão total, e é a mais valiosa que o harness tem: foi ela que
+ * pegou a coluna identificada por nome mutável e a regra de espaços contraditória
+ * entre três fases. Ela continua existindo, lendo o índice de critérios em vez
+ * do texto corrido — o mesmo conteúdo, organizado para que a contradição fique
+ * lado a lado em vez de a trinta páginas de distância.
+ */
+export interface PhaseAuditContext extends AuditorContext {
+  /** A fase sob auditoria, exatamente como o loop a entregaria ao executor. */
+  phaseMarkdown: string;
+  phaseNumber: number;
+  totalPhases: number;
+}
+
+export function phaseAuditPrompt(context: PhaseAuditContext): string {
+  const upstream = context.upstream.map((document) => `## Upstream document: ${document.name}\n${document.content}`);
+  return [
+    languageBlock(context.language),
+    "",
+    FRAME,
+    "",
+    `${AXES_COMMON}\n${AXIS_EXECUTABILITY}`,
+    "",
+    SCOPE_RULE,
+    "",
+    DOUBT_RULE,
+    "",
+    "## What you are looking at",
+    `This is ONE phase of a plan with ${context.totalPhases}. Judge this phase against the decisions and`,
+    "the documents above it — nothing else. You are NOT looking for contradictions with other phases:",
+    "another pass reads the whole plan for that, and a finding you raise here about a phase you cannot",
+    "see would send the writer rewriting blind.",
+    "",
+    OUTPUT,
+    "",
+    "## The developer's original request (verbatim)",
+    context.request,
+    "",
+    "## Confirmed decisions (ACCEPTED answers only)",
+    context.decisions.length > 0 ? context.decisions.map((entry) => `- ${entry}`).join("\n") : "- (none)",
+    "",
+    "## Remarks from earlier audits in this chain",
+    context.upstreamRemarks.length > 0
+      ? context.upstreamRemarks.map((remark) => `- ${remark.document} · ${remark.where}: ${remark.observation}`).join("\n")
+      : "- (none)",
+    ...(upstream.length > 0 ? ["", ...upstream] : []),
+    "",
+    `## The phase under audit — number ${context.phaseNumber} of ${context.totalPhases}`,
+    context.phaseMarkdown,
+  ].join("\n");
+}
+
+export interface CoherenceContext extends AuditorContext {
+  /** Um critério por linha, com endereço: o índice de regras do plano. */
+  digest: string;
+  totalPhases: number;
+}
+
+export function coherencePrompt(context: CoherenceContext): string {
+  const upstream = context.upstream.map((document) => `## Upstream document: ${document.name}\n${document.content}`);
+  return [
+    languageBlock(context.language),
+    "",
+    FRAME,
+    "",
+    "## Your only question",
+    `You are reading the complete index of what the ${context.totalPhases} phases of this plan assert.`,
+    "You are looking for ONE class of defect, and nothing else:",
+    "",
+    "   Do two criteria assert things that cannot both be true?",
+    "",
+    "Concretely: the same field, entity, rule or behaviour described differently in different places.",
+    "One phase trims a value before storing it while another preserves it and trims only on",
+    "comparison. One phase identifies a record by a name that another phase allows renaming. One",
+    "phase says a table is fixed while another adds rows to it. A criterion here and a criterion",
+    "there that an implementation cannot satisfy at the same time.",
+    "",
+    "This is the defect no one else catches. The phase-by-phase pass reads each phase alone and each",
+    "one is internally fine; the contradiction only exists between them, and the loop discovers it",
+    "when the implementation of one breaks the tests of the other.",
+    "",
+    "## What is NOT your job here",
+    "- Whether a criterion is observable, well written, or traceable. Another pass owns that.",
+    "- Whether the plan is complete, well sized, or properly ordered.",
+    "- Style, wording, formatting. Say nothing about any of it.",
+    "If the only thing you can say is that something could be clearer, say APPROVED and stay quiet.",
+    "",
+    DOUBT_RULE,
+    "",
+    OUTPUT,
+    "",
+    "Every finding MUST name BOTH addresses it reconciles, like `P1.T9.C2 vs P3.T2.C1`, and the fix",
+    "must say which of the two is right according to the decisions — never \"align them\".",
+    "",
+    "## The developer's original request (verbatim)",
+    context.request,
+    "",
+    "## Confirmed decisions (ACCEPTED answers only)",
+    context.decisions.length > 0 ? context.decisions.map((entry) => `- ${entry}`).join("\n") : "- (none)",
+    ...(upstream.length > 0 ? ["", ...upstream] : []),
+    "",
+    "## Index of everything the plan asserts",
+    context.digest,
+  ].join("\n");
+}

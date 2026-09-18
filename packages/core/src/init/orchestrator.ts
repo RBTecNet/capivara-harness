@@ -20,7 +20,7 @@ import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index
 import { MAX_CRITERIA_PER_PHASE, MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Question } from "../interview/index.js";
-import { assessRehearsal, auditorPrompt, languageBlock, enumerateCriteria, gapPrompt, interviewPrompt, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
+import { assessRehearsal, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, gapPrompt, interviewPrompt, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
 import type { AskedQuestion, CriterionRef, DocumentName, RehearsalResult, WriterContext } from "../prompts/index.js";
 import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEvents, runIdFor, runPaths, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
@@ -698,6 +698,105 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * não é falta de informação: é uma decisão que ninguém quer tomar agora, e o
    * gate de prontidão é o lugar certo para isso aparecer.
    */
+  /** O contexto comum das duas perguntas da auditoria do plano. */
+  function auditBase(writer: WriterContext, upstream: { name: string; content: string }[]) {
+    return {
+      language: options.language,
+      document: "project-phases.md",
+      executable: true,
+      request: options.request.text,
+      decisions: writer.decisions,
+      dispositions: allAnswers.map((answer) => `${answer.questionId} ${answer.disposition}`),
+      upstream,
+      upstreamRemarks: remarks.map((entry) => ({
+        document: entry.document,
+        where: entry.remark.where,
+        observation: entry.remark.observation,
+      })),
+      content: "",
+    };
+  }
+
+  /**
+   * Auditoria do plano: uma chamada por fase, em paralelo, mais uma de coerência.
+   *
+   * As chamadas por fase são independentes — cada uma julga uma fase contra as
+   * decisões — então correm juntas. A de coerência lê o índice de critérios em
+   * vez do texto corrido: o mesmo conteúdo, organizado para que a contradição
+   * fique lado a lado em vez de a trinta páginas de distância.
+   */
+  async function auditPlanInParts(
+    content: string,
+    writer: WriterContext,
+    upstream: { name: string; content: string }[],
+    attempt: number,
+  ): Promise<AuditVerdict> {
+    const parsed = parsePhases(content);
+    if (!parsed.ok) throw new InitBlockedError("o plano não passa no parser na hora de auditar", runId);
+
+    const fases = parsed.document.phases;
+    const base = auditBase(writer, upstream);
+
+    const veredictos: AuditVerdict[] = [];
+    const fila = [...fases];
+    const trabalhadores = Array.from({ length: Math.min(maxParallelParts, fila.length) }, async () => {
+      for (;;) {
+        const fase = fila.shift();
+        if (!fase) return;
+        veredictos.push(
+          await auditCall(`project-phases.md#P${fase.number}`, attempt, () =>
+            phaseAuditPrompt({
+              ...base,
+              phaseMarkdown: fase.markdown,
+              phaseNumber: fase.number,
+              totalPhases: fases.length,
+            }),
+          ),
+        );
+      }
+    });
+    await Promise.all(trabalhadores);
+
+    // A coerência recebe só o esquema entre os upstream: contradição entre fases
+    // é quase sempre sobre dado, e os outros documentos dobrariam o prompt sem
+    // acrescentar evidência para esta pergunta.
+    const digest = enumerateCriteria(parsed.document)
+      .map((criterion) => `${criterion.address} [${criterion.taskTitle}] ${criterion.text}`)
+      .join("\n");
+
+    veredictos.push(
+      await auditCall("project-phases.md#coerência", attempt, () =>
+        coherencePrompt({
+          ...base,
+          upstream: upstream.filter((documento) => documento.name === "database-schema.md"),
+          digest,
+          totalPhases: fases.length,
+        }),
+      ),
+    );
+
+    const findings = veredictos.flatMap((veredicto) => veredicto.findings);
+    const remarksDoPlano = veredictos.flatMap((veredicto) => veredicto.remarks);
+
+    announce(`  auditoria em ${fases.length} fase(s) + coerência: ${findings.length} finding(s)`);
+
+    return findings.length > 0
+      ? { status: "REJECTED", findings, remarks: remarksDoPlano, reason: veredictos.find((v) => v.reason)?.reason ?? "há defeito no plano" }
+      : { status: "APPROVED", findings: [], remarks: remarksDoPlano, reason: "" };
+  }
+
+  /** Uma chamada de auditoria, com a repetição por saída inválida que já existia. */
+  async function auditCall(subject: string, attempt: number, prompt: () => string): Promise<AuditVerdict> {
+    for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
+      const parsed = parseAudit(await track({ role: "auditor", stage: "audit", subject, attempt, prompt: prompt() }));
+      if (parsed.ok) return parsed.verdict;
+      if (tentativa === 2) {
+        throw new InitBlockedError(`o auditor de ${subject} devolveu saída inválida duas vezes: ${parsed.defects.join("; ")}`, runId);
+      }
+    }
+    throw new InitBlockedError("inalcançável", runId);
+  }
+
   /** Um plano publicado só vale a retomada se ainda passa no que é conferível. */
   function planoAindaValido(conteudo: string): boolean {
     const parsed = parsePhases(conteudo);
@@ -1240,6 +1339,20 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           reason: "o plano não passa no contrato",
         };
       }
+    }
+
+    /*
+     * O plano é auditado em duas perguntas, não numa só.
+     *
+     * Medido no piloto 3: auditoria e reescritas foram 41 dos 65 minutos, e a
+     * primeira leitura do plano de 68 KB levou seis minutos sozinha. A pergunta
+     * local — esta fase está fiel, seus critérios são observáveis — só precisa da
+     * fase, então vira N chamadas paralelas e uma devolução custa uma fase
+     * relida. A pergunta global continua vendo tudo, porque contradição entre
+     * fases é o defeito que ninguém mais pega.
+     */
+    if (document === "project-phases.md" && parsePhases(content).ok) {
+      return await auditPlanInParts(content, writer, upstream, attempt);
     }
 
     for (let tentativa = 1; tentativa <= 2; tentativa += 1) {

@@ -4,7 +4,7 @@ export { materializeSessions, phaseId, splitPhases } from "./split.js";
 export type { PhaseSession, SplitResult } from "./split.js";
 export { preflight } from "./preflight.js";
 export type { PreflightOptions, PreflightResult, PreflightWarning } from "./preflight.js";
-export { commitPhase, hasPendingChanges, isClean, isRepository, treeSignature } from "./git.js";
+export { commitPhase, commitSpecification, hasPendingChanges, isClean, isRepository, treeSignature } from "./git.js";
 export type { CommitResult } from "./git.js";
 export { DEFAULT_WAIT_SECONDS, RESET_BUFFER_SECONDS, detectRateLimit, planWait } from "./ratelimit.js";
 export type { RateLimit, WaitPlan } from "./ratelimit.js";

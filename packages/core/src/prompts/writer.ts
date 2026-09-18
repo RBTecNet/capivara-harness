@@ -269,6 +269,38 @@ export function phasePartPrompt(part: PhasePartContext): string {
  * A regra de decisão é restritiva de propósito: perguntar o descobrível gasta a
  * paciência de quem responde e não melhora o documento.
  */
+/**
+ * A pergunta que o desenvolvedor não faz sozinho.
+ *
+ * Quem está planejando um produto está quase sempre dentro da regra de negócio,
+ * e aparência não lhe ocorre — o piloto 1b saiu com trinta testes verdes, banco
+ * migrado, aplicação de pé e ZERO linha de estilo, porque nenhum dos quatro
+ * documentos mencionava a palavra. O executor entregou exatamente o que estava
+ * escrito, e o que estava escrito não pedia nada.
+ *
+ * Entregar um produto de interface sem estilo nenhum não é escopo mínimo, é
+ * defeito. Por isso esta pergunta não depende de o modelo achar que ela é
+ * relevante: quando existe interface, ela é obrigatória.
+ */
+const APPEARANCE = [
+  "## One question you must always ask when the product has a user interface",
+  "If anything the developer described is seen by a person — a screen, a page, a window — ONE of",
+  "your questions is about visual identity, even when the request never mentions looks. It almost",
+  "never does: whoever is planning a product is usually deep in the business rules, and appearance",
+  "simply does not occur to them. A product shipped with no styling at all is not a minimal scope,",
+  "it is a defect — and the loop will faithfully build exactly the nothing that was specified.",
+  "",
+  "Ask it as a concrete choice, never as \"do you want it to look good?\". Offer options that differ",
+  "in effort and result, each naming what the developer gets:",
+  "- a small design system of their own: colour tokens in one place, a spacing scale, typography,",
+  "  visible states for hover, focus, empty and loading, light and dark themes;",
+  "- an existing component library or CSS framework, named and versioned;",
+  "- a deliberate minimum: readable typography, consistent spacing, one accent colour, nothing more.",
+  "",
+  "There is no option for \"no styling\", because that is the defect this question exists to prevent.",
+  "Recommend the one that fits the product described, and say why in one sentence.",
+].join("\n");
+
 export function interviewPrompt(
   document: DocumentName,
   writer: WriterContext,
@@ -291,6 +323,8 @@ export function interviewPrompt(
     "",
     "Never ask about a discoverable command, path, dependency or convention. Record a low-risk",
     "explicit assumption instead. An empty question list is a valid and good answer.",
+    "",
+    ...(document === "project-description.md" ? [APPEARANCE, ""] : []),
     "",
     "Return only JSON:",
     '{ "contract": "capivara-questions/v1", "questions": [ {',

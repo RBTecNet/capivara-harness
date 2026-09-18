@@ -17,15 +17,13 @@ export interface CoverageSources {
   storyIds: string[];
   entities: string[];
   workflows: Workflow[];
-  /** Números de workflow que o desenvolvedor excluiu explicitamente. */
-  excludedWorkflows: string[];
 }
 
 export function checkCoverage(document: PhasesDocument, sources: CoverageSources): ContractError[] {
   return [
     ...checkStories(document, sources.storyIds),
     ...checkEntities(document, sources.entities),
-    ...checkWorkflows(document, sources.workflows, sources.excludedWorkflows),
+    ...checkWorkflows(document, sources.workflows),
   ];
 }
 
@@ -65,23 +63,28 @@ export function checkEntities(document: PhasesDocument, entities: string[]): Con
 }
 
 /** I-12 — todo workflow numerado é coberto por uma task ou explicitamente excluído. */
-export function checkWorkflows(
-  document: PhasesDocument,
-  workflows: Workflow[],
-  excluded: string[],
-): ContractError[] {
+/**
+ * I-12 — todo workflow da descrição aparece em pelo menos um `**Traces:**`.
+ *
+ * Não existe lista de exclusão, e não existe de propósito. A descrição do
+ * projeto nasce da entrevista: um workflow que não deve ser construído
+ * simplesmente não é escrito lá. Excluir no plano o que a descrição afirma seria
+ * deixar os dois documentos discordando por escrito, com um mecanismo para
+ * tornar a discordância legítima.
+ */
+export function checkWorkflows(document: PhasesDocument, workflows: Workflow[]): ContractError[] {
   const traces = allTraces(document).join(" · ").toLowerCase();
-  const exclusions = new Set(excluded);
   const errors: ContractError[] = [];
   for (const workflow of workflows) {
-    if (exclusions.has(workflow.number)) continue;
     const pattern = new RegExp(`workflow\\s+${escape(workflow.number)}(?![0-9])`);
     if (pattern.test(traces)) continue;
     errors.push({
       code: "I-12",
       line: 0,
-      message: `o workflow ${workflow.number} ("${workflow.name}") não é coberto nem excluído`,
-      hint: `cite \`workflow ${workflow.number}\` em **Traces:** na task que o implementa, ou registre a exclusão que o desenvolvedor decidiu`,
+      message: `o workflow ${workflow.number} ("${workflow.name}") não é coberto por nenhuma task`,
+      hint:
+        `cite \`workflow ${workflow.number}\` em **Traces:** na task que o implementa — o rótulo é estrutural ` +
+        `e não se traduz; se o workflow não deve ser construído, ele não deveria estar na descrição do projeto`,
     });
   }
   return errors;

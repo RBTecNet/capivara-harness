@@ -116,3 +116,29 @@ export async function commitPhase(projectRoot: string, phaseNumber: number, titl
   await run("git", ["commit", "-q", "-m", message], { cwd: projectRoot });
   return { committed: true, message };
 }
+
+/**
+ * A especificação entra no histórico do produto.
+ *
+ * Até aqui, `.capivara/` era excluída de tudo — e com razão, para o plano de
+ * controle não contar como trabalho da fase nem poluir o commit. O efeito
+ * colateral era que o código nascia versionado e a especificação que o gerou,
+ * não: quem clonasse o repositório encontrava a aplicação sem as decisões que a
+ * produziram.
+ *
+ * Só os quatro documentos publicados, num commit próprio, no momento em que o
+ * pacote fica pronto. Nada de `runs/` nem de `handoffs/`: aquilo é estado do
+ * run, e o `.gitignore` escrito na árvore de artefatos já os mantém de fora.
+ */
+export async function commitSpecification(projectRoot: string): Promise<CommitResult> {
+  if (!(await isRepository(projectRoot))) return { committed: false, message: "sem repositório Git: a especificação não foi versionada" };
+
+  // Pathspec explícito: nada do trabalho em andamento de quem chamou entra junto.
+  await run("git", ["add", "--", ".capivara/init"], { cwd: projectRoot });
+  const staged = await run("git", ["diff", "--cached", "--name-only", "--", ".capivara/init"], { cwd: projectRoot });
+  if (staged.stdout.trim() === "") return { committed: false, message: "a especificação versionada já é esta" };
+
+  const message = "docs(capivara): especificação RALPH READY";
+  await run("git", ["commit", "-q", "-m", message, "--", ".capivara/init"], { cwd: projectRoot });
+  return { committed: true, message };
+}

@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runPhase, splitPhases } from "../../src/loop/index.js";
+import { commitSpecification, runPhase, splitPhases } from "../../src/loop/index.js";
 import type { EngineCall, EngineResult, PhaseSession } from "../../src/loop/index.js";
 import { readEvents, runPaths } from "../../src/state/index.js";
 import { VALID_PHASES } from "../contract/fixture.js";
@@ -286,4 +286,56 @@ describe("fase que para deixando trabalho na árvore", () => {
 
     expect(avisos.join("\n")).not.toContain("trabalho parcial");
   }, 20000);
+});
+
+describe("a especificação entra no histórico", () => {
+  it("sem repositório, diz que não versionou em vez de quebrar", async () => {
+    const solto = await mkdtemp(join(tmpdir(), "capivara-sem-git-"));
+    try {
+      const resultado = await commitSpecification(solto);
+      expect(resultado.committed).toBe(false);
+      expect(resultado.message).toContain("sem repositório");
+    } finally {
+      await rm(solto, { recursive: true, force: true });
+    }
+  });
+
+  it("versiona os documentos publicados e nada do trabalho em andamento", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "capivara-git-"));
+    try {
+      await run("git", ["init", "-q"], { cwd: repo });
+      await run("git", ["config", "user.email", "t@t"], { cwd: repo });
+      await run("git", ["config", "user.name", "t"], { cwd: repo });
+      await mkdir(join(repo, ".capivara", "init"), { recursive: true });
+      await writeFile(join(repo, ".capivara", "init", "project-description.md"), "# doc\n", "utf8");
+      await writeFile(join(repo, "rascunho.txt"), "trabalho em andamento\n", "utf8");
+
+      const resultado = await commitSpecification(repo);
+      expect(resultado.committed).toBe(true);
+
+      const versionados = await run("git", ["ls-files"], { cwd: repo });
+      expect(versionados.stdout).toContain(".capivara/init/project-description.md");
+      expect(versionados.stdout).not.toContain("rascunho.txt");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+
+  it("rodar de novo sem mudança não cria commit vazio", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "capivara-git-"));
+    try {
+      await run("git", ["init", "-q"], { cwd: repo });
+      await run("git", ["config", "user.email", "t@t"], { cwd: repo });
+      await run("git", ["config", "user.name", "t"], { cwd: repo });
+      await mkdir(join(repo, ".capivara", "init"), { recursive: true });
+      await writeFile(join(repo, ".capivara", "init", "project-description.md"), "# doc\n", "utf8");
+      await commitSpecification(repo);
+
+      const segunda = await commitSpecification(repo);
+      expect(segunda.committed).toBe(false);
+      expect(segunda.message).toContain("já é esta");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
 });

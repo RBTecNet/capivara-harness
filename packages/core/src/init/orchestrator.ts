@@ -677,7 +677,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       storyIds: extractStoryIds(published["user-stories.md"] ?? ""),
       entities: extractEntities(published["database-schema.md"] ?? ""),
       workflows: extractWorkflows(published["project-description.md"] ?? ""),
-      excludedWorkflows: [],
+
     };
   }
 

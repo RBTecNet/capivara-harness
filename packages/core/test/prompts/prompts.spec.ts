@@ -203,6 +203,26 @@ describe("escrita de project-phases em partes", () => {
   });
 });
 
+describe("a pergunta de aparência", () => {
+  it("é obrigatória no documento que descreve o produto", () => {
+    const prompt = interviewPrompt("project-description.md", context, "projeto vazio", []);
+    expect(prompt).toContain("always ask when the product has a user interface");
+    expect(prompt).toContain("not a minimal scope");
+  });
+
+  it("não tem opção para 'sem estilo nenhum'", () => {
+    const prompt = interviewPrompt("project-description.md", context, "projeto vazio", []);
+    expect(prompt).toContain("There is no option for");
+    expect(prompt).toContain("no styling");
+  });
+
+  it("não polui os outros documentos da cadeia", () => {
+    for (const documento of ["user-stories.md", "database-schema.md"] as const) {
+      expect(interviewPrompt(documento, context, "projeto vazio", [])).not.toContain("visual identity");
+    }
+  });
+});
+
 describe("eixo de precisão do auditor", () => {
   const base = {
     language: "português do Brasil",

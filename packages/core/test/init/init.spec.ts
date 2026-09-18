@@ -405,7 +405,7 @@ describe("gate de prontidão", () => {
   const base = {
     documents: Object.fromEntries(DOCUMENT_CHAIN.map((name) => [name, "conteúdo"])) as Record<string, string>,
     stampInputs: [],
-    coverage: { storyIds: [], entities: [], workflows: [], excludedWorkflows: [] },
+    coverage: { storyIds: [], entities: [], workflows: [] },
     approved: [...DOCUMENT_CHAIN],
     unresolvedQuestions: [],
     designRoot: ".capivara/init/design",

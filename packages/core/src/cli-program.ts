@@ -7,7 +7,7 @@ import { diagnose, renderDiagnosis } from "./commands/doctor.js";
 import { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
 import { BUILD_ROLES, INIT_ROLES, describeRoles, renderUnresolved, rolesFromFlags, unresolvedRoles, type CliRoleFlags } from "./commands/options.js";
 import { InitBlockedError, resolveRequest, runInit } from "./init/index.js";
-import { runBuild } from "./loop/index.js";
+import { commitSpecification, runBuild } from "./loop/index.js";
 import { BACK, HarnessProgress, createLiveRegion, detectLanguage, renderDashboard, renderQuestion, renderSplash, supportsColor } from "./tui/index.js";
 import { createLineIO, runWizard } from "./commands/wizard.js";
 import { runIdFor } from "./state/index.js";
@@ -80,8 +80,9 @@ export function createProgram(): Command {
       .option("--max-audit-returns <n>", "devoluções do auditor por documento", "3")
       .option("--max-interview-rounds <n>", "rodadas de entrevista por documento", "3")
       .option("--fresh", "ignora o que este run já publicou e recomeça a cadeia do zero")
-      .option("--no-dashboard", "não desenha o painel; só as linhas de progresso"),
-  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; maxAuditReturns: string; maxInterviewRounds: string; fresh?: boolean; dashboard?: boolean }) => {
+      .option("--no-dashboard", "não desenha o painel; só as linhas de progresso")
+      .option("--no-commit", "não versiona a especificação ao chegar em RALPH READY"),
+  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; maxAuditReturns: string; maxInterviewRounds: string; fresh?: boolean; dashboard?: boolean; commit?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const configured = rolesFromFlags(flags);
     const semProvider = unresolvedRoles(configured, INIT_ROLES);
@@ -178,6 +179,15 @@ export function createProgram(): Command {
       });
       live.release();
       stdout.write(`\n${outcome.rendered}\n`);
+
+      // A especificação entra no histórico do produto junto com o código que ela
+      // gera; sem isso, quem clona o repositório encontra a aplicação sem as
+      // decisões que a produziram.
+      if (outcome.readiness.ready && flags.commit !== false) {
+        const commit = await commitSpecification(projectRoot);
+        stdout.write(`${commit.committed ? `versionado: ${commit.message}` : commit.message}\n`);
+      }
+
       process.exitCode = outcome.readiness.ready ? 0 : 2;
     } catch (error) {
       if (error instanceof InitBlockedError) {

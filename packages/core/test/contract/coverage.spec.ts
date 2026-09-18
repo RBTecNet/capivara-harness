@@ -50,7 +50,7 @@ describe("extratores", () => {
 });
 
 describe("checkCoverage", () => {
-  const sources = { storyIds: STORY_IDS, entities: ENTITIES, workflows: WORKFLOWS, excludedWorkflows: [] };
+  const sources = { storyIds: STORY_IDS, entities: ENTITIES, workflows: WORKFLOWS };
 
   it("aceita o documento de referência", () => {
     expect(checkCoverage(document(), sources)).toEqual([]);
@@ -92,19 +92,21 @@ describe("I-11 — cobertura de entidades", () => {
 });
 
 describe("I-12 — cobertura de workflows", () => {
-  it("reprova workflow que não é coberto nem excluído", () => {
-    const errors = checkWorkflows(document(), [...WORKFLOWS, { number: "3", name: "Relatórios" }], []);
+  it("reprova workflow que nenhuma task rastreia", () => {
+    const errors = checkWorkflows(document(), [...WORKFLOWS, { number: "3", name: "Relatórios" }]);
     expect(errors.map((error) => error.code)).toEqual(["I-12"]);
     expect(errors[0]?.message).toContain("Relatórios");
   });
 
-  it("aceita workflow explicitamente excluído", () => {
-    const workflows = [...WORKFLOWS, { number: "3", name: "Relatórios" }];
-    expect(checkWorkflows(document(), workflows, ["3"])).toEqual([]);
+  it("não existe exclusão: o que não deve ser construído não entra na descrição", () => {
+    // Um mecanismo de exclusão tornaria legítimo o plano contradizer por escrito
+    // a descrição que o gerou.
+    const errors = checkWorkflows(document(), [...WORKFLOWS, { number: "3", name: "Relatórios" }]);
+    expect(errors[0]?.hint).toContain("não deveria estar na descrição do projeto");
   });
 
   it("workflow 1 não é satisfeito por workflow 10", () => {
     const source = VALID_PHASES.replace("US-1.1, users, workflow 1", "US-1.1, users, workflow 10");
-    expect(checkWorkflows(document(source), [{ number: "1", name: "Cadastro" }], [])).toHaveLength(1);
+    expect(checkWorkflows(document(source), [{ number: "1", name: "Cadastro" }])).toHaveLength(1);
   });
 });

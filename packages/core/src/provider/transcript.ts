@@ -228,8 +228,14 @@ export function summarizeCodexEvent(line: string): string | null {
   if (itemType === "file_change" || itemType === "patch_apply") return "alterando arquivo";
   if (itemType === "web_search") return "buscando na web";
   if (itemType === "agent_message") {
+    /*
+     * "resposta" é o que o DESENVOLVEDOR dá a uma pergunta. Usar a mesma palavra
+     * para a saída do modelo fez alguém ler o painel e perguntar que respostas
+     * eram aquelas que ele não tinha dado — na tela que existe justamente para
+     * dizer o que está acontecendo.
+     */
     const texto = typeof item?.["text"] === "string" ? (item["text"] as string) : "";
-    return `resposta recebida (${texto.length} caracteres)`;
+    return `devolveu ${texto.length} caracteres`;
   }
 
   if (tipo === "turn.completed") {

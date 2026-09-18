@@ -176,6 +176,14 @@ describe("janela de log ao vivo", () => {
     expect(linha).toBe("$ ls -la src");
   });
 
+  it('"resposta" fica reservada ao que o desenvolvedor dá', () => {
+    // Na janela de log, "resposta recebida" foi lido como resposta do
+    // desenvolvedor a uma pergunta que ele nunca viu.
+    const linha = summarizeCodexEvent('{"type":"item.completed","item":{"type":"agent_message","text":"abc"}}');
+    expect(linha).toBe("devolveu 3 caracteres");
+    expect(linha).not.toContain("resposta");
+  });
+
   it("evento desconhecido não polui a janela com JSON cru", () => {
     expect(summarizeCodexEvent('{"type":"algo.que.nao.conheco","payload":{"a":1}}')).toBeNull();
     expect(summarizeCodexEvent("isto não é json")).toBeNull();

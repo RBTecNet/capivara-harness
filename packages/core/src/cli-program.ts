@@ -78,8 +78,9 @@ export function createProgram(): Command {
       .argument("[pedido]", "o que você quer construir; aceita @arquivo")
       .option("--file <caminho>", "lê o pedido de um arquivo")
       .option("--max-audit-returns <n>", "devoluções do auditor por documento", "3")
-      .option("--max-interview-rounds <n>", "rodadas de entrevista por documento", "3"),
-  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; maxAuditReturns: string; maxInterviewRounds: string }) => {
+      .option("--max-interview-rounds <n>", "rodadas de entrevista por documento", "3")
+      .option("--fresh", "ignora o que este run já publicou e recomeça a cadeia do zero"),
+  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; maxAuditReturns: string; maxInterviewRounds: string; fresh?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const configured = rolesFromFlags(flags);
     const semProvider = unresolvedRoles(configured, INIT_ROLES);
@@ -112,10 +113,15 @@ export function createProgram(): Command {
         language,
         maxAuditReturns: Number(flags.maxAuditReturns),
         maxInterviewRounds: Number(flags.maxInterviewRounds),
+        ...(flags.fresh === true ? { fresh: true } : {}),
         announce: (message) => stdout.write(`${message}\n`),
         call: async (call) => {
           const response = await bridge({ role: call.role, stage: call.stage, prompt: call.prompt });
-          return { stdout: response.stdout, exitCode: response.exitCode };
+          return {
+            stdout: response.stdout,
+            exitCode: response.exitCode,
+            ...(response.usage ? { usage: { inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens } } : {}),
+          };
         },
         ask: async (question, index, total) => {
           stdout.write(renderQuestion({ question, index, total, document: "entrevista", style: style() }));

@@ -19,7 +19,7 @@ afterEach(async () => {
 
 const request = { text: "um sistema de reservas para uma pousada", origin: "text" as const, path: null, sha12: "abc123abc123" };
 
-async function run(steps: ScriptStep[], answers: string[] = []) {
+async function run(steps: ScriptStep[], answers: string[] = [], extras: { fresh?: boolean } = {}) {
   const agent = fakeAgent(steps);
   const dito: string[] = [];
   let asked = 0;
@@ -28,6 +28,7 @@ async function run(steps: ScriptStep[], answers: string[] = []) {
     request,
     language: "português do Brasil",
     announce: (message) => void dito.push(message),
+    ...extras,
     call: agent.call,
     ask: async () => answers[asked++] ?? "use as recomendações",
   });
@@ -227,6 +228,47 @@ describe("entrevista dentro do init", () => {
     expect(outcome.readiness.ready).toBe(false);
     const entrevista = outcome.readiness.checks.find((check) => check.id === "entrevista");
     expect(entrevista?.passed).toBe(false);
+  });
+});
+
+describe("retomada", () => {
+  it("documento já publicado neste run não é reescrito, e suas decisões descem a cadeia", async () => {
+    const primeiro = happyPath();
+    primeiro.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    // O primeiro run morre depois de publicar project-description.md.
+    primeiro.unshift({ match: { role: "writer", stage: "authoring", subject: "user-stories.md" }, respond: { stdout: "", exitCode: 124 }, repeat: true });
+    await expect(run(primeiro, ["1"])).rejects.toThrow(InitBlockedError);
+
+    const { agent, anunciado, outcome } = await run(happyPath());
+    expect(anunciado).toContain("reaproveitado deste run");
+    expect(agent.calls.some((call) => call.stage === "authoring" && call.subject === "project-description.md")).toBe(false);
+    // A decisão da entrevista do documento reaproveitado continua valendo.
+    const escrita = agent.calls.find((call) => call.stage === "authoring" && call.subject === "user-stories.md");
+    expect(escrita?.prompt).toContain("Node + Vitest");
+    expect(outcome.readiness.ready).toBe(true);
+  });
+
+  it("resposta já dada não é perguntada de novo", async () => {
+    const primeiro = happyPath();
+    primeiro.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    primeiro.unshift({ match: { role: "writer", stage: "authoring", subject: "project-description.md" }, respond: { stdout: "", exitCode: 124 }, repeat: true });
+    await expect(run(primeiro, ["1"])).rejects.toThrow(InitBlockedError);
+
+    const segundo = happyPath();
+    segundo.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    const { anunciado, outcome } = await run(segundo, []);
+    expect(anunciado).toContain("resposta(s) retomada(s)");
+    expect(outcome.report.checkpoint.decisions).toHaveLength(1);
+  });
+
+  it("--fresh ignora tudo e recomeça", async () => {
+    const primeiro = happyPath();
+    primeiro.unshift({ match: { role: "writer", stage: "authoring", subject: "user-stories.md" }, respond: { stdout: "", exitCode: 124 }, repeat: true });
+    await expect(run(primeiro)).rejects.toThrow(InitBlockedError);
+
+    const { agent, anunciado } = await run(happyPath(), [], { fresh: true });
+    expect(anunciado).not.toContain("reaproveitado");
+    expect(agent.calls.some((call) => call.stage === "authoring" && call.subject === "project-description.md")).toBe(true);
   });
 });
 

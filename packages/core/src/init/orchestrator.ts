@@ -10,16 +10,18 @@
  * pedido ao gate, sem tocar em provider real.
  */
 
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { assemblePhasesDocument, buildStamp, extractEntities, extractStoryIds, extractWorkflows, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
 import type { StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
 import { MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
-import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, unresolved, writeHandoff } from "../interview/index.js";
+import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Question } from "../interview/index.js";
 import { assessRehearsal, auditorPrompt, languageBlock, enumerateCriteria, gapPrompt, interviewPrompt, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
 import type { AskedQuestion, CriterionRef, DocumentName, WriterContext } from "../prompts/index.js";
-import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, runIdFor, runPaths, writeRunState } from "../state/index.js";
+import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEvents, runIdFor, runPaths, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
 import { DOCUMENT_CHAIN, evaluateReadiness } from "./readiness.js";
@@ -41,7 +43,12 @@ export interface AgentCall {
   prompt: string;
 }
 
-export type AgentCaller = (call: AgentCall) => Promise<{ stdout: string; exitCode: number }>;
+export type AgentCaller = (call: AgentCall) => Promise<{
+  stdout: string;
+  exitCode: number;
+  /** Tokens da chamada, quando a CLI os reporta. Ausente é "não medido". */
+  usage?: { inputTokens: number; outputTokens: number };
+}>;
 export type AskDeveloper = (question: Question, index: number, total: number) => Promise<string>;
 export type DecideStandoff = (rendered: string) => Promise<string>;
 
@@ -61,6 +68,10 @@ export interface InitOptions {
   maxGapQuestions?: number;
   /** Reescritas do plano motivadas pelo ensaio do verificador. */
   maxRehearsalRounds?: number;
+  /** Ignora o que este run já publicou e recomeça a cadeia do zero. */
+  fresh?: boolean;
+  /** Fases escritas ao mesmo tempo. Elas são independentes; o teto é de cortesia. */
+  maxParallelParts?: number;
   now?: () => Date;
 }
 
@@ -122,6 +133,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const maxGapRounds = options.maxGapRounds ?? 2;
   const maxGapQuestions = options.maxGapQuestions ?? 5;
   const maxRehearsalRounds = options.maxRehearsalRounds ?? 1;
+  const maxParallelParts = Math.max(1, options.maxParallelParts ?? 3);
 
   const runId = runIdFor("init", options.request.sha12);
   const paths = runPaths(options.projectRoot, runId);
@@ -146,6 +158,10 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       const cost = costs.get(call.role) ?? { role: call.role, calls: 0, inputTokens: null, outputTokens: null, milliseconds: 0 };
       cost.calls += 1;
       cost.milliseconds += Date.now() - startedAt;
+      if (response.usage) {
+        cost.inputTokens = (cost.inputTokens ?? 0) + response.usage.inputTokens;
+        cost.outputTokens = (cost.outputTokens ?? 0) + response.usage.outputTokens;
+      }
       costs.set(call.role, cost);
 
       if (response.exitCode === 0) return response.stdout;
@@ -190,7 +206,44 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   /** Ausente até o ensaio rodar; o gate trata ausência como reprovação. */
   let rehearsal: { blocked: string[] } | undefined;
 
+  /*
+   * O que ESTE run já publicou não se repete.
+   *
+   * O piloto 3 perdeu vinte e três respostas dadas à mão porque uma chamada
+   * estourou o tempo no terceiro documento: os dois primeiros já estavam
+   * publicados em disco, as respostas do terceiro já estavam no handoff, e mesmo
+   * assim a única saída era recomeçar do zero. Perguntar duas vezes a mesma coisa
+   * é a forma mais rápida de perder quem responde.
+   *
+   * O reaproveitamento é estreito de propósito: só vale para o mesmo run — e o id
+   * do run é o hash do pedido, então mudar o pedido muda o run e nada é herdado.
+   */
+  const jaPublicados = new Set<string>(
+    options.fresh === true
+      ? []
+      : (await readEvents(paths.events))
+          .filter((entry) => entry.stage === "publish" && entry.status === "complete")
+          .map((entry) => entry.subject),
+  );
+
   for (const document of DOCUMENT_CHAIN) {
+    if (jaPublicados.has(document)) {
+      const conteudo = await readFile(join(artifactPaths(options.projectRoot).init, document), "utf8").catch(() => "");
+      const handoff = await readHandoff(options.projectRoot, runId, document);
+      if (conteudo.trim() !== "") {
+        published[document] = conteudo;
+        approved.push(document);
+        // As decisões precisam descer a cadeia: um documento reaproveitado sem
+        // as respostas que o geraram deixaria os seguintes sem contexto.
+        if (handoff) {
+          allAnswers.push(...handoff.answers.map((answer) => ({ ...answer, questionId: scoped(document, answer.questionId) })));
+          allQuestions.push(...handoff.questions.map((question) => ({ ...question, id: scoped(document, question.id) })));
+        }
+        announce(`— ${document} (reaproveitado deste run; --fresh recomeça do zero)`);
+        continue;
+      }
+    }
+
     announce(`— ${document}`);
     await event("interview", document, "started");
 
@@ -236,6 +289,18 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   async function interview(document: ChainDocument, upstream: { name: string; content: string }[]) {
     const questions: Question[] = [];
     const answers: Answer[] = [];
+
+    /*
+     * O handoff é gravado ao fim de cada rodada, e é ele que impede reperguntar.
+     * Semeado aqui, o `planRound` vê as respostas que já existem e só pede o que
+     * falta; o levantamento novo chega e é deduplicado por id contra estas.
+     */
+    const retomado = options.fresh === true ? null : await readHandoff(options.projectRoot, runId, document);
+    if (retomado && retomado.answers.length > 0) {
+      questions.push(...retomado.questions);
+      answers.push(...retomado.answers);
+      announce(`  ${retomado.answers.length} resposta(s) retomada(s) de ${document}; não vou perguntar de novo`);
+    }
 
     for (let round = 1; round <= maxInterviewRounds; round += 1) {
       const writer: WriterContext = {
@@ -462,10 +527,20 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       throw new InitBlockedError(`o ledger de coordenação veio inválido: ${ledger.defects.map((defect) => defect.problem).join("; ")}`, runId);
     }
 
+    /*
+     * As fases são escritas em paralelo porque são independentes por construção.
+     * O ledger aloca todas ANTES de a primeira ser escrita, e nenhuma parte lê o
+     * texto de outra: a coordenação entre elas já está decidida no ledger, que é
+     * exatamente o motivo de ele existir.
+     *
+     * No piloto 3 isso custou 29 minutos de fila para sete fases que ninguém
+     * estava esperando. A ordem do documento é preservada pelo índice, não pelo
+     * relógio — quem termina primeiro não fura a fila do texto final.
+     */
     const parts = allocateParts(ledger.ledger);
-    const phases: string[] = [];
-    for (const part of parts) {
-      announce(`  parte ${part.id}`);
+    const phases: string[] = new Array<string>(parts.length).fill("");
+
+    const escreverParte = async (part: (typeof parts)[number], posicao: number): Promise<void> => {
       const entry = ledger.ledger.phases.find((phase) => phase.number === part.phaseNumber);
       const output = await track({
         role: "writer",
@@ -479,9 +554,21 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         dependsOn: entry?.dependsOn || "none",
       });
       for (const fix of normalized.applied) announce(`    ${part.id}: ${fix}`);
-      phases.push(normalized.markdown.trim());
+      phases[posicao] = normalized.markdown.trim();
+      announce(`  ${part.id} pronta`);
       await event("authoring", part.id, "complete");
-    }
+    };
+
+    announce(`  escrevendo ${parts.length} fase(s), até ${maxParallelParts} por vez`);
+    const fila = parts.map((part, posicao) => ({ part, posicao }));
+    const trabalhadores = Array.from({ length: Math.min(maxParallelParts, fila.length) }, async () => {
+      for (;;) {
+        const proxima = fila.shift();
+        if (!proxima) return;
+        await escreverParte(proxima.part, proxima.posicao);
+      }
+    });
+    await Promise.all(trabalhadores);
 
     // As decisões em aberto entram como prosa em `## Open Questions`, NUNCA com
     // o marcador [NEEDS DECISION]: o invariante I-13 recusa esse marcador no

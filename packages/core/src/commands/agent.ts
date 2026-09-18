@@ -6,8 +6,8 @@
  * sem tocar em provider real, e o que mantém o custo do desenvolvimento honesto.
  */
 
-import { buildInvocation, readCredentials, runProvider, selectCredential } from "../provider/index.js";
-import type { RoleConfig, RoleName, SupervisorLimits } from "../provider/index.js";
+import { buildInvocation, parseCodexJsonl, readCredentials, runProvider, selectCredential } from "../provider/index.js";
+import type { RoleConfig, RoleName, SupervisorLimits, TokenUsage } from "../provider/index.js";
 
 export interface AgentBridgeOptions {
   projectRoot: string;
@@ -31,6 +31,8 @@ export interface BridgeResponse {
   stdout: string;
   stderr: string;
   timedOut: string | null;
+  /** Tokens da chamada, quando a CLI os reporta. */
+  usage?: TokenUsage;
 }
 
 export function createAgentBridge(options: AgentBridgeOptions): (request: BridgeRequest) => Promise<BridgeResponse> {
@@ -49,11 +51,17 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
     });
 
     const result = await runProvider({ invocation, prompt: request.prompt, limits: options.limits });
+
+    // O transcrito é lido aqui para que os orquestradores continuem recebendo
+    // texto: quem chama não precisa saber que a CLI fala em eventos.
+    const transcript = invocation.transcript === "codex-jsonl" ? parseCodexJsonl(result.stdout) : null;
+
     return {
       exitCode: result.exitCode,
-      stdout: result.stdout,
+      stdout: transcript ? transcript.text : result.stdout,
       stderr: result.stderr,
       timedOut: result.timedOut,
+      ...(transcript?.usage ? { usage: transcript.usage } : {}),
     };
   };
 }

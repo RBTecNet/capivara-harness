@@ -34,6 +34,8 @@ export interface Invocation {
   env: NodeJS.ProcessEnv;
   /** O que será escrito no stdin do processo. */
   stdinIsPrompt: true;
+  /** Como ler o que a CLI escreveu. Ausente significa texto puro. */
+  transcript?: "codex-jsonl";
 }
 
 function safe(value: string, field: string): string {
@@ -107,17 +109,24 @@ export function buildInvocation(role: RoleName, config: RoleConfig, context: Inv
   const binary = env[cli.binaryEnv]?.trim() || cli.defaultBinary;
 
   if (config.provider === "codex") {
+    /*
+     * `--json` não é preferência de formato: é o que torna a chamada observável.
+     * Sem ele a CLI fica muda enquanto pensa — indistinguível de travada para o
+     * relógio de ocioso —, a resposta precisa ser raspada do relatório de
+     * progresso, e o custo em tokens simplesmente não existe.
+     */
     const args = [
       "exec",
       "--cd", context.projectRoot,
       "--skip-git-repo-check",
       "--color", "never",
+      "--json",
       "--sandbox", readOnly ? "read-only" : systemAccess ? "danger-full-access" : "workspace-write",
     ];
     if (model) args.push("--model", model);
     if (effort) args.push("-c", `model_reasoning_effort="${effort}"`);
     args.push("-");
-    return { command: binary, args, env, stdinIsPrompt: true };
+    return { command: binary, args, env, stdinIsPrompt: true, transcript: "codex-jsonl" };
   }
 
   if (config.provider === "claude") {

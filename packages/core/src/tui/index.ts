@@ -10,5 +10,5 @@ export { BLOCK_FONT_ROWS, blockText } from "./blockfont.js";
 export { CAPYBARA_ASCII, CAPYBARA_COLS, CAPYBARA_ROWS, renderCapybara, supportsTrueColor } from "./capybara.js";
 export type { CapybaraOptions } from "./capybara.js";
 export { DEFAULT_LANGUAGE, detectLanguage } from "./language.js";
-export { readChoice, renderChoices, renderCommand, toArgv, wizardSteps } from "./wizard.js";
+export { readChoice, renderChoices, renderCommand, roleHint, toArgv, wizardSteps } from "./wizard.js";
 export type { Choice, ChoiceReading, WizardAnswers, WizardStep } from "./wizard.js";

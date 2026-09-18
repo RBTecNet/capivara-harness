@@ -304,6 +304,15 @@ describe("wizard", () => {
     expect(builder?.hint).toContain("exige uma CLI");
   });
 
+  it("quem julga não é oferecido como lugar de economizar", () => {
+    const steps = wizardSteps("init");
+    for (const id of ["auditor-override", "verifier-override"]) {
+      const step = steps.find((entry) => entry.id === id);
+      expect(step?.hint).toContain("não coloque abaixo do executor");
+      expect(step?.hint).not.toContain("barato");
+    }
+  });
+
   it("o build pergunta comando de teste e ciclos; o init pergunta o pedido", () => {
     expect(wizardSteps("build").map((step) => step.id)).toContain("test-cmd");
     expect(wizardSteps("init").map((step) => step.id)).toContain("request");

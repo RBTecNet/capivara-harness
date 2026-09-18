@@ -1,9 +1,20 @@
 /**
  * Tradução das flags para a configuração dos quatro papéis.
  *
- * Defaults sensatos: auditor e verificador caem num modelo mais barato quando o
- * operador não disse nada, porque ler e emitir veredito não precisa do modelo
- * mais caro — e são eles que rodam mais vezes.
+ * Nenhum papel tem default: rodar modelo custa dinheiro e a escolha é de quem
+ * paga. O que existe aqui é só a tradução das flags.
+ *
+ * Sobre a tentação de baratear o auditor e o verificador por eles serem
+ * somente-leitura: eles julgam o trabalho de outro modelo. Um juiz abaixo do
+ * autor não reprova menos — ele carimba, porque não enxerga o defeito para
+ * reprovar. E as regras da dúvida deste harness dependem disso: "na dúvida,
+ * aprove e ressalve" vindo de um modelo fraco é aprovação automática; "na
+ * dúvida, INCOMPLETE" vindo de um modelo fraco é ciclo de correção queimado
+ * contra código que estava certo.
+ *
+ * O piloto 3 é a evidência: foi o auditor quem viu que a regra de enviar cartão
+ * novo para "A fazer" usava o nome da coluna, que outra story permite renomear.
+ * Isso é inferência entre dois documentos, não conferência de forma.
  */
 
 import { CLI_PROVIDERS, DIRECT_PROVIDERS, resolveRoles, ROLE_NAMES } from "../provider/index.js";

@@ -1751,3 +1751,49 @@ inteiro.
 
 `evaluateReadiness` passou a oito para nove itens. O ensaio ausente **reprova**:
 não ter rodado não aprova nada.
+
+## 24. Quem julga não é onde se economiza
+
+Decidido em 2026-09-17, contra uma recomendação minha.
+
+Eu havia sugerido rodar auditor e verificador num modelo mais barato, com o
+argumento de que são papéis somente-leitura e de que a auditoria consumiu 37 dos
+171 minutos do piloto 3. A objeção do desenvolvedor derruba isso:
+
+> como um modelo de menor inteligência pode avaliar o trabalho de um modelo
+> superior?
+
+Ela está certa, e o erro do argumento original é confundir **permissão** com
+**dificuldade**. Somente-leitura descreve o que o papel pode fazer no disco, não
+o quanto ele precisa entender. Auditor e verificador julgam o que outro modelo
+produziu, e um juiz abaixo do autor não reprova menos: ele **carimba**, porque
+não enxerga o defeito que teria de nomear.
+
+Pior: as duas regras da dúvida deste harness dependem da capacidade de quem as
+aplica. "Na dúvida, aprove e ressalve", vindo de um modelo fraco, é aprovação
+automática. "Na dúvida, INCOMPLETE", vindo de um modelo fraco, é ciclo de
+correção queimado contra código que estava certo. As assimetrias que os papéis
+carregam pressupõem um juiz que enxerga.
+
+A evidência estava no próprio run que motivou a sugestão. Foi o auditor quem viu
+que a regra de enviar cartão novo para "A fazer" identificava a coluna pelo
+**nome**, enquanto US-2.1 permite renomeá-la — depois da renomeação, o modelo não
+acha mais a coluna inicial. Isso é inferência entre dois documentos, não
+conferência de forma. E foi o auditor, no piloto 2, quem previu como ressalva o
+critério insatisfazível que só apareceria cinco fases adiante.
+
+### A regra
+
+Auditor e verificador nunca abaixo do executor. Igual ou acima.
+
+O classificador de respostas da entrevista roda no papel `auditor` e essa
+decisão o cobre — foi exatamente ele que, no piloto 3, descartou uma decisão
+completa do desenvolvedor por ler mal a resposta. Baratear esse ponto seria
+institucionalizar o defeito.
+
+### Onde então se ganha tempo
+
+Não no juiz. Nas idas e vindas: menos devoluções por auditoria, prompts que não
+recarregam a cadeia inteira a cada tentativa, e paralelismo onde as unidades são
+independentes — como as fases, que eram sete chamadas em fila sem nenhuma
+esperar pela outra.

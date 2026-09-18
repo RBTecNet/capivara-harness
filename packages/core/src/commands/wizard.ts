@@ -18,7 +18,7 @@
 
 import { CLI_PROVIDERS, DIRECT_PROVIDERS, ROLES, ROLE_NAMES } from "../provider/index.js";
 import type { RoleName } from "../provider/index.js";
-import { readChoice, renderChoices, renderCommand, toArgv } from "../tui/index.js";
+import { readChoice, renderChoices, renderCommand, roleHint, toArgv } from "../tui/index.js";
 import type { Choice, WizardAnswers } from "../tui/index.js";
 
 export interface WizardIO {
@@ -244,7 +244,7 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
       ];
       const escolhido = await choose(
         io,
-        `${definition.label} — ${definition.requiresCli ? "escreve arquivos e roda comandos: exige uma CLI" : "somente leitura; um modelo mais barato costuma bastar"}`,
+        `${definition.label} — ${roleHint(role, definition.requiresCli)}`,
         opcoes,
         0,
       );

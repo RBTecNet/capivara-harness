@@ -93,6 +93,19 @@ export interface WizardStep {
   hint: string;
 }
 
+/**
+ * O que dizer sobre cada papel na hora de escolher o modelo.
+ *
+ * Somente-leitura não quer dizer barato. Auditor e verificador julgam o que
+ * outro modelo produziu, e um juiz abaixo do autor não reprova menos: ele
+ * carimba, porque não enxerga o defeito.
+ */
+export function roleHint(role: RoleName, requiresCli: boolean): string {
+  if (requiresCli) return "escreve arquivos e roda comandos: exige uma CLI";
+  if (role === "auditor" || role === "verifier") return "julga o trabalho de outro modelo: não coloque abaixo do executor";
+  return "escreve os documentos: é a base de tudo o que vem depois";
+}
+
 /** Os passos, como dados: a TUI apenas os apresenta. */
 export function wizardSteps(command: "init" | "build"): WizardStep[] {
   const steps: WizardStep[] = [];
@@ -113,10 +126,7 @@ export function wizardSteps(command: "init" | "build"): WizardStep[] {
     steps.push({
       id: `${role}-override`,
       prompt: `Configurar ${definition.label} separadamente?`,
-      hint:
-        definition.requiresCli
-          ? "este papel escreve arquivos e roda comandos: exige uma CLI"
-          : "papel somente leitura; um modelo mais barato costuma bastar",
+      hint: roleHint(role, definition.requiresCli),
     });
   }
 

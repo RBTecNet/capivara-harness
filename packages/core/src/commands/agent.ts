@@ -6,7 +6,7 @@
  * sem tocar em provider real, e o que mantém o custo do desenvolvimento honesto.
  */
 
-import { buildInvocation, parseCodexJsonl, readCredentials, runProvider, selectCredential } from "../provider/index.js";
+import { buildInvocation, readCredentials, readTranscript, runProvider, selectCredential } from "../provider/index.js";
 import type { RoleConfig, RoleName, SupervisorLimits, TokenUsage } from "../provider/index.js";
 
 export interface AgentBridgeOptions {
@@ -54,7 +54,7 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
 
     // O transcrito é lido aqui para que os orquestradores continuem recebendo
     // texto: quem chama não precisa saber que a CLI fala em eventos.
-    const transcript = invocation.transcript === "codex-jsonl" ? parseCodexJsonl(result.stdout) : null;
+    const transcript = invocation.transcript ? readTranscript(invocation.transcript, result.stdout) : null;
 
     return {
       exitCode: result.exitCode,

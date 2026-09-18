@@ -12,6 +12,7 @@
 
 import { ROLES, type RoleConfig, type RoleName } from "./roles.js";
 import { cliProvider, decideReasoning, directProvider, isCliProvider, isDirectProvider } from "./registry.js";
+import type { TranscriptKind } from "./transcript.js";
 
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:\/-]*$/;
 
@@ -35,7 +36,7 @@ export interface Invocation {
   /** O que será escrito no stdin do processo. */
   stdinIsPrompt: true;
   /** Como ler o que a CLI escreveu. Ausente significa texto puro. */
-  transcript?: "codex-jsonl";
+  transcript?: TranscriptKind;
 }
 
 function safe(value: string, field: string): string {
@@ -134,7 +135,7 @@ export function buildInvocation(role: RoleName, config: RoleConfig, context: Inv
     if (model) args.push("--model", model);
     if (effort) args.push("--effort", effort);
     const { CLAUDECODE: _ignored, ...withoutMarker } = env;
-    return { command: binary, args, env: withoutMarker, stdinIsPrompt: true };
+    return { command: binary, args, env: withoutMarker, stdinIsPrompt: true, transcript: "claude-json" };
   }
 
   const args = ["run", "--dir", context.projectRoot, "--format", "json"];
@@ -147,5 +148,6 @@ export function buildInvocation(role: RoleName, config: RoleConfig, context: Inv
       ? { ...env, OPENCODE_PERMISSION: '{"edit":"deny","bash":"deny","task":"deny","external_directory":"deny"}' }
       : env,
     stdinIsPrompt: true,
+    transcript: "opencode-jsonl",
   };
 }

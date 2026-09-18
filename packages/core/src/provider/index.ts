@@ -38,5 +38,5 @@ export {
   writeCredentials,
 } from "./credentials.js";
 export type { CredentialRecord, SafeCredential } from "./credentials.js";
-export { parseCodexJsonl } from "./transcript.js";
-export type { TokenUsage, Transcript } from "./transcript.js";
+export { parseClaudeJson, parseCodexJsonl, parseOpencodeJsonl, readTranscript } from "./transcript.js";
+export type { TokenUsage, Transcript, TranscriptKind } from "./transcript.js";

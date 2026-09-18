@@ -120,7 +120,15 @@ export function createProgram(): Command {
           return {
             stdout: response.stdout,
             exitCode: response.exitCode,
-            ...(response.usage ? { usage: { inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens } } : {}),
+            ...(response.usage
+              ? {
+                  usage: {
+                    inputTokens: response.usage.inputTokens,
+                    outputTokens: response.usage.outputTokens,
+                    ...(response.usage.costUsd !== undefined ? { costUsd: response.usage.costUsd } : {}),
+                  },
+                }
+              : {}),
           };
         },
         ask: async (question, index, total) => {

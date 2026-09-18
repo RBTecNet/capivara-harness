@@ -22,7 +22,12 @@ export interface TokenUsage {
   cachedInputTokens: number;
   outputTokens: number;
   reasoningTokens: number;
+  /** Só quando a CLI informa; nem todas informam. */
+  costUsd?: number;
 }
+
+/** Como cada CLI fala. Ausente significa texto puro, sem envelope. */
+export type TranscriptKind = "codex-jsonl" | "claude-json" | "opencode-jsonl";
 
 export interface Transcript {
   /** A resposta final do agente. */
@@ -81,4 +86,110 @@ export function parseCodexJsonl(stdout: string): Transcript {
   }
 
   return text === null ? { text: stdout, usage, raw: true } : { text, usage, raw: false };
+}
+
+/**
+ * `claude -p --output-format json` devolve UM objeto por chamada.
+ *
+ * A resposta fica em `result`; o resto do objeto é contabilidade da sessão. Sem
+ * esta leitura, o documento publicado seria o objeto inteiro — envelope, custo,
+ * estatística de subagentes e tudo.
+ */
+export function parseClaudeJson(stdout: string): Transcript {
+  const objeto = ultimoObjeto(stdout);
+  if (!objeto) return { text: stdout, usage: null, raw: true };
+
+  const uso = objeto.usage as Record<string, unknown> | undefined;
+  const detalhes = uso?.["output_tokens_details"] as Record<string, unknown> | undefined;
+  const custo = objeto["total_cost_usd"];
+  const usage: TokenUsage | null = uso
+    ? {
+        inputTokens: inteiro(uso, "input_tokens"),
+        cachedInputTokens: inteiro(uso, "cache_read_input_tokens"),
+        outputTokens: inteiro(uso, "output_tokens"),
+        reasoningTokens: inteiro(detalhes, "thinking_tokens"),
+        ...(typeof custo === "number" ? { costUsd: custo } : {}),
+      }
+    : null;
+
+  // Erro reportado pela própria CLI: devolve tudo, porque o diagnóstico pode
+  // estar em qualquer campo do envelope e engoli-lo é trocar causa por vazio.
+  if (objeto["is_error"] === true) return { text: stdout, usage, raw: true };
+
+  const resultado = objeto["result"];
+  if (typeof resultado !== "string") return { text: stdout, usage, raw: true };
+  return { text: resultado, usage, raw: false };
+}
+
+/**
+ * `opencode run --format json` transmite partes.
+ *
+ * O texto do agente chega em pedaços `type: "text"`, que são concatenados na
+ * ordem; `step_finish` fecha cada passo com tokens e custo, e uma resposta com
+ * várias etapas traz vários — somados, porque a chamada é uma só.
+ */
+export function parseOpencodeJsonl(stdout: string): Transcript {
+  const pedacos: string[] = [];
+  let usage: TokenUsage | null = null;
+
+  for (const evento of objetos(stdout)) {
+    const parte = evento["part"] as Record<string, unknown> | undefined;
+    if (parte?.["type"] === "text" && typeof parte["text"] === "string") {
+      pedacos.push(parte["text"]);
+      continue;
+    }
+
+    const tokens = parte?.["tokens"] as Record<string, unknown> | undefined;
+    if (!tokens) continue;
+    const cache = tokens["cache"] as Record<string, unknown> | undefined;
+    const custo = parte?.["cost"];
+    const somado: TokenUsage = {
+      inputTokens: (usage?.inputTokens ?? 0) + inteiro(tokens, "input"),
+      cachedInputTokens: (usage?.cachedInputTokens ?? 0) + inteiro(cache, "read"),
+      outputTokens: (usage?.outputTokens ?? 0) + inteiro(tokens, "output"),
+      reasoningTokens: (usage?.reasoningTokens ?? 0) + inteiro(tokens, "reasoning"),
+    };
+    const acumulado: number = (usage?.costUsd ?? 0) + (typeof custo === "number" ? custo : 0);
+    usage = acumulado > 0 ? { ...somado, costUsd: acumulado } : somado;
+  }
+
+  return pedacos.length === 0 ? { text: stdout, usage, raw: true } : { text: pedacos.join(""), usage, raw: false };
+}
+
+/** Objetos JSON, um por linha, ignorando o que não for JSON. */
+function* objetos(stdout: string): Generator<Record<string, unknown>> {
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "" || !trimmed.startsWith("{")) continue;
+    try {
+      yield JSON.parse(trimmed) as Record<string, unknown>;
+    } catch {
+      /* linha que não é JSON não derruba a leitura */
+    }
+  }
+}
+
+/**
+ * O último objeto completo da saída.
+ *
+ * Tenta o stdout inteiro primeiro — é o caso normal, um objeto só — e cai para a
+ * última linha que for JSON quando a CLI escreveu algo em volta.
+ */
+function ultimoObjeto(stdout: string): Record<string, unknown> | null {
+  try {
+    const inteiro = JSON.parse(stdout.trim()) as Record<string, unknown>;
+    if (inteiro && typeof inteiro === "object") return inteiro;
+  } catch {
+    /* segue para a leitura linha a linha */
+  }
+  let ultimo: Record<string, unknown> | null = null;
+  for (const objeto of objetos(stdout)) ultimo = objeto;
+  return ultimo;
+}
+
+/** Lê o transcrito conforme a CLI que o produziu. */
+export function readTranscript(kind: TranscriptKind, stdout: string): Transcript {
+  if (kind === "claude-json") return parseClaudeJson(stdout);
+  if (kind === "opencode-jsonl") return parseOpencodeJsonl(stdout);
+  return parseCodexJsonl(stdout);
 }

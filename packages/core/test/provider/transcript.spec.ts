@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCodexJsonl } from "../../src/provider/index.js";
+import { buildInvocation, parseClaudeJson, parseCodexJsonl, parseOpencodeJsonl, readTranscript } from "../../src/provider/index.js";
 
 const transcrito = [
   '{"type":"thread.started","thread_id":"01a0"}',
@@ -39,5 +39,119 @@ describe("transcrito do codex", () => {
     const lido = parseCodexJsonl(erro);
     expect(lido.raw).toBe(true);
     expect(lido.text).toBe(erro);
+  });
+});
+
+/*
+ * As amostras abaixo foram capturadas das CLIs reais instaladas nesta máquina,
+ * com um prompt de uma palavra. Nenhuma foi escrita de memória: o formato que um
+ * adaptador supõe é exatamente onde ele quebra em silêncio.
+ */
+
+const CLAUDE = JSON.stringify({
+  duration_api_ms: 2031,
+  stop_reason: "end_turn",
+  session_id: "3807fab1",
+  total_cost_usd: 0.0963905,
+  usage: {
+    input_tokens: 2,
+    cache_creation_input_tokens: 9023,
+    cache_read_input_tokens: 10143,
+    output_tokens: 5,
+    output_tokens_details: { thinking_tokens: 0 },
+  },
+  is_error: false,
+  num_turns: 1,
+  subtype: "success",
+  result: "# Documento\n\ncorpo",
+  type: "result",
+});
+
+const OPENCODE = [
+  { type: "step_start", sessionID: "ses_1", part: { type: "step-start" } },
+  { type: "text", sessionID: "ses_1", part: { type: "text", text: "# Documento\n\n" } },
+  { type: "text", sessionID: "ses_1", part: { type: "text", text: "corpo" } },
+  {
+    type: "step_finish",
+    sessionID: "ses_1",
+    part: {
+      type: "step-finish",
+      reason: "stop",
+      tokens: { total: 8439, input: 8373, output: 2, reasoning: 64, cache: { write: 0, read: 12 } },
+      cost: 0.00652725,
+    },
+  },
+]
+  .map((evento) => JSON.stringify(evento))
+  .join("\n");
+
+describe("transcrito do claude", () => {
+  it("entrega o campo result, não o envelope da sessão", () => {
+    const lido = parseClaudeJson(CLAUDE);
+    expect(lido.text).toBe("# Documento\n\ncorpo");
+    expect(lido.raw).toBe(false);
+    expect(lido.text).not.toContain("session_id");
+  });
+
+  it("traz tokens e o custo em dólares que a CLI informa", () => {
+    expect(parseClaudeJson(CLAUDE).usage).toEqual({
+      inputTokens: 2,
+      cachedInputTokens: 10143,
+      outputTokens: 5,
+      reasoningTokens: 0,
+      costUsd: 0.0963905,
+    });
+  });
+
+  it("erro declarado pela CLI devolve tudo, em vez de esconder a causa", () => {
+    const erro = JSON.stringify({ is_error: true, result: "credenciais inválidas", usage: { input_tokens: 1, output_tokens: 0 } });
+    const lido = parseClaudeJson(erro);
+    expect(lido.raw).toBe(true);
+    expect(lido.text).toContain("credenciais inválidas");
+  });
+
+  it("saída que não é JSON não vira documento", () => {
+    const lido = parseClaudeJson("command not found: claude");
+    expect(lido.raw).toBe(true);
+    expect(lido.text).toBe("command not found: claude");
+  });
+});
+
+describe("transcrito do opencode", () => {
+  it("junta as partes de texto na ordem", () => {
+    const lido = parseOpencodeJsonl(OPENCODE);
+    expect(lido.text).toBe("# Documento\n\ncorpo");
+    expect(lido.raw).toBe(false);
+  });
+
+  it("soma tokens e custo dos passos", () => {
+    expect(parseOpencodeJsonl(OPENCODE).usage).toEqual({
+      inputTokens: 8373,
+      cachedInputTokens: 12,
+      outputTokens: 2,
+      reasoningTokens: 64,
+      costUsd: 0.00652725,
+    });
+  });
+
+  it("dois passos somam, porque a chamada é uma só", () => {
+    const dois = [OPENCODE, OPENCODE].join("\n");
+    expect(parseOpencodeJsonl(dois).usage?.inputTokens).toBe(16746);
+  });
+});
+
+describe("cada provider lê o seu próprio formato", () => {
+  it("o adaptador declara como a CLI fala", () => {
+    const contexto = { projectRoot: "/projeto", runId: "init-1", stage: "authoring", language: "português do Brasil" };
+    const config = { provider: "", model: "", effort: "", credential: "", command: "" };
+    expect(buildInvocation("writer", { ...config, provider: "codex" }, contexto).transcript).toBe("codex-jsonl");
+    expect(buildInvocation("writer", { ...config, provider: "claude" }, contexto).transcript).toBe("claude-json");
+    expect(buildInvocation("writer", { ...config, provider: "opencode" }, contexto).transcript).toBe("opencode-jsonl");
+  });
+
+  it("o leitor certo é escolhido pelo tipo declarado", () => {
+    expect(readTranscript("claude-json", CLAUDE).text).toBe("# Documento\n\ncorpo");
+    expect(readTranscript("opencode-jsonl", OPENCODE).text).toBe("# Documento\n\ncorpo");
+    expect(readTranscript("codex-jsonl", transcrito).text).toBe("# Documento\n\ncorpo");
   });
 });

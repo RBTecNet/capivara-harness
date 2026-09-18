@@ -14,6 +14,8 @@ export interface RoleCost {
   role: string;
   calls: number;
   inputTokens: number | null;
+  /** Só quando a CLI informa o custo; nem todas informam. */
+  costUsd?: number;
   outputTokens: number | null;
   milliseconds: number;
 }
@@ -73,7 +75,7 @@ export function renderReport(report: InitReport): string {
     const tokens =
       cost.inputTokens === null || cost.outputTokens === null
         ? "tokens não medidos"
-        : `${cost.inputTokens} entrada / ${cost.outputTokens} saída`;
+        : `${cost.inputTokens} entrada / ${cost.outputTokens} saída${cost.costUsd === undefined ? "" : ` / US$ ${cost.costUsd.toFixed(4)}`}`;
     lines.push(`  ${cost.role.padEnd(9)} ${cost.calls} chamada(s) · ${tokens} · ${Math.round(cost.milliseconds / 1000)}s`);
   }
 

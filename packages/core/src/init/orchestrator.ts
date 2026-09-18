@@ -47,7 +47,7 @@ export type AgentCaller = (call: AgentCall) => Promise<{
   stdout: string;
   exitCode: number;
   /** Tokens da chamada, quando a CLI os reporta. Ausente é "não medido". */
-  usage?: { inputTokens: number; outputTokens: number };
+  usage?: { inputTokens: number; outputTokens: number; costUsd?: number };
 }>;
 export type AskDeveloper = (question: Question, index: number, total: number) => Promise<string>;
 export type DecideStandoff = (rendered: string) => Promise<string>;
@@ -161,6 +161,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       if (response.usage) {
         cost.inputTokens = (cost.inputTokens ?? 0) + response.usage.inputTokens;
         cost.outputTokens = (cost.outputTokens ?? 0) + response.usage.outputTokens;
+        if (response.usage.costUsd !== undefined) cost.costUsd = (cost.costUsd ?? 0) + response.usage.costUsd;
       }
       costs.set(call.role, cost);
 

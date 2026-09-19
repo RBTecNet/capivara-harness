@@ -165,3 +165,36 @@ derrubar de vez.
 **B não foi retomado de propósito.** O build é retomável e mais três ciclos
 provavelmente fechariam a fase, mas aí "quantos ciclos o mimo precisa" deixaria de
 ser comparável com A.
+
+
+### Resultado de C — o mesmo executor, o juiz trocado
+
+Interrompido de propósito na fase 5, depois de já ter respondido o que motivou a
+rodada. Quatro de sete fases, com o juiz em opus 5 no lugar do deepseek.
+
+| | B · juiz deepseek | C · juiz opus |
+|---|---|---|
+| fase 1 | passou de primeira | 2 ciclos |
+| fase 2 | passou de primeira | 2 ciclos |
+| fase 3 | **esgotou 3 ciclos e parou** | fechou no 3º ciclo |
+| fase 4 | — | 2 ciclos |
+| desfecho | parou em 2 de 7 | 4 de 7 quando foi encerrado |
+
+**O juiz importa, e a evidência é direta.** Mesmo executor, mesmo plano, mesma
+fase: com o deepseek julgando o build morreu; com o opus, passou. É o §24
+— "quem julga não é onde se economiza" — deixando de ser raciocínio e virando
+medição.
+
+A explicação mais provável não é que o opus reprove melhor, e sim que ele
+**ensine melhor**: o texto do `INCOMPLETE — <o que falta>` volta ao executor como
+instrução, e com executor fraco a qualidade dessa instrução pesa mais que a
+precisão do veredito. Os dois verificadores concordaram que a fase 3 estava
+incompleta; só um disse o suficiente para o executor consertar.
+
+**O custo escondido do executor gratuito.** C parou para esperar cota:
+
+    [P05] limite de uso sem horário de reset informado; aguardando 1800s sem consumir ciclo
+
+O harness acertou em não gastar ciclo por isso — limite de uso não é defeito do
+executor. Mas a conta prática muda: modelo gratuito precisa de mais ciclos E tem
+cota, e cada batida custa meia hora de relógio. "Gratuito" sai caro em tempo.

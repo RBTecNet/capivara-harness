@@ -691,9 +691,24 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
     // O esqueleto é recusado pelo parser antes de custar qualquer fase escrita.
     await event("authoring", "skeleton", "started");
+    /*
+     * O escritor tenta até três vezes, e cada tentativa recebe os defeitos da
+     * anterior nomeados.
+     *
+     * Eram duas, e conferiam só o parser. O piloto 6 terminou em NOT READY
+     * porque uma story não aparecia no `covers` de fase nenhuma — defeito
+     * mecânico, verificável em código, descoberto no gate quando já não havia
+     * mais tentativa. A lição já estava escrita na auditoria do plano e não
+     * tinha sido aplicada aqui: conferir no laço transforma um run perdido numa
+     * segunda chamada de três minutos.
+     *
+     * Três tentativas porque agora há duas famílias de defeito a atravessar —
+     * forma e executabilidade — e o esqueleto é a chamada mais barata do ciclo
+     * e aquela de que todo o resto depende.
+     */
     let esqueleto: Skeleton | null = null;
     let defeitos: string[] = [];
-    for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
+    for (let tentativa = 1; tentativa <= 3; tentativa += 1) {
       const saida = await track({
         role: "writer",
         stage: "authoring",
@@ -712,12 +727,30 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       });
 
       const lido = parseSkeleton(saida, { maxTasksPerPhase: MAX_TASKS_PER_PHASE });
-      if (lido.ok) {
-        esqueleto = lido.skeleton;
-        break;
+      if (!lido.ok) {
+        defeitos = lido.defects.map((defeito) => `${defeito.problem} → ${defeito.hint}`);
+        announce(`  o esqueleto veio com ${defeitos.length} defeito(s) de forma; pedindo de novo com eles nomeados`);
+        continue;
       }
-      defeitos = lido.defects.map((defeito) => `${defeito.problem} → ${defeito.hint}`);
-      announce(`  o esqueleto veio com ${defeitos.length} defeito(s); pedindo de novo com eles nomeados`);
+
+      /*
+       * O gate é a autoridade sobre o que é um esqueleto executável, então o
+       * laço consulta O MESMO gate em vez de reimplementar a regra — é a tese do
+       * contrato único aplicada aqui dentro.
+       *
+       * Fora as decisões em aberto, que são da entrevista e não do escritor: ele
+       * não tem como fechá-las reescrevendo.
+       */
+      const portao = evaluatePlanReadiness({ skeleton: lido.skeleton, unresolvedQuestions: [] });
+      const executaveis = portao.checks.filter(
+        (check) => !check.passed && check.id !== "esqueleto" && check.id !== "decisoes",
+      );
+
+      esqueleto = lido.skeleton;
+      if (executaveis.length === 0) break;
+
+      defeitos = executaveis.map((check) => `${check.title} — ${check.detail}`);
+      announce(`  o esqueleto não passa no gate em ${executaveis.length} ponto(s); pedindo de novo com eles nomeados`);
     }
 
     if (!esqueleto) {

@@ -245,3 +245,58 @@ describe("cada auditoria recebe só o que a sua pergunta exige", () => {
     expect(coerencia?.prompt).toContain("## Fases");
   });
 });
+
+describe("o esqueleto é conferido no laço, não só no portão", () => {
+  /** Um esqueleto que passa no parser e deixa uma story sem fase que a entregue. */
+  const semCobertura = JSON.stringify({
+    ...JSON.parse(SKELETON),
+    stories: [
+      { id: "US-1.1", statement: "Como hóspede, crio uma reserva" },
+      { id: "US-2.2", statement: "Como operador, suspendo um membro" },
+    ],
+  });
+
+  it("story que nenhuma fase entrega volta ao escritor com o defeito nomeado", async () => {
+    const steps = skeletonPath();
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "skeleton", attempt: 1 },
+      respond: { stdout: semCobertura },
+    });
+
+    const { outcome, agent } = await init(steps);
+
+    const segunda = agent.calls.find(
+      (call) => call.subject === "skeleton" && call.stage === "authoring" && call.attempt === 2,
+    );
+    expect(segunda, "o escritor precisa ganhar uma segunda tentativa").toBeDefined();
+    expect(segunda?.prompt).toContain("US-2.2");
+    // E o run chega ao gate, em vez de morrer nele.
+    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+  });
+
+  it("corrigido na segunda tentativa, não há terceira", async () => {
+    const steps = skeletonPath();
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "skeleton", attempt: 1 },
+      respond: { stdout: semCobertura },
+    });
+
+    const { agent } = await init(steps);
+    const tentativas = agent.calls.filter((call) => call.subject === "skeleton" && call.stage === "authoring");
+    expect(tentativas).toHaveLength(2);
+  });
+
+  it("insistindo no defeito, o run publica e o portão reporta NOT READY em vez de estourar", async () => {
+    const steps = skeletonPath();
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "skeleton" },
+      respond: { stdout: semCobertura },
+      repeat: true,
+    });
+
+    const { outcome, agent } = await init(steps);
+    expect(agent.calls.filter((call) => call.subject === "skeleton" && call.stage === "authoring")).toHaveLength(3);
+    expect(outcome.readiness.ready).toBe(false);
+    expect(outcome.rendered).toContain("US-2.2");
+  });
+});

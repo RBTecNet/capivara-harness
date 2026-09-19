@@ -350,3 +350,22 @@ describe("ensaio do verificador", () => {
     expect(resultado.blocking[0]?.ruling).toBe("UNOBSERVABLE");
   });
 });
+
+describe("onde o executor constrói", () => {
+  it("o prompt diz para construir na raiz, e proíbe o subdiretório", async () => {
+    const { implementPrompt } = await import("../../src/prompts/index.js");
+    const prompt = implementPrompt({
+      language: "português do Brasil",
+      phaseMarkdown: "## Phase 1: Base\n\n- [ ] **Task:** X",
+      phaseNumber: 1,
+      taskCount: 1,
+      testCommand: null,
+      systemInstall: false,
+    });
+
+    expect(prompt).toContain("Build IN THE CURRENT DIRECTORY");
+    expect(prompt).toContain("Never create a subdirectory to hold the project");
+    // O caso real do piloto 6-mimo: `tmp/biblioteca-app/`.
+    expect(prompt).toContain("not `tmp/`");
+  });
+});

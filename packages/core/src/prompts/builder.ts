@@ -28,6 +28,26 @@ export const BUILDER_COMPLETE_MARKER = "CAPIVARA_BUILDER_STATUS: COMPLETE";
 
 export function discoveryPreamble(): string {
   return [
+    /*
+     * Onde construir precisava ser dito.
+     *
+     * O prompt nunca disse, e os executores mais fortes inferiam. O mimo, mais
+     * fraco, criou `tmp/biblioteca-app/` e montou o projeto inteiro lá dentro:
+     * a raiz ficou vazia, o gate 2 não achou comando de teste, e a fase entrou
+     * em ciclo de correção sem que nada estivesse errado com o código escrito.
+     *
+     * Um harness que se propõe a rodar com modelo barato não pode depender de
+     * inferência para a pergunta mais básica de todas.
+     */
+    "## Where the project lives",
+    "You are already inside the project. Build IN THE CURRENT DIRECTORY: `package.json`, `src/`,",
+    "the config files and everything else go at this root, next to `.capivara/`.",
+    "Never create a subdirectory to hold the project — not `app/`, not `tmp/`, not a folder named",
+    "after the product. A scaffolding tool that wants to create one (`npm create vite@latest myapp`)",
+    "must be pointed at `.` instead, or its output moved to this root afterwards.",
+    "The verifier reads this directory. A project built one level down reads as a project that was",
+    "never built.",
+    "",
     "## Discover the stack and the conventions before writing code",
     "This project may use any language or framework. Assume nothing. Before you start, read the",
     "ones that exist, in this order:",

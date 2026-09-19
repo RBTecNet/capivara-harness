@@ -101,7 +101,7 @@ especificação.
 | build | executor | verificador | o que responde |
 |---|---|---|---|
 | A · piloto-6 | codex | opus 5 | a referência |
-| B · piloto-6-mimo | mimo-v2.5-**free** | deepseek-v4-pro | um executor gratuito dá conta? |
+| B · piloto-6-mimo | mimo-v2.5-**free** | deepseek-v4-pro | parou na fase 3 de 7 |
 | C · a rodar | mimo-v2.5-free | **opus 5** | quanto do resultado de B foi o juiz? |
 
 **B move duas variáveis ao mesmo tempo**, e isso foi descuido meu no desenho: se
@@ -128,3 +128,40 @@ para achar a linha que importava.
 ler transcript de sessão, é a diferença entre corrigir em dois minutos e concluir
 que o modelo barato não serve — conclusão que teria sido falsa três vezes
 seguidas.
+
+
+### Resultado de B — o executor gratuito
+
+Parou na fase 3 de 7, com os três ciclos de correção esgotados.
+
+| | A · codex + opus | B · mimo free + deepseek |
+|---|---|---|
+| fase 1 | 55 min, **3 ciclos** | 35 min, **0 ciclos** |
+| fase 2 | 20 min, 0 ciclos | 5 min, 0 ciclos |
+| fase 3 | 3 ciclos, **passou** | 3 ciclos, **parou** |
+| desfecho | 7 fases verdes, 111 testes | 2 fases verdes, 203 de 204 testes |
+
+O que derrubou B foi um único teste:
+
+```
+❯ src/__tests__/WorkflowHistoricoMembro.test.tsx (8 tests | 1 failed)
+    × Histórico atualiza quando pagamento de multa é registrado
+Tests  1 failed | 203 passed (204)
+```
+
+Duzentos e três testes passando e um falhando. O gate 2 recusou, corretamente:
+suíte vermelha é suíte vermelha, e a régua não afrouxa porque o executor é
+gratuito.
+
+**A leitura.** O mimo foi mais rápido e mais limpo que o codex nas duas primeiras
+fases — metade do tempo, zero devoluções contra três. A diferença apareceu onde
+importa: **corrigir o próprio trabalho sob a pressão de um gate**. O codex também
+sofreu na fase 3, gastou os mesmos três ciclos, e convergiu no último; o mimo não.
+
+Vale registrar que o verificador barato não foi leniente: o deepseek reprovou no
+ciclo 2 pelo gate 3, antes de o gate 2 — que é mecânico e imune a leniência —
+derrubar de vez.
+
+**B não foi retomado de propósito.** O build é retomável e mais três ciclos
+provavelmente fechariam a fase, mas aí "quantos ciclos o mimo precisa" deixaria de
+ser comparável com A.

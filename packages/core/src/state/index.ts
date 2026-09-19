@@ -18,7 +18,7 @@ export type {
   RunState,
   RunStatus,
 } from "./run-store.js";
-export { LockBusyError, acquireLock, isProcessAlive } from "./lock.js";
+export { LockBusyError, acquireLock, isProcessAlive, liveLockOwner } from "./lock.js";
 export type { AcquireLockOptions, LockHandle, LockOwner } from "./lock.js";
 export { nextSubject, replayEvents, restoreRun } from "./resume.js";
 export type { RestoredRun, RunProgress } from "./resume.js";

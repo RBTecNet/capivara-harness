@@ -70,6 +70,37 @@ async function readOwner(lockPath: string): Promise<LockOwner | null> {
   }
 }
 
+/**
+ * Quem está rodando este run agora, se é que alguém está.
+ *
+ * Existe para ser consultado ANTES do preflight. Enquanto o `build` só descobria
+ * o dono na hora de tomar o lock, um segundo processo primeiro passava pelo
+ * preflight e reclamava da árvore suja — e a árvore estava suja porque o
+ * primeiro processo estava escrevendo nela naquele instante. A mensagem culpava
+ * a vítima e sugeria descartar o trabalho.
+ *
+ * No piloto 5 eu segui essa sugestão e apaguei `src/`, `test/`, `index.html` e
+ * `package.json` de um executor em plena sessão. A pergunta "há alguém rodando?"
+ * precisa vir antes da pergunta "a árvore está limpa?", porque a resposta da
+ * primeira explica a segunda.
+ *
+ * Isto não substitui o `acquireLock`: consultar e depois tomar tem corrida, e
+ * quem garante a exclusão continua sendo a criação atômica do diretório. Aqui o
+ * que se ganha é a mensagem certa no momento certo.
+ */
+export async function liveLockOwner(options: {
+  projectRoot: string;
+  runId: string;
+  isAlive?: (pid: number) => boolean;
+}): Promise<LockOwner | null> {
+  const alive = options.isAlive ?? isProcessAlive;
+  const owner = await readOwner(runPaths(options.projectRoot, options.runId).lock);
+  if (!owner) return null;
+  // De outra máquina não dá para perguntar se o processo vive; o lock decide.
+  if (owner.hostname !== osHostname()) return owner;
+  return alive(owner.pid) ? owner : null;
+}
+
 export interface AcquireLockOptions {
   projectRoot: string;
   runId: string;

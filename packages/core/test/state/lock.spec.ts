@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { LockBusyError, acquireLock, isProcessAlive, runPaths } from "../../src/state/index.js";
+import { LockBusyError, acquireLock, isProcessAlive, liveLockOwner, runPaths } from "../../src/state/index.js";
 
 let projectRoot = "";
 const RUN = "init-abc123abc123";
@@ -84,5 +84,36 @@ describe("acquireLock", () => {
       "utf8",
     );
     await expect(acquireLock(options({ isAlive: () => false }))).rejects.toThrow(/outra-maquina/);
+  });
+});
+
+describe("quem está rodando agora", () => {
+  it("sem lock, não há dono", async () => {
+    expect(await liveLockOwner({ projectRoot, runId: "build-1" })).toBeNull();
+  });
+
+  it("com o dono vivo, devolve o dono: é o que explica a árvore suja", async () => {
+    const lock = await acquireLock({ projectRoot, runId: "build-1", command: "build" });
+    try {
+      const dono = await liveLockOwner({ projectRoot, runId: "build-1" });
+      expect(dono?.pid).toBe(process.pid);
+    } finally {
+      await lock.release();
+    }
+  });
+
+  it("dono morto não é dono: o run anterior caiu e este pode rodar", async () => {
+    const lock = await acquireLock({ projectRoot, runId: "build-1", command: "build" });
+    try {
+      expect(await liveLockOwner({ projectRoot, runId: "build-1", isAlive: () => false })).toBeNull();
+    } finally {
+      await lock.release();
+    }
+  });
+
+  it("lock liberado não deixa dono para trás", async () => {
+    const lock = await acquireLock({ projectRoot, runId: "build-1", command: "build" });
+    await lock.release();
+    expect(await liveLockOwner({ projectRoot, runId: "build-1" })).toBeNull();
   });
 });

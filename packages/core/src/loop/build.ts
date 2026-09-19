@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { sha12 } from "../contract/stamps.js";
 import {
   acquireLock,
+  liveLockOwner,
   appendEvent,
   artifactPaths,
   createRunState,
@@ -99,6 +100,24 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   }
 
   const runId = runIdFor("build", sha12(plan));
+
+  /*
+   * "Há alguém rodando?" vem ANTES de "a árvore está limpa?".
+   *
+   * Um segundo build encontra a árvore suja porque o primeiro está escrevendo
+   * nela. Perguntado nesta ordem, o preflight culpava a vítima e sugeria
+   * descartar o trabalho em curso — sugestão que, seguida, apaga o que um
+   * executor está produzindo naquele instante.
+   */
+  const emExecucao = await liveLockOwner({ projectRoot: options.projectRoot, runId });
+  if (emExecucao) {
+    const razao =
+      `já há um build deste plano em execução no pid ${emExecucao.pid} (desde ${emExecucao.startedAt}), ` +
+      "e é ele que está escrevendo na árvore. Espere aquele processo terminar, ou encerre-o antes de rodar de novo.";
+    announce(`erro: ${razao}`);
+    return { runId, exitCode: 1, phases: [], warnings: [], errors: [razao], acceptance: null };
+  }
+
   const repository = await isRepository(options.projectRoot);
 
   const checked = await preflight({

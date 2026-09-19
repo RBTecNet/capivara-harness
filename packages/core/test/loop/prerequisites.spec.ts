@@ -272,3 +272,43 @@ describe("a seção de stack é lida mesmo sendo a última do esqueleto", () => 
     expect(unverifiedTechnologies("## Stack\n- Estilos: CSS Modules\n")).toEqual(["CSS Modules"]);
   });
 });
+
+describe("um build só reclama da árvore depois de saber que ninguém está escrevendo nela", () => {
+  it("com outro build vivo, a mensagem nomeia o pid em vez de culpar a árvore", async () => {
+    const { runBuild } = await import("../../src/loop/index.js");
+    const { acquireLock, runIdFor } = await import("../../src/state/index.js");
+    const { sha12 } = await import("../../src/contract/index.js");
+    const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    const projectRoot = await mkdtemp(join(tmpdir(), "capivara-build-vivo-"));
+    await mkdir(join(projectRoot, ".capivara", "init"), { recursive: true });
+    const plano = "# X — Project Phases\n\n<!-- inputs: skeleton.md@sha256:aaaaaaaaaaaa -->\n\n## Overview\n\ntexto\n";
+    await writeFile(join(projectRoot, ".capivara/init/project-phases.md"), plano, "utf8");
+
+    // Alguém já está rodando este mesmo plano.
+    const lock = await acquireLock({ projectRoot, runId: runIdFor("build", sha12(plano)), command: "build" });
+    try {
+      const ditas: string[] = [];
+      const resultado = await runBuild({
+        projectRoot,
+        language: "português do Brasil",
+        engine: "codex",
+        call: async () => {
+          throw new Error("nenhuma chamada de modelo devia acontecer");
+        },
+        announce: (linha: string) => void ditas.push(linha),
+        environment: {},
+      });
+
+      expect(resultado.exitCode).toBe(1);
+      expect(resultado.errors.join(" ")).toContain(`pid ${process.pid}`);
+      // E não manda descartar o trabalho de quem está escrevendo agora.
+      expect(ditas.join(" ")).not.toContain("git clean");
+    } finally {
+      await lock.release();
+      await rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+});

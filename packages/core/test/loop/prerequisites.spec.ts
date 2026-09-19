@@ -225,3 +225,50 @@ describe("resolução", () => {
     expect(vezes).toBe(3);
   });
 });
+
+describe("o aviso do que não foi verificado precisa caber num aviso", () => {
+  /** A stack do piloto 5, com as frases que o esqueleto de fato escreveu. */
+  const ESQUELETO_REAL = [
+    "# Gastos — Skeleton",
+    "",
+    "## Stack",
+    "- Plataforma: Aplicação web executada no navegador, em uma máquina só, sem conta e sem servidor",
+    "- Persistência: Armazenamento local do navegador para lancamentos, categorias e limites_mensais",
+    "- Visual: Sistema visual próprio enxuto com tokens de cor centralizados, escala de espaçamento, tipografia definida, estados de passar o cursor, foco, vazio e carregamento, e temas claro e escuro",
+    "",
+    "## Entidades",
+  ].join("\n");
+
+  it("cada decisão vira um rótulo curto, não a frase inteira do esqueleto", () => {
+    for (const entrada of unverifiedTechnologies(ESQUELETO_REAL)) {
+      expect(entrada.length, entrada).toBeLessThanOrEqual(48);
+    }
+  });
+
+  it("o aviso inteiro continua cabendo numa linha de terminal", () => {
+    const aviso = `não verifiquei, o catálogo não reconhece: ${unverifiedTechnologies(ESQUELETO_REAL).join(", ")}`;
+    // Antes desta correção o mesmo esqueleto produzia 373 caracteres.
+    expect(aviso.length, aviso).toBeLessThan(200);
+  });
+
+  it("ainda diz o suficiente para a pessoa reconhecer do que se trata", () => {
+    const entradas = unverifiedTechnologies(ESQUELETO_REAL);
+    expect(entradas.some((entrada) => entrada.includes("Aplicação web"))).toBe(true);
+    expect(entradas.some((entrada) => entrada.includes("Armazenamento local"))).toBe(true);
+  });
+
+  it("decisão que já é curta passa intacta", () => {
+    expect(unverifiedTechnologies("## Stack\n- Estilos: CSS Modules")).toEqual(["CSS Modules"]);
+  });
+});
+
+describe("a seção de stack é lida mesmo sendo a última do esqueleto", () => {
+  it("sem seção depois dela, ainda deduz os executáveis", () => {
+    const esqueleto = "# X — Skeleton\n\n## Stack\n- Banco: PostgreSQL 16\n- Runtime: Node.js 22\n";
+    expect(detectPrerequisites(esqueleto).map((p) => p.binary).sort()).toEqual(["node", "psql"]);
+  });
+
+  it("sem seção depois dela, ainda lista o que não reconhece", () => {
+    expect(unverifiedTechnologies("## Stack\n- Estilos: CSS Modules\n")).toEqual(["CSS Modules"]);
+  });
+});

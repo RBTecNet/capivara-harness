@@ -40,9 +40,18 @@ const CATALOG: { pattern: RegExp; prerequisite: Prerequisite }[] = [
   { pattern: /\bjava\b|\bspring\b/i, prerequisite: { technology: "Java", binary: "java", systemLevel: false } },
 ];
 
-/** A seção de stack do esqueleto; o documento inteiro serve de reserva. */
+/**
+ * A seção de stack do esqueleto; o documento inteiro serve de reserva.
+ *
+ * O fim da seção é a próxima `##` OU o fim do texto. Escrever esse "ou o fim do
+ * texto" como `\Z` é um reflexo de quem vem de outra linguagem: em JavaScript
+ * `\Z` não é âncora nenhuma, é a letra Z literal. O efeito era silencioso e só
+ * aparecia num esqueleto cuja Stack fosse a última seção — ali a leitura
+ * devolvia vazio, o catálogo não reconhecia nada, e o preflight passava sem ter
+ * conferido pré-requisito nenhum.
+ */
 function stackSection(skeleton: string): string {
-  return /^##\s+Stack\s*$([\s\S]*?)(?=^##\s|\Z)/m.exec(skeleton)?.[1] ?? "";
+  return /^##\s+Stack\s*$([\s\S]*?)(?=^##\s|$(?![\s\S]))/m.exec(skeleton)?.[1] ?? "";
 }
 
 /** Lê a seção `## Stack` do esqueleto e deduz o que precisa existir na máquina. */
@@ -88,12 +97,32 @@ export function describeMissing(statuses: readonly PrerequisiteStatus[], systemI
  * deixou de fora em vez de deixar entender que não havia nada.
  */
 export function unverifiedTechnologies(skeleton: string): string[] {
-  // `- <componente>: <decisão>`, que é como o esqueleto escreve a stack.
+  /*
+   * `- <componente>: <decisão>`, que é como o esqueleto escreve a stack.
+   *
+   * A decisão do esqueleto é uma frase, não um nome de produto: onde a tabela em
+   * prosa trazia "React 18", aqui vem "Sistema visual próprio enxuto com tokens
+   * de cor centralizados, escala de espaçamento, tipografia definida, estados
+   * de…". Despejar isso inteiro num aviso produziu, no piloto 5, um parágrafo de
+   * quatro linhas que ninguém lê — e um aviso que ninguém lê não avisa.
+   *
+   * Então a frase é cortada no primeiro limite de cláusula e truncada. O que o
+   * aviso precisa entregar é o reconhecimento de que ali há uma decisão que o
+   * catálogo não sabe conferir, não a decisão inteira: essa está no esqueleto.
+   */
   const decisoes = [...stackSection(skeleton).matchAll(/^-\s*[^:\n]+:\s*(.+)$/gm)]
     .map((linha) => (linha[1] ?? "").trim())
+    .map((valor) => resumir(valor))
     .filter((valor) => valor !== "");
 
   return [...new Set(decisoes)].filter((decisao) => !CATALOG.some((entrada) => entrada.pattern.test(decisao)));
+}
+
+/** A decisão em tamanho de aviso: primeira cláusula, no máximo 48 caracteres. */
+function resumir(decisao: string): string {
+  const primeira = (decisao.split(/\s+(?:com|para|em|usando)\s+|[,;(]/)[0] ?? "").trim();
+  const base = primeira === "" ? decisao : primeira;
+  return base.length <= 48 ? base : `${base.slice(0, 47).trimEnd()}…`;
 }
 
 export type PrerequisiteChoice = "instalar" | "verificar" | "abortar";

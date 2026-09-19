@@ -15,11 +15,11 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkRewriteDrift, coverageFromSkeleton, parsePhaseFragment, parseSkeleton, renderSkeleton, sliceForPhase, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
+import { assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parsePhaseFragment, parseSkeleton, renderSkeleton, sliceForPhase, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
 import type { CoverageSources, Skeleton, StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
-import { phaseBlock } from "../contract/templates.js";
+import { tasksBlock } from "../contract/templates.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, isRepairable, publish, repairDeterministically, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, isNonAnswer, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Assumption, Question } from "../interview/index.js";
@@ -825,18 +825,24 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               slice: sliceForPhase(esqueleto, fase.number),
               phaseNumber: fase.number,
               totalPhases: esqueleto.phases.length,
-              // O molde de UMA fase. Mostrar a gramática do documento inteiro
-              // fez duas fases copiarem a linha de carimbo do exemplo.
-              grammar: phaseBlock(fase.number),
+              // O molde de uma TASK. O envelope da fase é montado em código, do
+              // esqueleto: pedi-lo ao modelo só criava mais uma coisa a errar.
+              grammar: tasksBlock(fase.number),
               maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
             }),
           });
           const semMortas = stripDeadDesignRefs(repairDeterministically(saida).content, designExiste);
           for (const conserto of semMortas.applied) announce(`    fase ${fase.number}: ${conserto}`);
-          fases[posicao] = normalizePhasePart(semMortas.content, {
-            phaseNumber: fase.number,
-            dependsOn: fase.dependsOn,
-          }).markdown.trim();
+
+          // O modelo escreveu as tasks; o envelope vem do esqueleto, montado em
+          // código. Número, título, goal, dependências e cobertura deixam de ser
+          // coisas que ele possa errar.
+          const tarefas = extractTasks(semMortas.content);
+          for (const conserto of tarefas.applied) announce(`    fase ${fase.number}: ${conserto}`);
+          fases[posicao] = assemblePhase(
+            { number: fase.number, title: fase.title, goal: fase.goal, dependsOn: fase.dependsOn, covers: fase.covers },
+            tarefas.tasks,
+          ).trim();
           announce(`  fase ${fase.number} pronta`);
           await event("authoring", `phase-p${String(fase.number).padStart(2, "0")}`, "complete");
         }
@@ -933,7 +939,10 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               const fase = esqueleto.phases.find((entry) => entry.number === numero);
               if (!fase) continue;
 
-              const anterior = proximas[numero - 1] ?? "";
+              // A emenda também vê só as tasks: o envelope é do esqueleto, e
+              // não há emenda de auditoria que o mude. Mandar a fase inteira era
+              // devolver ao modelo a chance de estragar o que ele não escreveu.
+              const anterior = extractTasks(proximas[numero - 1] ?? "").tasks;
               const saida = await track({
                 role: "writer",
                 stage: "authoring",
@@ -944,10 +953,10 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
               const limpa = stripDeadDesignRefs(repairDeterministically(saida).content, designExiste);
               for (const conserto of limpa.applied) announce(`    fase ${numero}: ${conserto}`);
-              proximas[numero - 1] = normalizePhasePart(limpa.content, {
-                phaseNumber: numero,
-                dependsOn: fase.dependsOn,
-              }).markdown.trim();
+              proximas[numero - 1] = assemblePhase(
+                { number: fase.number, title: fase.title, goal: fase.goal, dependsOn: fase.dependsOn, covers: fase.covers },
+                extractTasks(limpa.content).tasks,
+              ).trim();
             }
           }),
         );

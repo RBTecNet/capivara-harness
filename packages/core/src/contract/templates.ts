@@ -78,6 +78,57 @@ export function phaseBlock(phaseNumber: number): string {
   return PHASE_BLOCK.join("\n").replaceAll("{{PHASE_NUMBER}}", String(phaseNumber));
 }
 
+/**
+ * A gramática do que o escritor de fato escreve: as tasks, e só elas.
+ *
+ * O envelope da fase — heading, número, título, Goal, Depends on, Covers — é
+ * inteiramente derivável do esqueleto, e por isso é montado em código. Enquanto
+ * foi pedido ao modelo, ele foi mais uma coisa a errar: três das sete fases do
+ * piloto 6 voltaram numeradas erradas, e quatro correções mecânicas existiam só
+ * para consertar esse pedido desnecessário.
+ *
+ * Sobra para o modelo o que só ele pode fazer: decidir o que construir, em que
+ * ordem, com que critérios de aceite. Isso é o trabalho; o resto é formulário.
+ */
+export const TASKS_BLOCK: readonly string[] = [
+  "### Phase {{PHASE_NUMBER}}.<M>: <sub-phase name>   (opcional, para agrupar)",
+  "",
+  "- [ ] **Task:** <what to build>",
+  "  - **Acceptance criteria:**",
+  "    - <concrete, validatable condition>",
+  "  - **Feature tests:** <test name -> the business rule it asserts>",
+  "  - **Traces:** <US-N.M / entity / workflow>",
+];
+
+export function tasksBlock(phaseNumber: number): string {
+  return TASKS_BLOCK.join("\n").replaceAll("{{PHASE_NUMBER}}", String(phaseNumber));
+}
+
+/** O envelope de uma fase, montado do esqueleto. O modelo não o escreve. */
+export interface PhaseEnvelope {
+  number: number;
+  title: string;
+  goal: string;
+  dependsOn: string;
+  covers: readonly string[];
+}
+
+/**
+ * A fase inteira: o envelope que o esqueleto define, mais as tasks que o modelo
+ * escreveu. Uma função, um lugar, nenhuma chance de divergirem.
+ */
+export function assemblePhase(envelope: PhaseEnvelope, tasks: string): string {
+  const covers = envelope.covers.length > 0 ? envelope.covers.join(", ") : "—";
+  return [
+    `## Phase ${envelope.number}: ${envelope.title}`,
+    "",
+    `**Goal:** ${envelope.goal} · **Depends on:** ${envelope.dependsOn} · **Covers:** ${covers}`,
+    "",
+    tasks.trim(),
+    "",
+  ].join("\n");
+}
+
 /** O heading exato de uma fase. Citá-lo é conhecimento do contrato. */
 export function phaseHeading(phaseNumber: number): string {
   return `## Phase ${phaseNumber}:`;

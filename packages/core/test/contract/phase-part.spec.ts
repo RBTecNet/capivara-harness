@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalDependsOn, canonicalWorkflowTraces, joinPhaseMetadata, normalizePhasePart, parsePhaseFragment, parsePhases } from "../../src/contract/index.js";
+import { assemblePhase, canonicalDependsOn, canonicalWorkflowTraces, extractTasks, joinPhaseMetadata, normalizePhasePart, parsePhaseFragment, parsePhases } from "../../src/contract/index.js";
 
 const FASE = [
   "## Phase 2: Cadastro de hóspedes",
@@ -69,12 +69,22 @@ describe("normalizePhasePart", () => {
     expect(normalized.markdown).toContain("### Phase 2.1:");
   });
 
-  it("parte sem o heading esperado é devolvida intacta, não esvaziada", () => {
+  /*
+   * Esta regra mudou depois do piloto 6, e a anterior ficava aqui: um heading com
+   * o número errado era devolvido como veio. O custo apareceu com um escritor mais
+   * fraco — três das sete fases vieram numeradas erradas, o documento foi montado
+   * fora de ordem e o parser gastou uma rodada de auditoria com I-03.
+   *
+   * O número certo não é palpite: quem pediu a parte sabe qual ela é. O que
+   * continua valendo é a preocupação que gerou a regra antiga — nunca esvaziar o
+   * conteúdo no escuro —, e é isso que os casos abaixo protegem.
+   */
+  it("heading com número errado é corrigido, e o conteúdo sobrevive", () => {
     const outra = FASE.replace("## Phase 2:", "## Phase 9:");
     const normalized = normalizePhasePart(outra, { phaseNumber: 2, dependsOn: "none" });
-    expect(normalized.markdown).toContain("## Phase 9:");
+    expect(normalized.markdown).toContain("## Phase 2:");
     expect(normalized.markdown).toContain("**Task:**");
-    expect(normalized.applied.join(" ")).toContain("sem normalizar");
+    expect(normalized.applied.join(" ")).toContain("veio 9, esta parte é a 2");
   });
 
   it("o resultado continua passando no parser", () => {
@@ -182,5 +192,113 @@ describe("rótulo traduzido em Covers", () => {
     expect(content).toContain("workflow 1");
     expect(content).toContain("workflow 6");
     expect(content).not.toContain("fluxo");
+  });
+});
+
+describe("fase certa, número errado", () => {
+  const corpo = [
+    "**Goal:** migrations existem · **Depends on:** none · **Covers:** reservas",
+    "",
+    "- [ ] **Task:** Criar a migration",
+    "  - **Acceptance criteria:**",
+    "    - A tabela existe",
+    "  - **Feature tests:** migra → a tabela existe",
+    "  - **Traces:** reservas",
+  ].join("\n");
+
+  it("o número do heading é corrigido pelo número que foi pedido", () => {
+    const parte = normalizePhasePart(`## Phase 4: Fundação\n\n${corpo}`, { phaseNumber: 1, dependsOn: "none" });
+    expect(parte.markdown).toContain("## Phase 1: Fundação");
+    expect(parte.markdown).not.toContain("## Phase 4");
+    expect(parte.applied.join(" ")).toContain("veio 4, esta parte é a 1");
+  });
+
+  it("o conteúdo da fase sobrevive inteiro à correção", () => {
+    const parte = normalizePhasePart(`## Phase 7: Fundação\n\n${corpo}`, { phaseNumber: 2, dependsOn: "Phase 1" });
+    expect(parte.markdown).toContain("**Task:** Criar a migration");
+    expect(parte.markdown).toContain("**Traces:** reservas");
+  });
+
+  it("com o número certo, nada é anunciado como corrigido", () => {
+    const parte = normalizePhasePart(`## Phase 1: Fundação\n\n${corpo}`, { phaseNumber: 1, dependsOn: "none" });
+    expect(parte.applied.join(" ")).not.toContain("corrigiu o número");
+  });
+
+  it("com vários headings de fase, devolve como veio: qual seria a pedida é palpite", () => {
+    const duas = `## Phase 4: Uma\n\n${corpo}\n\n## Phase 5: Outra\n\n${corpo}`;
+    const parte = normalizePhasePart(duas, { phaseNumber: 1, dependsOn: "none" });
+    expect(parte.applied.join(" ")).toContain("devolvida sem normalizar");
+  });
+
+  it("sem heading de fase nenhum, continua devolvendo como veio", () => {
+    const parte = normalizePhasePart(`# Documento\n\n${corpo}`, { phaseNumber: 1, dependsOn: "none" });
+    expect(parte.applied.join(" ")).toContain("devolvida sem normalizar");
+  });
+});
+
+describe("o envelope é do harness, as tasks são do modelo", () => {
+  const envelope = {
+    number: 3,
+    title: "Consulta e Busca",
+    goal: "o acervo é pesquisável",
+    dependsOn: "Phase 2",
+    covers: ["US-1.2", "workflow 10"],
+  };
+  const tasks = [
+    "- [ ] **Task:** Implementar a busca por título",
+    "  - **Acceptance criteria:**",
+    "    - A busca ignora maiúsculas e acentos",
+    "  - **Feature tests:** busca_titulo → encontra ignorando caixa",
+    "  - **Traces:** US-1.2",
+  ].join("\n");
+
+  it("monta a fase inteira do que o esqueleto já sabia", () => {
+    const fase = assemblePhase(envelope, tasks);
+    expect(fase).toContain("## Phase 3: Consulta e Busca");
+    expect(fase).toContain("**Goal:** o acervo é pesquisável · **Depends on:** Phase 2 · **Covers:** US-1.2, workflow 10");
+    expect(fase).toContain("**Task:** Implementar a busca por título");
+  });
+
+  it("o resultado passa no parser, que é quem decide", () => {
+    const documento = [
+      "# Biblioteca — Project Phases",
+      "",
+      "<!-- inputs: skeleton.md@sha256:aaaaaaaaaaaa -->",
+      "",
+      "## Overview",
+      "",
+      "x",
+      "",
+      assemblePhase({ ...envelope, number: 1, dependsOn: "none" }, tasks),
+    ].join("\n");
+    const lido = parsePhases(documento);
+    expect(lido.ok, lido.ok ? "" : lido.errors.map((e) => `${e.code} ${e.message}`).join("; ")).toBe(true);
+  });
+
+  it("heading que o modelo escreveu apesar de tudo é descartado, não corrigido", () => {
+    // Não importa que número ele tenha posto: aquela linha não é usada.
+    const comLixo = `Claro! Aqui vai:\n\n## Phase 9: Nome Errado\n\n**Goal:** errado\n\n${tasks}`;
+    const { tasks: extraidas, applied } = extractTasks(comLixo);
+    expect(extraidas).not.toContain("Phase 9");
+    expect(extraidas).not.toContain("Goal");
+    expect(extraidas.startsWith("- [ ] **Task:**")).toBe(true);
+    expect(applied.join(" ")).toContain("antes da primeira task");
+  });
+
+  it("sub-fase é início válido de tasks e sobrevive", () => {
+    const comSub = `### Phase 3.1: Busca\n\n${tasks}`;
+    expect(extractTasks(comSub).tasks.startsWith("### Phase 3.1:")).toBe(true);
+  });
+
+  it("nível 2 escrito no meio é descartado: ele encerraria a captura da fase", () => {
+    const { tasks: extraidas } = extractTasks(`${tasks}\n\n## Open Questions\n\nfalta decidir a stack\n`);
+    expect(extraidas).not.toContain("Open Questions");
+    expect(extraidas).not.toContain("falta decidir");
+  });
+
+  it("sem task nenhuma, devolve o que veio em vez de esvaziar em silêncio", () => {
+    const { tasks: extraidas, applied } = extractTasks("o modelo divagou e não escreveu task");
+    expect(extraidas).toBe("o modelo divagou e não escreveu task");
+    expect(applied.join(" ")).toContain("não achei task nenhuma");
   });
 });

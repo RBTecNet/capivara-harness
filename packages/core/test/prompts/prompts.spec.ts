@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { assessRehearsal, enumerateCriteria, gapPrompt, interviewPrompt, languageBlock, parseRehearsal, phaseFromSlicePrompt, rehearsalPrompt, skeletonPrompt } from "../../src/prompts/index.js";
 import type { WriterContext } from "../../src/prompts/index.js";
-import { parsePhases, phaseBlock } from "../../src/contract/index.js";
+import { parsePhases, tasksBlock } from "../../src/contract/index.js";
 import { STRUCTURAL_LABELS } from "../../src/contract/index.js";
 
 const context: WriterContext = {
@@ -28,7 +28,7 @@ const fatia = (phaseNumber = 1): string =>
     slice: "## Stack\n- Linguagem: Node 22",
     phaseNumber,
     totalPhases: 3,
-    grammar: phaseBlock(phaseNumber),
+    grammar: tasksBlock(phaseNumber),
     maxCriteriaPerTask: 4,
   });
 
@@ -182,10 +182,11 @@ describe("o esqueleto pensa o produto uma vez, a fase vê só a fatia", () => {
     expect(esqueleto).toContain("A name you leave loose becomes two different names");
   });
 
-  it("a fase escreve EXATAMENTE a sua fase e nada do envelope", () => {
+  it("a fase escreve as tasks, e o envelope não é sequer pedido a ela", () => {
     const prompt = fatia(3);
     expect(prompt).toContain("writing phase 3 of 3");
-    expect(prompt).toContain("no document header, no other phase");
+    expect(prompt).toContain("You emit the TASKS of this phase, and nothing else");
+    expect(prompt).toContain("no phase heading, no Goal line");
   });
 
   it("a fase recebe a gramática vinda do módulo do contrato", () => {

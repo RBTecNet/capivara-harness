@@ -24,6 +24,10 @@ export interface NormalizedPart {
 }
 
 const LEVEL_2 = /^##\s+(.*)$/;
+const TASK_LINE = /^\s*-\s*\[[ xX]\]\s*\*\*Task:\*\*/;
+const SUB_PHASE = /^###\s+Phase\s+\d+\.\d+\s*:/;
+/** Um heading de fase com qualquer número, para reconhecer o número errado. */
+const OUTRA_FASE = /^##\s+Phase\s+(\d+)\s*:/;
 
 /**
  * `workflow <n>` é rótulo estrutural, não palavra do texto.
@@ -80,9 +84,39 @@ export function normalizePhasePart(markdown: string, expectation: PhasePartExpec
   const applied: string[] = [];
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
 
-  const start = lines.findIndex((line) => line.startsWith(phaseHeading(expectation.phaseNumber)));
+  let start = lines.findIndex((line) => line.startsWith(phaseHeading(expectation.phaseNumber)));
+
+  /*
+   * Fase certa, número errado.
+   *
+   * O escritor recebeu "escreva a fase 1" e devolveu "## Phase 4: ...". O número
+   * correto não é palpite: quem pediu a parte sabe qual ela é. Enquanto isto não
+   * era corrigido aqui, a parte voltava sem normalizar, o documento era montado
+   * com a fase fora de posição, e o parser reclamava I-03 — uma rodada inteira de
+   * auditoria gasta num erro que se conserta contando.
+   *
+   * No piloto 6 foram três das sete fases de uma vez, com um escritor mais fraco.
+   *
+   * Só com UM heading de fase no texto: com vários, não se sabe qual é a fase
+   * pedida, e aí devolver como veio continua sendo melhor do que recortar no
+   * escuro e esvaziar o conteúdo em silêncio.
+   */
   if (start === -1) {
-    // Sem o heading esperado não há como saber onde a fase começa. Recortar no
+    const cabecalhos = lines
+      .map((line, index) => ({ line, index }))
+      .filter((entry) => OUTRA_FASE.test(entry.line));
+
+    if (cabecalhos.length === 1) {
+      const alvo = cabecalhos[0]!;
+      const errado = OUTRA_FASE.exec(alvo.line)?.[1] ?? "?";
+      lines[alvo.index] = alvo.line.replace(OUTRA_FASE, `## Phase ${expectation.phaseNumber}:`);
+      applied.push(`corrigiu o número da fase no heading: veio ${errado}, esta parte é a ${expectation.phaseNumber}`);
+      start = alvo.index;
+    }
+  }
+
+  if (start === -1) {
+    // Sem heading de fase nenhum não há como saber onde ela começa. Recortar no
     // escuro esvaziaria o conteúdo em silêncio, que é pior do que devolvê-lo
     // como veio e deixar o parser e o auditor reclamarem com evidência.
     return { markdown, applied: [`a parte não traz o heading "${phaseHeading(expectation.phaseNumber)}"; devolvida sem normalizar`] };
@@ -199,4 +233,39 @@ export function joinPhaseMetadata(markdown: string): { content: string; applied:
   restantes[goalAt] = junta;
 
   return { content: restantes.join("\n"), applied: true };
+}
+
+/**
+ * Só as tasks, do que o modelo devolveu.
+ *
+ * Ele foi instruído a emitir apenas as tasks, mas um escritor barato escreve o
+ * heading assim mesmo, ou um "Claro! Aqui vai:" antes. Nada disso é erro que
+ * precise voltar para ele: o envelope é montado em código e o que sobra é
+ * descartável. Descartar é mecânico, então é feito aqui.
+ *
+ * O corte começa na primeira linha que é task ou sub-fase, e termina antes de
+ * qualquer nível 2 — que encerraria a captura do parser e sumiria com o resto da
+ * fase sem aviso.
+ */
+export function extractTasks(markdown: string): { tasks: string; applied: string[] } {
+  const applied: string[] = [];
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+
+  const inicio = lines.findIndex((line) => TASK_LINE.test(line) || SUB_PHASE.test(line));
+  if (inicio === -1) return { tasks: markdown.trim(), applied: ["não achei task nenhuma; devolvido como veio"] };
+  if (inicio > 0) {
+    lines.splice(0, inicio);
+    applied.push("descartou o que vinha antes da primeira task");
+  }
+
+  const corte = lines.findIndex((line) => LEVEL_2.test(line));
+  if (corte > 0) {
+    lines.splice(corte);
+    applied.push("descartou uma seção de nível 2, que encerraria a captura da fase");
+  }
+
+  const traduzidos = canonicalWorkflowTraces(lines.join("\n"));
+  if (traduzidos.applied) applied.push("traduziu de volta a referência de workflow nos Traces");
+
+  return { tasks: traduzidos.content.replace(/\s+$/, ""), applied };
 }

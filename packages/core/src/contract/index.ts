@@ -16,6 +16,8 @@ export type { Workflow } from "./coverage.js";
 export { checkCoverage, checkEntities, checkStories, checkWorkflows } from "./coverage.js";
 export type { CoverageSources } from "./coverage.js";
 export { renderContractDocument } from "./doc.js";
+export { TASKS_BLOCK, assemblePhase, tasksBlock } from "./templates.js";
+export type { PhaseEnvelope } from "./templates.js";
 export {
   GRAMMAR_BLOCK,
   PHASE_BLOCK,
@@ -27,7 +29,7 @@ export {
   phaseHeading,
 } from "./templates.js";
 export type { PhasesDocumentParts } from "./templates.js";
-export { canonicalDependsOn, canonicalWorkflowTraces, joinPhaseMetadata, normalizePhasePart } from "./phase-part.js";
+export { canonicalDependsOn, canonicalWorkflowTraces, extractTasks, joinPhaseMetadata, normalizePhasePart } from "./phase-part.js";
 export type { NormalizedPart, PhasePartExpectation } from "./phase-part.js";
 export { checkRewriteDrift, parsePhaseFragment } from "./drift.js";
 export type { DriftInput } from "./drift.js";

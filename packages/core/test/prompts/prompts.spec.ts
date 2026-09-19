@@ -300,6 +300,25 @@ describe("ensaio do verificador", () => {
     expect(prompt).toContain("Sem dependências externas");
   });
 
+  it("lê a resposta real do verificador, que ecoa o título da task", () => {
+    /*
+     * Bytes reais de uma chamada do piloto 4. O prompt lista cada critério como
+     * `P2.T1.C1 [fase · task] texto` e o modelo espelha o formato; a regex antiga
+     * exigia o dois-pontos colado ao endereço e reconhecia zero de doze linhas
+     * perfeitas.
+     */
+    const real = [
+      "CRITERION P2.T1.C1 [Casca visual responsiva · Definir a fonte única de cores, espaçamentos, tipografia, bordas e sombras compartilhadas.]: OBSERVABLE — Inspecionar a definição centralizada de tokens.",
+      "CRITERION P2.T2.C1 [Casca visual responsiva · Construir a casca visual do quadro.]: OBSERVABLE — Abrir a interface e verificar que o quadro contém as colunas.",
+    ].join("\n");
+
+    const verdicts = parseRehearsal(real);
+    expect(verdicts).toHaveLength(2);
+    expect(verdicts[0]?.address).toBe("P2.T1.C1");
+    expect(verdicts[0]?.ruling).toBe("OBSERVABLE");
+    expect(verdicts[0]?.reason).toContain("tokens");
+  });
+
   it("lê os vereditos ignorando prosa em volta", () => {
     const verdicts = parseRehearsal(
       [

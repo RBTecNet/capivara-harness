@@ -18,7 +18,7 @@ import type { CoverageSources, Skeleton, StampInput } from "../contract/index.js
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
 import { phaseBlock } from "../contract/templates.js";
-import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
+import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Assumption, Question } from "../interview/index.js";
 import { amendPhasePrompt, assessRehearsal, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
@@ -718,7 +718,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         attempt: 1,
         prompt: phasePartPrompt({ ...writer, phaseNumber: part.phaseNumber, ledgerEntry: JSON.stringify(entry) }),
       });
-      const normalized = normalizePhasePart(repairDeterministically(output).content, {
+      const semMortas = stripDeadDesignRefs(repairDeterministically(output).content, designExiste);
+      for (const conserto of semMortas.applied) announce(`    ${part.id}: ${conserto}`);
+      const normalized = normalizePhasePart(semMortas.content, {
         phaseNumber: part.phaseNumber,
         dependsOn: entry?.dependsOn || "none",
       });
@@ -1095,7 +1097,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
             }),
           });
-          fases[posicao] = normalizePhasePart(repairDeterministically(saida).content, {
+          const semMortas = stripDeadDesignRefs(repairDeterministically(saida).content, designExiste);
+          for (const conserto of semMortas.applied) announce(`    fase ${fase.number}: ${conserto}`);
+          fases[posicao] = normalizePhasePart(semMortas.content, {
             phaseNumber: fase.number,
             dependsOn: fase.dependsOn,
           }).markdown.trim();
@@ -1135,6 +1139,16 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     await event("publish", "project-phases.md", "complete");
 
     return await concluir();
+  }
+
+  /**
+   * O artefato de design existe em disco?
+   *
+   * Função declarada, não `const`: ela é usada na escrita das fases, que roda
+   * antes deste ponto do arquivo, e `const` não é içado.
+   */
+  function designExiste(caminho: string): boolean {
+    return existsSync(join(artifactPaths(options.projectRoot).init, caminho)) || existsSync(join(options.projectRoot, caminho));
   }
 
   /** Os documentos acima de `document` que já estão publicados. */

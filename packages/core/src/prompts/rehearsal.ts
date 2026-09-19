@@ -143,7 +143,20 @@ export interface CriterionVerdict {
   reason: string;
 }
 
-const CRITERION_LINE = /^CRITERION\s+(P\d+\.T\d+\.C\d+):\s*(OBSERVABLE|UNSATISFIABLE|UNOBSERVABLE)\s*(?:[—-]\s*(.*))?$/;
+/*
+ * O endereço, o veredito, e tolerância ao que vier no meio.
+ *
+ * O prompt lista cada critério como `P2.T1.C1 [fase · task] texto`, e o modelo
+ * espelha esse formato na resposta — devolvendo `P2.T1.C1 [fase · task]:
+ * OBSERVABLE — …`. A regex antiga exigia o dois-pontos colado ao endereço e
+ * reconhecia ZERO linhas de uma resposta perfeita.
+ *
+ * Isso custou caro e me levou a um diagnóstico errado: no piloto 3 eu concluí
+ * que os lotes eram grandes demais e mudei o lote por isso; no piloto 4, 21 de
+ * 72 critérios voltaram como "não ensaiados" com o verificador tendo respondido
+ * todos. O defeito nunca esteve na resposta — estava em quem a lia.
+ */
+const CRITERION_LINE = /^CRITERION\s+(P\d+\.T\d+\.C\d+)\b[^:]*:\s*(OBSERVABLE|UNSATISFIABLE|UNOBSERVABLE)\b\s*(?:[—:-]\s*(.*))?$/;
 
 /** Lê as linhas CRITERION, ignorando prosa em volta e indentação acidental. */
 export function parseRehearsal(output: string): CriterionVerdict[] {

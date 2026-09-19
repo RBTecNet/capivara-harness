@@ -133,3 +133,37 @@ export function stripResolvedMarkers(content: string, resolved: readonly string[
 
   return { content: next, applied };
 }
+
+/**
+ * Referência de design que aponta para arquivo inexistente.
+ *
+ * O diretório de design é manual e quase sempre não existe (D-18), mas a
+ * gramática mostra o campo — e mostrar um campo sem dizer que ele é dispensável
+ * é convite para preenchê-lo. O piloto 4 voltou com 24 tasks apontando para
+ * `design/fase-1/*.md` inventados, e as 24 viraram findings de auditoria: um
+ * defeito só, repetido, consumindo o ciclo inteiro.
+ *
+ * Referência para arquivo que não existe é morta por definição, e o gate a
+ * recusa de qualquer forma. Removê-la é estritamente melhor do que reprovar o
+ * documento por causa dela — e é verificável em código, então não se pede ao
+ * modelo.
+ */
+export function stripDeadDesignRefs(content: string, exists: (relativePath: string) => boolean): { content: string; applied: string[] } {
+  const mortas: string[] = [];
+  const limpo = content
+    .split("\n")
+    .filter((line) => {
+      const referencia = /^[ \t]*-[ \t]*\*\*Design ref:\*\*[ \t]*(.+?)[ \t]*$/.exec(line);
+      if (!referencia) return true;
+      const caminho = (referencia[1] ?? "").replace(/^`|`$/g, "").trim();
+      if (caminho === "" || exists(caminho)) return true;
+      mortas.push(caminho);
+      return false;
+    })
+    .join("\n");
+
+  return {
+    content: limpo,
+    applied: mortas.length === 0 ? [] : [`removeu ${mortas.length} Design ref para arquivo inexistente (${mortas.slice(0, 3).join(", ")}${mortas.length > 3 ? "…" : ""})`],
+  };
+}

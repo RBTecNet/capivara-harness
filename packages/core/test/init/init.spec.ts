@@ -232,7 +232,14 @@ describe("entrevista dentro do init", () => {
 });
 
 describe("referência de design", () => {
-  it("caminho que não existe em disco volta ao escritor, não ao gate", async () => {
+  it("caminho que não existe é removido em código, sem custar devolução", async () => {
+    /*
+     * Antes isto virava finding de auditoria — e no piloto 4 foram 24 deles, um
+     * por task, o mesmo defeito repetido consumindo o ciclo inteiro. Referência
+     * para arquivo inexistente é morta por definição e o gate a recusaria de
+     * qualquer forma: removê-la é estritamente melhor do que reprovar por causa
+     * dela.
+     */
     const comDesign = [
       "## Phase 1: Fundação",
       "",
@@ -249,55 +256,13 @@ describe("referência de design", () => {
 
     const steps = happyPath();
     steps.unshift({ match: { role: "writer", stage: "authoring", subject: "phase-p01", attempt: 1 }, respond: { stdout: comDesign } });
-    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: PHASE_1 }, repeat: true });
-    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 }, repeat: true });
 
-    const { agent } = await run(steps);
-    const reescrita = agent.calls.find((call) => call.subject === "phase-p01" && call.attempt > 1);
-    expect(reescrita?.prompt).toContain("telas/inicial.png");
-  });
-});
+    const { outcome, anunciado } = await run(steps);
+    expect(anunciado).toContain("Design ref para arquivo inexistente");
+    expect(outcome.readiness.checks.find((check) => check.id === "design")?.passed).toBe(true);
 
-describe("orçamento por task", () => {
-  it("task inchada volta para ser dividida, antes de qualquer auditoria", async () => {
-    const inchada = [
-      "## Phase 1: Fundação",
-      "",
-      "**Goal:** base · **Depends on:** none · **Covers:** statuses",
-      "",
-      "- [ ] **Task:** Fazer tudo de uma vez",
-      "  - **Acceptance criteria:**",
-      ...Array.from({ length: 9 }, (_unused, posicao) => `    - condição observável ${posicao + 1}`),
-      "  - **Feature tests:** t → t",
-      "  - **Traces:** statuses",
-      "",
-    ].join("\n");
-
-    const steps = happyPath();
-    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "phase-p01", attempt: 1 }, respond: { stdout: inchada } });
-    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: PHASE_1 }, repeat: true });
-    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 }, repeat: true });
-
-    const { agent } = await run(steps);
-    const emenda = agent.calls.find((call) => call.subject === "phase-p01" && call.attempt > 1);
-    expect(emenda?.prompt).toContain("está fazendo mais de uma coisa");
-  });
-});
-
-describe("a devolução emenda, não reescreve", () => {
-  it("o escritor recebe o texto atual e a ordem de não mexer no resto", async () => {
-    const steps = happyPath();
-    steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2", attempt: 1 },
-      respond: { stdout: reject("Phase 2", "o critério de sobreposição não é observável", "declare o código HTTP") },
-    });
-    steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 }, repeat: true });
-
-    const { agent } = await run(steps);
-    const emenda = agent.calls.find((call) => call.subject === "phase-p02" && call.attempt > 1);
-    expect(emenda?.prompt).toContain("You are amending a phase");
-    expect(emenda?.prompt).toContain("comes back byte-identical");
-    expect(emenda?.prompt).not.toContain("EXACTLY ONE phase");
+    const plano = await readFile(join(projectRoot, ".capivara", "init", "project-phases.md"), "utf8");
+    expect(plano).not.toContain("telas/inicial.png");
   });
 });
 

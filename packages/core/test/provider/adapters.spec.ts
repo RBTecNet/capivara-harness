@@ -53,7 +53,20 @@ describe("sandbox por papel — a fronteira mais delicada", () => {
   it("opencode: read-only nega edit, bash, task e diretório externo", () => {
     const invocation = buildInvocation("verifier", config({ provider: "opencode" }), context);
     expect(invocation.env.OPENCODE_PERMISSION).toContain('"edit":"deny"');
-    expect(buildInvocation("builder", config({ provider: "opencode" }), context).env.OPENCODE_PERMISSION).toBeUndefined();
+    expect(invocation.env.OPENCODE_PERMISSION).toContain('"external_directory":"deny"');
+  });
+
+  /*
+   * Herdar o default da CLI não servia: ele nega diretório externo, e npm, Vite e
+   * tsc usam `/tmp` e `~/.npm` o tempo todo. O piloto 6-mimo morreu na primeira
+   * linha da sessão, com "auto-rejecting" e nenhum arquivo escrito.
+   */
+  it("opencode: o executor recebe as permissões declaradas, não herdadas", () => {
+    const permissao = buildInvocation("builder", config({ provider: "opencode" }), context).env.OPENCODE_PERMISSION;
+    expect(permissao).toBeDefined();
+    expect(permissao).toContain('"edit":"allow"');
+    expect(permissao).toContain('"bash":"allow"');
+    expect(permissao).toContain('"external_directory":"allow"');
   });
 });
 

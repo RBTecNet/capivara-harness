@@ -26,6 +26,51 @@ verificadas, 72 testes do projeto passando).
 
 ## Piloto 6 — biblioteca comunitária · haiku escreve, opus julga
 
+### Resultado
+
+`init` **6,4 min** → PLAN READY · 7 fases, 7 entidades, 12 regras transversais.
+`plan` → RALPH READY na **quinta** rodada · 7 fases, 61 tasks, 198 critérios,
+todos observáveis no ensaio.
+
+As cinco rodadas do `plan` não são cinco tentativas do modelo: são cinco defeitos
+do harness, um por rodada, cada um escondendo o seguinte.
+
+| rodada | o que mudou | devoluções | onde parou |
+|---|---|---|---|
+| 1 | — | 4 → 17 → 15 | contrato, stamp, cobertura |
+| 2 | envelope montado em código | 5 → 78 | I-08 × 39, I-09 × 10 |
+| 3 | reparo de markdown | 3 → 24 | uma fase sem tasks (plan mode) |
+| 4 | adapter fora do plan mode | 8 → 5 | 20 UNOBSERVABLE (leitura do parser) |
+| 5 | parser blindado + listas | 1 → 17 → 3 → 14 | **RALPH READY** |
+
+Custo da quinta rodada, medido com a contagem de tokens já corrigida:
+
+| papel | chamadas | entrada | tempo |
+|---|---|---|---|
+| escritor (haiku) | 25 | 679k | 1566s |
+| auditor (opus) | 16 | 482k | 385s |
+| verificador (opus) | 29 | 705k | 335s |
+
+**O gargalo inverteu.** No piloto 5 o auditor consumiu 2383s, mais que escritor e
+verificador somados; aqui levou 385s, e quem domina o relógio é o escritor
+barato. É o que a tese previa: julgar é pouco trabalho por chamada, escrever é
+volume.
+
+**Os 170 minutos da quinta rodada não são o custo de um plano.** Incluem quatro
+auditorias com oscilação — 1, 17, 3, 14 findings sobre um documento quase igual —
+e um impasse. O número honesto de "quanto custa um plano com haiku" só sai de um
+pedido novo, rodado uma vez, com o harness já corrigido.
+
+### O que a rodada respondeu
+
+Que um escritor barato, julgado por um auditor caro, **produz documentação
+executável** — desde que o harness não lhe peça o que é determinístico. Dos
+defeitos que derrubaram as quatro primeiras rodadas, nenhum era capacidade do
+modelo: dois eram trabalho que o harness empurrava para ele, um era o adapter, e
+um era a leitura do próprio plano.
+
+### O desenho original desta rodada
+
 Duas variáveis mudam ao mesmo tempo, e isso é deliberado:
 
 1. **O tamanho do pedido.** 36 linhas, 6 entidades, 9 fluxos. O piloto 5 rendeu 3

@@ -16,6 +16,24 @@ import type { Answer, Disposition, Question } from "./types.js";
 const DEFER = /^(?:não sei|nao sei|sei lá|sei la|não faço ideia|nao faco ideia|tanto faz|depois|decido depois|defer|deferir|not sure|dunno)\.?$/i;
 const USE_RECOMMENDATIONS = /^(?:use as recomenda(?:ç|c)(?:ões|oes)|usar as recomenda(?:ç|c)(?:ões|oes)|usa a recomenda(?:ç|c)(?:ão|ao)|use a recomenda(?:ç|c)(?:ão|ao)|recomenda(?:ç|c)(?:ão|ao)|use recommendations)\.?$/i;
 
+/**
+ * Isto é uma não-resposta?
+ *
+ * Numa pergunta da entrevista, "use as recomendações" é uma resposta legítima:
+ * existe uma recomendação na tela e ela é escolhida. Num IMPASSE de auditoria não
+ * existe recomendação nenhuma — existe o que o auditor exige e o que o escritor
+ * escreveu, e eles não convergiram. Ali a mesma frase não decide nada.
+ *
+ * O impasse precisa distinguir as duas coisas porque o que ele faz com a resposta
+ * é gravá-la como autoridade ACIMA do auditor. No piloto 5, "use as recomendações"
+ * virou "decisão do desenvolvedor" e silenciou um finding que dizia, corretamente,
+ * que a fase tinha inventado escopo que o pedido não pedia.
+ */
+export function isNonAnswer(raw: string): boolean {
+  const answer = raw.trim();
+  return answer === "" || DEFER.test(answer) || USE_RECOMMENDATIONS.test(answer);
+}
+
 export interface LocalClassification {
   disposition: Disposition;
   decision: string;

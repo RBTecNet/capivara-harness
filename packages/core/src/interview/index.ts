@@ -11,7 +11,7 @@ export type {
 } from "./types.js";
 export { parseQuestionBatch } from "./protocol.js";
 export type { QuestionBatch, QuestionDefect } from "./protocol.js";
-export { buildAnswer, classifyLocally, parseClassification } from "./classify.js";
+export { buildAnswer, classifyLocally, isNonAnswer, parseClassification } from "./classify.js";
 export type { LocalClassification, ModelVerdict } from "./classify.js";
 export {
   buildCheckpoint,

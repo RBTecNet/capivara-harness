@@ -21,7 +21,7 @@ import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
 import { phaseBlock } from "../contract/templates.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, isRepairable, publish, repairDeterministically, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
-import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
+import { buildAnswer, buildCheckpoint, classifyLocally, isNonAnswer, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Assumption, Question } from "../interview/index.js";
 import { amendPhasePrompt, assessRehearsal, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
 import type { AskedQuestion, CriterionRef, RehearsalResult, WriterContext } from "../prompts/index.js";
@@ -1365,8 +1365,38 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         const normalized = decision.toLowerCase();
 
         if (normalized.startsWith("publicar")) return { content, remarks: verdict.remarks, authored };
-        if (normalized.startsWith("abortar") || decision === "") {
+        if (normalized.startsWith("abortar")) {
           throw new InitBlockedError(`${rendered}\n\nDecisão do desenvolvedor: abortar`, runId);
+        }
+
+        /*
+         * Não-resposta não é decisão.
+         *
+         * O que vem daqui é gravado como autoridade ACIMA do auditor, então
+         * "não sei", "tanto faz" e "use as recomendações" não podem entrar por
+         * esse caminho: num impasse não há recomendação — há o que o auditor
+         * exige e o que o escritor escreveu, que não convergiram.
+         *
+         * O piloto 5 mostrou o estrago: "use as recomendações" virou "decisão do
+         * desenvolvedor" e silenciou um finding que dizia, com razão, que a fase
+         * tinha inventado escopo que ninguém pediu. O run publica do mesmo jeito
+         * — parar aqui custaria o run inteiro por uma pergunta sem dono — mas a
+         * ressalva sai dizendo que NINGUÉM decidiu, que é a verdade.
+         */
+        if (isNonAnswer(decision)) {
+          announce(`  ninguém decidiu o impasse; publicando com ${verdict.findings.length} ressalva(s) em aberto`);
+          await event("audit", document, "complete", "publicado sem decisão do desenvolvedor", attempt);
+          return {
+            content,
+            authored,
+            remarks: [
+              ...verdict.remarks,
+              ...verdict.findings.map((finding) => ({
+                where: finding.where,
+                observation: `${finding.problem} (o auditor insistiu e ninguém decidiu: segue em aberto)`,
+              })),
+            ],
+          };
         }
 
         // A resposta do desenvolvedor É a decisão: ela volta ao escritor como

@@ -774,3 +774,54 @@ describe("cadeia completa init → build", () => {
     expect(events.at(-1)?.status).toBe("complete");
   });
 });
+
+describe("B-40 · não-resposta não vira autoridade", () => {
+  function impasseNoPlano(steps: ScriptStep[]): ScriptStep[] {
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
+      respond: { stdout: reject("Phase 1", "a fase inventou escopo que ninguém pediu", "remova o que o pedido não pede") },
+      repeat: true,
+    });
+    return steps;
+  }
+
+  async function comDecisao(decisao: string) {
+    const agent = fakeAgent(impasseNoPlano(happyPath()));
+    const outcome = await runInit({
+      projectRoot,
+      request,
+      language: "português do Brasil",
+      maxAuditReturns: 2,
+      call: agent.call,
+      ask: async () => "use as recomendações",
+      decideStandoff: async () => decisao,
+    });
+    return { outcome, agent };
+  }
+
+  for (const naoResposta of ["use as recomendações", "não sei", "tanto faz", "   "]) {
+    it(`"${naoResposta.trim() || "(vazio)"}" publica, mas o finding segue em aberto e não vira decisão de ninguém`, async () => {
+      const { outcome } = await comDecisao(naoResposta);
+      expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+
+      const ressalva = outcome.report.remarks.find((entry) => entry.remark.observation.includes("inventou escopo"));
+      expect(ressalva?.remark.observation).toContain("ninguém decidiu");
+      expect(ressalva?.remark.observation).not.toContain("decisão do desenvolvedor");
+    });
+  }
+
+  it("uma decisão de verdade continua valendo como autoridade acima do auditor", async () => {
+    const { outcome, agent } = await comDecisao("o escopo extra fica; eu quero editar categoria");
+    expect(outcome.readiness.ready).toBe(true);
+
+    const reescrita = agent.calls.find(
+      (call) => call.stage === "authoring" && call.prompt.includes("acima do auditor"),
+    );
+    expect(reescrita?.prompt).toContain("eu quero editar categoria");
+    expect(outcome.report.remarks.some((entry) => entry.remark.observation.includes("decisão do desenvolvedor"))).toBe(true);
+  });
+
+  it("abortar continua derrubando o run, e não se confunde com não responder", async () => {
+    await expect(comDecisao("abortar")).rejects.toThrow(/Decisão do desenvolvedor: abortar/);
+  });
+});

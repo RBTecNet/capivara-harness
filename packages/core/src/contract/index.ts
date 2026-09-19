@@ -32,3 +32,16 @@ export { canonicalDependsOn, canonicalWorkflowTraces, normalizePhasePart } from 
 export type { NormalizedPart, PhasePartExpectation } from "./phase-part.js";
 export { checkRewriteDrift, parsePhaseFragment } from "./drift.js";
 export type { DriftInput } from "./drift.js";
+export { SKELETON_CONTRACT, parseSkeleton, renderSkeleton, sliceForPhase } from "./skeleton.js";
+export type {
+  Skeleton,
+  SkeletonDefect,
+  SkeletonEntity,
+  SkeletonField,
+  SkeletonPhase,
+  SkeletonResult,
+  SkeletonRule,
+  SkeletonStack,
+  SkeletonStory,
+  SkeletonWorkflow,
+} from "./skeleton.js";

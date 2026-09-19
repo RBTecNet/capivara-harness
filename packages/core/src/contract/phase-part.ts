@@ -26,6 +26,10 @@ export interface NormalizedPart {
 const LEVEL_2 = /^##\s+(.*)$/;
 const TASK_LINE = /^\s*-\s*\[[ xX]\]\s*\*\*Task:\*\*/;
 const SUB_PHASE = /^###\s+Phase\s+\d+\.\d+\s*:/;
+/** O rótulo de critérios com texto colado na mesma linha. */
+const INLINE_CRITERIA = /^-\s*\*\*Acceptance criteria:\*\*\s+(\S.*)$/;
+/** Um rótulo de task na margem, sem o traço que o faz item de lista. */
+const NAKED_LABEL = /^(\s*)(\*\*(?:Acceptance criteria|Feature tests|Traces|Design ref):\*\*.*)$/;
 /** Um heading de fase com qualquer número, para reconhecer o número errado. */
 const OUTRA_FASE = /^##\s+Phase\s+(\d+)\s*:/;
 
@@ -267,5 +271,79 @@ export function extractTasks(markdown: string): { tasks: string; applied: string
   const traduzidos = canonicalWorkflowTraces(lines.join("\n"));
   if (traduzidos.applied) applied.push("traduziu de volta a referência de workflow nos Traces");
 
-  return { tasks: traduzidos.content.replace(/\s+$/, ""), applied };
+  const rotulos = repairMissingBullets(traduzidos.content);
+  if (rotulos.applied > 0) applied.push(`devolveu o traço a ${rotulos.applied} rótulo(s) de task escritos na margem`);
+
+  const criterios = repairInlineCriteria(rotulos.content);
+  if (criterios.applied > 0) {
+    applied.push(`abriu os critérios de ${criterios.applied} task(s) que vieram colados na linha do rótulo`);
+  }
+
+  return { tasks: criterios.content.replace(/\s+$/, ""), applied };
+}
+
+/**
+ * Critérios escritos na mesma linha do rótulo.
+ *
+ * A gramática quer o rótulo sozinho e os critérios como itens abaixo dele. Um
+ * escritor barato escreve tudo numa linha, separado por ponto e vírgula:
+ *
+ *     - **Acceptance criteria:** a tabela existe; o índice existe; o seed roda
+ *
+ * O parser então não vê critério nenhum e reprova a task com I-08. No piloto 6
+ * isso sozinho foram 39 dos 49 defeitos do plano — quatro quintos de um run
+ * perdido, numa diferença de formatação que não muda o que foi decidido.
+ *
+ * Quebrar por ponto e vírgula é heurística, e é a heurística certa: o texto veio
+ * de uma lista e o separador é o que a lista usou. Sem ponto e vírgula, vira um
+ * critério só — que é exatamente o que foi escrito.
+ */
+export function repairInlineCriteria(markdown: string): { content: string; applied: number } {
+  let applied = 0;
+  const saida: string[] = [];
+
+  for (const line of markdown.replace(/\r\n/g, "\n").split("\n")) {
+    const inline = INLINE_CRITERIA.exec(line.trim());
+    if (!inline) {
+      saida.push(line);
+      continue;
+    }
+
+    const criterios = (inline[1] ?? "")
+      .split(";")
+      .map((entry) => entry.trim())
+      .filter((entry) => entry !== "");
+    if (criterios.length === 0) {
+      saida.push(line);
+      continue;
+    }
+
+    applied += 1;
+    saida.push("  - **Acceptance criteria:**");
+    for (const criterio of criterios) saida.push(`    - ${criterio}`);
+  }
+
+  return { content: saida.join("\n"), applied };
+}
+
+/**
+ * Rótulo de task escrito sem o traço da lista.
+ *
+ * O parser casa `- **Traces:** …` como item de lista. O mesmo rótulo sem o
+ * traço — `**Traces:** …` — não casa com nada e a task fica sem o campo, embora
+ * ele esteja escrito ali, legível, uma coluna à esquerda.
+ *
+ * É a irmã de `repairInlineCriteria`: as duas são a mesma task, escrita com
+ * markdown ligeiramente diferente do que o contrato pede. Nenhuma das duas muda
+ * o que foi decidido, e por isso nenhuma das duas deveria custar uma devolução.
+ */
+export function repairMissingBullets(markdown: string): { content: string; applied: number } {
+  let applied = 0;
+  const saida = markdown.replace(/\r\n/g, "\n").split("\n").map((line) => {
+    const rotulo = NAKED_LABEL.exec(line);
+    if (!rotulo) return line;
+    applied += 1;
+    return `${rotulo[1] ?? ""}- ${(rotulo[2] ?? "").trim()}`;
+  });
+  return { content: saida.join("\n"), applied };
 }

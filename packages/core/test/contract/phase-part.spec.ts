@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assemblePhase, canonicalDependsOn, canonicalWorkflowTraces, extractTasks, joinPhaseMetadata, normalizePhasePart, parsePhaseFragment, parsePhases } from "../../src/contract/index.js";
+import { assemblePhase, canonicalDependsOn, repairInlineCriteria, repairMissingBullets, canonicalWorkflowTraces, extractTasks, joinPhaseMetadata, normalizePhasePart, parsePhaseFragment, parsePhases } from "../../src/contract/index.js";
 
 const FASE = [
   "## Phase 2: Cadastro de hóspedes",
@@ -300,5 +300,111 @@ describe("o envelope é do harness, as tasks são do modelo", () => {
     const { tasks: extraidas, applied } = extractTasks("o modelo divagou e não escreveu task");
     expect(extraidas).toBe("o modelo divagou e não escreveu task");
     expect(applied.join(" ")).toContain("não achei task nenhuma");
+  });
+});
+
+describe("critérios colados na linha do rótulo", () => {
+  it("o ponto e vírgula que a lista usou vira a quebra dos itens", () => {
+    const { content, applied } = repairInlineCriteria(
+      "- **Acceptance criteria:** a tabela existe; o índice existe; o seed roda",
+    );
+    expect(applied).toBe(1);
+    expect(content.split("\n")).toEqual([
+      "  - **Acceptance criteria:**",
+      "    - a tabela existe",
+      "    - o índice existe",
+      "    - o seed roda",
+    ]);
+  });
+
+  it("sem ponto e vírgula, vira um critério só — que é o que foi escrito", () => {
+    const { content } = repairInlineCriteria("- **Acceptance criteria:** a tabela existe");
+    expect(content.split("\n")).toEqual(["  - **Acceptance criteria:**", "    - a tabela existe"]);
+  });
+
+  it("o rótulo já sozinho não é tocado", () => {
+    const certo = "  - **Acceptance criteria:**\n    - a tabela existe";
+    expect(repairInlineCriteria(certo)).toEqual({ content: certo, applied: 0 });
+  });
+
+  it("depois do reparo, a task passa no parser — que é quem decide", () => {
+    const tasks = [
+      "- [ ] **Task:** Criar a migration",
+      "- **Acceptance criteria:** a tabela existe; o seed roda",
+      "- **Traces:** reservas",
+    ].join("\n");
+
+    const documento = [
+      "# X — Project Phases",
+      "",
+      "<!-- inputs: skeleton.md@sha256:aaaaaaaaaaaa -->",
+      "",
+      "## Overview",
+      "",
+      "x",
+      "",
+      assemblePhase({ number: 1, title: "Base", goal: "g", dependsOn: "none", covers: ["reservas"] }, extractTasks(tasks).tasks),
+    ].join("\n");
+
+    const lido = parsePhases(documento);
+    expect(lido.ok, lido.ok ? "" : lido.errors.map((e) => `${e.code} ${e.message}`).join("; ")).toBe(true);
+    if (lido.ok) expect(lido.document.phases[0]?.tasks[0]?.acceptanceCriteria).toEqual(["a tabela existe", "o seed roda"]);
+  });
+
+  it("a extração anuncia o reparo, para não consertar em silêncio", () => {
+    const { applied } = extractTasks("- [ ] **Task:** X\n- **Acceptance criteria:** a; b\n- **Traces:** y");
+    expect(applied.join(" ")).toContain("vieram colados na linha do rótulo");
+  });
+});
+
+describe("rótulo de task escrito sem o traço", () => {
+  it("o traço volta, e o rótulo passa a ser o item de lista que o parser casa", () => {
+    const { content, applied } = repairMissingBullets("  **Traces:** US-1.1");
+    expect(applied).toBe(1);
+    expect(content).toBe("  - **Traces:** US-1.1");
+  });
+
+  it("vale para os quatro rótulos de task", () => {
+    for (const rotulo of ["Acceptance criteria", "Feature tests", "Traces", "Design ref"]) {
+      expect(repairMissingBullets(`  **${rotulo}:** x`).content.trim().startsWith("- ")).toBe(true);
+    }
+  });
+
+  it("o que já tem traço não é tocado", () => {
+    const certo = "  - **Traces:** US-1.1";
+    expect(repairMissingBullets(certo)).toEqual({ content: certo, applied: 0 });
+  });
+
+  it("a indentação original é preservada", () => {
+    expect(repairMissingBullets("    **Traces:** x").content).toBe("    - **Traces:** x");
+  });
+
+  it("os dois reparos juntos levam a task do jeito do modelo ao jeito do contrato", () => {
+    // Como o haiku escreveu no piloto 6: rótulo na margem, critérios colados.
+    const cru = [
+      "- [ ] **Task:** Implementar persistência de operador",
+      "  **Acceptance criteria:** dados vão para sessionStorage; dados voltam após recarregar",
+      "  **Traces:** US-2.3",
+    ].join("\n");
+
+    const documento = [
+      "# X — Project Phases",
+      "",
+      "<!-- inputs: skeleton.md@sha256:aaaaaaaaaaaa -->",
+      "",
+      "## Overview",
+      "",
+      "x",
+      "",
+      assemblePhase({ number: 1, title: "Base", goal: "g", dependsOn: "none", covers: ["US-2.3"] }, extractTasks(cru).tasks),
+    ].join("\n");
+
+    const lido = parsePhases(documento);
+    expect(lido.ok, lido.ok ? "" : lido.errors.map((e) => `${e.code} ${e.message}`).join("; ")).toBe(true);
+    if (lido.ok) {
+      const task = lido.document.phases[0]?.tasks[0];
+      expect(task?.acceptanceCriteria).toHaveLength(2);
+      expect(task?.traces).toEqual(["US-2.3"]);
+    }
   });
 });

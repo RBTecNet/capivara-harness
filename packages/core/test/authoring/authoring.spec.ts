@@ -4,14 +4,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   IntervalPartError,
-  LEDGER_CONTRACT,
-  MAX_TASKS_PER_PHASE,
-  allocateParts,
   assertSinglePhasePart,
   classifyDefect,
   discardStaging,
   isRepairable,
-  parseLedger,
   partId,
   publish,
   readStaged,
@@ -23,59 +19,7 @@ import {
 import { assemblePhasesDocument, parsePhases } from "../../src/contract/index.js";
 import type { ContractError } from "../../src/contract/index.js";
 
-const ledgerSource = (overrides: Record<string, unknown> = {}) =>
-  JSON.stringify({
-    contract: LEDGER_CONTRACT,
-    phases: [
-      { number: 1, title: "Fundação de dados", goal: "migrations e seeds existem", dependsOn: "none", covers: ["users"], taskCount: 8 },
-      { number: 2, title: "Cadastro", goal: "visitante se cadastra", dependsOn: "Phase 1", covers: ["US-1.1"], taskCount: 6 },
-    ],
-    mvpCutPhase: 2,
-    coverage: { stories: { "US-1.1": [2] }, entities: { users: [1] }, workflows: { "1": [2] } },
-    ...overrides,
-  });
-
-describe("ledger", () => {
-  it("aceita um ledger bem formado", () => {
-    const result = parseLedger(ledgerSource());
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.ledger.phases).toHaveLength(2);
-  });
-
-  it("recusa fase acima do teto de uma sessão", () => {
-    const result = parseLedger(ledgerSource({ phases: [{ number: 1, title: "t", goal: "g", dependsOn: "none", covers: [], taskCount: MAX_TASKS_PER_PHASE + 1 }] }));
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.defects[0]?.hint).toContain("divida em mais fases");
-  });
-
-  it("recusa numeração fora de ordem", () => {
-    const result = parseLedger(ledgerSource({ phases: [{ number: 3, title: "t", goal: "g", dependsOn: "none", covers: [], taskCount: 2 }] }));
-    expect(result.ok).toBe(false);
-  });
-
-  it("exige o mapa de cobertura nas três dimensões", () => {
-    const result = parseLedger(ledgerSource({ coverage: { stories: {} } }));
-    if (result.ok) throw new Error("esperava defeitos");
-    const problemas = result.defects.map((d) => d.problem).join(" ");
-    expect(problemas).toContain("entities");
-    expect(problemas).toContain("workflows");
-  });
-
-  it("recusa fase sem task", () => {
-    const result = parseLedger(ledgerSource({ phases: [{ number: 1, title: "t", goal: "g", dependsOn: "none", covers: [], taskCount: 0 }] }));
-    expect(result.ok).toBe(false);
-  });
-});
-
 describe("partes — uma fase por parte", () => {
-  it("aloca uma parte por fase do ledger", () => {
-    const result = parseLedger(ledgerSource());
-    if (!result.ok) throw new Error("ledger inválido");
-    const parts = allocateParts(result.ledger);
-    expect(parts.map((part) => part.id)).toEqual(["phase-p01", "phase-p02"]);
-    expect(parts[0]?.purpose).toContain("Fundação de dados");
-  });
-
   it("recusa parte nomeada por intervalo — o runtime, não a disciplina do modelo", () => {
     for (const nome of ["phases-p01-p04", "phases-1-4", "p01..p04", "fases-1 a 4", "phases-p02-to-p05"]) {
       expect(() => assertSinglePhasePart(nome), nome).toThrow(IntervalPartError);

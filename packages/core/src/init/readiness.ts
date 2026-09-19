@@ -10,23 +10,17 @@
 import { checkCoverage, checkDesignRefs, checkStamp, parsePhases } from "../contract/index.js";
 import type { ContractError, CoverageSources, StampInput } from "../contract/index.js";
 
-export const DOCUMENT_CHAIN = [
-  "project-description.md",
-  "user-stories.md",
-  "database-schema.md",
-  "project-phases.md",
-] as const;
-
-export type ChainDocument = (typeof DOCUMENT_CHAIN)[number];
+/** Os artefatos que um run do ciclo publica, na ordem em que nascem. */
+export const INIT_ARTIFACTS = ["skeleton.md", "project-phases.md"] as const;
 
 export interface ReadinessInput {
-  /** Conteúdo publicado de cada documento da cadeia; ausente significa não publicado. */
-  documents: Partial<Record<ChainDocument, string>>;
+  /** O plano executável publicado; vazio significa que não há plano. */
+  plan: string;
   /** Inputs do plano executável, para verificar o frescor do stamp. */
   stampInputs: StampInput[];
   coverage: CoverageSources;
-  /** Documentos cujo auditor retornou APPROVED. */
-  approved: ChainDocument[];
+  /** O auditor devolveu APPROVED sobre o plano. */
+  approved: boolean;
   /** Perguntas materiais ainda não resolvidas. */
   unresolvedQuestions: string[];
   designRoot: string;
@@ -36,14 +30,6 @@ export interface ReadinessInput {
    * significa que o ensaio não rodou — e não rodar não aprova nada.
    */
   rehearsal?: { blocked: string[] } | undefined;
-  /**
-   * Quais artefatos este run precisa ter publicado.
-   *
-   * O caminho por esqueleto produz dois — o esqueleto e o plano — em vez dos
-   * quatro documentos em prosa. O que o gate confere não é quantos arquivos
-   * existem, é se o loop consegue executar o que existe.
-   */
-  expected?: readonly string[];
 }
 
 export interface ReadinessCheck {
@@ -66,17 +52,15 @@ export function evaluateReadiness(input: ReadinessInput): Readiness {
   const checks: ReadinessCheck[] = [];
   let contractErrors: ContractError[] = [];
 
-  const esperados = input.expected ?? DOCUMENT_CHAIN;
-  const missing = esperados.filter((name) => (input.documents[name as ChainDocument] ?? "").trim() === "");
+  const publicado = input.plan.trim() !== "";
   checks.push({
     id: "documentos",
-    title: `Os artefatos do run estão publicados (${esperados.length})`,
-    passed: missing.length === 0,
-    detail: missing.length === 0 ? "" : `faltam: ${missing.join(", ")} — rode a etapa correspondente`,
+    title: "O plano executável está publicado",
+    passed: publicado,
+    detail: publicado ? "" : "project-phases.md não foi publicado — rode `capivara plan`",
   });
 
-  const phases = input.documents["project-phases.md"] ?? "";
-  const parsed = phases.trim() === "" ? null : parsePhases(phases);
+  const parsed = publicado ? parsePhases(input.plan) : null;
 
   checks.push({
     id: "contrato",
@@ -96,7 +80,7 @@ export function evaluateReadiness(input: ReadinessInput): Readiness {
   const stampErrors = document ? checkStamp(document, input.stampInputs) : [];
   checks.push({
     id: "frescor",
-    title: "Os stamps de input estão frescos em toda a cadeia",
+    title: "O stamp do plano cita o esqueleto que ele de fato leu",
     passed: document !== null && stampErrors.length === 0,
     detail: stampErrors.map((error) => `${error.message} → ${error.hint}`).join("\n"),
   });
@@ -120,20 +104,19 @@ export function evaluateReadiness(input: ReadinessInput): Readiness {
   });
   contractErrors = [...contractErrors, ...designErrors];
 
-  const withMarkers = DOCUMENT_CHAIN.filter((name) => (input.documents[name] ?? "").includes(NEEDS_DECISION));
+  const comMarcador = input.plan.includes(NEEDS_DECISION);
   checks.push({
     id: "decisoes",
-    title: "Nenhum documento carrega decisão pendente",
-    passed: withMarkers.length === 0,
-    detail: withMarkers.length === 0 ? "" : `${NEEDS_DECISION} em: ${withMarkers.join(", ")} — resolva na entrevista e reescreva o trecho`,
+    title: "O plano não carrega decisão pendente",
+    passed: !comMarcador,
+    detail: comMarcador ? `${NEEDS_DECISION} no plano — resolva na entrevista e reescreva o trecho` : "",
   });
 
-  const notApproved = esperados.filter((name) => !input.approved.includes(name as ChainDocument));
   checks.push({
     id: "auditoria",
-    title: `Os artefatos auditáveis foram aprovados (${esperados.length})`,
-    passed: notApproved.length === 0,
-    detail: notApproved.length === 0 ? "" : `sem aprovação: ${notApproved.join(", ")}`,
+    title: "O plano foi aprovado pelo auditor",
+    passed: input.approved,
+    detail: input.approved ? "" : "o auditor não aprovou o plano",
   });
 
   /*

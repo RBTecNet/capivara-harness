@@ -7,14 +7,14 @@
  * pelo detalhe.
  */
 
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InitBlockedError, evaluatePlanReadiness, runInit, runPlan } from "../../src/init/index.js";
 import { parseSkeleton } from "../../src/contract/index.js";
 import type { Skeleton } from "../../src/contract/index.js";
-import { SKELETON, fakeAgent, skeletonPath } from "../support/fake-agent.js";
+import { PHASE_1, SKELETON, fakeAgent, oneQuestion, skeletonPath } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
 
 let projectRoot = "";
@@ -34,15 +34,15 @@ const comum = {
   ask: async () => "use as recomendações",
 };
 
-async function init(steps: ScriptStep[]) {
+async function init(steps: ScriptStep[], ask?: (typeof comum)["ask"]) {
   const agent = fakeAgent(steps);
-  const outcome = await runInit({ projectRoot, request, ...comum, mode: "skeleton", stage: "init", call: agent.call });
+  const outcome = await runInit({ projectRoot, request, ...comum, stage: "init", call: agent.call, ...(ask ? { ask } : {}) });
   return { outcome, agent };
 }
 
-async function plan(steps: ScriptStep[]) {
+async function plan(steps: ScriptStep[], ask?: (typeof comum)["ask"]) {
   const agent = fakeAgent(steps);
-  const outcome = await runPlan({ projectRoot, request, ...comum, call: agent.call });
+  const outcome = await runPlan({ projectRoot, request, ...comum, call: agent.call, ...(ask ? { ask } : {}) });
   return { outcome, agent };
 }
 
@@ -112,6 +112,54 @@ describe("estágio 2 — plan", () => {
   });
 });
 
+describe("a entrevista do plan — o que só a escrita da fase descobre", () => {
+  /** A fase 1 sai com uma decisão em aberto; o resto do roteiro é o feliz. */
+  function comLacuna(): ScriptStep[] {
+    const steps = skeletonPath();
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "phase-p01" },
+      respond: { stdout: `${PHASE_1}\n[NEEDS DECISION] qual provedor de email envia a confirmação\n` },
+    });
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-phases.md:gaps" },
+      respond: { stdout: oneQuestion("Q-G1") },
+    });
+    return steps;
+  }
+
+  it("marcador deixado pela fase vira pergunta, e a resposta some com o marcador", async () => {
+    await init(skeletonPath());
+    const { outcome, agent } = await plan(comLacuna(), async () => "1");
+
+    const lacuna = agent.calls.find((call) => call.subject === "project-phases.md:gaps");
+    expect(lacuna?.prompt).toContain("qual provedor de email envia a confirmação");
+    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+
+    const plano = await readFile(join(projectRoot, ".capivara", "init", "project-phases.md"), "utf8");
+    expect(plano).not.toContain("[NEEDS DECISION]");
+  });
+
+  it("a rodada de lacunas leva junto, com as palavras dele, o que o init já fechou", async () => {
+    const comEntrevista = skeletonPath();
+    comEntrevista.unshift({
+      match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 },
+      respond: { stdout: oneQuestion() },
+    });
+    await init(comEntrevista, async () => "1");
+
+    const { agent } = await plan(comLacuna(), async () => "1");
+    const lacuna = agent.calls.find((call) => call.subject === "project-phases.md:gaps");
+    expect(lacuna?.prompt).toContain("Never ask again what the developer already answered");
+    expect(lacuna?.prompt).toContain("Node + Vitest");
+  });
+
+  it("sem marcador nenhum, ninguém é perguntado", async () => {
+    await init(skeletonPath());
+    const { agent } = await plan(skeletonPath());
+    expect(agent.calls.some((call) => call.subject === "project-phases.md:gaps")).toBe(false);
+  });
+});
+
 describe("o gate PLAN READY", () => {
   it("story que nenhuma fase entrega bloqueia", () => {
     const esqueleto = esqueletoLido();
@@ -154,5 +202,46 @@ describe("o gate PLAN READY", () => {
     const readiness = evaluatePlanReadiness({ skeleton: null, unresolvedQuestions: [] });
     expect(readiness.ready).toBe(false);
     expect(readiness.checks[0]?.detail).toContain("init");
+  });
+});
+
+describe("o esqueleto guardado e a entrevista do esqueleto não brigam pelo mesmo arquivo", () => {
+  it("as respostas do init sobrevivem à gravação do esqueleto", async () => {
+    const comEntrevista = skeletonPath();
+    comEntrevista.unshift({
+      match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 },
+      respond: { stdout: oneQuestion() },
+    });
+    const agent = fakeAgent(comEntrevista);
+    await runInit({ projectRoot, request, ...comum, stage: "init", call: agent.call, ask: async () => "1" });
+
+    const handoffs = join(projectRoot, ".capivara", "handoffs");
+    const arquivos = await readdir(handoffs);
+    expect(arquivos.sort()).toEqual(arquivos.sort().filter((nome) => nome.endsWith(".json")));
+    expect(arquivos).toHaveLength(2);
+
+    const entrevista = arquivos.find((nome) => nome.endsWith(".skeleton.json"));
+    const guardado = JSON.parse(await readFile(join(handoffs, entrevista ?? ""), "utf8")) as { answers: unknown[] };
+    expect(guardado.answers).toHaveLength(1);
+  });
+});
+
+describe("cada auditoria recebe só o que a sua pergunta exige", () => {
+  it("a auditoria de uma fase recebe a fatia que escreveu aquela fase, não o produto inteiro", async () => {
+    await init(skeletonPath());
+    const { agent } = await plan(skeletonPath());
+
+    const fase2 = agent.calls.find((call) => call.role === "auditor" && call.subject === "project-phases.md#P2");
+    expect(fase2?.prompt).toContain("US-1.1");
+    expect(fase2?.prompt).not.toContain("pertence a statuses");
+  });
+
+  it("a auditoria de coerência recebe o esqueleto inteiro: a pergunta dela é global", async () => {
+    await init(skeletonPath());
+    const { agent } = await plan(skeletonPath());
+
+    const coerencia = agent.calls.find((call) => call.role === "auditor" && call.subject === "project-phases.md#coerência");
+    expect(coerencia?.prompt).toContain("pertence a statuses");
+    expect(coerencia?.prompt).toContain("## Fases");
   });
 });

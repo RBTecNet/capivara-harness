@@ -67,14 +67,24 @@ describe("doctor", () => {
     expect(documentacao?.detail).toContain("capivara init");
   });
 
-  it("cadeia incompleta é bloqueio, não aviso", async () => {
+  it("esqueleto sem plano é passo pendente: manda rodar o plan, não bloqueia", async () => {
     const { mkdir } = await import("node:fs/promises");
     await mkdir(join(projectRoot, ".capivara", "init"), { recursive: true });
-    await writeFile(join(projectRoot, ".capivara/init/project-description.md"), "# X", "utf8");
+    await writeFile(join(projectRoot, ".capivara/init/skeleton.md"), "# X", "utf8");
+    const diagnoses = await diagnose({ projectRoot, credentialsFile: ausente, environment: {} });
+    const documentacao = diagnoses.find((diagnosis) => diagnosis.item === "documentação");
+    expect(documentacao?.health).toBe("aviso");
+    expect(documentacao?.detail).toContain("capivara plan");
+  });
+
+  it("plano sem o esqueleto que ele diz ter lido é bloqueio", async () => {
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(projectRoot, ".capivara", "init"), { recursive: true });
+    await writeFile(join(projectRoot, ".capivara/init/project-phases.md"), "# X", "utf8");
     const diagnoses = await diagnose({ projectRoot, credentialsFile: ausente, environment: {} });
     const documentacao = diagnoses.find((diagnosis) => diagnosis.item === "documentação");
     expect(documentacao?.health).toBe("ausente");
-    expect(documentacao?.detail).toContain("user-stories.md");
+    expect(documentacao?.detail).toContain("capivara init");
   });
 
   it("o resumo diz o que bloqueia", async () => {

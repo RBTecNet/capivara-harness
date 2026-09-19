@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { DOCUMENT_CHAIN_LABELS, HarnessProgress, createLiveRegion, renderDashboard } from "../../src/tui/index.js";
+import { PIPELINE_STEPS, HarnessProgress, createLiveRegion, renderDashboard } from "../../src/tui/index.js";
 import type { ProgressEvent } from "../../src/tui/index.js";
 
 const plain = { enabled: false };
@@ -23,17 +23,17 @@ function progresso(now = () => new Date("2026-09-18T03:00:00Z")): HarnessProgres
 }
 
 function evento(partial: Partial<ProgressEvent>): ProgressEvent {
-  return { stage: "interview", subject: "project-description.md", status: "started", detail: "", attempt: 1, ...partial };
+  return { stage: "interview", subject: "skeleton", status: "started", detail: "", attempt: 1, ...partial };
 }
 
 describe("painel do harness", () => {
-  it("começa com os quatro documentos aguardando", () => {
+  it("começa com todos os passos do ciclo aguardando", () => {
     const model = progresso().model();
-    expect(model.pipeline).toHaveLength(DOCUMENT_CHAIN_LABELS.length);
+    expect(model.pipeline).toHaveLength(PIPELINE_STEPS.length);
     expect(model.pipeline.every((step) => step.state === "aguardando")).toBe(true);
   });
 
-  it("documento em trabalho fica em andamento e publicado fica concluído", () => {
+  it("passo em trabalho fica em andamento e publicado fica concluído", () => {
     const p = progresso();
     p.apply(evento({ stage: "authoring" }));
     expect(p.model().pipeline[0]?.state).toBe("em andamento");
@@ -49,15 +49,15 @@ describe("painel do harness", () => {
     expect(p.model().pipeline[0]?.state).toBe("concluído");
   });
 
-  it("a etapa nomeia o que está acontecendo e em qual documento", () => {
+  it("a etapa nomeia o que está acontecendo e sobre o quê", () => {
     const p = progresso();
-    p.apply(evento({ stage: "audit", subject: "database-schema.md" }));
-    expect(p.model().stage).toBe("auditoria · database-schema");
+    p.apply(evento({ stage: "audit", subject: "project-phases.md" }));
+    expect(p.model().stage).toBe("auditoria · project-phases");
   });
 
-  it("assunto com sufixo de gaps ainda aponta para o documento", () => {
+  it("assunto com sufixo de gaps ainda aponta para o passo", () => {
     const p = progresso();
-    p.apply(evento({ stage: "interview", subject: "user-stories.md:gaps", status: "retry" }));
+    p.apply(evento({ stage: "interview", subject: "project-phases.md:gaps", status: "retry" }));
     expect(p.model().pipeline[1]?.state).toBe("em andamento");
   });
 
@@ -72,7 +72,7 @@ describe("painel do harness", () => {
     const p = progresso();
     p.apply(evento({ stage: "authoring", status: "blocked", subject: "project-phases.md" }));
     expect(p.model().status.state).toBe("falhou");
-    expect(p.model().pipeline[3]?.state).toBe("falhou");
+    expect(p.model().pipeline[1]?.state).toBe("falhou");
   });
 
   it("RALPH READY fecha a situação", () => {
@@ -153,7 +153,7 @@ describe("o painel diz o que está acontecendo agora", () => {
     expect(renderDashboard(p.model())).not.toBe(antes);
   });
 
-  it("documento reaproveitado aparece concluído, não aguardando", () => {
+  it("passo reaproveitado aparece concluído, não aguardando", () => {
     const p = progresso();
     p.apply(evento({ stage: "publish", status: "complete", detail: "reaproveitado deste run" }));
     expect(p.model().pipeline[0]?.state).toBe("concluído");

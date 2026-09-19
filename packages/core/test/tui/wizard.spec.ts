@@ -94,7 +94,7 @@ describe("wizard", () => {
   });
 
   it("o build pergunta teste e ciclos, e não pergunta pedido", async () => {
-    const { deps, tela } = roteiro(["", "2", "1", "", "1", "n", "npm run test:ci", "5", "s"]);
+    const { deps, tela } = roteiro(["", "3", "1", "", "1", "n", "npm run test:ci", "5", "s"]);
     const resultado = await runWizard(deps);
     expect(resultado?.argv).toEqual(["build", "--provider", "codex", "--test-cmd", "npm run test:ci", "--max-cycles", "5"]);
     expect(tela()).not.toContain("De onde vem o pedido?");
@@ -105,7 +105,7 @@ describe("wizard", () => {
     await runWizard(init.deps);
     expect(init.tela()).not.toContain("Executor");
 
-    const build = roteiro(["", "2", "1", "", "1", "s", "1", "1", "", "", "n"]);
+    const build = roteiro(["", "3", "1", "", "1", "s", "1", "1", "", "", "n"]);
     await runWizard(build.deps);
     expect(build.tela()).not.toContain("Escritor");
   });
@@ -113,7 +113,7 @@ describe("wizard", () => {
   it("número inválido é recusado sem derrubar o wizard", async () => {
     const { deps, tela } = roteiro(["", "9", "1", "1", "x", ".", "1", "", "1", "n", "n"]);
     const resultado = await runWizard(deps);
-    expect(tela()).toContain("entre 1 e 2");
+    expect(tela()).toContain("entre 1 e 3");
     expect(resultado?.argv[0]).toBe("init");
   });
 

@@ -183,13 +183,19 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
     return null;
   }
 
-  // Documentação pronta na pasta é o sinal mais forte de qual comando vem agora.
-  const documentado = await deps.fileExists(`${projectRoot}/.capivara/init/project-phases.md`);
+  /*
+   * O que já existe na pasta é o sinal mais forte de qual estágio vem agora: sem
+   * esqueleto é `init`, com esqueleto e sem plano é `plan`, com plano é `build`.
+   */
+  const temEsqueleto = await deps.fileExists(`${projectRoot}/.capivara/init/skeleton.md`);
+  const temPlano = await deps.fileExists(`${projectRoot}/.capivara/init/project-phases.md`);
   const comandos: Choice[] = [
-    { label: "init", hint: "entrevista, escreve e audita os quatro documentos até RALPH READY" },
-    { label: "build", hint: "constrói a aplicação a partir da documentação pronta" },
+    { label: "init", hint: "entrevista e desenha as fases do projeto até PLAN READY" },
+    { label: "plan", hint: "detalha as fases que o init produziu, até RALPH READY" },
+    { label: "build", hint: "constrói a aplicação a partir do plano pronto" },
   ];
-  const command = (["init", "build"] as const)[await choose(io, "O que você quer fazer?", comandos, documentado ? 1 : 0)] ?? "init";
+  const sugerido = temPlano ? 2 : temEsqueleto ? 1 : 0;
+  const command = (["init", "plan", "build"] as const)[await choose(io, "O que você quer fazer?", comandos, sugerido)] ?? "init";
 
   const answers: WizardAnswers = { command, global: {}, roles: {} };
   if (projectRoot !== deps.cwd) answers.projectRoot = projectRoot;
@@ -234,7 +240,7 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
 
   // Papéis: só os que ESTE comando chama. Perguntar pelo executor num init é
   // pedir uma decisão que não vai ser usada.
-  const usados: RoleName[] = command === "init" ? ["writer", "auditor", "verifier"] : ["builder", "verifier"];
+  const usados: RoleName[] = command === "build" ? ["builder", "verifier"] : ["writer", "auditor", "verifier"];
   if (await yesNo(io, "\nAjustar algum papel separadamente?", false)) {
     for (const role of usados) {
       const definition = ROLES[role];

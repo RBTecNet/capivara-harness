@@ -7,15 +7,6 @@
  * intervalo é recusado pelo runtime, não pela disciplina do modelo.
  */
 
-import type { Ledger } from "./ledger.js";
-
-export interface Part {
-  id: string;
-  phaseNumber: number;
-  /** O propósito declarado da parte, alocado antes da primeira escrita. */
-  purpose: string;
-}
-
 export class IntervalPartError extends Error {
   constructor(id: string) {
     super(
@@ -37,14 +28,3 @@ export function partId(phaseNumber: number): string {
   return `phase-p${String(phaseNumber).padStart(2, "0")}`;
 }
 
-export function allocateParts(ledger: Ledger): Part[] {
-  return ledger.phases.map((phase) => {
-    const id = partId(phase.number);
-    assertSinglePhasePart(id);
-    return {
-      id,
-      phaseNumber: phase.number,
-      purpose: `${phase.title} — ${phase.goal} (${phase.taskCount} tasks)`,
-    };
-  });
-}

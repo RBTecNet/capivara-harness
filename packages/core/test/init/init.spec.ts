@@ -2,9 +2,10 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DOCUMENT_CHAIN, InitBlockedError, evaluateReadiness, inspectProject, resolveRequest, runInit, summarizeInventory } from "../../src/init/index.js";
+import { InitBlockedError, evaluateReadiness, inspectProject, resolveRequest, runInit, summarizeInventory } from "../../src/init/index.js";
 import { readEvents, runIdFor, runPaths } from "../../src/state/index.js";
-import { DESCRIPTION, PHASE_1, PHASE_2, approve, fakeAgent, happyPath, oneQuestion, reject, rehearsedAddresses } from "../support/fake-agent.js";
+import { assemblePhasesDocument } from "../../src/contract/index.js";
+import { SKELETON, PHASE_1, PHASE_2, approve, fakeAgent, happyPath, oneQuestion, reject, rehearsedAddresses } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
 
 let projectRoot = "";
@@ -18,6 +19,15 @@ afterEach(async () => {
 });
 
 const request = { text: "um sistema de reservas para uma pousada", origin: "text" as const, path: null, sha12: "abc123abc123" };
+
+/** Um plano que passa no contrato, para exercitar o gate sem rodar o run inteiro. */
+const PLANO = assemblePhasesDocument({
+  projectName: "Pousada",
+  stamp: "<!-- inputs: skeleton.md@sha256:aaaaaaaaaaaa -->",
+  overview: "Fundação primeiro.",
+  phases: [PHASE_1.trim(), PHASE_2.trim()],
+  openQuestions: [],
+});
 
 async function run(steps: ScriptStep[], answers: string[] = [], extras: { fresh?: boolean } = {}) {
   const agent = fakeAgent(steps);
@@ -97,12 +107,13 @@ describe("inventário", () => {
 });
 
 describe("init ponta a ponta — caminho feliz", () => {
-  it("chega a RALPH READY e publica os quatro documentos", async () => {
+  it("chega a RALPH READY e publica o esqueleto e o plano", async () => {
     const { outcome } = await run(happyPath());
     expect(outcome.readiness.ready, outcome.readiness.checks.filter((c) => !c.passed).map((c) => `${c.title}: ${c.detail}`).join("\n")).toBe(true);
 
-    for (const document of DOCUMENT_CHAIN) {
-      const content = await readFile(join(projectRoot, ".capivara/init", document), "utf8");
+    // Dois artefatos, não quatro: o esqueleto e o plano que o loop consome.
+    for (const artefato of ["skeleton.md", "project-phases.md"]) {
+      const content = await readFile(join(projectRoot, ".capivara/init", artefato), "utf8");
       expect(content.length).toBeGreaterThan(50);
     }
   });
@@ -119,7 +130,8 @@ describe("init ponta a ponta — caminho feliz", () => {
   it("o stamp de inputs é gravado e está fresco", async () => {
     await run(happyPath());
     const content = await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8");
-    expect(content.split("\n")[2]).toMatch(/^<!-- inputs: project-description\.md@sha256:[0-9a-f]{12} /);
+    // O plano é carimbado com o único upstream que existe: o esqueleto.
+    expect(content.split("\n")[2]).toMatch(/^<!-- inputs: skeleton\.md@sha256:[0-9a-f]{12} /);
   });
 
   it("o relatório traz artefatos, plano, cobertura e custo", async () => {
@@ -135,7 +147,7 @@ describe("init ponta a ponta — caminho feliz", () => {
     const { outcome } = await run(happyPath());
     const events = await readEvents(runPaths(projectRoot, outcome.runId).events);
     const publicados = events.filter((event) => event.stage === "publish" && event.status === "complete");
-    expect(publicados.map((event) => event.subject)).toEqual([...DOCUMENT_CHAIN]);
+    expect(publicados.map((event) => event.subject)).toEqual(["skeleton", "project-phases.md"]);
   });
 
   it("uma fase por chamada: nunca um intervalo", async () => {
@@ -153,15 +165,15 @@ describe("init ponta a ponta — caminho feliz", () => {
 describe("entrevista dentro do init", () => {
   it("apresenta a pergunta e usa a decisão aceita", async () => {
     const steps = happyPath();
-    steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 }, respond: { stdout: oneQuestion() } });
     const { agent } = await run(steps, ["1"]);
-    const escrita = agent.calls.find((call) => call.stage === "authoring" && call.subject === "project-description.md");
+    const escrita = agent.calls.find((call) => call.stage === "authoring" && call.subject === "skeleton");
     expect(escrita?.prompt).toContain("Node + Vitest");
   });
 
   it("'não sei' não vira decisão confirmada", async () => {
     const steps = happyPath();
-    steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 }, respond: { stdout: oneQuestion() } });
     const { outcome } = await run(steps, ["não sei"]);
     expect(outcome.report.checkpoint.decisions).toHaveLength(0);
     expect(outcome.report.checkpoint.deferrals).toHaveLength(1);
@@ -169,7 +181,7 @@ describe("entrevista dentro do init", () => {
 
   it("resposta em texto livre que não fecha volta para quem a escreveu", async () => {
     const steps = happyPath();
-    steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 }, respond: { stdout: oneQuestion() } });
     // Primeiro veredito: falta algo. Segundo: fechou.
     let vez = 0;
     steps.unshift({
@@ -193,7 +205,7 @@ describe("entrevista dentro do init", () => {
 
   it("o que segue em aberto é dito, nunca sumido", async () => {
     const steps = happyPath();
-    steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 }, respond: { stdout: oneQuestion() } });
     steps.unshift({
       match: { role: "auditor", stage: "interview" },
       respond: { stdout: "CAPIVARA_ANSWER: Q-01 | DEFERRED | não dá para saber a stack" },
@@ -207,7 +219,7 @@ describe("entrevista dentro do init", () => {
 
   it("o classificador recebe a evidência e as opções, não só a pergunta", async () => {
     const steps = happyPath();
-    steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 }, respond: { stdout: oneQuestion() } });
     steps.unshift({
       match: { role: "auditor", stage: "interview" },
       respond: { stdout: "CAPIVARA_ANSWER: Q-01 | ACCEPTED | Node com Vitest" },
@@ -223,7 +235,7 @@ describe("entrevista dentro do init", () => {
 
   it("pergunta adiada bloqueia o RALPH READY com [NEEDS DECISION]", async () => {
     const steps = happyPath();
-    steps.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 }, respond: { stdout: oneQuestion() } });
     const { outcome } = await run(steps, ["não sei"]);
     expect(outcome.readiness.ready).toBe(false);
     const entrevista = outcome.readiness.checks.find((check) => check.id === "entrevista");
@@ -296,74 +308,6 @@ describe("dimensionamento de fase", () => {
   });
 });
 
-describe("retomada", () => {
-  it("documento já publicado neste run não é reescrito, e suas decisões descem a cadeia", async () => {
-    const primeiro = happyPath();
-    primeiro.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
-    // O primeiro run morre depois de publicar project-description.md.
-    primeiro.unshift({ match: { role: "writer", stage: "authoring", subject: "user-stories.md" }, respond: { stdout: "", exitCode: 124 }, repeat: true });
-    await expect(run(primeiro, ["1"])).rejects.toThrow(InitBlockedError);
-
-    const { agent, anunciado, outcome } = await run(happyPath());
-    expect(anunciado).toContain("reaproveitado deste run");
-    expect(agent.calls.some((call) => call.stage === "authoring" && call.subject === "project-description.md")).toBe(false);
-    // A decisão da entrevista do documento reaproveitado continua valendo.
-    const escrita = agent.calls.find((call) => call.stage === "authoring" && call.subject === "user-stories.md");
-    expect(escrita?.prompt).toContain("Node + Vitest");
-    expect(outcome.readiness.ready).toBe(true);
-  });
-
-  it("resposta já dada não é perguntada de novo", async () => {
-    const primeiro = happyPath();
-    primeiro.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
-    primeiro.unshift({ match: { role: "writer", stage: "authoring", subject: "project-description.md" }, respond: { stdout: "", exitCode: 124 }, repeat: true });
-    await expect(run(primeiro, ["1"])).rejects.toThrow(InitBlockedError);
-
-    const segundo = happyPath();
-    segundo.unshift({ match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 }, respond: { stdout: oneQuestion() } });
-    const { anunciado, outcome } = await run(segundo, []);
-    expect(anunciado).toContain("resposta(s) retomada(s)");
-    expect(outcome.report.checkpoint.decisions).toHaveLength(1);
-  });
-
-  it("plano publicado que não passa mais nas verificações é reescrito, não reaproveitado", async () => {
-    /*
-     * É a situação do piloto 3: um plano publicado por uma versão anterior, que
-     * o gate reprova. Reaproveitá-lo devolveria o mesmo NOT READY para sempre.
-     */
-    await run(happyPath());
-
-    const plano = join(projectRoot, ".capivara", "init", "project-phases.md");
-    const publicado = await readFile(plano, "utf8");
-    await writeFile(plano, publicado.replace(/\*\*Traces:\*\* .*/g, "**Traces:** nada"), "utf8");
-
-    const { agent, anunciado } = await run(happyPath());
-    expect(anunciado).toContain("não passa mais nas verificações mecânicas");
-    expect(agent.calls.some((call) => call.subject === "phase-p01")).toBe(true);
-  });
-
-  it("plano reaproveitado ainda é ensaiado: reaproveitar texto não reaproveita veredito", async () => {
-    // Sem isto o gate reprovaria por o ensaio não ter rodado, e a tentativa
-    // seguinte reaproveitaria de novo — reprovado para sempre.
-    await run(happyPath());
-
-    const { agent, outcome } = await run(happyPath());
-    const ensaios = agent.calls.filter((call) => call.role === "verifier" && call.stage === "verify");
-    expect(ensaios.length).toBeGreaterThan(0);
-    expect(outcome.readiness.checks.find((check) => check.id === "ensaio")?.passed).toBe(true);
-  });
-
-  it("--fresh ignora tudo e recomeça", async () => {
-    const primeiro = happyPath();
-    primeiro.unshift({ match: { role: "writer", stage: "authoring", subject: "user-stories.md" }, respond: { stdout: "", exitCode: 124 }, repeat: true });
-    await expect(run(primeiro)).rejects.toThrow(InitBlockedError);
-
-    const { agent, anunciado } = await run(happyPath(), [], { fresh: true });
-    expect(anunciado).not.toContain("reaproveitado");
-    expect(agent.calls.some((call) => call.stage === "authoring" && call.subject === "project-description.md")).toBe(true);
-  });
-});
-
 describe("o laço de auditoria cabe os dois orçamentos", () => {
   it("duas devoluções mecânicas mais duas do auditor não estouram a volta", async () => {
     /*
@@ -425,13 +369,13 @@ describe("o levantamento não roda à toa", () => {
     // inteiro descartado por duplicidade.
     const steps = happyPath();
     steps.unshift({
-      match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 },
+      match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 },
       respond: { stdout: oneQuestion() },
     });
 
     const { agent } = await run(steps, ["1"]);
     const levantamentos = agent.calls.filter(
-      (call) => call.stage === "interview" && call.subject === "project-description.md",
+      (call) => call.stage === "interview" && call.subject === "skeleton",
     );
     expect(levantamentos).toHaveLength(1);
   });
@@ -439,13 +383,13 @@ describe("o levantamento não roda à toa", () => {
   it("resposta em aberto ainda abre a rodada seguinte", async () => {
     const steps = happyPath();
     steps.unshift({
-      match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 },
+      match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 },
       respond: { stdout: oneQuestion() },
     });
 
     const { agent } = await run(steps, ["não sei"]);
     const levantamentos = agent.calls.filter(
-      (call) => call.stage === "interview" && call.subject === "project-description.md",
+      (call) => call.stage === "interview" && call.subject === "skeleton",
     );
     expect(levantamentos.length).toBeGreaterThan(1);
   });
@@ -466,7 +410,7 @@ describe("o canal de suposição", () => {
 
     const steps = happyPath();
     steps.unshift({
-      match: { role: "writer", stage: "interview", subject: "project-description.md", attempt: 1 },
+      match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 },
       respond: { stdout: comSuposicao },
     });
 
@@ -475,7 +419,8 @@ describe("o canal de suposição", () => {
     expect(outcome.report.checkpoint.assumptions.map((item) => item.statement)).toContain("seis cores fixas em hexadecimal");
 
     // E o escritor do documento seguinte trabalha sabendo do que foi suposto.
-    const escrita = agent.calls.find((call) => call.stage === "authoring" && call.subject === "user-stories.md");
+    // E o esqueleto é escrito sabendo do que foi suposto.
+    const escrita = agent.calls.find((call) => call.stage === "authoring" && call.subject === "skeleton");
     expect(escrita?.prompt).toContain("seis cores fixas em hexadecimal");
   });
 
@@ -485,45 +430,13 @@ describe("o canal de suposição", () => {
   });
 });
 
-describe("resposta de gap sobrevive ao run", () => {
-  it("decisão tomada na rodada de gaps fica gravada onde a retomada lê", async () => {
-    // O piloto 3 decidiu a stack numa rodada de gaps e, ao regenerar os
-    // documentos no dia seguinte, o escritor perguntou a stack de novo: a
-    // resposta existia só na memória do processo.
-    const comMarcador = DESCRIPTION.replace("## Tech Stack", "[NEEDS DECISION] qual banco de dados\n\n## Tech Stack");
-    const steps = happyPath();
-    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "project-description.md", attempt: 1 }, respond: { stdout: comMarcador } });
-    steps.unshift({
-      match: { role: "writer", stage: "interview", subject: "project-description.md:gaps" },
-      respond: { stdout: oneQuestion("Q-09") },
-      repeat: true,
-    });
-    steps.push({ match: { role: "writer", stage: "authoring", subject: "project-description.md" }, respond: { stdout: DESCRIPTION }, repeat: true });
-
-    await run(steps, ["1"]);
-
-    const handoff = JSON.parse(
-      await readFile(join(projectRoot, ".capivara", "handoffs", `${runIdFor("init", request.sha12)}.project-description.md.json`), "utf8"),
-    ) as { answers: { questionId: string; disposition: string; decision: string }[] };
-
-    const daRodadaDeGaps = handoff.answers.find((answer) => answer.questionId === "Q-09");
-    expect(daRodadaDeGaps?.disposition).toBe("ACCEPTED");
-    expect(daRodadaDeGaps?.decision).toContain("Node");
-  });
-});
-
 describe("decisão de impasse", () => {
-  /** Leva o documento ao impasse: o auditor reprova sempre, o escritor insiste. */
+  /** Leva o plano ao impasse: o auditor reprova sempre, o escritor insiste. */
   function semConvergencia(): ScriptStep[] {
     const steps = happyPath();
     steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-description.md" },
-      respond: { stdout: reject("Tech Stack", "a regra não diz sobre o que a operação incide", "nomeie o alvo") },
-      repeat: true,
-    });
-    steps.push({
-      match: { role: "writer", stage: "authoring", subject: "project-description.md" },
-      respond: { stdout: DESCRIPTION },
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#coerência" },
+      respond: { stdout: reject("Phase 1", "a regra não diz sobre o que a operação incide", "nomeie o alvo") },
       repeat: true,
     });
     return steps;
@@ -559,7 +472,7 @@ describe("decisão de impasse", () => {
     await comImpasse(regra);
 
     const handoff = JSON.parse(
-      await readFile(join(projectRoot, ".capivara", "handoffs", `${runIdFor("init", request.sha12)}.project-description.md.json`), "utf8"),
+      await readFile(join(projectRoot, ".capivara", "handoffs", `${runIdFor("init", request.sha12)}.project-phases.md.json`), "utf8"),
     ) as { answers: { questionId: string; disposition: string; decision: string }[] };
 
     const registrada = handoff.answers.find((answer) => answer.questionId.startsWith("SD-"));
@@ -567,12 +480,13 @@ describe("decisão de impasse", () => {
     expect(registrada?.decision).toContain("aparado na gravação");
   });
 
-  it("e desce a cadeia: o documento seguinte é escrito sabendo dela", async () => {
+  it("e volta ao escritor como autoridade, na emenda da fase", async () => {
     const regra = "o valor é aparado na gravação e a comparação ignora caixa";
     const { agent } = await comImpasse(regra);
 
-    const seguinte = agent.calls.find((call) => call.stage === "authoring" && call.subject === "user-stories.md");
-    expect(seguinte?.prompt).toContain("aparado na gravação");
+    const emendas = agent.calls.filter((call) => call.subject.startsWith("phase-") && call.prompt.includes("amending"));
+    expect(emendas.length).toBeGreaterThan(0);
+    expect(emendas.some((call) => call.prompt.includes("aparado na gravação"))).toBe(true);
   });
 });
 
@@ -582,11 +496,11 @@ describe("limite de uso", () => {
     const steps = happyPath();
     let vez = 0;
     steps.unshift({
-      match: { role: "writer", stage: "authoring", subject: "project-description.md" },
+      match: { role: "writer", stage: "authoring", subject: "skeleton" },
       respond: {
         stdout: () => {
           vez += 1;
-          return vez === 1 ? "rate limit reached" : DESCRIPTION;
+          return vez === 1 ? "rate limit reached" : SKELETON;
         },
       },
       repeat: true,
@@ -616,9 +530,9 @@ describe("timeout do provider", () => {
     // A primeira chamada estoura; a segunda responde.
     let vez = 0;
     steps.unshift({
-      match: { role: "writer", stage: "authoring", subject: "project-description.md" },
+      match: { role: "writer", stage: "authoring", subject: "skeleton" },
       respond: {
-        stdout: () => (vez === 0 ? "" : DESCRIPTION),
+        stdout: () => (vez === 0 ? "" : SKELETON),
         exitCode: () => {
           vez += 1;
           return vez === 1 ? 124 : 0;
@@ -635,7 +549,7 @@ describe("timeout do provider", () => {
   it("estouro duas vezes para o run dizendo o que fazer", async () => {
     const steps = happyPath();
     steps.unshift({
-      match: { role: "writer", stage: "authoring", subject: "project-description.md" },
+      match: { role: "writer", stage: "authoring", subject: "skeleton" },
       respond: { stdout: "", exitCode: 124 },
       repeat: true,
     });
@@ -643,58 +557,30 @@ describe("timeout do provider", () => {
   });
 });
 
-describe("auditoria dentro do init", () => {
-  it("devolve, o escritor reescreve, e o documento é publicado", async () => {
-    const steps = happyPath();
-    steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-description.md", attempt: 1 },
-      respond: { stdout: reject("Tech Stack", "a versão do Node não é a decidida", "use Node 26, como decidido na entrevista") },
-    });
-    steps.push({ match: { role: "writer", stage: "authoring", subject: "project-description.md", attempt: 2 }, respond: { stdout: (await import("../support/fake-agent.js")).DESCRIPTION } });
-    steps.push({ match: { role: "auditor", stage: "audit", subject: "project-description.md", attempt: 2 }, respond: { stdout: approve() } });
-
-    const { outcome, agent } = await run(steps);
-    expect(outcome.readiness.ready).toBe(true);
-    const reescrita = agent.calls.find((call) => call.stage === "authoring" && call.subject === "project-description.md" && call.attempt === 2);
-    expect(reescrita?.prompt).toContain("use Node 26");
-  });
-
-  it("saída inválida do auditor duas vezes bloqueia o run com diagnóstico", async () => {
-    const steps = happyPath();
-    steps.unshift({ match: { role: "auditor", stage: "audit" }, respond: { stdout: "achei que está bom" }, repeat: true });
-    await expect(run(steps)).rejects.toThrow(InitBlockedError);
-  });
-});
-
 describe("gate de prontidão", () => {
   const base = {
-    documents: Object.fromEntries(DOCUMENT_CHAIN.map((name) => [name, "conteúdo"])) as Record<string, string>,
+    plan: PLANO,
     stampInputs: [],
     coverage: { storyIds: [], entities: [], workflows: [] },
-    approved: [...DOCUMENT_CHAIN],
+    approved: true,
     unresolvedQuestions: [],
     designRoot: ".capivara/init/design",
     designExists: () => true,
   };
 
   it("um único item falso produz NOT READY, nunca 'quase pronto'", () => {
-    const readiness = evaluateReadiness({ ...base, approved: ["project-description.md"] });
+    const readiness = evaluateReadiness({ ...base, approved: false });
     expect(readiness.ready).toBe(false);
-    expect(readiness.checks.find((check) => check.id === "auditoria")?.detail).toContain("user-stories.md");
+    expect(readiness.checks.find((check) => check.id === "auditoria")?.passed).toBe(false);
   });
 
-  it("documento faltando é reportado pelo nome", () => {
-    const documents = { ...base.documents };
-    delete documents["user-stories.md"];
-    const readiness = evaluateReadiness({ ...base, documents });
-    expect(readiness.checks.find((check) => check.id === "documentos")?.detail).toContain("user-stories.md");
+  it("plano ausente é reportado dizendo o que rodar", () => {
+    const readiness = evaluateReadiness({ ...base, plan: "" });
+    expect(readiness.checks.find((check) => check.id === "documentos")?.detail).toContain("capivara plan");
   });
 
-  it("[NEEDS DECISION] em qualquer documento bloqueia", () => {
-    const readiness = evaluateReadiness({
-      ...base,
-      documents: { ...base.documents, "user-stories.md": "texto [NEEDS DECISION] qual provedor de email" },
-    });
+  it("[NEEDS DECISION] no plano bloqueia", () => {
+    const readiness = evaluateReadiness({ ...base, plan: `${PLANO}\n[NEEDS DECISION] qual provedor de email\n` });
     expect(readiness.checks.find((check) => check.id === "decisoes")?.passed).toBe(false);
   });
 

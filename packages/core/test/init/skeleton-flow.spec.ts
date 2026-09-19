@@ -34,7 +34,6 @@ async function run(steps: ScriptStep[]) {
     projectRoot,
     request,
     language: "português do Brasil",
-    mode: "skeleton",
     announce: (message) => void dito.push(message),
     call: agent.call,
     ask: async () => "use as recomendações",

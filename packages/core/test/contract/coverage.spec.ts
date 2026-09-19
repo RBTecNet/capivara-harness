@@ -4,13 +4,13 @@ import {
   checkEntities,
   checkStories,
   checkWorkflows,
-  extractEntities,
-  extractStoryIds,
-  extractWorkflows,
+  coverageFromSkeleton,
   parsePhases,
+  parseSkeleton,
 } from "../../src/contract/index.js";
 import type { PhasesDocument } from "../../src/contract/index.js";
 import { ENTITIES, STORY_IDS, VALID_PHASES, WORKFLOWS } from "./fixture.js";
+import { SKELETON } from "../support/fake-agent.js";
 
 function document(source = VALID_PHASES): PhasesDocument {
   const result = parsePhases(source);
@@ -18,34 +18,15 @@ function document(source = VALID_PHASES): PhasesDocument {
   return result.document;
 }
 
-describe("extratores", () => {
-  it("lê os IDs do apêndice de user-stories", () => {
-    const source = [
-      "## Appendix: User Story Status",
-      "",
-      "| ID | Story | Priority | Status |",
-      "|----|-------|----------|--------|",
-      "| US-1.1 | Cadastro | High | Pending |",
-      "| US-1.10 | Exportação | Low | Pending |",
-    ].join("\n");
-    expect(extractStoryIds(source)).toEqual(["US-1.1", "US-1.10"]);
-  });
-
-  it("lê as tabelas DBML do modelo de dados", () => {
-    const source = "Table users {\n  id bigint\n}\n\nTable statuses {\n  id bigint\n}";
-    expect(extractEntities(source)).toEqual(["users", "statuses"]);
-  });
-
-  it("devolve zero entidades quando o projeto não tem persistência", () => {
-    expect(extractEntities("## Schema\n\nO estado vive em memória durante a execução.")).toEqual([]);
-  });
-
-  it("lê os workflows numerados do project-description", () => {
-    const source = "## Core Workflows\n\n### 1. Cadastro\n\ntexto\n\n### 2. Exportação\n";
-    expect(extractWorkflows(source)).toEqual([
-      { number: "1", name: "Cadastro" },
-      { number: "2", name: "Exportação" },
-    ]);
+describe("as fontes de cobertura saem do esqueleto", () => {
+  it("story, entidade e fluxo declarados viram o que a cobertura exige rastrear", () => {
+    const lido = parseSkeleton(SKELETON, { maxTasksPerPhase: 15 });
+    if (!lido.ok) throw new Error("fixture inválida");
+    expect(coverageFromSkeleton(lido.skeleton)).toEqual({
+      storyIds: ["US-1.1"],
+      entities: ["statuses", "reservations"],
+      workflows: [{ number: "1", name: "Criar reserva" }],
+    });
   });
 });
 

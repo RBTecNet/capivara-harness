@@ -7,6 +7,12 @@
  *
  * Fica junto dos handoffs, com o mesmo id de run — o pedido decide o run, e um
  * pedido diferente não herda o esqueleto de outro.
+ *
+ * O sufixo é `.skeleton-state.json`, e não `.skeleton.json`, porque o handoff da
+ * entrevista sobre o esqueleto já ocupa esse nome. Enquanto os dois colidiram, a
+ * gravação do esqueleto — que vem depois — apagava as respostas do
+ * desenvolvedor, e o `plan` entrevistava como se o `init` nunca tivesse
+ * perguntado nada.
  */
 
 import { readFile } from "node:fs/promises";
@@ -16,7 +22,7 @@ import { artifactPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
 
 function skeletonPath(projectRoot: string, runId: string): string {
-  return join(artifactPaths(projectRoot).handoffs, `${runId}.skeleton.json`);
+  return join(artifactPaths(projectRoot).handoffs, `${runId}.skeleton-state.json`);
 }
 
 export async function writeSkeletonState(projectRoot: string, runId: string, skeleton: Skeleton): Promise<void> {

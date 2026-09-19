@@ -12,8 +12,7 @@ export type {
 } from "./phases.js";
 export { buildStamp, checkStamp, isStampLine, sha12 } from "./stamps.js";
 export type { StampInput } from "./stamps.js";
-export { extractEntities, extractStoryIds, extractWorkflows } from "./documents.js";
-export type { Workflow } from "./documents.js";
+export type { Workflow } from "./coverage.js";
 export { checkCoverage, checkEntities, checkStories, checkWorkflows } from "./coverage.js";
 export type { CoverageSources } from "./coverage.js";
 export { renderContractDocument } from "./doc.js";
@@ -32,7 +31,7 @@ export { canonicalDependsOn, canonicalWorkflowTraces, joinPhaseMetadata, normali
 export type { NormalizedPart, PhasePartExpectation } from "./phase-part.js";
 export { checkRewriteDrift, parsePhaseFragment } from "./drift.js";
 export type { DriftInput } from "./drift.js";
-export { SKELETON_CONTRACT, parseSkeleton, renderSkeleton, sliceForPhase } from "./skeleton.js";
+export { SKELETON_CONTRACT, coverageFromSkeleton, parseSkeleton, renderSkeleton, sliceForPhase } from "./skeleton.js";
 export type {
   Skeleton,
   SkeletonDefect,

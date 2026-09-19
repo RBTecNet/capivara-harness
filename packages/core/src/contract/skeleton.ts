@@ -21,6 +21,8 @@
  * exatamente a ausência desse acordo que produziu os impasses do piloto 3.
  */
 
+import type { CoverageSources } from "./coverage.js";
+
 export const SKELETON_CONTRACT = "capivara-skeleton/v1" as const;
 
 export interface SkeletonStack {
@@ -324,4 +326,21 @@ export function renderSkeleton(skeleton: Skeleton): string {
   );
 
   return `${linhas.join("\n")}\n`;
+}
+
+/**
+ * As fontes de cobertura do esqueleto.
+ *
+ * Antes elas eram extraídas dos três documentos em prosa — IDs do apêndice de
+ * stories, `Table` do DBML, `### N.` dos workflows. O esqueleto declara os três
+ * diretamente, então a extração some junto com a prosa, mas a checagem não: é
+ * ela que pega a task que não rastreia nada, e foi ela que pegou o piloto 3
+ * traduzindo o rótulo `workflow <n>`.
+ */
+export function coverageFromSkeleton(skeleton: Skeleton): CoverageSources {
+  return {
+    storyIds: skeleton.stories.map((story) => story.id),
+    entities: skeleton.entities.map((entity) => entity.name),
+    workflows: skeleton.workflows.map((workflow) => ({ number: workflow.number, name: workflow.name })),
+  };
 }

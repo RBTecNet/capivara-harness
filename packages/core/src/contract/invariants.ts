@@ -100,7 +100,7 @@ export const INVARIANTS: readonly Invariant[] = [
   },
   {
     code: "I-10",
-    title: "Todo `US-N.M` do apêndice de user-stories aparece em pelo menos um `**Traces:**`",
+    title: "Toda story `US-N.M` declarada no esqueleto aparece em pelo menos um `**Traces:**`",
     rationale: "Cobertura: uma story sem task é trabalho que o plano esqueceu, e o loop entregaria uma aplicação incompleta sem nunca reprovar.",
     checkedBy: "coverage",
     enforcement: "rejects",
@@ -114,7 +114,7 @@ export const INVARIANTS: readonly Invariant[] = [
   },
   {
     code: "I-12",
-    title: "Todo workflow numerado do project-description é coberto por uma task ou explicitamente excluído",
+    title: "Todo workflow numerado do esqueleto é coberto por uma task ou explicitamente excluído",
     rationale: "Cobertura: um fluxo principal pode sumir entre a descrição e o plano sem que nenhuma verificação perceba.",
     checkedBy: "coverage",
     enforcement: "rejects",

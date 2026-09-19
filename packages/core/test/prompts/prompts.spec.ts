@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { assessRehearsal, enumerateCriteria, gapPrompt, interviewPrompt, languageBlock, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, writerPrompt } from "../../src/prompts/index.js";
+import { assessRehearsal, enumerateCriteria, gapPrompt, interviewPrompt, languageBlock, parseRehearsal, phaseFromSlicePrompt, rehearsalPrompt, skeletonPrompt } from "../../src/prompts/index.js";
 import type { WriterContext } from "../../src/prompts/index.js";
-import { parsePhases } from "../../src/contract/index.js";
+import { parsePhases, phaseBlock } from "../../src/contract/index.js";
 import { STRUCTURAL_LABELS } from "../../src/contract/index.js";
 
 const context: WriterContext = {
@@ -12,13 +12,27 @@ const context: WriterContext = {
   upstream: [],
 };
 
-const todos = [
-  writerPrompt("project-description.md", context),
-  writerPrompt("user-stories.md", context),
-  writerPrompt("database-schema.md", context),
-  ledgerPrompt(context),
-  phasePartPrompt({ ...context, phaseNumber: 1, ledgerEntry: "{}" }),
-];
+const esqueleto = skeletonPrompt({
+  language: context.language,
+  request: context.request,
+  decisions: context.decisions,
+  assumptions: [],
+  inventory: "Projeto vazio.",
+  maxTasksPerPhase: 15,
+  maxCriteriaPerTask: 4,
+});
+
+const fatia = (phaseNumber = 1): string =>
+  phaseFromSlicePrompt({
+    language: context.language,
+    slice: "## Stack\n- Linguagem: Node 22",
+    phaseNumber,
+    totalPhases: 3,
+    grammar: phaseBlock(phaseNumber),
+    maxCriteriaPerTask: 4,
+  });
+
+const todos = [interviewPrompt("skeleton", context, "Projeto vazio.", []), gapPrompt("phase 1", context, ["x"]), esqueleto, fatia()];
 
 describe("regra de idioma", () => {
   it("todo prompto do escritor carrega o bloco de idioma resolvido", () => {
@@ -52,13 +66,13 @@ describe("neutralidade de execução", () => {
   });
 
   it("o escritor é instruído a não citar provider nem topologia de agentes", () => {
-    expect(writerPrompt("project-description.md", context)).toContain("Never mention a provider");
+    expect(interviewPrompt("skeleton", context, "Projeto vazio.", [])).toContain("Never mention a provider");
   });
 });
 
 describe("papel read-only", () => {
   it("o escritor é proibido de escrever código, rodar comandos e commitar", () => {
-    const prompt = writerPrompt("project-description.md", context);
+    const prompt = interviewPrompt("skeleton", context, "Projeto vazio.", []);
     expect(prompt).toContain("never run build or test commands");
     expect(prompt).toContain("never commit");
   });
@@ -66,24 +80,22 @@ describe("papel read-only", () => {
 
 describe("autoridade e proibições", () => {
   it("declara a ordem de autoridade e que só ACCEPTED é decisão", () => {
-    const prompt = writerPrompt("user-stories.md", context);
+    const prompt = interviewPrompt("skeleton", context, "Projeto vazio.", []);
     expect(prompt).toContain("Authority order");
-    expect(prompt).toContain("is not a");
     expect(prompt).toContain("DEFERRED, PARTIAL, AMBIGUOUS or CONTRADICTED");
   });
 
   it("proíbe inventar precisão que a fonte não deu", () => {
-    expect(writerPrompt("database-schema.md", context)).toContain("Never add precision the source did not supply");
+    expect(interviewPrompt("skeleton", context, "Projeto vazio.", [])).toContain("Never add precision the source did not supply");
   });
 
   it("manda marcar decisão aberta com [NEEDS DECISION]", () => {
-    expect(writerPrompt("project-description.md", context)).toContain("[NEEDS DECISION]");
+    expect(interviewPrompt("skeleton", context, "Projeto vazio.", [])).toContain("[NEEDS DECISION]");
   });
 
   it("carrega o pedido original verbatim e as decisões aceitas", () => {
-    const prompt = writerPrompt("project-description.md", context);
-    expect(prompt).toContain("um sistema de reservas para uma pousada");
-    expect(prompt).toContain("Stack: Node 22 com Vitest");
+    expect(esqueleto).toContain("um sistema de reservas para uma pousada");
+    expect(esqueleto).toContain("Stack: Node 22 com Vitest");
   });
 });
 
@@ -103,15 +115,6 @@ describe("levantamento de perguntas", () => {
   it("declara a regra de decisão restritiva e aceita lista vazia", () => {
     expect(prompt).toContain("Ask only when ALL of these are true");
     expect(prompt).toContain("An empty question list is a valid and good answer");
-  });
-});
-
-describe("metadado de documentação não vira pergunta", () => {
-  it("prioridade e status têm padrão e nunca são marcados como pendentes", () => {
-    const prompt = writerPrompt("user-stories.md", context);
-    expect(prompt).toContain("documentation metadata, not decisions");
-    expect(prompt).toContain("Default every story to High and Pending");
-    expect(prompt).toContain("NEVER write [NEEDS DECISION] in those columns");
   });
 });
 
@@ -135,19 +138,18 @@ describe("opção não pode ser adiamento disfarçado", () => {
   });
 });
 
-describe("ausência de design e limites do DBML", () => {
-  it("a ausência de artefato de design nunca é decisão pendente", () => {
-    const prompt = phasePartPrompt({ ...context, phaseNumber: 1, ledgerEntry: "{}" });
-    expect(prompt).toContain("OMIT the Design ref line entirely");
-    expect(prompt).toContain("NEVER an open decision");
+describe("ausência de artefato de design", () => {
+  it("a fase aprende que Design ref quase sempre não existe, e que inventar caminho a reprova", () => {
+    expect(fatia()).toContain("USUALLY ABSENT");
+    expect(fatia()).toContain("dead reference");
   });
 
   it("o levantamento de gaps não pergunta caminho de design", () => {
-    expect(gapPrompt("project-phases.md", context, ["caminho do design"])).toContain("Never ask for the path of a design artifact");
+    expect(gapPrompt("phase 3", context, ["caminho do design"])).toContain("Never ask for the path of a design artifact");
   });
 
   it("a rodada de gaps recebe o que já foi perguntado, com as palavras do desenvolvedor", () => {
-    const prompt = gapPrompt("project-description.md", context, ["ciclo de vida das colunas"], [
+    const prompt = gapPrompt("skeleton", context, ["ciclo de vida das colunas"], [
       {
         decision: "Quais colunas devem existir inicialmente e qual o ciclo de vida delas?",
         disposition: "DEFERRED",
@@ -160,66 +162,58 @@ describe("ausência de design e limites do DBML", () => {
   });
 
   it("sem histórico, a rodada de gaps não inventa uma seção vazia", () => {
-    expect(gapPrompt("user-stories.md", context, ["x"])).not.toContain("Already asked in this document");
-  });
-
-  it("o documento de dados declara regras com semântica exata, sem DDL", () => {
-    const prompt = writerPrompt("database-schema.md", context);
-    expect(prompt).toContain("### Structural rules");
-    expect(prompt).toContain("NO DDL, NO SQL, NO triggers");
-    expect(prompt).toContain("new_check_in < existing_check_out");
+    expect(gapPrompt("phase 1", context, ["x"])).not.toContain("Already asked in this document");
   });
 });
 
-describe("escrita de project-phases em partes", () => {
-  it("o ledger planeja tudo e escreve nenhuma fase", () => {
-    const prompt = ledgerPrompt(context);
-    expect(prompt).toContain("write NO phase yet");
-    expect(prompt).toContain("capivara-ledger/v1");
+describe("o esqueleto pensa o produto uma vez, a fase vê só a fatia", () => {
+  it("o esqueleto é a única vez que alguém olha o produto inteiro", () => {
+    expect(esqueleto).toContain("ONLY time anyone looks at the whole product at once");
+    expect(esqueleto).toContain("capivara-skeleton/v1");
   });
 
-  it("o ledger declara o dimensionamento como restrição dura", () => {
-    expect(ledgerPrompt(context)).toContain("hard constraint");
-    expect(ledgerPrompt(context)).toContain("ONE agent session");
+  it("o esqueleto declara o dimensionamento como restrição da sessão de agente", () => {
+    expect(esqueleto).toContain("One phase is ONE agent session");
+    expect(esqueleto).toContain("up to 15 tasks");
   });
 
-  it("a parte escreve EXATAMENTE uma fase e nada do envelope", () => {
-    const prompt = phasePartPrompt({ ...context, phaseNumber: 3, ledgerEntry: '{"number":3}' });
-    expect(prompt).toContain("EXACTLY ONE phase");
-    expect(prompt).toContain("phase 3");
-    expect(prompt).toContain("Do not write the document header");
+  it("a regra transversal precisa nomear alvo e momento: é o acordo entre fases que não se veem", () => {
+    expect(esqueleto).toContain("NAMES ITS TARGET AND ITS");
+    expect(esqueleto).toContain("A name you leave loose becomes two different names");
   });
 
-  it("a parte recebe a gramática vinda do módulo do contrato", () => {
-    const prompt = phasePartPrompt({ ...context, phaseNumber: 2, ledgerEntry: "{}" });
-    expect(prompt).toContain("**Acceptance criteria:**");
-    expect(prompt).toContain("**Traces:**");
+  it("a fase escreve EXATAMENTE a sua fase e nada do envelope", () => {
+    const prompt = fatia(3);
+    expect(prompt).toContain("writing phase 3 of 3");
+    expect(prompt).toContain("no document header, no other phase");
   });
 
-  it("exige critério binário e recusa linguagem vaga", () => {
-    const prompt = phasePartPrompt({ ...context, phaseNumber: 1, ledgerEntry: "{}" });
-    expect(prompt).toContain("binary and observable");
-    expect(prompt).toContain("are rejected");
+  it("a fase recebe a gramática vinda do módulo do contrato", () => {
+    expect(fatia(2)).toContain("**Acceptance criteria:**");
+    expect(fatia(2)).toContain("**Traces:**");
+  });
+
+  it("a fase é proibida de redefinir a regra transversal que ela não decidiu", () => {
+    expect(fatia()).toContain("do not contradict them");
+    expect(fatia()).toContain("breaks a phase you cannot see");
   });
 });
 
 describe("a pergunta de aparência", () => {
-  it("é obrigatória no documento que descreve o produto", () => {
-    const prompt = interviewPrompt("project-description.md", context, "projeto vazio", []);
+  it("é obrigatória no levantamento que descreve o produto", () => {
+    const prompt = interviewPrompt("skeleton", context, "projeto vazio", []);
     expect(prompt).toContain("always ask when the product has a user interface");
     expect(prompt).toContain("not a minimal scope");
   });
 
   it("não tem opção para 'sem estilo nenhum'", () => {
-    const prompt = interviewPrompt("project-description.md", context, "projeto vazio", []);
+    const prompt = interviewPrompt("skeleton", context, "projeto vazio", []);
     expect(prompt).toContain("There is no option for");
     expect(prompt).toContain("no styling");
   });
 
-  it("não polui os outros documentos da cadeia", () => {
-    for (const documento of ["user-stories.md", "database-schema.md"] as const) {
-      expect(interviewPrompt(documento, context, "projeto vazio", [])).not.toContain("visual identity");
-    }
+  it("não polui o levantamento de uma fase, que não decide a identidade do produto", () => {
+    expect(interviewPrompt("phase 2", context, "projeto vazio", [])).not.toContain("visual identity");
   });
 });
 

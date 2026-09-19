@@ -126,9 +126,10 @@ export async function commitPhase(projectRoot: string, phaseNumber: number, titl
  * não: quem clonasse o repositório encontrava a aplicação sem as decisões que a
  * produziram.
  *
- * Só os quatro documentos publicados, num commit próprio, no momento em que o
- * pacote fica pronto. Nada de `runs/` nem de `handoffs/`: aquilo é estado do
- * run, e o `.gitignore` escrito na árvore de artefatos já os mantém de fora.
+ * Só os artefatos publicados — o esqueleto e o plano — num commit próprio, no
+ * momento em que o pacote fica pronto. Nada de `runs/` nem de `handoffs/`:
+ * aquilo é estado do run, e o `.gitignore` escrito na árvore de artefatos já os
+ * mantém de fora.
  */
 export async function commitSpecification(projectRoot: string): Promise<CommitResult> {
   if (!(await isRepository(projectRoot))) return { committed: false, message: "sem repositório Git: a especificação não foi versionada" };

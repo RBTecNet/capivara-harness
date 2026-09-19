@@ -1,15 +1,21 @@
 # capivara
 
-Do prompt à aplicação final, em dois comandos.
+Do prompt à aplicação final, em três comandos.
 
 ```bash
 capivara init "um sistema de reservas para uma pousada de 8 quartos"
+capivara plan
 capivara build
 ```
 
-O primeiro entrevista você, escreve quatro documentos, audita cada um e para
-quando não há mais nenhum gap: **RALPH READY**. O segundo constrói a aplicação a
-partir dessa documentação, uma fase por sessão, até o fim.
+O `init` entrevista você e desenha as fases do projeto: **PLAN READY**. O `plan`
+detalha cada fase, audita, ensaia e para quando não há mais nenhum gap:
+**RALPH READY**. O `build` constrói a aplicação a partir desse plano, uma fase
+por sessão, até o fim.
+
+O corte entre os dois primeiros está onde o custo muda de ordem de grandeza. O
+`init` são duas ou três chamadas; o `plan` são dezenas. Errar a divisão do
+produto custa minutos, não horas.
 
 ## A tese
 
@@ -40,24 +46,37 @@ Confira o ambiente antes de gastar a primeira chamada:
 capivara doctor
 ```
 
-## Os dois comandos
+## Os três comandos
 
 ### `capivara init`
 
-Percorre quatro documentos encadeados, cada um com sua própria entrevista:
+Entrevista você e produz o **esqueleto** do produto: stack, entidades com campos,
+stories, fluxos, regras transversais e fases. É a única chamada que olha o
+produto inteiro de uma vez.
 
-```
-project-description.md  →  user-stories.md  →  database-schema.md  →  project-phases.md
-```
-
-Cada documento passa por um **self-check mecânico** (custo zero) e depois por um
-**auditor independente**, em sessão nova, que aprova ou devolve com o motivo *e*
-a orientação de correção. Só `project-phases.md` é consumido pelo loop; os outros
-três são a autoridade que o executor lê.
+As **regras transversais** são a parte que não pode ser vaga. Se a fase 3 cria um
+campo e a fase 7 o lê, elas nunca se veem — concordam só pelo que o esqueleto
+escreveu. Por isso o gate recusa regra que não nomeie sobre o que fala.
 
 A entrevista pergunta uma coisa por vez, mostra a evidência antes da pergunta, e
 classifica cada resposta. Só uma resposta aceita vira decisão confirmada —
 `não sei` nunca confirma a recomendação que estava na tela.
+
+Termina em **PLAN READY**, que é mecânico: nenhuma chamada de modelo. As fases
+cobrem tudo o que foi declarado, são contíguas, dependem só do que vem antes, e
+nenhuma decisão material ficou em aberto.
+
+### `capivara plan`
+
+Escreve uma fase por chamada, **cada uma vendo só a sua fatia**: a stack, o que
+aquela fase entrega, e todas as regras transversais. Nada mais. O que precisava
+ser acordado entre as fases já foi, no esqueleto.
+
+O que só a escrita da fase descobre volta como uma segunda rodada de entrevista.
+Depois vêm o self-check mecânico (custo zero), o **auditor independente** — uma
+chamada por fase, mais uma de coerência sobre o plano inteiro — e o **ensaio do
+verificador**, que julga cada critério de aceite antes de existir código: um
+critério impossível de observar para aqui, e não três ciclos de correção adiante.
 
 Termina em `RALPH READY` ou em `NOT READY` dizendo exatamente o que falta. Nunca
 "quase pronto".
@@ -84,7 +103,7 @@ de onde parou, sem refazer o que já ficou verde.
 
 | Papel | O que faz | Permissão |
 |---|---|---|
-| `writer` | escreve os documentos | somente leitura |
+| `writer` | escreve o esqueleto e as fases | somente leitura |
 | `auditor` | aprova ou devolve com orientação | somente leitura |
 | `builder` | implementa a fase | escrita + rede |
 | `verifier` | diz o que está feito e o que não está | leitura + comandos read-only |
@@ -123,9 +142,7 @@ aparece em `argv`, onde ficariam visíveis em `ps`.
 ```
 .capivara/
 ├── init/                    autoridade de leitura para o executor
-│   ├── project-description.md
-│   ├── user-stories.md
-│   ├── database-schema.md
+│   ├── skeleton.md          o produto: stack, dados, stories, fluxos, regras
 │   ├── project-phases.md    o único documento que o loop consome
 │   └── design/              manual e opcional; a ferramenta nunca escreve aqui
 ├── handoffs/                a entrevista, preservada entre execuções

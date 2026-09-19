@@ -23,7 +23,7 @@ export interface AuditorContext {
   decisions: string[];
   dispositions: string[];
   upstream: { name: string; content: string }[];
-  /** Ressalvas das auditorias anteriores desta cadeia. */
+  /** Ressalvas das auditorias anteriores deste run. */
   upstreamRemarks: { document: string; where: string; observation: string }[];
   content: string;
 }
@@ -36,7 +36,7 @@ const FRAME = [
   "## What you receive",
   "- the developer's original prompt, verbatim",
   "- the interview: raw answers, normalized decisions and dispositions",
-  "- the upstream documents of the chain",
+  "- the part of the skeleton this document was written from",
   "- the document under audit",
   "The mechanical self-check already passed. Do not re-audit the shape the parser owns: heading",
   "levels, stamp freshness, coverage counts and task field presence are already proven.",

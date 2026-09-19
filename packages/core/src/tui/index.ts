@@ -17,4 +17,4 @@ export { createLiveRegion } from "./live.js";
 export type { LiveRegion } from "./live.js";
 export { HarnessProgress } from "./harness-progress.js";
 export type { HarnessProgressOptions, ProgressEvent } from "./harness-progress.js";
-export { DOCUMENT_CHAIN_LABELS } from "./labels.js";
+export { PIPELINE_STEPS } from "./labels.js";

@@ -10,7 +10,7 @@ import { ROLE_NAMES, ROLES } from "../provider/roles.js";
 import type { RoleName } from "../provider/roles.js";
 
 export interface WizardAnswers {
-  command: "init" | "build";
+  command: "init" | "plan" | "build";
   request?: string;
   global: { provider?: string; model?: string; effort?: string };
   roles: Partial<Record<RoleName, { provider?: string; model?: string; effort?: string }>>;

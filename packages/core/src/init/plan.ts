@@ -12,8 +12,8 @@
 
 import { runInit, type InitOptions, type InitOutcome } from "./orchestrator.js";
 
-export type PlanOptions = Omit<InitOptions, "mode" | "stage">;
+export type PlanOptions = Omit<InitOptions, "stage">;
 
 export async function runPlan(options: PlanOptions): Promise<InitOutcome> {
-  return runInit({ ...options, mode: "skeleton", stage: "plan" });
+  return runInit({ ...options, stage: "plan" });
 }

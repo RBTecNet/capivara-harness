@@ -10,7 +10,7 @@
  * direito para nenhum dos dois.
  */
 
-import { DOCUMENT_CHAIN_LABELS } from "./labels.js";
+import { PIPELINE_STEPS } from "./labels.js";
 import type { Activity, DashboardModel, DashboardEvent, PipelineStep, StepState } from "./dashboard.js";
 import type { Style } from "./ansi.js";
 
@@ -72,7 +72,7 @@ export class HarnessProgress {
     this.now = options.now ?? (() => new Date());
     this.startedAt = this.now().getTime();
     this.projeto = options.project;
-    for (const documento of DOCUMENT_CHAIN_LABELS) this.estados.set(documento.id, "aguardando");
+    for (const passo of PIPELINE_STEPS) this.estados.set(passo.id, "aguardando");
   }
 
   /** Um evento do run. Documento publicado fecha o passo; devolução marca correção. */
@@ -146,9 +146,9 @@ export class HarnessProgress {
   }
 
   private pipeline(): PipelineStep[] {
-    return DOCUMENT_CHAIN_LABELS.map((documento) => ({
-      label: documento.label,
-      state: this.estados.get(documento.id) ?? "aguardando",
+    return PIPELINE_STEPS.map((passo) => ({
+      label: passo.label,
+      state: this.estados.get(passo.id) ?? "aguardando",
     }));
   }
 

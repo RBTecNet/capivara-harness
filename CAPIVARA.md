@@ -1,14 +1,18 @@
 # Capivara
 
-Ferramenta de terminal que transforma um prompt livre em documentação `RALPH READY`
-(`capivara init`) e, num segundo comando, constrói a aplicação a partir dela
-(`capivara build`).
+Ferramenta de terminal que vai do prompt livre à aplicação em três estágios:
+`capivara init` desenha as fases do projeto até `PLAN READY`, `capivara plan` as
+detalha até `RALPH READY`, e `capivara build` constrói a aplicação a partir do plano.
 
 ## Especificação
 
 **`docs/PLANO.md` é a autoridade deste repositório.** Leia antes de escrever qualquer código.
-Ele define o contrato, os quatro documentos, os motores de entrevista e auditoria, os quatro
-gates do loop, os prompts literais de cada papel (Apêndice A) e o provider falso (Apêndice B).
+Ele define o contrato, os motores de entrevista e auditoria, os quatro gates do loop, os
+prompts literais de cada papel (Apêndice A) e o provider falso (Apêndice B).
+
+**§26 é o ciclo que roda hoje.** As seções 6 a 9 descrevem a cadeia de quatro documentos em
+prosa, que foi medida, reprovada e removida do produto; elas ficam como registro. Antes de
+implementar qualquer coisa sobre documentação, leia §26 primeiro.
 
 Uma mudança de comportamento começa no plano, não no código.
 

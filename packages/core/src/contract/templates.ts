@@ -11,7 +11,7 @@
 export const GRAMMAR_BLOCK: readonly string[] = [
   "# <Projeto> — Project Phases",
   "",
-  "<!-- inputs: project-description.md@sha256:abc123abc123 user-stories.md@sha256:def456def456 database-schema.md@sha256:789abc789abc -->",
+  "<!-- inputs: skeleton.md@sha256:abc123abc123 -->",
   "",
   "## Overview",
   "",

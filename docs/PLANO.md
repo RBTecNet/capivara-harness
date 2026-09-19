@@ -12,12 +12,17 @@ e, num segundo comando, constrói a aplicação final a partir dessa documentaç
 
 ## 0. Resumo executivo
 
-O `capivara` é uma CLI Node/TypeScript com dois comandos:
+O `capivara` é uma CLI Node/TypeScript com três comandos:
 
 ```
-capivara init "<prompt>"   # entrevista → 4 documentos → auditoria → RALPH READY
+capivara init "<prompt>"   # entrevista → esqueleto do produto → PLAN READY
+capivara plan              # uma fase por chamada → lacunas → auditoria → ensaio → RALPH READY
 capivara build             # loop com 4 gates por fase → aplicação final
 ```
+
+> **§26 reescreveu este ciclo.** As seções 6 a 9 descrevem a cadeia de quatro documentos em
+> prosa, que foi medida, reprovada e removida do produto. Elas ficam como registro do que se
+> tentou e do que se aprendeu; o que roda hoje está em §26.
 
 A tese do projeto cabe em uma frase:
 
@@ -1855,3 +1860,102 @@ E a conclusão que não era sobre desempenho: os planos que passaram nas auditor
 dos pilotos anteriores provavelmente carregavam defeitos que a leitura única não
 via. Parte do que o loop descobriu implementando estava no documento desde o
 começo.
+
+
+---
+
+## 26. O ciclo em três estágios — e a remoção da cadeia em prosa
+
+### 26.1 O que foi removido, e por quê
+
+A cadeia de quatro documentos (`project-description.md`, `user-stories.md`,
+`database-schema.md`, `project-phases.md`) foi removida do produto. Ela não falhou por
+qualidade: falhou por custo e por acoplamento.
+
+O que a medição mostrou, comparando o mesmo pedido pelos dois caminhos:
+
+| | cadeia em prosa | ciclo em três estágios |
+|---|---|---|
+| tempo até RALPH READY | 126 min | 27 min |
+| chamadas de modelo | 79 | 31 |
+| tamanho do prompt de escrita | 28 KB | 7–11 KB |
+| plano publicado | 65 KB | 20 KB |
+| ciclos de correção no build | vários | zero |
+
+A causa estava na estrutura, não nos prompts. Cada uma das ~50 chamadas do plano recebia o
+projeto inteiro e reconstruía o entendimento dele antes de escrever a sua fase: 77% do que o
+modelo processava era contexto, não tarefa. Escrever a fase 7 exigia pensar o produto todo
+pela sétima vez.
+
+O desenvolvedor foi explícito sobre o critério que importa: *"eu não quero ler nada, eu não
+vou avaliar documentação... a única obrigatoriedade é que a documentação gerada precisa ser
+compatível com o loop"*. Não há leitor humano. Quatro documentos em prosa existiam para um
+leitor que não existe — e o preço deles era pago em minutos e em ambiguidade.
+
+### 26.2 O que existe no lugar
+
+**Um artefato estruturado**, `capivara-skeleton/v1` (`src/contract/skeleton.ts`): stack,
+entidades com campos, stories, fluxos, **regras transversais** e fases. Ele é produzido por
+UMA chamada — a única vez em que alguém olha o produto inteiro de uma vez.
+
+As **regras transversais** são a parte que não pode ser vaga, e é a que substitui o que a
+prosa fazia sem querer: se a fase 3 cria um campo e a fase 7 o lê, elas nunca se veem, e
+concordam só pelo que o esqueleto escreveu. Uma regra que nomeia uma operação sem nomear
+sobre o que ela opera foi o defeito mais caro que este harness produziu — três fases
+adivinhando diferente sobre o mesmo campo. Por isso o gate PLAN READY recusa regra sem
+sujeito.
+
+**Uma fatia por fase** (`sliceForPhase`): a fase vê a stack, o que ela cobre, e TODAS as
+regras transversais. Nada mais. É a troca que corta a reconstrução do projeto em cada
+chamada.
+
+### 26.3 Os três estágios
+
+**`init`** — entrevista sobre o produto, esqueleto, **PLAN READY**. Custa duas ou três
+chamadas. É o estágio barato de errar: errar a divisão do produto passa a custar minutos em
+vez de horas, porque o esqueleto é pequeno o bastante para ser recusado antes de se pagar
+pelo detalhe.
+
+**`plan`** — cada fase é escrita com a sua fatia, em paralelo; o que só a escrita da fase
+descobre volta como rodada de lacunas (a segunda entrevista); auditoria; ensaio do
+verificador; **RALPH READY**.
+
+**`build`** — inalterado: o loop com quatro gates por fase.
+
+### 26.4 PLAN READY — o gate mecânico
+
+Nenhuma chamada de modelo. A pergunta é estrutural, e toda resposta é verificável em código:
+
+1. **esqueleto** — foi produzido.
+2. **cobertura** — toda story, entidade e fluxo é entregue por alguma fase. O que não é
+   coberto não vai existir.
+3. **ordem** — as fases são contíguas e dependem só do que vem antes. O loop executa em
+   ordem e não volta atrás.
+4. **regras** — toda regra transversal nomeia sobre o que fala.
+5. **decisões** — nada material em aberto.
+
+PLAN READY protege o `plan` de detalhar sobre uma divisão errada; RALPH READY protege o
+`build` de implementar sobre um plano inexecutável. Errar o primeiro custa minutos; errar o
+segundo custa horas.
+
+### 26.5 Cada auditoria recebe só o que a sua pergunta exige
+
+A auditoria de uma fase recebe a MESMA fatia que escreveu aquela fase: fidelidade só é
+julgável contra o que foi pedido, e entregar a fase sem o pedido é pedir ao auditor que
+adivinhe. A auditoria de coerência recebe o esqueleto inteiro, porque a pergunta dela é
+global por natureza — e ela é uma chamada, não N.
+
+### 26.6 Dois defeitos que a remoção expôs
+
+Ambos estavam escondidos pela cadeia e só apareceram quando ela saiu:
+
+**A cobertura não conferia nada.** As fontes de cobertura eram extraídas dos três documentos
+em prosa (`## Appendix` de stories, `Table` do DBML, `### N.` dos fluxos). Sem eles, as três
+listas voltavam vazias e a checagem passava por não ter assunto. Hoje elas saem do esqueleto
+(`coverageFromSkeleton`), que é quem declarou o produto.
+
+**O esqueleto apagava a entrevista.** O estado do esqueleto e o handoff da entrevista sobre o
+esqueleto gravavam no mesmo arquivo, `<runId>.skeleton.json`. A gravação do esqueleto vem
+depois, então apagava as respostas do desenvolvedor — e o `plan` entrevistava como se o
+`init` nunca tivesse perguntado nada. O sufixo do estado passou a ser `.skeleton-state.json`,
+e um teste fixa os dois arquivos lado a lado.

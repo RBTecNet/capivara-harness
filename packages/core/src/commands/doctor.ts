@@ -15,7 +15,7 @@ import { CLI_CATALOG, DIRECT_CATALOG, readCredentials } from "../provider/index.
 import { artifactPaths } from "../state/paths.js";
 import { isClean, isRepository } from "../loop/git.js";
 import { resolveTestCommand } from "../loop/testcmd.js";
-import { DOCUMENT_CHAIN } from "../init/readiness.js";
+import { INIT_ARTIFACTS } from "../init/readiness.js";
 
 const run = promisify(execFile);
 
@@ -107,20 +107,29 @@ export async function diagnose(options: DoctorOptions): Promise<Diagnosis[]> {
 
   const init = artifactPaths(options.projectRoot).init;
   const missing: string[] = [];
-  for (const document of DOCUMENT_CHAIN) {
-    const content = await readFile(join(init, document), "utf8").catch(() => null);
-    if (content === null) missing.push(document);
+  for (const artefato of INIT_ARTIFACTS) {
+    const content = await readFile(join(init, artefato), "utf8").catch(() => null);
+    if (content === null) missing.push(artefato);
   }
+  /*
+   * Faltar o plano é um passo pendente, não um defeito: o `init` publica o
+   * esqueleto e o `plan` publica o plano, e entre um e outro o projeto está num
+   * estado legítimo. Faltar o esqueleto com o plano publicado é que é quebra —
+   * o plano diz ter lido algo que não existe em disco.
+   */
+  const semEsqueleto = missing.includes("skeleton.md");
   found.push({
     area: "projeto",
     item: "documentação",
-    health: missing.length === 0 ? "ok" : missing.length === DOCUMENT_CHAIN.length ? "aviso" : "ausente",
+    health: missing.length === 0 ? "ok" : semEsqueleto && missing.length === 1 ? "ausente" : "aviso",
     detail:
       missing.length === 0
-        ? "os quatro documentos estão publicados"
-        : missing.length === DOCUMENT_CHAIN.length
-          ? "nenhum documento ainda: rode `capivara init`"
-          : `cadeia incompleta, faltam: ${missing.join(", ")}`,
+        ? "o esqueleto e o plano executável estão publicados"
+        : missing.length === INIT_ARTIFACTS.length
+          ? "nenhum artefato ainda: rode `capivara init`"
+          : semEsqueleto
+            ? "o plano existe sem o esqueleto que ele diz ter lido: rode `capivara init` de novo"
+            : "o esqueleto está publicado e o plano não: rode `capivara plan`",
   });
 
   return found;

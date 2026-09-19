@@ -1,9 +1,11 @@
 /**
- * A máquina de estados do `capivara init`.
+ * A máquina de estados do `init` e do `plan`.
  *
- * Para cada documento da cadeia: entrevista → escrita → self-check mecânico →
- * auditoria → publicação. O plano executável é a exceção: ele é escrito em
- * partes, uma fase por chamada, e montado em código.
+ * `init`: entrevista → esqueleto → PLAN READY. Uma chamada olha o produto
+ * inteiro, e é a única que olha.
+ * `plan`: uma fase por chamada, cada uma vendo só a sua fatia → lacunas →
+ * auditoria → ensaio → RALPH READY. O plano é montado em código, nunca escrito
+ * de uma vez.
  *
  * Toda dependência externa entra por parâmetro — a chamada ao modelo e a
  * pergunta ao desenvolvedor. Isso é o que permite exercitar o init inteiro, do
@@ -13,26 +15,25 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkRewriteDrift, extractEntities, parsePhaseFragment, parseSkeleton, renderSkeleton, sliceForPhase, extractStoryIds, extractWorkflows, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
+import { assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkRewriteDrift, coverageFromSkeleton, parsePhaseFragment, parseSkeleton, renderSkeleton, sliceForPhase, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
 import type { CoverageSources, Skeleton, StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
 import { phaseBlock } from "../contract/templates.js";
-import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
+import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, isRepairable, publish, repairDeterministically, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Assumption, Question } from "../interview/index.js";
-import { amendPhasePrompt, assessRehearsal, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
-import type { AskedQuestion, CriterionRef, DocumentName, RehearsalResult, WriterContext } from "../prompts/index.js";
+import { amendPhasePrompt, assessRehearsal, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
+import type { AskedQuestion, CriterionRef, RehearsalResult, WriterContext } from "../prompts/index.js";
 import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEvents, runIdFor, runPaths, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
 import { detectRateLimit, planWait } from "../loop/ratelimit.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
-import { DOCUMENT_CHAIN, evaluateReadiness } from "./readiness.js";
+import { INIT_ARTIFACTS, evaluateReadiness } from "./readiness.js";
 import { evaluatePlanReadiness, renderPlanReadiness } from "./plan-readiness.js";
 import { readSkeletonState, writeSkeletonState } from "./skeleton-state.js";
-import type { ChainDocument, Readiness } from "./readiness.js";
+import type { Readiness } from "./readiness.js";
 import type { DeveloperRequest } from "./request.js";
-import { checkDocumentShape } from "./selfcheck.js";
 import { renderReport, type InitReport, type RoleCost } from "./report.js";
 
 export interface AgentCall {
@@ -73,32 +74,18 @@ export interface InitOptions {
   maxGapQuestions?: number;
   /** Reescritas do plano motivadas pelo ensaio do verificador. */
   maxRehearsalRounds?: number;
-  /** Ignora o que este run já publicou e recomeça a cadeia do zero. */
+  /** Ignora o que este run já publicou e recomeça do zero. */
   fresh?: boolean;
   /** Fases escritas ao mesmo tempo. Elas são independentes; o teto é de cortesia. */
   maxParallelParts?: number;
   /** Rodadas para fechar defeito mecânico, separadas do teto do auditor. */
   maxMechanicalRounds?: number;
   /**
-   * Levantar perguntas ANTES de escrever cada documento.
-   *
-   * Desligado, o escritor escreve direto — assumindo o que é de baixo risco e
-   * marcando o que travou — e a rodada de gaps pergunta só o que sobrou. São
-   * dois caminhos para a mesma coisa; a questão é qual custa menos, e isso se
-   * mede em vez de se argumentar.
-   */
-  upfrontInterview?: boolean;
-  /**
-   * `chain` são os quatro documentos em prosa; `skeleton` é uma leitura do
-   * produto inteiro seguida das fases, cada uma vendo só a sua fatia.
-   */
-  mode?: "chain" | "skeleton";
-  /**
-   * Onde o run começa e termina no caminho por esqueleto.
+   * Onde o run começa e termina.
    *
    * `init` produz o esqueleto e para em PLAN READY; `plan` lê o esqueleto de
-   * disco e detalha as fases até RALPH READY. `both` faz os dois, que é como o
-   * caminho nasceu e como os testes o exercitam de ponta a ponta.
+   * disco e detalha as fases até RALPH READY. `both` faz os dois de uma vez, que
+   * é como os testes exercitam o ciclo de ponta a ponta.
    */
   stage?: "init" | "plan" | "both";
   /** Critérios por chamada do ensaio. Lote grande volta sem julgamento. */
@@ -280,8 +267,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const inventoryText = summarizeInventory(inventory);
   announce(inventory.empty ? "Projeto vazio: greenfield." : `Inventário: ${inventory.files.length} arquivo(s).`);
 
-  const published: Partial<Record<ChainDocument, string>> = {};
-  const approved: ChainDocument[] = [];
+  /** O plano executável publicado por este run. */
+  let plano = "";
+  let planoAprovado = false;
   const allAnswers: Answer[] = [];
   const allQuestions: Question[] = [];
   /** Suposições que o escritor registrou em vez de perguntar; o relatório as mostra. */
@@ -293,125 +281,17 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   let skeletonAtual: Skeleton | null = null;
 
   /*
-   * O que ESTE run já publicou não se repete.
+   * Um caminho só: uma leitura do produto inteiro, depois cada fase vendo a sua
+   * fatia.
    *
-   * O piloto 3 perdeu vinte e três respostas dadas à mão porque uma chamada
-   * estourou o tempo no terceiro documento: os dois primeiros já estavam
-   * publicados em disco, as respostas do terceiro já estavam no handoff, e mesmo
-   * assim a única saída era recomeçar do zero. Perguntar duas vezes a mesma coisa
-   * é a forma mais rápida de perder quem responde.
-   *
-   * O reaproveitamento é estreito de propósito: só vale para o mesmo run — e o id
-   * do run é o hash do pedido, então mudar o pedido muda o run e nada é herdado.
+   * A cadeia de quatro documentos em prosa foi removida. Ela existia para um
+   * leitor que não existe — o desenvolvedor não lê documentação, verifica se a
+   * aplicação funciona — e custava oito vezes mais para entregar um plano três
+   * vezes maior. O critério de aceite é um só: o loop consegue executar.
    */
-  const jaPublicados = new Set<string>(
-    options.fresh === true
-      ? []
-      : (await readEvents(paths.events))
-          .filter((entry) => entry.stage === "publish" && entry.status === "complete")
-          .map((entry) => entry.subject),
-  );
+  return await buildFromSkeleton();
 
-  /*
-   * O caminho por esqueleto: uma leitura do produto inteiro, depois cada fase
-   * vendo só a sua fatia.
-   *
-   * A cadeia de quatro documentos em prosa existia para um leitor que não
-   * existe. O critério de aceite da documentação é um só — o loop consegue
-   * executá-la — e prosa não ajuda nisso.
-   */
-  if (options.mode === "skeleton") {
-    const construido = await buildFromSkeleton();
-    return construido;
-  }
-
-  for (const document of DOCUMENT_CHAIN) {
-    if (jaPublicados.has(document)) {
-      const conteudo = await readFile(join(artifactPaths(options.projectRoot).init, document), "utf8").catch(() => "");
-      const handoff = await readHandoff(options.projectRoot, runId, document);
-
-      /*
-       * Reaproveita o que continua válido, refaz o que não está.
-       *
-       * O plano é o único documento com verificação mecânica, e reaproveitá-lo
-       * sem conferir transformaria a retomada numa armadilha: o piloto 3 saiu
-       * NOT READY por cobertura, e repetir o comando devolveria o mesmo plano
-       * defeituoso e o mesmo NOT READY, para sempre.
-       */
-      const aindaValido = document !== "project-phases.md" || planoAindaValido(conteudo);
-      if (!aindaValido) {
-        announce(`— ${document} foi reescrito: o que estava publicado não passa mais nas verificações mecânicas`);
-      }
-
-      if (conteudo.trim() !== "" && aindaValido) {
-        published[document] = conteudo;
-        approved.push(document);
-        // As decisões precisam descer a cadeia: um documento reaproveitado sem
-        // as respostas que o geraram deixaria os seguintes sem contexto.
-        if (handoff) {
-          allAnswers.push(...handoff.answers.map((answer) => ({ ...answer, questionId: scoped(document, answer.questionId) })));
-          allQuestions.push(...handoff.questions.map((question) => ({ ...question, id: scoped(document, question.id) })));
-        }
-        // Publicado é publicado: sem este evento, o painel mostra "aguardando"
-        // um documento que está pronto em disco desde a tentativa anterior.
-        await event("publish", document, "complete", "reaproveitado deste run");
-        announce(`— ${document} (reaproveitado deste run; --fresh recomeça do zero)`);
-
-        /*
-         * O ensaio roda mesmo sobre plano reaproveitado, senão o gate reprova
-         * por ele não ter rodado — e a cada nova tentativa o plano seria
-         * reaproveitado de novo, reprovado de novo, para sempre. Reaproveitar o
-         * texto não reaproveita o veredito.
-         */
-        if (document === "project-phases.md") await rehearse(authoredFromPublished(conteudo), writerContext(upstreamFor(document)), upstreamFor(document));
-        continue;
-      }
-    }
-
-    announce(`— ${document}`);
-    await event("interview", document, "started");
-
-    const upstream = DOCUMENT_CHAIN.filter((name) => name !== document && published[name] !== undefined)
-      .filter((name) => DOCUMENT_CHAIN.indexOf(name) < DOCUMENT_CHAIN.indexOf(document))
-      .map((name) => ({ name, content: published[name] ?? "" }));
-
-    const answers = await interview(document, upstream);
-
-    allAnswers.push(...answers.answers.map((answer) => ({ ...answer, questionId: scoped(document, answer.questionId) })));
-    allQuestions.push(...answers.questions.map((question) => ({ ...question, id: scoped(document, question.id) })));
-
-    const writer: WriterContext = {
-      language: options.language,
-      request: options.request.text,
-      decisions: allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision),
-      assumptions: allAssumptions.map((assumption) => `${assumption.topic}: ${assumption.statement} (${assumption.basis})`),
-      upstream,
-      ...(stampFor(document, published) !== null ? { stamp: stampFor(document, published) as string } : {}),
-    };
-
-    await event("authoring", document, "started");
-    const authored = document === "project-phases.md" ? await writePhases(writer) : await writeSimple(document, writer);
-
-    const closed = await closeGaps(document, authored, writer);
-
-    await event("audit", document, "started");
-    const verdict = await auditLoop(document, closed, writer, upstream);
-    remarks.push(...verdict.remarks.map((remark) => ({ document, remark })));
-
-    // O plano aprovado ainda não é um plano implementável: quem decide isso é
-    // quem vai julgar cada task no build, e ele é chamado aqui.
-    const final =
-      document === "project-phases.md" ? await rehearse(verdict.authored, writer, upstream) : { content: verdict.content };
-
-    published[document] = final.content;
-    approved.push(document);
-
-    await publish(options.projectRoot, [{ name: document, content: final.content }]);
-    await event("publish", document, "complete");
-    announce(`  publicado: ${document}`);
-  }
-
-  async function interview(document: ChainDocument, upstream: { name: string; content: string }[]) {
+  async function interview(document: string, upstream: { name: string; content: string }[]) {
     const questions: Question[] = [];
     const answers: Answer[] = [];
 
@@ -442,13 +322,6 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }
     }
 
-    // Sem levantamento prévio, quem pergunta é a escrita, pelo que ela não
-    // conseguir resolver sozinha.
-    if (options.upfrontInterview === false) {
-      await event("interview", document, "complete", "sem levantamento prévio: a escrita pergunta o que travar");
-      return { questions, answers };
-    }
-
     for (let round = 1; round <= maxInterviewRounds; round += 1) {
       const writer: WriterContext = {
         language: options.language,
@@ -457,9 +330,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         assumptions: [],
         upstream,
       };
-      // Já respondido inclui os documentos anteriores da cadeia. Sem isso, cada
-      // documento reabre a mesma decisão: no piloto 1 a stack foi perguntada
-      // quatro vezes, com quatro nomes diferentes.
+      // Já respondido inclui as rodadas anteriores e, no `plan`, o que o `init`
+      // fechou. Sem isso a mesma decisão é reaberta: no piloto 1 a stack foi
+      // perguntada quatro vezes, com quatro nomes diferentes.
       const previous = [
         ...allQuestions.map((question) => {
           const answer = allAnswers.find((entry) => entry.questionId === question.id);
@@ -567,7 +440,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * Resposta que não fecha volta para quem a escreveu, com o que falta na tela.
    */
   async function settle(
-    document: ChainDocument,
+    document: string,
     question: Question,
     raw: string,
     round: number,
@@ -597,7 +470,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     return buildAnswer(question, texto, classification, round, now);
   }
 
-  async function classifyWithModel(document: ChainDocument, question: Question, raw: string, round: number) {
+  async function classifyWithModel(document: string, question: Question, raw: string, round: number) {
     const output = await track({
       role: "auditor",
       stage: "interview",
@@ -636,200 +509,6 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       decision: verdict.disposition === "ACCEPTED" ? verdict.text : "",
       open: verdict.disposition === "ACCEPTED" ? "" : verdict.text || question.decision,
     };
-  }
-
-  async function writeSimple(document: ChainDocument, writer: WriterContext): Promise<Authored> {
-    const output = await track({
-      role: "writer",
-      stage: "authoring",
-      subject: document,
-      attempt: 1,
-      prompt: writerPrompt(document as Exclude<DocumentName, "project-phases.md">, writer),
-    });
-    const repaired = repairDeterministically(output, writer.stamp);
-    const defects = checkDocumentShape(document, repaired.content);
-    if (defects.length > 0) {
-      const retry = await track({
-        role: "writer",
-        stage: "self-check",
-        subject: document,
-        attempt: 2,
-        prompt: [
-          writerPrompt(document as Exclude<DocumentName, "project-phases.md">, writer),
-          "",
-          "## The previous attempt failed the mechanical self-check",
-          ...defects.map((defect) => `- ${defect.problem}\n  what to do: ${defect.hint}`),
-        ].join("\n"),
-      });
-      return simple(document, writer, repairDeterministically(retry, writer.stamp).content);
-    }
-    return simple(document, writer, repaired.content);
-  }
-
-  function simple(document: ChainDocument, writer: WriterContext, content: string): Authored {
-    return {
-      content,
-      rewrite: async (findings, attempt) => {
-        const rewritten = await track({
-          role: "writer",
-          stage: "authoring",
-          subject: document,
-          attempt,
-          prompt: [
-            writerPrompt(document as Exclude<DocumentName, "project-phases.md">, writer),
-            "",
-            rewriteInstruction(findings),
-            "",
-            "## The version you must fix",
-            content,
-          ].join("\n"),
-        });
-        return simple(document, writer, repairDeterministically(rewritten, writer.stamp).content);
-      },
-    };
-  }
-
-  async function writePhases(writer: WriterContext): Promise<Authored> {
-    const ledgerOutput = await track({ role: "writer", stage: "authoring", subject: "ledger", attempt: 1, prompt: ledgerPrompt(writer) });
-    const ledger = parseLedger(ledgerOutput);
-    if (!ledger.ok) {
-      throw new InitBlockedError(`o ledger de coordenação veio inválido: ${ledger.defects.map((defect) => defect.problem).join("; ")}`, runId);
-    }
-
-    /*
-     * As fases são escritas em paralelo porque são independentes por construção.
-     * O ledger aloca todas ANTES de a primeira ser escrita, e nenhuma parte lê o
-     * texto de outra: a coordenação entre elas já está decidida no ledger, que é
-     * exatamente o motivo de ele existir.
-     *
-     * No piloto 3 isso custou 29 minutos de fila para sete fases que ninguém
-     * estava esperando. A ordem do documento é preservada pelo índice, não pelo
-     * relógio — quem termina primeiro não fura a fila do texto final.
-     */
-    const parts = allocateParts(ledger.ledger);
-    const phases: string[] = new Array<string>(parts.length).fill("");
-
-    const escreverParte = async (part: (typeof parts)[number], posicao: number): Promise<void> => {
-      const entry = ledger.ledger.phases.find((phase) => phase.number === part.phaseNumber);
-      const output = await track({
-        role: "writer",
-        stage: "authoring",
-        subject: part.id,
-        attempt: 1,
-        prompt: phasePartPrompt({ ...writer, phaseNumber: part.phaseNumber, ledgerEntry: JSON.stringify(entry) }),
-      });
-      const semMortas = stripDeadDesignRefs(repairDeterministically(output).content, designExiste);
-      for (const conserto of semMortas.applied) announce(`    ${part.id}: ${conserto}`);
-      const normalized = normalizePhasePart(semMortas.content, {
-        phaseNumber: part.phaseNumber,
-        dependsOn: entry?.dependsOn || "none",
-      });
-      for (const fix of normalized.applied) announce(`    ${part.id}: ${fix}`);
-      phases[posicao] = normalized.markdown.trim();
-      announce(`  ${part.id} pronta`);
-      await event("authoring", part.id, "complete");
-    };
-
-    announce(`  escrevendo ${parts.length} fase(s), até ${maxParallelParts} por vez`);
-    const fila = parts.map((part, posicao) => ({ part, posicao }));
-    const trabalhadores = Array.from({ length: Math.min(maxParallelParts, fila.length) }, async () => {
-      for (;;) {
-        const proxima = fila.shift();
-        if (!proxima) return;
-        await escreverParte(proxima.part, proxima.posicao);
-      }
-    });
-    await Promise.all(trabalhadores);
-
-    // As decisões em aberto entram como prosa em `## Open Questions`, NUNCA com
-    // o marcador [NEEDS DECISION]: o invariante I-13 recusa esse marcador no
-    // documento, e injetá-lo aqui produziria um plano que o próprio contrato
-    // rejeita. Quem bloqueia a prontidão é o gate, que recebe os mesmos itens.
-    const openQuestions = unresolved({
-      round: maxInterviewRounds,
-      questions: allQuestions,
-      answers: allAnswers,
-      assumptions: [],
-      maxRounds: maxInterviewRounds,
-    }).map((item) => `${item.topic}: ${item.statement}`);
-
-    const overview = `${ledger.ledger.phases.length} fases, fundação primeiro. O MVP fecha na fase ${ledger.ledger.mvpCutPhase}.`;
-
-    /**
-     * A reescrita do plano NUNCA pode passar pelo prompt de parte sem remontar.
-     *
-     * O piloto 1 provou por quê: o prompt de parte manda escrever uma fase e
-     * proibir o cabeçalho, então a resposta do modelo substituiu o documento
-     * inteiro por uma fase só, sem título — e o parser reprovou o que o auditor
-     * tinha acabado de aprovar. Aqui a devolução reescreve APENAS as fases que
-     * os findings nomeiam, e o documento é remontado em código, como sempre.
-     */
-    const build = (current: string[]): Authored => ({
-      content: assemblePhasesDocument({ projectName: projectName(published), stamp: writer.stamp ?? "", overview, phases: current, openQuestions }),
-      rewrite: async (findings, attempt) => {
-        const targeted = affectedPhases(findings, parts.length);
-        announce(`  reescrevendo ${targeted.length} de ${parts.length} fase(s)`);
-        const next = [...current];
-
-        /*
-         * Emendar, não reescrever. E conferir que emendou: a instrução "mude só
-         * o que os findings citam" já estava no prompt antigo e o modelo
-         * reescrevia a fase inteira assim mesmo. O que é verificável em código
-         * não se pede por favor.
-         */
-        const emendas = targeted.map((phaseNumber) => async () => {
-          const part = parts.find((entry) => entry.phaseNumber === phaseNumber);
-          if (!part) return;
-          const entry = ledger.ledger.phases.find((phase) => phase.number === phaseNumber);
-          const anterior = current[phaseNumber - 1] ?? "";
-
-          let desvios: string[] = [];
-          for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
-            const output = await track({
-              role: "writer",
-              stage: "authoring",
-              subject: part.id,
-              attempt: attempt + tentativa - 1,
-              prompt: amendPhasePrompt({
-                language: options.language,
-                current: anterior,
-                findings,
-                ...(desvios.length > 0 ? { drift: desvios } : {}),
-              }),
-            });
-
-            const emendada = normalizePhasePart(repairDeterministically(output).content, {
-              phaseNumber,
-              dependsOn: entry?.dependsOn || "none",
-            }).markdown.trim();
-
-            desvios = driftBetween(anterior, emendada, findings);
-            if (desvios.length === 0 || tentativa === 2) {
-              if (desvios.length > 0) {
-                announce(`  ${part.id}: a emenda mexeu no que ninguém pediu (${desvios.length}); seguindo com o que veio`);
-              }
-              next[phaseNumber - 1] = emendada;
-              return;
-            }
-            announce(`  ${part.id}: a emenda derivou; pedindo de novo com o desvio nomeado`);
-          }
-        });
-
-        const filaDeEmendas = [...emendas];
-        await Promise.all(
-          Array.from({ length: Math.min(maxParallelParts, filaDeEmendas.length) }, async () => {
-            for (;;) {
-              const emenda = filaDeEmendas.shift();
-              if (!emenda) return;
-              await emenda();
-            }
-          }),
-        );
-        return build(next);
-      },
-    });
-
-    return build(phases);
   }
 
   /**
@@ -883,9 +562,6 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     const fases = parsed.document.phases;
     const base = auditBase(writer, upstream);
 
-    // A coerência recebe só o esquema entre os upstream: contradição entre fases
-    // é quase sempre sobre dado, e os outros documentos dobrariam o prompt sem
-    // acrescentar evidência para esta pergunta.
     const digest = enumerateCriteria(parsed.document)
       .map((criterion) => `${criterion.address} [${criterion.taskTitle}] ${criterion.text}`)
       .join("\n");
@@ -895,17 +571,34 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * depende de nenhuma e serializá-la custou 318s numa medição — cinco minutos
      * de relógio em troca de nada.
      */
+    /*
+     * Cada auditoria recebe exatamente o que a sua pergunta exige.
+     *
+     * A de uma fase recebe a MESMA fatia que escreveu a fase: fidelidade só é
+     * julgável contra o que foi pedido, e pedir a fase sem o pedido é pedir ao
+     * auditor que adivinhe. A de coerência recebe o esqueleto inteiro, porque a
+     * pergunta dela é global por natureza — e ela é uma chamada, não N.
+     */
+    const fatia = (numero: number): { name: string; content: string }[] =>
+      skeletonAtual ? [{ name: "fatia do esqueleto", content: sliceForPhase(skeletonAtual, numero) }] : upstream;
+
     const tarefas: (() => Promise<AuditVerdict>)[] = [
       ...fases.map((fase) => () =>
         auditCall(`project-phases.md#P${fase.number}`, attempt, () =>
-          phaseAuditPrompt({ ...base, phaseMarkdown: fase.markdown, phaseNumber: fase.number, totalPhases: fases.length }),
+          phaseAuditPrompt({
+            ...base,
+            upstream: fatia(fase.number),
+            phaseMarkdown: fase.markdown,
+            phaseNumber: fase.number,
+            totalPhases: fases.length,
+          }),
         ),
       ),
       () =>
         auditCall("project-phases.md#coerência", attempt, () =>
           coherencePrompt({
             ...base,
-            upstream: upstream.filter((documento) => documento.name === "database-schema.md"),
+            upstream: skeletonAtual ? [{ name: "skeleton.md", content: renderSkeleton(skeletonAtual) }] : upstream,
             digest,
             totalPhases: fases.length,
           }),
@@ -946,14 +639,6 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     throw new InitBlockedError("inalcançável", runId);
   }
 
-  /** Um plano publicado só vale a retomada se ainda passa no que é conferível. */
-  function planoAindaValido(conteudo: string): boolean {
-    const parsed = parsePhases(conteudo);
-    if (!parsed.ok) return false;
-    if (checkCoverage(parsed.document, coberturaAtual()).length > 0) return false;
-    return checkDesignRefs(parsed.document, artifactPaths(options.projectRoot).design, (caminho) => existsSync(caminho)).length === 0;
-  }
-
   /**
    * O caminho por esqueleto, do pedido ao plano.
    *
@@ -976,12 +661,28 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         );
       }
       skeletonAtual = guardado;
+
+      /*
+       * As decisões do `init` viajam para o `plan` pelo handoff.
+       *
+       * Sem isto, o segundo estágio não sabe nada do que o desenvolvedor
+       * respondeu no primeiro, e a rodada de lacunas volta a perguntar — ou pior,
+       * recomenda o contrário do que ele acabou de decidir, que foi o defeito
+       * mais caro que o piloto 3 produziu.
+       */
+      const doInit = await readHandoff(options.projectRoot, runId, "skeleton");
+      if (doInit) {
+        allQuestions.push(...doInit.questions.map((question) => ({ ...question, id: scoped("skeleton", question.id) })));
+        allAnswers.push(...doInit.answers.map((answer) => ({ ...answer, questionId: scoped("skeleton", answer.questionId) })));
+        announce(`  ${doInit.answers.length} decisão(ões) do init carregada(s); não vou perguntar de novo`);
+      }
+
       announce(`— esqueleto lido: ${guardado.phases.length} fases, ${guardado.rules.length} regra(s) transversal(is)`);
       return await detalharFases(guardado);
     }
 
     await event("interview", "skeleton", "started");
-    const entrevista = await interview("project-description.md", []);
+    const entrevista = await interview("skeleton", []);
     allAnswers.push(...entrevista.answers.map((answer) => ({ ...answer, questionId: scoped("skeleton", answer.questionId) })));
     allQuestions.push(...entrevista.questions.map((question) => ({ ...question, id: scoped("skeleton", question.id) })));
 
@@ -1123,17 +824,20 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }).map((item) => `${item.topic}: ${item.statement}`),
     });
 
-    published["project-phases.md"] = documento;
+    plano = documento;
     skeletonAtual = esqueleto;
 
     const writerDoPlano = writerContext([]);
-    const verdict = await auditLoop("project-phases.md", authoredFromPublished(documento), writerDoPlano, []);
-    published["project-phases.md"] = verdict.content;
-    approved.push("project-phases.md");
-    remarks.push(...verdict.remarks.map((remark) => ({ document: "project-phases.md" as ChainDocument, remark })));
+    const semGaps = await closeGaps("project-phases.md", planoAutorado(esqueleto, fases), writerDoPlano);
+    plano = semGaps.content;
+
+    const verdict = await auditLoop("project-phases.md", semGaps, writerDoPlano, []);
+    plano = verdict.content;
+    planoAprovado = true;
+    remarks.push(...verdict.remarks.map((remark) => ({ document: "project-phases.md", remark })));
 
     const final = await rehearse(verdict.authored, writerDoPlano, []);
-    published["project-phases.md"] = final.content;
+    plano = final.content;
 
     await publish(options.projectRoot, [{ name: "project-phases.md", content: final.content }]);
     await event("publish", "project-phases.md", "complete");
@@ -1151,13 +855,6 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     return existsSync(join(artifactPaths(options.projectRoot).init, caminho)) || existsSync(join(options.projectRoot, caminho));
   }
 
-  /** Os documentos acima de `document` que já estão publicados. */
-  function upstreamFor(document: ChainDocument): { name: string; content: string }[] {
-    return DOCUMENT_CHAIN.filter((name) => name !== document && published[name] !== undefined)
-      .filter((name) => DOCUMENT_CHAIN.indexOf(name) < DOCUMENT_CHAIN.indexOf(document))
-      .map((name) => ({ name, content: published[name] ?? "" }));
-  }
-
   /** O contexto do escritor para um documento, montado do que já foi decidido. */
   function writerContext(upstream: { name: string; content: string }[]): WriterContext {
     return {
@@ -1170,27 +867,73 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   }
 
   /**
-   * Um documento já publicado, embrulhado para o ensaio.
+   * O plano montado, com a forma de emendar a fase que a auditoria citar.
    *
-   * Ele não precisa saber reescrever: se o ensaio reprovar um critério de um
-   * plano reaproveitado, o caminho é o gate bloquear com o endereço na tela — a
-   * reescrita exige o ledger e as partes, que este run não tem.
+   * Sem isto a devolução não tinha o que reescrever: o plano voltava idêntico e o
+   * ciclo virava impasse com zero devoluções. A emenda nasce da MESMA fatia que
+   * escreveu a fase — é o que mantém a fase corrigida coerente com o que ela
+   * podia ver quando nasceu.
    */
-  function authoredFromPublished(content: string): Authored {
-    return {
-      content,
-      rewrite: async () => authoredFromPublished(content),
-    };
+  function planoAutorado(esqueleto: Skeleton, fases: string[]): Authored {
+    const montar = (partes: string[]): string =>
+      assemblePhasesDocument({
+        projectName: esqueleto.projectName,
+        stamp: buildStamp([{ name: "skeleton.md", content: renderSkeleton(esqueleto) }]),
+        overview: `${esqueleto.phases.length} fases, fundação primeiro. O MVP fecha na fase ${esqueleto.mvpCutPhase}.`,
+        phases: partes,
+        openQuestions: [],
+      });
+
+    const autorado = (partes: string[]): Authored => ({
+      content: montar(partes),
+      rewrite: async (findings, attempt) => {
+        const alvos = affectedPhases(findings, partes.length);
+        announce(`  emendando ${alvos.length} de ${partes.length} fase(s)`);
+        const proximas = [...partes];
+
+        const fila = [...alvos];
+        await Promise.all(
+          Array.from({ length: Math.min(maxParallelParts, fila.length) }, async () => {
+            for (;;) {
+              const numero = fila.shift();
+              if (numero === undefined) return;
+              const fase = esqueleto.phases.find((entry) => entry.number === numero);
+              if (!fase) continue;
+
+              const anterior = proximas[numero - 1] ?? "";
+              const saida = await track({
+                role: "writer",
+                stage: "authoring",
+                subject: `phase-p${String(numero).padStart(2, "0")}`,
+                attempt,
+                prompt: amendPhasePrompt({ language: options.language, current: anterior, findings }),
+              });
+
+              const limpa = stripDeadDesignRefs(repairDeterministically(saida).content, designExiste);
+              for (const conserto of limpa.applied) announce(`    fase ${numero}: ${conserto}`);
+              proximas[numero - 1] = normalizePhasePart(limpa.content, {
+                phaseNumber: numero,
+                dependsOn: fase.dependsOn,
+              }).markdown.trim();
+            }
+          }),
+        );
+
+        return autorado(proximas);
+      },
+    });
+
+    return autorado(fases);
   }
 
-  /** As fontes de cobertura a partir do que já foi publicado nesta cadeia. */
+  /**
+   * As fontes de cobertura: o esqueleto, que é quem declarou o produto.
+   *
+   * Sem esqueleto não há o que cobrir — e é o caso de quem ainda não rodou o
+   * `init`, onde as listas vazias fazem a checagem passar por não ter assunto.
+   */
   function coberturaAtual(): CoverageSources {
-    return {
-      storyIds: extractStoryIds(published["user-stories.md"] ?? ""),
-      entities: extractEntities(published["database-schema.md"] ?? ""),
-      workflows: extractWorkflows(published["project-description.md"] ?? ""),
-
-    };
+    return skeletonAtual ? coverageFromSkeleton(skeletonAtual) : { storyIds: [], entities: [], workflows: [] };
   }
 
   /**
@@ -1207,7 +950,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * todo escritor daqui para frente e é gravada no handoff, que é o que a
    * retomada lê.
    */
-  async function recordDeveloperDecision(document: ChainDocument, findings: readonly Finding[], decision: string): Promise<void> {
+  async function recordDeveloperDecision(document: string, findings: readonly Finding[], decision: string): Promise<void> {
     const anteriores = allAnswers.filter((answer) => answer.questionId.includes("#standoff#")).length;
     const id = `SD-${String(anteriores + 1).padStart(2, "0")}`;
     const pergunta: Question = {
@@ -1246,7 +989,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * Os ids ficam locais ao documento, que é como a retomada os lê; o escopo por
    * etapa é acrescentado só na agregação em memória.
    */
-  async function persistAnswers(document: ChainDocument, questions: readonly Question[], answers: readonly Answer[]): Promise<void> {
+  async function persistAnswers(document: string, questions: readonly Question[], answers: readonly Answer[]): Promise<void> {
     const anterior = await readHandoff(options.projectRoot, runId, document);
     const conhecidas = new Set((anterior?.questions ?? []).map((question) => question.id));
 
@@ -1263,22 +1006,34 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     });
   }
 
-  /** As perguntas deste documento e como o desenvolvedor as respondeu. */
-  function perguntadas(document: ChainDocument): AskedQuestion[] {
-    const prefixo = `${document}#`;
-    return allAnswers
-      .filter((answer) => answer.questionId.startsWith(prefixo))
-      .map((answer) => {
-        const pergunta = allQuestions.find((entry) => entry.id === answer.questionId);
-        return {
-          decision: pergunta?.decision ?? answer.questionId,
-          disposition: answer.disposition,
-          answer: answer.raw,
-        };
-      });
+  /**
+   * O que já foi perguntado neste run, com as palavras do desenvolvedor.
+   *
+   * Na cadeia em prosa isto era filtrado por documento, porque cada documento
+   * tinha a sua entrevista. Aqui há uma só, e o que a rodada de gaps não pode
+   * fazer é reabrir o que ela fechou: no piloto 3 a rodada recomendou o
+   * contrário do que o desenvolvedor tinha acabado de decidir.
+   */
+  function perguntadas(): AskedQuestion[] {
+    return allAnswers.map((answer) => {
+      const pergunta = allQuestions.find((entry) => entry.id === answer.questionId);
+      return {
+        decision: pergunta?.decision ?? answer.questionId,
+        disposition: answer.disposition,
+        answer: answer.raw,
+      };
+    });
   }
 
-  async function closeGaps(document: ChainDocument, initial: Authored, writer: WriterContext): Promise<Authored> {
+  /**
+   * A entrevista do `plan`: o que só a escrita da fase descobriu que falta.
+   *
+   * A entrevista do `init` pergunta sobre o produto, antes de existir plano. Ela
+   * não alcança o que só aparece ao detalhar uma fase — e sem este caminho de
+   * volta um `[NEEDS DECISION]` viraria bloqueio no fim do run, com o
+   * desenvolvedor descobrindo tarde algo que responderia em dez segundos.
+   */
+  async function closeGaps(document: string, initial: Authored, writer: WriterContext): Promise<Authored> {
     let authored = initial;
     // Um marcador já perguntado não volta. Reperguntar o que a pessoa acabou de
     // responder é a forma mais rápida de fazê-la desistir da entrevista.
@@ -1297,7 +1052,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       if (markers.length === 0) return authored;
       for (const marker of markers) asked.add(marker.toLowerCase());
 
-      announce(`  ${markers.length} decisão(ões) pendente(s) em ${document}; reabrindo a entrevista`);
+      announce(`  ${markers.length} decisão(ões) pendente(s) nas fases; reabrindo a entrevista`);
       await event("interview", document, "retry", `${markers.length} gap(s) descobertos na escrita`, round);
 
       const batch = parseQuestionBatch(
@@ -1306,11 +1061,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           stage: "interview",
           subject: `${document}:gaps`,
           attempt: round,
-          // O que já foi perguntado vai junto, com as palavras do desenvolvedor.
-          // Sem isso a rodada de gaps reabre o que a entrevista fechou e chega a
-          // recomendar o contrário — foi assim que o piloto 3 publicou colunas
-          // gerenciáveis depois de o desenvolvedor as ter fixado.
-          prompt: gapPrompt(document, writer, markers, perguntadas(document)),
+          prompt: gapPrompt(document, writer, markers, perguntadas()),
         }),
       );
       if (!batch.ok || batch.questions.length === 0) return authored;
@@ -1324,21 +1075,13 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }
 
       // Escopo próprio: as perguntas de gap reusam Q-01, Q-02… e sobrescreveriam
-      // as respostas da entrevista principal do mesmo documento.
-      const stage = `gap${round}`;
-      allQuestions.push(...batch.questions.map((question) => ({ ...question, id: scoped(document, question.id, stage) })));
-      allAnswers.push(...answered.map((answer) => ({ ...answer, questionId: scoped(document, answer.questionId, stage) })));
-      allQuestions.push(...batch.questions.map((question) => ({ ...question, id: scoped(document, question.id, stage) })));
+      // as respostas da entrevista do esqueleto.
+      const escopo = `gap${round}`;
+      allQuestions.push(...batch.questions.map((question) => ({ ...question, id: scoped(document, question.id, escopo) })));
+      allAnswers.push(...answered.map((answer) => ({ ...answer, questionId: scoped(document, answer.questionId, escopo) })));
 
-      /*
-       * A rodada de gaps grava no handoff como a entrevista grava.
-       *
-       * Sem isto, decisão tomada aqui existe só na memória do processo. O piloto
-       * 3 decidiu a stack numa rodada de gaps e, ao regenerar os documentos no
-       * dia seguinte, o escritor perguntou a stack de novo — a resposta não
-       * estava em lugar nenhum que a retomada lesse. É o mesmo defeito da
-       * decisão de impasse, no outro caminho que sai da entrevista principal.
-       */
+      // Decisão tomada aqui precisa sobreviver ao processo: sem isto, o run
+      // seguinte pergunta a mesma coisa porque a retomada não a encontra.
       await persistAnswers(document, batch.questions, answered);
 
       const accepted = answered.filter((answer) => answer.disposition === "ACCEPTED");
@@ -1567,7 +1310,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   }
 
   async function auditLoop(
-    document: ChainDocument,
+    document: string,
     initial: Authored,
     writer: WriterContext,
     upstream: { name: string; content: string }[],
@@ -1657,7 +1400,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   }
 
   async function auditOnce(
-    document: ChainDocument,
+    document: string,
     content: string,
     writer: WriterContext,
     upstream: { name: string; content: string }[],
@@ -1703,7 +1446,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               fix: erro.hint,
             })),
             remarks: [],
-            reason: "há item da cadeia que nenhuma task rastreia",
+            reason: "há item do esqueleto que nenhuma task rastreia",
             mechanical: true,
           };
         }
@@ -1842,22 +1585,16 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * conseguir executá-la, e isso não muda com a forma como ela foi produzida.
    */
   async function concluir(): Promise<InitOutcome> {
-    const phasesDocument = published["project-phases.md"] ?? "";
-    const parsedPhases = parsePhases(phasesDocument);
+    const parsedPhases = parsePhases(plano);
     const coverage = coberturaAtual();
 
     const readiness = evaluateReadiness({
-      documents: published,
-      /*
-       * O plano é carimbado com o que ele leu. Na cadeia em prosa são os três
-       * documentos; no caminho por esqueleto é o esqueleto, que é o único
-       * upstream que existe.
-       */
-      stampInputs: skeletonAtual
-        ? [{ name: "skeleton.md", content: renderSkeleton(skeletonAtual) }]
-        : stampInputs(published),
+      plan: plano,
+      // O plano é carimbado com o que ele leu, e o que ele leu é o esqueleto:
+      // é o único upstream que existe no ciclo.
+      stampInputs: skeletonAtual ? [{ name: "skeleton.md", content: renderSkeleton(skeletonAtual) }] : [],
       coverage,
-      approved,
+      approved: planoAprovado,
       unresolvedQuestions: needsDecisionMarkers({
         round: maxInterviewRounds,
         questions: allQuestions,
@@ -1870,15 +1607,13 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       // conferir, e um verificador que sempre aprova não está conferindo nada.
       designExists: (caminho) => existsSync(caminho),
       rehearsal,
-      // No caminho por esqueleto o run entrega dois artefatos, não quatro.
-      ...(skeletonAtual ? { expected: ["project-phases.md"] as const } : {}),
     });
 
     const tasks = parsedPhases.ok ? parsedPhases.document.phases.reduce((total, phase) => total + phase.tasks.length, 0) : 0;
 
     const report: InitReport = {
       ready: readiness.ready,
-      published: DOCUMENT_CHAIN.map((name) => `${artifactPaths(options.projectRoot).init}/${name}`),
+      published: INIT_ARTIFACTS.map((name) => `${artifactPaths(options.projectRoot).init}/${name}`),
       phases: parsedPhases.ok ? parsedPhases.document.phases.length : 0,
       tasks,
       mvpCutPhase: parsedPhases.ok ? parsedPhases.document.phases.length : 0,
@@ -1895,26 +1630,6 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
     return { runId, readiness, report, rendered: renderReport(report) };
   }
-}
-
-function stampFor(document: ChainDocument, published: Partial<Record<ChainDocument, string>>): string | null {
-  const inputs = stampSources(document, published);
-  return inputs.length === 0 ? null : buildStamp(inputs);
-}
-
-function stampSources(document: ChainDocument, published: Partial<Record<ChainDocument, string>>): StampInput[] {
-  const order: ChainDocument[] = ["project-description.md", "user-stories.md", "database-schema.md"];
-  const upTo = order.slice(0, DOCUMENT_CHAIN.indexOf(document));
-  return upTo.map((name) => ({ name, content: published[name] ?? "" }));
-}
-
-function stampInputs(published: Partial<Record<ChainDocument, string>>): StampInput[] {
-  return stampSources("project-phases.md", published);
-}
-
-function projectName(published: Partial<Record<ChainDocument, string>>): string {
-  const title = (published["project-description.md"] ?? "").split("\n")[0] ?? "";
-  return /^#\s+(.+?)\s+—/.exec(title)?.[1] ?? "Projeto";
 }
 
 export { sha12 };

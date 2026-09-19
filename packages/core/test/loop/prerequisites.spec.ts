@@ -11,40 +11,33 @@ import {
 import type { PrerequisiteStatus } from "../../src/loop/index.js";
 import { ROLES, buildInvocation } from "../../src/provider/index.js";
 
-const DESCRICAO = [
-  "# Pousada — Project Description",
+const ESQUELETO = [
+  "# Pousada — Skeleton",
   "",
-  "## Overview",
+  "## Stack",
+  "- Frontend: React 18",
+  "- Backend: Node.js 20 com TypeScript 5",
+  "- Banco: PostgreSQL 16",
   "",
-  "Reservas.",
-  "",
-  "## Tech Stack",
-  "",
-  "| Camada | Tecnologia |",
-  "| --- | --- |",
-  "| Frontend | React 18 |",
-  "| Backend | Node.js 20 com TypeScript 5 |",
-  "| Banco | PostgreSQL 16 |",
-  "",
-  "## Core Workflows",
-  "",
-  "### 1. Criar reserva",
+  "## Entidades",
+  "### reservations",
+  "- id: bigint",
 ].join("\n");
 
 describe("detecção de pré-requisitos", () => {
-  it("lê a seção Tech Stack e deduz os executáveis", () => {
-    const encontrados = detectPrerequisites(DESCRICAO).map((prerequisite) => prerequisite.binary).sort();
+  it("lê a seção Stack do esqueleto e deduz os executáveis", () => {
+    const encontrados = detectPrerequisites(ESQUELETO).map((prerequisite) => prerequisite.binary).sort();
     expect(encontrados).toEqual(["node", "psql"]);
   });
 
   it("distingue serviço de sistema de runtime do projeto", () => {
-    const prerequisites = detectPrerequisites(DESCRICAO);
+    const prerequisites = detectPrerequisites(ESQUELETO);
     expect(prerequisites.find((entry) => entry.binary === "psql")?.systemLevel).toBe(true);
     expect(prerequisites.find((entry) => entry.binary === "node")?.systemLevel).toBe(false);
   });
 
   it("não inventa pré-requisito para stack que não reconhece", () => {
-    expect(detectPrerequisites("## Tech Stack\n\n| Camada | Tecnologia |\n| --- | --- |\n| Tudo | Elixir |")).toEqual([]);
+    expect(detectPrerequisites("## Stack\n- Tudo: Elixir")).toEqual([]);
   });
 
   it("verifica de verdade contra o PATH", async () => {
@@ -113,18 +106,15 @@ const ausente = (technology: string, binary: string): PrerequisiteStatus => ({
 });
 
 const COM_NAO_RECONHECIDAS = [
-  "# Projeto — Project Description",
+  "# Projeto — Skeleton",
   "",
-  "## Tech Stack",
+  "## Stack",
+  "- Linguagem: Node.js 26",
+  "- Banco: PostgreSQL 16",
+  "- Interface: React 19.1.0",
+  "- Estilos: CSS Modules",
   "",
-  "| Componente | Decisão |",
-  "|---|---|",
-  "| Linguagem | Node.js 26 |",
-  "| Banco | PostgreSQL 16 |",
-  "| Interface | React 19.1.0 |",
-  "| Estilos | CSS Modules |",
-  "",
-  "## Core Workflows",
+  "## Entidades",
 ].join("\n");
 
 describe("o que o catálogo não reconhece é dito, não escondido", () => {
@@ -141,7 +131,7 @@ describe("o que o catálogo não reconhece é dito, não escondido", () => {
     expect(detectPrerequisites(COM_NAO_RECONHECIDAS).map((item) => item.binary)).toContain("psql");
   });
 
-  it("descrição sem Tech Stack não inventa lista", () => {
+  it("esqueleto sem seção de stack não inventa lista", () => {
     expect(unverifiedTechnologies("# Projeto\n\ntexto solto")).toEqual([]);
   });
 });

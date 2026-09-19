@@ -14,7 +14,7 @@ executa não podem divergir.
 ```markdown
 # <Projeto> — Project Phases
 
-<!-- inputs: project-description.md@sha256:abc123abc123 user-stories.md@sha256:def456def456 database-schema.md@sha256:789abc789abc -->
+<!-- inputs: skeleton.md@sha256:abc123abc123 -->
 
 ## Overview
 
@@ -57,9 +57,9 @@ são traduzidos; a indentação dos sub-itens é livre.
 | I-07 | Toda fase declara pelo menos uma task | `parser` | `rejects` |
 | I-08 | Toda task declara pelo menos um critério de aceitação | `parser` | `rejects` |
 | I-09 | Toda task declara `**Traces:**` não vazio | `parser` | `rejects` |
-| I-10 | Todo `US-N.M` do apêndice de user-stories aparece em pelo menos um `**Traces:**` | `coverage` | `rejects` |
+| I-10 | Toda story `US-N.M` declarada no esqueleto aparece em pelo menos um `**Traces:**` | `coverage` | `rejects` |
 | I-11 | Toda entidade declarada no modelo de dados aparece em pelo menos uma task | `coverage` | `rejects` |
-| I-12 | Todo workflow numerado do project-description é coberto por uma task ou explicitamente excluído | `coverage` | `rejects` |
+| I-12 | Todo workflow numerado do esqueleto é coberto por uma task ou explicitamente excluído | `coverage` | `rejects` |
 | I-13 | Nenhum marcador `[NEEDS DECISION]` no documento | `parser` | `rejects` |
 | I-14 | Todo `**Design ref:**` aponta para um caminho existente sob o diretório de design | `design-refs` | `rejects` |
 

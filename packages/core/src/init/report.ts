@@ -2,8 +2,8 @@
  * O relatório final do `init`.
  *
  * Diz o que foi decidido, o que foi assumido, o que ficou em aberto e quanto
- * custou. Um harness que só diz "pronto" obriga o desenvolvedor a abrir os
- * quatro documentos para descobrir o que a ferramenta entendeu do pedido dele.
+ * custou. Um harness que só diz "pronto" obriga o desenvolvedor a abrir o plano
+ * para descobrir o que a ferramenta entendeu do pedido dele.
  */
 
 import type { Checkpoint } from "../interview/types.js";

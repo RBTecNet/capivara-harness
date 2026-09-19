@@ -75,11 +75,16 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
 
   const parsed = parsePhases(plan);
   if (parsed.ok) {
+    /*
+     * O plano é carimbado com o que ele leu, e o que ele leu é o esqueleto.
+     *
+     * Enquanto esta lista continuou sendo a dos quatro documentos em prosa, todo
+     * build abria com um aviso dizendo que `skeleton.md` não era input do plano —
+     * um aviso correto sobre uma pergunta errada.
+     */
     const inputs: StampInput[] = [];
-    for (const name of ["project-description.md", "user-stories.md", "database-schema.md"]) {
-      const content = await readFile(join(init, name), "utf8").catch(() => null);
-      if (content !== null) inputs.push({ name, content });
-    }
+    const esqueleto = await readFile(join(init, "skeleton.md"), "utf8").catch(() => null);
+    if (esqueleto !== null) inputs.push({ name: "skeleton.md", content: esqueleto });
     for (const stale of checkStamp(parsed.document, inputs)) {
       // Documento stale é aviso alto, nunca bloqueio: o operador decide.
       warnings.push({ code: "stale", message: `${stale.message} → ${stale.hint}` });
@@ -122,8 +127,8 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
 
   // A stack decidida exige o quê, e o que existe nesta máquina? Descobrir aqui
   // custa uma chamada a `which`; descobrir na terceira fase custa três sessões.
-  const description = await readFile(join(init, "project-description.md"), "utf8").catch(() => "");
-  const prerequisites = await checkPrerequisites(detectPrerequisites(description));
+  const esqueletoLido = await readFile(join(init, "skeleton.md"), "utf8").catch(() => "");
+  const prerequisites = await checkPrerequisites(detectPrerequisites(esqueletoLido));
   const missing = describeMissing(prerequisites, options.systemInstall === true);
   const ausentes = prerequisites.filter((status) => !status.present);
   if (missing !== "") {
@@ -136,7 +141,7 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
    * lê um preflight limpo conclui que tudo foi conferido, e silêncio aqui é a
    * pior resposta possível.
    */
-  const naoVerificadas = unverifiedTechnologies(description);
+  const naoVerificadas = unverifiedTechnologies(esqueletoLido);
   if (naoVerificadas.length > 0) {
     warnings.push({
       code: "nao-verificada",

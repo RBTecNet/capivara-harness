@@ -7,7 +7,6 @@
  */
 
 import { QUESTIONS_CONTRACT } from "../../src/interview/index.js";
-import { LEDGER_CONTRACT } from "../../src/authoring/index.js";
 import type { AgentCall } from "../../src/init/index.js";
 
 export interface ScriptStep {
@@ -90,103 +89,6 @@ export const approve = (reason = "fiel ao pedido e às decisões aceitas") =>
 export const reject = (where: string, problem: string, fix: string) =>
   [`CAPIVARA_AUDIT_STATUS: REJECTED`, `CAPIVARA_FINDING: ${where} | ${problem} | ${fix}`, `CAPIVARA_REASON: ${problem}`].join("\n");
 
-export const DESCRIPTION = `# Pousada — Project Description
-
-## Overview
-
-Um sistema de reservas para uma pousada pequena.
-
-### Key Concepts
-
-- **Reserva:** período entre check-in e check-out, com status.
-
-## Tech Stack
-
-| Camada | Tecnologia |
-| --- | --- |
-| Runtime | Node 26 |
-| Testes | Vitest 5 |
-
-## Core Workflows
-
-### 1. Criar reserva
-
-1. O hóspede escolhe as datas.
-2. O sistema cria a reserva com status pendente.
-`;
-
-export const STORIES = `# Pousada — User Stories
-
-## Overview
-
-Reservas para uma pousada pequena.
-
-**User Types:**
-- **Hóspede** - quem reserva um quarto
-
-## 1. Reservas
-
-### US-1.1: Criar reserva
-**As a** hóspede
-**I want to** reservar um quarto por um período
-**So that** eu tenha onde ficar
-
-**Acceptance Criteria:**
-- [ ] a reserva nasce com status pendente
-- [ ] datas sobrepostas para o mesmo quarto são recusadas
-
-**Expected Result:** uma reserva persistida com status pendente.
-
-## Appendix: User Story Status
-
-| ID | Story | Priority | Status |
-|----|-------|----------|--------|
-| US-1.1 | Criar reserva | High | Pending |
-`;
-
-export const SCHEMA = `# Pousada — Database Schema
-
-## Overview
-
-Duas entidades: **reservations** e a lookup **statuses**.
-
-## Schema
-
-\`\`\`dbml
-Table statuses {
-  id bigint [pk, increment]
-  name varchar [not null]
-}
-
-Table reservations {
-  id bigint [pk, increment]
-  status_id bigint [ref: > statuses.id, not null]
-}
-\`\`\`
-
-## Relationships
-
-- Uma **reservation** pertence a um **status**.
-
-## Lookup Table Seeds
-
-- statuses: pendente, confirmada, cancelada
-
-## Notes & Conventions
-
-- Sem enum: status vira lookup com chave estrangeira.
-`;
-
-export const LEDGER = JSON.stringify({
-  contract: LEDGER_CONTRACT,
-  phases: [
-    { number: 1, title: "Fundação de dados", goal: "migrations e seeds existem", dependsOn: "none", covers: ["reservations", "statuses"], taskCount: 2 },
-    { number: 2, title: "Criar reserva", goal: "o hóspede cria uma reserva", dependsOn: "Phase 1", covers: ["US-1.1"], taskCount: 1 },
-  ],
-  mvpCutPhase: 2,
-  coverage: { stories: { "US-1.1": [2] }, entities: { reservations: [1], statuses: [1] }, workflows: { "1": [2] } },
-});
-
 export const PHASE_1 = `## Phase 1: Fundação de dados
 
 **Goal:** migrations e seeds existem · **Depends on:** none · **Covers:** reservations, statuses
@@ -216,7 +118,6 @@ export const PHASE_2 = `## Phase 2: Criar reserva
   - **Traces:** US-1.1, reservations, workflow 1
 `;
 
-/** O roteiro do caminho feliz: cenário B-01 do catálogo. */
 /** Endereços que o prompt do ensaio listou, na ordem em que apareceram. */
 export function rehearsedAddresses(prompt: string): string[] {
   return [...prompt.matchAll(/^(P\d+\.T\d+\.C\d+) /gm)].map((match) => match[1] ?? "");
@@ -270,16 +171,13 @@ export function skeletonPath(): ScriptStep[] {
   ];
 }
 
+/**
+ * O caminho feliz do ciclo único: entrevista, esqueleto, fases, auditoria, ensaio.
+ *
+ * A cadeia de quatro documentos em prosa foi removida do produto, e com ela o
+ * roteiro que a exercitava.
+ */
 export function happyPath(): ScriptStep[] {
-  return [
-    { match: { role: "writer", stage: "interview" }, respond: { stdout: NO_QUESTIONS }, repeat: true },
-    { match: { role: "writer", stage: "authoring", subject: "project-description.md" }, respond: { stdout: DESCRIPTION } },
-    { match: { role: "writer", stage: "authoring", subject: "user-stories.md" }, respond: { stdout: STORIES } },
-    { match: { role: "writer", stage: "authoring", subject: "database-schema.md" }, respond: { stdout: SCHEMA } },
-    { match: { role: "writer", stage: "authoring", subject: "ledger" }, respond: { stdout: LEDGER } },
-    { match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: PHASE_1 } },
-    { match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 } },
-    { match: { role: "auditor", stage: "audit" }, respond: { stdout: approve() }, repeat: true },
-    rehearsalApproves(),
-  ];
+  return skeletonPath();
 }
+

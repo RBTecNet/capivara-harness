@@ -40,9 +40,14 @@ const CATALOG: { pattern: RegExp; prerequisite: Prerequisite }[] = [
   { pattern: /\bjava\b|\bspring\b/i, prerequisite: { technology: "Java", binary: "java", systemLevel: false } },
 ];
 
-/** Lê a seção `## Tech Stack` do project-description e deduz o que precisa existir. */
-export function detectPrerequisites(projectDescription: string): Prerequisite[] {
-  const section = /^##\s+Tech Stack\s*$([\s\S]*?)(?=^##\s|\Z)/m.exec(projectDescription)?.[1] ?? projectDescription;
+/** A seção de stack do esqueleto; o documento inteiro serve de reserva. */
+function stackSection(skeleton: string): string {
+  return /^##\s+Stack\s*$([\s\S]*?)(?=^##\s|\Z)/m.exec(skeleton)?.[1] ?? "";
+}
+
+/** Lê a seção `## Stack` do esqueleto e deduz o que precisa existir na máquina. */
+export function detectPrerequisites(skeleton: string): Prerequisite[] {
+  const section = stackSection(skeleton) || skeleton;
   const found = new Map<string, Prerequisite>();
   for (const entry of CATALOG) {
     if (entry.pattern.test(section)) found.set(entry.prerequisite.binary, entry.prerequisite);
@@ -82,11 +87,11 @@ export function describeMissing(statuses: readonly PrerequisiteStatus[], systemI
  * tudo foi conferido. O catálogo é pequeno de propósito, então ele diz o que
  * deixou de fora em vez de deixar entender que não havia nada.
  */
-export function unverifiedTechnologies(projectDescription: string): string[] {
-  const section = /^##\s+Tech Stack\s*$([\s\S]*?)(?=^##\s|\Z)/m.exec(projectDescription)?.[1] ?? "";
-  const decisoes = [...section.matchAll(/^\|[^|\n]+\|([^|\n]+)\|/gm)]
+export function unverifiedTechnologies(skeleton: string): string[] {
+  // `- <componente>: <decisão>`, que é como o esqueleto escreve a stack.
+  const decisoes = [...stackSection(skeleton).matchAll(/^-\s*[^:\n]+:\s*(.+)$/gm)]
     .map((linha) => (linha[1] ?? "").trim())
-    .filter((valor) => valor !== "" && !/^-+$/.test(valor) && !/^decisão$/i.test(valor));
+    .filter((valor) => valor !== "");
 
   return [...new Set(decisoes)].filter((decisao) => !CATALOG.some((entrada) => entrada.pattern.test(decisao)));
 }

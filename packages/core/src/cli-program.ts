@@ -89,16 +89,15 @@ export function createProgram(): Command {
   roleFlags(
     program
       .command("init")
-      .description("Entrevista, escreve e audita os quatro documentos até RALPH READY")
+      .description("Entrevista e desenha as fases do projeto até PLAN READY")
       .argument("[pedido]", "o que você quer construir; aceita @arquivo")
       .option("--file <caminho>", "lê o pedido de um arquivo")
       .option("--max-audit-returns <n>", "devoluções do auditor por documento", "3")
-      .option("--max-interview-rounds <n>", "rodadas de entrevista por documento", "3")
-      .option("--fresh", "ignora o que este run já publicou e recomeça a cadeia do zero")
+      .option("--max-interview-rounds <n>", "rodadas de entrevista", "3")
+      .option("--fresh", "ignora o que este run já publicou e recomeça do zero")
       .option("--no-dashboard", "não desenha o painel; só as linhas de progresso")
-      .option("--no-commit", "não versiona a especificação ao chegar em RALPH READY")
-      .option("--skeleton", "ciclo novo: entrega as fases do projeto em PLAN READY, sem documentos em prosa"),
-  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; maxAuditReturns: string; maxInterviewRounds: string; fresh?: boolean; dashboard?: boolean; commit?: boolean; skeleton?: boolean }) => {
+      .option("--no-commit", "não versiona a especificação ao chegar em PLAN READY"),
+  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; maxAuditReturns: string; maxInterviewRounds: string; fresh?: boolean; dashboard?: boolean; commit?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const configured = rolesFromFlags(flags);
     const semProvider = unresolvedRoles(configured, INIT_ROLES);
@@ -188,8 +187,8 @@ export function createProgram(): Command {
         maxInterviewRounds: Number(flags.maxInterviewRounds),
         providers: { writer: roles.writer.provider, auditor: roles.auditor.provider, verifier: roles.verifier.provider },
         ...(flags.fresh === true ? { fresh: true } : {}),
-        // No ciclo novo o init entrega as fases e para: quem detalha é o plan.
-        ...(flags.skeleton === true ? { mode: "skeleton" as const, stage: "init" as const } : {}),
+        // O init entrega as fases e para em PLAN READY: quem as detalha é o plan.
+        stage: "init",
         announce: (message) => {
           progress.note(message.trim());
           if (live.enabled) repaint();
@@ -198,8 +197,8 @@ export function createProgram(): Command {
         onProgress: (evento) => {
           progress.apply(evento);
           // O nome do produto vem do documento que o nomeia, assim que ele existe.
-          if (evento.stage === "publish" && evento.subject === "project-description.md") {
-            readFile(join(projectRoot, ".capivara", "init", "project-description.md"), "utf8")
+          if (evento.stage === "publish" && evento.subject === "skeleton") {
+            readFile(join(projectRoot, ".capivara", "init", "skeleton.md"), "utf8")
               .then((conteudo) => {
                 const titulo = /^#\s+(.+?)\s+—/m.exec(conteudo)?.[1];
                 if (titulo) progress.setProject(titulo);

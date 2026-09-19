@@ -7,10 +7,14 @@
  * concluído, porque ele só executa o que o plano declara.
  *
  * A correção é sempre adicionar a task que falta — nunca apagar a story, a
- * entidade ou o workflow do documento upstream para silenciar a checagem.
+ * entidade ou o workflow do esqueleto para silenciar a checagem.
  */
 
-import type { Workflow } from "./documents.js";
+/** Um fluxo numerado, do jeito que o `**Traces:**` de uma task o endereça. */
+export interface Workflow {
+  number: string;
+  name: string;
+}
 import type { ContractError, PhasesDocument } from "./phases.js";
 
 export interface CoverageSources {
@@ -39,7 +43,7 @@ export function checkStories(document: PhasesDocument, storyIds: string[]): Cont
       code: "I-10",
       line: 0,
       message: `a story ${id} não é citada por nenhuma task`,
-      hint: `adicione a task que implementa ${id} e cite-a em **Traces:**; nunca remova a story do user-stories para calar a checagem`,
+      hint: `adicione a task que implementa ${id} e cite-a em **Traces:**; nunca remova a story do esqueleto para calar a checagem`,
     });
   }
   return errors;

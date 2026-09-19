@@ -1642,8 +1642,24 @@ aceitação da Phase 11.
 ## B.5 O que o provider falso não cobre
 
 Ele prova **mecânica**, nunca **qualidade semântica**: não diz se a documentação gerada é boa,
-se as fases estão bem dimensionadas ou se o auditor calibra bem. Isso só os três pilotos com
-modelo real da Phase 11 respondem. Os dois são complementares e nenhum substitui o outro.
+se as fases estão bem dimensionadas ou se o auditor calibra bem. Isso só os pilotos com modelo
+real respondem. Os dois são complementares e nenhum substitui o outro.
+
+### E também não cobre o terminal
+
+Isto foi aprendido caro, no piloto 5, com 712 testes verdes: o `init` morreu na pergunta 1 de
+6 com `ERR_USE_AFTER_CLOSE` do readline, depois de já ter pago pelo levantamento inteiro.
+
+O falso substitui o **provider**. Ele não substitui a **entrada do desenvolvedor**: nos testes
+o `ask` é uma função que sempre devolve uma string, e uma função nunca fecha, nunca esgota,
+nunca entrega o lote todo antes da primeira pergunta. Toda a classe de falha de I/O de
+terminal — entrada que acaba, entrada que chega adiantada, readline fechado, ausência de TTY —
+é invisível para a suíte inteira, por construção.
+
+O que fechou essa lacuna não foi um teste de integração maior: foi `commands/line-io.ts`
+testado diretamente contra um `EventEmitter`, onde fechar a entrada é uma linha. A lição é a
+de sempre neste projeto — o que não é exercitável em código vira defeito descoberto em
+produção, e a resposta é tornar exercitável em código, não rodar mais vezes com modelo real.
 
 
 ---

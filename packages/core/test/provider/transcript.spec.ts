@@ -103,7 +103,8 @@ describe("transcrito do claude", () => {
 
   it("traz tokens e o custo em dólares que a CLI informa", () => {
     expect(parseClaudeJson(CLAUDE).usage).toEqual({
-      inputTokens: 2,
+      // 2 fora do cache + 9023 de escrita + 10143 de leitura: tudo isso entrou.
+      inputTokens: 19168,
       cachedInputTokens: 10143,
       outputTokens: 5,
       reasoningTokens: 0,
@@ -201,5 +202,41 @@ describe("janela de log ao vivo", () => {
     alimentar('{"type":"turn.st');
     alimentar('arted"}\n{"type":"thread.started"}\n');
     expect(recebidas).toEqual(['{"type":"turn.started"}', '{"type":"thread.started"}']);
+  });
+});
+
+describe("entrada significa a mesma coisa em todo provider", () => {
+  /** O envelope que a CLI do Claude de fato devolve. */
+  const claude = JSON.stringify({
+    result: "pronto",
+    total_cost_usd: 0.0226,
+    usage: {
+      input_tokens: 9,
+      cache_creation_input_tokens: 9309,
+      cache_read_input_tokens: 13607,
+      output_tokens: 333,
+      output_tokens_details: { thinking_tokens: 326 },
+    },
+  });
+
+  it("soma o que entrou, inclusive o que criou e leu cache", () => {
+    // Ao pé da letra seriam 9 tokens; de fato entraram 22.925.
+    expect(parseClaudeJson(claude).usage?.inputTokens).toBe(22925);
+  });
+
+  it("a parcela que veio de cache continua visível à parte", () => {
+    expect(parseClaudeJson(claude).usage?.cachedInputTokens).toBe(13607);
+  });
+
+  it("o codex já reporta o total, e não é somado duas vezes", () => {
+    const evento = JSON.stringify({ usage: { input_tokens: 126300, cached_input_tokens: 90000, output_tokens: 68700 } });
+    const lido = parseCodexJsonl(`{"item":{"type":"agent_message","text":"ok"}}\n${evento}`);
+    expect(lido.usage?.inputTokens).toBe(126300);
+    expect(lido.usage?.cachedInputTokens).toBe(90000);
+  });
+
+  it("sem campos de cache, o número não muda", () => {
+    const simples = JSON.stringify({ result: "ok", usage: { input_tokens: 500, output_tokens: 20 } });
+    expect(parseClaudeJson(simples).usage?.inputTokens).toBe(500);
   });
 });

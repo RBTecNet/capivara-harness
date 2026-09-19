@@ -102,9 +102,25 @@ export function parseClaudeJson(stdout: string): Transcript {
   const uso = objeto.usage as Record<string, unknown> | undefined;
   const detalhes = uso?.["output_tokens_details"] as Record<string, unknown> | undefined;
   const custo = objeto["total_cost_usd"];
+
+  /*
+   * Os dois providers chamam de `input_tokens` coisas diferentes.
+   *
+   * No codex o campo já é o total, e `cached_input_tokens` é um subconjunto
+   * informativo dele. No Claude é o contrário: `input_tokens` conta só o que NÃO
+   * veio de cache, e a criação e a leitura de cache são parcelas à parte. Lido
+   * ao pé da letra, um prompt de 23 mil tokens era relatado como 9 — uma
+   * subestimação de 2500 vezes, que faria qualquer comparação de custo entre
+   * providers dizer o contrário da verdade.
+   *
+   * Aqui `inputTokens` significa a mesma coisa para todo provider: tudo o que
+   * entrou. `cachedInputTokens` continua sendo a parcela que veio de cache, para
+   * quem quiser saber quanto foi barato.
+   */
   const usage: TokenUsage | null = uso
     ? {
-        inputTokens: inteiro(uso, "input_tokens"),
+        inputTokens:
+          inteiro(uso, "input_tokens") + inteiro(uso, "cache_creation_input_tokens") + inteiro(uso, "cache_read_input_tokens"),
         cachedInputTokens: inteiro(uso, "cache_read_input_tokens"),
         outputTokens: inteiro(uso, "output_tokens"),
         reasoningTokens: inteiro(detalhes, "thinking_tokens"),

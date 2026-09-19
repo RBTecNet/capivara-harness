@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -115,5 +115,18 @@ describe("quem está rodando agora", () => {
     const lock = await acquireLock({ projectRoot, runId: "build-1", command: "build" });
     await lock.release();
     expect(await liveLockOwner({ projectRoot, runId: "build-1" })).toBeNull();
+  });
+});
+
+describe("o plano de controle fica fora do histórico", () => {
+  it("ignora runs e handoffs, que é o que o commit da especificação promete", async () => {
+    const { ensureArtifactTree, CONTROL_PLANE_IGNORE } = await import("../../src/state/index.js");
+    await ensureArtifactTree(projectRoot);
+
+    const escrito = await readFile(join(projectRoot, ".capivara", ".gitignore"), "utf8");
+    expect(escrito).toBe(CONTROL_PLANE_IGNORE);
+    expect(escrito).toContain("runs/");
+    // Sem esta linha o `plan` deixa a árvore suja e o `build` recusa começar.
+    expect(escrito).toContain("handoffs/");
   });
 });

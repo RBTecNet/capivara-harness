@@ -1,3 +1,13 @@
+> **Os pilotos 1, 1b, 2 e 3 foram descartados em 19/09/2026.** Eles rodaram a cadeia de
+> quatro documentos em prosa, que §26 do plano removeu do produto: os artefatos que eles
+> deixaram não são reproduzíveis pela ferramenta atual, e mantê-los convidava a comparações
+> com um caminho que não existe mais. A evidência que justificava a remoção está preservada
+> em `docs/medicoes/`. Os prompts dos três pilotos continuam abaixo, e continuam válidos —
+> é o protocolo que os consome que mudou de três documentos para três estágios.
+>
+> O piloto 4 (quadro kanban, interface visual) segue em `~/pilotos/piloto-4`: é o único que
+> rodou o ciclo atual de ponta a ponta, do pedido à aplicação servida no navegador.
+
 # Protocolo dos três pilotos
 
 A Phase 11 do plano tem duas metades. A primeira — o catálogo de 30 cenários contra

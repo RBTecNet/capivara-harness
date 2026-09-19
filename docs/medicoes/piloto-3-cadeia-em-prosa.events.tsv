@@ -1,0 +1,129 @@
+2026-09-17T23:52:26.995Z	interview	project-description.md	1	started	
+2026-09-18T00:14:51.050Z	interview	project-description.md	1	complete	24 resposta(s)
+2026-09-18T00:14:51.053Z	authoring	project-description.md	1	started	
+2026-09-18T00:18:57.979Z	interview	project-description.md	1	retry	4 gap(s) descobertos na escrita
+2026-09-18T00:40:36.805Z	audit	project-description.md	1	started	
+2026-09-18T00:41:52.993Z	publish	project-description.md	1	complete	
+2026-09-18T00:41:52.997Z	interview	user-stories.md	1	started	
+2026-09-18T00:48:17.913Z	interview	user-stories.md	1	complete	7 resposta(s)
+2026-09-18T00:48:17.923Z	authoring	user-stories.md	1	started	
+2026-09-18T00:52:47.281Z	audit	user-stories.md	1	started	
+2026-09-18T00:54:22.374Z	publish	user-stories.md	1	complete	
+2026-09-18T00:54:22.377Z	interview	database-schema.md	1	started	
+2026-09-18T01:02:11.871Z	interview	database-schema.md	1	complete	9 resposta(s)
+2026-09-18T01:02:11.874Z	authoring	database-schema.md	1	started	
+2026-09-18T01:12:12.388Z	authoring	database-schema.md	1	retry	timeout do provider
+2026-09-18T01:21:03.443Z	interview	database-schema.md	1	retry	1 gap(s) descobertos na escrita
+2026-09-18T01:24:16.295Z	audit	database-schema.md	1	started	
+2026-09-18T01:29:27.035Z	audit	database-schema.md	1	retry	A regra que envia cartões novos para A fazer usa o nome mutável da coluna, embora US-2.1 permita renomeá-la; após a renomeação, o modelo não identifica a coluna inicial.; As regras de unicidade de colunas.nome e etiquetas.nome não definem a comparação aceita: remover espaços nas extremidades e ignorar maiúsculas, minúsculas e acentos; essa normalização só aparece para a busca de cartoes.titulo.
+2026-09-18T01:36:28.937Z	publish	database-schema.md	1	complete	
+2026-09-18T01:36:28.939Z	interview	project-phases.md	1	started	
+2026-09-18T01:45:16.012Z	interview	project-phases.md	1	complete	4 resposta(s)
+2026-09-18T01:45:16.016Z	authoring	project-phases.md	1	started	
+2026-09-18T01:53:07.462Z	authoring	phase-p01	1	complete	
+2026-09-18T01:57:12.633Z	authoring	phase-p02	1	complete	
+2026-09-18T02:02:36.613Z	authoring	phase-p03	1	complete	
+2026-09-18T02:08:42.525Z	authoring	phase-p04	1	complete	
+2026-09-18T02:12:21.659Z	authoring	phase-p05	1	complete	
+2026-09-18T02:16:49.808Z	authoring	phase-p06	1	complete	
+2026-09-18T02:21:56.470Z	authoring	phase-p07	1	complete	
+2026-09-18T02:21:56.473Z	audit	project-phases.md	1	started	
+2026-09-18T02:27:33.408Z	audit	project-phases.md	1	retry	As tarefas não declaram que temas e cores_etiqueta são tabelas somente de consulta, imutáveis e limitadas exatamente às opções predefinidas.; A normalização da busca não define se o título armazenado é preservado ou normalizado na gravação, mantendo a ambiguidade registrada para cartoes.titulo.
+2026-09-18T02:43:33.576Z	audit	project-phases.md	2	retry	as regras para cartoes.titulo são incompatíveis: Phase 1.9 remove os espaços das extremidades antes da persistência, enquanto Phase 2.2 e Phase 6.2 preservam o texto informado e normalizam esses espaços somente na busca
+2026-09-18T02:53:50.046Z	audit	project-phases.md	3	blocked	teto de devoluções esgotado
+2026-09-18T02:59:27.162Z	audit	project-phases.md	3	retry	decisão do desenvolvedor: Uma regra só para cartoes.titulo, válida nas fases 1.9, 2.2 e 6.2: o título é gravado exatamente como digitado, com os espaços das extremidades removidos na gravação; espaços internos, maiúsculas e acentos são preservados como digitados. Como o título é obrigatório, um título composto só de espaços é inválido e recusado na validação. A busca remove os espaços das extremidades do texto buscado e compara ignorando maiúsculas, minúsculas e acentos, encontrando qualquer trecho do título gravado; a comparação nunca altera o valor gravado. Os testes verificam o valor persistido, sem espaços nas extremidades, e a correspondência da consulta, parcial e insensível a caixa e acento. As tabelas temas e cores_etiqueta são catálogos fixos: contêm exatamente as linhas semeadas, e a aplicação não insere, não altera e não remove linhas nelas. As tarefas devem declarar isso e ter testes que recusem inserção, alteração e remoção fora dessas linhas.
+2026-09-18T03:14:18.072Z	verify	project-phases.md	1	started	404 critério(s)
+2026-09-18T03:19:41.260Z	verify	project-phases.md	1	complete	404 critério(s) observáveis
+2026-09-18T03:19:41.270Z	publish	project-phases.md	1	complete	
+2026-09-18T03:19:41.288Z	publish	-	1	blocked	NOT READY
+2026-09-18T11:22:07.127Z	interview	project-phases.md	1	started	
+2026-09-18T11:26:39.905Z	interview	project-phases.md	1	complete	4 resposta(s)
+2026-09-18T11:26:39.913Z	authoring	project-phases.md	1	started	
+2026-09-18T11:34:05.541Z	authoring	phase-p02	1	complete	
+2026-09-18T11:35:10.759Z	authoring	phase-p03	1	complete	
+2026-09-18T11:35:54.911Z	authoring	phase-p01	1	complete	
+2026-09-18T11:39:27.867Z	authoring	phase-p05	1	complete	
+2026-09-18T11:40:17.438Z	authoring	phase-p06	1	complete	
+2026-09-18T11:40:42.237Z	authoring	phase-p04	1	complete	
+2026-09-18T11:43:43.047Z	authoring	phase-p07	1	complete	
+2026-09-18T11:43:43.051Z	audit	project-phases.md	1	started	
+2026-09-18T11:43:43.057Z	audit	project-phases.md	1	retry	a fase declara 73 critérios de aceite em 12 tasks, e uma fase é uma sessão de agente; a fase declara 61 critérios de aceite em 12 tasks, e uma fase é uma sessão de agente; a fase declara 70 critérios de aceite em 13 tasks, e uma fase é uma sessão de agente
+2026-09-18T12:00:42.660Z	audit	project-phases.md	2	retry	O teste pressupõe múltiplos quadros, mas o modelo exige uma única linha em quadros; esse cenário não existe em produção; O critério permite uma data que não seja um dia de calendário, contrariando a decisão aceita; O critério não nomeia o campo do cartão que recebe o valor de quadros.coluna_inicial_id
+2026-09-18T12:14:02.511Z	audit	project-phases.md	3	blocked	teto de devoluções esgotado
+2026-09-18T12:31:13.842Z	interview	project-phases.md	1	started	
+2026-09-18T12:31:39.853Z	interview	project-phases.md	1	started	
+2026-09-18T12:35:17.637Z	interview	project-phases.md	1	complete	4 resposta(s)
+2026-09-18T12:35:17.644Z	authoring	project-phases.md	1	started	
+2026-09-18T12:41:51.854Z	authoring	phase-p01	1	complete	
+2026-09-18T12:43:11.627Z	authoring	phase-p02	1	complete	
+2026-09-18T12:44:14.150Z	authoring	phase-p03	1	complete	
+2026-09-18T12:45:58.338Z	authoring	phase-p04	1	complete	
+2026-09-18T12:47:30.503Z	authoring	phase-p05	1	complete	
+2026-09-18T12:48:02.477Z	authoring	phase-p06	1	complete	
+2026-09-18T12:48:02.488Z	audit	project-phases.md	1	started	
+2026-09-18T12:54:14.029Z	audit	project-phases.md	1	retry	As regras de normalização não identificam se a remoção de espaços e a comparação sem maiúsculas, minúsculas e acentos alteram o valor persistido ou somente a comparação; na busca, também não identificam se o alvo é o título, a consulta ou ambos
+2026-09-18T13:07:54.622Z	audit	project-phases.md	2	retry	a fase declara 69 critérios de aceite em 12 tasks, e uma fase é uma sessão de agente; a fase declara 62 critérios de aceite em 14 tasks, e uma fase é uma sessão de agente
+2026-09-18T13:23:27.692Z	audit	project-phases.md	3	retry	timeout do provider
+2026-09-18T13:29:10.596Z	verify	project-phases.md	1	started	312 critério(s)
+2026-09-18T13:36:14.939Z	verify	project-phases.md	1	blocked	P1.T1.C1 · Definir os registros normalizados do armazenamento local para quadros, colunas, etiquetas, cartões, temas, cores e marcadores de exclusão — NÃO ENSAIADO: o verificador não julgou este critério | P1.T1.C2 · Definir os registros normalizados do armazenamento local para quadros, colunas, etiquetas, cartões, temas, cores e marcadores de exclusão — NÃO ENSAIADO: o verificador não julgou este critério | P1.T1.C3 · Definir os registros normalizados do armazenamento local para quadros, colunas, etiquetas, cartões, temas, cores e marcadores de exclusão — NÃO ENSAIADO: o verificador não julgou este critério | P1.T2.C1 · Semear as tabelas de consulta de temas e cores de etiquetas — NÃO ENSAIADO: o verificador não julgou este critério | P1.T2.C2 · Semear as tabelas de consulta de temas e cores de etiquetas — NÃO ENSAIADO: o verificador não julgou este critério | P1.T2.C3 · Semear as tabelas de consulta de temas e cores de etiquetas — NÃO ENSAIADO: o verificador não julgou este critério | P1.T3.C1 · Definir identificadores, versões, índices e relacionamentos do armazenamento — NÃO ENSAIADO: o verificador não julgou este critério | P1.T3.C2 · Definir identificadores, versões, índices e relacionamentos do armazenamento — NÃO ENSAIADO: o verificador não julgou este critério | P1.T3.C3 · Definir identificadores, versões, índices e relacionamentos do armazenamento — NÃO ENSAIADO: o verificador não julgou este critério | P1.T3.C4 · Definir identificadores, versões, índices e relacionamentos do armazenamento — NÃO ENSAIADO: o verificador não julgou este critério | P1.T3.C5 · Definir identificadores, versões, índices e relacionamentos do armazenamento — NÃO ENSAIADO: o verificador não julgou este critério | P1.T4.C1 · Executar migrações versionadas com preservação dos dados compatíveis — NÃO ENSAIADO: o verificador não julgou este critério | P1.T4.C2 · Executar migrações versionadas com preservação dos dados compatíveis — NÃO ENSAIADO: o verificador não julgou este critério | P1.T4.C3 · Executar migrações versionadas com preservação dos dados compatíveis — NÃO ENSAIADO: o verificador não julgou este critério | P1.T5.C1 · Criar o estado inicial e restaurar o estado persistido do quadro — NÃO ENSAIADO: o verificador não julgou este critério | P1.T5.C2 · Criar o estado inicial e restaurar o estado persistido do quadro — NÃO ENSAIADO: o verificador não julgou este critério | P1.T5.C3 · Criar o estado inicial e restaurar o estado persistido do quadro — NÃO ENSAIADO: o verificador não julgou este critério | P1.T5.C4 · Criar o estado inicial e restaurar o estado persistido do quadro — NÃO ENSAIADO: o verificador não julgou este critério | P1.T6.C1 · Bloquear a restauração sem substituir dados quando a leitura ou a migração falhar — NÃO ENSAIADO: o verificador não julgou este critério | P1.T6.C2 · Bloquear a restauração sem substituir dados quando a leitura ou a migração falhar — NÃO ENSAIADO: o verificador não julgou este critério | P1.T6.C3 · Bloquear a restauração sem substituir dados quando a leitura ou a migração falhar — NÃO ENSAIADO: o verificador não julgou este critério | P1.T6.C4 · Bloquear a restauração sem substituir dados quando a leitura ou a migração falhar — NÃO ENSAIADO: o verificador não julgou este critério | P1.T7.C1 · Aplicar a versão esperada e o incremento na mesma transação — NÃO ENSAIADO: o verificador não julgou este critério | P1.T7.C2 · Aplicar a versão esperada e o incremento na mesma transação — NÃO ENSAIADO: o verificador não julgou este critério | P1.T7.C3 · Aplicar a versão esperada e o incremento na mesma transação — NÃO ENSAIADO: o verificador não julgou este critério | P1.T7.C4 · Aplicar a versão esperada e o incremento na mesma transação — NÃO ENSAIADO: o verificador não julgou este critério | P1.T8.C1 · Manter posições inteiras e recompactar coleções após alterações — NÃO ENSAIADO: o verificador não julgou este critério | P1.T8.C2 · Manter posições inteiras e recompactar coleções após alterações — NÃO ENSAIADO: o verificador não julgou este critério | P1.T8.C3 · Manter posições inteiras e recompactar coleções após alterações — NÃO ENSAIADO: o verificador não julgou este critério | P1.T8.C4 · Manter posições inteiras e recompactar coleções após alterações — NÃO ENSAIADO: o verificador não julgou este critério | P1.T8.C5 · Manter posições inteiras e recompactar coleções após alterações — NÃO ENSAIADO: o verificador não julgou este critério | P1.T9.C1 · Validar unicidade, referências e pré-condições do modelo — NÃO ENSAIADO: o verificador não julgou este critério | P1.T9.C2 · Validar unicidade, referências e pré-condições do modelo — NÃO ENSAIADO: o verificador não julgou este critério | P1.T9.C3 · Validar unicidade, referências e pré-condições do modelo — NÃO ENSAIADO: o verificador não julgou este critério | P1.T9.C4 · Validar unicidade, referências e pré-condições do modelo — NÃO ENSAIADO: o verificador não julgou este critério | P1.T9.C5 · Validar unicidade, referências e pré-condições do modelo — NÃO ENSAIADO: o verificador não julgou este critério | P1.T9.C6 · Validar unicidade, referências e pré-condições do modelo — NÃO ENSAIADO: o verificador não julgou este critério | P1.T10.C1 · Persistir os campos de conteúdo nos formatos definidos pelo modelo — NÃO ENSAIADO: o verificador não julgou este critério | P1.T10.C2 · Persistir os campos de conteúdo nos formatos definidos pelo modelo — NÃO ENSAIADO: o verificador não julgou este critério | P1.T10.C3 · Persistir os campos de conteúdo nos formatos definidos pelo modelo — NÃO ENSAIADO: o verificador não julgou este critério | P1.T10.C4 · Persistir os campos de conteúdo nos formatos definidos pelo modelo — NÃO ENSAIADO: o verificador não julgou este critério | P1.T11.C1 · Registrar exclusões permanentes com marcadores por entidade — NÃO ENSAIADO: o verificador não julgou este critério | P1.T11.C2 · Registrar exclusões permanentes com marcadores por entidade — NÃO ENSAIADO: o verificador não julgou este critério | P1.T11.C3 · Registrar exclusões permanentes com marcadores por entidade — NÃO ENSAIADO: o verificador não julgou este critério | P1.T11.C4 · Registrar exclusões permanentes com marcadores por entidade — NÃO ENSAIADO: o verificador não julgou este critério | P1.T12.C1 · Persistir a opção de tema e sincronizar transações entre abas — NÃO ENSAIADO: o verificador não julgou este critério | P1.T12.C2 · Persistir a opção de tema e sincronizar transações entre abas — NÃO ENSAIADO: o verificador não julgou este critério | P1.T12.C3 · Persistir a opção de tema e sincronizar transações entre abas — NÃO ENSAIADO: o verificador não julgou este critério | P1.T12.C4 · Persistir a opção de tema e sincronizar transações entre abas — NÃO ENSAIADO: o verificador não julgou este critério | P1.T12.C5 · Persistir a opção de tema e sincronizar transações entre abas — NÃO ENSAIADO: o verificador não julgou este critério | P1.T12.C6 · Persistir a opção de tema e sincronizar transações entre abas — NÃO ENSAIADO: o verificador não julgou este critério
+2026-09-18T13:36:14.966Z	publish	project-phases.md	1	complete	
+2026-09-18T13:36:14.993Z	publish	-	1	blocked	NOT READY
+2026-09-18T14:59:40.940Z	publish	project-description.md	1	complete	reaproveitado deste run
+2026-09-18T14:59:40.949Z	publish	user-stories.md	1	complete	reaproveitado deste run
+2026-09-18T14:59:40.959Z	publish	database-schema.md	1	complete	reaproveitado deste run
+2026-09-18T14:59:40.963Z	interview	project-phases.md	1	started	
+2026-09-18T15:04:41.057Z	interview	project-phases.md	1	complete	4 resposta(s)
+2026-09-18T15:04:41.062Z	authoring	project-phases.md	1	started	
+2026-09-18T15:11:38.473Z	authoring	phase-p01	1	complete	
+2026-09-18T15:11:44.717Z	authoring	phase-p03	1	complete	
+2026-09-18T15:13:19.755Z	authoring	phase-p02	1	complete	
+2026-09-18T15:15:38.230Z	authoring	phase-p05	1	complete	
+2026-09-18T15:17:24.018Z	authoring	phase-p06	1	complete	
+2026-09-18T15:17:44.842Z	authoring	phase-p04	1	complete	
+2026-09-18T15:19:03.191Z	authoring	phase-p07	1	complete	
+2026-09-18T15:22:57.178Z	authoring	phase-p08	1	complete	
+2026-09-18T15:22:57.183Z	audit	project-phases.md	1	started	
+2026-09-18T15:22:57.191Z	audit	project-phases.md	1	retry	a fase declara 74 critérios de aceite em 14 tasks, e uma fase é uma sessão de agente
+2026-09-18T15:38:35.460Z	audit	project-phases.md	2	retry	Os critérios não definem se remover espaços e ignorar maiúsculas, minúsculas e acentos altera o valor armazenado ou apenas a comparação, nem em que momento isso ocorre; O critério "A correspondência remove os espaços nas extremidades" não identifica se a operação incide no título armazenado, na consulta ou em ambos, nem quando ocorre ou se altera o valor persistido; O critério "Todas as ações da aplicação têm um caminho completo por teclado" é mais amplo que as ações implementadas nesta fase e não pode ser verificado ao final dela; A decisão aceita de linguagem minimalista neutra com acentos semânticos não aparece em nenhum objetivo ou critério da fase; As regras dizem que os espaços nas extremidades do nome são removidos e que maiúsculas, minúsculas e acentos são ignorados na comparação, mas não dizem se a remoção altera o valor persistido em colunas.nome, em que momento isso ocorre, nem se caixa e acentos permanecem no valor armazenado ou também são normalizados; Os critérios cobrem criação, renomeação e cores válidas, mas não exigem alterar a cor de uma etiqueta existente, capacidade confirmada e prevista em US-3.1; Os critérios de falha de persistência bloqueiam e preservam o estado, mas não exigem informar a falha antes da conclusão; “A comparação remove espaços nas extremidades” não identifica se o alvo é o título armazenado, a consulta ou ambos, nem quando a operação ocorre; A validação só rejeita a ausência de título e não define o tratamento de valores formados apenas por espaços, omitindo a decisão aceita de rejeitar e remover espaços; A tarefa não define a verificação da versão na exclusão, a versão gravada no marcador nem a atualização das versões dos cartões restantes cuja posição muda na recompactação; O plano exige compatibilidade com Google Chrome e Mozilla Firefox, embora nenhuma decisão confirmada autorize navegadores específicos; isso amplia o escopo para além de executar no navegador.; A fase não define se remover espaços e ignorar caixa ou acentos atua no valor recebido, no valor persistido, na consulta ou apenas na comparação; também não rejeita explicitamente o resultado vazio, apesar da decisão aceita; Os critérios exigem apenas uma versão inteira e não exigem comparar a versão esperada com a persistida, incrementar na mesma transação, recusar e informar conflito na mesma entidade; A validação lista relações de colunas, etiquetas e cartões, mas não exige que quadros.tema_id aponte para uma linha existente de temas; Embora a fase inclua falhas e cubra US-1.1 e US-9.1, não há tarefa para migrações versionadas, preservação de dados compatíveis, bloqueio após falha de leitura ou migração sem gravar estado vazio, falha de persistência antes da conclusão, manutenção do formulário e sincronização imediata entre abas
+2026-09-18T15:51:06.425Z	audit	project-phases.md	3	blocked	teto de devoluções esgotado
+2026-09-18T15:59:29.084Z	publish	project-description.md	1	complete	reaproveitado deste run
+2026-09-18T15:59:29.091Z	publish	user-stories.md	1	complete	reaproveitado deste run
+2026-09-18T15:59:29.096Z	publish	database-schema.md	1	complete	reaproveitado deste run
+2026-09-18T15:59:29.100Z	interview	project-phases.md	1	started	
+2026-09-18T16:05:59.788Z	interview	project-phases.md	1	complete	4 resposta(s)
+2026-09-18T16:05:59.792Z	authoring	project-phases.md	1	started	
+2026-09-18T16:12:33.523Z	authoring	phase-p03	1	complete	
+2026-09-18T16:13:22.096Z	authoring	phase-p02	1	complete	
+2026-09-18T16:14:19.732Z	authoring	phase-p01	1	complete	
+2026-09-18T16:17:31.168Z	authoring	phase-p05	1	complete	
+2026-09-18T16:17:38.341Z	authoring	phase-p04	1	complete	
+2026-09-18T16:19:28.269Z	authoring	phase-p06	1	complete	
+2026-09-18T16:22:42.865Z	authoring	phase-p07	1	complete	
+2026-09-18T16:22:42.871Z	audit	project-phases.md	1	started	
+2026-09-18T16:22:42.879Z	audit	project-phases.md	1	retry	a fase declara 16 tasks e uma fase é uma sessão de agente
+2026-09-18T16:25:19.924Z	audit	project-phases.md	2	retry	a fase declara 64 critérios de aceite em 13 tasks, e uma fase é uma sessão de agente
+2026-09-18T16:44:38.508Z	interview	project-description.md	1	started	
+2026-09-18T16:48:25.184Z	interview	project-description.md	1	complete	24 resposta(s)
+2026-09-18T16:48:25.192Z	authoring	project-description.md	1	started	
+2026-09-18T16:52:29.851Z	interview	project-description.md	1	retry	2 gap(s) descobertos na escrita
+2026-09-18T16:55:37.496Z	interview	project-description.md	1	started	
+2026-09-18T17:00:08.545Z	interview	project-description.md	1	complete	24 resposta(s)
+2026-09-18T17:00:08.557Z	authoring	project-description.md	1	started	
+2026-09-18T17:03:29.207Z	interview	project-description.md	1	retry	2 gap(s) descobertos na escrita
+2026-09-18T17:09:22.408Z	audit	project-description.md	1	started	
+2026-09-18T17:12:50.233Z	audit	project-description.md	1	retry	A regra de ignorar maiúsculas, minúsculas e acentos não identifica quais valores são normalizados, em qual momento, nem se os valores originais permanecem intactos.; “Sem busca e sem filtro” está limitado à primeira utilização; o documento não define o comportamento ao reabrir um quadro já persistido.; A regra de recusar a segunda alteração conflitante não define o que caracteriza conflito, qual estado é comparado nem quando a recusa ocorre.
+2026-09-18T17:14:48.539Z	publish	project-description.md	1	complete	
+2026-09-18T17:14:48.566Z	interview	user-stories.md	1	started	
+2026-09-18T17:19:36.881Z	interview	user-stories.md	1	complete	7 resposta(s)
+2026-09-18T17:19:36.896Z	authoring	user-stories.md	1	started	
+2026-09-18T17:24:28.754Z	audit	user-stories.md	1	started	
+2026-09-18T17:27:07.624Z	publish	user-stories.md	1	complete	
+2026-09-18T17:27:07.640Z	interview	database-schema.md	1	started	
+2026-09-18T17:45:37.433Z	interview	database-schema.md	1	complete	16 resposta(s)
+2026-09-18T17:45:37.442Z	authoring	database-schema.md	1	started	
+2026-09-18T17:55:38.064Z	authoring	database-schema.md	1	retry	timeout do provider
+2026-09-18T18:04:04.567Z	interview	database-schema.md	1	retry	1 gap(s) descobertos na escrita
+2026-09-18T18:06:58.411Z	audit	database-schema.md	1	started	
+2026-09-18T18:14:33.778Z	audit	database-schema.md	1	retry	A relação de `quadros` com `preferencias_quadro` declara muitas preferências, enquanto `### Structural rules` declara uma única por quadro
+2026-09-18T18:27:26.103Z	audit	database-schema.md	2	retry	As regras de normalização não fixam o momento nem a fronteira do valor afetado: nome_normalizado só diz que é calculada, e a busca apenas diz que normaliza o texto digitado e cartoes.titulo, sem definir explicitamente a transformação aceita; permanece ambíguo se os espaços são removidos do valor armazenado, da consulta, do título ou apenas da chave.
+2026-09-18T18:31:16.844Z	audit	database-schema.md	3	blocked	teto de devoluções esgotado

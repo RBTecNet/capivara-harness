@@ -1872,20 +1872,38 @@ A cadeia de quatro documentos (`project-description.md`, `user-stories.md`,
 `database-schema.md`, `project-phases.md`) foi removida do produto. Ela não falhou por
 qualidade: falhou por custo e por acoplamento.
 
-O que a medição mostrou, comparando o mesmo pedido pelos dois caminhos:
+A evidência é o mesmo pedido — o kanban do piloto 3 e do piloto 4, byte a byte o mesmo
+`pedido.md` — rodado pelos dois caminhos. Os dois arquivos de eventos estão em
+`docs/medicoes/`, e tudo abaixo sai deles:
 
-| | cadeia em prosa | ciclo em três estágios |
+| | cadeia em prosa (piloto 3) | ciclo em três estágios (piloto 4) |
 |---|---|---|
-| tempo até RALPH READY | 126 min | 27 min |
-| chamadas de modelo | 79 | 31 |
-| tamanho do prompt de escrita | 28 KB | 7–11 KB |
-| plano publicado | 65 KB | 20 KB |
-| ciclos de correção no build | vários | zero |
+| chegou a RALPH READY? | **não**, em três tentativas | sim, na primeira |
+| do pedido ao gate | nunca fechou | **27 min** (02:56 → 03:23) |
+| só o estágio do plano | **134 min**, terminando em NOT READY | 19,7 min |
+| devoluções do auditor | teto esgotado nas três tentativas | teto esgotado uma vez, e o plano passou |
+| plano publicado | nenhum | 21 KB, 3 fases, 25 tasks, 75 critérios |
+| ciclos de correção no build | build nunca rodou | **zero**: as três fases fecharam de primeira |
 
-A causa estava na estrutura, não nos prompts. Cada uma das ~50 chamadas do plano recebia o
-projeto inteiro e reconstruía o entendimento dele antes de escrever a sua fase: 77% do que o
-modelo processava era contexto, não tarefa. Escrever a fase 7 exigia pensar o produto todo
-pela sétima vez.
+O número que importa nessa tabela não é nenhum dos tempos: é a primeira linha. A cadeia em
+prosa não produziu um plano executável para este pedido — três sessões, 207, 134 e 212
+minutos, todas terminando bloqueadas. O ciclo novo produziu um em 27 minutos, e o `build`
+fechou as três fases sem uma única correção.
+
+> **Sobre uma versão anterior desta seção.** A tabela dizia "126 min contra 27 min, 79
+> chamadas contra 31, plano de 65 KB contra 20 KB". Os três primeiros números não se
+> sustentam nos eventos gravados: a cadeia nunca terminou este pedido, então não há um tempo
+> até RALPH READY para comparar, e o plano de 65 KB nunca foi publicado em disco. A
+> comparação honesta é a de cima, e é mais dura para a cadeia do que a que eu tinha escrito.
+
+A causa estava na estrutura, não nos prompts. Cada chamada do plano — e o piloto 3 fez
+dezenas delas por tentativa — recebia os três documentos upstream inteiros e reconstruía o
+entendimento do projeto antes de escrever a sua fase. Escrever a fase 7 exigia pensar o
+produto todo pela sétima vez, e a maior parte do prompt era esse contexto, não a tarefa.
+
+(A proporção exata não é recuperável: os eventos gravados não carregam contagem de tokens,
+e a medição por chamada que eu tinha citado aqui não sobreviveu à sessão em que foi feita.
+O que os eventos provam é a estrutura do desperdício, não o seu percentual.)
 
 O desenvolvedor foi explícito sobre o critério que importa: *"eu não quero ler nada, eu não
 vou avaliar documentação... a única obrigatoriedade é que a documentação gerada precisa ser

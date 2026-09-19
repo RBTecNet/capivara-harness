@@ -38,7 +38,26 @@ const LEVEL_2 = /^##\s+(.*)$/;
  * conserta; o que não reconhecer vira finding de cobertura antes do gate.
  */
 const TRANSLATED_WORKFLOW = /\b(?:fluxos?|flujos?|flows?|workflows)\s+0*(\d+)\b/gi;
-const TRACES_LINE = /^(\s*-\s*\*\*Traces:\*\*\s*)(.*)$/;
+/*
+ * Traces E Covers.
+ *
+ * O normalizador nasceu olhando só para Traces, e a tradução reapareceu em
+ * Covers — onde sobreviveu até o documento publicado. As duas linhas carregam o
+ * mesmo rótulo estrutural, e a cobertura lê o rótulo, não a prosa.
+ */
+const LABEL_LINE = /\*\*(?:Traces|Covers):\*\*/;
+
+/**
+ * A linha de metadados da fase é UMA, com os campos separados por `·`.
+ *
+ * O modelo às vezes escreve os três em linhas separadas, com quebra de markdown
+ * no fim. O parser recusa — `I-03: a fase não declara a linha de metadados` — e
+ * o run inteiro morre no gate por causa de duas quebras de linha. Isso é
+ * verificável e consertável em código, então não se pede ao modelo.
+ */
+const GOAL_LINE = /^\s*\*\*Goal:\*\*\s*(.*?)\s*$/;
+const DEPENDS_LINE = /^\s*\*\*Depends on:\*\*\s*(.*?)\s*$/;
+const COVERS_LINE = /^\s*\*\*Covers:\*\*\s*(.*?)\s*$/;
 const DEPENDS_TOKEN = /(?:phase\s*)?0*(\d+)/gi;
 const DEPENDS_ON = /(\*\*Depends on:\*\*\s*)([^·\n]*)/;
 
@@ -83,6 +102,12 @@ export function normalizePhasePart(markdown: string, expectation: PhasePartExpec
 
   let content = lines.join("\n").replace(/\s+$/, "");
 
+  const metadados = joinPhaseMetadata(content);
+  if (metadados.applied) {
+    content = metadados.content;
+    applied.push("juntou os metadados da fase numa linha só, como o contrato exige");
+  }
+
   const traduzidos = canonicalWorkflowTraces(content);
   if (traduzidos.applied) {
     content = traduzidos.content;
@@ -102,23 +127,76 @@ export function normalizePhasePart(markdown: string, expectation: PhasePartExpec
 /**
  * Devolve `workflow <n>` às linhas de Traces que o traduziram.
  *
- * Só mexe em linha de Traces: "fluxo" no meio de um critério é prosa legítima e
- * continua prosa. O rótulo estrutural é o que a cobertura lê, e só ele.
+ * Só mexe nas linhas de Traces e Covers: "fluxo" no meio de um critério é prosa
+ * legítima e continua prosa. O rótulo estrutural é o que a cobertura lê.
  */
 export function canonicalWorkflowTraces(markdown: string): { content: string; applied: boolean } {
   let applied = false;
   const content = markdown
     .split("\n")
     .map((line) => {
-      const traces = TRACES_LINE.exec(line);
-      if (!traces) return line;
-      const corrigido = (traces[2] ?? "").replace(TRANSLATED_WORKFLOW, (inteiro, numero: string) => {
+      // `Covers` vive no meio da linha de metadados, entre Goal e Depends on:
+      // por isso a linha inteira é considerada, e não só o que vem depois do
+      // rótulo. Linha de metadados é estrutural de ponta a ponta.
+      if (!LABEL_LINE.test(line)) return line;
+      return line.replace(TRANSLATED_WORKFLOW, (inteiro, numero: string) => {
         const canonico = `workflow ${Number(numero)}`;
         if (inteiro.toLowerCase() !== canonico) applied = true;
         return canonico;
       });
-      return `${traces[1]}${corrigido}`;
     })
     .join("\n");
   return { content, applied };
+}
+
+/**
+ * Junta `Goal`, `Depends on` e `Covers` numa linha, quando vieram separados.
+ *
+ * O contrato exige os três numa linha só, separados por `·`. Escritos em linhas
+ * distintas — com ou sem quebra de markdown no fim — o parser não reconhece a
+ * fase e o run inteiro para no gate. Duas quebras de linha derrubando três horas
+ * de trabalho é exatamente o tipo de coisa que o runtime tem obrigação de
+ * consertar sozinho.
+ */
+export function joinPhaseMetadata(markdown: string): { content: string; applied: boolean } {
+  const lines = markdown.split("\n");
+
+  const goalAt = lines.findIndex((line) => GOAL_LINE.test(line));
+  if (goalAt === -1) return { content: markdown, applied: false };
+
+  // Já está numa linha só quando a própria linha do Goal carrega os outros dois.
+  const goalLine = lines[goalAt] ?? "";
+  if (/\*\*Depends on:\*\*/.test(goalLine) && /\*\*Covers:\*\*/.test(goalLine)) {
+    return { content: markdown, applied: false };
+  }
+
+  const goal = GOAL_LINE.exec(goalLine)?.[1] ?? "";
+  let dependsAt = -1;
+  let coversAt = -1;
+  let depends = "";
+  let covers = "";
+
+  // Procura só logo abaixo: metadados de outra fase não são desta.
+  for (let index = goalAt + 1; index < Math.min(lines.length, goalAt + 5); index += 1) {
+    const line = lines[index] ?? "";
+    const comDepends = DEPENDS_LINE.exec(line);
+    if (comDepends && dependsAt === -1) {
+      dependsAt = index;
+      depends = comDepends[1] ?? "";
+      continue;
+    }
+    const comCovers = COVERS_LINE.exec(line);
+    if (comCovers && coversAt === -1) {
+      coversAt = index;
+      covers = comCovers[1] ?? "";
+    }
+  }
+
+  if (dependsAt === -1 || coversAt === -1) return { content: markdown, applied: false };
+
+  const junta = `**Goal:** ${goal.replace(/\s+$/, "")} · **Depends on:** ${depends.replace(/\s+$/, "")} · **Covers:** ${covers.replace(/\s+$/, "")}`;
+  const restantes = lines.filter((_line, index) => index !== dependsAt && index !== coversAt);
+  restantes[goalAt] = junta;
+
+  return { content: restantes.join("\n"), applied: true };
 }

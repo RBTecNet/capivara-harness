@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canonicalDependsOn, canonicalWorkflowTraces, normalizePhasePart, parsePhases } from "../../src/contract/index.js";
+import { canonicalDependsOn, canonicalWorkflowTraces, joinPhaseMetadata, normalizePhasePart, parsePhaseFragment, parsePhases } from "../../src/contract/index.js";
 
 const FASE = [
   "## Phase 2: Cadastro de hóspedes",
@@ -118,5 +118,69 @@ describe("rótulo de workflow nos Traces", () => {
 
   it("zeros à esquerda e plural também voltam ao canônico", () => {
     expect(canonicalWorkflowTraces("  - **Traces:** flujos 03").content).toContain("workflow 3");
+  });
+});
+
+describe("metadados da fase numa linha só", () => {
+  /* O piloto real escreveu assim — três linhas, com quebra de markdown no fim —
+   * e o parser recusou a fase inteira: I-03. Duas quebras de linha derrubando o
+   * run é exatamente o que o runtime tem obrigação de consertar sozinho. */
+  const separado = [
+    "## Phase 1: Estrutura da interface",
+    "",
+    "**Goal:** Construir a composição visual responsiva.  ",
+    "**Depends on:** Phase 1, Phase 2  ",
+    "**Covers:** preferencias, US-1.10, workflow 1",
+    "",
+    "- [ ] **Task:** Montar a paleta",
+    "  - **Acceptance criteria:**",
+    "    - a paleta existe num arquivo só",
+    "  - **Feature tests:** paleta → existe",
+    "  - **Traces:** US-1.10",
+    "",
+  ].join("\n");
+
+  it("junta as três linhas na forma que o contrato exige", () => {
+    const { content, applied } = joinPhaseMetadata(separado);
+    expect(applied).toBe(true);
+    expect(content).toContain("**Goal:** Construir a composição visual responsiva. · **Depends on:** Phase 1, Phase 2 · **Covers:** preferencias, US-1.10, workflow 1");
+  });
+
+  it("e aí a fase volta a ser legível pelo parser", () => {
+    expect(parsePhaseFragment(separado)).toBeNull();
+    expect(parsePhaseFragment(joinPhaseMetadata(separado).content)?.number).toBe(1);
+  });
+
+  it("o que já está numa linha não é tocado", () => {
+    const certo = [
+      "## Phase 1: Fundação",
+      "",
+      "**Goal:** base · **Depends on:** none · **Covers:** statuses",
+      "",
+    ].join("\n");
+    expect(joinPhaseMetadata(certo).applied).toBe(false);
+  });
+
+  it("sem Depends on ou Covers logo abaixo, não inventa nada", () => {
+    const incompleto = ["## Phase 1: F", "", "**Goal:** algo", ""].join("\n");
+    expect(joinPhaseMetadata(incompleto).applied).toBe(false);
+  });
+
+  it("a normalização inteira aplica a junção e avisa", () => {
+    const { markdown, applied } = normalizePhasePart(separado, { phaseNumber: 1, dependsOn: "none" });
+    expect(applied.join(" ")).toContain("numa linha só");
+    expect(parsePhaseFragment(markdown)?.tasks).toHaveLength(1);
+  });
+});
+
+describe("rótulo traduzido em Covers", () => {
+  it("Covers também volta ao canônico, não só Traces", () => {
+    // "fluxo 1" sobrevivia em Covers até o documento publicado.
+    const linha = "**Goal:** g · **Depends on:** none · **Covers:** preferencias, fluxo 1, fluxo 6";
+    const { content, applied } = canonicalWorkflowTraces(linha);
+    expect(applied).toBe(true);
+    expect(content).toContain("workflow 1");
+    expect(content).toContain("workflow 6");
+    expect(content).not.toContain("fluxo");
   });
 });

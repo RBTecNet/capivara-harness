@@ -13,10 +13,11 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkRewriteDrift, extractEntities, grammarBlock, parsePhaseFragment, parseSkeleton, renderSkeleton, sliceForPhase, extractStoryIds, extractWorkflows, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
+import { assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkRewriteDrift, extractEntities, parsePhaseFragment, parseSkeleton, renderSkeleton, sliceForPhase, extractStoryIds, extractWorkflows, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
 import type { CoverageSources, Skeleton, StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
+import { phaseBlock } from "../contract/templates.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Assumption, Question } from "../interview/index.js";
@@ -1016,7 +1017,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               slice: sliceForPhase(esqueleto, fase.number),
               phaseNumber: fase.number,
               totalPhases: esqueleto.phases.length,
-              grammar: grammarBlock(),
+              // O molde de UMA fase. Mostrar a gramática do documento inteiro
+              // fez duas fases copiarem a linha de carimbo do exemplo.
+              grammar: phaseBlock(fase.number),
               maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
             }),
           });

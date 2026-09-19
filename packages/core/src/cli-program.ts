@@ -8,7 +8,7 @@ import { listProviders, renderProviderList } from "./commands/providers.js";
 import { diagnose, renderDiagnosis } from "./commands/doctor.js";
 import { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
 import { BUILD_ROLES, INIT_ROLES, describeRoles, renderUnresolved, rolesFromFlags, unresolvedRoles, type CliRoleFlags } from "./commands/options.js";
-import { InitBlockedError, resolveRequest, runInit } from "./init/index.js";
+import { InitBlockedError, resolveRequest, runInit, runPlan } from "./init/index.js";
 import { commitSpecification, runBuild } from "./loop/index.js";
 import {
   BACK,
@@ -97,7 +97,7 @@ export function createProgram(): Command {
       .option("--fresh", "ignora o que este run já publicou e recomeça a cadeia do zero")
       .option("--no-dashboard", "não desenha o painel; só as linhas de progresso")
       .option("--no-commit", "não versiona a especificação ao chegar em RALPH READY")
-      .option("--skeleton", "caminho novo: uma leitura do produto e as fases, sem documentos em prosa"),
+      .option("--skeleton", "ciclo novo: entrega as fases do projeto em PLAN READY, sem documentos em prosa"),
   ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; maxAuditReturns: string; maxInterviewRounds: string; fresh?: boolean; dashboard?: boolean; commit?: boolean; skeleton?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const configured = rolesFromFlags(flags);
@@ -188,7 +188,8 @@ export function createProgram(): Command {
         maxInterviewRounds: Number(flags.maxInterviewRounds),
         providers: { writer: roles.writer.provider, auditor: roles.auditor.provider, verifier: roles.verifier.provider },
         ...(flags.fresh === true ? { fresh: true } : {}),
-        ...(flags.skeleton === true ? { mode: "skeleton" as const } : {}),
+        // No ciclo novo o init entrega as fases e para: quem detalha é o plan.
+        ...(flags.skeleton === true ? { mode: "skeleton" as const, stage: "init" as const } : {}),
         announce: (message) => {
           progress.note(message.trim());
           if (live.enabled) repaint();
@@ -323,6 +324,87 @@ export function createProgram(): Command {
         progress.halted(error.message.split("\n")[0] ?? "");
         repaint();
         live.release();
+        stdout.write(`\n${error.message}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      throw error;
+    } finally {
+      terminal.close();
+    }
+  });
+
+  roleFlags(
+    program
+      .command("plan")
+      .description("Detalha as fases que o init produziu, até RALPH READY")
+      .option("--max-audit-returns <n>", "devoluções do auditor", "3")
+      .option("--no-dashboard", "não desenha o painel; só as linhas de progresso"),
+    ["writer", "auditor", "verifier"],
+  ).action(async (flags: CommonFlags & { maxAuditReturns: string; dashboard?: boolean }) => {
+    const projectRoot = flags.project ?? ".";
+    const roles = rolesFromFlags(flags);
+    const semProvider = unresolvedRoles(roles, INIT_ROLES);
+    if (semProvider.length > 0) {
+      stdout.write(`${renderUnresolved("plan", semProvider)}\n`);
+      process.exitCode = 2;
+      return;
+    }
+
+    /*
+     * O `plan` retoma o esqueleto pelo id do run, e o id vem do pedido. É o
+     * mesmo pedido que gerou as fases: mudar o texto muda o run, e o plan não
+     * herdaria o esqueleto de outro.
+     */
+    const request = await resolveRequest(projectRoot, { file: "pedido.md" }).catch(() => null);
+    if (!request) {
+      stdout.write("não encontrei o pedido em pedido.md — o plan retoma o esqueleto pelo mesmo pedido que o init usou\n");
+      process.exitCode = 2;
+      return;
+    }
+
+    const language = detectLanguage(request.text, flags.language);
+    const terminal = createInterface({ input: stdin, output: stdout });
+    const runId = runIdFor("init", request.sha12);
+    const bridge = createAgentBridge({ projectRoot, runId, language, roles, limits: DEFAULT_LIMITS });
+
+    try {
+      const outcome = await runPlan({
+        projectRoot,
+        request,
+        language,
+        maxAuditReturns: Number(flags.maxAuditReturns),
+        announce: (message) => stdout.write(`${message}\n`),
+        call: async (call) => {
+          const response = await bridge({ role: call.role, stage: call.stage, prompt: call.prompt });
+          return {
+            stdout: response.stdout,
+            exitCode: response.exitCode,
+            ...(response.usage ? { usage: { inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens } } : {}),
+          };
+        },
+        ask: async (question, index, total) => {
+          if (stdin.isTTY !== true) {
+            throw new InitBlockedError(`o plano precisa de uma decisão e não há terminal: ${question.decision}`, runId);
+          }
+          stdout.write(renderQuestion({ question, index, total, document: "fase", style: style() }));
+          const answer = await terminal.question("> ");
+          return answer.trim().toLowerCase() === BACK ? "" : answer;
+        },
+        ...(stdin.isTTY === true
+          ? {
+              decideStandoff: async (rendered: string) => {
+                stdout.write(`\n${rendered}\n`);
+                return terminal.question('> (responda, ou "publicar" para aceitar como está) ');
+              },
+            }
+          : {}),
+      });
+
+      stdout.write(`\n${outcome.rendered}\n`);
+      process.exitCode = outcome.readiness.ready ? 0 : 2;
+    } catch (error) {
+      if (error instanceof InitBlockedError) {
         stdout.write(`\n${error.message}\n`);
         process.exitCode = 2;
         return;

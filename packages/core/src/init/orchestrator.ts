@@ -28,6 +28,8 @@ import type { RunStage } from "../state/index.js";
 import { detectRateLimit, planWait } from "../loop/ratelimit.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
 import { DOCUMENT_CHAIN, evaluateReadiness } from "./readiness.js";
+import { evaluatePlanReadiness, renderPlanReadiness } from "./plan-readiness.js";
+import { readSkeletonState, writeSkeletonState } from "./skeleton-state.js";
 import type { ChainDocument, Readiness } from "./readiness.js";
 import type { DeveloperRequest } from "./request.js";
 import { checkDocumentShape } from "./selfcheck.js";
@@ -91,6 +93,14 @@ export interface InitOptions {
    * produto inteiro seguida das fases, cada uma vendo só a sua fatia.
    */
   mode?: "chain" | "skeleton";
+  /**
+   * Onde o run começa e termina no caminho por esqueleto.
+   *
+   * `init` produz o esqueleto e para em PLAN READY; `plan` lê o esqueleto de
+   * disco e detalha as fases até RALPH READY. `both` faz os dois, que é como o
+   * caminho nasceu e como os testes o exercitam de ponta a ponta.
+   */
+  stage?: "init" | "plan" | "both";
   /** Critérios por chamada do ensaio. Lote grande volta sem julgamento. */
   maxCriteriaPerRehearsalBatch?: number;
   /** Provider de cada papel, só para reconhecer o formato do limite de uso. */
@@ -950,6 +960,24 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * mesmos, porque são eles que respondem se o loop consegue executar.
    */
   async function buildFromSkeleton(): Promise<InitOutcome> {
+    const estagio = options.stage ?? "both";
+
+    // O `plan` não reentrevista nem reescreve o esqueleto: ele lê o que o `init`
+    // publicou. Se não houver, não há o que planejar.
+    if (estagio === "plan") {
+      const emDisco = await readFile(join(artifactPaths(options.projectRoot).init, "skeleton.md"), "utf8").catch(() => "");
+      const guardado = await readSkeletonState(options.projectRoot, runId);
+      if (emDisco.trim() === "" || !guardado) {
+        throw new InitBlockedError(
+          "não há esqueleto publicado neste projeto. Rode `capivara init` primeiro: é ele que produz as fases.",
+          runId,
+        );
+      }
+      skeletonAtual = guardado;
+      announce(`— esqueleto lido: ${guardado.phases.length} fases, ${guardado.rules.length} regra(s) transversal(is)`);
+      return await detalharFases(guardado);
+    }
+
     await event("interview", "skeleton", "started");
     const entrevista = await interview("project-description.md", []);
     allAnswers.push(...entrevista.answers.map((answer) => ({ ...answer, questionId: scoped("skeleton", answer.questionId) })));
@@ -997,6 +1025,50 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     await event("publish", "skeleton", "complete", `${esqueleto.phases.length} fase(s), ${esqueleto.entities.length} entidade(s)`);
     announce(`  esqueleto: ${esqueleto.phases.length} fases, ${esqueleto.entities.length} entidades, ${esqueleto.rules.length} regra(s) transversal(is)`);
 
+    await writeSkeletonState(options.projectRoot, runId, esqueleto);
+    skeletonAtual = esqueleto;
+
+    if (estagio === "init") {
+      const planReadiness = evaluatePlanReadiness({
+        skeleton: esqueleto,
+        unresolvedQuestions: needsDecisionMarkers({
+          round: maxInterviewRounds,
+          questions: allQuestions,
+          answers: allAnswers,
+          assumptions: [],
+          maxRounds: maxInterviewRounds,
+        }),
+      });
+
+      await writeRunState(options.projectRoot, { ...state, stage: planReadiness.ready ? "ready" : "publish", status: planReadiness.ready ? "complete" : "blocked" }, now);
+      await event(planReadiness.ready ? "ready" : "publish", "-", planReadiness.ready ? "complete" : "blocked", planReadiness.ready ? "PLAN READY" : "NOT READY");
+
+      const relatorio: InitReport = {
+        ready: planReadiness.ready,
+        published: [`${artifactPaths(options.projectRoot).init}/skeleton.md`],
+        phases: esqueleto.phases.length,
+        tasks: esqueleto.phases.reduce((total, phase) => total + phase.taskCount, 0),
+        mvpCutPhase: esqueleto.mvpCutPhase,
+        coverage: { stories: esqueleto.stories.length, entities: esqueleto.entities.length, workflows: esqueleto.workflows.length },
+        checkpoint: buildCheckpoint({ round: maxInterviewRounds, questions: allQuestions, answers: allAnswers, assumptions: allAssumptions, maxRounds: maxInterviewRounds }),
+        remarks,
+        costs: [...costs.values()],
+        readiness: { ready: planReadiness.ready, checks: planReadiness.checks, contractErrors: [] },
+      };
+
+      return { runId, readiness: relatorio.readiness, report: relatorio, rendered: renderPlanReadiness(planReadiness) };
+    }
+
+    return await detalharFases(esqueleto);
+  }
+
+  /**
+   * O segundo estágio: cada fase ganha tasks, critérios e testes.
+   *
+   * Cada uma vê só a sua fatia — a stack, o que ela cobre, e as regras
+   * transversais. O que precisava ser acordado entre elas já foi, no esqueleto.
+   */
+  async function detalharFases(esqueleto: Skeleton): Promise<InitOutcome> {
     // Cada fase vê a sua fatia, e só ela. É a troca que corta a reconstrução do
     // projeto inteiro em toda chamada.
     const fases = new Array<string>(esqueleto.phases.length).fill("");

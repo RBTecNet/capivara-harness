@@ -10,3 +10,8 @@ export { renderReport } from "./report.js";
 export type { InitReport, RoleCost } from "./report.js";
 export { InitBlockedError, runInit } from "./orchestrator.js";
 export type { AgentCall, AgentCaller, AskDeveloper, DecideStandoff, InitOptions, InitOutcome } from "./orchestrator.js";
+export { runPlan } from "./plan.js";
+export type { PlanOptions } from "./plan.js";
+export { evaluatePlanReadiness, renderPlanReadiness } from "./plan-readiness.js";
+export type { PlanCheck, PlanReadiness, PlanReadinessInput } from "./plan-readiness.js";
+export { readSkeletonState, writeSkeletonState } from "./skeleton-state.js";

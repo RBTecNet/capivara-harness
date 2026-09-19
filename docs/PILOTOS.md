@@ -62,17 +62,44 @@ Exercita limites numéricos, que é exatamente onde a entrevista costuma aceitar
 vago. Se o critério de aceitação gerado disser "limita adequadamente" em vez de
 "a 101ª criação na mesma hora devolve 429", o auditor falhou.
 
+### Piloto 4 — aplicação de navegador com interface visual
+
+> "um quadro kanban pessoal, para uso numa máquina só, que rode no navegador"
+> (`docs/medicoes/pedido.md`)
+
+O primeiro que rodou o ciclo em três estágios de ponta a ponta. Exercita o que
+nenhum dos anteriores exercitava: um produto cujo critério de pronto é visual, e
+que por isso depende da pergunta de aparência da entrevista.
+
+### Piloto 5 — regras transversais entre fases que não se veem
+
+> "um controle de gastos pessoais que rode no navegador, numa máquina só, sem
+> conta e sem servidor" (`~/pilotos/piloto-5/pedido.md`)
+
+Escolhido para atacar o mecanismo central do §26: dinheiro tem regras que
+atravessam todas as fases e que, se ficarem vagas, fazem duas fases divergirem
+sem que nenhuma esteja errada sozinha — arredondamento de centavos, o sinal de
+entrada contra saída, e qual data define a que mês um lançamento pertence.
+
+A fase que soma o mês e a fase que grava o lançamento nunca se veem. Se o
+esqueleto não fixar a regra, uma arredonda e a outra trunca, e o total da tela
+não bate com a soma das linhas. É exatamente o defeito que as regras transversais
+existem para impedir, num domínio onde ele é fácil de medir.
+
+Tem também mais fases que o kanban, o que é o ponto: com três fases o esqueleto
+inteiro e a fatia de uma fase quase se confundem, e o `sliceForPhase` não é
+testado de verdade.
+
 ## Como rodar cada piloto
 
 ```bash
-mkdir -p ~/pilotos/piloto-1 && cd ~/pilotos/piloto-1
+mkdir -p ~/pilotos/piloto-N && cd ~/pilotos/piloto-N
 git init -b main
 
-capivara init "<o pedido do piloto>" \
-  --provider codex --model <modelo> \
-  --auditor-provider <provider mais barato> --auditor-model <modelo mais barato>
+capivara init --file pedido.md --provider codex
+capivara plan --provider codex
 
-# Leia os quatro documentos ANTES de gastar com implementação.
+# O esqueleto é pequeno: dá para olhar antes de pagar pelo detalhe.
 capivara build --verifier-provider <provider mais barato> --verifier-model <modelo mais barato>
 ```
 

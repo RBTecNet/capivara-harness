@@ -24,7 +24,8 @@ import {
   supportsColor,
   supportsTrueColor,
 } from "./tui/index.js";
-import { createLineIO, runWizard } from "./commands/wizard.js";
+import { runWizard } from "./commands/wizard.js";
+import { InputEndedError, createLineIO } from "./commands/line-io.js";
 import { runIdFor } from "./state/index.js";
 import { VERSION } from "./version.js";
 
@@ -127,6 +128,23 @@ export function createProgram(): Command {
     const runId = runIdFor("init", request.sha12);
     const bridge = createAgentBridge({ projectRoot, runId, language, roles, limits: DEFAULT_LIMITS });
     const terminal = createInterface({ input: stdin, output: stdout });
+    /*
+     * A leitura é enfileirada, não `terminal.question()` direto: entrada vinda
+     * de pipe ou arquivo chega inteira antes da primeira pergunta, o readline
+     * fecha no fim dela, e a pergunta seguinte estoura em ERR_USE_AFTER_CLOSE.
+     */
+    const linhas = createLineIO(terminal, (text) => void stdout.write(text));
+    const perguntar = async (prompt: string, decision: string): Promise<string> => {
+      try {
+        return await linhas.ask(prompt);
+      } catch (error) {
+        if (!(error instanceof InputEndedError)) throw error;
+        throw new InitBlockedError(
+          [`A entrada terminou e o escritor ainda precisa de uma decisão:`, "", `  ${decision}`, "", "Nada do que já foi publicado se perdeu: rode o mesmo comando para continuar."].join("\n"),
+          runId,
+        );
+      }
+    };
 
     /*
      * O painel observa e nunca altera: ele lê os eventos que o orquestrador já
@@ -275,12 +293,12 @@ export function createProgram(): Command {
             repaint();
             live.release();
             progress.asking(null);
-            const answer = await terminal.question(paint("  ▸ sua resposta: ", "cyan", style()));
+            const answer = await perguntar(paint("  ▸ sua resposta: ", "cyan", style()), question.decision);
             return answer.trim().toLowerCase() === BACK ? "" : answer;
           }
 
           stdout.write(renderQuestion({ question, index, total, document: "entrevista", style: style() }));
-          const answer = await terminal.question("> ");
+          const answer = await perguntar("> ", question.decision);
           return answer.trim().toLowerCase() === BACK ? "" : answer;
         },
         /*
@@ -298,10 +316,10 @@ export function createProgram(): Command {
                   repaint();
                   live.release();
                   progress.asking(null);
-                  return terminal.question(paint('  ▸ sua decisão (ou "publicar" para aceitar como está): ', "cyan", style()));
+                  return perguntar(paint('  ▸ sua decisão (ou "publicar" para aceitar como está): ', "cyan", style()), "o impasse do auditor");
                 }
                 stdout.write(`\n${rendered}\n`);
-                return terminal.question('> (responda, ou "publicar" para aceitar como está) ');
+                return perguntar('> (responda, ou "publicar" para aceitar como está) ', "o impasse do auditor");
               },
             }
           : {}),
@@ -366,6 +384,18 @@ export function createProgram(): Command {
     const terminal = createInterface({ input: stdin, output: stdout });
     const runId = runIdFor("init", request.sha12);
     const bridge = createAgentBridge({ projectRoot, runId, language, roles, limits: DEFAULT_LIMITS });
+    const linhas = createLineIO(terminal, (text) => void stdout.write(text));
+    const perguntar = async (prompt: string, decision: string): Promise<string> => {
+      try {
+        return await linhas.ask(prompt);
+      } catch (error) {
+        if (!(error instanceof InputEndedError)) throw error;
+        throw new InitBlockedError(
+          [`A entrada terminou e o plano ainda precisa de uma decisão:`, "", `  ${decision}`, "", "Nada do que já foi publicado se perdeu: rode `capivara plan` para continuar."].join("\n"),
+          runId,
+        );
+      }
+    };
 
     try {
       const outcome = await runPlan({
@@ -387,14 +417,14 @@ export function createProgram(): Command {
             throw new InitBlockedError(`o plano precisa de uma decisão e não há terminal: ${question.decision}`, runId);
           }
           stdout.write(renderQuestion({ question, index, total, document: "fase", style: style() }));
-          const answer = await terminal.question("> ");
+          const answer = await perguntar("> ", question.decision);
           return answer.trim().toLowerCase() === BACK ? "" : answer;
         },
         ...(stdin.isTTY === true
           ? {
               decideStandoff: async (rendered: string) => {
                 stdout.write(`\n${rendered}\n`);
-                return terminal.question('> (responda, ou "publicar" para aceitar como está) ');
+                return perguntar('> (responda, ou "publicar" para aceitar como está) ', "o impasse do auditor");
               },
             }
           : {}),
@@ -444,6 +474,7 @@ export function createProgram(): Command {
     // quando há um desenvolvedor para responder. Sem terminal, faltar
     // pré-requisito continua sendo erro de preflight, e não um palpite.
     const terminalBuild = stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
+    const linhasBuild = terminalBuild ? createLineIO(terminalBuild, (text) => void stdout.write(text)) : null;
 
     const outcome = await runBuild({
       projectRoot,
@@ -451,7 +482,12 @@ export function createProgram(): Command {
         ? {
             askPrerequisite: async (rendered: string) => {
               stdout.write(`\n${rendered}\n`);
-              return terminalBuild.question("> ");
+              // Entrada esgotada é "abortar": faltando pré-requisito e sem quem
+              // decida, instalar por conta própria seria um palpite caro.
+              return await linhasBuild!.ask("> ").catch((error: unknown) => {
+                if (error instanceof InputEndedError) return "3";
+                throw error;
+              });
             },
             installPrerequisites: async (prompt: string) => {
               const bridge = createAgentBridge({

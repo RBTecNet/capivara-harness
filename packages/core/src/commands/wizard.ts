@@ -20,55 +20,13 @@ import { CLI_PROVIDERS, DIRECT_PROVIDERS, ROLES, ROLE_NAMES } from "../provider/
 import type { RoleName } from "../provider/index.js";
 import { readChoice, renderChoices, renderCommand, roleHint, toArgv } from "../tui/index.js";
 import type { Choice, WizardAnswers } from "../tui/index.js";
+import { createLineIO } from "./line-io.js";
+import type { LineIO, LineSource } from "./line-io.js";
 
-export interface WizardIO {
-  ask: (prompt: string) => Promise<string>;
-  write: (text: string) => void;
-}
-
-/** O mínimo que o leitor de linhas precisa: serve readline e serve um fake. */
-export interface LineSource {
-  on: (event: "line" | "close", listener: (line: string) => void) => unknown;
-}
-
-/**
- * Enfileira as linhas em vez de pedir uma por vez.
- *
- * `question()` só enxerga o que chega ENQUANTO ele espera. Com a entrada vinda
- * de um pipe, todas as linhas chegam de uma vez, antes de a segunda pergunta
- * existir: a primeira é respondida, o resto evapora e o readline fecha — foi o
- * que derrubou o wizard no primeiro teste com entrada roteirizada.
- *
- * Com fila, linha que chega cedo espera a pergunta, e pergunta que chega cedo
- * espera a linha. É a mesma correção que o pedido colado exigia, feita no lugar
- * certo: o buffer de entrada, não cada pergunta.
- */
-export function createLineIO(source: LineSource, write: (text: string) => void): WizardIO {
-  const buffered: string[] = [];
-  const waiting: { resolve: (line: string) => void; reject: (error: Error) => void }[] = [];
-  let closed = false;
-
-  source.on("line", (line) => {
-    const next = waiting.shift();
-    if (next) next.resolve(line);
-    else buffered.push(line);
-  });
-  source.on("close", () => {
-    closed = true;
-    while (waiting.length > 0) waiting.shift()?.reject(new Error("a entrada terminou"));
-  });
-
-  return {
-    write,
-    ask: (prompt) => {
-      write(prompt);
-      const pronto = buffered.shift();
-      if (pronto !== undefined) return Promise.resolve(pronto);
-      if (closed) return Promise.reject(new Error("a entrada terminou"));
-      return new Promise<string>((resolve, reject) => waiting.push({ resolve, reject }));
-    },
-  };
-}
+/** O wizard lê linha a linha como todo o resto do CLI. */
+export type WizardIO = LineIO;
+export { createLineIO };
+export type { LineSource };
 
 export interface WizardDeps {
   io: WizardIO;

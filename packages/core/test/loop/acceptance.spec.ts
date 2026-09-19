@@ -1,8 +1,8 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { deriveAcceptance, runAcceptance } from "../../src/loop/index.js";
+import { defaultRunner, deriveAcceptance, runAcceptance } from "../../src/loop/index.js";
 import { acceptancePrompt } from "../../src/prompts/index.js";
 
 let projectRoot = "";
@@ -254,4 +254,53 @@ describe("contenção — nenhum processo sobrevive à aceitação", () => {
     expect(result.exitCode).toBe(3);
     expect(result.output).toContain("ECONNREFUSED");
   }, 20000);
+});
+
+describe("aplicação que roda no navegador", () => {
+  const pagina = ['<script type="module" src="src/main.js"></script>', '<link rel="stylesheet" href="src/interface.css">'].join("\n");
+
+  it("uma página sem build nem servidor ainda tem o que provar", () => {
+    // O piloto 4 entregou index.html mais módulos e a aceitação foi pulada
+    // inteira: um produto que funciona saiu sem prova operacional nenhuma.
+    const passos = deriveAcceptance({ indexHtml: pagina });
+    expect(passos).toHaveLength(1);
+    expect(passos[0]?.id).toBe("página");
+    expect(passos[0]?.service).toBe(false);
+  });
+
+  it("o Node continua tendo precedência quando os dois existem", () => {
+    const passos = deriveAcceptance({
+      packageJson: JSON.stringify({ scripts: { build: "vite build", start: "vite preview" } }),
+      indexHtml: pagina,
+    });
+    expect(passos.map((passo) => passo.id)).toContain("build");
+    expect(passos.map((passo) => passo.id)).not.toContain("página");
+  });
+
+  it("sem index.html não há o que aceitar, e isso não é reprovação", () => {
+    expect(deriveAcceptance({ indexHtml: null })).toEqual([]);
+  });
+
+  it("a verificação roda de verdade: referência morta reprova, íntegra passa", async () => {
+    const raiz = await mkdtemp(join(tmpdir(), "capivara-pagina-"));
+    try {
+      await mkdir(join(raiz, "src"), { recursive: true });
+      await writeFile(join(raiz, "index.html"), pagina, "utf8");
+      await writeFile(join(raiz, "src", "interface.css"), "body{}", "utf8");
+
+      const passo = deriveAcceptance({ indexHtml: pagina })[0]!;
+
+      // `src/main.js` ainda não existe: a página aponta para o vazio.
+      const faltando = await defaultRunner(passo.command, raiz, 20);
+      expect(faltando.exitCode, faltando.output).not.toBe(0);
+      expect(faltando.output).toContain("src/main.js");
+
+      await writeFile(join(raiz, "src", "main.js"), "export {};", "utf8");
+      const completo = await defaultRunner(passo.command, raiz, 20);
+      expect(completo.exitCode, completo.output).toBe(0);
+      expect(completo.output).toContain("todos os arquivos");
+    } finally {
+      await rm(raiz, { recursive: true, force: true });
+    }
+  }, 30000);
 });

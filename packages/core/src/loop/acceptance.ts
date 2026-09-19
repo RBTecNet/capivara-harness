@@ -47,6 +47,8 @@ export interface Manifests {
   pyproject?: string | null;
   goMod?: string | null;
   cargoToml?: string | null;
+  /** Página inicial de uma aplicação que roda direto no navegador. */
+  indexHtml?: string | null;
 }
 
 /**
@@ -74,7 +76,8 @@ export function deriveAcceptance(manifests: Manifests): AcceptanceStep[] {
   if ((manifests.cargoToml ?? null) !== null) {
     return [{ id: "build", command: "cargo build --release", service: false }];
   }
-  return [];
+
+  return staticSteps(manifests.indexHtml ?? null);
 }
 
 function nodeSteps(packageJson: string | null): AcceptanceStep[] {
@@ -234,6 +237,7 @@ export async function runAcceptance(options: AcceptanceOptions): Promise<Accepta
     pyproject: await lerManifesto(options.projectRoot, "pyproject.toml"),
     goMod: await lerManifesto(options.projectRoot, "go.mod"),
     cargoToml: await lerManifesto(options.projectRoot, "Cargo.toml"),
+    indexHtml: await lerManifesto(options.projectRoot, "index.html"),
   });
 
   if (steps.length === 0) {
@@ -282,4 +286,41 @@ export async function runAcceptance(options: AcceptanceOptions): Promise<Accepta
   } finally {
     if (room !== options.projectRoot) await rm(room, { recursive: true, force: true });
   }
+}
+
+/**
+ * Aplicação que roda direto no navegador, sem build nem servidor.
+ *
+ * O piloto 4 entregou exatamente isso — `index.html` mais módulos e CSS — e a
+ * aceitação foi pulada inteira: "o projeto não declara um ecossistema com build,
+ * instalação ou entrypoint". Um produto que funciona saiu sem nenhuma prova
+ * operacional, e teria saído igual se o `index.html` referenciasse um arquivo
+ * que a cópia limpa não tem.
+ *
+ * Não há servidor para subir nem processo para ficar de pé, então a prova é
+ * outra: a página existe e tudo o que ela pede existe junto. É pouco, mas é
+ * exatamente o que quebra numa cópia limpa — e é o que o gate 2 não vê, porque
+ * a suíte testa módulos, não a montagem da página.
+ */
+function staticSteps(indexHtml: string | null): AcceptanceStep[] {
+  if (indexHtml === null || indexHtml.trim() === "") return [];
+
+  /*
+   * Referência local, não remota: `https://…` é responsabilidade de quem
+   * publica, e âncora (`#`) não é arquivo. `set -e` faria o `for` abortar antes
+   * da mensagem, então o erro é reportado por quem o encontra.
+   */
+  const verificaAssets = [
+    "referencias=$(grep -oE '(src|href)=\"[^\"]+\"' index.html",
+    "| sed -E 's/.*=\"([^\"]+)\"/\\1/'",
+    "| grep -vE '^(https?:)?//' | grep -v '^#' | grep -v '^data:' | sort -u)",
+    "; faltando=0",
+    "; for referencia in $referencias; do",
+    "  arquivo=${referencia%%[?#]*}",
+    "; [ -f \"$arquivo\" ] || { echo \"index.html aponta para $arquivo, que não existe na cópia limpa\"; faltando=1; }",
+    "; done",
+    "; [ $faltando -eq 0 ] && echo \"index.html e todos os arquivos que ele referencia existem\"",
+  ].join(" ");
+
+  return [{ id: "página", command: verificaAssets, service: false }];
 }

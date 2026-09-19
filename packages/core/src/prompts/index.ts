@@ -11,3 +11,5 @@ export { REHEARSAL_HEADER, assessRehearsal, enumerateCriteria, parseRehearsal, r
 export type { CriterionRef, CriterionRuling, CriterionVerdict, RehearsalContext, RehearsalResult } from "./rehearsal.js";
 export { amendPhasePrompt } from "./amend.js";
 export type { AmendContext } from "./amend.js";
+export { phaseFromSlicePrompt, skeletonPrompt } from "./skeleton.js";
+export type { PhaseFromSliceContext, SkeletonContext } from "./skeleton.js";

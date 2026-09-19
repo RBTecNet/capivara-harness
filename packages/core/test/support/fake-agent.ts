@@ -236,6 +236,40 @@ export function rehearsalApproves(): ScriptStep {
   };
 }
 
+/** Um esqueleto coerente com PHASE_1 e PHASE_2, para o caminho novo. */
+export const SKELETON = JSON.stringify({
+  contract: "capivara-skeleton/v1",
+  projectName: "Pousada",
+  stack: [
+    { component: "Linguagem", decision: "Node 22 com TypeScript" },
+    { component: "Banco", decision: "PostgreSQL 16" },
+  ],
+  entities: [
+    { name: "statuses", fields: [{ name: "nome", type: "text, único" }], relations: [] },
+    { name: "reservations", fields: [{ name: "status_id", type: "fk para statuses" }], relations: ["pertence a statuses"] },
+  ],
+  stories: [{ id: "US-1.1", statement: "Como hóspede, crio uma reserva" }],
+  workflows: [{ number: "1", name: "Criar reserva", steps: ["escolher datas", "confirmar"] }],
+  rules: [{ subject: "reservations.datas", statement: "duas reservas do mesmo quarto não se sobrepõem" }],
+  phases: [
+    { number: 1, title: "Fundação de dados", goal: "migrations e seeds existem", dependsOn: "none", covers: ["statuses", "reservations"], taskCount: 2 },
+    { number: 2, title: "Criar reserva", goal: "o hóspede cria uma reserva", dependsOn: "Phase 1", covers: ["US-1.1", "workflow 1"], taskCount: 2 },
+  ],
+  mvpCutPhase: 2,
+});
+
+/** Roteiro do caminho por esqueleto: uma leitura do produto, depois as fases. */
+export function skeletonPath(): ScriptStep[] {
+  return [
+    { match: { role: "writer", stage: "interview" }, respond: { stdout: NO_QUESTIONS }, repeat: true },
+    { match: { role: "writer", stage: "authoring", subject: "skeleton" }, respond: { stdout: SKELETON }, repeat: true },
+    { match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: PHASE_1 }, repeat: true },
+    { match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 }, repeat: true },
+    { match: { role: "auditor", stage: "audit" }, respond: { stdout: approve() }, repeat: true },
+    rehearsalApproves(),
+  ];
+}
+
 export function happyPath(): ScriptStep[] {
   return [
     { match: { role: "writer", stage: "interview" }, respond: { stdout: NO_QUESTIONS }, repeat: true },

@@ -13,14 +13,14 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkRewriteDrift, extractEntities, parsePhaseFragment, extractStoryIds, extractWorkflows, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
-import type { CoverageSources, StampInput } from "../contract/index.js";
+import { assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkRewriteDrift, extractEntities, grammarBlock, parsePhaseFragment, parseSkeleton, renderSkeleton, sliceForPhase, extractStoryIds, extractWorkflows, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
+import type { CoverageSources, Skeleton, StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, allocateParts, isRepairable, parseLedger, publish, repairDeterministically, stage, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Assumption, Question } from "../interview/index.js";
-import { amendPhasePrompt, assessRehearsal, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, gapPrompt, interviewPrompt, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
+import { amendPhasePrompt, assessRehearsal, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, ledgerPrompt, parseRehearsal, phasePartPrompt, rehearsalPrompt, rewriteInstruction, writerPrompt } from "../prompts/index.js";
 import type { AskedQuestion, CriterionRef, DocumentName, RehearsalResult, WriterContext } from "../prompts/index.js";
 import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEvents, runIdFor, runPaths, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
@@ -85,6 +85,11 @@ export interface InitOptions {
    * mede em vez de se argumentar.
    */
   upfrontInterview?: boolean;
+  /**
+   * `chain` são os quatro documentos em prosa; `skeleton` é uma leitura do
+   * produto inteiro seguida das fases, cada uma vendo só a sua fatia.
+   */
+  mode?: "chain" | "skeleton";
   /** Critérios por chamada do ensaio. Lote grande volta sem julgamento. */
   maxCriteriaPerRehearsalBatch?: number;
   /** Provider de cada papel, só para reconhecer o formato do limite de uso. */
@@ -273,6 +278,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const remarks: { document: string; remark: Remark }[] = [];
   /** Ausente até o ensaio rodar; o gate trata ausência como reprovação. */
   let rehearsal: { blocked: string[] } | undefined;
+  /** Presente apenas no caminho por esqueleto; é dele que sai a cobertura. */
+  let skeletonAtual: Skeleton | null = null;
 
   /*
    * O que ESTE run já publicou não se repete.
@@ -293,6 +300,19 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           .filter((entry) => entry.stage === "publish" && entry.status === "complete")
           .map((entry) => entry.subject),
   );
+
+  /*
+   * O caminho por esqueleto: uma leitura do produto inteiro, depois cada fase
+   * vendo só a sua fatia.
+   *
+   * A cadeia de quatro documentos em prosa existia para um leitor que não
+   * existe. O critério de aceite da documentação é um só — o loop consegue
+   * executá-la — e prosa não ajuda nisso.
+   */
+  if (options.mode === "skeleton") {
+    const construido = await buildFromSkeleton();
+    return construido;
+  }
 
   for (const document of DOCUMENT_CHAIN) {
     if (jaPublicados.has(document)) {
@@ -919,6 +939,127 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     if (!parsed.ok) return false;
     if (checkCoverage(parsed.document, coberturaAtual()).length > 0) return false;
     return checkDesignRefs(parsed.document, artifactPaths(options.projectRoot).design, (caminho) => existsSync(caminho)).length === 0;
+  }
+
+  /**
+   * O caminho por esqueleto, do pedido ao plano.
+   *
+   * Uma chamada pensa o produto inteiro; as fases são escritas em paralelo,
+   * cada uma com a sua fatia; os portões que protegem a execução continuam os
+   * mesmos, porque são eles que respondem se o loop consegue executar.
+   */
+  async function buildFromSkeleton(): Promise<InitOutcome> {
+    await event("interview", "skeleton", "started");
+    const entrevista = await interview("project-description.md", []);
+    allAnswers.push(...entrevista.answers.map((answer) => ({ ...answer, questionId: scoped("skeleton", answer.questionId) })));
+    allQuestions.push(...entrevista.questions.map((question) => ({ ...question, id: scoped("skeleton", question.id) })));
+
+    const decisoes = allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision);
+    const suposicoes = allAssumptions.map((assumption) => `${assumption.topic}: ${assumption.statement} (${assumption.basis})`);
+
+    // O esqueleto é recusado pelo parser antes de custar qualquer fase escrita.
+    await event("authoring", "skeleton", "started");
+    let esqueleto: Skeleton | null = null;
+    let defeitos: string[] = [];
+    for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
+      const saida = await track({
+        role: "writer",
+        stage: "authoring",
+        subject: "skeleton",
+        attempt: tentativa,
+        prompt: skeletonPrompt({
+          language: options.language,
+          request: options.request.text,
+          decisions: decisoes,
+          assumptions: suposicoes,
+          inventory: inventoryText,
+          maxTasksPerPhase: MAX_TASKS_PER_PHASE,
+          maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
+          ...(defeitos.length > 0 ? { defects: defeitos } : {}),
+        }),
+      });
+
+      const lido = parseSkeleton(saida, { maxTasksPerPhase: MAX_TASKS_PER_PHASE });
+      if (lido.ok) {
+        esqueleto = lido.skeleton;
+        break;
+      }
+      defeitos = lido.defects.map((defeito) => `${defeito.problem} → ${defeito.hint}`);
+      announce(`  o esqueleto veio com ${defeitos.length} defeito(s); pedindo de novo com eles nomeados`);
+    }
+
+    if (!esqueleto) {
+      throw new InitBlockedError(`o esqueleto veio inválido duas vezes: ${defeitos.join("; ")}`, runId);
+    }
+
+    await publish(options.projectRoot, [{ name: "skeleton.md", content: renderSkeleton(esqueleto) }]);
+    await event("publish", "skeleton", "complete", `${esqueleto.phases.length} fase(s), ${esqueleto.entities.length} entidade(s)`);
+    announce(`  esqueleto: ${esqueleto.phases.length} fases, ${esqueleto.entities.length} entidades, ${esqueleto.rules.length} regra(s) transversal(is)`);
+
+    // Cada fase vê a sua fatia, e só ela. É a troca que corta a reconstrução do
+    // projeto inteiro em toda chamada.
+    const fases = new Array<string>(esqueleto.phases.length).fill("");
+    const fila = esqueleto.phases.map((fase, posicao) => ({ fase, posicao }));
+    await Promise.all(
+      Array.from({ length: Math.min(maxParallelParts, fila.length) }, async () => {
+        for (;;) {
+          const proxima = fila.shift();
+          if (!proxima) return;
+          const { fase, posicao } = proxima;
+          const saida = await track({
+            role: "writer",
+            stage: "authoring",
+            subject: `phase-p${String(fase.number).padStart(2, "0")}`,
+            attempt: 1,
+            prompt: phaseFromSlicePrompt({
+              language: options.language,
+              slice: sliceForPhase(esqueleto, fase.number),
+              phaseNumber: fase.number,
+              totalPhases: esqueleto.phases.length,
+              grammar: grammarBlock(),
+              maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
+            }),
+          });
+          fases[posicao] = normalizePhasePart(repairDeterministically(saida).content, {
+            phaseNumber: fase.number,
+            dependsOn: fase.dependsOn,
+          }).markdown.trim();
+          announce(`  fase ${fase.number} pronta`);
+          await event("authoring", `phase-p${String(fase.number).padStart(2, "0")}`, "complete");
+        }
+      }),
+    );
+
+    const documento = assemblePhasesDocument({
+      projectName: esqueleto.projectName,
+      stamp: buildStamp([{ name: "skeleton.md", content: renderSkeleton(esqueleto) }]),
+      overview: `${esqueleto.phases.length} fases, fundação primeiro. O MVP fecha na fase ${esqueleto.mvpCutPhase}.`,
+      phases: fases,
+      openQuestions: unresolved({
+        round: maxInterviewRounds,
+        questions: allQuestions,
+        answers: allAnswers,
+        assumptions: [],
+        maxRounds: maxInterviewRounds,
+      }).map((item) => `${item.topic}: ${item.statement}`),
+    });
+
+    published["project-phases.md"] = documento;
+    skeletonAtual = esqueleto;
+
+    const writerDoPlano = writerContext([]);
+    const verdict = await auditLoop("project-phases.md", authoredFromPublished(documento), writerDoPlano, []);
+    published["project-phases.md"] = verdict.content;
+    approved.push("project-phases.md");
+    remarks.push(...verdict.remarks.map((remark) => ({ document: "project-phases.md" as ChainDocument, remark })));
+
+    const final = await rehearse(verdict.authored, writerDoPlano, []);
+    published["project-phases.md"] = final.content;
+
+    await publish(options.projectRoot, [{ name: "project-phases.md", content: final.content }]);
+    await event("publish", "project-phases.md", "complete");
+
+    return await concluir();
   }
 
   /** Os documentos acima de `document` que já estão publicados. */
@@ -1603,53 +1744,68 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     throw new InitBlockedError("inalcançável", runId);
   }
 
-  const phasesDocument = published["project-phases.md"] ?? "";
-  const parsedPhases = parsePhases(phasesDocument);
-  const coverage = {
-    storyIds: extractStoryIds(published["user-stories.md"] ?? ""),
-    entities: extractEntities(published["database-schema.md"] ?? ""),
-    workflows: extractWorkflows(published["project-description.md"] ?? ""),
-    excludedWorkflows: [],
-  };
+  return await concluir();
 
-  const readiness = evaluateReadiness({
-    documents: published,
-    stampInputs: stampInputs(published),
-    coverage,
-    approved,
-    unresolvedQuestions: needsDecisionMarkers({
-      round: maxInterviewRounds,
-      questions: allQuestions,
-      answers: allAnswers,
-      assumptions: [],
-      maxRounds: maxInterviewRounds,
-    }),
-    designRoot: artifactPaths(options.projectRoot).design,
-    // Perguntar ao disco, não responder "sim" por padrão: o gate existe para
-    // conferir, e um verificador que sempre aprova não está conferindo nada.
-    designExists: (caminho) => existsSync(caminho),
-    rehearsal,
-  });
+  /**
+   * O fecho, comum aos dois caminhos.
+   *
+   * Os portões são os mesmos: o que decide se a documentação serve é o loop
+   * conseguir executá-la, e isso não muda com a forma como ela foi produzida.
+   */
+  async function concluir(): Promise<InitOutcome> {
+    const phasesDocument = published["project-phases.md"] ?? "";
+    const parsedPhases = parsePhases(phasesDocument);
+    const coverage = coberturaAtual();
 
-  const tasks = parsedPhases.ok ? parsedPhases.document.phases.reduce((total, phase) => total + phase.tasks.length, 0) : 0;
+    const readiness = evaluateReadiness({
+      documents: published,
+      /*
+       * O plano é carimbado com o que ele leu. Na cadeia em prosa são os três
+       * documentos; no caminho por esqueleto é o esqueleto, que é o único
+       * upstream que existe.
+       */
+      stampInputs: skeletonAtual
+        ? [{ name: "skeleton.md", content: renderSkeleton(skeletonAtual) }]
+        : stampInputs(published),
+      coverage,
+      approved,
+      unresolvedQuestions: needsDecisionMarkers({
+        round: maxInterviewRounds,
+        questions: allQuestions,
+        answers: allAnswers,
+        assumptions: [],
+        maxRounds: maxInterviewRounds,
+      }),
+      designRoot: artifactPaths(options.projectRoot).design,
+      // Perguntar ao disco, não responder "sim" por padrão: o gate existe para
+      // conferir, e um verificador que sempre aprova não está conferindo nada.
+      designExists: (caminho) => existsSync(caminho),
+      rehearsal,
+      // No caminho por esqueleto o run entrega dois artefatos, não quatro.
+      ...(skeletonAtual ? { expected: ["project-phases.md"] as const } : {}),
+    });
 
-  const report: InitReport = {
-    ready: readiness.ready,
-    published: DOCUMENT_CHAIN.map((name) => `${artifactPaths(options.projectRoot).init}/${name}`),
-    phases: parsedPhases.ok ? parsedPhases.document.phases.length : 0,
-    tasks,
-    mvpCutPhase: parsedPhases.ok ? parsedPhases.document.phases.length : 0,
-    coverage: { stories: coverage.storyIds.length, entities: coverage.entities.length, workflows: coverage.workflows.length },
-    checkpoint: buildCheckpoint({ round: maxInterviewRounds, questions: allQuestions, answers: allAnswers, assumptions: allAssumptions, maxRounds: maxInterviewRounds }),
-    remarks,
-    costs: [...costs.values()],
-    readiness,
-  };
+    const tasks = parsedPhases.ok ? parsedPhases.document.phases.reduce((total, phase) => total + phase.tasks.length, 0) : 0;
 
-  await writeRunState(options.projectRoot, { ...state, stage: readiness.ready ? "ready" : "publish", status: readiness.ready ? "complete" : "blocked" }, now);
-  await event(readiness.ready ? "ready" : "publish", "-", readiness.ready ? "complete" : "blocked", readiness.ready ? "RALPH READY" : "NOT READY");
+    const report: InitReport = {
+      ready: readiness.ready,
+      published: DOCUMENT_CHAIN.map((name) => `${artifactPaths(options.projectRoot).init}/${name}`),
+      phases: parsedPhases.ok ? parsedPhases.document.phases.length : 0,
+      tasks,
+      mvpCutPhase: parsedPhases.ok ? parsedPhases.document.phases.length : 0,
+      coverage: { stories: coverage.storyIds.length, entities: coverage.entities.length, workflows: coverage.workflows.length },
+      checkpoint: buildCheckpoint({ round: maxInterviewRounds, questions: allQuestions, answers: allAnswers, assumptions: allAssumptions, maxRounds: maxInterviewRounds }),
+      remarks,
+      costs: [...costs.values()],
+      readiness,
+    };
 
-  return { runId, readiness, report, rendered: renderReport(report) };
+    await writeRunState(options.projectRoot, { ...state, stage: readiness.ready ? "ready" : "publish", status: readiness.ready ? "complete" : "blocked" }, now);
+    await event(readiness.ready ? "ready" : "publish", "-", readiness.ready ? "complete" : "blocked", readiness.ready ? "RALPH READY" : "NOT READY");
+
+
+    return { runId, readiness, report, rendered: renderReport(report) };
+  }
 }
 
 function stampFor(document: ChainDocument, published: Partial<Record<ChainDocument, string>>): string | null {

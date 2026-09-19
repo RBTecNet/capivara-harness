@@ -36,6 +36,14 @@ export interface ReadinessInput {
    * significa que o ensaio não rodou — e não rodar não aprova nada.
    */
   rehearsal?: { blocked: string[] } | undefined;
+  /**
+   * Quais artefatos este run precisa ter publicado.
+   *
+   * O caminho por esqueleto produz dois — o esqueleto e o plano — em vez dos
+   * quatro documentos em prosa. O que o gate confere não é quantos arquivos
+   * existem, é se o loop consegue executar o que existe.
+   */
+  expected?: readonly string[];
 }
 
 export interface ReadinessCheck {
@@ -58,12 +66,13 @@ export function evaluateReadiness(input: ReadinessInput): Readiness {
   const checks: ReadinessCheck[] = [];
   let contractErrors: ContractError[] = [];
 
-  const missing = DOCUMENT_CHAIN.filter((name) => (input.documents[name] ?? "").trim() === "");
+  const esperados = input.expected ?? DOCUMENT_CHAIN;
+  const missing = esperados.filter((name) => (input.documents[name as ChainDocument] ?? "").trim() === "");
   checks.push({
     id: "documentos",
-    title: "Os quatro documentos da cadeia estão publicados",
+    title: `Os artefatos do run estão publicados (${esperados.length})`,
     passed: missing.length === 0,
-    detail: missing.length === 0 ? "" : `faltam: ${missing.join(", ")} — rode a fase documental correspondente`,
+    detail: missing.length === 0 ? "" : `faltam: ${missing.join(", ")} — rode a etapa correspondente`,
   });
 
   const phases = input.documents["project-phases.md"] ?? "";
@@ -119,10 +128,10 @@ export function evaluateReadiness(input: ReadinessInput): Readiness {
     detail: withMarkers.length === 0 ? "" : `${NEEDS_DECISION} em: ${withMarkers.join(", ")} — resolva na entrevista e reescreva o trecho`,
   });
 
-  const notApproved = DOCUMENT_CHAIN.filter((name) => !input.approved.includes(name));
+  const notApproved = esperados.filter((name) => !input.approved.includes(name as ChainDocument));
   checks.push({
     id: "auditoria",
-    title: "Os quatro documentos foram aprovados pelo auditor",
+    title: `Os artefatos auditáveis foram aprovados (${esperados.length})`,
     passed: notApproved.length === 0,
     detail: notApproved.length === 0 ? "" : `sem aprovação: ${notApproved.join(", ")}`,
   });

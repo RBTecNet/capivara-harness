@@ -96,8 +96,9 @@ export function createProgram(): Command {
       .option("--max-interview-rounds <n>", "rodadas de entrevista por documento", "3")
       .option("--fresh", "ignora o que este run já publicou e recomeça a cadeia do zero")
       .option("--no-dashboard", "não desenha o painel; só as linhas de progresso")
-      .option("--no-commit", "não versiona a especificação ao chegar em RALPH READY"),
-  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; maxAuditReturns: string; maxInterviewRounds: string; fresh?: boolean; dashboard?: boolean; commit?: boolean }) => {
+      .option("--no-commit", "não versiona a especificação ao chegar em RALPH READY")
+      .option("--skeleton", "caminho novo: uma leitura do produto e as fases, sem documentos em prosa"),
+  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; maxAuditReturns: string; maxInterviewRounds: string; fresh?: boolean; dashboard?: boolean; commit?: boolean; skeleton?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const configured = rolesFromFlags(flags);
     const semProvider = unresolvedRoles(configured, INIT_ROLES);
@@ -187,6 +188,7 @@ export function createProgram(): Command {
         maxInterviewRounds: Number(flags.maxInterviewRounds),
         providers: { writer: roles.writer.provider, auditor: roles.auditor.provider, verifier: roles.verifier.provider },
         ...(flags.fresh === true ? { fresh: true } : {}),
+        ...(flags.skeleton === true ? { mode: "skeleton" as const } : {}),
         announce: (message) => {
           progress.note(message.trim());
           if (live.enabled) repaint();

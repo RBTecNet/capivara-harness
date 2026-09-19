@@ -31,8 +31,22 @@ describe("sandbox por papel — a fronteira mais delicada", () => {
     expect(buildInvocation("builder", config(), context).args.join(" ")).toContain("--sandbox workspace-write");
   });
 
-  it("claude: read-only usa plan e o executor usa acceptEdits", () => {
-    expect(buildInvocation("auditor", config({ provider: "claude" }), context).args.join(" ")).toContain("--permission-mode plan");
+  /*
+   * `plan` NÃO é o modo somente-leitura, apesar do nome. É o modo em que a CLI
+   * grava um plano em `~/.claude/plans/` e depois tenta relê-lo — fora do
+   * diretório de trabalho, onde o sandbox barra. No piloto 6 uma fase inteira do
+   * plano publicado era a explicação da CLI de que não conseguiu abrir o próprio
+   * arquivo, e o run terminou NOT READY por isso.
+   */
+  it("claude: papel somente-leitura usa default, nunca plan", () => {
+    for (const papel of ["writer", "auditor", "verifier"] as const) {
+      const args = buildInvocation(papel, config({ provider: "claude" }), context).args.join(" ");
+      expect(args, papel).toContain("--permission-mode default");
+      expect(args, papel).not.toContain("--permission-mode plan");
+    }
+  });
+
+  it("claude: o executor continua podendo editar", () => {
     expect(buildInvocation("builder", config({ provider: "claude" }), context).args.join(" ")).toContain("--permission-mode acceptEdits");
   });
 

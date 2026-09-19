@@ -88,3 +88,43 @@ Como duas variáveis mudam juntas, um tempo diferente não atribui causa sozinho
 O que esta rodada responde com clareza é outra coisa: **um escritor barato,
 julgado por um auditor caro, produz documentação executável?** Se produzir, a
 configuração vale por si, independentemente de qual variável moveu o relógio.
+
+
+---
+
+## Os builds do mesmo plano — isolando executor e verificador
+
+Um plano RALPH READY, byte a byte o mesmo (md5 conferido), construído mais de uma
+vez. Tudo que diferir vem de quem executa e de quem julga, nunca da
+especificação.
+
+| build | executor | verificador | o que responde |
+|---|---|---|---|
+| A · piloto-6 | codex | opus 5 | a referência |
+| B · piloto-6-mimo | mimo-v2.5-**free** | deepseek-v4-pro | um executor gratuito dá conta? |
+| C · a rodar | mimo-v2.5-free | **opus 5** | quanto do resultado de B foi o juiz? |
+
+**B move duas variáveis ao mesmo tempo**, e isso foi descuido meu no desenho: se
+B sair melhor que A, não dá para saber se o executor entregou melhor ou se o
+deepseek é um juiz mais leniente que o opus. C existe para separar: fixa o juiz
+em opus e deixa só o executor mudar.
+
+### O que B já mostrou
+
+Três tentativas de B falharam antes de a quarta andar, e **nenhuma** foi
+limitação do modelo:
+
+| tentativa | sintoma que o harness relatou | causa real |
+|---|---|---|
+| 1 | "nenhum comando de teste resolvido" | o prompt do executor nunca disse onde construir; o projeto foi para `tmp/biblioteca-app/` |
+| 2 | "a sessão não escreveu nada" | o adapter não concedia permissão ao executor, e o opencode negou `/tmp` |
+| 3 | "a árvore de trabalho tem alterações não commitadas" | eu apaguei `.capivara/runs`, e com ele o lock, com um processo ainda vivo |
+
+As três mensagens eram verdadeiras e inúteis: descreviam o sintoma com precisão e
+escondiam a causa por completo. Nas três foi preciso abrir o log bruto da sessão
+para achar a linha que importava.
+
+**Isso é uma lacuna de produto, não um detalhe de operação.** Para quem não vai
+ler transcript de sessão, é a diferença entre corrigir em dois minutos e concluir
+que o modelo barato não serve — conclusão que teria sido falsa três vezes
+seguidas.

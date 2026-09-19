@@ -91,6 +91,8 @@ const FEATURE_TESTS = /^- \*\*Feature tests:\*\* (\S.*)$/;
 const DESIGN_REF = /^- \*\*Design ref:\*\* (\S.*)$/;
 const TRACES = /^- \*\*Traces:\*\* (\S.*)$/;
 const CRITERION = /^- (\S.*)$/;
+/** Um rótulo de task sem conteúdo na linha: introduz uma lista, não afirma nada. */
+const STRUCTURAL_ONLY = /^-?\s*\*\*(?:Acceptance criteria|Feature tests|Traces|Design ref):\*\*\s*$/;
 const NEEDS_DECISION = "[NEEDS DECISION]";
 
 interface PhaseDraft {
@@ -284,6 +286,19 @@ export function parsePhases(source: string): ParseResult {
     }
 
     if (inCriteria) {
+      /*
+       * Rótulo estrutural nunca é critério.
+       *
+       * `- **Feature tests:**` sem texto na mesma linha não casa com o rótulo
+       * inline, e caía aqui: virava um critério de aceitação que não afirma nada
+       * sobre o sistema. No piloto 6 foram exatamente os 20 critérios que o
+       * ensaio reprovou como UNOBSERVABLE — o verificador estava certo, e o
+       * defeito era desta leitura.
+       */
+      if (STRUCTURAL_ONLY.test(trimmed)) {
+        inCriteria = false;
+        continue;
+      }
       const criterion = CRITERION.exec(trimmed);
       if (criterion) task.acceptanceCriteria.push((criterion[1] ?? "").trim());
     }

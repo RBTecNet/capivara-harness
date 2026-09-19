@@ -29,6 +29,10 @@ const SUB_PHASE = /^###\s+Phase\s+\d+\.\d+\s*:/;
 /** O rótulo de critérios com texto colado na mesma linha. */
 const INLINE_CRITERIA = /^-\s*\*\*Acceptance criteria:\*\*\s+(\S.*)$/;
 /** Um rótulo de task na margem, sem o traço que o faz item de lista. */
+/** Um rótulo de task sozinho na linha, que introduz uma lista abaixo. */
+const LIST_LABEL = /^-?\s*\*\*(Acceptance criteria|Feature tests|Traces|Design ref):\*\*\s*$/;
+/** Um item simples de lista, que não é outro rótulo nem uma task. */
+const SIMPLE_ITEM = /^-\s+(?!\[[ xX]\])(?!\*\*(?:Acceptance criteria|Feature tests|Traces|Design ref):)(\S.*)$/;
 const NAKED_LABEL = /^(\s*)(\*\*(?:Acceptance criteria|Feature tests|Traces|Design ref):\*\*.*)$/;
 /** Um heading de fase com qualquer número, para reconhecer o número errado. */
 const OUTRA_FASE = /^##\s+Phase\s+(\d+)\s*:/;
@@ -274,7 +278,10 @@ export function extractTasks(markdown: string): { tasks: string; applied: string
   const rotulos = repairMissingBullets(traduzidos.content);
   if (rotulos.applied > 0) applied.push(`devolveu o traço a ${rotulos.applied} rótulo(s) de task escritos na margem`);
 
-  const criterios = repairInlineCriteria(rotulos.content);
+  const listas = repairLabelLists(rotulos.content);
+  if (listas.applied > 0) applied.push(`converteu ${listas.applied} rótulo(s) escritos como lista para a forma que o contrato lê`);
+
+  const criterios = repairInlineCriteria(listas.content);
   if (criterios.applied > 0) {
     applied.push(`abriu os critérios de ${criterios.applied} task(s) que vieram colados na linha do rótulo`);
   }
@@ -345,5 +352,53 @@ export function repairMissingBullets(markdown: string): { content: string; appli
     applied += 1;
     return `${rotulo[1] ?? ""}- ${(rotulo[2] ?? "").trim()}`;
   });
+  return { content: saida.join("\n"), applied };
+}
+
+/**
+ * Rótulo de task seguido de uma lista, em vez de texto na mesma linha.
+ *
+ * A gramática quer `- **Feature tests:** nome → regra`. O modelo escreve o rótulo
+ * sozinho e os itens abaixo, que é markdown igualmente razoável e que o contrato
+ * não aceita:
+ *
+ *     - **Feature tests:**
+ *       - reserva_expira → a reserva some depois de 2 dias
+ *
+ * Cada item vira uma linha própria do rótulo. O parser já aceita o rótulo
+ * repetido — `featureTests` e `traces` são listas —, então a conversão é exata e
+ * não perde nem inventa nada.
+ */
+export function repairLabelLists(markdown: string): { content: string; applied: number } {
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const saida: string[] = [];
+  let applied = 0;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const rotulo = LIST_LABEL.exec((lines[i] ?? "").trim());
+    // `Acceptance criteria` fica de fora: ali a lista é a forma correta.
+    if (!rotulo || rotulo[1] === "Acceptance criteria") {
+      saida.push(lines[i] ?? "");
+      continue;
+    }
+
+    const itens: string[] = [];
+    let j = i + 1;
+    for (; j < lines.length; j += 1) {
+      const item = SIMPLE_ITEM.exec((lines[j] ?? "").trim());
+      if (!item) break;
+      itens.push((item[1] ?? "").trim());
+    }
+
+    if (itens.length === 0) {
+      saida.push(lines[i] ?? "");
+      continue;
+    }
+
+    applied += 1;
+    for (const item of itens) saida.push(`  - **${rotulo[1]}:** ${item}`);
+    i = j - 1;
+  }
+
   return { content: saida.join("\n"), applied };
 }

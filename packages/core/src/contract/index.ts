@@ -29,7 +29,7 @@ export {
   phaseHeading,
 } from "./templates.js";
 export type { PhasesDocumentParts } from "./templates.js";
-export { canonicalDependsOn, canonicalWorkflowTraces, extractTasks, joinPhaseMetadata, repairInlineCriteria, repairMissingBullets, normalizePhasePart } from "./phase-part.js";
+export { canonicalDependsOn, canonicalWorkflowTraces, extractTasks, joinPhaseMetadata, repairInlineCriteria, repairLabelLists, repairMissingBullets, normalizePhasePart } from "./phase-part.js";
 export type { NormalizedPart, PhasePartExpectation } from "./phase-part.js";
 export { checkRewriteDrift, parsePhaseFragment } from "./drift.js";
 export type { DriftInput } from "./drift.js";

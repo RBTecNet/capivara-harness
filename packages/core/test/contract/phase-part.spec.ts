@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assemblePhase, canonicalDependsOn, repairInlineCriteria, repairMissingBullets, canonicalWorkflowTraces, extractTasks, joinPhaseMetadata, normalizePhasePart, parsePhaseFragment, parsePhases } from "../../src/contract/index.js";
+import { assemblePhase, canonicalDependsOn, repairInlineCriteria, repairLabelLists, repairMissingBullets, canonicalWorkflowTraces, extractTasks, joinPhaseMetadata, normalizePhasePart, parsePhaseFragment, parsePhases } from "../../src/contract/index.js";
 
 const FASE = [
   "## Phase 2: Cadastro de hóspedes",
@@ -405,6 +405,62 @@ describe("rótulo de task escrito sem o traço", () => {
       const task = lido.document.phases[0]?.tasks[0];
       expect(task?.acceptanceCriteria).toHaveLength(2);
       expect(task?.traces).toEqual(["US-2.3"]);
+    }
+  });
+});
+
+describe("rótulo escrito como lista, e rótulo que nunca é critério", () => {
+  it("cada item da lista vira uma linha própria do rótulo", () => {
+    const { content, applied } = repairLabelLists(
+      ["- **Feature tests:**", "  - reserva_expira → some depois de 2 dias", "  - multa_calculada → R$ 0,50 por dia"].join("\n"),
+    );
+    expect(applied).toBe(1);
+    expect(content.split("\n")).toEqual([
+      "  - **Feature tests:** reserva_expira → some depois de 2 dias",
+      "  - **Feature tests:** multa_calculada → R$ 0,50 por dia",
+    ]);
+  });
+
+  it("os critérios de aceite ficam de fora: ali a lista é a forma certa", () => {
+    const certo = ["- **Acceptance criteria:**", "  - a tabela existe"].join("\n");
+    expect(repairLabelLists(certo).applied).toBe(0);
+  });
+
+  it("rótulo já inline não é tocado", () => {
+    const certo = "  - **Traces:** US-1.1";
+    expect(repairLabelLists(certo)).toEqual({ content: certo, applied: 0 });
+  });
+
+  it("o rótulo estrutural nunca vira critério de aceitação, mesmo sem reparo", () => {
+    // A defesa vive no parser: foi ela que os 20 UNOBSERVABLE do piloto 6 pediram.
+    const tasks = [
+      "- [ ] **Task:** Criar a reserva",
+      "  - **Acceptance criteria:**",
+      "    - a reserva nasce ativa",
+      "  - **Feature tests:**",
+      "    - reserva_nasce → nasce ativa",
+      "  - **Traces:** US-4.1",
+    ].join("\n");
+
+    const documento = [
+      "# X — Project Phases",
+      "",
+      "<!-- inputs: skeleton.md@sha256:aaaaaaaaaaaa -->",
+      "",
+      "## Overview",
+      "",
+      "x",
+      "",
+      assemblePhase({ number: 1, title: "Base", goal: "g", dependsOn: "none", covers: ["US-4.1"] }, extractTasks(tasks).tasks),
+    ].join("\n");
+
+    const lido = parsePhases(documento);
+    expect(lido.ok, lido.ok ? "" : lido.errors.map((e) => `${e.code} ${e.message}`).join("; ")).toBe(true);
+    if (lido.ok) {
+      const task = lido.document.phases[0]?.tasks[0];
+      expect(task?.acceptanceCriteria).toEqual(["a reserva nasce ativa"]);
+      expect(task?.acceptanceCriteria.join(" ")).not.toContain("Feature tests");
+      expect(task?.featureTests).toEqual(["reserva_nasce → nasce ativa"]);
     }
   });
 });

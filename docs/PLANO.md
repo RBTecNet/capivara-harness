@@ -1993,3 +1993,45 @@ esqueleto gravavam no mesmo arquivo, `<runId>.skeleton.json`. A gravação do es
 depois, então apagava as respostas do desenvolvedor — e o `plan` entrevistava como se o
 `init` nunca tivesse perguntado nada. O sufixo do estado passou a ser `.skeleton-state.json`,
 e um teste fixa os dois arquivos lado a lado.
+
+
+---
+
+## 27. Pendente — `skeleton.md` é derivado, e o `plan` recusa quando divergir
+
+**Decisão tomada, implementação pendente.** Fica depois do piloto 6.
+
+### O problema
+
+O `plan` lê `skeleton.md` apenas para verificar que o arquivo existe; o conteúdo
+inteiro vem de `.skeleton-state.json`. Editar o markdown à mão não tem efeito
+nenhum, e nada avisa. O `checkStamp` também não pega, porque o stamp é montado a
+partir do mesmo state que o `plan` usou.
+
+Isso quebra uma promessa que o próprio desenho faz. §26 justifica o esqueleto
+dizendo que ele é "pequeno o bastante para se olhar antes de pagar pelo detalhe",
+e olhar sugere poder corrigir. Hoje, quem abre o esqueleto, encontra uma regra
+transversal errada, conserta a linha e roda `capivara plan` tem a correção
+silenciosamente ignorada — e recebe um plano carimbado como se tivesse lido o
+arquivo corrigido.
+
+Vale notar como o defeito foi encontrado: aplicando ao próprio gate o critério de
+`CAPIVARA.md` sobre a correção que fica pela metade. Dos nove itens do RALPH
+READY, `frescor` era o único com zero verificações antes do gate final — e o
+motivo acabou não sendo o esperado.
+
+### O que fazer
+
+`skeleton.md` é **derivado**: artefato de leitura, nunca fonte. O `plan` compara
+o markdown em disco com `renderSkeleton(state)` e recusa rodar quando divergirem,
+dizendo o que aconteceu e o que fazer — rodar `capivara init --fresh` para
+regerar a partir do pedido, ou desfazer a edição.
+
+### A alternativa recusada, e por quê
+
+Tratar o markdown como fonte e reparseá-lo daria ao desenvolvedor controle direto
+sobre o esqueleto. Foi recusado porque exigiria simetria perfeita entre
+`renderSkeleton` e um parser de volta — trabalho real e uma superfície de erro
+nova — para servir a um fluxo que o desenvolvedor já disse não querer: *"eu não
+quero ler nada, eu não vou avaliar documentação"*. Recusar a divergência custa
+uma comparação de strings e elimina a promessa falsa.

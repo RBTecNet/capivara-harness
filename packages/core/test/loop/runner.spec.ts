@@ -292,7 +292,7 @@ describe("a especificação entra no histórico", () => {
   it("sem repositório, diz que não versionou em vez de quebrar", async () => {
     const solto = await mkdtemp(join(tmpdir(), "capivara-sem-git-"));
     try {
-      const resultado = await commitSpecification(solto);
+      const resultado = await commitSpecification(solto, "PLAN READY");
       expect(resultado.committed).toBe(false);
       expect(resultado.message).toContain("sem repositório");
     } finally {
@@ -307,14 +307,14 @@ describe("a especificação entra no histórico", () => {
       await run("git", ["config", "user.email", "t@t"], { cwd: repo });
       await run("git", ["config", "user.name", "t"], { cwd: repo });
       await mkdir(join(repo, ".capivara", "init"), { recursive: true });
-      await writeFile(join(repo, ".capivara", "init", "project-description.md"), "# doc\n", "utf8");
+      await writeFile(join(repo, ".capivara", "init", "skeleton.md"), "# doc\n", "utf8");
       await writeFile(join(repo, "rascunho.txt"), "trabalho em andamento\n", "utf8");
 
-      const resultado = await commitSpecification(repo);
+      const resultado = await commitSpecification(repo, "PLAN READY");
       expect(resultado.committed).toBe(true);
 
       const versionados = await run("git", ["ls-files"], { cwd: repo });
-      expect(versionados.stdout).toContain(".capivara/init/project-description.md");
+      expect(versionados.stdout).toContain(".capivara/init/skeleton.md");
       expect(versionados.stdout).not.toContain("rascunho.txt");
     } finally {
       await rm(repo, { recursive: true, force: true });
@@ -328,12 +328,40 @@ describe("a especificação entra no histórico", () => {
       await run("git", ["config", "user.email", "t@t"], { cwd: repo });
       await run("git", ["config", "user.name", "t"], { cwd: repo });
       await mkdir(join(repo, ".capivara", "init"), { recursive: true });
-      await writeFile(join(repo, ".capivara", "init", "project-description.md"), "# doc\n", "utf8");
-      await commitSpecification(repo);
+      await writeFile(join(repo, ".capivara", "init", "skeleton.md"), "# doc\n", "utf8");
+      await commitSpecification(repo, "PLAN READY");
 
-      const segunda = await commitSpecification(repo);
+      const segunda = await commitSpecification(repo, "PLAN READY");
       expect(segunda.committed).toBe(false);
       expect(segunda.message).toContain("já é esta");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("cada estágio versiona o que ele produziu", () => {
+  it("a mensagem nomeia o gate que aquele estágio de fato alcança", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "capivara-git-"));
+    try {
+      await run("git", ["init", "-q"], { cwd: repo });
+      await run("git", ["config", "user.email", "t@t"], { cwd: repo });
+      await run("git", ["config", "user.name", "t"], { cwd: repo });
+      await mkdir(join(repo, ".capivara", "init"), { recursive: true });
+
+      // O init publica o esqueleto e para em PLAN READY.
+      await writeFile(join(repo, ".capivara", "init", "skeleton.md"), "# esqueleto\n", "utf8");
+      expect((await commitSpecification(repo, "PLAN READY")).message).toContain("PLAN READY");
+
+      // O plan publica o plano executável — o artefato que o loop consome — e
+      // ele precisa entrar no histórico tanto quanto o esqueleto.
+      await writeFile(join(repo, ".capivara", "init", "project-phases.md"), "# plano\n", "utf8");
+      const segundo = await commitSpecification(repo, "RALPH READY");
+      expect(segundo.committed).toBe(true);
+      expect(segundo.message).toContain("RALPH READY");
+
+      const versionados = await run("git", ["ls-files"], { cwd: repo });
+      expect(versionados.stdout).toContain(".capivara/init/project-phases.md");
     } finally {
       await rm(repo, { recursive: true, force: true });
     }

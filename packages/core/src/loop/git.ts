@@ -127,11 +127,16 @@ export async function commitPhase(projectRoot: string, phaseNumber: number, titl
  * produziram.
  *
  * Só os artefatos publicados — o esqueleto e o plano — num commit próprio, no
- * momento em que o pacote fica pronto. Nada de `runs/` nem de `handoffs/`:
- * aquilo é estado do run, e o `.gitignore` escrito na árvore de artefatos já os
- * mantém de fora.
+ * momento em que cada estágio fecha o seu gate. Nada de `runs/` nem de
+ * `handoffs/`: aquilo é estado do run, e o `.gitignore` escrito na árvore de
+ * artefatos já os mantém de fora.
+ *
+ * Os DOIS estágios versionam, e o gate vai na mensagem. Enquanto só o `init`
+ * chamava isto, o esqueleto entrava no histórico e o plano executável — que é o
+ * artefato que o loop de fato consome — ficava de fora, com a mensagem do commit
+ * anunciando um RALPH READY que aquele estágio nem alcança.
  */
-export async function commitSpecification(projectRoot: string): Promise<CommitResult> {
+export async function commitSpecification(projectRoot: string, gate: "PLAN READY" | "RALPH READY"): Promise<CommitResult> {
   if (!(await isRepository(projectRoot))) return { committed: false, message: "sem repositório Git: a especificação não foi versionada" };
 
   // Pathspec explícito: nada do trabalho em andamento de quem chamou entra junto.
@@ -139,7 +144,7 @@ export async function commitSpecification(projectRoot: string): Promise<CommitRe
   const staged = await run("git", ["diff", "--cached", "--name-only", "--", ".capivara/init"], { cwd: projectRoot });
   if (staged.stdout.trim() === "") return { committed: false, message: "a especificação versionada já é esta" };
 
-  const message = "docs(capivara): especificação RALPH READY";
+  const message = `docs(capivara): especificação ${gate}`;
   await run("git", ["commit", "-q", "-m", message, "--", ".capivara/init"], { cwd: projectRoot });
   return { committed: true, message };
 }

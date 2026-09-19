@@ -331,7 +331,7 @@ export function createProgram(): Command {
       // gera; sem isso, quem clona o repositório encontra a aplicação sem as
       // decisões que a produziram.
       if (outcome.readiness.ready && flags.commit !== false) {
-        const commit = await commitSpecification(projectRoot);
+        const commit = await commitSpecification(projectRoot, "PLAN READY");
         stdout.write(`${commit.committed ? `versionado: ${commit.message}` : commit.message}\n`);
       }
 
@@ -356,9 +356,10 @@ export function createProgram(): Command {
       .command("plan")
       .description("Detalha as fases que o init produziu, até RALPH READY")
       .option("--max-audit-returns <n>", "devoluções do auditor", "3")
-      .option("--no-dashboard", "não desenha o painel; só as linhas de progresso"),
+      .option("--no-dashboard", "não desenha o painel; só as linhas de progresso")
+      .option("--no-commit", "não versiona a especificação ao chegar em RALPH READY"),
     ["writer", "auditor", "verifier"],
-  ).action(async (flags: CommonFlags & { maxAuditReturns: string; dashboard?: boolean }) => {
+  ).action(async (flags: CommonFlags & { maxAuditReturns: string; dashboard?: boolean; commit?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const roles = rolesFromFlags(flags);
     const semProvider = unresolvedRoles(roles, INIT_ROLES);
@@ -431,6 +432,14 @@ export function createProgram(): Command {
       });
 
       stdout.write(`\n${outcome.rendered}\n`);
+
+      // O plano executável é o artefato que o loop consome: ele precisa estar no
+      // histórico tanto quanto o esqueleto que o gerou.
+      if (outcome.readiness.ready && flags.commit !== false) {
+        const commit = await commitSpecification(projectRoot, "RALPH READY");
+        stdout.write(`${commit.committed ? `versionado: ${commit.message}` : commit.message}\n`);
+      }
+
       process.exitCode = outcome.readiness.ready ? 0 : 2;
     } catch (error) {
       if (error instanceof InitBlockedError) {

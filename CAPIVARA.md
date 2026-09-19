@@ -79,3 +79,25 @@ módulo — não edite à mão; um teste falha se a página divergir do código.
 Falta a segunda metade da Phase 11: os **três pilotos com modelo real**. Eles
 gastam dinheiro, levam dezenas de minutos e precisam de julgamento humano sobre
 se a aplicação entregue é a pedida. O protocolo está em `docs/PILOTOS.md`.
+
+## A correção que fica pela metade
+
+Três defeitos desta sessão tinham a mesma forma: uma verificação existia no lugar
+certo, e não existia no lugar irmão.
+
+| corrigido em | faltava em | custo de descobrir |
+|---|---|---|
+| fila de linhas no wizard | `init`, `plan`, `build` | um run morto na pergunta 1 de 6 |
+| cobertura no laço da auditoria do plano | laço de escrita do esqueleto | um run terminando em NOT READY |
+| commit da especificação no `init` | `plan`, que publica o plano executável | o artefato que o loop consome ficava fora do histórico |
+
+Nos três casos o comentário que explicava a lição já estava escrito no código —
+ao lado da metade que fora corrigida.
+
+**O critério:** quando um defeito for de categoria — "isto é verificável em código
+e só era visto tarde demais", "esta entrada pode acabar", "este estágio também
+publica" — a pergunta seguinte não é se o conserto funcionou. É **onde mais isto
+acontece**, respondida com uma busca, antes de dar o assunto por encerrado.
+
+Vale também para o inverso: ao escrever uma verificação nova, procurar o estágio
+irmão que precisa dela.

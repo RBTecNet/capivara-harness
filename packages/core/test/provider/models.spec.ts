@@ -73,3 +73,45 @@ describe("falhar aqui nunca derruba quem chamou", () => {
     expect(await listarModelos("claude", semBinario)).toEqual(CLAUDE_FAMILIES);
   });
 });
+
+describe("os níveis de raciocínio que o modelo de fato aceita", () => {
+  /*
+   * O wizard oferecia `minimal` a todo mundo, e nenhum modelo atual do codex o
+   * aceita. A chamada morria com `Unsupported value: 'minimal' is not supported
+   * with this model`, e o run terminava em "o papel writer falhou com código 1
+   * em skeleton" — depois de o desenvolvedor ter feito apenas o que o wizard
+   * ofereceu.
+   */
+  const CODEX_JSON = JSON.stringify({
+    models: [
+      {
+        slug: "gpt-6-astra",
+        visibility: "list",
+        supported_reasoning_levels: [{ effort: "low" }, { effort: "medium" }, { effort: "high" }, { effort: "xhigh" }],
+      },
+      { slug: "gpt-5.5", visibility: "list", supported_reasoning_levels: [{ effort: "low" }, { effort: "medium" }] },
+    ],
+  });
+
+  it("lê os níveis por modelo, e minimal não está entre eles", () => {
+    const mapa = MODEL_LISTINGS.codex?.efforts?.(CODEX_JSON) ?? {};
+    expect(mapa["gpt-6-astra"]).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(mapa["gpt-6-astra"]).not.toContain("minimal");
+  });
+
+  it("modelos diferentes aceitam níveis diferentes", () => {
+    const mapa = MODEL_LISTINGS.codex?.efforts?.(CODEX_JSON) ?? {};
+    expect(mapa["gpt-5.5"]).toEqual(["low", "medium"]);
+    expect(mapa["gpt-5.5"]).not.toContain("xhigh");
+  });
+
+  it("saída ilegível devolve mapa vazio, e quem chamou usa a lista genérica", () => {
+    expect(MODEL_LISTINGS.codex?.efforts?.("não é JSON")).toEqual({});
+  });
+
+  it("CLI que não informa níveis devolve vazio, sem erro", async () => {
+    const { listarEfforts } = await import("../../src/provider/index.js");
+    expect(await listarEfforts("opencode", "qualquer-modelo")).toEqual([]);
+    expect(await listarEfforts("claude", "opus")).toEqual([]);
+  });
+});

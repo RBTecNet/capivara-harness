@@ -30,6 +30,17 @@ export interface ModelListing {
   command: string[];
   /** Transforma a saída bruta nos identificadores que a CLI aceita em `--model`. */
   parse: (stdout: string) => string[];
+  /**
+   * Os níveis de raciocínio que CADA modelo aceita, quando a CLI informa.
+   *
+   * Existe porque oferecer um nível que o modelo recusa não é um detalhe: a
+   * chamada morre com código 1 e uma mensagem de API. O wizard oferecia
+   * `minimal` para todo mundo, e nenhum modelo atual do codex aceita esse valor
+   * — o run terminava em "o papel writer falhou com código 1 em skeleton",
+   * sem que o desenvolvedor tivesse feito nada além de escolher uma opção que
+   * lhe foi apresentada.
+   */
+  efforts?: (stdout: string) => Record<string, string[]>;
 }
 
 /**
@@ -84,6 +95,23 @@ export const MODEL_LISTINGS: Record<string, ModelListing> = {
         return [];
       }
     },
+    efforts: (stdout) => {
+      try {
+        const objeto = JSON.parse(stdout) as {
+          models?: { slug?: string; supported_reasoning_levels?: { effort?: string }[] }[];
+        };
+        const mapa: Record<string, string[]> = {};
+        for (const modelo of objeto.models ?? []) {
+          if (typeof modelo.slug !== "string") continue;
+          mapa[modelo.slug] = (modelo.supported_reasoning_levels ?? [])
+            .map((nivel) => nivel.effort)
+            .filter((nivel): nivel is string => typeof nivel === "string");
+        }
+        return mapa;
+      } catch {
+        return {};
+      }
+    },
   },
   claude: { command: [], parse: () => CLAUDE_FAMILIES },
   opencode: { command: ["models"], parse: porSeparador(/\s+/) },
@@ -123,6 +151,33 @@ export async function listarModelos(providerId: string, env: NodeJS.ProcessEnv =
   try {
     const { stdout } = await run(binary, listagem.command, { timeout: TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
     return [...new Set(listagem.parse(stdout))];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Os níveis de raciocínio que este modelo aceita, ou lista vazia quando não dá
+ * para saber.
+ *
+ * Vazio significa "pergunte de outro jeito": quem chamou volta a oferecer a
+ * lista genérica, porque uma CLI que não informa não é uma CLI sem níveis.
+ */
+export async function listarEfforts(
+  providerId: string,
+  modelo: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string[]> {
+  const listagem = MODEL_LISTINGS[providerId];
+  if (!listagem?.efforts || listagem.command.length === 0) return [];
+  if (!(await cliDisponivel(providerId, env))) return [];
+
+  const adapter = CLI_ADAPTERS.find((entrada) => entrada.id === providerId);
+  const binary = env[adapter?.binaryEnv ?? ""]?.trim() || adapter?.defaultBinary || providerId;
+
+  try {
+    const { stdout } = await run(binary, listagem.command, { timeout: TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+    return listagem.efforts(stdout)[modelo] ?? [];
   } catch {
     return [];
   }

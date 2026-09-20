@@ -87,7 +87,10 @@ describe("wizard", () => {
   });
 
   it("o comando impresso e o argv executado dizem a mesma coisa", async () => {
-    const { deps } = roteiro(["", "1", "1", "uma agenda", ".", "2", "sonnet", "3", "n", "s"]);
+    // O effort é a 2ª opção: `desligado`, `low`, `medium`, `high`. `minimal` saiu
+    // da lista porque nenhum modelo atual do codex o aceita, e oferecê-lo fazia a
+    // chamada morrer com código 1.
+    const { deps } = roteiro(["", "1", "1", "uma agenda", ".", "2", "sonnet", "2", "n", "s"]);
     const resultado = await runWizard(deps);
     expect(resultado?.argv).toEqual(["init", "uma agenda", "--provider", "claude", "--model", "sonnet", "--effort", "low"]);
     expect(resultado?.command).toBe('capivara init "uma agenda" --provider claude --model sonnet --effort low');

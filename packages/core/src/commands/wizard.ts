@@ -41,6 +41,13 @@ export interface WizardDeps {
    * devolvendo vazio, faz a pergunta voltar a ser o nome digitado.
    */
   listModels?: (providerId: string) => Promise<string[]>;
+  /**
+   * Os níveis de raciocínio que um modelo aceita, quando a CLI informa.
+   *
+   * Ausente, ou devolvendo vazio, faz o wizard oferecer a lista genérica — que
+   * é o que ele fazia antes, menos o `minimal` que ninguém aceitava.
+   */
+  listEfforts?: (providerId: string, model: string) => Promise<string[]>;
 }
 
 export interface WizardResult {
@@ -51,9 +58,16 @@ export interface WizardResult {
   execute: boolean;
 }
 
-const EFFORTS: Choice[] = [
+/**
+ * A lista genérica, para quando a CLI não informa o que o modelo aceita.
+ *
+ * `minimal` saiu daqui: nenhum modelo atual do codex o aceita, e oferecê-lo
+ * fazia a chamada morrer com código 1 e uma mensagem de API — depois de o
+ * desenvolvedor ter feito apenas o que o wizard ofereceu. Quando a CLI sabe
+ * responder, esta lista nem é usada.
+ */
+const EFFORTS_GENERICOS: Choice[] = [
   { label: "desligado", hint: "nem todo provider aceita raciocínio estendido" },
-  { label: "minimal" },
   { label: "low" },
   { label: "medium" },
   { label: "high" },
@@ -281,7 +295,16 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
   }
   answers.global.provider = provider;
 
-  const effort = EFFORTS[await choose(io, "Intensidade de raciocínio?", EFFORTS, 0)]?.label ?? "desligado";
+  // O que este modelo aceita, quando a CLI sabe dizer; senão, a lista genérica.
+  const aceitos = answers.global.model
+    ? await (deps.listEfforts ?? (async () => []))(provider, answers.global.model).catch(() => [])
+    : [];
+  const opcoesEffort: Choice[] =
+    aceitos.length > 0
+      ? [{ label: "desligado", hint: `${answers.global.model} aceita: ${aceitos.join(", ")}` }, ...aceitos.map((nivel) => ({ label: nivel }))]
+      : EFFORTS_GENERICOS;
+
+  const effort = opcoesEffort[await choose(io, "Intensidade de raciocínio?", opcoesEffort, 0)]?.label ?? "desligado";
   if (effort !== "desligado") answers.global.effort = effort;
 
   // Papéis: só os que ESTE comando chama. Perguntar pelo executor num init é

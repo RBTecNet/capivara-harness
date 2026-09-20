@@ -219,6 +219,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
           }),
         call: options.call,
         ...(options.testRunner !== undefined ? { testRunner: options.testRunner } : {}),
+        systemInstall: options.systemInstall === true,
         ...(options.maxCycles !== undefined ? { maxCycles: options.maxCycles } : {}),
         commitsEnabled: checked.commitsEnabled,
         announce,

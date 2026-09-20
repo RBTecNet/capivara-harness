@@ -94,10 +94,26 @@ export async function gate2(
   projectRoot: string,
   testCommand: string | null,
   runner: TestRunner = defaultTestRunner,
+  systemInstall = false,
 ): Promise<GateResult & { skipped?: boolean }> {
   if (!testCommand) return { green: true, skipped: true };
   const result = await runner(testCommand, projectRoot);
   if (ferramentaAusente(result.exitCode, result.output)) {
+    /*
+     * A instrução tem de caber no que o executor pode fazer.
+     *
+     * Ela dizia "você tem acesso de sistema" sempre, inclusive rodando com
+     * `--no-system-install`. O executor então tentava instalar fora do projeto,
+     * era negado, e gastava o ciclo seguindo uma ordem impossível — três
+     * executores do piloto 6 queimaram a fase 1 assim.
+     */
+    const comoInstalar = systemInstall
+      ? "Você tem acesso de sistema: instale o runner declarado pelo projeto, " +
+        "por exemplo criando e populando o ambiente do projeto ou instalando o pacote correspondente."
+      : "Você NÃO tem acesso de sistema neste run: instale o runner como dependência DO PROJETO, " +
+        "dentro desta pasta (por exemplo `npm install -D <runner>`, ou o equivalente do gerenciador que o " +
+        "projeto usa), e deixe-o declarado no manifesto. Não tente instalar nada fora do projeto.";
+
     return {
       green: false,
       gate: "gate 2 — suíte do projeto",
@@ -105,9 +121,8 @@ export async function gate2(
       cause:
         `O runner de testes do projeto NÃO ESTÁ INSTALADO neste ambiente: '${testCommand}' terminou com código ` +
         `${result.exitCode}. Isto não é um teste vermelho — é uma ferramenta ausente, e a correção é instalá-la, ` +
-        `não mexer no código nem trocar o runner. Você tem acesso de sistema: instale o runner declarado pelo ` +
-        `projeto (por exemplo, criando e populando o ambiente do projeto, ou instalando o pacote correspondente) ` +
-        `e garanta que '${testCommand}' passe a funcionar a partir da raiz do projeto. Saída:\n${tail(result.output, 60)}`,
+        `não mexer no código nem trocar o runner. ${comoInstalar} ` +
+        `Garanta que '${testCommand}' passe a funcionar a partir da raiz do projeto. Saída:\n${tail(result.output, 60)}`,
     };
   }
 
@@ -115,10 +130,43 @@ export async function gate2(
     return {
       green: false,
       gate: "gate 2 — suíte do projeto",
-      cause: `O comando de teste do projeto ('${testCommand}') falhou com código ${result.exitCode}. Saída:\n${tail(result.output, 200)}`,
+      cause:
+        `O comando de teste do projeto ('${testCommand}') falhou com código ${result.exitCode}.` +
+        `${raizComum(result.output)} Saída:\n${tail(result.output, 200)}`,
     };
   }
   return green;
+}
+
+/**
+ * Quando muitas falhas têm a MESMA mensagem, dizê-lo antes da saída bruta.
+ *
+ * Quinze testes vermelhos parecem quinze problemas. No piloto 6 eram um só —
+ * `localStorage.clear is not a function` em todos, um ambiente de teste mal
+ * configurado —, e o executor gastou cinco ciclos tratando sintoma. A saída
+ * completa continua logo abaixo; o que muda é a primeira coisa que ele lê.
+ *
+ * A regra é conservadora de propósito: só fala quando há pelo menos três falhas e
+ * a mesma mensagem responde por dois terços delas. Abaixo disso, apontar uma
+ * "causa comum" seria palpite.
+ */
+export function raizComum(output: string): string {
+  const mensagens = [...output.matchAll(/^\s*(?:→|Error:|AssertionError:)\s*(\S.*)$/gm)]
+    .map((match) => (match[1] ?? "").trim())
+    .filter((mensagem) => mensagem !== "");
+  if (mensagens.length < 3) return "";
+
+  const contagem = new Map<string, number>();
+  for (const mensagem of mensagens) contagem.set(mensagem, (contagem.get(mensagem) ?? 0) + 1);
+
+  const [maior, vezes] = [...contagem.entries()].sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
+  if (vezes < 3 || vezes / mensagens.length < 2 / 3) return "";
+
+  return (
+    ` ATENÇÃO: ${vezes} das ${mensagens.length} falhas trazem a MESMA mensagem — "${maior}". ` +
+    "Uma causa única repetida em testes que verificam coisas diferentes costuma ser configuração do ambiente " +
+    "de teste, não defeito de lógica. Verifique o setup do runner antes de mexer no código de produto."
+  );
 }
 
 /** G3 — o verificador cobriu todas as tasks e nenhuma ficou incompleta. */

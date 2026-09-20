@@ -312,3 +312,71 @@ describe("um build só reclama da árvore depois de saber que ninguém está esc
     }
   });
 });
+
+describe("o gate 2 explica a causa, não só o sintoma", () => {
+  /** A saída real do piloto 6: quinze testes vermelhos, uma causa só. */
+  const QUINZE_FALHAS = [
+    "❯ src/test/storage.test.ts (2 tests | 2 failed)",
+    "  × persistência localStorage > salvar dados → recarregar → dados existem",
+    "    → localStorage.clear is not a function",
+    "  × persistência localStorage > update e delete funcionam",
+    "    → localStorage.clear is not a function",
+    "❯ src/test/types.test.ts (2 tests | 2 failed)",
+    "  × tipos compilam e satisfazem regras transversais",
+    "    → localStorage.clear is not a function",
+    "  × enums de status estão definidos",
+    "    → localStorage.clear is not a function",
+    "Tests  15 failed (15)",
+  ].join("\n");
+
+  it("aponta a mensagem repetida e diz onde procurar", async () => {
+    const { raizComum } = await import("../../src/loop/gates.js");
+    const aviso = raizComum(QUINZE_FALHAS);
+    expect(aviso).toContain("localStorage.clear is not a function");
+    expect(aviso).toContain("configuração do ambiente");
+    expect(aviso).toContain("4 das 4");
+  });
+
+  it("cala quando as falhas têm causas diferentes: apontar uma seria palpite", async () => {
+    const { raizComum } = await import("../../src/loop/gates.js");
+    const variadas = ["→ esperava 3, recebeu 2", "→ não encontrou o elemento", "→ timeout após 5000ms"].join("\n");
+    expect(raizComum(variadas)).toBe("");
+  });
+
+  it("cala com poucas falhas, onde repetição não é evidência", async () => {
+    const { raizComum } = await import("../../src/loop/gates.js");
+    expect(raizComum("→ mesma coisa\n→ mesma coisa")).toBe("");
+  });
+});
+
+describe("o gate 2 pede o que o executor pode fazer", () => {
+  const runnerAusente = async () => ({ exitCode: 127, output: "sh: 1: vitest: not found" });
+
+  it("sem acesso de sistema, manda instalar como dependência do projeto", async () => {
+    const { gate2 } = await import("../../src/loop/gates.js");
+    const resultado = await gate2("/tmp/p", "npm test", runnerAusente, false);
+    expect(resultado.cause).toContain("NÃO tem acesso de sistema");
+    expect(resultado.cause).toContain("dependência DO PROJETO");
+    expect(resultado.cause).not.toContain("Você tem acesso de sistema:");
+  });
+
+  /*
+   * A instrução afirmava acesso de sistema sempre, inclusive com
+   * `--no-system-install`. O executor tentava instalar fora do projeto, era
+   * negado, e gastava o ciclo seguindo uma ordem impossível.
+   */
+  it("com acesso de sistema, aí sim manda instalar o runner do ambiente", async () => {
+    const { gate2 } = await import("../../src/loop/gates.js");
+    const resultado = await gate2("/tmp/p", "npm test", runnerAusente, true);
+    expect(resultado.cause).toContain("Você tem acesso de sistema");
+  });
+
+  it("os dois caminhos deixam claro que não é teste vermelho", async () => {
+    const { gate2 } = await import("../../src/loop/gates.js");
+    for (const sistema of [true, false]) {
+      const resultado = await gate2("/tmp/p", "npm test", runnerAusente, sistema);
+      expect(resultado.toolMissing, String(sistema)).toBe(true);
+      expect(resultado.cause, String(sistema)).toContain("não é um teste vermelho");
+    }
+  });
+});

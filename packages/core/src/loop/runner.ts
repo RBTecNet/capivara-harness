@@ -54,6 +54,8 @@ export interface PhaseRunOptions {
   resolveTest?: () => Promise<TestCommand | null>;
   call: EngineCaller;
   testRunner?: TestRunner;
+  /** Se o executor pode instalar fora do projeto. Muda o que o gate 2 pede a ele. */
+  systemInstall?: boolean;
   maxCycles?: number;
   maxLimitWaits?: number;
   commitsEnabled: boolean;
@@ -149,13 +151,20 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       lastGate = g0.gate;
       lastCause = g0.cause;
     } else {
-      const g2 = await gate2(options.projectRoot, testeAgora?.command ?? null, options.testRunner);
+      const g2 = await gate2(options.projectRoot, testeAgora?.command ?? null, options.testRunner, options.systemInstall === true);
       if (!g2.green) {
         lastGate = g2.gate;
         // Ferramenta ausente não ganha o prefixo de "não escreveu nada": a sessão
         // corretamente não mexeu no código, porque o defeito é de ambiente.
         lastCause = g2.toolMissing === true ? g2.cause : `${noChangeNote}${g2.cause}`;
-        if (g2.toolMissing === true) announce(`[${session.id}] o runner de testes não está instalado; o executor tem acesso de sistema para instalá-lo`);
+        if (g2.toolMissing === true) {
+          announce(
+            `[${session.id}] o runner de testes não está instalado; ` +
+              (options.systemInstall === true
+                ? "o executor tem acesso de sistema para instalá-lo"
+                : "o executor vai instalá-lo como dependência do projeto"),
+          );
+        }
       } else {
         if (g2.skipped) announce(`[${session.id}] gate 2 pulado: nenhum comando de teste resolvido`);
         const verification = await options.call({

@@ -27,7 +27,7 @@ export interface TokenUsage {
 }
 
 /** Como cada CLI fala. Ausente significa texto puro, sem envelope. */
-export type TranscriptKind = "codex-jsonl" | "claude-json" | "opencode-jsonl";
+export type TranscriptKind = "codex-jsonl" | "claude-json" | "opencode-jsonl" | "agy-json";
 
 export interface Transcript {
   /** A resposta final do agente. */
@@ -203,10 +203,43 @@ function ultimoObjeto(stdout: string): Record<string, unknown> | null {
   return ultimo;
 }
 
+/**
+ * O envelope do Antigravity: um objeto só, com o texto em `response`.
+ *
+ * `status` é a própria CLI dizendo se a volta deu certo. Qualquer coisa diferente
+ * de SUCCESS devolve tudo como veio: o diagnóstico está nesse envelope, e
+ * entregar `response` sozinho trocaria a causa por uma resposta truncada.
+ *
+ * Os tokens vêm somados em `input_tokens`, com o cache reportado à parte — a
+ * mesma convenção do codex, e o oposto da do Claude. Confundir as duas foi um
+ * defeito real: um prompt de 23 mil tokens relatado como 9.
+ */
+export function parseAgyJson(stdout: string): Transcript {
+  const objeto = ultimoObjeto(stdout);
+  if (!objeto) return { text: stdout, usage: null, raw: true };
+
+  const uso = objeto["usage"] as Record<string, unknown> | undefined;
+  const usage: TokenUsage | null = uso
+    ? {
+        inputTokens: inteiro(uso, "input_tokens"),
+        cachedInputTokens: inteiro(uso, "cache_read_tokens"),
+        outputTokens: inteiro(uso, "output_tokens"),
+        reasoningTokens: inteiro(uso, "thinking_tokens"),
+      }
+    : null;
+
+  if (objeto["status"] !== "SUCCESS") return { text: stdout, usage, raw: true };
+
+  const resposta = objeto["response"];
+  if (typeof resposta !== "string") return { text: stdout, usage, raw: true };
+  return { text: resposta, usage, raw: false };
+}
+
 /** Lê o transcrito conforme a CLI que o produziu. */
 export function readTranscript(kind: TranscriptKind, stdout: string): Transcript {
   if (kind === "claude-json") return parseClaudeJson(stdout);
   if (kind === "opencode-jsonl") return parseOpencodeJsonl(stdout);
+  if (kind === "agy-json") return parseAgyJson(stdout);
   return parseCodexJsonl(stdout);
 }
 

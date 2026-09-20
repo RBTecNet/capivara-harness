@@ -120,3 +120,47 @@ describe("ambiente da invocação", () => {
     expect(invocation.env.CAPIVARA_LANGUAGE).toBe("pt-BR");
   });
 });
+
+describe("antigravity", () => {
+  const agy = (papel: "writer" | "auditor" | "verifier" | "builder", systemInstall = false) =>
+    buildInvocation(papel, config({ provider: "agy" }), { ...context, systemInstall }).args.join(" ");
+
+  it("o prompt não vira argumento: esta CLI lê de stdin", () => {
+    // `-p` aqui espera o texto como valor do próprio flag; passá-lo vazio faz a
+    // CLI tomar o argumento seguinte como prompt. Foi o primeiro erro ao integrar.
+    expect(agy("writer")).not.toContain("-p");
+    expect(agy("writer")).toContain("--output-format json");
+  });
+
+  /*
+   * A lição que o adaptador do Claude custou: `plan` não é somente-leitura, é o
+   * modo que grava um plano em arquivo e depois tenta relê-lo.
+   */
+  it("papel somente-leitura nunca entra em modo plan", () => {
+    for (const papel of ["writer", "auditor", "verifier"] as const) {
+      expect(agy(papel), papel).not.toContain("--mode plan");
+      expect(agy(papel), papel).toContain("--sandbox");
+      expect(agy(papel), papel).not.toContain("--dangerously-skip-permissions");
+    }
+  });
+
+  /*
+   * E a lição que o adaptador do opencode custou: quem executa precisa da
+   * permissão dita por extenso, senão a sessão morre na primeira ferramenta.
+   */
+  it("o executor edita sem depender de aprovação, porque não há quem aprove", () => {
+    expect(agy("builder")).toContain("--mode accept-edits");
+    expect(agy("builder")).toContain("--dangerously-skip-permissions");
+  });
+
+  it("com instalação de sistema, nem o sandbox entra", () => {
+    expect(agy("builder", true)).not.toContain("--sandbox");
+    expect(agy("builder", false)).toContain("--sandbox");
+  });
+
+  it("modelo e effort chegam à linha de comando", () => {
+    const args = buildInvocation("writer", config({ provider: "agy", model: "gemini-3.1-pro-high", effort: "high" }), context).args.join(" ");
+    expect(args).toContain("--model gemini-3.1-pro-high");
+    expect(args).toContain("--effort high");
+  });
+});

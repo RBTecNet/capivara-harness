@@ -10,11 +10,24 @@ import {
 import { listProviders } from "../../src/commands/providers.js";
 
 describe("catálogo", () => {
-  it("são 10 providers: 4 de CLI e 6 de API direta", async () => {
-    expect(CLI_CATALOG).toHaveLength(4);
-    expect(DIRECT_CATALOG).toHaveLength(6);
+  /*
+   * Contado da lista, não fixado num número: acrescentar uma CLI é escrever um
+   * adaptador e citá-lo, e esse trabalho não deve incluir caçar o teste que
+   * guardava o total antigo.
+   */
+  it("a listagem cobre todo provider de CLI e de API direta, sem faltar nem repetir", async () => {
     const listagem = await listProviders("/caminho/que/nao/existe.json");
-    expect(listagem).toHaveLength(10);
+    expect(listagem).toHaveLength(CLI_CATALOG.length + DIRECT_CATALOG.length);
+
+    const ids = listagem.map((provider) => provider.id).sort();
+    expect(new Set(ids).size, "id repetido entre providers").toBe(ids.length);
+    for (const esperado of [...CLI_CATALOG, ...DIRECT_CATALOG]) {
+      expect(ids, `${esperado.id} sumiu da listagem`).toContain(esperado.id);
+    }
+  });
+
+  it("o antigravity está no catálogo de CLI", () => {
+    expect(CLI_CATALOG.map((cli) => cli.id)).toContain("agy");
   });
 
   it("a listagem informa o estado de configuração de cada um", async () => {

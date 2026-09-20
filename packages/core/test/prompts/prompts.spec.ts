@@ -357,10 +357,8 @@ describe("onde o executor constrói", () => {
     const prompt = implementPrompt({
       language: "português do Brasil",
       phaseMarkdown: "## Phase 1: Base\n\n- [ ] **Task:** X",
-      phaseNumber: 1,
-      taskCount: 1,
       testCommand: null,
-      systemInstall: false,
+      containerized: false,
     });
 
     expect(prompt).toContain("Build IN THE CURRENT DIRECTORY");

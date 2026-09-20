@@ -88,3 +88,43 @@ it("entrega a resposta, não o envelope", () => {
 `--provider custom --adapter /caminho/do/executavel` chama qualquer executável que
 receba o prompt pelo stdin e escreva a resposta no stdout. Serve de escape — e de
 prova de que o contrato é pequeno o bastante para caber num script.
+
+
+---
+
+## O que a integração do `agy` ensinou
+
+Feita seguindo os quatro passos acima, e cada armadilha estava num lugar que o
+nome da flag não revelava.
+
+**O prompt não vai por `-p`.** Nesta CLI, `-p` espera o texto como valor do
+próprio flag (`-p='...'`); passá-lo vazio faz ela tomar o argumento seguinte como
+prompt, e a chamada morre com *"took --output-format as its prompt"*. O caminho é
+stdin, que é como o harness já manda todo prompt.
+
+**`--mode plan` não é somente-leitura**, aqui nem em lugar nenhum. É o modo que
+planeja antes de agir e grava o plano num arquivo. O adaptador do Claude usou
+`plan` para os papéis de leitura e uma fase inteira do piloto 6 veio com a
+explicação da CLI de que não conseguiu reabrir o próprio plano, no lugar das
+tasks. Somente-leitura de verdade é não conceder aprovação automática: em print
+mode, sem ninguém para aprovar, a ferramenta que exigiria permissão é negada.
+
+**Quem executa precisa da permissão dita por extenso.** O adaptador do opencode
+não declarava nada para o executor e herdava o default da CLI, que nega diretório
+externo — e npm, Vite e tsc usam `/tmp` e `~/.npm` o tempo todo. A sessão morria
+na primeira linha e o gate relatava "a sessão não escreveu nada".
+
+### A regra que sai das três
+
+Nenhum nome de flag é evidência. `plan` não é leitura, ausência de configuração
+não é permissão padrão, `-p` não é um booleano. **Chame a CLI de verdade nos três
+níveis de acesso e leia a saída** — é o passo 1 deste documento, e as três vezes
+em que ele foi pulado custaram um run inteiro cada.
+
+### Um teste que não envelhece
+
+Os testes que contavam providers (`são 10 providers: 4 de CLI...`) quebraram ao
+acrescentar o `agy`, sem que nada estivesse errado. Foram reescritos para contar
+a partir do catálogo: acrescentar uma CLI é escrever o adaptador e citá-lo na
+lista, e esse trabalho não deve incluir caçar o teste que guardava o total
+antigo.

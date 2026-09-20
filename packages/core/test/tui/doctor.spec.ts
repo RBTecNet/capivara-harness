@@ -29,14 +29,16 @@ describe("doctor", () => {
     expect(diagnoses.find((diagnosis) => diagnosis.area === "runtime")?.health).toBe("ok");
   });
 
-  it("verifica as três CLIs e diz o que fazer quando faltam", async () => {
+  it("verifica cada CLI do catálogo e diz o que fazer quando falta", async () => {
     const diagnoses = await diagnose({
       projectRoot,
       credentialsFile: ausente,
       environment: { CAPIVARA_CODEX_BIN: "binario-que-nao-existe" },
     });
     const cli = diagnoses.filter((diagnosis) => diagnosis.area === "providers de CLI");
-    expect(cli).toHaveLength(3);
+    // O adaptador custom não tem binário fixo para procurar; os demais têm.
+    const { CLI_CATALOG } = await import("../../src/provider/index.js");
+    expect(cli).toHaveLength(CLI_CATALOG.filter((entrada) => entrada.id !== "custom").length);
     const codex = cli.find((diagnosis) => diagnosis.item.includes("Codex"));
     expect(codex?.health).toBe("ausente");
     expect(codex?.detail).toContain("CAPIVARA_CODEX_BIN");

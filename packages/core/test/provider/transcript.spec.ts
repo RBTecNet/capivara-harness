@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
+import { parseAgyJson,
   buildInvocation,
   createLineSplitter,
   parseClaudeJson,
@@ -238,5 +238,50 @@ describe("entrada significa a mesma coisa em todo provider", () => {
   it("sem campos de cache, o número não muda", () => {
     const simples = JSON.stringify({ result: "ok", usage: { input_tokens: 500, output_tokens: 20 } });
     expect(parseClaudeJson(simples).usage?.inputTokens).toBe(500);
+  });
+});
+
+describe("transcrito do antigravity", () => {
+  /** A saída real de `agy --output-format json`, capturada ao integrar a CLI. */
+  const AGY = JSON.stringify({
+    conversation_id: "76845d2f-5800-4d8e-ac81-d68d31719000",
+    status: "SUCCESS",
+    response: "OK\n",
+    duration_seconds: 1.98,
+    num_turns: 1,
+    usage: { input_tokens: 23771, output_tokens: 20, thinking_tokens: 19, cache_read_tokens: 0, total_tokens: 23791 },
+  });
+
+  it("entrega o campo response, não o envelope da conversa", () => {
+    const lido = parseAgyJson(AGY);
+    expect(lido.text).toBe("OK\n");
+    expect(lido.raw).toBe(false);
+    expect(lido.text).not.toContain("conversation_id");
+  });
+
+  it("lê os tokens na convenção desta CLI: entrada já somada, cache à parte", () => {
+    expect(parseAgyJson(AGY).usage).toEqual({
+      inputTokens: 23771,
+      cachedInputTokens: 0,
+      outputTokens: 20,
+      reasoningTokens: 19,
+    });
+  });
+
+  it("status diferente de SUCCESS devolve tudo, em vez de esconder a causa", () => {
+    const falhou = JSON.stringify({ status: "ERROR", response: "", error: "modelo indisponível" });
+    const lido = parseAgyJson(falhou);
+    expect(lido.raw).toBe(true);
+    expect(lido.text).toContain("modelo indisponível");
+  });
+
+  it("saída que não é o envelope volta como veio", () => {
+    const lido = parseAgyJson("Error: unexpected argument");
+    expect(lido.raw).toBe(true);
+    expect(lido.text).toContain("unexpected argument");
+  });
+
+  it("o despachante escolhe este leitor pelo tipo do adaptador", () => {
+    expect(readTranscript("agy-json", AGY).text).toBe("OK\n");
   });
 });

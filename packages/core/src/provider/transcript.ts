@@ -27,7 +27,7 @@ export interface TokenUsage {
 }
 
 /** Como cada CLI fala. Ausente significa texto puro, sem envelope. */
-export type TranscriptKind = "codex-jsonl" | "claude-json" | "opencode-jsonl" | "agy-json";
+export type TranscriptKind = "codex-jsonl" | "claude-json" | "opencode-jsonl" | "agy-json" | "cursor-json";
 
 export interface Transcript {
   /** A resposta final do agente. */
@@ -249,11 +249,44 @@ export function parseAgyJson(stdout: string): Transcript {
   return { text: resposta, usage, raw: false };
 }
 
+/**
+ * O envelope do Cursor Agent: um objeto de resultado, com o texto em `result`.
+ *
+ * `is_error` é a própria CLI dizendo se a volta deu certo; qualquer coisa fora do
+ * caminho feliz devolve tudo, porque o diagnóstico está no envelope.
+ *
+ * Os campos de uso vêm em camelCase — `inputTokens`, não `input_tokens` — e o
+ * total já inclui o que veio de cache, como no codex e ao contrário do Claude.
+ * Verificado chamando a CLI duas vezes: `cacheReadTokens` fica estável enquanto
+ * `inputTokens` acompanha o tamanho do prompt.
+ */
+export function parseCursorJson(stdout: string): Transcript {
+  const objeto = ultimoObjeto(stdout);
+  if (!objeto) return { text: stdout, usage: null, raw: true };
+
+  const uso = objeto["usage"] as Record<string, unknown> | undefined;
+  const usage: TokenUsage | null = uso
+    ? {
+        inputTokens: inteiro(uso, "inputTokens"),
+        cachedInputTokens: inteiro(uso, "cacheReadTokens"),
+        outputTokens: inteiro(uso, "outputTokens"),
+        reasoningTokens: 0,
+      }
+    : null;
+
+  if (objeto["is_error"] === true) return { text: stdout, usage, raw: true };
+
+  const resultado = objeto["result"];
+  if (typeof resultado !== "string" || resultado.trim() === "") return { text: stdout, usage, raw: true };
+  return { text: resultado, usage, raw: false };
+}
+
 /** Lê o transcrito conforme a CLI que o produziu. */
 export function readTranscript(kind: TranscriptKind, stdout: string): Transcript {
   if (kind === "claude-json") return parseClaudeJson(stdout);
   if (kind === "opencode-jsonl") return parseOpencodeJsonl(stdout);
   if (kind === "agy-json") return parseAgyJson(stdout);
+  if (kind === "cursor-json") return parseCursorJson(stdout);
   return parseCodexJsonl(stdout);
 }
 

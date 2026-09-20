@@ -180,3 +180,46 @@ describe("antigravity", () => {
     expect(args).toContain("--effort high");
   });
 });
+
+describe("cursor", () => {
+  const cursor = (papel: "writer" | "auditor" | "verifier" | "builder") =>
+    buildInvocation(papel, config({ provider: "cursor" }), context).args.join(" ");
+
+  /*
+   * Sem `--trust` a CLI para e pede para ser rodada interativamente — em modo
+   * headless, uma sessão perdida sem diagnóstico. A capivara só roda dentro do
+   * projeto que o operador apontou, então a confiança é a premissa da chamada.
+   */
+  it("todo papel confia no diretório, senão a CLI não sai do lugar", () => {
+    for (const papel of ["writer", "auditor", "verifier", "builder"] as const) {
+      expect(cursor(papel), papel).toContain("--trust");
+    }
+  });
+
+  /*
+   * A CLI oferece `plan` e `ask`. `plan` analisa e PROPÕE planos; `ask` é Q&A e
+   * recusa editar — verificado contra a CLI real. Escolher pelo nome mais óbvio
+   * foi o que custou uma fase inteira do piloto 6 no adaptador do Claude.
+   */
+  it("somente-leitura é ask, nunca plan", () => {
+    for (const papel of ["writer", "auditor", "verifier"] as const) {
+      expect(cursor(papel), papel).toContain("--mode ask");
+      expect(cursor(papel), papel).not.toContain("--mode plan");
+    }
+  });
+
+  it("o executor não entra em modo de leitura: `-p` já lhe dá write e shell", () => {
+    // Comparado como argumento: `--mode` é substring de `--model` e passaria por
+    // um `toContain` ingênuo. É a mesma armadilha de `-p` dentro de
+    // `--dangerously-skip-permissions`, no adaptador do antigravity.
+    const args = buildInvocation("builder", config({ provider: "cursor" }), context).args;
+    expect(args).not.toContain("--mode");
+    expect(args).toContain("-p");
+  });
+
+  it("a intensidade vive no nome do modelo, e nenhum --effort é inventado", () => {
+    const args = buildInvocation("builder", config({ provider: "cursor", model: "composer-2.5", effort: "high" }), context).args.join(" ");
+    expect(args).toContain("--model composer-2.5");
+    expect(args).not.toContain("--effort");
+  });
+});

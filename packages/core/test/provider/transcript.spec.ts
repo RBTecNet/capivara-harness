@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseAgyJson,
+import { parseAgyJson, parseCursorJson,
   buildInvocation,
   createLineSplitter,
   parseClaudeJson,
@@ -313,5 +313,50 @@ describe("SUCCESS com resposta vazia não é sucesso", () => {
 
   it("os tokens continuam sendo lidos, mesmo na volta que falhou", () => {
     expect(parseAgyJson(NEGADO).usage?.inputTokens).toBe(24569);
+  });
+});
+
+describe("transcrito do cursor", () => {
+  /** A saída real de `cursor-agent -p --output-format json --trust`. */
+  const CURSOR = JSON.stringify({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    duration_ms: 6136,
+    result: "OK",
+    session_id: "0e0f2ba9",
+    usage: { inputTokens: 8222, outputTokens: 38, cacheReadTokens: 2816, cacheWriteTokens: 0 },
+  });
+
+  it("entrega o campo result, não o envelope da sessão", () => {
+    const lido = parseCursorJson(CURSOR);
+    expect(lido.text).toBe("OK");
+    expect(lido.raw).toBe(false);
+    expect(lido.text).not.toContain("session_id");
+  });
+
+  it("lê os campos em camelCase, com o total de entrada já somado", () => {
+    // Verificado contra a CLI: cacheReadTokens fica estável entre chamadas
+    // enquanto inputTokens acompanha o tamanho do prompt — o total é inputTokens.
+    expect(parseCursorJson(CURSOR).usage).toEqual({
+      inputTokens: 8222,
+      cachedInputTokens: 2816,
+      outputTokens: 38,
+      reasoningTokens: 0,
+    });
+  });
+
+  it("is_error devolve tudo, em vez de esconder a causa", () => {
+    const erro = JSON.stringify({ is_error: true, result: "sessão expirada", usage: { inputTokens: 1, outputTokens: 0 } });
+    expect(parseCursorJson(erro).raw).toBe(true);
+    expect(parseCursorJson(erro).text).toContain("sessão expirada");
+  });
+
+  it("resultado vazio não é resposta, como em toda CLI", () => {
+    expect(parseCursorJson(JSON.stringify({ is_error: false, result: "  " })).raw).toBe(true);
+  });
+
+  it("o despachante escolhe este leitor pelo tipo do adaptador", () => {
+    expect(readTranscript("cursor-json", CURSOR).text).toBe("OK");
   });
 });

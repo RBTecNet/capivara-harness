@@ -38,7 +38,7 @@ export {
   writeCredentials,
 } from "./credentials.js";
 export type { CredentialRecord, SafeCredential } from "./credentials.js";
-export { createLineSplitter, parseAgyJson,
+export { createLineSplitter, parseAgyJson, parseCursorJson,
   parseClaudeJson, parseCodexJsonl, parseOpencodeJsonl, readTranscript, summarizeCodexEvent } from "./transcript.js";
 export type { TokenUsage, Transcript, TranscriptKind } from "./transcript.js";
 export { CLI_ADAPTERS, cliAdapter } from "./cli/index.js";

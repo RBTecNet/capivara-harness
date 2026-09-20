@@ -10,11 +10,12 @@
 import { agyAdapter } from "./agy.js";
 import { claudeAdapter } from "./claude.js";
 import { codexAdapter } from "./codex.js";
+import { cursorAdapter } from "./cursor.js";
 import { customAdapter } from "./custom.js";
 import { opencodeAdapter } from "./opencode.js";
 import type { CliAdapter } from "./types.js";
 
-export const CLI_ADAPTERS = [codexAdapter, claudeAdapter, opencodeAdapter, agyAdapter, customAdapter] as const;
+export const CLI_ADAPTERS = [codexAdapter, claudeAdapter, opencodeAdapter, agyAdapter, cursorAdapter, customAdapter] as const;
 
 export type CliProviderId = (typeof CLI_ADAPTERS)[number]["id"];
 

@@ -2082,3 +2082,30 @@ princípio dos outros gates: verificável em código, e caro exatamente uma vez.
 Não é trabalho pequeno, e por isso fica registrado em vez de improvisado. Mas é a
 diferença entre "todas as fases verdes" e "a aplicação faz o que foi pedido" —
 que hoje o harness não consegue afirmar.
+
+### A medição que fechou o caso
+
+O mesmo plano de 61 tasks, construído por dois executores, com o mesmo
+verificador. Ambos terminaram com as sete fases verdes, a suíte passando e a
+aceitação operacional aprovada. O desenvolvedor abriu as duas:
+
+| | gemini 3.8 flash | composer 2.5 |
+|---|---|---|
+| tempo | 118 min | 117 min |
+| **ciclos de correção** | **3** | **18** |
+| testes do projeto | 168 | 143 |
+| componentes de produto | 23 | 25 |
+| **completude funcional** | **tudo funciona** | **falta a maioria dos cadastros** |
+
+Os dois escreveram praticamente o mesmo número de componentes. O composer não
+deixou de criar arquivos — criou código que não faz o que deveria, que é o caso
+pior para o gate 3: há o que ler, e a leitura aprova.
+
+**O número de ciclos era o sinal, e ninguém estava lendo.** Dezoito devoluções
+contra três, para entregar menos. Um executor que erra muito e conserta rápido
+pode estar convergindo para *passar no gate* em vez de *fazer o trabalho* — e o
+harness, que só olha o veredito de cada passagem, não distingue as duas coisas.
+
+Isso sugere uma métrica barata enquanto o gate de fluxos não existe: **ciclos
+gastos por fase é sinal de qualidade, não só de velocidade.** Uma fase que
+precisou de cinco passagens merece desconfiança mesmo tendo fechado verde.

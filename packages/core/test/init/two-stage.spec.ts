@@ -11,7 +11,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { InitBlockedError, evaluatePlanReadiness, runInit, runPlan } from "../../src/init/index.js";
+import { InitBlockedError, evaluatePlanReadiness, readRequestState, runInit, runPlan } from "../../src/init/index.js";
 import { parseSkeleton } from "../../src/contract/index.js";
 import type { Skeleton } from "../../src/contract/index.js";
 import { PHASE_1, SKELETON, fakeAgent, oneQuestion, skeletonPath } from "../support/fake-agent.js";
@@ -76,6 +76,16 @@ describe("estágio 1 — init", () => {
     const esqueleto = await readFile(join(projectRoot, ".capivara", "init", "skeleton.md"), "utf8");
     expect(esqueleto).toContain("## Fases");
     expect(esqueleto).toContain("Regras transversais");
+  });
+
+  /*
+   * O id do run é o hash do pedido, e é por ele que o `plan` reencontra o
+   * esqueleto. Se o `init` não registrar qual pedido usou, o `plan` só acha o
+   * esqueleto de quem por acaso chamou o arquivo de `pedido.md`.
+   */
+  it("registra qual pedido gerou o esqueleto, para o plan retomá-lo", async () => {
+    await init(skeletonPath());
+    expect((await readRequestState(projectRoot))?.text).toBe(request.text);
   });
 });
 
@@ -218,7 +228,12 @@ describe("o esqueleto guardado e a entrevista do esqueleto não brigam pelo mesm
     const handoffs = join(projectRoot, ".capivara", "handoffs");
     const arquivos = await readdir(handoffs);
     expect(arquivos.sort()).toEqual(arquivos.sort().filter((nome) => nome.endsWith(".json")));
-    expect(arquivos).toHaveLength(2);
+    /*
+     * Os dois convivem: o que colidiu uma vez foi o nome, não a pasta. Contar
+     * arquivos aqui só prenderia o teste a quem mais escreve em handoffs.
+     */
+    expect(arquivos.filter((nome) => nome.endsWith(".skeleton.json"))).toHaveLength(1);
+    expect(arquivos.filter((nome) => nome.endsWith(".skeleton-state.json"))).toHaveLength(1);
 
     const entrevista = arquivos.find((nome) => nome.endsWith(".skeleton.json"));
     const guardado = JSON.parse(await readFile(join(handoffs, entrevista ?? ""), "utf8")) as { answers: unknown[] };

@@ -32,6 +32,7 @@ import { inspectProject, summarizeInventory } from "./inventory.js";
 import { INIT_ARTIFACTS, evaluateReadiness } from "./readiness.js";
 import { evaluatePlanReadiness, renderPlanReadiness } from "./plan-readiness.js";
 import { readSkeletonState, writeSkeletonState } from "./skeleton-state.js";
+import { writeRequestState } from "./request-state.js";
 import type { Readiness } from "./readiness.js";
 import type { DeveloperRequest } from "./request.js";
 import { renderReport, type InitReport, type RoleCost } from "./report.js";
@@ -799,6 +800,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     announce(`  esqueleto: ${esqueleto.phases.length} fases, ${esqueleto.entities.length} entidades, ${esqueleto.rules.length} regra(s) transversal(is)`);
 
     await writeSkeletonState(options.projectRoot, runId, esqueleto);
+    await writeRequestState(options.projectRoot, options.request);
     skeletonAtual = esqueleto;
 
     if (estagio === "init") {

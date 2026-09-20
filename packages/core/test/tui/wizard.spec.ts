@@ -8,7 +8,7 @@
 import { Readable } from "node:stream";
 import { createInterface } from "node:readline/promises";
 import { describe, expect, it } from "vitest";
-import { createLineIO, runWizard } from "../../src/commands/wizard.js";
+import { createLineIO, filtrarModelos, runWizard } from "../../src/commands/wizard.js";
 import { readChoice, renderChoices, renderCommand, toArgv } from "../../src/tui/index.js";
 
 function roteiro(respostas: string[]) {
@@ -94,6 +94,25 @@ describe("wizard", () => {
     const resultado = await runWizard(deps);
     expect(resultado?.argv).toEqual(["init", "uma agenda", "--provider", "claude", "--model", "sonnet", "--effort", "low"]);
     expect(resultado?.command).toBe('capivara init "uma agenda" --provider claude --model sonnet --effort low');
+  });
+
+  /*
+   * O `plan` reencontra o esqueleto pelo pedido que o `init` registrou. Enquanto
+   * o wizard não olhava esse registro, ele montava `capivara plan ...` sem
+   * `--file` em qualquer projeto — e quem tinha rodado `init --file docs/prd.txt`
+   * via o comando morrer antes da primeira chamada.
+   */
+  it("o plan não pergunta pedido quando o projeto registra qual o init usou", async () => {
+    const { deps, tela } = roteiro(["", "2", "1", "", "1", "n", "s"]);
+    const resultado = await runWizard({ ...deps, requestRecorded: async () => true });
+    expect(resultado?.argv).toEqual(["plan", "--provider", "codex"]);
+    expect(tela()).not.toContain("De onde vem o pedido?");
+  });
+
+  it("sem esse registro, o plan pede o arquivo em vez de montar um comando que falha", async () => {
+    const { deps } = roteiro(["", "2", "pedido.md", "1", "", "1", "n", "s"]);
+    const resultado = await runWizard({ ...deps, requestRecorded: async () => false });
+    expect(resultado?.argv).toEqual(["plan", "--provider", "codex", "--file", "pedido.md"]);
   });
 
   it("o build pergunta teste e ciclos, e não pergunta pedido", async () => {
@@ -218,5 +237,38 @@ describe("o mesmo provider tem o mesmo número em toda tela", () => {
     const argv = resultado?.argv.join(" ") ?? "";
     expect(argv).toContain("--provider opencode");
     expect(argv).not.toContain("--writer-provider");
+  });
+});
+
+describe("filtrar 223 modelos por um trecho do nome", () => {
+  /*
+   * O caso que expôs o problema: "mini" está no meio de "gemini", então a lista
+   * abria com 31 modelos do Google antes de qualquer minimax.
+   */
+  const google = Array.from({ length: 4 }, (_, i) => `gemini-3.8-flash-${i}`);
+  const modelos = [...google, "opencode-go/minimax-m3", "minimax-m2"];
+
+  it("quem começa pelo trecho vem antes de quem só o contém no meio", () => {
+    expect(filtrarModelos(modelos, "mini")).toEqual(["minimax-m2", "opencode-go/minimax-m3", ...google]);
+  });
+
+  it("um pedaço do identificador conta como começo: os nomes vêm partidos por / e -", () => {
+    expect(filtrarModelos(["opencode-go/glm-5.2", "xglm"], "glm")).toEqual(["opencode-go/glm-5.2", "xglm"]);
+  });
+
+  it("nada é descartado: o que casa só no meio continua na lista", () => {
+    expect(filtrarModelos(modelos, "mini")).toHaveLength(modelos.length);
+  });
+
+  it("o que não casa fica de fora", () => {
+    expect(filtrarModelos(modelos, "opus")).toEqual([]);
+  });
+
+  it("filtro vazio devolve a lista como está", () => {
+    expect(filtrarModelos(modelos, "  ")).toEqual(modelos);
+  });
+
+  it("não distingue maiúsculas", () => {
+    expect(filtrarModelos(["GPT-6-Astra"], "gpt")).toEqual(["GPT-6-Astra"]);
   });
 });

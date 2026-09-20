@@ -42,6 +42,15 @@ export interface WizardDeps {
    */
   listModels?: (providerId: string) => Promise<string[]>;
   /**
+   * Se o projeto já registra qual pedido o `init` usou.
+   *
+   * O `plan` retoma o esqueleto por esse pedido e o encontra sozinho — não há o
+   * que perguntar. Só quando o registro falta (um `init` anterior a ele) é que
+   * o wizard pergunta o arquivo, em vez de montar um comando que ele já sabe
+   * que vai parar em "não encontrei qual pedido o init usou".
+   */
+  requestRecorded?: (projectRoot: string) => Promise<boolean>;
+  /**
    * Os níveis de raciocínio que um modelo aceita, quando a CLI informa.
    *
    * Ausente, ou devolvendo vazio, faz o wizard oferecer a lista genérica — que
@@ -171,6 +180,36 @@ export async function runWizard(deps: WizardDeps): Promise<WizardResult | null> 
 const MODELOS_SEM_FILTRO = 20;
 
 /**
+ * Os modelos que casam com o trecho digitado, do mais provável ao menos.
+ *
+ * Substring pura engana: filtrar por "mini" devolvia os 31 `gemini` antes de
+ * qualquer `minimax`, porque "mini" está no meio de "gemini". Quem digita um
+ * trecho está quase sempre começando a escrever o nome, então quem começa por
+ * ele vem primeiro — no nome inteiro ou em qualquer pedaço dele, já que os
+ * identificadores vêm partidos por `/`, `-`, `_` e `.`.
+ *
+ * Nada é descartado: o que casa só no meio continua na lista, no fim.
+ */
+export function filtrarModelos(modelos: string[], filtro: string): string[] {
+  const alvo = filtro.trim().toLowerCase();
+  if (alvo === "") return modelos;
+
+  const peso = (modelo: string): number => {
+    const nome = modelo.toLowerCase();
+    if (!nome.includes(alvo)) return 3;
+    if (nome.startsWith(alvo)) return 0;
+    if (nome.split(/[/\-_.]/).some((parte) => parte.startsWith(alvo))) return 1;
+    return 2;
+  };
+
+  return modelos
+    .map((modelo, ordem) => ({ modelo, ordem, peso: peso(modelo) }))
+    .filter((item) => item.peso < 3)
+    .sort((a, b) => a.peso - b.peso || a.ordem - b.ordem)
+    .map((item) => item.modelo);
+}
+
+/**
  * Escolher o modelo pelo número, quando dá para saber quais existem.
  *
  * Três situações, e nenhuma delas pode travar quem está no meio do wizard:
@@ -205,7 +244,7 @@ async function escolherModelo(
     const filtro = (await pergunta(io, "Digite parte do nome para filtrar (vazio lista todos, 0 volta ao provider): ")).trim();
     if (filtro === "0") return "voltar";
     if (filtro !== "") {
-      const casaram = modelos.filter((modelo) => modelo.toLowerCase().includes(filtro.toLowerCase()));
+      const casaram = filtrarModelos(modelos, filtro);
       if (casaram.length === 0) io.write(`Nenhum modelo com "${filtro}"; mostrando todos.\n`);
       else candidatos = casaram;
     }
@@ -255,25 +294,39 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
   const answers: WizardAnswers = { command, global: {}, roles: {} };
   if (projectRoot !== deps.cwd) answers.projectRoot = projectRoot;
 
+  const arquivoDoPedido = async (): Promise<string> => {
+    for (;;) {
+      const caminho = await text(io, "Caminho do arquivo: ");
+      if (caminho === "") {
+        io.write("O caminho não pode ficar vazio.\n");
+        continue;
+      }
+      if (!(await deps.fileExists(caminho.startsWith("/") ? caminho : `${projectRoot}/${caminho}`))) {
+        io.write(`Não encontrei ${caminho} dentro de ${projectRoot}.\n`);
+        continue;
+      }
+      return caminho;
+    }
+  };
+
+  /*
+   * O `plan` normalmente não pergunta nada: o `init` registrou qual pedido
+   * usou, e é por ele que o esqueleto é reencontrado. A pergunta só aparece em
+   * projeto cujo `init` rodou antes desse registro existir — sem ela, o wizard
+   * montaria um comando que morre antes da primeira chamada.
+   */
+  if (command === "plan" && !(await (deps.requestRecorded ?? (async () => true))(projectRoot).catch(() => true))) {
+    io.write("\nEste projeto não registra qual pedido o init usou — aponte o mesmo arquivo de novo.\n");
+    answers.requestFile = await arquivoDoPedido();
+  }
+
   if (command === "init") {
     const fontes: Choice[] = [
       { label: "escrever agora", hint: "cole ou digite; várias linhas" },
       { label: "ler de um arquivo", hint: "um .md ou .txt já escrito" },
     ];
     if (await choose(io, "De onde vem o pedido?", fontes, 0) === 1) {
-      for (;;) {
-        const caminho = await text(io, "Caminho do arquivo: ");
-        if (caminho === "") {
-          io.write("O caminho não pode ficar vazio.\n");
-          continue;
-        }
-        if (!(await deps.fileExists(caminho.startsWith("/") ? caminho : `${projectRoot}/${caminho}`))) {
-          io.write(`Não encontrei ${caminho} dentro de ${projectRoot}.\n`);
-          continue;
-        }
-        answers.requestFile = caminho;
-        break;
-      }
+      answers.requestFile = await arquivoDoPedido();
     } else {
       const pedido = await multiline(io, "O que você quer construir?");
       if (pedido === "") {

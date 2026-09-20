@@ -8,7 +8,7 @@ import { listProviders, renderProviderList } from "./commands/providers.js";
 import { diagnose, renderDiagnosis } from "./commands/doctor.js";
 import { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
 import { BUILD_ROLES, INIT_ROLES, describeRoles, renderUnresolved, rolesFromFlags, unresolvedRoles, type CliRoleFlags } from "./commands/options.js";
-import { InitBlockedError, resolveRequest, runInit, runPlan } from "./init/index.js";
+import { InitBlockedError, readRequestState, resolveRequest, runInit, runPlan } from "./init/index.js";
 import { commitSpecification, runBuild } from "./loop/index.js";
 import {
   BACK,
@@ -368,11 +368,12 @@ export function createProgram(): Command {
     program
       .command("plan")
       .description("Detalha as fases que o init produziu, até RALPH READY")
+      .option("--file <caminho>", "lê o pedido de um arquivo; por padrão, o mesmo que o init usou")
       .option("--max-audit-returns <n>", "devoluções do auditor", "3")
       .option("--no-dashboard", "não desenha o painel; só as linhas de progresso")
       .option("--no-commit", "não versiona a especificação ao chegar em RALPH READY"),
     ["writer", "auditor", "verifier"],
-  ).action(async (flags: CommonFlags & { maxAuditReturns: string; dashboard?: boolean; commit?: boolean }) => {
+  ).action(async (flags: CommonFlags & { file?: string; maxAuditReturns: string; dashboard?: boolean; commit?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const roles = rolesFromFlags(flags);
     const semProvider = unresolvedRoles(roles, INIT_ROLES);
@@ -386,10 +387,28 @@ export function createProgram(): Command {
      * O `plan` retoma o esqueleto pelo id do run, e o id vem do pedido. É o
      * mesmo pedido que gerou as fases: mudar o texto muda o run, e o plan não
      * herdaria o esqueleto de outro.
+     *
+     * Por isso ele não pergunta nada: o `init` registrou qual pedido usou, e é
+     * esse que o `plan` retoma. `--file` existe para o caso de haver mais de um
+     * `init` no projeto; `pedido.md` fica como último recurso, para quem tinha
+     * o registro e apagou `.capivara/`.
      */
-    const request = await resolveRequest(projectRoot, { file: "pedido.md" }).catch(() => null);
+    const request = flags.file
+      ? await resolveRequest(projectRoot, { file: flags.file }).catch(() => null)
+      : ((await readRequestState(projectRoot)) ?? (await resolveRequest(projectRoot, { file: "pedido.md" }).catch(() => null)));
     if (!request) {
-      stdout.write("não encontrei o pedido em pedido.md — o plan retoma o esqueleto pelo mesmo pedido que o init usou\n");
+      stdout.write(
+        [
+          flags.file
+            ? `não consegui ler o pedido em ${flags.file}`
+            : "não encontrei qual pedido o init usou, e também não há um pedido.md",
+          "",
+          "O plan retoma o esqueleto pelo mesmo pedido que gerou as fases. Aponte-o:",
+          "",
+          "    capivara plan --file <o mesmo arquivo que você passou ao init>",
+          "",
+        ].join("\n"),
+      );
       process.exitCode = 2;
       return;
     }
@@ -568,6 +587,7 @@ export function createProgram(): Command {
         listEfforts: (providerId, model) => listarEfforts(providerId, model),
         fileExists: (path) => stat(path).then((info) => info.isFile()).catch(() => false),
         directoryExists: (path) => stat(path).then((info) => info.isDirectory()).catch(() => false),
+        requestRecorded: async (root) => (await readRequestState(root)) !== null,
       });
     } finally {
       terminal.close();

@@ -2109,3 +2109,61 @@ harness, que só olha o veredito de cada passagem, não distingue as duas coisas
 Isso sugere uma métrica barata enquanto o gate de fluxos não existe: **ciclos
 gastos por fase é sinal de qualidade, não só de velocidade.** Uma fase que
 precisou de cinco passagens merece desconfiança mesmo tendo fechado verde.
+
+## 29. O estágio que sabia o que precisava e mesmo assim perguntou errado
+
+O `plan` retoma o esqueleto pelo id do run, e o id é o hash do pedido. Para
+achar o esqueleto, portanto, ele precisa do texto exato do pedido — que não está
+no esqueleto: está no arquivo que o desenvolvedor passou ao `init`.
+
+A implementação resolvia isso com um caminho fixo:
+
+```ts
+const request = await resolveRequest(projectRoot, { file: "pedido.md" }).catch(() => null);
+```
+
+O desenvolvedor rodou o wizard, que montou `capivara init --file docs/prd.txt`,
+chegou a PLAN READY, e rodou o `plan` — que respondeu **"não encontrei o pedido
+em pedido.md"**. O `plan` não tinha `--file`, então não havia como responder à
+mensagem. A única saída era copiar o arquivo para `pedido.md` e adivinhar que
+era isso que a ferramenta queria.
+
+O defeito não é o caminho fixo. É que **o `init` sabia qual pedido usou e não
+registrou**, obrigando o estágio seguinte a adivinhar por convenção de nome.
+
+A correção tem três partes, e a ordem importa:
+
+1. O `init` grava `.capivara/handoffs/pedido.json` junto com o esqueleto — nunca
+   antes, para o ponteiro não apontar para um run sem esqueleto.
+2. O `plan` lê esse registro. `--file` existe para escolher outro à mão, e
+   `pedido.md` continua como último recurso.
+3. O wizard **consulta o registro antes de perguntar**. Com registro, o `plan`
+   não pergunta nada; sem ele, pede o arquivo — em vez de montar um comando que
+   ele já sabe que vai falhar.
+
+O ponteiro é único, e não um arquivo por run: quem o lê ainda não sabe o id do
+run, que é exatamente o que ele vem buscar.
+
+O hash é recalculado a partir do texto em vez de aceito como veio. É ele que
+decide qual esqueleto será retomado, e um arquivo editado à mão apontaria o
+`plan` para o run de outro pedido.
+
+### A forma do defeito
+
+Vale a generalização, porque não é o primeiro desta família: **um estágio impõe
+uma convenção que o estágio anterior poderia ter registrado como fato.** O custo
+não é o erro em si — é que a mensagem de erro fica impossível de obedecer,
+porque ela pede uma coisa (`pedido.md`) que nunca foi combinada com ninguém.
+
+O sintoma a procurar é este: *o comando pede algo que o próprio harness
+produziu, e não oferece flag para dizer onde está.*
+
+### Filtro que casa no meio da palavra
+
+No mesmo relato, o filtro de modelos: digitar `mini` devolvia 31 modelos
+`gemini` antes de qualquer `minimax`, porque "mini" está no meio de "gemini".
+
+Quem digita um trecho está quase sempre começando a escrever o nome. Agora quem
+começa por ele vem primeiro — no identificador inteiro ou em qualquer pedaço
+dele, já que os nomes vêm partidos por `/`, `-`, `_` e `.`. O que casa só no
+meio continua na lista, no fim: descartar seria trocar um erro por outro.

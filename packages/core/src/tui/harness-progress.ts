@@ -11,6 +11,7 @@
  */
 
 import { PIPELINE_STEPS } from "./labels.js";
+import type { BuildPhaseRow } from "./build-phases.js";
 import type { Activity, DashboardModel, DashboardEvent, PipelineStep, StepState } from "./dashboard.js";
 import type { Style } from "./ansi.js";
 
@@ -36,13 +37,20 @@ export interface HarnessProgressOptions {
    * esqueleto pronto e termina exatamente no RALPH READY. O rótulo é a única
    * coisa que distingue as duas telas.
    */
-  command?: "init" | "plan";
+  command?: "init" | "plan" | "build";
   width?: number;
   environment?: NodeJS.ProcessEnv;
   now?: () => Date;
 }
 
 /** Quanto do trabalho de um documento já passou, para o rótulo da etapa. */
+/** O que cada comando anuncia como destino, no cabeçalho do painel. */
+const SUBTITLE: Record<"init" | "plan" | "build", string> = {
+  init: "init · esqueleto · do pedido ao PLAN READY",
+  plan: "plan · detalhamento · do esqueleto ao RALPH READY",
+  build: "build · ralph · do plano executável à aplicação",
+};
+
 const STAGE_LABEL: Record<string, string> = {
   interview: "entrevista",
   authoring: "escrita",
@@ -75,6 +83,7 @@ export class HarnessProgress {
   private saida = 0;
   private custo: number | null = null;
   private correcoes = 0;
+  private fases: { rows: BuildPhaseRow[]; summary: string; maxRows: number } | null = null;
 
   constructor(options: HarnessProgressOptions) {
     this.options = options;
@@ -112,6 +121,16 @@ export class HarnessProgress {
    */
   setProject(nome: string): void {
     if (nome.trim() !== "") this.projeto = nome.trim();
+  }
+
+  /**
+   * A etapa mostrada em ETAPA ATUAL.
+   *
+   * No init ela vem dos eventos do orquestrador. No build, quem sabe dizer é o
+   * loop — a fase e o ciclo em que ela está.
+   */
+  setStage(etapa: string): void {
+    if (etapa.trim() !== "") this.etapa = etapa.trim();
   }
 
   /** A pergunta da vez ocupa o corpo do painel; `null` devolve a janela de log. */
@@ -161,19 +180,28 @@ export class HarnessProgress {
     }));
   }
 
+  /**
+   * As fases do build, com os gates de cada uma.
+   *
+   * Quem acompanha o andamento é o `BuildPhaseTracker`; o painel só recebe as
+   * linhas prontas. `maxRows` vem de quem desenha, porque só ele sabe a altura
+   * do terminal.
+   */
+  setPhases(rows: BuildPhaseRow[], summary: string, maxRows: number): void {
+    this.fases = { rows, summary, maxRows };
+  }
+
   model(): DashboardModel {
     return {
       version: this.options.version,
       command: this.options.command ?? "init",
-      subtitle:
-        (this.options.command ?? "init") === "plan"
-          ? "plan · detalhamento · do esqueleto ao RALPH READY"
-          : "init · esqueleto · do pedido ao PLAN READY",
+      subtitle: SUBTITLE[this.options.command ?? "init"],
       project: this.projeto,
       stage: this.etapa,
       status: this.situacao,
       durationSeconds: Math.max(0, Math.round((this.now().getTime() - this.startedAt) / 1000)),
       pipeline: this.pipeline(),
+      ...(this.fases ? { phases: this.fases } : {}),
       provider: this.options.provider,
       telemetry: [
         { label: "CHAMADAS", value: String(this.chamadas) },

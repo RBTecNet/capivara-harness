@@ -124,10 +124,16 @@ describe("arquitetura", () => {
 describe("os dois estágios do ciclo mostram a mesma coisa", () => {
   const cliProgram = async (): Promise<string> => readFile(join(SRC, "cli-program.ts"), "utf8");
 
-  it("o painel é construído num lugar só", async () => {
+  /*
+   * Dois painéis, não três: `init` e `plan` compartilham um, e o `build` tem o
+   * seu porque a caixa dele é outra — as FASES do plano executável, com os
+   * gates de cada uma, no lugar do pipeline da documentação. O que não pode
+   * voltar a existir é uma cópia por comando dentro do ciclo de documentação.
+   */
+  it("o painel da documentação é construído num lugar só", async () => {
     const fonte = await cliProgram();
-    expect(fonte.split("new HarnessProgress(").length - 1).toBe(1);
-    expect(fonte.split("createLiveRegion(").length - 1).toBe(1);
+    expect(fonte.split("new HarnessProgress(").length - 1).toBe(2);
+    expect(fonte.split("createLiveRegion(").length - 1).toBe(2);
   });
 
   it("init e plan usam esse lugar", async () => {
@@ -137,8 +143,8 @@ describe("os dois estágios do ciclo mostram a mesma coisa", () => {
     }
   });
 
-  it("os dois aceitam desligar o painel, para pipe, arquivo e CI", async () => {
+  it("todo comando que desenha aceita desligar o painel, para pipe, arquivo e CI", async () => {
     const fonte = await cliProgram();
-    expect(fonte.split('"--no-dashboard"').length - 1).toBe(2);
+    expect(fonte.split('"--no-dashboard"').length - 1).toBe(3);
   });
 });

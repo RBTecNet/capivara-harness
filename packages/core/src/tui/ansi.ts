@@ -47,10 +47,43 @@ export function padVisible(value: string, width: number): string {
   return missing > 0 ? value + " ".repeat(missing) : value;
 }
 
+/**
+ * Encurta pela direita contando só o que se vê, preservando a cor.
+ *
+ * A versão anterior arrancava todos os códigos ANSI ao cortar. O efeito era
+ * silencioso e sistemático: qualquer linha que passasse da largura perdia a cor
+ * inteira — e no painel do build isso acertava exatamente a linha que mais
+ * precisava dela, a da fase que falhou, porque a causa do erro é o texto mais
+ * longo da lista. A fase vermelha aparecia cinza.
+ *
+ * Códigos de cor não ocupam largura: são copiados na íntegra e não entram na
+ * conta. O reset final evita que a cor vaze para o resto da tela quando o corte
+ * cai no meio de um trecho pintado.
+ */
 export function truncateVisible(value: string, width: number): string {
   if (visibleWidth(value) <= width) return value;
-  const plain = value.replace(/\u001B\[[0-9;]*m/g, "");
-  return `${plain.slice(0, Math.max(0, width - 1))}…`;
+  if (width <= 0) return "";
+
+  const limite = width - 1;
+  let visiveis = 0;
+  let saida = "";
+  let pintou = false;
+
+  for (let posicao = 0; posicao < value.length; ) {
+    const codigo = /^\u001B\[[0-9;]*m/.exec(value.slice(posicao));
+    if (codigo) {
+      saida += codigo[0];
+      pintou = true;
+      posicao += codigo[0].length;
+      continue;
+    }
+    if (visiveis >= limite) break;
+    saida += value[posicao];
+    visiveis += 1;
+    posicao += 1;
+  }
+
+  return `${saida}…${pintou ? CODES.reset : ""}`;
 }
 
 /**

@@ -2243,3 +2243,74 @@ O cabeçalho passou a saber qual estágio desenha. Compartilhando o painel, o
 `plan` herdou o título do `init` — "INIT · do prompt ao RALPH READY" numa
 execução que **começa** com o esqueleto pronto e termina exatamente no RALPH
 READY.
+
+## 31. O que o harness sabia e não contava a ninguém
+
+Três correções da mesma família das do §30, e a família tem nome: **o harness
+tinha a informação e não a registrava**.
+
+### O estágio de documentação não guardava transcrição
+
+O `build` sempre gravou o prompt inteiro de cada ciclo e a saída inteira do
+provider:
+
+```
+.capivara/runs/build-<id>/     events.tsv  run.json  prompts/  logs/
+.capivara/runs/init-<id>/      events.tsv  run.json
+```
+
+O `init` e o `plan` — que custam dezenas de chamadas — não guardavam nada. E as
+fases só emitiam evento ao **concluir**: um `plan` que morresse escrevendo fases
+ia direto do PLAN READY para o silêncio, sem dizer quantas tinham sido tentadas.
+
+O custo apareceu na primeira pergunta séria: um executor fraco não fechou o
+`plan`, outro fechou, e não havia como saber se a diferença foi o modelo ou uma
+armadilha nossa. A regra do §24 diz para suspeitar do harness primeiro — e o
+harness não deixou como verificar. O modelo levou a culpa por ausência de prova.
+
+Agora cada chamada grava `prompts/<estágio>.<assunto>.<papel>.<n>-<t>.txt` e o
+`.log` correspondente, e as fases anunciam `started`.
+
+### O painel do build mostrava a fase corrente e mais nada
+
+Num plano de sete fases, quem olhava não sabia quantas faltavam, quais tinham
+fechado, nem em que gate a corrente estava parada. E é no gate que a informação
+mora: **"escreveu mas a suíte reprovou" (G1 verde, G2 vermelho) e "o engine
+morreu" (G0 vermelho) são diagnósticos opostos**, e a tela dizia a mesma coisa
+para os dois.
+
+O loop já sabia de tudo isso — emitia para o `events.tsv` e para o `announce`,
+que é prosa para log, não estado para uma tela que se redesenha. Agora ele emite
+progresso estruturado, e o painel desenha uma linha por fase com os quatro gates:
+
+```
+┌ FASES · 2/7 fases · 1 falhou ──────────────────────────────────┐
+│  ✓ P01 Fundação do parser              G0● G1● G2● G3●  commitada
+│  ● P03 Frontend: aba de explicação     G0● G1● G2● G3○  ciclo 2/3
+│  ✗ P04 Frontend: aba de geração        G0● G1● G2● G3○  gate 2 — su…
+```
+
+Quando o plano não cabe na tela, a janela tem uma prioridade só: **a fase em
+execução nunca some**. Saem primeiro as concluídas — já entregaram o que
+tinham — e a janela sobe sozinha conforme o build anda. As escondidas são
+contadas numa linha, porque esconder sem avisar troca uma tela incompleta por
+uma tela enganosa.
+
+### Dois defeitos que só a tela desenhada revelou
+
+Nenhum dos dois aparecia em teste unitário; os dois apareceram na primeira
+renderização com dados realistas.
+
+**A fase que terminava perdia os gates.** A regra de zerar no ciclo novo estava
+disparando também no desfecho — e apagar o gate vermelho de uma fase que falhou
+joga fora exatamente o que quem olha procura. Só um ciclo NOVO zera.
+
+**A linha que não cabia perdia a cor inteira.** `truncateVisible` arrancava
+todos os códigos ANSI ao cortar. O efeito era silencioso e sistemático, e
+acertava em cheio a linha que mais precisava de cor: a da fase que falhou, porque
+a causa do erro é o texto mais longo da lista. A fase vermelha aparecia cinza.
+Agora o corte conta só o que se vê, copia os códigos e fecha a cor no fim.
+
+Vale o registro do segundo: ele existia desde que o painel existe, em todas as
+caixas, e ninguém tinha visto — porque nenhuma linha passava da largura até
+aparecer uma com causa de erro dentro.

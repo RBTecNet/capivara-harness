@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -150,10 +150,43 @@ describe("init ponta a ponta — caminho feliz", () => {
     expect(publicados.map((event) => event.subject)).toEqual(["skeleton", "project-phases.md"]);
   });
 
+  /*
+   * O contrato é "uma fase por chamada", não a ordem entre elas: as fases são
+   * escritas em paralelo porque são independentes, e quem chega primeiro depende
+   * de quanto cada worker esperou em disco. Prender a ordem aqui fazia o teste
+   * piscar assim que o laço ganhou uma escrita a mais antes da chamada.
+   */
   it("uma fase por chamada: nunca um intervalo", async () => {
     const { agent } = await run(happyPath());
     const partes = agent.calls.filter((call) => call.subject.startsWith("phase-p"));
-    expect(partes.map((call) => call.subject)).toEqual(["phase-p01", "phase-p02"]);
+    expect(partes.map((call) => call.subject).sort()).toEqual(["phase-p01", "phase-p02"]);
+  });
+
+  /*
+   * O `build` guardava prompt e saída de cada ciclo; o `init` e o `plan` — que
+   * custam dezenas de chamadas — não guardavam nada. Quando um `plan` morria no
+   * meio, não sobrava o que ler: nem o que foi pedido, nem o que o provider
+   * respondeu, e a pergunta "foi o modelo ou fomos nós?" ficava sem resposta.
+   */
+  it("guarda o prompt e a resposta de cada chamada, como o build faz", async () => {
+    const { outcome } = await run(happyPath());
+    const raiz = join(projectRoot, ".capivara", "runs", outcome.runId);
+
+    const prompts = await readdir(join(raiz, "prompts"));
+    const logs = await readdir(join(raiz, "logs"));
+    expect(prompts.length).toBeGreaterThan(0);
+    expect(prompts.length).toBe(logs.length);
+
+    // O nome diz estágio, assunto, papel e tentativa — é por ele que se acha a
+    // chamada que morreu, sem abrir todos os arquivos.
+    expect(prompts.some((nome) => nome.startsWith("authoring.phase-p01.writer."))).toBe(true);
+  });
+
+  it("assunto com . / e # vira nome de arquivo, não caminho inventado", async () => {
+    const { outcome } = await run(happyPath());
+    const prompts = await readdir(join(projectRoot, ".capivara", "runs", outcome.runId, "prompts"));
+    expect(prompts.every((nome) => !nome.includes("/") && !nome.includes("#"))).toBe(true);
+    expect(prompts.some((nome) => nome.includes("project-phases.md"))).toBe(true);
   });
 
   it("nenhuma chamada fica sem roteiro", async () => {

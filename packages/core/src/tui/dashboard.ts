@@ -11,6 +11,7 @@
  */
 
 import { paint, padVisible, tint, truncatePath, truncateVisible, visibleWidth, type Style } from "./ansi.js";
+import { renderPhaseRows, type BuildPhaseRow } from "./build-phases.js";
 import { blockText } from "./blockfont.js";
 import { CAPYBARA_COLS, renderCapybara } from "./capybara.js";
 
@@ -55,6 +56,15 @@ export interface DashboardModel {
   status: { label: string; state: StepState };
   durationSeconds: number;
   pipeline: PipelineStep[];
+  /**
+   * As fases do plano executável, quando o painel é de um build.
+   *
+   * O build mostrava a fase corrente e mais nada: num plano de sete fases, quem
+   * olhava não sabia quantas faltavam nem em que gate a corrente estava parada.
+   * Substitui o pipeline — as duas caixas respondem à mesma pergunta, cada uma
+   * no seu lado do ciclo.
+   */
+  phases?: { rows: BuildPhaseRow[]; summary: string; maxRows: number };
   provider: { perfil: string; transporte: string; contabilidade: string };
   telemetry: Metric[];
   events: DashboardEvent[];
@@ -252,8 +262,20 @@ export function renderDashboard(model: DashboardModel): string {
     ),
   );
 
+  if (model.phases) {
+    const lista = renderPhaseRows(model.phases.rows, model.phases.maxRows, width - 2, style);
+    lines.push(
+      ...box(
+        `FASES · ${model.phases.summary}`,
+        lista.length > 0 ? [...lista, "", paint("G0 engine · G1 escrita · G2 suíte · G3 verificação", "gray", style)] : [paint("nenhuma fase planejada", "gray", style)],
+        width,
+        style,
+      ),
+    );
+  }
+
   const pipeline: string[] = [];
-  if (model.pipeline.length > 0) {
+  if (!model.phases && model.pipeline.length > 0) {
     const marks = model.pipeline
       .map((step) => paint(`[${MARK[step.state]}]`, TONE[step.state], style))
       .join(paint(" ── ", "gray", style));

@@ -26,3 +26,4 @@ export {
 export type { Prerequisite, PrerequisiteChoice, PrerequisiteStatus, Resolution } from "./prerequisites.js";
 export { deriveAcceptance, defaultRunner, runAcceptance, serviceRunner } from "./acceptance.js";
 export type { AcceptanceOptions, AcceptanceResult, AcceptanceStep, CommandRunner, StepResult } from "./acceptance.js";
+export type { BuildProgress, BuildProgressListener, LoopGate, LoopGateState, LoopPhaseState } from "./progress.js";

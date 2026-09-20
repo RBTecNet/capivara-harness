@@ -25,7 +25,7 @@ import { buildAnswer, buildCheckpoint, classifyLocally, isNonAnswer, needsDecisi
 import type { Answer, Assumption, Question } from "../interview/index.js";
 import { amendPhasePrompt, assessRehearsal, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
 import type { AskedQuestion, CriterionRef, RehearsalResult, WriterContext } from "../prompts/index.js";
-import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEvents, runIdFor, runPaths, writeRunState } from "../state/index.js";
+import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEvents, runIdFor, runPaths, writeAtomic, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
 import { detectRateLimit, planWait } from "../loop/ratelimit.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
@@ -221,12 +221,38 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * conteúdo: a mesma chamada costuma passar na segunda. Desistir na primeira
    * joga fora meia hora de entrevista para economizar uma chamada.
    */
+  /*
+   * O nome do arquivo da transcrição.
+   *
+   * `subject` carrega `.md`, `#` e `/` — `project-phases.md#P2` viraria caminho
+   * com pasta inexistente. Tudo o que não é identificador vira `-`.
+   */
+  const arquivoDaChamada = (call: AgentCall, tentativa: number): string =>
+    `${call.stage}.${call.subject.replace(/[^A-Za-z0-9_.-]+/g, "-")}.${call.role}.${call.attempt ?? 1}-${tentativa}`;
+
   const track = async (call: AgentCall): Promise<string> => {
     let esperas = 0;
 
     for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
       const startedAt = Date.now();
       const response = await options.call(call);
+
+      /*
+       * A transcrição da chamada, como o build já guardava a dele.
+       *
+       * O `build` gravava prompt e saída de cada ciclo; o `init` e o `plan` —
+       * que custam dezenas de chamadas — não guardavam nada. Quando um `plan`
+       * morria no meio, não sobrava o que ler: nem o que foi pedido, nem o que
+       * o provider respondeu. A pergunta "foi o modelo ou fomos nós?" ficava
+       * sem como ser respondida, e o modelo levava a culpa por padrão.
+       *
+       * Gravar não pode derrubar a chamada que já foi paga: falha aqui é
+       * silenciosa de propósito.
+       */
+      const arquivo = arquivoDaChamada(call, tentativa);
+      await writeAtomic(join(paths.prompts, `${arquivo}.txt`), call.prompt).catch(() => undefined);
+      await writeAtomic(join(paths.logs, `${arquivo}.log`), response.stdout).catch(() => undefined);
+
       const cost = costs.get(call.role) ?? { role: call.role, calls: 0, inputTokens: null, outputTokens: null, milliseconds: 0 };
       cost.calls += 1;
       cost.milliseconds += Date.now() - startedAt;
@@ -875,6 +901,17 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           const proxima = fila.shift();
           if (!proxima) return;
           const { fase, posicao } = proxima;
+          const marca = `phase-p${String(fase.number).padStart(2, "0")}`;
+
+          /*
+           * A fase avisa que começou, não só que terminou.
+           *
+           * Enquanto só havia `complete`, um `plan` que morresse escrevendo
+           * fases não deixava evento nenhum sobre elas: o events.tsv ia direto
+           * do PLAN READY para o nada. Quem fosse investigar não sabia sequer
+           * quantas fases tinham sido tentadas.
+           */
+          await event("authoring", marca, "started");
 
           /*
            * Fase sem task é resposta inválida, não resultado.
@@ -933,7 +970,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             tarefas.tasks,
           ).trim();
           announce(`  fase ${fase.number} pronta`);
-          await event("authoring", `phase-p${String(fase.number).padStart(2, "0")}`, "complete");
+          await event("authoring", marca, "complete");
         }
       }),
     );

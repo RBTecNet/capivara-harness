@@ -33,6 +33,7 @@ import { resolveTestCommand } from "./testcmd.js";
 import { runPhase, type EngineCaller, type PhaseOutcome } from "./runner.js";
 import { runAcceptance, type AcceptanceResult, type CommandRunner } from "./acceptance.js";
 import { acceptancePrompt, installPrompt } from "../prompts/index.js";
+import type { BuildProgressListener } from "./progress.js";
 import type { TestRunner } from "./gates.js";
 
 export interface BuildOptions {
@@ -45,6 +46,15 @@ export interface BuildOptions {
   maxCycles?: number;
   keepGoing?: boolean;
   announce?: (message: string) => void;
+  /**
+   * Espelho do andamento, para quem desenha.
+   *
+   * `onPlanned` chega uma vez, com o plano inteiro: a tela precisa saber quantas
+   * fases existem antes de a primeira começar, senão a lista cresce por baixo e
+   * ninguém sabe quanto falta. `onProgress` chega a cada gate.
+   */
+  onPlanned?: (phases: { id: string; title: string }[]) => void;
+  onProgress?: BuildProgressListener;
   sleep?: (seconds: number) => Promise<void>;
   now?: () => Date;
   environment?: NodeJS.ProcessEnv;
@@ -195,12 +205,15 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     const resumeFrom = nextSubject(progress, planned);
     if (resumeFrom !== null && resumeFrom !== planned[0]) announce(`retomando a partir de ${resumeFrom}`);
 
+    options.onPlanned?.(checked.sessions.map((session) => ({ id: session.id, title: session.title })));
+
     const done = new Set(progress.completed);
     const phases: PhaseReport[] = [];
 
     for (const session of checked.sessions) {
       if (done.has(session.id)) {
         announce(`[${session.id}] já concluída neste run`);
+        options.onProgress?.({ kind: "phase", id: session.id, state: "pulado", cycle: 0, detail: "já concluída" });
         phases.push({ id: session.id, title: session.title, outcome: { status: "already-implemented", cycles: 0 } });
         continue;
       }
@@ -223,6 +236,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         ...(options.maxCycles !== undefined ? { maxCycles: options.maxCycles } : {}),
         commitsEnabled: checked.commitsEnabled,
         announce,
+        ...(options.onProgress !== undefined ? { onProgress: options.onProgress } : {}),
         ...(options.sleep !== undefined ? { sleep: options.sleep } : {}),
         now,
       });

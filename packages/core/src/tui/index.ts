@@ -18,3 +18,6 @@ export type { LiveRegion } from "./live.js";
 export { HarnessProgress } from "./harness-progress.js";
 export type { HarnessProgressOptions, ProgressEvent } from "./harness-progress.js";
 export { PIPELINE_STEPS } from "./labels.js";
+export { GATES, emptyGates, gatesWidth, phaseRowWidth, phaseSummary, phaseWindow, renderPhaseRows } from "./build-phases.js";
+export type { BuildPhaseRow, GateId, GateState, PhaseState } from "./build-phases.js";
+export { BuildPhaseTracker } from "./build-progress.js";

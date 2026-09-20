@@ -13,6 +13,7 @@ import { appendEvent } from "../state/events.js";
 import { runPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
 import { fixPrompt, implementPrompt, verifyPrompt } from "../prompts/index.js";
+import type { BuildProgressListener } from "./progress.js";
 import { commitPhase, hasPendingChanges, treeSignature } from "./git.js";
 import { declaredComplete, gate0, gate1, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
 import { detectRateLimit, planWait } from "./ratelimit.js";
@@ -60,6 +61,8 @@ export interface PhaseRunOptions {
   maxLimitWaits?: number;
   commitsEnabled: boolean;
   announce?: (message: string) => void;
+  /** Espelho do andamento, para quem desenha. O loop emite e segue. */
+  onProgress?: BuildProgressListener;
   sleep?: (seconds: number) => Promise<void>;
   now?: () => Date;
 }
@@ -87,6 +90,10 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   let lastCause = "";
   let previousWroteNothing = false;
 
+  const relatar = options.onProgress ?? (() => undefined);
+  const gate = (nome: "G0" | "G1" | "G2" | "G3", estado: "corrente" | "verde" | "vermelho", cycle: number): void =>
+    relatar({ kind: "gate", id: session.id, gate: nome, state: estado, cycle });
+
   const event = async (status: "started" | "complete" | "retry" | "blocked" | "skipped", detail: string, attempt: number): Promise<void> => {
     await appendEvent(paths.events, {
       timestamp: now().toISOString(),
@@ -101,6 +108,16 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   for (let cycle = 1; cycle <= maxCycles; ) {
     await event("started", cycle === 1 ? "implementação" : `ciclo de correção ${cycle}`, cycle);
     announce(cycle === 1 ? `[${session.id}] ${session.title}` : `[${session.id}] ciclo de correção ${cycle}/${maxCycles}`);
+    relatar({
+      kind: "phase",
+      id: session.id,
+      state: "em andamento",
+      cycle,
+      detail: cycle === 1 ? "implementação" : `ciclo ${cycle}/${maxCycles}`,
+    });
+    // O engine roda antes de qualquer veredito: o gate 0 é o que está correndo
+    // enquanto a sessão trabalha, e é o que a tela precisa mostrar por minutos.
+    gate("G0", "corrente", cycle);
 
     const context = {
       language: options.language,
@@ -147,11 +164,18 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     const noChangeNote = wrote ? "" : "A sessão anterior terminou sem alterar nenhum arquivo. ";
 
     const g0 = gate0(result, options.engine);
+    gate("G0", g0.green ? "verde" : "vermelho", cycle);
+    // O gate 1 é sinal, não veredito: não escrever nada não reprova a fase, mas
+    // muda tudo na leitura de quem olha a tela. Vem depois do gate 0 porque a
+    // ordem na tela é a ordem dos gates, não a da avaliação.
+    gate("G1", wrote ? "verde" : "vermelho", cycle);
     if (!g0.green) {
       lastGate = g0.gate;
       lastCause = g0.cause;
     } else {
+      gate("G2", "corrente", cycle);
       const g2 = await gate2(options.projectRoot, testeAgora?.command ?? null, options.testRunner, options.systemInstall === true);
+      gate("G2", g2.green ? "verde" : "vermelho", cycle);
       if (!g2.green) {
         lastGate = g2.gate;
         // Ferramenta ausente não ganha o prefixo de "não escreveu nada": a sessão
@@ -167,6 +191,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         }
       } else {
         if (g2.skipped) announce(`[${session.id}] gate 2 pulado: nenhum comando de teste resolvido`);
+        gate("G3", "corrente", cycle);
         const verification = await options.call({
           role: "verifier",
           phase: session,
@@ -176,6 +201,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         await writeAtomic(`${paths.logs}/${session.id}.verify-${cycle}.log`, verification.stdout);
 
         const g3 = gate3(verification.stdout, session.taskCount);
+        gate("G3", g3.green ? "verde" : "vermelho", cycle);
         if (!g3.green) {
           lastGate = g3.gate;
           lastCause = `${noChangeNote}${g3.cause}`;
@@ -186,11 +212,13 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
 
           if (!commit.committed && commit.message.includes("já estava implementada")) {
             await event("complete", "já implementada em HEAD", cycle);
+            relatar({ kind: "phase", id: session.id, state: "concluído", cycle, detail: "já implementada" });
             announce(`[${session.id}] JÁ IMPLEMENTADA — gates verdes, nada a commitar`);
             return { status: "already-implemented", cycles: cycle };
           }
 
           await event("complete", commit.message, cycle);
+          relatar({ kind: "phase", id: session.id, state: "concluído", cycle, detail: commit.committed ? "commitada" : "completa" });
           announce(`[${session.id}] COMPLETA${commit.committed ? ` — ${commit.message}` : ""}`);
           return { status: "complete", committed: commit.committed, message: commit.message, cycles: cycle };
         }
@@ -206,6 +234,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   }
 
   await event("blocked", `${lastGate ?? "desconhecido"}: ${lastCause.split("\n")[0] ?? ""}`, maxCycles);
+  relatar({ kind: "phase", id: session.id, state: "falhou", cycle: maxCycles, detail: lastGate ?? "sem gate" });
 
   /*
    * A fase parou deixando trabalho na árvore, e o preflight da próxima execução

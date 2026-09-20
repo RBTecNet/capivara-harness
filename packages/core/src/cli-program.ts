@@ -13,6 +13,7 @@ import type { InitOptions } from "./init/index.js";
 import { commitSpecification, runBuild } from "./loop/index.js";
 import {
   BACK,
+  BuildPhaseTracker,
   HarnessProgress,
   createLiveRegion,
   detectLanguage,
@@ -542,9 +543,10 @@ export function createProgram(): Command {
       .option("--max-cycles <n>", "ciclos de correção por fase", "3")
       .option("--keep-going", "continua mesmo depois de uma fase falhar")
       .option("--no-system-install", "mantém o executor dentro do workspace, sem instalar pacotes de sistema")
-      .option("--no-acceptance", "pula a aceitação operacional final"),
+      .option("--no-acceptance", "pula a aceitação operacional final")
+      .option("--no-dashboard", "não desenha o painel; só as linhas de progresso"),
     ["builder", "verifier"],
-  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean }) => {
+  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean; dashboard?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const roles = rolesFromFlags(flags);
     const semProvider = unresolvedRoles(roles, BUILD_ROLES);
@@ -555,10 +557,67 @@ export function createProgram(): Command {
     }
     const language = flags.language ?? "português do Brasil";
 
-    if (flags.splash !== false) {
+    const comPainel = flags.dashboard !== false && stdout.isTTY === true;
+    if (flags.splash !== false && !comPainel) {
       const papeis = describeRoles(roles).filter((role) => (BUILD_ROLES as readonly string[]).includes(role.role));
       stdout.write(renderSplash({ version: VERSION, roles: papeis, style: style() }));
     }
+
+    /*
+     * O painel do build.
+     *
+     * As fases são a informação que o build tem e o init não: quantas faltam, e
+     * em que gate a corrente está parada. A tela mostrava a fase corrente e mais
+     * nada, e "escreveu mas a suíte reprovou" ficava indistinguível de "o engine
+     * morreu" — dois diagnósticos opostos, o mesmo silêncio.
+     */
+    const fases = new BuildPhaseTracker();
+    const painelBuild = new HarnessProgress({
+      version: VERSION,
+      command: "build",
+      project: basename(resolve(projectRoot)),
+      roles: describeRoles(roles).filter((role) => (BUILD_ROLES as readonly string[]).includes(role.role)),
+      provider: {
+        perfil: `${roles.builder.provider}${roles.builder.model ? `:${roles.builder.model}` : ""}`,
+        transporte: `${roles.builder.provider}-cli`,
+        contabilidade: "por chamada",
+      },
+      style: style(),
+      environment: process.env,
+    });
+
+    const liveBuild = createLiveRegion((text) => void stdout.write(text), comPainel);
+    const larguraBuild = (): number => stdout.columns ?? 100;
+    const fundoBuild = ((): string | undefined => {
+      const escolhido = process.env.CAPIVARA_BG?.trim();
+      if (escolhido === "none") return undefined;
+      if (!supportsTrueColor(process.env)) return undefined;
+      return escolhido && escolhido !== "" ? escolhido : UBUNTU_AUBERGINE;
+    })();
+
+    /*
+     * Quantas fases cabem.
+     *
+     * O resto do painel ocupa altura fixa; o que sobra é da lista. Sem esse
+     * teto, um plano de vinte fases empurraria a telemetria e o log para fora da
+     * tela — e a lista existe para responder "onde estamos", não para ser tudo.
+     */
+    const ALTURA_FIXA = 34;
+    const linhasDeFase = (): number => Math.max(3, Math.min(12, (stdout.rows ?? 40) - ALTURA_FIXA));
+
+    const desenharBuild = (): string => {
+      painelBuild.setPhases(fases.rows(), fases.summary(), linhasDeFase());
+      return renderDashboard({
+        ...painelBuild.model(),
+        width: larguraBuild(),
+        ...(fundoBuild !== undefined ? { background: fundoBuild } : {}),
+      });
+    };
+    const repaintBuild = (): void => liveBuild.draw(desenharBuild());
+    liveBuild.beat(() => {
+      painelBuild.tick();
+      return desenharBuild();
+    });
 
     // O build pergunta ao desenvolvedor quando falta pré-requisito — mas só
     // quando há um desenvolvedor para responder. Sem terminal, faltar
@@ -599,7 +658,20 @@ export function createProgram(): Command {
       systemInstall: flags.systemInstall !== false,
       skipAcceptance: flags.acceptance === false,
       ...(flags.keepGoing !== undefined ? { keepGoing: flags.keepGoing } : {}),
-      announce: (message) => stdout.write(`${message}\n`),
+      announce: (message) => {
+        painelBuild.note(message.trim());
+        if (liveBuild.enabled) repaintBuild();
+        else stdout.write(`${message}\n`);
+      },
+      onPlanned: (planejadas) => {
+        fases.plan(planejadas);
+        repaintBuild();
+      },
+      onProgress: (evento) => {
+        fases.apply(evento);
+        if (evento.kind === "phase") painelBuild.setStage(`${evento.id} · ${evento.detail}`);
+        repaintBuild();
+      },
       call: async (call) => {
         const bridge = createAgentBridge({
           projectRoot,
@@ -609,10 +681,27 @@ export function createProgram(): Command {
           limits: DEFAULT_LIMITS,
           systemInstall: flags.systemInstall !== false,
         });
-        return bridge({ role: call.role, stage: "implement", prompt: call.prompt });
+        const quem = `${call.role} · ${call.phase.id}`;
+        painelBuild.beginCall(quem);
+        repaintBuild();
+        const resposta = await bridge({
+          role: call.role,
+          stage: "implement",
+          prompt: call.prompt,
+          // Sem isto o terminal fica com cara de travado durante os minutos em
+          // que a sessão do executor trabalha.
+          onActivity: (line) => {
+            painelBuild.note(`${quem}: ${line}`);
+            repaintBuild();
+          },
+        });
+        painelBuild.charge(resposta.usage);
+        repaintBuild();
+        return resposta;
       },
     });
 
+    liveBuild.release();
     terminalBuild?.close();
 
     // Nada a reimprimir: o `announce` acima já é a saída do build, e

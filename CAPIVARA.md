@@ -87,16 +87,19 @@ dos cadastros sem funcionar.
 
 ## A correção que fica pela metade
 
-Três defeitos desta sessão tinham a mesma forma: uma verificação existia no lugar
-certo, e não existia no lugar irmão.
+Uma verificação existe no lugar certo e não existe no lugar irmão. É a forma de
+defeito mais comum deste repositório, e a tabela só cresce:
 
 | corrigido em | faltava em | custo de descobrir |
 |---|---|---|
 | fila de linhas no wizard | `init`, `plan`, `build` | um run morto na pergunta 1 de 6 |
 | cobertura no laço da auditoria do plano | laço de escrita do esqueleto | um run terminando em NOT READY |
 | commit da especificação no `init` | `plan`, que publica o plano executável | o artefato que o loop consome ficava fora do histórico |
+| `Phase N` e `Fase N` nas emendas | o endereço `P2.T2.C1`, no mesmo campo | a emenda do `cron5` foi para a fase 1 com o defeito na 2 |
+| o fim de texto sem `\Z` em `prerequisites.ts` | `acceptance.ts`, na leitura do `pyproject` | a aceitação de um projeto Python aprovava sem executar o produto |
+| `resolveTest` redetectando depois da sessão | quase aconteceu com o comando de subida do gate 4 | pego pelo cenário do catálogo, antes de sair |
 
-Nos três casos o comentário que explicava a lição já estava escrito no código —
+Em todos os casos o comentário que explicava a lição já estava escrito no código —
 ao lado da metade que fora corrigida.
 
 **O critério:** quando um defeito for de categoria — "isto é verificável em código

@@ -113,9 +113,19 @@ function pythonSteps(pyproject: string | null): AcceptanceStep[] {
     { id: "install", command: ".venv-aceitacao/bin/pip install --disable-pip-version-check -e .", service: false },
   ];
 
-  // `[project.scripts]` declara os entrypoints do pacote. Leitura deliberadamente
-  // rasa: o primeiro nome basta para provar que o console script foi instalado.
-  const section = /^\[project\.scripts\]\s*$([\s\S]*?)(?=^\[|\Z)/m.exec(pyproject)?.[1] ?? "";
+  /*
+   * `[project.scripts]` declara os entrypoints do pacote. Leitura deliberadamente
+   * rasa: o primeiro nome basta para provar que o console script foi instalado.
+   *
+   * O fim da seção é a próxima `[` OU o fim do texto, escrito `$(?![\s\S])`. Aqui
+   * estava `\Z`, que em JavaScript não é âncora: é a letra Z. Num pyproject cujo
+   * `[project.scripts]` fosse a ÚLTIMA seção — que é onde ele costuma estar — a
+   * leitura devolvia vazio, o passo `start` sumia, e a aceitação de um projeto
+   * Python terminava aprovando sem nunca ter executado o produto. A mesma
+   * armadilha já tinha sido paga em `prerequisites.ts`, e esta ficou para trás:
+   * a correção existindo num lugar e faltando no irmão.
+   */
+  const section = /^\[project\.scripts\]\s*$([\s\S]*?)(?=^\[|$(?![\s\S]))/m.exec(pyproject)?.[1] ?? "";
   const entrypoint = /^\s*["']?([A-Za-z][A-Za-z0-9._-]*)["']?\s*=/m.exec(section)?.[1];
   if (entrypoint !== undefined) {
     steps.push({ id: "start", command: `.venv-aceitacao/bin/${entrypoint} --help`, service: true });

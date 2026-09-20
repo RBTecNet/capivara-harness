@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 931 testes em 50 arquivos, `npm run check` verde |
+| suíte | 936 testes em 50 arquivos, `npm run check` verde |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
 O ciclo de três estágios foi desenvolvido no branch `ciclo-unico` e fundido em
@@ -113,7 +113,9 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 - **`--permission-mode plan` do claude escreve arquivos.** Um papel read-only
   configurado assim devolve a mensagem de erro da CLI como se fosse conteúdo.
 - **`\Z` não é âncora em JavaScript.** É a letra Z. Um preflight passou meses
-  sem verificar nada por causa disso.
+  sem verificar nada por causa disso — e o mesmo `\Z` ainda estava vivo na
+  leitura do `pyproject`, onde derrubava o passo que prova que o produto sobe.
+  O fim de texto se escreve `$(?![\s\S])`.
 - **Nunca apague `.capivara/runs/` sem checar o lock.** Eu apaguei `src/` de um
   build vivo por diagnosticar como morto um processo que estava rodando.
 - **Compare argv entrada por entrada, nunca a string juntada.** `-p` casa dentro
@@ -132,7 +134,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 931 testes
+npm run check     # build + typecheck + 936 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

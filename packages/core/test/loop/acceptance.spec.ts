@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { defaultRunner, deriveAcceptance, runAcceptance } from "../../src/loop/index.js";
+import { defaultRunner, deriveAcceptance, runAcceptance, startCommandFor } from "../../src/loop/index.js";
 import { acceptancePrompt } from "../../src/prompts/index.js";
 
 let projectRoot = "";
@@ -51,6 +51,19 @@ describe("ecossistemas além do Node", () => {
     expect(steps[2]?.command).toBe(".venv-aceitacao/bin/resumo --help");
     // O ambiente próprio é o que dispensa sudo e prova que o pacote se instala.
     expect(steps[0]?.command).toContain("venv");
+  });
+
+  /*
+   * O caso que a regra antiga perdia. O teste acima passava porque tinha uma
+   * seção DEPOIS de `[project.scripts]`; num pyproject onde ela é a última — que
+   * é onde ela costuma estar — a leitura devolvia vazio, o passo `start` sumia,
+   * e a aceitação aprovava sem nunca ter executado o produto.
+   */
+  it("o entrypoint é lido mesmo quando [project.scripts] é a última seção", () => {
+    const pyproject = ['[project]', 'name = "resumo"', "", "[project.scripts]", 'resumo = "resumo.cli:main"', ""].join("\n");
+    const steps = deriveAcceptance({ pyproject });
+    expect(steps.map((step) => step.id)).toEqual(["venv", "install", "start"]);
+    expect(steps[2]?.command).toBe(".venv-aceitacao/bin/resumo --help");
   });
 
   it("pacote Python sem entrypoint declarado ainda prova que instala", () => {
@@ -303,4 +316,35 @@ describe("aplicação que roda no navegador", () => {
       await rm(raiz, { recursive: true, force: true });
     }
   }, 30000);
+});
+
+/*
+ * O que o gate 4 usa para subir a aplicação. Nasce da mesma derivação da
+ * aceitação: o passo `service` é, por definição, o que fica de pé.
+ */
+describe("o comando que sobe a aplicação", () => {
+  it("leva o build junto, porque produto compilado de código velho responde e engana", async () => {
+    await manifest({ build: "tsc", start: "node dist/index.js" });
+    expect(await startCommandFor(projectRoot)).toBe("npm run build && npm start");
+  });
+
+  it("sem build, é só a subida", async () => {
+    await manifest({ start: "node server.js" });
+    expect(await startCommandFor(projectRoot)).toBe("npm start");
+  });
+
+  it("projeto sem entrypoint não tem o que subir, e o gate 4 é quem decide o que fazer", async () => {
+    await manifest({ test: "vitest" });
+    expect(await startCommandFor(projectRoot)).toBeNull();
+    expect(await startCommandFor(join(projectRoot, "vazio"))).toBeNull();
+  });
+
+  it("um pacote Python sobe pelo console script instalado", async () => {
+    await writeFile(
+      join(projectRoot, "pyproject.toml"),
+      ['[project]', 'name = "resumo"', "", "[project.scripts]", 'resumo = "resumo.cli:main"'].join("\n"),
+      "utf8",
+    );
+    expect(await startCommandFor(projectRoot)).toBe(".venv-aceitacao/bin/resumo --help");
+  });
 });

@@ -84,8 +84,6 @@ item é o que importa: nenhum gate exercita a aplicação. Os quatro leem códig
 por isso um build já fechou com todas as fases verdes e metade dos cadastros sem
 funcionar.
 
-Este trabalho vive no branch `ciclo-unico`, 39 commits à frente de `main`.
-
 ## A correção que fica pela metade
 
 Três defeitos desta sessão tinham a mesma forma: uma verificação existia no lugar

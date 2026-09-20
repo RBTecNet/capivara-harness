@@ -13,13 +13,15 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `ciclo-unico`, **39 commits à frente de `main`** |
+| branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
 | suíte | 874 testes em 46 arquivos, `npm run check` verde |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
-`main` está velho. Toda a estrutura de três estágios vive em `ciclo-unico`, e a
-decisão de fundir (ou abrir PR) ainda não foi tomada.
+O ciclo de três estágios foi desenvolvido no branch `ciclo-unico` e fundido em
+`main` por fast-forward — `main` não tinha commits próprios, então o histórico é
+uma linha reta e não há commit de merge. O branch foi apagado depois disso; a tag
+`checkpoint-2026-09-20` marca esse ponto.
 
 ## O que está pronto e medido
 
@@ -49,7 +51,6 @@ Em ordem de importância, não de esforço:
 3. **Cosmético:** o painel do `plan` mostra "esqueleto do produto — aguardando"
    mesmo lendo um esqueleto que já existe. O pipeline foi desenhado para o `init`
    e o `plan` o herdou.
-4. **A decisão de fundir `ciclo-unico` em `main`.**
 
 ## As armadilhas, em uma linha cada
 

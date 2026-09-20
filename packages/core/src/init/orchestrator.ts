@@ -137,6 +137,22 @@ function contaTasks(markdown: string): number {
   return [...markdown.matchAll(/^\s*-\s*\[[ xX]\]\s*\*\*Task:\*\*/gm)].length;
 }
 
+/**
+ * O trecho da saída do provider que cabe num diagnóstico.
+ *
+ * Uma CLI que falha costuma despejar o envelope inteiro da sessão; o que
+ * interessa é a mensagem de erro, e ela quase sempre está no fim. Linhas vazias
+ * e repetidas saem, porque o que sobra é lido por alguém cansado.
+ */
+function recorte(saida: string, linhas = 12): string {
+  const limpas = saida
+    .split("\n")
+    .map((linha) => linha.trimEnd())
+    .filter((linha) => linha.trim() !== "");
+  const ultimas = limpas.slice(-linhas).map((linha) => (linha.length > 300 ? `${linha.slice(0, 297)}...` : linha));
+  return ultimas.length > 0 ? ultimas.map((linha) => `    ${linha}`).join("\n") : "    (a CLI não escreveu nada)";
+}
+
 function scoped(document: string, questionId: string, stage = "interview"): string {
   return `${document}#${stage}#${questionId}`;
 }
@@ -255,7 +271,23 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               "Rode o mesmo comando de novo; se repetir, tente um modelo mais rápido para esse papel:",
               `    capivara init ... --${call.role}-model <modelo>`,
             ].join("\n")
-          : `o papel ${call.role} falhou com código ${response.exitCode} em ${call.subject}`,
+          : [
+              `O papel ${call.role} falhou com código ${response.exitCode} em ${call.subject}.`,
+              "",
+              /*
+               * O que a CLI disse é a única pista de por que ela saiu.
+               *
+               * A mensagem dizia só "falhou com código 1", e a causa ficava no
+               * stdout descartado. Um free tier recusando uso externo, uma
+               * credencial vencida e um modelo inexistente produzem o mesmo
+               * código de saída e diagnósticos completamente diferentes.
+               */
+              "O que o provider respondeu:",
+              recorte(response.stdout),
+              "",
+              `Nada do que já foi publicado se perdeu. Verifique o modelo e a credencial de ${call.role}:`,
+              `    capivara ${options.stage === "plan" ? "plan" : "init"} ... --${call.role}-provider <provider> --${call.role}-model <modelo>`,
+            ].join("\n"),
         runId,
       );
     }

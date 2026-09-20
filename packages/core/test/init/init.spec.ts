@@ -711,3 +711,45 @@ describe("ensaio do verificador", () => {
     expect(outcome.readiness.checks.find((check) => check.id === "ensaio")?.detail).toContain("NÃO ENSAIADO");
   });
 });
+
+describe("quando o provider falha, o que ele disse chega a quem chamou", () => {
+  it("a mensagem carrega a resposta da CLI, não só o código de saída", async () => {
+    // O caso real: o free tier do opencode recusando uso fora da própria
+    // ferramenta. Antes, tudo isso virava "falhou com código 1".
+    const recusa = JSON.stringify({
+      error: { type: "FreeTierError", message: "OpenCode's free tier can only be used from within OpenCode" },
+    });
+
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "skeleton" },
+      respond: { stdout: recusa, exitCode: 1 },
+      repeat: true,
+    });
+
+    await expect(run(steps)).rejects.toThrow(/FreeTierError/);
+  });
+
+  it("diz o que fazer, e que nada do publicado se perdeu", async () => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "skeleton" },
+      respond: { stdout: "erro qualquer", exitCode: 1 },
+      repeat: true,
+    });
+
+    await expect(run(steps)).rejects.toThrow(/--writer-model/);
+    await expect(run(steps)).rejects.toThrow(/nada do que já foi publicado se perdeu/i);
+  });
+
+  it("CLI que morre calada não vira mensagem vazia", async () => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "skeleton" },
+      respond: { stdout: "   \n\n  ", exitCode: 1 },
+      repeat: true,
+    });
+
+    await expect(run(steps)).rejects.toThrow(/a CLI não escreveu nada/);
+  });
+});

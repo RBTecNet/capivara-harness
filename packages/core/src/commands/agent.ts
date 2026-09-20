@@ -43,6 +43,18 @@ export interface BridgeResponse {
   timedOut: string | null;
   /** Tokens da chamada, quando a CLI os reporta. */
   usage?: TokenUsage;
+  /**
+   * A CLI emitiu um resultado legível? Ausente quando ela não tem envelope.
+   *
+   * Isto sobe junto com o texto porque é aqui — e só aqui — que se sabe. Quem
+   * recebe o transcrito já desembrulhado não tem como redescobrir o fato lendo
+   * o resultado: o envelope ficou para trás. O gate 0 tentava, por regex, e
+   * reprovava toda chamada bem-sucedida do claude; foi o que travou o `cron5`
+   * na fase 1 com o executor tendo feito o trabalho certo.
+   */
+  resultRead?: boolean;
+  /** A CLI declarou a volta como erro, em vez de simplesmente não responder. */
+  engineError?: boolean;
 }
 
 export function createAgentBridge(options: AgentBridgeOptions): (request: BridgeRequest) => Promise<BridgeResponse> {
@@ -90,6 +102,8 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
       stderr: result.stderr,
       timedOut: result.timedOut,
       ...(transcript?.usage ? { usage: transcript.usage } : {}),
+      ...(transcript ? { resultRead: !transcript.raw } : {}),
+      ...(transcript?.error === true ? { engineError: true } : {}),
     };
   };
 }

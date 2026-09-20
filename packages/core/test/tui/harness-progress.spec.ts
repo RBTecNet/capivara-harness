@@ -236,6 +236,20 @@ describe("região viva", () => {
     region.draw("nova");
     expect(escrito[1]).not.toContain("A");
   });
+
+  it("ao redimensionar, redesenha da origem sem reutilizar a altura anterior", () => {
+    const written: string[] = [];
+    let size = { columns: 110, rows: 50 };
+    const region = createLiveRegion((text) => void written.push(text), true, () => size);
+    region.draw("uma\nduas\ntrês");
+    size = { columns: 80, rows: 24 };
+    region.draw("compacto");
+    expect(written[1]).toContain("\u001b[H\u001b[2J");
+    expect(written[1]).not.toContain("[3A");
+    region.draw("novo");
+    expect(written[2]).toContain("[1A");
+    expect(written[2]).not.toContain("[2J");
+  });
 });
 
 /*

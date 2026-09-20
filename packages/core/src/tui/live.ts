@@ -34,8 +34,13 @@ const CLEAR_BELOW = `${ESC}[0J`;
 const HIDE_CURSOR = `${ESC}[?25l`;
 const SHOW_CURSOR = `${ESC}[?25h`;
 
-export function createLiveRegion(write: (text: string) => void, enabled: boolean): LiveRegion {
+export function createLiveRegion(
+  write: (text: string) => void,
+  enabled: boolean,
+  dimensions?: () => { columns: number; rows: number },
+): LiveRegion {
   let desenhadas = 0;
+  let previous: { columns: number; rows: number } | undefined;
   let pulso: NodeJS.Timeout | null = null;
 
   const region: LiveRegion = {
@@ -54,9 +59,14 @@ export function createLiveRegion(write: (text: string) => void, enabled: boolean
     draw: (text) => {
       if (!enabled) return;
       const corpo = text.endsWith("\n") ? text : `${text}\n`;
-      const subir = desenhadas > 0 ? cursorUp(desenhadas) : "";
+      const size = dimensions?.();
+      // Depois de resize, o terminal pode ter refluído cada linha antiga.
+      // A contagem anterior não identifica mais o começo do painel.
+      const resized = desenhadas > 0 && previous && size && (previous.columns !== size.columns || previous.rows !== size.rows);
+      const subir = resized ? `${ESC}[H${ESC}[2J` : desenhadas > 0 ? cursorUp(desenhadas) : "";
       write(`${HIDE_CURSOR}${subir}${CLEAR_BELOW}${corpo}${SHOW_CURSOR}`);
-      desenhadas = corpo.split("\n").length - 1;
+      desenhadas = Math.min(corpo.split("\n").length - 1, size ? Math.max(0, size.rows - 1) : Infinity);
+      previous = size;
     },
     release: () => {
       if (pulso) {

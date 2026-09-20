@@ -15,7 +15,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parsePhaseFragment, parseSkeleton, renderSkeleton, sliceForPhase, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
+import { affectedPhases, assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parsePhaseFragment, parseSkeleton, renderSkeleton, sliceForPhase, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
 import type { CoverageSources, Skeleton, StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
@@ -162,24 +162,6 @@ function scoped(document: string, questionId: string, stage = "interview"): stri
 interface Authored {
   content: string;
   rewrite: (findings: Finding[], attempt: number) => Promise<Authored>;
-}
-
-/**
- * De quais fases os findings falam.
- *
- * Um finding costuma citar "Phase 3" ou "Phase 1.5". Quando nenhum identifica
- * uma fase, o conservador é reescrever todas: melhor pagar a mais do que
- * publicar um plano com um defeito que ninguém atribuiu.
- */
-function affectedPhases(findings: readonly Finding[], total: number): number[] {
-  const named = new Set<number>();
-  for (const finding of findings) {
-    for (const match of `${finding.where} ${finding.problem}`.matchAll(/\b(?:phase|fase)\s*(\d+)/gi)) {
-      const phase = Number(match[1]);
-      if (phase >= 1 && phase <= total) named.add(phase);
-    }
-  }
-  return named.size > 0 ? [...named].sort((left, right) => left - right) : Array.from({ length: total }, (_, index) => index + 1);
 }
 
 export class InitBlockedError extends Error {
@@ -1498,7 +1480,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * estouravam a volta e o run morria com "o ciclo não convergiu" — sem impasse,
      * sem pergunta, sem documento. Foi assim que a medição de 95 minutos terminou.
      */
-    for (let attempt = 1; attempt <= maxAuditReturns + maxMechanicalRounds + 1; attempt += 1) {
+    const cycleBudget = maxAuditReturns + maxMechanicalRounds + 1;
+    let attemptLimit = cycleBudget;
+    for (let attempt = 1; attempt <= attemptLimit; attempt += 1) {
       const content = authored.content;
       const verdict = await auditOnce(document, content, writer, upstream, attempt);
       history.push({ attempt, verdict, contentSha: sha12(content) });
@@ -1535,6 +1519,20 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         if (normalized.startsWith("publicar")) return { content, remarks: verdict.remarks, authored };
         if (normalized.startsWith("abortar")) {
           throw new InitBlockedError(`${rendered}\n\nDecisão do desenvolvedor: abortar`, runId);
+        }
+
+        if (normalized === "reiniciar") {
+          // Controle de execução, não decisão de produto. O cron5 gravou esta
+          // palavra como ACCEPTED e liberou a rejeição seguinte como ressalva.
+          // Só o orçamento do ciclo recomeça: as tentativas nos logs seguem
+          // crescentes, e uma nova rejeição ainda precisa passar pela auditoria.
+          developerRuled = false;
+          history.length = 0;
+          attemptLimit = attempt + cycleBudget;
+          await event("audit", document, "retry", "reinício da auditoria solicitado pelo desenvolvedor", attempt);
+          announce(`  reiniciando correção e auditoria de ${document}; aprovação continua obrigatória`);
+          authored = await authored.rewrite(action.standoff.auditorInsists, attempt + 1);
+          continue;
         }
 
         /*

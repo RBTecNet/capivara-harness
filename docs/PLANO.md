@@ -435,6 +435,21 @@ O auditor nunca corrige o documento. Se corrigisse, seria escritor e auditor ao 
 e a independência do veredito acabaria. Ele descreve o defeito e a correção; quem aplica é
 o escritor, em sessão nova.
 
+### 8.6 Correções do incidente cron5
+
+O encaminhamento das emendas reconhece `Phase N`, `Fase N`, subfases e endereços
+`PN.TN.CN`, em todos os campos do finding, inclusive a orientação de correção.
+As referências são lidas pelo módulo de contrato. Quando não há fase identificável,
+permanece o fallback de revisar todas as fases; referências fora do plano são ignoradas.
+
+No impasse, o comando `reiniciar` abre um novo ciclo de correção e auditoria do
+documento atual, com os mesmos tetos configurados. Preserva entrevista, esqueleto
+e plano em trabalho. É controle de execução, nunca uma decisão de produto ou
+permissão para publicar com rejeições. Cada novo ciclo exige esse comando explícito;
+se esgotar o teto outra vez, pergunta novamente. Os números de tentativa continuam
+crescendo para preservar os logs anteriores. `publicar`, `abortar` e decisões
+substantivas mantêm o comportamento existente.
+
 ---
 
 ## 9. `capivara init` — máquina de estados
@@ -678,6 +693,12 @@ opções numeradas com a recomendada marcada → consequências. Aceita número,
 **Dashboard ao vivo** — estágio atual, documento/fase, tentativa/ciclo, papel e modelo em uso,
 bytes recebidos, tempo até o primeiro byte, tokens e custo acumulados por papel, e as últimas
 linhas de atividade. No `build`, mostra a grade de fases com o estado de cada gate.
+
+O cabeçalho é compacto: mascote proporcional, centralizado no painel, título à esquerda
+quando houver espaço. Largura **e altura** são medidas a cada desenho. Em telas baixas,
+reduzir primeiro o histórico e a janela de fases, depois a decoração; preservar a atividade
+atual e a fase corrente. Nenhuma linha ultrapassa a largura disponível. A pergunta mantém
+seu conteúdo completo e, quando não couber na tela, vira saída estática durante a resposta.
 
 **Wizard** — montagem interativa do comando: provider e modelo por papel, effort, credencial,
 opções do loop. Ao final imprime o comando equivalente, para você copiar e nunca mais precisar
@@ -2314,3 +2335,96 @@ Agora o corte conta só o que se vê, copia os códigos e fecha a cor no fim.
 Vale o registro do segundo: ele existia desde que o painel existe, em todas as
 caixas, e ninguém tinha visto — porque nenhuma linha passava da largura até
 aparecer uma com causa de erro dentro.
+
+---
+
+## 32. O gate que procurava o envelope que a ponte já tinha aberto
+
+O `cron5` foi executado com o sonnet como executor e parou na fase 1. Três
+ciclos, três vezes o mesmo veredito:
+
+```
+gate 0 — engine: o engine terminou sem emitir um resultado
+```
+
+E três vezes, no log da mesma chamada, o executor terminando assim:
+
+> Implementei a Fase 1 completa: projeto Node.js/TypeScript com Express, motor
+> determinístico do cron, endpoint `POST /api/interpretar` […] Os 39 testes Jest
+> passam, o build compila […]
+>
+> `CAPIVARA_BUILDER_STATUS: COMPLETE`
+
+O trabalho estava feito e testado. O que faltava era nosso.
+
+### O defeito
+
+O gate 0 pergunta se o engine terminou de verdade. Para o claude, ele perguntava
+assim:
+
+```js
+if (engine === "claude" && !/"type"\s*:\s*"result"/.test(result.stdout))
+```
+
+Só que quem entrega esse `stdout` é a ponte, e a ponte faz exatamente uma coisa
+antes: lê o envelope e devolve **o texto de dentro dele**, para que os
+orquestradores não precisem saber que a CLI fala JSON. O gate procurava o
+envelope no conteúdo de onde o envelope tinha acabado de ser retirado.
+
+O resultado é perfeitamente invertido:
+
+| a chamada | o que sobra no stdout | o gate 0 |
+|---|---|---|
+| deu certo | o texto do executor | **reprova** — não acha o envelope |
+| deu erro | o envelope cru inteiro | aprova o primeiro teste, cai no `is_error` |
+
+Ou seja: **com engine `claude`, só as voltas fracassadas chegavam ao gate 2.**
+Nenhuma fase jamais fechou com esse executor, e não havia como fechar.
+
+### Por que ninguém viu
+
+Havia teste dos dois lados, e os dois estavam verdes. O do gate alimentava o
+gate0 com `'{"type":"result","is_error":true}'` — o envelope à mão. É uma
+entrada que a produção **nunca** produz, porque a ponte está sempre no meio. O
+teste descrevia um acordo que o código do outro lado não cumpria, e ficou verde
+descrevendo a si mesmo.
+
+É a mesma família do §8.6 e da tabela do `CAPIVARA.md`: a verificação existe num
+lugar e o irmão não a cumpre. Aqui com um agravante — o gate media o fato certo
+pelo caminho errado.
+
+### A correção
+
+Quem abre o envelope é quem sabe o que havia dentro, e agora diz:
+
+- cada leitor de transcrito já distinguia "não veio resultado" de "a CLI declarou
+  erro"; o segundo caso passou a ser marcado explicitamente (`error`), em vez de
+  ficar implícito no texto cru;
+- a ponte sobe os dois fatos junto com o texto (`resultRead`, `engineError`);
+- o gate 0 pergunta pelos fatos e não pelo nome do provider. O `engine === "claude"`
+  saiu: qualquer CLI com envelope pode terminar sem resultado, e antes só uma era
+  verificada.
+
+O teste que faltava não é de nenhum dos dois lados: é da costura. Uma CLI falsa
+que fala o formato do claude, a ponte de verdade, o gate 0 de verdade, e o caso
+que o `cron5` provou ser o único que importava — a volta que **deu certo**.
+
+### O que este defeito diz sobre o resto
+
+Duas coisas que não se corrigem com este commit.
+
+**O ciclo de correção foi gasto com o executor errado.** Um gate 0 vermelho por
+envelope não é defeito do código escrito, e mesmo assim a causa foi para o prompt
+do executor, que leu "o engine terminou sem emitir um resultado" e passou dois
+ciclos tentando entender do que se tratava — no segundo, escrevendo em inglês que
+*the previous session's failure was an infrastructure issue*. Ele estava certo. O
+harness devolveu a um modelo um problema que o modelo não tinha como resolver, e
+ainda cobrou dele o ciclo. Falha de infraestrutura devia ter caminho próprio: ou
+repete sem consumir ciclo, como o limite de uso já faz, ou para e fala com o
+operador. Fica anotado.
+
+**O §24 outra vez.** O executor foi julgado por um defeito nosso, e a conclusão
+fácil era "sonnet não dá conta da fase 1". Todas as vezes em que isso foi dito
+neste projeto, a causa estava no harness: o `mimo` que criou `tmp/`, o piloto 6
+com o `--permission-mode plan`, o piloto 7 com o `SUCCESS` vazio do agy, e agora
+o `cron5`. Quatro em quatro.

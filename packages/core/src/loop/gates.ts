@@ -21,16 +21,31 @@ export type GateResult =
 
 const green: GateResult = { green: true };
 
-/** G0 — o processo terminou de verdade, e não por morte ou erro estrutural. */
-export function gate0(result: { exitCode: number; stdout: string; stderr: string; timedOut: string | null }, engine: string): GateResult {
+/**
+ * G0 — o processo terminou de verdade, e não por morte ou erro estrutural.
+ *
+ * Quem lê o envelope da CLI é a ponte, e é ela quem diz aqui se houve resultado.
+ * Este gate já tentou descobrir o mesmo fato por regex sobre o stdout, e a regex
+ * procurava o envelope num texto de onde a ponte já o tinha retirado: toda volta
+ * BEM-SUCEDIDA do claude era reprovada, e só as que falhavam passavam no teste —
+ * porque aí o texto cru voltava inteiro. O `cron5` morreu assim, com o executor
+ * entregando a fase 1 completa três vezes seguidas.
+ *
+ * O fato também não é do claude: qualquer CLI com envelope pode terminar sem
+ * resultado. Perguntar pelo fato, e não pelo nome do provider, cobre todas.
+ */
+export function gate0(
+  result: { exitCode: number; stdout: string; stderr: string; timedOut: string | null; resultRead?: boolean; engineError?: boolean },
+  engine: string,
+): GateResult {
   if (result.timedOut) {
     return { green: false, gate: "gate 0 — engine", cause: `o engine estourou o timeout (${result.timedOut}). Últimas linhas:\n${tail(result.stdout || result.stderr)}` };
   }
-  if (engine === "claude" && !/"type"\s*:\s*"result"/.test(result.stdout)) {
-    return { green: false, gate: "gate 0 — engine", cause: `o engine terminou sem emitir um resultado. Últimas linhas:\n${tail(result.stdout)}` };
+  if (result.engineError === true) {
+    return { green: false, gate: "gate 0 — engine", cause: `o engine ${engine} reportou a volta como erro. Últimas linhas:\n${tail(result.stdout)}` };
   }
-  if (engine === "claude" && /"is_error"\s*:\s*true/.test(result.stdout)) {
-    return { green: false, gate: "gate 0 — engine", cause: `o engine reportou is_error=true. Últimas linhas:\n${tail(result.stdout)}` };
+  if (result.resultRead === false) {
+    return { green: false, gate: "gate 0 — engine", cause: `o engine ${engine} terminou sem emitir um resultado. Últimas linhas:\n${tail(result.stdout)}` };
   }
   if (result.exitCode !== 0) {
     return { green: false, gate: "gate 0 — engine", cause: `o engine saiu com código ${result.exitCode}. Últimas linhas:\n${tail(result.stdout || result.stderr)}` };

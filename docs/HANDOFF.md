@@ -1,7 +1,8 @@
 # Handoff — onde o trabalho está
 
-Escrito em 2026-09-20, no commit `4b08b08`, para quem pega o projeto sem o
-histórico da conversa que o produziu.
+Escrito em 2026-09-20 e atualizado no mesmo dia, depois do incidente `cron5`,
+para quem pega o projeto sem o histórico da conversa que o produziu. O último
+commit é o que corrigiu o gate 0 (§32 do plano), e a árvore está limpa.
 
 Isto **não** repete o que o `README.md` e o `CAPIVARA.md` já dizem. Leia aqueles
 primeiro: eles explicam o que a capivara é. Este arquivo diz em que ponto ela
@@ -15,13 +16,14 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 874 testes em 46 arquivos, `npm run check` verde |
+| suíte | 901 testes em 48 arquivos, `npm run check` verde |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
 O ciclo de três estágios foi desenvolvido no branch `ciclo-unico` e fundido em
 `main` por fast-forward — `main` não tinha commits próprios, então o histórico é
 uma linha reta e não há commit de merge. O branch foi apagado depois disso; a tag
-`checkpoint-2026-09-20` marca esse ponto.
+`checkpoint-2026-09-20` marca esse ponto, no commit `49d32e6`. Dois commits
+vieram depois dela; o que eles trouxeram está na seção seguinte.
 
 ## O que está pronto e medido
 
@@ -36,6 +38,45 @@ e a conclusão que mudou o projeto foi esta:
 O §24 do plano — *quem julga não é onde se economiza* — foi provado
 experimentalmente: o mesmo executor fraco que morria na fase 1 com um auditor
 caro terminou as sete fases quando o harness parou de esconder informação dele.
+
+## O que veio depois do checkpoint
+
+Tudo commitado, com a suíte verde. São três frentes, todas nascidas
+de um run real:
+
+**§8.6 do plano — as correções do incidente `cron5`.** A função que decide de
+quais fases os findings falam saiu do `init/orchestrator.ts` para
+`src/contract/phase-references.ts`: a gramática do plano mora no contrato, e o
+`architecture.spec.ts` cobra isso. Ela passou a reconhecer `Phase N`, `Fase N` e o
+endereço `P2.T2.C1`, e a ler também a orientação de correção, não só o `where`.
+Sem o terceiro formato, a correção do `cron5` foi inteira para a fase 1 enquanto o
+defeito estava na 2. Sem fase identificável, o fallback conservador continua:
+revisar todas.
+
+No impasse existe agora o comando `reiniciar`, que abre um ciclo novo de correção e
+auditoria do documento atual com os mesmos tetos, preservando entrevista, esqueleto
+e plano. É controle de execução, nunca decisão de produto — o `cron5` gravou a
+palavra como ACCEPTED e com isso liberou a rejeição seguinte como ressalva. Cada
+reinício precisa ser pedido outra vez, e os números de tentativa seguem crescendo
+para não sobrescrever os logs anteriores.
+
+**§32 — o gate 0 reprovava toda volta bem-sucedida do claude.** É o mais grave
+dos três, e foi o que travou o `cron5` com o sonnet.
+ O gate procurava
+o envelope JSON dentro do stdout; a ponte entrega o texto de dentro do envelope,
+que ela mesma acabou de abrir. Com engine `claude`, só as chamadas que falhavam
+passavam no primeiro teste do gate — nenhuma fase jamais fechou com esse executor.
+Agora quem abre o envelope reporta os dois fatos (`resultRead`, `engineError`) e o
+gate pergunta pelos fatos, para qualquer CLI com envelope, não só a do claude. O
+teste que faltava é o da costura: CLI falsa, ponte de verdade, gate de verdade.
+
+**O painel.** Cabeçalho compacto, com o mascote proporcional centralizado no painel
+e o título à esquerda quando couber. A altura passou a ser medida a cada desenho,
+como já era a largura: em tela baixa encolhem primeiro o histórico e a janela de
+fases, depois a decoração, e a fase corrente e a atividade sobrevivem. A pergunta
+mantém o conteúdo completo e vira saída estática quando não couber. O piso de 60
+colunas saiu — ele fazia o terminal estreito quebrar linha e invalidar a contagem
+que a região viva usa para redesenhar.
 
 ## O que NÃO está feito
 
@@ -68,13 +109,21 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
   build vivo por diagnosticar como morto um processo que estava rodando.
 - **Compare argv entrada por entrada, nunca a string juntada.** `-p` casa dentro
   de `--dangerously-skip-permissions`; `--mode` casa dentro de `--model`.
+- **O auditor cita fase em três formatos.** `Phase 2`, `Fase 2` e `P2.T2.C1`. Quem
+  conhece só dois manda a emenda para a fase errada — e a orientação de correção
+  aponta a fase tanto quanto o campo do local.
+- **Depois de um resize, a contagem de linhas do desenho anterior é ficção.** O
+  terminal refluiu cada linha antiga; subir por aquele número apaga a coisa errada.
+- **Quem abre o envelope é quem sabe o que havia dentro.** Depois da ponte, o
+  stdout é o texto do agente; procurar ali o envelope da CLI é procurar o que foi
+  retirado. Fato de envelope viaja como campo, nunca como regex sobre o texto.
 - **A correção que fica pela metade** é a forma de defeito mais comum aqui: a
   verificação existe num lugar e falta no irmão. Ver a tabela no `CAPIVARA.md`.
 
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 874 testes
+npm run check     # build + typecheck + 901 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se
@@ -107,3 +156,5 @@ As mais recentes são as mais úteis para quem chega agora:
 - **§29** — o estágio que impunha uma convenção em vez de registrar um fato
 - **§30** — três defeitos que uma execução de teste expôs
 - **§31** — o que o harness sabia e não contava a ninguém
+- **§32** — o gate que procurava o envelope que a ponte já tinha aberto (`cron5`)
+- **§8.6** — as correções do incidente `cron5`, fora da ordem por ser emenda do §8

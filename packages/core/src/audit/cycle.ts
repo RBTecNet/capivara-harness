@@ -194,5 +194,6 @@ export function renderStandoff(standoff: Standoff): string {
   lines.push("", "O escritor fez:");
   standoff.writerDid.forEach((summary, index) => lines.push(`  ${index + 1}. ${summary}`));
   lines.push("", standoff.question);
+  lines.push('Comandos: "reiniciar" tenta corrigir e auditar novamente; "publicar" aceita como está; "abortar" interrompe.');
   return lines.join("\n");
 }

@@ -220,6 +220,64 @@ describe("dashboard", () => {
   it("aguenta um modelo sem pipeline, telemetria nem eventos", () => {
     expect(() => renderDashboard({ ...model, pipeline: [], telemetry: [], events: [] })).not.toThrow();
   });
+
+  it("centraliza o mascote inteiro e reduz o topo em terminal com cor verdadeira", () => {
+    const environment = { COLORTERM: "truecolor" };
+    const mascot = renderCapybara({ style: colored, environment, columns: 32 });
+    for (const width of [80, 110, 160]) {
+      const lines = renderDashboard({ ...model, width, style: colored, environment }).split("\n");
+      const start = Math.floor((width - Math.max(...mascot.map(visibleWidth))) / 2);
+      mascot.forEach((row, index) => {
+        const line = lines[index]!;
+        const position = line.indexOf(row);
+        expect(position).toBeGreaterThanOrEqual(0);
+        expect(visibleWidth(line.slice(0, position))).toBe(start);
+      });
+      expect(lines.findIndex((line) => line.includes("SITUAÇÃO"))).toBeLessThanOrEqual(10);
+    }
+  });
+
+  it.each([40, 64, 80, 110, 160])("cabe em %i colunas e acompanha a altura sem esconder a fase corrente", (width) => {
+    for (const height of [24, 32, 40, 50]) {
+      const view = renderDashboard({
+        ...model, width, height, style: colored, environment: { COLORTERM: "truecolor" },
+        phases: {
+          summary: "10/20 fases", maxRows: 12,
+          rows: Array.from({ length: 20 }, (_, index) => ({
+            id: `P${String(index + 1).padStart(2, "0")}`, title: `Implementação ${index + 1}`,
+            state: index === 10 ? "em andamento" as const : "aguardando" as const,
+            detail: "ciclo 2/3", gates: { G0: "verde" as const, G1: "verde" as const, G2: "corrente" as const, G3: "aguardando" as const },
+          })),
+        },
+        events: Array.from({ length: 10 }, (_, index) => ({ time: "12:00:00", text: `evento ${index}` })),
+      });
+      const lines = view.split("\n");
+      expect(lines.length).toBeLessThan(height);
+      expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
+      expect(view).toContain("P11");
+      expect(view).toContain("G2");
+      expect(view).toContain("evento 9");
+      expect(view).not.toContain("PIPELINE");
+    }
+  });
+
+  it("preserva todas as opções de uma pergunta que exige rolagem", () => {
+    const view = renderDashboard({ ...model, height: 24, width: 80,
+      question: { title: "PERGUNTA", body: Array.from({ length: 40 }, (_, i) => `opção ${i + 1}`) },
+    });
+    expect(view).toContain("opção 1");
+    expect(view).toContain("opção 40");
+  });
+
+  it("mantém as caixas de informação no terminal comum de 80 por 24", () => {
+    const view = renderDashboard({ ...model, width: 80, height: 24, pipeline: model.pipeline.slice(0, 2),
+      roles: ["writer", "auditor", "verifier"].map((role) => ({ role, provider: "codex", model: "gpt-5" })),
+    });
+    expect(view.split("\n").length).toBeLessThan(24);
+    expect(view).toContain("SITUAÇÃO");
+    expect(view).toContain("TELEMETRIA");
+    expect(view).toContain("PROVEDOR ATUAL");
+  });
 });
 
 describe("fundo do painel", () => {
@@ -291,6 +349,13 @@ describe("capivara", () => {
   it("o recuo desloca todas as linhas", () => {
     const linhas = renderCapybara({ style: plain, environment: {}, indent: 4 });
     expect(linhas.every((line) => line.startsWith("    "))).toBe(true);
+  });
+
+  it("reduz largura e altura na mesma proporção, sem gerar cores inválidas", () => {
+    const lines = renderCapybara({ style: colored, environment: { COLORTERM: "truecolor" }, columns: 32 });
+    expect(lines).toHaveLength(CAPYBARA_ROWS * 0.8);
+    expect(Math.max(...lines.map(visibleWidth))).toBe(CAPYBARA_COLS * 0.8);
+    expect(lines.join("\n")).not.toContain("NaN");
   });
 });
 

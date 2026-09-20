@@ -25,6 +25,12 @@ export interface EngineResult {
   stdout: string;
   stderr: string;
   timedOut: string | null;
+  /**
+   * O que só quem abriu o envelope da CLI sabe, e o gate 0 precisa saber.
+   * Ausentes quando a CLI fala texto puro, e aí o gate 0 julga pelo código de saída.
+   */
+  resultRead?: boolean;
+  engineError?: boolean;
 }
 
 export interface EngineCall {

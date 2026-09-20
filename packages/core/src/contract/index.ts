@@ -32,6 +32,7 @@ export type { PhasesDocumentParts } from "./templates.js";
 export { canonicalDependsOn, canonicalWorkflowTraces, extractTasks, joinPhaseMetadata, repairInlineCriteria, repairLabelLists, repairMissingBullets, normalizePhasePart } from "./phase-part.js";
 export type { NormalizedPart, PhasePartExpectation } from "./phase-part.js";
 export { checkRewriteDrift, parsePhaseFragment } from "./drift.js";
+export { affectedPhases } from "./phase-references.js";
 export type { DriftInput } from "./drift.js";
 export { SKELETON_CONTRACT, coverageFromSkeleton, parseSkeleton, renderSkeleton, sliceForPhase } from "./skeleton.js";
 export type {

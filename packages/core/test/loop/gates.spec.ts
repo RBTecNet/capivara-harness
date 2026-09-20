@@ -46,10 +46,27 @@ describe("G0 — o engine terminou de verdade", () => {
     expect(result.cause).toContain("idle");
   });
 
-  it("no claude, exige o evento de resultado e recusa is_error", () => {
-    expect(gate0({ ...engineOk, stdout: "texto solto" }, "claude").green).toBe(false);
-    expect(gate0({ ...engineOk, stdout: '{"type":"result","is_error":false}' }, "claude").green).toBe(true);
-    expect(gate0({ ...engineOk, stdout: '{"type":"result","is_error":true}' }, "claude").green).toBe(false);
+  /*
+   * O teste antigo alimentava o gate com o envelope cru do claude — exatamente o
+   * que a produção nunca entrega, porque a ponte desembrulha antes. Ele ficou
+   * verde enquanto o build travava em toda volta bem-sucedida.
+   */
+  it("julga pelo resultado lido, não pelo nome do provider", () => {
+    expect(gate0({ ...engineOk, stdout: "a fase está pronta", resultRead: true }, "claude").green).toBe(true);
+    expect(gate0({ ...engineOk, resultRead: false }, "claude").green).toBe(false);
+    expect(gate0({ ...engineOk, resultRead: false }, "opencode").green).toBe(false);
+    // Texto puro, sem envelope: o gate 0 continua julgando pelo código de saída.
+    expect(gate0(engineOk, "claude").green).toBe(true);
+  });
+
+  it("separa a CLI que falhou da CLI que não respondeu", () => {
+    const erro = gate0({ ...engineOk, resultRead: false, engineError: true }, "claude");
+    if (erro.green) throw new Error("deveria reprovar");
+    expect(erro.cause).toContain("reportou a volta como erro");
+
+    const mudo = gate0({ ...engineOk, resultRead: false }, "claude");
+    if (mudo.green) throw new Error("deveria reprovar");
+    expect(mudo.cause).toContain("sem emitir um resultado");
   });
 });
 

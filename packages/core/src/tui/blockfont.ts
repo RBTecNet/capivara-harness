@@ -21,9 +21,19 @@ const GLYPHS: Record<string, readonly string[]> = {
 
 export const BLOCK_FONT_ROWS = 5;
 
+const COMPACT_GLYPHS: Record<string, readonly string[]> = {
+  C: [" ██", "█  ", "█  ", "█  ", " ██"],
+  A: [" █ ", "█ █", "███", "█ █", "█ █"],
+  P: ["██ ", "█ █", "██ ", "█  ", "█  "],
+  I: ["███", " █ ", " █ ", " █ ", "███"],
+  V: ["█ █", "█ █", "█ █", "█ █", " █ "],
+  R: ["██ ", "█ █", "██ ", "█ █", "█ █"],
+};
+
 /** Devolve as cinco linhas do texto em blocos; ignora o que não conhece. */
-export function blockText(text: string): string[] {
-  const letters = [...text.toUpperCase()].map((letter) => GLYPHS[letter]).filter((glyph): glyph is readonly string[] => glyph !== undefined);
+export function blockText(text: string, compact = false): string[] {
+  const glyphs = compact ? COMPACT_GLYPHS : GLYPHS;
+  const letters = [...text.toUpperCase()].map((letter) => glyphs[letter]).filter((glyph): glyph is readonly string[] => glyph !== undefined);
   if (letters.length === 0) return Array.from({ length: BLOCK_FONT_ROWS }, () => "");
   return Array.from({ length: BLOCK_FONT_ROWS }, (_, row) => letters.map((glyph) => glyph[row] ?? "").join(" "));
 }

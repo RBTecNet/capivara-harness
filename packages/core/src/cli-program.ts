@@ -145,7 +145,7 @@ function estagioInterativo(options: {
     environment: process.env,
   });
 
-  const live = createLiveRegion((text) => void stdout.write(text), comPainel);
+  const live = createLiveRegion((text) => void stdout.write(text), comPainel, () => ({ columns: stdout.columns ?? 100, rows: stdout.rows ?? 40 }));
 
   // A largura é lida a cada desenho: redimensionar a janela ajusta o painel na
   // repintura seguinte, sem precisar ouvir evento de resize.
@@ -167,6 +167,7 @@ function estagioInterativo(options: {
     renderDashboard({
       ...progress.model(),
       width: larguraAtual(),
+      height: stdout.rows ?? 40,
       ...(fundo !== undefined ? { background: fundo } : {}),
     });
   const repaint = (): void => live.draw(desenhar());
@@ -586,7 +587,7 @@ export function createProgram(): Command {
       environment: process.env,
     });
 
-    const liveBuild = createLiveRegion((text) => void stdout.write(text), comPainel);
+    const liveBuild = createLiveRegion((text) => void stdout.write(text), comPainel, () => ({ columns: stdout.columns ?? 100, rows: stdout.rows ?? 40 }));
     const larguraBuild = (): number => stdout.columns ?? 100;
     const fundoBuild = ((): string | undefined => {
       const escolhido = process.env.CAPIVARA_BG?.trim();
@@ -595,21 +596,12 @@ export function createProgram(): Command {
       return escolhido && escolhido !== "" ? escolhido : UBUNTU_AUBERGINE;
     })();
 
-    /*
-     * Quantas fases cabem.
-     *
-     * O resto do painel ocupa altura fixa; o que sobra é da lista. Sem esse
-     * teto, um plano de vinte fases empurraria a telemetria e o log para fora da
-     * tela — e a lista existe para responder "onde estamos", não para ser tudo.
-     */
-    const ALTURA_FIXA = 34;
-    const linhasDeFase = (): number => Math.max(3, Math.min(12, (stdout.rows ?? 40) - ALTURA_FIXA));
-
     const desenharBuild = (): string => {
-      painelBuild.setPhases(fases.rows(), fases.summary(), linhasDeFase());
+      painelBuild.setPhases(fases.rows(), fases.summary(), 12);
       return renderDashboard({
         ...painelBuild.model(),
         width: larguraBuild(),
+        height: stdout.rows ?? 40,
         ...(fundoBuild !== undefined ? { background: fundoBuild } : {}),
       });
     };

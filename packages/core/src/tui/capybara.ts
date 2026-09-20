@@ -63,6 +63,8 @@ function paintCell(top: string, bottom: string): string {
 
 export interface CapybaraOptions {
   style: Style;
+  /** Reduz o desenho proporcionalmente, sem cortar suas linhas. */
+  columns?: number;
   /** Colunas de recuo à esquerda. */
   indent?: number;
   environment?: NodeJS.ProcessEnv;
@@ -75,11 +77,19 @@ export function renderCapybara(options: CapybaraOptions): string[] {
     return CAPYBARA_ASCII.map((line) => `${indent}${line}`);
   }
 
-  return CAPYBARA_PIXELS.map((row) => {
+  const columns = Math.max(1, Math.min(CAPYBARA_COLS, Math.floor(options.columns ?? CAPYBARA_COLS)));
+  const rows = Math.max(1, Math.round(CAPYBARA_ROWS * columns / CAPYBARA_COLS));
+  const pixel = (x: number, y: number): string => {
+    const sourceX = Math.min(CAPYBARA_COLS - 1, Math.floor((x + 0.5) * CAPYBARA_COLS / columns));
+    const sourceY = Math.min(CAPYBARA_ROWS * 2 - 1, Math.floor((y + 0.5) * CAPYBARA_ROWS / rows));
+    const offset = sourceX * 12 + (sourceY % 2) * 6;
+    return CAPYBARA_PIXELS[Math.floor(sourceY / 2)]!.slice(offset, offset + 6);
+  };
+
+  return Array.from({ length: rows }, (_, row) => {
     let line = indent;
-    for (let column = 0; column < CAPYBARA_COLS; column += 1) {
-      const cell = row.slice(column * 12, column * 12 + 12);
-      line += paintCell(cell.slice(0, 6), cell.slice(6, 12));
+    for (let column = 0; column < columns; column += 1) {
+      line += paintCell(pixel(column, row * 2), pixel(column, row * 2 + 1));
     }
     return line.replace(/\s+$/, "");
   });

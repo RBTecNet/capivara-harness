@@ -277,6 +277,23 @@ describe("B-08 a B-12 · auditoria", () => {
 });
 
 describe("B-32 · reescrita do plano após devolução", () => {
+  it.each([
+    { where: "P1.T1.C3 vs P2.T2.C1", problem: "A Fase 1 sobe sem IA, mas P2.T2.C1 exige credenciais para iniciar.", fix: "Restringir P2.T2.C1 ao endpoint de IA.", expected: ["phase-p01", "phase-p02"] },
+    { where: "P2.T1.C2", problem: "falta o código HTTP", fix: "declare HTTP 409", expected: ["phase-p02"] },
+    { where: "API", problem: "falta o código HTTP", fix: "corrija P2.T1.C2 para declarar HTTP 409", expected: ["phase-p02"] },
+  ])("encaminha endereços do auditor: $where / $fix", async ({ where, problem, fix, expected }) => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#coerência", attempt: 1 },
+      respond: { stdout: reject(where, problem, fix) },
+    });
+    const { outcome, agent } = await init(steps);
+    expect(outcome.readiness.ready).toBe(true);
+    const rewritten = agent.calls.filter((call) => call.stage === "authoring" && call.attempt === 2);
+    expect(rewritten.map((call) => call.subject).sort()).toEqual(expected);
+    expect(rewritten.every((call) => call.prompt.includes(fix))).toBe(true);
+  });
+
   it("reescreve APENAS a fase que o finding nomeia e remonta o documento inteiro", async () => {
     const steps = happyPath();
     steps.unshift({
@@ -416,6 +433,49 @@ describe("B-35 · impasse do auditor", () => {
         decideStandoff: async () => "abortar",
       }),
     ).rejects.toThrow(/Decisão do desenvolvedor: abortar/);
+  });
+
+  it("reiniciar renova o ciclo, exige aprovação e não vira decisão confirmada", async () => {
+    const steps = happyPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
+      respond: { stdout: (call) => call.attempt < 4 ? reject("Phase 1", "falta a restrição", "declare a restrição") : approve() },
+      repeat: true,
+    });
+    const agent = fakeAgent(steps);
+    let asked = 0;
+    const outcome = await runInit({
+      projectRoot, request, language: "português do Brasil", maxAuditReturns: 2,
+      call: agent.call, ask: async () => "use as recomendações",
+      decideStandoff: async () => ++asked === 1 ? "  REINICIAR  " : "abortar",
+    });
+    expect(outcome.readiness.ready).toBe(true);
+    expect(asked).toBe(1);
+    expect(agent.calls.filter((call) => call.subject === "project-phases.md#P1").map((call) => call.attempt)).toEqual([1, 2, 3, 4]);
+    expect(outcome.report.checkpoint.decisions).toHaveLength(0);
+    expect(outcome.report.remarks.some((entry) => entry.remark.observation.includes("decisão do desenvolvedor"))).toBe(false);
+    expect(agent.calls.some((call) => call.prompt.includes("acima do auditor: REINICIAR"))).toBe(false);
+    const { readHandoff } = await import("../../src/interview/index.js");
+    const handoff = await readHandoff(projectRoot, outcome.runId, "project-phases.md");
+    expect(handoff?.answers ?? []).toEqual([]);
+    const events = await readEvents(runPaths(projectRoot, outcome.runId).events);
+    expect(events.some((event) => event.detail.includes("reinício da auditoria"))).toBe(true);
+    expect(events.some((event) => event.detail.includes("sob decisão do desenvolvedor"))).toBe(false);
+  });
+
+  it("cada reinício precisa ser pedido, volta a respeitar o teto e mantém tentativas crescentes", async () => {
+    const agent = fakeAgent(impasse(happyPath()));
+    let asked = 0;
+    await expect(runInit({
+      projectRoot, request, language: "português do Brasil", maxAuditReturns: 2, maxMechanicalRounds: 1,
+      call: agent.call, ask: async () => "use as recomendações",
+      decideStandoff: async () => ++asked <= 2 ? "reiniciar" : "abortar",
+    })).rejects.toThrow(/Decisão do desenvolvedor: abortar/);
+    expect(asked).toBe(3);
+    expect(agent.calls.filter((call) => call.subject === "project-phases.md#P1").map((call) => call.attempt)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(agent.calls.filter((call) => call.subject === "phase-p01").map((call) => call.attempt)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(agent.calls.some((call) => call.role === "verifier")).toBe(false);
+    await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).rejects.toThrow();
   });
 });
 

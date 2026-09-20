@@ -13,7 +13,7 @@
 import { paint, padVisible, tint, truncatePath, truncateVisible, visibleWidth, type Style } from "./ansi.js";
 import { renderPhaseRows, type BuildPhaseRow } from "./build-phases.js";
 import { blockText } from "./blockfont.js";
-import { CAPYBARA_COLS, renderCapybara } from "./capybara.js";
+import { renderCapybara } from "./capybara.js";
 
 export type StepState = "concluído" | "em andamento" | "aguardando" | "falhou" | "pulado";
 
@@ -88,6 +88,8 @@ export interface DashboardModel {
   frame?: number;
   roles?: { role: string; provider: string; model: string }[];
   width?: number;
+  /** Altura do terminal; uma linha fica livre para o cursor após o desenho. */
+  height?: number;
   style: Style;
   environment?: NodeJS.ProcessEnv;
 }
@@ -109,18 +111,17 @@ const TONE: Record<StepState, "green" | "yellow" | "gray" | "red"> = {
 };
 
 /**
- * Abaixo disso não há painel que caiba; acima, ele acompanha o terminal.
- *
  * O teto fixo de 110 colunas fazia o painel ficar encolhido num terminal largo e
  * cortar a informação mais útil — a etapa atual — enquanto sobrava espaço vazio
  * à direita. A largura é recalculada a cada desenho, então redimensionar a
  * janela ajusta o painel na repintura seguinte.
+ * Também não há piso artificial de 60: ele fazia terminais menores quebrarem
+ * linhas, invalidando a contagem usada para redesenhar a região viva.
  */
-const MIN_WIDTH = 60;
 const DEFAULT_WIDTH = 100;
 
 export function dashboardWidth(model: DashboardModel): number {
-  return Math.max(MIN_WIDTH, model.width ?? DEFAULT_WIDTH);
+  return Math.max(4, Math.floor(model.width ?? DEFAULT_WIDTH));
 }
 
 /** Quando o terminal é estreito, as colunas viram linhas em vez de sumirem. */
@@ -134,7 +135,7 @@ function duration(seconds: number): string {
 /** Caixa com título embutido na borda de cima, como no painel de referência. */
 function box(title: string, body: string[], width: number, style: Style): string[] {
   const inner = width - 2;
-  const heading = ` ${title} `;
+  const heading = truncateVisible(` ${title} `, inner);
   const top = `┌${heading}${"─".repeat(Math.max(0, inner - visibleWidth(heading)))}┐`;
   const lines = [paint(top, "cyan", style)];
   for (const line of body) {
@@ -190,49 +191,46 @@ function activityLine(model: DashboardModel): string {
   return paint(`${pulso}${detalhe} — há ${tempo} nesta chamada`, ACTIVITY_TONE.modelo, style);
 }
 
-export function renderDashboard(model: DashboardModel): string {
-  const width = dashboardWidth(model);
+interface Layout {
+  artwork: boolean;
+  dense: boolean;
+  events: number;
+  phases: number;
+}
+
+/** A capivara fica no centro do painel, independentemente da largura do título. */
+function header(model: DashboardModel, width: number, artwork: boolean): string[] {
   const { style } = model;
   const lines: string[] = [];
-
-  /*
-   * Cabeçalho: título em blocos à esquerda, capivara à direita — quando cabem.
-   *
-   * Num terminal estreito os dois juntos passam da largura e o painel inteiro
-   * vaza. A capivara é a primeira a sair, depois o título em blocos; o nome do
-   * produto em texto simples cabe em qualquer lugar.
-   */
-  const titleWidth = Math.max(...blockText("CAPIVARA").map((line) => line.length));
-  const cabeCapivara = width >= titleWidth + CAPYBARA_COLS + 4;
-  const cabeTitulo = width >= titleWidth + 2;
-
-  if (cabeTitulo) {
-    const title = blockText("CAPIVARA").map((line) => paint(line, "cyan", style));
-    const mascot = cabeCapivara
-      ? renderCapybara({ style, ...(model.environment !== undefined ? { environment: model.environment } : {}) })
-      : [];
-    const gap = cabeCapivara ? Math.max(2, width - titleWidth - CAPYBARA_COLS - 2) : 0;
-
-    const header = Math.max(title.length, mascot.length);
-    for (let row = 0; row < header; row += 1) {
-      const left = padVisible(title[row] ?? "", titleWidth);
-      lines.push(truncateVisible(`${left}${" ".repeat(gap)}${mascot[row] ?? ""}`.replace(/\s+$/, ""), width));
+  if (artwork && width >= 64) {
+    const mascot = renderCapybara({
+      style,
+      columns: 32,
+      ...(model.environment !== undefined ? { environment: model.environment } : {}),
+    });
+    const mascotWidth = Math.max(...mascot.map(visibleWidth));
+    const leftWidth = Math.floor((width - mascotWidth) / 2);
+    const blocks = blockText("CAPIVARA", leftWidth < 48);
+    const title = Math.max(...blocks.map(visibleWidth)) + 3 <= leftWidth
+      ? blocks.map((line) => paint(line, "cyan", style))
+      : [paint("CAPIVARA", "cyan", style), paint(`v${model.version}`, "gray", style)];
+    const top = Math.floor((mascot.length - title.length) / 2);
+    for (let row = 0; row < mascot.length; row += 1) {
+      lines.push(`${padVisible(`  ${title[row - top] ?? ""}`, leftWidth)}${mascot[row] ?? ""}`);
     }
+    lines.push(paint(`${model.subtitle.toUpperCase()} · v${model.version}`, "gray", style));
   } else {
-    lines.push(paint("capivara", "cyan", style));
+    lines.push(`${paint("CAPIVARA", "cyan", style)} ${paint(`v${model.version}`, "gray", style)} · ${model.subtitle.toUpperCase()}`);
   }
-
-  lines.push("");
-  lines.push(paint(model.subtitle.toUpperCase(), "gray", style));
-  const assinatura = "HARNESS · capivara documentadora";
-  const versao = `v${model.version}`;
-  lines.push(
-    paint(versao, "gray", style) +
-      " ".repeat(Math.max(1, width - versao.length - assinatura.length)) +
-      paint(assinatura, "gray", style),
-  );
   lines.push(paint("─".repeat(width), "gray", style));
-  lines.push("");
+  return lines;
+}
+
+function dashboardLines(model: DashboardModel, layout: Layout): string[] {
+  const width = dashboardWidth(model);
+  const { style } = model;
+  const lines = header(model, width, layout.artwork);
+  if (layout.dense) lines.pop(); // A moldura de situação já separa o cabeçalho.
 
   lines.push(
     ...box(
@@ -244,7 +242,7 @@ export function renderDashboard(model: DashboardModel): string {
        * com outros quatro. O workflow saiu: o subtítulo já o nomeia.
        */
       [
-        ...columns(
+        ...(layout.dense ? [`${model.project} · ${MARK[model.status.state]} ${model.status.label} · ${duration(model.durationSeconds)}`] : columns(
           [
             { label: "PROJETO", value: model.project, path: true },
             { label: "STATUS", value: `${MARK[model.status.state]} ${model.status.label}` },
@@ -252,8 +250,8 @@ export function renderDashboard(model: DashboardModel): string {
           ],
           width,
           style,
-        ),
-        "",
+        )),
+        ...(layout.dense ? [] : [""]),
         `${paint(padVisible("ETAPA ATUAL", 16), "cyan", style)}${model.stage}`,
         `${paint(padVisible("AGORA", 16), "cyan", style)}${activityLine(model)}`,
       ],
@@ -263,11 +261,11 @@ export function renderDashboard(model: DashboardModel): string {
   );
 
   if (model.phases) {
-    const lista = renderPhaseRows(model.phases.rows, model.phases.maxRows, width - 2, style);
+    const lista = renderPhaseRows(model.phases.rows, layout.phases, width - 2, style);
     lines.push(
       ...box(
         `FASES · ${model.phases.summary}`,
-        lista.length > 0 ? [...lista, "", paint("G0 engine · G1 escrita · G2 suíte · G3 verificação", "gray", style)] : [paint("nenhuma fase planejada", "gray", style)],
+        lista.length > 0 ? [...lista, ...(layout.dense ? [] : [paint("G0 engine · G1 escrita · G2 suíte · G3 verificação", "gray", style)])] : [paint("nenhuma fase planejada", "gray", style)],
         width,
         style,
       ),
@@ -279,14 +277,14 @@ export function renderDashboard(model: DashboardModel): string {
     const marks = model.pipeline
       .map((step) => paint(`[${MARK[step.state]}]`, TONE[step.state], style))
       .join(paint(" ── ", "gray", style));
-    pipeline.push(marks, "");
+    if (!layout.dense) pipeline.push(marks);
     for (const step of model.pipeline) {
       const rotulo = padVisible(truncateVisible(step.label, 26), 27);
       pipeline.push(`  ${paint(MARK[step.state], TONE[step.state], style)} ${rotulo}${paint(step.state, "gray", style)}`);
     }
-    pipeline.push("", paint("Somente metadados operacionais; o painel não altera a execução.", "gray", style));
+    if (!layout.dense) pipeline.push(paint("Somente metadados operacionais; o painel não altera a execução.", "gray", style));
   }
-  lines.push(...box("PIPELINE · FLUXO DE EXECUÇÃO", pipeline, width, style));
+  if (pipeline.length > 0) lines.push(...box("PIPELINE · FLUXO DE EXECUÇÃO", pipeline, width, style));
 
   lines.push(
     ...box(
@@ -298,8 +296,10 @@ export function renderDashboard(model: DashboardModel): string {
               (role) =>
                 `${paint(padVisible(role.role, 16), "cyan", style)}${role.provider || "não configurado"}${role.model ? `/${role.model}` : ""}`,
             )),
-        `${paint(padVisible("transporte", 16), "cyan", style)}${model.provider.transporte}`,
-        `${paint(padVisible("contabilidade", 16), "cyan", style)}${model.provider.contabilidade}`,
+        ...(layout.dense ? [] : [
+          `${paint(padVisible("transporte", 16), "cyan", style)}${model.provider.transporte}`,
+          `${paint(padVisible("contabilidade", 16), "cyan", style)}${model.provider.contabilidade}`,
+        ]),
       ],
       width,
       style,
@@ -316,14 +316,13 @@ export function renderDashboard(model: DashboardModel): string {
     lines.push(
       ...box(
         "O QUE ESTÁ ACONTECENDO",
-        model.events.slice(-10).map((event) => `${paint(`[${event.time}]`, "gray", style)} ${event.text}`),
+        model.events.slice(-layout.events).map((event) => `${paint(`[${event.time}]`, "gray", style)} ${event.text}`),
         width,
         style,
       ),
     );
   }
 
-  lines.push("");
   // O rodapé também cabe: num terminal estreito ele vira a metade que importa.
   lines.push(
     paint(
@@ -333,8 +332,42 @@ export function renderDashboard(model: DashboardModel): string {
     ),
   );
 
-  const rendered = lines.join("\n");
-  return model.background === undefined ? rendered : tint(rendered, model.background, width);
+  return lines;
+}
+
+export function renderDashboard(model: DashboardModel): string {
+  const width = dashboardWidth(model);
+  const budget = model.height === undefined ? Infinity : Math.max(1, model.height - 1);
+  const layout: Layout = {
+    artwork: budget >= 35,
+    dense: budget < 27,
+    events: Math.min(6, model.events.length),
+    phases: model.phases?.maxRows ?? 0,
+  };
+  let lines = dashboardLines(model, layout);
+  while (lines.length > budget) {
+    if (layout.events > 1) layout.events -= 1;
+    else if (layout.phases > 1) layout.phases -= 1;
+    else if (layout.artwork) layout.artwork = false;
+    else if (!layout.dense) layout.dense = true;
+    else break;
+    lines = dashboardLines(model, layout);
+  }
+  // Perguntas são liberadas da região viva antes da resposta; nunca cortar opções.
+  if (lines.length > budget && !model.question) {
+    const current = model.phases?.rows.find((phase) => phase.state === "em andamento");
+    lines = [
+      paint(`CAPIVARA v${model.version} · ${model.command.toUpperCase()} · ${model.project}`, "cyan", model.style),
+      `${model.status.label} · ${duration(model.durationSeconds)} · ${model.stage}`,
+      activityLine(model),
+      ...(current ? renderPhaseRows([current], 1, width, model.style) : []),
+      ...(model.roles ?? []).map((role) => `${role.role} ${role.provider}/${role.model}`),
+      ...model.telemetry.map((metric) => `${metric.label}: ${metric.value}`),
+      ...model.events.slice(-1).map((event) => `[${event.time}] ${event.text}`),
+    ].slice(0, budget);
+  }
+  const rendered = lines.map((line) => truncateVisible(line, width)).join("\n");
+  return model.background === undefined || !model.style.enabled ? rendered : tint(rendered, model.background, width);
 }
 
 export const PHASE_GATES = ["G0 engine", "G1 escrita", "G2 suíte", "G3 verificação"] as const;

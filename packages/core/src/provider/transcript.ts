@@ -35,6 +35,14 @@ export interface Transcript {
   usage: TokenUsage | null;
   /** Verdadeiro quando nenhum evento de mensagem apareceu: o texto é o stdout cru. */
   raw: boolean;
+  /**
+   * A própria CLI declarou a volta como erro.
+   *
+   * Distinto de `raw`: uma volta pode vir crua porque o envelope não chegou —
+   * processo morto, saída truncada — e isso não é a CLI dizendo que falhou. Quem
+   * decide se a chamada valeu precisa das duas coisas separadas.
+   */
+  error?: true;
 }
 
 interface CodexEvent {
@@ -130,7 +138,7 @@ export function parseClaudeJson(stdout: string): Transcript {
 
   // Erro reportado pela própria CLI: devolve tudo, porque o diagnóstico pode
   // estar em qualquer campo do envelope e engoli-lo é trocar causa por vazio.
-  if (objeto["is_error"] === true) return { text: stdout, usage, raw: true };
+  if (objeto["is_error"] === true) return { text: stdout, usage, raw: true, error: true };
 
   const resultado = objeto["result"];
   if (typeof resultado !== "string") return { text: stdout, usage, raw: true };
@@ -228,7 +236,7 @@ export function parseAgyJson(stdout: string): Transcript {
       }
     : null;
 
-  if (objeto["status"] !== "SUCCESS") return { text: stdout, usage, raw: true };
+  if (objeto["status"] !== "SUCCESS") return { text: stdout, usage, raw: true, error: true };
 
   const resposta = objeto["response"];
   if (typeof resposta !== "string") return { text: stdout, usage, raw: true };
@@ -274,7 +282,7 @@ export function parseCursorJson(stdout: string): Transcript {
       }
     : null;
 
-  if (objeto["is_error"] === true) return { text: stdout, usage, raw: true };
+  if (objeto["is_error"] === true) return { text: stdout, usage, raw: true, error: true };
 
   const resultado = objeto["result"];
   if (typeof resultado !== "string" || resultado.trim() === "") return { text: stdout, usage, raw: true };

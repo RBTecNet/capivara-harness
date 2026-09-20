@@ -355,6 +355,7 @@ describe("o gate 2 pede o que o executor pode fazer", () => {
   it("sem acesso de sistema, manda instalar como dependência do projeto", async () => {
     const { gate2 } = await import("../../src/loop/gates.js");
     const resultado = await gate2("/tmp/p", "npm test", runnerAusente, false);
+    if (resultado.green) throw new Error("esperava o gate reprovando");
     expect(resultado.cause).toContain("NÃO tem acesso de sistema");
     expect(resultado.cause).toContain("dependência DO PROJETO");
     expect(resultado.cause).not.toContain("Você tem acesso de sistema:");
@@ -368,6 +369,7 @@ describe("o gate 2 pede o que o executor pode fazer", () => {
   it("com acesso de sistema, aí sim manda instalar o runner do ambiente", async () => {
     const { gate2 } = await import("../../src/loop/gates.js");
     const resultado = await gate2("/tmp/p", "npm test", runnerAusente, true);
+    if (resultado.green) throw new Error("esperava o gate reprovando");
     expect(resultado.cause).toContain("Você tem acesso de sistema");
   });
 
@@ -375,6 +377,7 @@ describe("o gate 2 pede o que o executor pode fazer", () => {
     const { gate2 } = await import("../../src/loop/gates.js");
     for (const sistema of [true, false]) {
       const resultado = await gate2("/tmp/p", "npm test", runnerAusente, sistema);
+      if (resultado.green) throw new Error("esperava o gate reprovando");
       expect(resultado.toolMissing, String(sistema)).toBe(true);
       expect(resultado.cause, String(sistema)).toContain("não é um teste vermelho");
     }

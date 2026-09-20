@@ -58,6 +58,18 @@ function roleFlags(command: Command, roles = ["writer", "auditor", "builder", "v
     .option("--no-splash", "não mostra a abertura");
 }
 
+/**
+ * `--ver` é apelido de `--version`.
+ *
+ * Não dá para declarar os dois no mesmo `.version()`: o commander recusa duas
+ * flags longas na mesma opção. E declarar `--ver` como opção à parte a faria
+ * aparecer duas vezes na ajuda, dizendo a mesma coisa. Traduzir no argv resolve
+ * antes de o parser existir, que é onde um apelido pertence.
+ */
+export function withVersionAlias(argv: readonly string[]): string[] {
+  return argv.map((argumento) => (argumento === "--ver" ? "--version" : argumento));
+}
+
 export function createProgram(): Command {
   const program = new Command();
   program

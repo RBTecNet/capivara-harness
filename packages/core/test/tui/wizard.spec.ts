@@ -172,3 +172,26 @@ describe("entrada roteirizada", () => {
     expect(escrito.join("")).toContain("Nada foi executado");
   });
 });
+
+describe("--ver é apelido de --version", () => {
+  it("traduz apenas o apelido, e deixa o resto do argv intacto", async () => {
+    const { withVersionAlias } = await import("../../src/cli-program.js");
+    expect(withVersionAlias(["node", "capivara", "--ver"])).toEqual(["node", "capivara", "--version"]);
+    expect(withVersionAlias(["node", "capivara", "init", "--provider", "codex"])).toEqual([
+      "node",
+      "capivara",
+      "init",
+      "--provider",
+      "codex",
+    ]);
+  });
+
+  it("não mexe em argumento que apenas contenha o texto", async () => {
+    const { withVersionAlias } = await import("../../src/cli-program.js");
+    // Um pedido que fale de versões não pode virar consulta de versão.
+    expect(withVersionAlias(["init", "controle de --versões do documento"])).toEqual([
+      "init",
+      "controle de --versões do documento",
+    ]);
+  });
+});

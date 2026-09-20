@@ -198,3 +198,36 @@ incompleta; só um disse o suficiente para o executor consertar.
 O harness acertou em não gastar ciclo por isso — limite de uso não é defeito do
 executor. Mas a conta prática muda: modelo gratuito precisa de mais ciclos E tem
 cota, e cada batida custa meia hora de relógio. "Gratuito" sai caro em tempo.
+
+
+---
+
+## O mesmo executor, três resultados — e a diferença era nossa
+
+O composer 2.5 construiu o plano do piloto 6 três vezes.
+
+| # | juiz | harness | tempo | ciclos | resultado |
+|---|---|---|---|---|---|
+| 1 | codex | com os defeitos | 117 min | 18 | 7 fases verdes, **funcionalmente parcial** |
+| 2 | opus 5 | com os defeitos | — | 5 de 5 | **morreu na fase 1** |
+| 3 | opus 5 | **corrigido** | **50 min** | 11 | 7 fases verdes |
+
+Entre o segundo e o terceiro run não mudou o executor, nem o juiz, nem o plano.
+Mudaram dois defeitos do gate 2:
+
+- a instrução para instalar o runner de testes afirmava "você tem acesso de
+  sistema" mesmo rodando com `--no-system-install`, e o executor gastava ciclos
+  seguindo uma ordem impossível;
+- quinze testes vermelhos com a MESMA mensagem — um ambiente de teste mal
+  configurado — chegavam como saída bruta, e o executor tratava sintoma.
+
+**O que isso obriga a reconhecer.** Depois do run 2 eu havia concluído, por
+escrito, que "o limite é do executor" e que "juiz forte não compensa executor
+fraco". As duas frases estavam contaminadas: o composer não morria por
+incapacidade, morria seguindo instruções que o harness dava errado.
+
+É a segunda vez na mesma sessão que um defeito nosso foi atribuído ao modelo — a
+primeira foram as cinco rodadas do haiku no `plan`. O padrão é forte o bastante
+para virar regra: **quando um modelo mais fraco falha, a primeira suspeita é o
+harness, não ele.** Modelo fraco não é o problema a diagnosticar; é o
+instrumento que revela o problema.

@@ -2035,3 +2035,50 @@ sobre o esqueleto. Foi recusado porque exigiria simetria perfeita entre
 nova — para servir a um fluxo que o desenvolvedor já disse não querer: *"eu não
 quero ler nada, eu não vou avaliar documentação"*. Recusar a divergência custa
 uma comparação de strings e elimina a promessa falsa.
+
+
+---
+
+## 28. Pendente — nenhum gate exercita a aplicação
+
+O build D do piloto 6 terminou com tudo verde: sete fases, gate 3 do opus
+aprovando cada uma, 582 testes do projeto passando, aceitação operacional
+confirmando que o produto sobe de uma cópia limpa.
+
+O desenvolvedor abriu a aplicação e encontrou, em dois minutos:
+
+- **não há cadastro de membros** — a tela lista, e não deixa adicionar;
+- **o empréstimo diz que não há exemplar disponível**, com exemplares
+  cadastrados.
+
+São buracos funcionais óbvios para quem usa, e invisíveis para todos os gates.
+
+### Por que passaram
+
+Cada gate pergunta uma coisa, e nenhuma delas é "isto funciona para quem usa":
+
+| gate | pergunta | por que não pega |
+|---|---|---|
+| 1 | a sessão escreveu código? | escreveu |
+| 2 | a suíte do projeto passa? | **a suíte é escrita pelo próprio executor** |
+| 3 | o código implementa as tasks? | o verificador **lê código, não clica** |
+| aceitação | o produto sobe de uma cópia limpa? | sobe |
+
+O gate 2 tem um viés estrutural: quem escreve o teste é quem escreveu o código, e
+um teste que exercita a mesma suposição errada passa. O gate 3 é independente de
+verdade — sessão nova, só leitura —, mas lê. Um fluxo que nunca é percorrido tem
+código presente e comportamento ausente.
+
+### O que fazer, quando for a vez
+
+Um gate que **abre a aplicação** e percorre os fluxos declarados. O esqueleto já
+traz os `workflows` com passos em texto, e o plano rastreia `workflow <n>` em
+`Traces` — a informação necessária já existe e é estruturada.
+
+Para produto de navegador, isso é um runner headless percorrendo cada workflow do
+esqueleto e falhando quando um passo não é executável na interface. É o mesmo
+princípio dos outros gates: verificável em código, e caro exatamente uma vez.
+
+Não é trabalho pequeno, e por isso fica registrado em vez de improvisado. Mas é a
+diferença entre "todas as fases verdes" e "a aplicação faz o que foi pedido" —
+que hoje o harness não consegue afirmar.

@@ -69,16 +69,22 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 ## Estado atual
 
-**As doze fases do §17 do plano estão implementadas.** `npm run check` passa:
-build, typecheck e 428 testes, incluindo o catálogo de 30 cenários do Apêndice B
-rodando a cadeia `init` → `build` inteira contra o provider falso.
+O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
+com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
+`npm run check` passa: build, typecheck e **874 testes**, incluindo o catálogo de
+cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
+
+Os pilotos com modelo real foram executados e medidos: `docs/medicoes/referencia.md`.
 
 `docs/capivara-phases-v1.md` é **gerado** por `npm run docs:contract` a partir do
 módulo — não edite à mão; um teste falha se a página divergir do código.
 
-Falta a segunda metade da Phase 11: os **três pilotos com modelo real**. Eles
-gastam dinheiro, levam dezenas de minutos e precisam de julgamento humano sobre
-se a aplicação entregue é a pedida. O protocolo está em `docs/PILOTOS.md`.
+**O que falta está em `docs/HANDOFF.md`**, em ordem de importância. O primeiro
+item é o que importa: nenhum gate exercita a aplicação. Os quatro leem código, e
+por isso um build já fechou com todas as fases verdes e metade dos cadastros sem
+funcionar.
+
+Este trabalho vive no branch `ciclo-unico`, 39 commits à frente de `main`.
 
 ## A correção que fica pela metade
 

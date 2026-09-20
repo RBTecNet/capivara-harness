@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 901 testes em 48 arquivos, `npm run check` verde |
+| suíte | 931 testes em 50 arquivos, `npm run check` verde |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
 O ciclo de três estágios foi desenvolvido no branch `ciclo-unico` e fundido em
@@ -41,8 +41,17 @@ caro terminou as sete fases quando o harness parou de esconder informação dele
 
 ## O que veio depois do checkpoint
 
-Tudo commitado, com a suíte verde. São três frentes, todas nascidas
-de um run real:
+Quatro frentes, todas nascidas de um run real. As três primeiras estão
+commitadas; o gate 4 é o trabalho corrente.
+
+**§33 — o gate 4, que abre a aplicação.** O §28 deixou de ser pendente. Os fluxos
+que o esqueleto sempre declarou viram roteiros Playwright, escritos por uma sessão
+que não implementou a fase, guardados em `.capivara/flows/` e rodados pelo loop
+contra o produto de pé. O roteiro fica no projeto, então o fluxo da fase 2
+continua sendo percorrido na fase 7. O que dá para conferir sem abrir navegador —
+um passo por `test.step`, um `expect` por passo, nada de `skip`, nada de
+interceptar o próprio backend — é conferido antes. Provado contra navegador de
+verdade: produto íntegro verde, produto sem o botão vermelho no passo 2.
 
 **§8.6 do plano — as correções do incidente `cron5`.** A função que decide de
 quais fases os findings falam saiu do `init/orchestrator.ts` para
@@ -82,14 +91,14 @@ que a região viva usa para redesenhar.
 
 Em ordem de importância, não de esforço:
 
-1. **§28 — nenhum gate exercita a aplicação.** É o buraco real. Os quatro gates
-   leem código; nenhum abre o produto e clica. Foi assim que um build fechou com
-   as sete fases verdes e metade dos cadastros sem funcionar. O esqueleto já traz
-   os `workflows` em texto e o plano os rastreia em `Traces` — a informação
-   existe e é estruturada. Falta o runner.
-2. **§27 — `skeleton.md` é derivado e ninguém confere.** O `plan` deveria
+1. **§27 — `skeleton.md` é derivado e ninguém confere.** O `plan` deveria
    recusar quando o markdown publicado divergir de `.skeleton-state.json`.
-3. **Cosmético:** o painel do `plan` mostra "esqueleto do produto — aguardando"
+2. **O gate 4 só serve a produto que sobe como serviço.** Para CLI e biblioteca
+   não há driver, e o caminho hoje é `--no-flows`. Os limites estão ditos no fim
+   do §33.
+3. **Falha de infraestrutura ainda consome ciclo de correção** e é devolvida ao
+   executor como se fosse defeito do código dele. Está no fim do §32.
+4. **Cosmético:** o painel do `plan` mostra "esqueleto do produto — aguardando"
    mesmo lendo um esqueleto que já existe. O pipeline foi desenhado para o `init`
    e o `plan` o herdou.
 
@@ -123,7 +132,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 901 testes
+npm run check     # build + typecheck + 931 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

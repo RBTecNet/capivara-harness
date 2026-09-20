@@ -11,6 +11,9 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { sha12 } from "../contract/stamps.js";
+import { workflowsForPhase, type Skeleton } from "../contract/index.js";
+import { startCommandFor } from "./acceptance.js";
+import type { FlowRunner } from "./flows.js";
 import {
   acquireLock,
   liveLockOwner,
@@ -41,6 +44,18 @@ export interface BuildOptions {
   language: string;
   engine: string;
   call: EngineCaller;
+  /**
+   * O esqueleto, de onde saem os fluxos do gate 4.
+   *
+   * Vem de fora porque quem o guarda é o `init`, e o loop não importa o init —
+   * o init já importa o loop, e o ciclo entre os dois seria pior que o parâmetro.
+   * Ausente ou nulo: o build roda sem o gate que abre a aplicação, e diz isso.
+   */
+  skeleton?: Skeleton | null;
+  /** Substituível nos testes: rodar navegador de verdade a cada cenário é inviável. */
+  flowRunner?: FlowRunner;
+  /** Desliga o gate 4 mesmo havendo esqueleto. */
+  skipFlows?: boolean;
   testRunner?: TestRunner;
   explicitTestCommand?: string;
   maxCycles?: number;
@@ -205,6 +220,25 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     const resumeFrom = nextSubject(progress, planned);
     if (resumeFrom !== null && resumeFrom !== planned[0]) announce(`retomando a partir de ${resumeFrom}`);
 
+    /*
+     * De onde saem os fluxos do gate 4. O esqueleto é do build inteiro; o
+     * comando que sobe a aplicação é resolvido por fase, porque num greenfield
+     * ele passa a existir no meio do caminho.
+     */
+    const esqueleto = options.skipFlows === true ? null : (options.skeleton ?? null);
+    if (options.skipFlows !== true && esqueleto === null) {
+      announce("aviso: sem esqueleto legível, o gate 4 não percorre fluxo nenhum nesta execução");
+    }
+
+    const fluxosDaFase =
+      esqueleto !== null
+        ? (phaseNumber: number) => ({
+            workflows: workflowsForPhase(esqueleto, phaseNumber),
+            resolveStart: () => startCommandFor(options.projectRoot),
+            ...(options.flowRunner !== undefined ? { runner: options.flowRunner } : {}),
+          })
+        : null;
+
     options.onPlanned?.(checked.sessions.map((session) => ({ id: session.id, title: session.title })));
 
     const done = new Set(progress.completed);
@@ -231,6 +265,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
             ...(options.environment !== undefined ? { environment: options.environment } : {}),
           }),
         call: options.call,
+        ...(fluxosDaFase ? { flows: fluxosDaFase(session.number) } : {}),
         ...(options.testRunner !== undefined ? { testRunner: options.testRunner } : {}),
         systemInstall: options.systemInstall === true,
         ...(options.maxCycles !== undefined ? { maxCycles: options.maxCycles } : {}),

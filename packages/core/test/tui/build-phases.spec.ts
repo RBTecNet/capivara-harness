@@ -138,7 +138,7 @@ describe("a linha que não cabe continua colorida", () => {
       id: "P04",
       title: "Frontend: aba de geração por prompt com validação no servidor",
       state: "falhou",
-      gates: { G0: "verde", G1: "verde", G2: "vermelho", G3: "aguardando" },
+      gates: { G0: "verde", G1: "verde", G2: "vermelho", G3: "aguardando", G4: "aguardando" },
       detail: "gate 2 — suíte do projeto reprovou em 7 testes",
     };
     const linha = renderPhaseRows([longa], 5, 70, comCor)[0] ?? "";

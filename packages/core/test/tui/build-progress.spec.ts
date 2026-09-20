@@ -87,14 +87,14 @@ describe("os gates da fase corrente", () => {
     expect(t.rows()[1]?.gates.G0).toBe("verde");
   });
 
-  it("fase concluída preserva os quatro gates verdes que a fizeram passar", () => {
+  it("fase concluída preserva os cinco gates verdes que a fizeram passar", () => {
     const eventos: BuildProgress[] = [{ kind: "phase", id: "P01", state: "em andamento", cycle: 1, detail: "implementação" }];
-    for (const gate of ["G0", "G1", "G2", "G3"] as const) {
+    for (const gate of ["G0", "G1", "G2", "G3", "G4"] as const) {
       eventos.push({ kind: "gate", id: "P01", gate, state: "verde", cycle: 1 });
     }
     eventos.push({ kind: "phase", id: "P01", state: "concluído", cycle: 1, detail: "commitada" });
     const linha = tracker(...eventos).rows()[0];
-    expect(Object.values(linha?.gates ?? {})).toEqual(["verde", "verde", "verde", "verde"]);
+    expect(Object.values(linha?.gates ?? {})).toEqual(["verde", "verde", "verde", "verde", "verde"]);
   });
 
   it("gates de uma fase não vazam para outra", () => {

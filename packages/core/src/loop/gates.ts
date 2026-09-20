@@ -8,12 +8,18 @@
  * G1 — a sessão escreveu código (SINAL, não veredito)
  * G2 — a suíte do projeto, rodada PELO LOOP
  * G3 — verificador independente, read-only, task a task
+ * G4 — os fluxos declarados, percorridos na aplicação de pé (ver flows.ts)
  */
 
 import { execFile } from "node:child_process";
 import { BUILDER_COMPLETE_MARKER, parseVerification } from "../prompts/index.js";
 
-export type GateName = "gate 0 — engine" | "gate 1 — escrita" | "gate 2 — suíte do projeto" | "gate 3 — verificação independente";
+export type GateName =
+  | "gate 0 — engine"
+  | "gate 1 — escrita"
+  | "gate 2 — suíte do projeto"
+  | "gate 3 — verificação independente"
+  | "gate 4 — fluxos na aplicação";
 
 export type GateResult =
   | { green: true }

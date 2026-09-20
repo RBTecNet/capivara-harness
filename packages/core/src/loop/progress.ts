@@ -10,8 +10,8 @@
  * execução depende de haver um ouvinte.
  */
 
-/** Os quatro gates, na ordem em que a fase passa por eles. */
-export type LoopGate = "G0" | "G1" | "G2" | "G3";
+/** Os cinco gates, na ordem em que a fase passa por eles. */
+export type LoopGate = "G0" | "G1" | "G2" | "G3" | "G4";
 
 export type LoopGateState = "corrente" | "verde" | "vermelho";
 

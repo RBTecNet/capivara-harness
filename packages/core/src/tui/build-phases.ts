@@ -1,5 +1,5 @@
 /**
- * A lista de fases do build, com os quatro gates de cada uma.
+ * A lista de fases do build, com os cinco gates de cada uma.
  *
  * O painel do build mostrava a fase corrente e mais nada. Num plano de sete
  * fases, quem olhava não sabia quantas faltavam, quais já tinham fechado, nem
@@ -12,8 +12,8 @@
 
 import { paint, padVisible, truncateVisible, visibleWidth, type Style } from "./ansi.js";
 
-/** Os quatro gates, na ordem em que a fase passa por eles. */
-export const GATES = ["G0", "G1", "G2", "G3"] as const;
+/** Os cinco gates, na ordem em que a fase passa por eles. */
+export const GATES = ["G0", "G1", "G2", "G3", "G4"] as const;
 export type GateId = (typeof GATES)[number];
 
 export type GateState = "aguardando" | "corrente" | "verde" | "vermelho";
@@ -62,7 +62,7 @@ const PHASE_TONE: Record<PhaseState, "green" | "yellow" | "gray" | "red"> = {
 };
 
 export function emptyGates(): Record<GateId, GateState> {
-  return { G0: "aguardando", G1: "aguardando", G2: "aguardando", G3: "aguardando" };
+  return { G0: "aguardando", G1: "aguardando", G2: "aguardando", G3: "aguardando", G4: "aguardando" };
 }
 
 /**

@@ -246,7 +246,7 @@ describe("dashboard", () => {
           rows: Array.from({ length: 20 }, (_, index) => ({
             id: `P${String(index + 1).padStart(2, "0")}`, title: `Implementação ${index + 1}`,
             state: index === 10 ? "em andamento" as const : "aguardando" as const,
-            detail: "ciclo 2/3", gates: { G0: "verde" as const, G1: "verde" as const, G2: "corrente" as const, G3: "aguardando" as const },
+            detail: "ciclo 2/3", gates: { G0: "verde" as const, G1: "verde" as const, G2: "corrente" as const, G3: "aguardando" as const, G4: "aguardando" as const },
           })),
         },
         events: Array.from({ length: 10 }, (_, index) => ({ time: "12:00:00", text: `evento ${index}` })),

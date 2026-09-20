@@ -8,7 +8,7 @@ import { listProviders, renderProviderList } from "./commands/providers.js";
 import { diagnose, renderDiagnosis } from "./commands/doctor.js";
 import { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
 import { BUILD_ROLES, INIT_ROLES, describeRoles, renderUnresolved, rolesFromFlags, unresolvedRoles, type CliRoleFlags } from "./commands/options.js";
-import { InitBlockedError, readRequestState, resolveRequest, runInit, runPlan } from "./init/index.js";
+import { InitBlockedError, readRequestState, readSkeletonState, resolveRequest, runInit, runPlan } from "./init/index.js";
 import type { InitOptions } from "./init/index.js";
 import { commitSpecification, runBuild } from "./loop/index.js";
 import {
@@ -545,9 +545,10 @@ export function createProgram(): Command {
       .option("--keep-going", "continua mesmo depois de uma fase falhar")
       .option("--no-system-install", "mantém o executor dentro do workspace, sem instalar pacotes de sistema")
       .option("--no-acceptance", "pula a aceitação operacional final")
+      .option("--no-flows", "pula o gate 4: não abre a aplicação para percorrer os fluxos do esqueleto")
       .option("--no-dashboard", "não desenha o painel; só as linhas de progresso"),
     ["builder", "verifier"],
-  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean; dashboard?: boolean }) => {
+  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean; flows?: boolean; dashboard?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const roles = rolesFromFlags(flags);
     const semProvider = unresolvedRoles(roles, BUILD_ROLES);
@@ -617,8 +618,20 @@ export function createProgram(): Command {
     const terminalBuild = stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
     const linhasBuild = terminalBuild ? createLineIO(terminalBuild, (text) => void stdout.write(text)) : null;
 
+    /*
+     * O esqueleto do `init` é o que diz quais fluxos existem. Ele é carregado
+     * aqui, e não dentro do loop, porque quem o guarda é o estágio de
+     * documentação: o loop importado pelo init não pode importar o init de volta.
+     */
+    const pedidoRegistrado = await readRequestState(projectRoot);
+    const esqueletoDoBuild = pedidoRegistrado
+      ? await readSkeletonState(projectRoot, runIdFor("init", pedidoRegistrado.sha12))
+      : null;
+
     const outcome = await runBuild({
       projectRoot,
+      skeleton: esqueletoDoBuild,
+      skipFlows: flags.flows === false,
       ...(terminalBuild
         ? {
             askPrerequisite: async (rendered: string) => {

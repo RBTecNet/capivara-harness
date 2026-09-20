@@ -12,7 +12,12 @@ import { dirname, join } from "node:path";
 import type { EngineCall, EngineResult } from "../../src/loop/index.js";
 
 export interface EngineStep {
-  match: { role?: "builder" | "verifier"; phase?: string; attempt?: number };
+  /**
+   * `prompt` casa por trecho, e existe porque o papel `verifier` atende a duas
+   * perguntas diferentes: verificar as tasks (gate 3) e redigir o roteiro de um
+   * fluxo (gate 4). Sem distinguir as duas, um roteiro responderia à outra.
+   */
+  match: { role?: "builder" | "verifier"; phase?: string; attempt?: number; prompt?: string };
   /** Arquivos que a sessão escreve, relativos à raiz do projeto. */
   writes?: { path: string; content: string }[];
   respond: { stdout: string; exitCode?: number; timedOut?: string | null };
@@ -35,6 +40,7 @@ export function fakeEngine(projectRoot: string, steps: EngineStep[]): FakeEngine
         if (step.match.role !== undefined && step.match.role !== call.role) return false;
         if (step.match.phase !== undefined && step.match.phase !== call.phase.id) return false;
         if (step.match.attempt !== undefined && step.match.attempt !== call.attempt) return false;
+        if (step.match.prompt !== undefined && !call.prompt.includes(step.match.prompt)) return false;
         return true;
       });
       if (index === -1) {

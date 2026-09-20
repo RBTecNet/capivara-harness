@@ -12,11 +12,13 @@
 import { appendEvent } from "../state/events.js";
 import { runPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
-import { fixPrompt, implementPrompt, verifyPrompt } from "../prompts/index.js";
-import type { BuildProgressListener } from "./progress.js";
+import { fixPrompt, flowPrompt, implementPrompt, verifyPrompt } from "../prompts/index.js";
+import type { BuildProgressListener, LoopGate } from "./progress.js";
 import { commitPhase, hasPendingChanges, treeSignature } from "./git.js";
 import { declaredComplete, gate0, gate1, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
 import { detectRateLimit, planWait } from "./ratelimit.js";
+import { FLOW_PORT, gate4, type FlowRunner } from "./flows.js";
+import type { SkeletonWorkflow } from "../contract/index.js";
 import type { PhaseSession } from "./split.js";
 import type { TestCommand } from "./testcmd.js";
 
@@ -60,6 +62,27 @@ export interface PhaseRunOptions {
    */
   resolveTest?: () => Promise<TestCommand | null>;
   call: EngineCaller;
+  /**
+   * O gate 4, quando o projeto tem fluxos a percorrer.
+   *
+   * Ausente significa build sem gate de fluxos — é o que acontece quando não há
+   * esqueleto legível, e o comportamento volta a ser o de antes do §33.
+   */
+  flows?: {
+    /** Os fluxos que esta fase entrega, vindos do esqueleto. */
+    workflows: SkeletonWorkflow[];
+    /**
+     * Como a aplicação sobe — resolvido DEPOIS da sessão, não antes dela.
+     *
+     * Num greenfield o `package.json` não existe quando o build começa: é a
+     * fase 1 que o escreve. Resolver uma vez, no início, condenava o gate 4 a
+     * nunca ter o que abrir — o mesmo erro que o gate 2 já tinha pago com
+     * `resolveTest`, e que aqui seria a mesma correção faltando no irmão.
+     */
+    resolveStart: () => Promise<string | null>;
+    runner?: FlowRunner;
+    port?: number;
+  };
   testRunner?: TestRunner;
   /** Se o executor pode instalar fora do projeto. Muda o que o gate 2 pede a ele. */
   systemInstall?: boolean;
@@ -97,7 +120,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   let previousWroteNothing = false;
 
   const relatar = options.onProgress ?? (() => undefined);
-  const gate = (nome: "G0" | "G1" | "G2" | "G3", estado: "corrente" | "verde" | "vermelho", cycle: number): void =>
+  const gate = (nome: LoopGate, estado: "corrente" | "verde" | "vermelho", cycle: number): void =>
     relatar({ kind: "gate", id: session.id, gate: nome, state: estado, cycle });
 
   const event = async (status: "started" | "complete" | "retry" | "blocked" | "skipped", detail: string, attempt: number): Promise<void> => {
@@ -169,6 +192,60 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
 
     const noChangeNote = wrote ? "" : "A sessão anterior terminou sem alterar nenhum arquivo. ";
 
+    /*
+     * G4 — a aplicação faz o que foi pedido.
+     *
+     * Só roda depois do G3 verde, e por isso não encarece a fase que ainda está
+     * errada: abrir o produto para percorrer um fluxo que o código nem tem
+     * gastaria uma sessão e um navegador para descobrir o que o gate 3 já sabia.
+     */
+    const passouNosFluxos = async (cycleAtual: number): Promise<boolean> => {
+      const fluxos = options.flows;
+      if (!fluxos) return true;
+
+      gate("G4", "corrente", cycleAtual);
+      const g4 = await gate4({
+        projectRoot: options.projectRoot,
+        workflows: fluxos.workflows,
+        startCommand: await fluxos.resolveStart(),
+        author: async (workflow, rejected) => {
+          const resposta = await options.call({
+            role: "verifier",
+            phase: session,
+            attempt: cycleAtual,
+            prompt: flowPrompt({
+              language: options.language,
+              workflow: { number: workflow.number, name: workflow.name, steps: workflow.steps },
+              baseUrl: `http://127.0.0.1:${fluxos.port ?? FLOW_PORT}`,
+              ...(rejected.length > 0 ? { rejected } : {}),
+            }),
+          });
+          await writeAtomic(
+            `${paths.logs}/${session.id}.flow-${workflow.number}-${cycleAtual}.log`,
+            resposta.stdout,
+          );
+          return resposta.stdout;
+        },
+        ...(fluxos.runner !== undefined ? { runner: fluxos.runner } : {}),
+        ...(fluxos.port !== undefined ? { port: fluxos.port } : {}),
+        announce: (message) => announce(`[${session.id}] ${message}`),
+      });
+
+      gate("G4", g4.green ? "verde" : "vermelho", cycleAtual);
+      if (g4.green) {
+        if (g4.skipped !== "") announce(`[${session.id}] gate 4 pulado: ${g4.skipped}`);
+        else announce(`[${session.id}] gate 4: ${g4.scripts.length} fluxo(s) percorrido(s) na aplicação de pé`);
+        return true;
+      }
+
+      lastGate = "gate 4 — fluxos na aplicação";
+      lastCause = g4.toolMissing === true ? g4.cause : `${noChangeNote}${g4.cause}`;
+      if (g4.toolMissing === true) {
+        announce(`[${session.id}] o runner de fluxos não está instalado; o executor vai instalá-lo no projeto`);
+      }
+      return false;
+    };
+
     const g0 = gate0(result, options.engine);
     gate("G0", g0.green ? "verde" : "vermelho", cycle);
     // O gate 1 é sinal, não veredito: não escrever nada não reprova a fase, mas
@@ -211,6 +288,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         if (!g3.green) {
           lastGate = g3.gate;
           lastCause = `${noChangeNote}${g3.cause}`;
+        } else if (!(await passouNosFluxos(cycle))) {
+          // A causa já foi registrada por `passouNosFluxos`; o ciclo segue.
         } else {
           const commit = options.commitsEnabled
             ? await commitPhase(options.projectRoot, session.number, session.title)

@@ -231,6 +231,29 @@ async function lerManifesto(projectRoot: string, nome: string): Promise<string |
   return readFile(join(projectRoot, nome), "utf8").catch(() => null);
 }
 
+/**
+ * Como a aplicação sobe, para quem precisa dela de pé — hoje, o gate 4.
+ *
+ * Reusa a derivação da aceitação em vez de adivinhar de novo: o passo `service`
+ * é, por definição, o que fica de pé. O build vem junto quando existe, porque um
+ * produto compilado servido a partir de código velho responde e engana.
+ */
+export async function startCommandFor(projectRoot: string): Promise<string | null> {
+  const steps = deriveAcceptance({
+    packageJson: await lerManifesto(projectRoot, "package.json"),
+    pyproject: await lerManifesto(projectRoot, "pyproject.toml"),
+    goMod: await lerManifesto(projectRoot, "go.mod"),
+    cargoToml: await lerManifesto(projectRoot, "Cargo.toml"),
+    indexHtml: await lerManifesto(projectRoot, "index.html"),
+  });
+
+  const service = steps.find((step) => step.service);
+  if (!service) return null;
+
+  const build = steps.find((step) => step.id === "build");
+  return build ? `${build.command} && ${service.command}` : service.command;
+}
+
 export async function runAcceptance(options: AcceptanceOptions): Promise<AcceptanceResult> {
   const steps = deriveAcceptance({
     packageJson: await lerManifesto(options.projectRoot, "package.json"),

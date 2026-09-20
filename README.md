@@ -83,7 +83,7 @@ Termina em `RALPH READY` ou em `NOT READY` dizendo exatamente o que falta. Nunca
 
 ### `capivara build`
 
-Uma fase = uma sessão de agente. Por fase, quatro gates:
+Uma fase = uma sessão de agente. Por fase, cinco gates:
 
 | Gate | O que verifica |
 |---|---|
@@ -91,6 +91,13 @@ Uma fase = uma sessão de agente. Por fase, quatro gates:
 | G1 | a sessão escreveu código — **sinal, não veredito** |
 | G2 | a suíte do projeto, rodada **pelo loop**, fora da sessão do agente |
 | G3 | um verificador independente, read-only, task a task |
+| G4 | os fluxos do esqueleto, percorridos **na aplicação de pé** |
+
+Os quatro primeiros leem; o G4 abre o produto e clica. Cada fluxo declarado no
+esqueleto vira um roteiro Playwright, escrito por uma sessão que não implementou
+a fase, guardado em `.capivara/flows/` e executado pelo loop — e como ele fica no
+projeto, o fluxo da fase 2 continua sendo percorrido na fase 7. `--no-flows`
+desliga o gate.
 
 Todos verdes com a árvore suja → um commit por fase. Todos verdes com a árvore
 limpa → a fase já estava implementada. Qualquer um vermelho → sessão nova com a

@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { SKELETON_CONTRACT, parseSkeleton, renderSkeleton, sliceForPhase } from "../../src/contract/index.js";
+import { SKELETON_CONTRACT, parseSkeleton, renderSkeleton, sliceForPhase, workflowsForPhase } from "../../src/contract/index.js";
 import type { Skeleton } from "../../src/contract/index.js";
 
 const LIMITES = { maxTasksPerPhase: 15 };
@@ -112,6 +112,22 @@ describe("a fatia de uma fase", () => {
 
   it("a stack vai em toda fase: é o que decide como se implementa", () => {
     expect(sliceForPhase(skeleton, 1)).toContain("TypeScript 5.8");
+  });
+
+  /*
+   * O gate 4 pergunta a mesma coisa que a fatia já perguntava. Perguntar por
+   * fora seria responder diferente: é a forma de defeito mais comum aqui.
+   */
+  it("os fluxos da fase são os mesmos que a fatia mostra", () => {
+    const fluxos = workflowsForPhase(skeleton, 2);
+    expect(fluxos.map((workflow) => workflow.number)).toEqual(["1"]);
+    expect(fluxos[0]?.steps.length).toBeGreaterThan(0);
+    for (const passo of fluxos[0]?.steps ?? []) expect(sliceForPhase(skeleton, 2)).toContain(passo);
+  });
+
+  it("fase sem fluxo declarado devolve lista vazia, não o esqueleto inteiro", () => {
+    expect(workflowsForPhase(skeleton, 1)).toEqual([]);
+    expect(workflowsForPhase(skeleton, 99)).toEqual([]);
   });
 
   it("fase inexistente devolve vazio em vez de quebrar", () => {

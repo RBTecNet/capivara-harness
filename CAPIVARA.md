@@ -7,7 +7,7 @@ detalha até `RALPH READY`, e `capivara build` constrói a aplicação a partir 
 ## Especificação
 
 **`docs/PLANO.md` é a autoridade deste repositório.** Leia antes de escrever qualquer código.
-Ele define o contrato, os motores de entrevista e auditoria, os quatro gates do loop, os
+Ele define o contrato, os motores de entrevista e auditoria, os cinco gates do loop, os
 prompts literais de cada papel (Apêndice A) e o provider falso (Apêndice B).
 
 **§26 é o ciclo que roda hoje.** As seções 6 a 9 descrevem a cadeia de quatro documentos em
@@ -71,7 +71,7 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-`npm run check` passa: build, typecheck e **874 testes**, incluindo o catálogo de
+`npm run check` passa: build, typecheck e **931 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
 
 Os pilotos com modelo real foram executados e medidos: `docs/medicoes/referencia.md`.
@@ -79,10 +79,11 @@ Os pilotos com modelo real foram executados e medidos: `docs/medicoes/referencia
 `docs/capivara-phases-v1.md` é **gerado** por `npm run docs:contract` a partir do
 módulo — não edite à mão; um teste falha se a página divergir do código.
 
-**O que falta está em `docs/HANDOFF.md`**, em ordem de importância. O primeiro
-item é o que importa: nenhum gate exercita a aplicação. Os quatro leem código, e
-por isso um build já fechou com todas as fases verdes e metade dos cadastros sem
-funcionar.
+O gate 4 — o que abre a aplicação e percorre os fluxos declarados — existe desde
+o §33. Era o buraco que fez um build fechar com todas as fases verdes e metade
+dos cadastros sem funcionar.
+
+**O que falta está em `docs/HANDOFF.md`**, em ordem de importância.
 
 ## A correção que fica pela metade
 

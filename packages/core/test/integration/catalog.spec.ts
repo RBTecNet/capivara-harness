@@ -15,8 +15,10 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InitBlockedError, runInit } from "../../src/init/index.js";
 import { runBuild, splitPhases } from "../../src/loop/index.js";
+import type { FlowRunner } from "../../src/loop/index.js";
 import { readEvents, runIdFor, runPaths } from "../../src/state/index.js";
 import { sha12 } from "../../src/contract/index.js";
+import type { Skeleton } from "../../src/contract/index.js";
 import {
   PHASE_1,
   PHASE_2,
@@ -82,7 +84,17 @@ async function publishPlan(): Promise<{ phases: number; tasks: number[] }> {
   return { phases: split.sessions.length, tasks: split.sessions.map((session) => session.taskCount) };
 }
 
-async function build(steps: EngineStep[], options: { maxCycles?: number; keepGoing?: boolean; testExit?: number[] } = {}) {
+async function build(
+  steps: EngineStep[],
+  options: {
+    maxCycles?: number;
+    keepGoing?: boolean;
+    testExit?: number[];
+    skeleton?: Skeleton;
+    flowRunner?: FlowRunner;
+    skipAcceptance?: boolean;
+  } = {},
+) {
   const engine = fakeEngine(projectRoot, steps);
   let testRun = 0;
   const outcome = await runBuild({
@@ -94,6 +106,9 @@ async function build(steps: EngineStep[], options: { maxCycles?: number; keepGoi
     environment: {},
     ...(options.maxCycles !== undefined ? { maxCycles: options.maxCycles } : {}),
     ...(options.keepGoing !== undefined ? { keepGoing: options.keepGoing } : {}),
+    ...(options.skeleton !== undefined ? { skeleton: options.skeleton } : {}),
+    ...(options.flowRunner !== undefined ? { flowRunner: options.flowRunner } : {}),
+    ...(options.skipAcceptance !== undefined ? { skipAcceptance: options.skipAcceptance } : {}),
     testRunner: async () => {
       const exit = options.testExit?.[testRun] ?? 0;
       testRun += 1;
@@ -883,5 +898,130 @@ describe("B-40 · não-resposta não vira autoridade", () => {
 
   it("abortar continua derrubando o run, e não se confunde com não responder", async () => {
     await expect(comDecisao("abortar")).rejects.toThrow(/Decisão do desenvolvedor: abortar/);
+  });
+});
+
+/*
+ * O §28 em forma de cenário.
+ *
+ * A pergunta que nenhum gate fazia — "isto funciona para quem usa?" — não dá
+ * para fazer a um modelo sob demanda, então aqui o navegador é falso e o que se
+ * exercita é a consequência: um fluxo que reprova devolve a fase ao ciclo de
+ * correção, com uma causa que fala de fluxo e não de teste de unidade.
+ */
+const ESQUELETO: Skeleton = {
+  contract: "capivara-skeleton/v1",
+  projectName: "Pousada",
+  stack: [{ component: "linguagem", decision: "TypeScript 5.8" }],
+  entities: [],
+  stories: [],
+  workflows: [
+    { number: "1", name: "Reservar uma diária", steps: ["escolhe a data", "confirma a reserva", "vê a reserva na lista"] },
+  ],
+  rules: [],
+  phases: [
+    { number: 1, title: "Fundação de dados", goal: "migrations", dependsOn: "none", covers: ["workflow 1"], taskCount: 2 },
+    { number: 2, title: "API", goal: "rotas", dependsOn: "Phase 1", covers: ["statuses"], taskCount: 2 },
+  ],
+  mvpCutPhase: 2,
+};
+
+const ROTEIRO = [
+  "```ts",
+  "import { expect, test } from '@playwright/test';",
+  "",
+  "test('workflow 1', async ({ page }) => {",
+  "  await test.step('passo 1: escolhe a data', async () => { await page.goto('/'); expect(page.url()).toBeTruthy(); });",
+  "  await test.step('passo 2: confirma a reserva', async () => { await page.click('#ok'); expect(page.url()).toBeTruthy(); });",
+  "  await test.step('passo 3: vê a reserva na lista', async () => { expect(await page.title()).toBeTruthy(); });",
+  "});",
+  "```",
+].join("\n");
+
+const MANIFESTO = { path: "package.json", content: JSON.stringify({ name: "p", scripts: { start: "node server.js" } }) };
+
+describe("B-41 · o gate que abre a aplicação", () => {
+  it("fluxo reprovado devolve a fase ao ciclo de correção, e a causa fala de fluxo", async () => {
+    const { tasks } = await publishPlan();
+    let passagem = 0;
+    const { outcome } = await build(
+      [
+        { match: { role: "builder", phase: "P01" }, writes: [MANIFESTO, { path: "src/a.ts", content: "export const a = 1;" }], respond: { stdout: "fiz" }, repeat: true },
+        { match: { role: "builder", phase: "P02" }, writes: [{ path: "src/b.ts", content: "export const b = 2;" }], respond: { stdout: "fiz" }, repeat: true },
+        { match: { role: "verifier", prompt: "CAPIVARA_FLOW" }, respond: { stdout: ROTEIRO }, repeat: true },
+        { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0] ?? 2) }, repeat: true },
+        { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1] ?? 2) }, repeat: true },
+      ],
+      {
+        skeleton: ESQUELETO,
+        skipAcceptance: true,
+        flowRunner: async () => {
+          passagem += 1;
+          // A primeira passagem encontra o produto sem o passo 2; a segunda, com.
+          return passagem === 1
+            ? { exitCode: 1, output: "1) passo 2: confirma a reserva\n   locator('#ok') não encontrado" }
+            : { exitCode: 0, output: "3 passed" };
+        },
+      },
+    );
+
+    expect(outcome.exitCode).toBe(0);
+    const eventos = await readEvents(runPaths(projectRoot, outcome.runId).events);
+    const devolucao = eventos.find((evento) => evento.status === "retry");
+    expect(devolucao?.detail).toContain("gate 4");
+    expect(devolucao?.detail).toContain("fluxo");
+    // O roteiro ficou no projeto: a fase 2 vai percorrê-lo de novo, de graça.
+    expect(await readFile(join(projectRoot, ".capivara/flows/workflow-1.spec.ts"), "utf8")).toContain("passo 3");
+  });
+
+  it("o fluxo da fase 1 continua sendo percorrido na fase 2", async () => {
+    const { tasks } = await publishPlan();
+    const percorridos: string[][] = [];
+    const { outcome } = await build(
+      [
+        { match: { role: "builder", phase: "P01" }, writes: [MANIFESTO, { path: "src/a.ts", content: "export const a = 1;" }], respond: { stdout: "fiz" }, repeat: true },
+        { match: { role: "builder", phase: "P02" }, writes: [{ path: "src/b.ts", content: "export const b = 2;" }], respond: { stdout: "fiz" }, repeat: true },
+        { match: { role: "verifier", prompt: "CAPIVARA_FLOW" }, respond: { stdout: ROTEIRO }, repeat: true },
+        { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0] ?? 2) }, repeat: true },
+        { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1] ?? 2) }, repeat: true },
+      ],
+      {
+        skeleton: ESQUELETO,
+        skipAcceptance: true,
+        flowRunner: async (_root, scripts) => {
+          percorridos.push(scripts);
+          return { exitCode: 0, output: "3 passed" };
+        },
+      },
+    );
+
+    expect(outcome.exitCode).toBe(0);
+    expect(percorridos).toEqual([["workflow-1.spec.ts"], ["workflow-1.spec.ts"]]);
+  });
+
+  it("sem esqueleto, o build avisa e roda como antes — nunca para por causa do gate novo", async () => {
+    const { tasks } = await publishPlan();
+    const avisos: string[] = [];
+    const engine = fakeEngine(projectRoot, [
+      { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "export const a = 1;" }], respond: { stdout: "fiz" }, repeat: true },
+      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0] ?? 2) }, repeat: true },
+      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1] ?? 2) }, repeat: true },
+    ]);
+    const outcome = await runBuild({
+      projectRoot,
+      language: "português do Brasil",
+      engine: "codex",
+      call: engine.call,
+      sleep: async () => undefined,
+      environment: {},
+      announce: (message) => avisos.push(message),
+      testRunner: async () => ({ exitCode: 0, output: "ok" }),
+      flowRunner: async () => {
+        throw new Error("o gate 4 não deveria rodar sem esqueleto");
+      },
+    });
+
+    expect(outcome.exitCode).toBe(0);
+    expect(avisos.join("\n")).toContain("sem esqueleto legível");
   });
 });

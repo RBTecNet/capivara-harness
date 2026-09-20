@@ -2060,7 +2060,7 @@ uma comparação de strings e elimina a promessa falsa.
 
 ---
 
-## 28. Pendente — nenhum gate exercita a aplicação
+## 28. Resolvido no §33 — nenhum gate exercitava a aplicação
 
 O build D do piloto 6 terminou com tudo verde: sete fases, gate 3 do opus
 aprovando cada uma, 582 testes do projeto passando, aceitação operacional
@@ -2103,6 +2103,10 @@ princípio dos outros gates: verificável em código, e caro exatamente uma vez.
 Não é trabalho pequeno, e por isso fica registrado em vez de improvisado. Mas é a
 diferença entre "todas as fases verdes" e "a aplicação faz o que foi pedido" —
 que hoje o harness não consegue afirmar.
+
+> **Feito no §33.** O gate 4 abre a aplicação e percorre os fluxos declarados. O
+> que está escrito daqui para baixo é o diagnóstico que levou a ele, e continua
+> valendo como registro de por que o gate existe.
 
 ### A medição que fechou o caso
 
@@ -2428,3 +2432,99 @@ fácil era "sonnet não dá conta da fase 1". Todas as vezes em que isso foi dit
 neste projeto, a causa estava no harness: o `mimo` que criou `tmp/`, o piloto 6
 com o `--permission-mode plan`, o piloto 7 com o `SUCCESS` vazio do agy, e agora
 o `cron5`. Quatro em quatro.
+
+---
+
+## 33. G4 — o gate que abre a aplicação
+
+O §28 ficou pendente por um tempo com o nome certo: *nenhum gate exercita a
+aplicação*. Este é o gate que faltava.
+
+### O que ele faz
+
+Depois do G3 verde, e só depois, o loop:
+
+1. lê do esqueleto os fluxos que **esta fase** entrega — `workflows` numerados,
+   com passos em texto, que o `init` já coletava e ninguém consumia;
+2. para cada fluxo sem roteiro, pede um a uma sessão que **não implementou a
+   fase**, no papel `verifier`: read-only, sem escrever nada na árvore. Ela
+   devolve o roteiro em texto e quem grava é o harness, sob `.capivara/flows/`;
+3. sobe a aplicação com o comando derivado do manifesto e roda os roteiros com o
+   Playwright, **pelo loop**;
+4. verde é o código de saída do processo. Vermelho vira causa do ciclo de
+   correção, como qualquer outro gate.
+
+### Três decisões que o desenho carrega
+
+**O veredito é do processo, não da narrativa.** É a mesma regra do G2, pela razão
+do §28: o G3 é independente e ainda assim lê, e ler aprova código presente com
+comportamento ausente. Um navegador que clica não tem essa saída.
+
+**Quem escreve o roteiro não implementou a fase, e não escreve na árvore.** A
+independência do G3, com uma diferença: o roteiro precisa existir em disco, então
+o papel devolve texto e o harness persiste. O papel de leitura continua sendo só
+de leitura — e o teste de arquitetura que garante isso continua valendo.
+
+**O roteiro fica no projeto.** É o que transforma o gate de fluxos em regressão: o
+fluxo da fase 2 continua sendo percorrido na fase 7, sem custo de sessão, e um
+defeito introduzido na 7 aparece na 7. Foi por isso que ele não virou arquivo
+temporário.
+
+### O preço de deixar o modelo escrever a própria prova
+
+Um roteiro frouxo passa. Quem escreve pode afirmar pouco — e o §28 alerta
+justamente para o executor que converge para *passar no gate* em vez de *fazer o
+trabalho*. Então o que dá para conferir mecanicamente é conferido antes de abrir
+navegador nenhum:
+
+| o que se confere | por quê |
+|---|---|
+| um `test.step` por passo, com o texto do passo | um fluxo com passo faltando não é o fluxo declarado |
+| ao menos um `expect` por passo | um passo que só clica não prova nada |
+| sem `test.skip`, `test.fixme`, `.only` | um teste desligado é um gate desligado |
+| sem interceptar o backend do produto | a tela passaria contra respostas inventadas pelo próprio roteiro |
+
+Reprovado, o roteiro volta ao autor com os defeitos nomeados — e a segunda recusa
+reprova o gate sem abrir a aplicação. O que sobra — se a asserção é *forte* — é
+julgamento, e continua sendo. O gate não promete eliminar o julgamento; promete
+que o fluxo foi percorrido.
+
+### O que o gate custa
+
+Uma sessão por fluxo novo, uma vez. Depois, só o tempo de rodar o navegador.
+Fluxo já roteirizado não custa sessão nenhuma — o roteiro íntegro é reusado, e a
+conferência estrutural roda antes de qualquer chamada.
+
+### O erro que quase repeti
+
+O comando que sobe a aplicação é resolvido **depois** da sessão do executor, não
+no início do build. Num greenfield o `package.json` não existe quando o build
+começa: é a fase 1 que o escreve. Resolver uma vez, no começo, condenaria o gate
+4 a nunca ter o que abrir — exatamente o defeito que o gate 2 já tinha pago com o
+`resolveTest` do §17. Era a correção existindo num lugar e faltando no irmão, de
+novo, e desta vez o cenário do catálogo pegou antes de sair.
+
+### Os limites, ditos
+
+- **Produto que não sobe como serviço.** Sem um entrypoint que o loop possa
+  executar, o gate reprova em vez de fingir que passou; para CLI e biblioteca, o
+  caminho é `--no-flows` enquanto um driver próprio não existir.
+- **O produto precisa respeitar `PORT`.** O gate sobe a aplicação numa porta
+  fixa e alta; um entrypoint que ignora a variável não responde onde o roteiro
+  procura, e isso aparece como falha de subida, não de fluxo.
+- **Sem esqueleto legível não há fluxos.** O build avisa uma vez e roda como
+  antes. Um projeto começado antes do esqueleto existir não para por causa do
+  gate novo.
+
+### A prova
+
+Contra navegador de verdade, fora da suíte: uma aplicação mínima com um campo, um
+botão e uma lista, e o fluxo declarado em três passos.
+
+| o produto | o gate 4 |
+|---|---|
+| íntegro | **verde** |
+| com o botão de confirmar removido | **vermelho** — `passo 2: confirma a reserva`, `locator.click` sem elemento |
+
+O segundo caso é o defeito do §28 em miniatura: o código está lá, o fluxo não
+acontece, e agora alguma coisa no harness percebe.

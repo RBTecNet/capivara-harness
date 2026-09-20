@@ -230,6 +230,22 @@ export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number
  * transversais vão inteiras, porque é justamente delas que nascem as
  * contradições entre fases.
  */
+/**
+ * Os fluxos que uma fase entrega, do jeito que o esqueleto os declarou.
+ *
+ * Mora aqui porque é a mesma pergunta que o recorte da fase já fazia, e porque
+ * quem a responde de novo por conta própria responde diferente. O gate de fluxos
+ * pergunta exatamente isto: o que esta fase precisa fazer funcionar.
+ */
+export function workflowsForPhase(skeleton: Skeleton, phaseNumber: number): SkeletonWorkflow[] {
+  const phase = skeleton.phases.find((entry) => entry.number === phaseNumber);
+  if (!phase) return [];
+  const cobre = new Set(phase.covers.map((item) => item.toLowerCase()));
+  return skeleton.workflows.filter(
+    (workflow) => cobre.has(`workflow ${workflow.number}`.toLowerCase()) || cobre.has(workflow.number.toLowerCase()),
+  );
+}
+
 export function sliceForPhase(skeleton: Skeleton, phaseNumber: number): string {
   const phase = skeleton.phases.find((entry) => entry.number === phaseNumber);
   if (!phase) return "";
@@ -239,7 +255,7 @@ export function sliceForPhase(skeleton: Skeleton, phaseNumber: number): string {
 
   const entidades = skeleton.entities.filter((entity) => relevante(entity.name));
   const stories = skeleton.stories.filter((story) => relevante(story.id));
-  const workflows = skeleton.workflows.filter((workflow) => relevante(`workflow ${workflow.number}`) || relevante(workflow.number));
+  const workflows = workflowsForPhase(skeleton, phaseNumber);
 
   const linhas = [
     `# ${skeleton.projectName} — fase ${phase.number}: ${phase.title}`,

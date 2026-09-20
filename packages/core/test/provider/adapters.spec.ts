@@ -128,7 +128,11 @@ describe("antigravity", () => {
   it("o prompt não vira argumento: esta CLI lê de stdin", () => {
     // `-p` aqui espera o texto como valor do próprio flag; passá-lo vazio faz a
     // CLI tomar o argumento seguinte como prompt. Foi o primeiro erro ao integrar.
-    expect(agy("writer")).not.toContain("-p");
+    // Comparado como argumento inteiro: `--dangerously-skip-permissions` contém
+    // "-p" como substring e passaria por um `toContain` ingênuo.
+    const args = buildInvocation("writer", config({ provider: "agy" }), context).args;
+    expect(args).not.toContain("-p");
+    expect(args).not.toContain("--print");
     expect(agy("writer")).toContain("--output-format json");
   });
 
@@ -136,12 +140,24 @@ describe("antigravity", () => {
    * A lição que o adaptador do Claude custou: `plan` não é somente-leitura, é o
    * modo que grava um plano em arquivo e depois tenta relê-lo.
    */
-  it("papel somente-leitura nunca entra em modo plan", () => {
+  it("papel somente-leitura nunca entra em modo plan, e é o sandbox que o segura", () => {
     for (const papel of ["writer", "auditor", "verifier"] as const) {
       expect(agy(papel), papel).not.toContain("--mode plan");
+      // Verificado contra a CLI real: com --sandbox, um pedido explícito de criar
+      // arquivo devolve a resposta e não cria nada.
       expect(agy(papel), papel).toContain("--sandbox");
-      expect(agy(papel), papel).not.toContain("--dangerously-skip-permissions");
+      expect(agy(papel), papel).not.toContain("--mode accept-edits");
     }
+  });
+
+  /*
+   * O nome assusta e o efeito aqui é o oposto: sem ele, a primeira ferramenta que
+   * a CLI quisesse usar seria negada — headless não tem a quem perguntar — e a
+   * volta inteira voltaria vazia. Foi o que esvaziou duas fases do piloto 7, com
+   * a CLI reportando SUCCESS e `response: ""`.
+   */
+  it("somente-leitura também pula o prompt de permissão, senão a volta vem vazia", () => {
+    expect(agy("writer")).toContain("--dangerously-skip-permissions");
   });
 
   /*

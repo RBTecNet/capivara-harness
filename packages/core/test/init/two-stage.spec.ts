@@ -300,3 +300,35 @@ describe("o esqueleto é conferido no laço, não só no portão", () => {
     expect(outcome.rendered).toContain("US-2.2");
   });
 });
+
+describe("fase sem task é resposta inválida, não resultado", () => {
+  it("o escritor ganha uma segunda tentativa quando a fase volta vazia", async () => {
+    await init(skeletonPath());
+
+    const steps = skeletonPath();
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "phase-p01", attempt: 1 },
+      respond: { stdout: "Claro! Aqui está a fase, sem nenhuma task." },
+    });
+
+    const { outcome, agent } = await plan(steps);
+    const tentativas = agent.calls.filter((call) => call.subject === "phase-p01" && call.stage === "authoring");
+    expect(tentativas.length, "a fase vazia precisa custar uma segunda chamada").toBeGreaterThanOrEqual(2);
+    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+  });
+
+  it("insistindo no vazio, o run para dizendo o que verificar", async () => {
+    await init(skeletonPath());
+
+    const steps = skeletonPath();
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "phase-p01" },
+      respond: { stdout: "" },
+      repeat: true,
+    });
+
+    // Antes disto o plano seguia vazio para a auditoria, o ensaio e o gate, que o
+    // reprovava por I-07 — muitas chamadas depois de o defeito ser conhecível.
+    await expect(plan(steps)).rejects.toThrow(/sem nenhuma task em duas tentativas/);
+  });
+});

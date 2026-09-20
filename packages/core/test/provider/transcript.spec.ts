@@ -285,3 +285,33 @@ describe("transcrito do antigravity", () => {
     expect(readTranscript("agy-json", AGY).text).toBe("OK\n");
   });
 });
+
+describe("SUCCESS com resposta vazia não é sucesso", () => {
+  /*
+   * O envelope real do piloto 7: a CLI negou uma ferramenta — headless não tem a
+   * quem perguntar — e encerrou a volta com SUCCESS e resposta vazia. Lido ao pé
+   * da letra, duas fases do plano foram publicadas sem uma única task.
+   */
+  const NEGADO = JSON.stringify({
+    conversation_id: "3a50d41c",
+    status: "SUCCESS",
+    response: "",
+    usage: { input_tokens: 24569, output_tokens: 410, thinking_tokens: 343, cache_read_tokens: 0 },
+    denied_actions: [{ action: "command", display_name: "RunCommand" }],
+  });
+
+  it("resposta vazia devolve tudo, para o diagnóstico chegar a quem chamou", () => {
+    const lido = parseAgyJson(NEGADO);
+    expect(lido.raw).toBe(true);
+    expect(lido.text).toContain("denied_actions");
+    expect(lido.text).toContain("RunCommand");
+  });
+
+  it("só espaços em branco também não é resposta", () => {
+    expect(parseAgyJson(JSON.stringify({ status: "SUCCESS", response: "   \n  " })).raw).toBe(true);
+  });
+
+  it("os tokens continuam sendo lidos, mesmo na volta que falhou", () => {
+    expect(parseAgyJson(NEGADO).usage?.inputTokens).toBe(24569);
+  });
+});

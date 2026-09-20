@@ -37,8 +37,16 @@ export const agyAdapter = {
     if (effort) args.push("--effort", effort);
 
     if (access === "read-only") {
-      // Sem auto-aprovação e com o terminal restrito: ler e nada mais.
-      args.push("--sandbox");
+      /*
+       * Quem garante o somente-leitura é o `--sandbox`, verificado: com ele, um
+       * pedido explícito de criar arquivo devolve a resposta e não cria nada.
+       *
+       * O `--dangerously-skip-permissions` entra junto por um motivo oposto ao
+       * que o nome sugere: sem ele, a primeira ferramenta que a CLI quisesse usar
+       * seria negada — em modo headless não há a quem perguntar — e a volta
+       * inteira voltaria vazia. Foi o que esvaziou duas fases do piloto 7.
+       */
+      args.push("--sandbox", "--dangerously-skip-permissions");
       return { args };
     }
 

@@ -232,6 +232,20 @@ export function parseAgyJson(stdout: string): Transcript {
 
   const resposta = objeto["response"];
   if (typeof resposta !== "string") return { text: stdout, usage, raw: true };
+
+  /*
+   * SUCCESS com resposta vazia não é sucesso.
+   *
+   * Quando uma ferramenta é negada — e em modo headless não há a quem perguntar,
+   * então ela é negada — esta CLI encerra a volta com `status: SUCCESS`,
+   * `response: ""` e a lista em `denied_actions`. Lido ao pé da letra, o vazio
+   * vira a resposta do papel: no piloto 7, duas das três fases do plano foram
+   * publicadas sem uma única task, e o log anunciou "fase 1 pronta".
+   *
+   * Devolver tudo aqui faz o diagnóstico chegar a quem chamou, com o nome da
+   * ferramenta negada dentro dele.
+   */
+  if (resposta.trim() === "") return { text: stdout, usage, raw: true };
   return { text: resposta, usage, raw: false };
 }
 

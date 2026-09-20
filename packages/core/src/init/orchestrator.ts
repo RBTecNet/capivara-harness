@@ -132,6 +132,11 @@ function driftBetween(antes: string, depois: string, findings: readonly Finding[
 /** Quantas esperas por chamada antes de desistir: duas janelas de reset bastam. */
 const MAX_ESPERAS_POR_CHAMADA = 2;
 
+/** Quantas tasks há neste markdown. Zero é resposta inválida do escritor. */
+function contaTasks(markdown: string): number {
+  return [...markdown.matchAll(/^\s*-\s*\[[ xX]\]\s*\*\*Task:\*\*/gm)].length;
+}
+
 function scoped(document: string, questionId: string, stage = "interview"): string {
   return `${document}#${stage}#${questionId}`;
 }
@@ -815,30 +820,59 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           const proxima = fila.shift();
           if (!proxima) return;
           const { fase, posicao } = proxima;
-          const saida = await track({
-            role: "writer",
-            stage: "authoring",
-            subject: `phase-p${String(fase.number).padStart(2, "0")}`,
-            attempt: 1,
-            prompt: phaseFromSlicePrompt({
-              language: options.language,
-              slice: sliceForPhase(esqueleto, fase.number),
-              phaseNumber: fase.number,
-              totalPhases: esqueleto.phases.length,
-              // O molde de uma TASK. O envelope da fase é montado em código, do
-              // esqueleto: pedi-lo ao modelo só criava mais uma coisa a errar.
-              grammar: tasksBlock(fase.number),
-              maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
-            }),
-          });
-          const semMortas = stripDeadDesignRefs(repairDeterministically(saida).content, designExiste);
-          for (const conserto of semMortas.applied) announce(`    fase ${fase.number}: ${conserto}`);
 
-          // O modelo escreveu as tasks; o envelope vem do esqueleto, montado em
-          // código. Número, título, goal, dependências e cobertura deixam de ser
-          // coisas que ele possa errar.
-          const tarefas = extractTasks(semMortas.content);
-          for (const conserto of tarefas.applied) announce(`    fase ${fase.number}: ${conserto}`);
+          /*
+           * Fase sem task é resposta inválida, não resultado.
+           *
+           * O sinal sempre existiu — `extractTasks` devolve "não achei task
+           * nenhuma" — e era anunciado e ignorado. No piloto 7, duas das três
+           * fases foram publicadas vazias porque a CLI encerrou a volta sem
+           * texto, e o log disse "fase 1 pronta" para as duas. O plano seguiu
+           * para a auditoria, para o ensaio e para o gate, que o reprovou por
+           * I-07 — muitas chamadas depois de o defeito ser conhecível.
+           *
+           * Uma segunda tentativa custa uma chamada. Descobrir no gate custa o
+           * run.
+           */
+          let tarefas: { tasks: string; applied: string[] } = { tasks: "", applied: [] };
+          for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
+            const saida = await track({
+              role: "writer",
+              stage: "authoring",
+              subject: `phase-p${String(fase.number).padStart(2, "0")}`,
+              attempt: tentativa,
+              prompt: phaseFromSlicePrompt({
+                language: options.language,
+                slice: sliceForPhase(esqueleto, fase.number),
+                phaseNumber: fase.number,
+                totalPhases: esqueleto.phases.length,
+                // O molde de uma TASK. O envelope da fase é montado em código, do
+                // esqueleto: pedi-lo ao modelo só criava mais uma coisa a errar.
+                grammar: tasksBlock(fase.number),
+                maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
+              }),
+            });
+            const semMortas = stripDeadDesignRefs(repairDeterministically(saida).content, designExiste);
+            for (const conserto of semMortas.applied) announce(`    fase ${fase.number}: ${conserto}`);
+
+            // O modelo escreveu as tasks; o envelope vem do esqueleto, montado em
+            // código. Número, título, goal, dependências e cobertura deixam de ser
+            // coisas que ele possa errar.
+            tarefas = extractTasks(semMortas.content);
+            for (const conserto of tarefas.applied) announce(`    fase ${fase.number}: ${conserto}`);
+
+            if (contaTasks(tarefas.tasks) > 0) break;
+            if (tentativa === 1) announce(`  fase ${fase.number} voltou sem task nenhuma; pedindo de novo`);
+          }
+
+          if (contaTasks(tarefas.tasks) === 0) {
+            throw new InitBlockedError(
+              `a fase ${fase.number} voltou sem nenhuma task em duas tentativas. ` +
+                "O escritor não produziu conteúdo — verifique o provider e o modelo desse papel antes de rodar de novo.",
+              runId,
+            );
+          }
+
           fases[posicao] = assemblePhase(
             { number: fase.number, title: fase.title, goal: fase.goal, dependsOn: fase.dependsOn, covers: fase.covers },
             tarefas.tasks,

@@ -195,3 +195,25 @@ describe("--ver é apelido de --version", () => {
     ]);
   });
 });
+
+describe("o mesmo provider tem o mesmo número em toda tela", () => {
+  it("escolher 3 dá opencode tanto no menu global quanto no de papel", async () => {
+    // Antes, "manter o padrão" ocupava a posição 1 do menu de papel e deslocava
+    // todos os providers: codex era 1 no global e 2 no papel, opencode 3 e 4.
+    // Quem lesse a primeira lista e respondesse pela memória pegava o vizinho.
+    const { deps } = roteiro(["", "1", "2", "pedido.md", "3", "mimo-v2.5-free", "1", "s", "3", "", "3", "", "3", "", "n"]);
+    const resultado = await runWizard(deps);
+    const argv = resultado?.argv.join(" ") ?? "";
+    expect(argv).toContain("--provider opencode");
+    expect(argv).toContain("--writer-provider opencode");
+    expect(argv).not.toContain("claude");
+  });
+
+  it("Enter num papel mantém o provider global, sem sujar o comando", async () => {
+    const { deps } = roteiro(["", "1", "2", "pedido.md", "3", "mimo-v2.5-free", "1", "s", "", "", "", "n"]);
+    const resultado = await runWizard(deps);
+    const argv = resultado?.argv.join(" ") ?? "";
+    expect(argv).toContain("--provider opencode");
+    expect(argv).not.toContain("--writer-provider");
+  });
+});

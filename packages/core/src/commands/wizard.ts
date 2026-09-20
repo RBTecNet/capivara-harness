@@ -75,10 +75,24 @@ async function pergunta(io: WizardIO, prompt: string): Promise<string> {
 }
 
 /** Pergunta até vir um número válido. Vazio aceita o padrão. */
-async function choose(io: WizardIO, title: string, choices: readonly Choice[], defaultIndex: number): Promise<number> {
+/**
+ * `rotuloPadrao` descreve o que o Enter faz quando ele não é uma das opções.
+ *
+ * Serve ao menu de papel, onde "manter o que foi escolhido" não é um item da
+ * lista — se fosse, deslocaria a numeração de todos os providers e faria o
+ * mesmo número significar coisas diferentes em duas telas da mesma sessão.
+ */
+async function choose(
+  io: WizardIO,
+  title: string,
+  choices: readonly Choice[],
+  defaultIndex: number,
+  rotuloPadrao?: string,
+): Promise<number> {
   io.write(`\n${renderChoices(title, choices, defaultIndex)}\n`);
+  const dica = rotuloPadrao ?? String(defaultIndex + 1);
   for (;;) {
-    const reading = readChoice(await pergunta(io, `Escolha [${defaultIndex + 1}]: `), choices.length, defaultIndex);
+    const reading = readChoice(await pergunta(io, `Escolha [${dica}]: `), choices.length, defaultIndex);
     if (reading.ok) return reading.index;
     io.write(`${reading.message}\n`);
   }
@@ -200,20 +214,29 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
   // pedir uma decisão que não vai ser usada.
   const usados: RoleName[] = command === "build" ? ["builder", "verifier"] : ["writer", "auditor", "verifier"];
   if (await yesNo(io, "\nAjustar algum papel separadamente?", false)) {
+    /*
+     * A numeração dos providers é a MESMA aqui e na pergunta global.
+     *
+     * "manter o padrão" já ocupou a posição 1 desta lista, e então codex era 1
+     * lá em cima e 2 aqui, opencode era 3 lá e 4 aqui. Quem lesse a primeira
+     * lista e respondesse pela memória escolhia o vizinho — e o wizard imprimia
+     * um comando com o provider errado, sem nada parecer estranho.
+     *
+     * Manter o padrão passa a ser o Enter, que é onde um "deixa como está"
+     * pertence.
+     */
+    const manterPadrao = -1;
     for (const role of usados) {
       const definition = ROLES[role];
-      const opcoes: Choice[] = [
-        { label: `manter ${provider}`, hint: "o padrão escolhido acima" },
-        ...PROVIDERS,
-      ];
       const escolhido = await choose(
         io,
         `${definition.label} — ${roleHint(role, definition.requiresCli)}`,
-        opcoes,
-        0,
+        PROVIDERS,
+        manterPadrao,
+        `Enter mantém ${provider}`,
       );
-      if (escolhido === 0) continue;
-      const proprio: { provider?: string; model?: string } = { provider: opcoes[escolhido]?.label ?? provider };
+      if (escolhido === manterPadrao) continue;
+      const proprio: { provider?: string; model?: string } = { provider: PROVIDERS[escolhido]?.label ?? provider };
       const modeloDoPapel = await text(io, `Modelo do ${role} (vazio usa o padrão do provider): `);
       if (modeloDoPapel !== "") proprio.model = modeloDoPapel;
       answers.roles[role] = proprio;

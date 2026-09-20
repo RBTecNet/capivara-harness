@@ -237,3 +237,35 @@ describe("região viva", () => {
     expect(escrito[1]).not.toContain("A");
   });
 });
+
+/*
+ * Os dois estágios compartilham o painel, e por um tempo o `plan` desenhou o
+ * cabeçalho do `init`: "INIT · do prompt ao RALPH READY" numa execução que
+ * começa com o esqueleto pronto e termina exatamente no RALPH READY.
+ */
+describe("o cabeçalho diz qual estágio está na tela", () => {
+  const painel = (command?: "init" | "plan") =>
+    new HarnessProgress({
+      version: "0.0.0",
+      project: "x",
+      roles: [],
+      provider: { perfil: "p", transporte: "t", contabilidade: "c" },
+      style: { enabled: false },
+      ...(command ? { command } : {}),
+    }).model();
+
+  it("o init vai do pedido ao PLAN READY", () => {
+    expect(painel("init").subtitle).toContain("PLAN READY");
+    expect(painel("init").command).toBe("init");
+  });
+
+  it("o plan parte do esqueleto e vai ao RALPH READY", () => {
+    expect(painel("plan").subtitle).toContain("esqueleto");
+    expect(painel("plan").subtitle).toContain("RALPH READY");
+    expect(painel("plan").command).toBe("plan");
+  });
+
+  it("omitido, continua sendo o init", () => {
+    expect(painel().command).toBe("init");
+  });
+});

@@ -263,6 +263,27 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         continue;
       }
 
+      /*
+       * Sair com erro sem escrever nada é o único fracasso sem diagnóstico.
+       *
+       * Credencial vencida, modelo inexistente e free tier recusando uso
+       * externo saem todos com código 1 — e todos *dizem* o que houve. Quando o
+       * stdout vem vazio não há o que ler, e a causa mais provável é o soluço:
+       * a sessão que não subiu, a conexão que caiu antes do primeiro byte.
+       *
+       * Isso custou um `plan` inteiro. Três fases já estavam escritas e
+       * auditadas quando a chamada de coerência voltou vazia; a execução
+       * seguinte refez as três do zero. O timeout já tinha a segunda chance
+       * exatamente por esse motivo, e esse caso é o mesmo: o provider não
+       * respondeu. Uma só, e a segunda falha vale pelo que ela for.
+       */
+      const mudo = response.stdout.trim() === "";
+      if (mudo && tentativa === 1) {
+        announce(`  ${call.role} saiu com código ${response.exitCode} sem escrever nada em ${call.subject}; tentando uma segunda vez`);
+        await event(call.stage, call.subject, "retry", `saída vazia com código ${response.exitCode}`, call.attempt);
+        continue;
+      }
+
       throw new InitBlockedError(
         estouro
           ? [
@@ -1443,7 +1464,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     for (let attempt = 1; attempt <= maxAuditReturns + maxMechanicalRounds + 1; attempt += 1) {
       const content = authored.content;
       const verdict = await auditOnce(document, content, writer, upstream, attempt);
-      history.push({ attempt, verdict, writerSummary: `tentativa ${attempt}: escreveu ${document}` });
+      history.push({ attempt, verdict, contentSha: sha12(content) });
 
       const action = nextAuditAction({ document, history, maxReturns: maxAuditReturns, maxMechanical: maxMechanicalRounds });
       if (action.action === "publish") return { content, remarks: verdict.remarks, authored };

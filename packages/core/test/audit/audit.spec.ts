@@ -6,6 +6,7 @@ import {
   parseAudit,
   persistentFindings,
   renderStandoff,
+  writerDid,
 } from "../../src/audit/index.js";
 import type { AuditAttempt, AuditVerdict } from "../../src/audit/index.js";
 import { auditorPrompt } from "../../src/prompts/index.js";
@@ -106,7 +107,7 @@ describe("ciclo de devolução", () => {
   const attempt = (n: number, status: "APPROVED" | "REJECTED", where?: string): AuditAttempt => ({
     attempt: n,
     verdict: verdict(status, where),
-    writerSummary: `tentativa ${n}: reescreveu US-1.2`,
+    contentSha: `sha-${n}`,
   });
 
   it("aprovado publica", () => {
@@ -142,6 +143,61 @@ describe("ciclo de devolução", () => {
   it("findings equivalentes não são contados duas vezes no impasse", () => {
     const history = [attempt(1, "REJECTED", "US-1.2"), attempt(2, "REJECTED", "US-1.2")];
     expect(persistentFindings(history)).toHaveLength(1);
+  });
+
+  /*
+   * O resumo era `tentativa N: escreveu <documento>`, repetido uma vez por
+   * tentativa. Chamado a desempatar, o desenvolvedor via quatro linhas
+   * idênticas: nem se o texto tinha mudado, nem o que o escritor fechou.
+   *
+   * Ninguém pode perguntar ao escritor o que ele fez — ele escreve em sessão
+   * nova a cada volta. Mas o auditor leu as duas versões, e a diferença entre
+   * os vereditos é exatamente isso.
+   */
+  describe("o que o escritor fez, medido pelo que o auditor deixou de apontar", () => {
+    const comFindings = (n: number, sha: string, onde: string[]): AuditAttempt => ({
+      attempt: n,
+      contentSha: sha,
+      verdict: {
+        status: "REJECTED",
+        findings: onde.map((where) => ({ where, problem: "critério vago", fix: "use um limite" })),
+        remarks: [],
+        reason: "r",
+      },
+    });
+
+    it("a primeira tentativa diz quantos pontos o auditor apontou", () => {
+      expect(writerDid([comFindings(1, "a", ["US-1.2", "US-2.1"])])[0]).toBe(
+        "tentativa 1: escreveu o documento; o auditor apontou 2 ponto(s)",
+      );
+    });
+
+    it("conta o que fechou, o que seguiu aberto e o que apareceu novo", () => {
+      const historia = [comFindings(1, "a", ["US-1.2", "US-2.1"]), comFindings(2, "b", ["US-2.1", "US-3.9"])];
+      expect(writerDid(historia)[1]).toBe("tentativa 2: reescreveu — fechou 1 de 2, 1 seguiu(ram) aberto(s), 1 apareceu(ram) novo(s)");
+    });
+
+    it("quando tudo fecha, não sobra ruído na linha", () => {
+      const historia = [comFindings(1, "a", ["US-1.2"]), comFindings(2, "b", [])];
+      expect(writerDid(historia)[1]).toBe("tentativa 2: reescreveu — fechou 1 de 1");
+    });
+
+    /*
+     * O fato que decide se a pergunta ao desenvolvedor é sobre o produto ou
+     * sobre o prompt: reenviar o mesmo texto byte a byte não é desacordo de
+     * conteúdo, é o escritor sem saber o que fazer com o pedido.
+     */
+    it("texto idêntico é dito como tal, e não como 'reescreveu'", () => {
+      const historia = [comFindings(1, "a", ["US-1.2"]), comFindings(2, "a", ["US-1.2"])];
+      expect(writerDid(historia)[1]).toBe("tentativa 2: devolveu o MESMO texto, sem uma alteração sequer");
+    });
+
+    it("o impasse renderizado carrega esse fato para o desenvolvedor", () => {
+      const historia = [comFindings(1, "a", ["US-1.2"]), comFindings(2, "a", ["US-1.2"]), comFindings(3, "a", ["US-1.2"])];
+      const action = nextAuditAction({ document: "x.md", history: historia, maxReturns: 3, maxMechanical: 3 });
+      if (action.action !== "ask-developer") throw new Error("esperava impasse");
+      expect(renderStandoff(action.standoff)).toContain("devolveu o MESMO texto");
+    });
   });
 
   it("uma aprovação depois de devoluções publica e encerra", () => {
@@ -251,9 +307,9 @@ describe("o impasse fala da versão atual", () => {
 
   it("finding já corrigido não é apresentado como insistência", () => {
     const history = [
-      { attempt: 1, verdict: rejeita("Phase 1", "faltava o índice"), writerSummary: "escreveu" },
-      { attempt: 2, verdict: rejeita("Phase 2", "falta a regra de unicidade"), writerSummary: "reescreveu" },
-      { attempt: 3, verdict: rejeita("Phase 2", "falta a regra de unicidade"), writerSummary: "reescreveu" },
+      { attempt: 1, verdict: rejeita("Phase 1", "faltava o índice"), contentSha: "sha-1" },
+      { attempt: 2, verdict: rejeita("Phase 2", "falta a regra de unicidade"), contentSha: "sha-2" },
+      { attempt: 3, verdict: rejeita("Phase 2", "falta a regra de unicidade"), contentSha: "sha-3" },
     ];
     const action = nextAuditAction({ document: "project-phases.md", history, maxReturns: 3, maxMechanical: 3 });
     expect(action.action).toBe("ask-developer");
@@ -264,9 +320,9 @@ describe("o impasse fala da versão atual", () => {
 
   it("o que sobreviveu a mais de uma tentativa é marcado como repetido", () => {
     const history = [
-      { attempt: 1, verdict: rejeita("Phase 2", "falta a regra de unicidade"), writerSummary: "escreveu" },
-      { attempt: 2, verdict: rejeita("Phase 2", "falta a regra de unicidade"), writerSummary: "reescreveu" },
-      { attempt: 3, verdict: rejeita("Phase 2", "falta a regra de unicidade"), writerSummary: "reescreveu" },
+      { attempt: 1, verdict: rejeita("Phase 2", "falta a regra de unicidade"), contentSha: "sha-1" },
+      { attempt: 2, verdict: rejeita("Phase 2", "falta a regra de unicidade"), contentSha: "sha-2" },
+      { attempt: 3, verdict: rejeita("Phase 2", "falta a regra de unicidade"), contentSha: "sha-3" },
     ];
     const action = nextAuditAction({ document: "project-phases.md", history, maxReturns: 3, maxMechanical: 3 });
     if (action.action !== "ask-developer") throw new Error("esperava impasse");
@@ -293,9 +349,9 @@ describe("defeito mecânico tem orçamento próprio", () => {
     // O piloto 3 parou em impasse com duas devoluções mecânicas e uma real: a
     // fase ia de 74 para 61 critérios e mais uma volta teria fechado.
     const history = [
-      { attempt: 1, verdict: mecanico("74 critérios"), writerSummary: "escreveu" },
-      { attempt: 2, verdict: doAuditor("ambiguidade de espaços"), writerSummary: "reescreveu" },
-      { attempt: 3, verdict: mecanico("61 critérios"), writerSummary: "reescreveu" },
+      { attempt: 1, verdict: mecanico("74 critérios"), contentSha: "sha-1" },
+      { attempt: 2, verdict: doAuditor("ambiguidade de espaços"), contentSha: "sha-2" },
+      { attempt: 3, verdict: mecanico("61 critérios"), contentSha: "sha-3" },
     ];
     const action = nextAuditAction({ document: "project-phases.md", history, maxReturns: 3, maxMechanical: 3 });
     expect(action.action).toBe("return-to-writer");
@@ -305,7 +361,7 @@ describe("defeito mecânico tem orçamento próprio", () => {
     const history = [1, 2, 3].map((attempt) => ({
       attempt,
       verdict: mecanico(`${80 - attempt} critérios`),
-      writerSummary: "reescreveu",
+      contentSha: `sha-${attempt}`,
     }));
     const action = nextAuditAction({ document: "project-phases.md", history, maxReturns: 3, maxMechanical: 3 });
     expect(action.action).toBe("ask-developer");
@@ -317,7 +373,7 @@ describe("defeito mecânico tem orçamento próprio", () => {
     const history = [1, 2, 3].map((attempt) => ({
       attempt,
       verdict: doAuditor("a regra não nomeia o alvo"),
-      writerSummary: "reescreveu",
+      contentSha: `sha-${attempt}`,
     }));
     const action = nextAuditAction({ document: "project-phases.md", history, maxReturns: 3, maxMechanical: 3 });
     expect(action.action).toBe("ask-developer");

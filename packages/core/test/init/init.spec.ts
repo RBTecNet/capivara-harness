@@ -546,6 +546,54 @@ describe("timeout do provider", () => {
     expect(outcome.readiness.ready).toBe(true);
   });
 
+  /*
+   * Sair com erro sem escrever nada é o único fracasso sem diagnóstico.
+   * Credencial vencida, modelo inexistente e free tier recusando uso externo
+   * saem todos com código 1 e todos dizem o que houve; stdout vazio não diz
+   * nada, e a causa provável é o soluço.
+   *
+   * O caso real: a chamada de coerência de um `plan` voltou vazia depois de
+   * três fases escritas e auditadas, e a execução seguinte refez as três.
+   */
+  it("saída vazia com código de erro tenta de novo antes de desistir", async () => {
+    const steps = happyPath();
+    let vez = 0;
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "skeleton" },
+      respond: {
+        stdout: () => (vez === 0 ? "" : SKELETON),
+        exitCode: () => {
+          vez += 1;
+          return vez === 1 ? 1 : 0;
+        },
+      },
+      repeat: true,
+    });
+
+    const { outcome, anunciado } = await run(steps);
+    expect(anunciado).toContain("sem escrever nada");
+    expect(outcome.readiness.ready).toBe(true);
+  });
+
+  it("mas erro COM diagnóstico não repete: a mensagem é a resposta", async () => {
+    const steps = happyPath();
+    let chamadas = 0;
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "skeleton" },
+      respond: {
+        stdout: () => {
+          chamadas += 1;
+          return "FreeTierError: external usage is not allowed";
+        },
+        exitCode: 1,
+      },
+      repeat: true,
+    });
+
+    await expect(run(steps)).rejects.toThrow(/FreeTierError/);
+    expect(chamadas).toBe(1);
+  });
+
   it("estouro duas vezes para o run dizendo o que fazer", async () => {
     const steps = happyPath();
     steps.unshift({

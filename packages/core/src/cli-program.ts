@@ -9,6 +9,7 @@ import { diagnose, renderDiagnosis } from "./commands/doctor.js";
 import { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
 import { BUILD_ROLES, INIT_ROLES, describeRoles, renderUnresolved, rolesFromFlags, unresolvedRoles, type CliRoleFlags } from "./commands/options.js";
 import { InitBlockedError, readRequestState, resolveRequest, runInit, runPlan } from "./init/index.js";
+import type { InitOptions } from "./init/index.js";
 import { commitSpecification, runBuild } from "./loop/index.js";
 import {
   BACK,
@@ -69,6 +70,240 @@ function roleFlags(command: Command, roles = ["writer", "auditor", "builder", "v
  */
 export function withVersionAlias(argv: readonly string[]): string[] {
   return argv.map((argumento) => (argumento === "--ver" ? "--version" : argumento));
+}
+
+/**
+ * O painel e as perguntas dos dois estágios do ciclo.
+ *
+ * `init` e `plan` são o mesmo orquestrador com estágios diferentes, e por isso
+ * têm exatamente a mesma superfície interativa: o mesmo painel, a mesma janela
+ * de log, a mesma caixa de pergunta, o mesmo impasse.
+ *
+ * Enquanto cada comando montava a sua, só o `init` tinha painel. O `plan` — que
+ * é o estágio LONGO, dezenas de chamadas contra uma — escrevia linhas soltas e
+ * ficava minutos calado durante cada fase, sem custo, sem papel ativo, sem
+ * pulso. O estágio caro era o que menos mostrava o que estava acontecendo.
+ *
+ * Construir isto uma vez é o que garante que a próxima melhoria de painel chegue
+ * nos dois: duas cópias divergem na primeira correção aplicada a uma só.
+ */
+function estagioInterativo(options: {
+  estagio: "init" | "plan";
+  projectRoot: string;
+  runId: string;
+  language: string;
+  roles: ReturnType<typeof rolesFromFlags>;
+  comPainel: boolean;
+  /** Como a caixa de pergunta se apresenta: o init entrevista, o plan detalha fase. */
+  documento: string;
+}) {
+  const { projectRoot, runId, roles, comPainel } = options;
+  const bridge = createAgentBridge({ projectRoot, runId, language: options.language, roles, limits: DEFAULT_LIMITS });
+  const terminal = createInterface({ input: stdin, output: stdout });
+
+  /*
+   * A leitura é enfileirada, não `terminal.question()` direto: entrada vinda de
+   * pipe ou arquivo chega inteira antes da primeira pergunta, o readline fecha
+   * no fim dela, e a pergunta seguinte estoura em ERR_USE_AFTER_CLOSE.
+   */
+  const linhas = createLineIO(terminal, (text) => void stdout.write(text));
+  const perguntar = async (prompt: string, decision: string): Promise<string> => {
+    try {
+      return await linhas.ask(prompt);
+    } catch (error) {
+      if (!(error instanceof InputEndedError)) throw error;
+      throw new InitBlockedError(
+        [
+          "A entrada terminou e ainda falta uma decisão:",
+          "",
+          `  ${decision}`,
+          "",
+          `Nada do que já foi publicado se perdeu: rode \`capivara ${options.estagio}\` para continuar.`,
+        ].join("\n"),
+        runId,
+      );
+    }
+  };
+
+  /*
+   * O painel observa e nunca altera: ele lê os eventos que o orquestrador já
+   * grava e se redesenha no lugar. Sem terminal, não desenha nada — as linhas de
+   * progresso continuam sendo a saída, e o log segue legível.
+   */
+  const progress = new HarnessProgress({
+    version: VERSION,
+    command: options.estagio,
+    project: basename(resolve(projectRoot)),
+    roles: describeRoles(roles).filter((role) => (INIT_ROLES as readonly string[]).includes(role.role)),
+    provider: {
+      perfil: `${roles.writer.provider}${roles.writer.model ? `:${roles.writer.model}` : ""}`,
+      transporte: `${roles.writer.provider}-cli`,
+      contabilidade: "por chamada",
+    },
+    style: style(),
+    environment: process.env,
+  });
+
+  const live = createLiveRegion((text) => void stdout.write(text), comPainel);
+
+  // A largura é lida a cada desenho: redimensionar a janela ajusta o painel na
+  // repintura seguinte, sem precisar ouvir evento de resize.
+  const larguraAtual = (): number => stdout.columns ?? 100;
+
+  /*
+   * O fundo só é pintado onde há cor verdadeira: em 16 cores, um tom escuro vira
+   * um bloco chapado que atrapalha mais do que ajuda. CAPIVARA_BG troca o tom, e
+   * "none" devolve o fundo do terminal.
+   */
+  const fundo = ((): string | undefined => {
+    const escolhido = process.env.CAPIVARA_BG?.trim();
+    if (escolhido === "none") return undefined;
+    if (!supportsTrueColor(process.env)) return undefined;
+    return escolhido && escolhido !== "" ? escolhido : UBUNTU_AUBERGINE;
+  })();
+
+  const desenhar = (): string =>
+    renderDashboard({
+      ...progress.model(),
+      width: larguraAtual(),
+      ...(fundo !== undefined ? { background: fundo } : {}),
+    });
+  const repaint = (): void => live.draw(desenhar());
+
+  // O pulso é o que separa "trabalhando" de "morto" na tela.
+  live.beat(() => {
+    progress.tick();
+    return desenhar();
+  });
+
+  const announce = (message: string): void => {
+    progress.note(message.trim());
+    if (live.enabled) repaint();
+    else stdout.write(`${message}\n`);
+  };
+
+  const onProgress: NonNullable<InitOptions["onProgress"]> = (evento) => {
+    // O nome do produto vem do documento que o nomeia, assim que ele existe.
+    if (evento.stage === "publish" && evento.subject === "skeleton") {
+      readFile(join(projectRoot, ".capivara", "init", "skeleton.md"), "utf8")
+        .then((conteudo) => {
+          const titulo = /^#\s+(.+?)\s+—/m.exec(conteudo)?.[1];
+          if (titulo) progress.setProject(titulo);
+        })
+        .catch(() => undefined);
+    }
+    repaint();
+  };
+
+  const call: InitOptions["call"] = async (chamada) => {
+    const quem = `${chamada.role} · ${chamada.subject.replace(/\.md$/, "")}`;
+    progress.beginCall(quem);
+    repaint();
+    const response = await bridge({
+      role: chamada.role,
+      stage: chamada.stage,
+      prompt: chamada.prompt,
+      // A janela de log recebe o que a CLI conta enquanto trabalha; sem isso o
+      // terminal fica com cara de travado durante minutos.
+      onActivity: (line) => {
+        progress.note(`${quem}: ${line}`);
+        repaint();
+      },
+    });
+    progress.charge(response.usage);
+    repaint();
+    return {
+      stdout: response.stdout,
+      exitCode: response.exitCode,
+      ...(response.usage
+        ? {
+            usage: {
+              inputTokens: response.usage.inputTokens,
+              outputTokens: response.usage.outputTokens,
+              ...(response.usage.costUsd !== undefined ? { costUsd: response.usage.costUsd } : {}),
+            },
+          }
+        : {}),
+    };
+  };
+
+  const ask: InitOptions["ask"] = async (question, index, total) => {
+    /*
+     * Sem terminal não há a quem perguntar. Oferecer a pergunta a uma entrada
+     * que não existe termina em ERR_USE_AFTER_CLOSE do readline — stack trace no
+     * lugar de diagnóstico, no fim de horas de trabalho. Foi o que derrubou um
+     * run inteiro do piloto 3 numa única pergunta.
+     */
+    if (stdin.isTTY !== true) {
+      throw new InitBlockedError(
+        [
+          "O escritor precisa de uma decisão para seguir e não há terminal para perguntar:",
+          "",
+          `  ${question.decision}`,
+          "",
+          ...(question.options.length > 0
+            ? question.options.map((option, posicao) => `  ${posicao + 1}) ${option.label}`)
+            : ["  (pergunta aberta)"]),
+          "",
+          "Rode o mesmo comando num terminal para responder. Nada do que já foi publicado se perdeu.",
+        ].join("\n"),
+        runId,
+      );
+    }
+
+    /*
+     * A pergunta é desenhada DENTRO do painel, no lugar da janela de log —
+     * enquanto a vez é do desenvolvedor não há nada acontecendo para registrar
+     * ali. A linha de resposta fica colada embaixo da moldura, fora dela de
+     * propósito: um painel que se repinta por cima de um prompt de leitura come
+     * o que a pessoa está digitando.
+     */
+    progress.waitingForDeveloper();
+    if (live.enabled) {
+      progress.asking(questionBox({ question, index, total, document: options.documento, style: style() }, larguraAtual()));
+      repaint();
+      live.release();
+      progress.asking(null);
+      const answer = await perguntar(paint("  ▸ sua resposta: ", "cyan", style()), question.decision);
+      return answer.trim().toLowerCase() === BACK ? "" : answer;
+    }
+
+    stdout.write(renderQuestion({ question, index, total, document: options.documento, style: style() }));
+    const answer = await perguntar("> ", question.decision);
+    return answer.trim().toLowerCase() === BACK ? "" : answer;
+  };
+
+  /*
+   * Sem terminal não há a quem perguntar, e o orquestrador já sabe parar com o
+   * impasse na tela quando ninguém decide.
+   */
+  const decideStandoff: InitOptions["decideStandoff"] = async (rendered: string) => {
+    progress.waitingForDeveloper();
+    if (live.enabled) {
+      progress.asking({ title: "IMPASSE · precisa da sua decisão", body: rendered.split("\n") });
+      repaint();
+      live.release();
+      progress.asking(null);
+      return perguntar(paint('  ▸ sua decisão (ou "publicar" para aceitar como está): ', "cyan", style()), "o impasse do auditor");
+    }
+    stdout.write(`\n${rendered}\n`);
+    return perguntar('> (responda, ou "publicar" para aceitar como está) ', "o impasse do auditor");
+  };
+
+  return {
+    progress,
+    live,
+    repaint,
+    /** O que se passa ao orquestrador; `decideStandoff` só existe com terminal. */
+    hooks: {
+      announce,
+      onProgress,
+      call,
+      ask,
+      ...(stdin.isTTY === true ? { decideStandoff } : {}),
+    },
+    close: () => terminal.close(),
+  };
 }
 
 export function createProgram(): Command {
@@ -139,74 +374,14 @@ export function createProgram(): Command {
     }
 
     const runId = runIdFor("init", request.sha12);
-    const bridge = createAgentBridge({ projectRoot, runId, language, roles, limits: DEFAULT_LIMITS });
-    const terminal = createInterface({ input: stdin, output: stdout });
-    /*
-     * A leitura é enfileirada, não `terminal.question()` direto: entrada vinda
-     * de pipe ou arquivo chega inteira antes da primeira pergunta, o readline
-     * fecha no fim dela, e a pergunta seguinte estoura em ERR_USE_AFTER_CLOSE.
-     */
-    const linhas = createLineIO(terminal, (text) => void stdout.write(text));
-    const perguntar = async (prompt: string, decision: string): Promise<string> => {
-      try {
-        return await linhas.ask(prompt);
-      } catch (error) {
-        if (!(error instanceof InputEndedError)) throw error;
-        throw new InitBlockedError(
-          [`A entrada terminou e o escritor ainda precisa de uma decisão:`, "", `  ${decision}`, "", "Nada do que já foi publicado se perdeu: rode o mesmo comando para continuar."].join("\n"),
-          runId,
-        );
-      }
-    };
-
-    /*
-     * O painel observa e nunca altera: ele lê os eventos que o orquestrador já
-     * grava e se redesenha no lugar. Sem terminal, não desenha nada — as linhas
-     * de progresso continuam sendo a saída, e o log segue legível.
-     */
-    const progress = new HarnessProgress({
-      version: VERSION,
-      project: basename(resolve(projectRoot)),
-      roles: describeRoles(roles).filter((role) => (INIT_ROLES as readonly string[]).includes(role.role)),
-      provider: {
-        perfil: `${roles.writer.provider}${roles.writer.model ? `:${roles.writer.model}` : ""}`,
-        transporte: `${roles.writer.provider}-cli`,
-        contabilidade: "por chamada",
-      },
-      style: style(),
-      environment: process.env,
-    });
-
-    const live = createLiveRegion((text) => void stdout.write(text), comPainel);
-
-    // A largura é lida a cada desenho: redimensionar a janela ajusta o painel na
-    // repintura seguinte, sem precisar ouvir evento de resize.
-    const larguraAtual = (): number => stdout.columns ?? 100;
-
-    /*
-     * O fundo só é pintado onde há cor verdadeira: em 16 cores, um tom escuro
-     * vira um bloco chapado que atrapalha mais do que ajuda. CAPIVARA_BG troca o
-     * tom, e "none" devolve o fundo do terminal.
-     */
-    const fundo = ((): string | undefined => {
-      const escolhido = process.env.CAPIVARA_BG?.trim();
-      if (escolhido === "none") return undefined;
-      if (!supportsTrueColor(process.env)) return undefined;
-      return escolhido && escolhido !== "" ? escolhido : UBUNTU_AUBERGINE;
-    })();
-
-    const desenhar = (): string =>
-      renderDashboard({
-        ...progress.model(),
-        width: larguraAtual(),
-        ...(fundo !== undefined ? { background: fundo } : {}),
-      });
-    const repaint = (): void => live.draw(desenhar());
-
-    // O pulso é o que separa "trabalhando" de "morto" na tela.
-    live.beat(() => {
-      progress.tick();
-      return desenhar();
+    const ui = estagioInterativo({
+      estagio: "init",
+      projectRoot,
+      runId,
+      language,
+      roles,
+      comPainel,
+      documento: "entrevista",
     });
 
     try {
@@ -220,124 +395,9 @@ export function createProgram(): Command {
         ...(flags.fresh === true ? { fresh: true } : {}),
         // O init entrega as fases e para em PLAN READY: quem as detalha é o plan.
         stage: "init",
-        announce: (message) => {
-          progress.note(message.trim());
-          if (live.enabled) repaint();
-          else stdout.write(`${message}\n`);
-        },
-        onProgress: (evento) => {
-          progress.apply(evento);
-          // O nome do produto vem do documento que o nomeia, assim que ele existe.
-          if (evento.stage === "publish" && evento.subject === "skeleton") {
-            readFile(join(projectRoot, ".capivara", "init", "skeleton.md"), "utf8")
-              .then((conteudo) => {
-                const titulo = /^#\s+(.+?)\s+—/m.exec(conteudo)?.[1];
-                if (titulo) progress.setProject(titulo);
-              })
-              .catch(() => undefined);
-          }
-          repaint();
-        },
-        call: async (call) => {
-          const quem = `${call.role} · ${call.subject.replace(/\.md$/, "")}`;
-          progress.beginCall(quem);
-          repaint();
-          const response = await bridge({
-            role: call.role,
-            stage: call.stage,
-            prompt: call.prompt,
-            // A janela de log recebe o que a CLI conta enquanto trabalha; sem
-            // isso o terminal fica com cara de travado durante minutos.
-            onActivity: (line) => {
-              progress.note(`${quem}: ${line}`);
-              repaint();
-            },
-          });
-          progress.charge(response.usage);
-          repaint();
-          return {
-            stdout: response.stdout,
-            exitCode: response.exitCode,
-            ...(response.usage
-              ? {
-                  usage: {
-                    inputTokens: response.usage.inputTokens,
-                    outputTokens: response.usage.outputTokens,
-                    ...(response.usage.costUsd !== undefined ? { costUsd: response.usage.costUsd } : {}),
-                  },
-                }
-              : {}),
-          };
-        },
-        ask: async (question, index, total) => {
-          /*
-           * Sem terminal não há a quem perguntar. Oferecer a pergunta a uma
-           * entrada que não existe termina em ERR_USE_AFTER_CLOSE do readline —
-           * stack trace no lugar de diagnóstico, no fim de horas de trabalho. Foi
-           * o que derrubou um run inteiro do piloto 3 numa única pergunta.
-           */
-          if (stdin.isTTY !== true) {
-            throw new InitBlockedError(
-              [
-                `O escritor precisa de uma decisão para seguir e não há terminal para perguntar:`,
-                "",
-                `  ${question.decision}`,
-                "",
-                ...(question.options.length > 0
-                  ? question.options.map((option, posicao) => `  ${posicao + 1}) ${option.label}`)
-                  : ["  (pergunta aberta)"]),
-                "",
-                "Rode o mesmo comando num terminal para responder. Nada do que já foi publicado se perdeu.",
-              ].join("\n"),
-              runId,
-            );
-          }
-
-          /*
-           * A pergunta é desenhada DENTRO do painel, no lugar da janela de log —
-           * enquanto a vez é do desenvolvedor não há nada acontecendo para
-           * registrar ali. A linha de resposta fica colada embaixo da moldura,
-           * fora dela de propósito: um painel que se repinta por cima de um
-           * prompt de leitura come o que a pessoa está digitando.
-           */
-          progress.waitingForDeveloper();
-          if (live.enabled) {
-            progress.asking(questionBox({ question, index, total, document: "entrevista", style: style() }, larguraAtual()));
-            repaint();
-            live.release();
-            progress.asking(null);
-            const answer = await perguntar(paint("  ▸ sua resposta: ", "cyan", style()), question.decision);
-            return answer.trim().toLowerCase() === BACK ? "" : answer;
-          }
-
-          stdout.write(renderQuestion({ question, index, total, document: "entrevista", style: style() }));
-          const answer = await perguntar("> ", question.decision);
-          return answer.trim().toLowerCase() === BACK ? "" : answer;
-        },
-        /*
-         * Sem terminal não há a quem perguntar, e o orquestrador já sabe parar
-         * com o impasse na tela quando ninguém decide. Oferecer a pergunta a uma
-         * entrada que não existe termina em ERR_USE_AFTER_CLOSE do readline —
-         * stack trace no lugar de um diagnóstico, no fim de horas de trabalho.
-         */
-        ...(stdin.isTTY === true
-          ? {
-              decideStandoff: async (rendered: string) => {
-                progress.waitingForDeveloper();
-                if (live.enabled) {
-                  progress.asking({ title: "IMPASSE · precisa da sua decisão", body: rendered.split("\n") });
-                  repaint();
-                  live.release();
-                  progress.asking(null);
-                  return perguntar(paint('  ▸ sua decisão (ou "publicar" para aceitar como está): ', "cyan", style()), "o impasse do auditor");
-                }
-                stdout.write(`\n${rendered}\n`);
-                return perguntar('> (responda, ou "publicar" para aceitar como está) ', "o impasse do auditor");
-              },
-            }
-          : {}),
+        ...ui.hooks,
       });
-      live.release();
+      ui.live.release();
       stdout.write(`\n${outcome.rendered}\n`);
 
       // A especificação entra no histórico do produto junto com o código que ela
@@ -351,16 +411,16 @@ export function createProgram(): Command {
       process.exitCode = outcome.readiness.ready ? 0 : 2;
     } catch (error) {
       if (error instanceof InitBlockedError) {
-        progress.halted(error.message.split("\n")[0] ?? "");
-        repaint();
-        live.release();
+        ui.progress.halted(error.message.split("\n")[0] ?? "");
+        ui.repaint();
+        ui.live.release();
         stdout.write(`\n${error.message}\n`);
         process.exitCode = 2;
         return;
       }
       throw error;
     } finally {
-      terminal.close();
+      ui.close();
     }
   });
 
@@ -414,21 +474,29 @@ export function createProgram(): Command {
     }
 
     const language = detectLanguage(request.text, flags.language);
-    const terminal = createInterface({ input: stdin, output: stdout });
     const runId = runIdFor("init", request.sha12);
-    const bridge = createAgentBridge({ projectRoot, runId, language, roles, limits: DEFAULT_LIMITS });
-    const linhas = createLineIO(terminal, (text) => void stdout.write(text));
-    const perguntar = async (prompt: string, decision: string): Promise<string> => {
-      try {
-        return await linhas.ask(prompt);
-      } catch (error) {
-        if (!(error instanceof InputEndedError)) throw error;
-        throw new InitBlockedError(
-          [`A entrada terminou e o plano ainda precisa de uma decisão:`, "", `  ${decision}`, "", "Nada do que já foi publicado se perdeu: rode `capivara plan` para continuar."].join("\n"),
-          runId,
-        );
-      }
-    };
+
+    /*
+     * O `plan` é o estágio LONGO — dezenas de chamadas contra uma do `init` — e
+     * era o que não tinha painel: escrevia linhas soltas e ficava minutos calado
+     * dentro de cada fase, sem custo, sem papel ativo, sem pulso na tela.
+     */
+    const comPainel = flags.dashboard !== false && stdout.isTTY === true;
+    if (flags.splash !== false && !comPainel) {
+      const papeis = describeRoles(roles).filter((role) => (INIT_ROLES as readonly string[]).includes(role.role));
+      stdout.write(renderSplash({ version: VERSION, roles: papeis, style: style() }));
+    }
+
+    const ui = estagioInterativo({
+      estagio: "plan",
+      projectRoot,
+      runId,
+      language,
+      roles,
+      comPainel,
+      // O plan não entrevista o produto: ele pergunta o que só a escrita da fase descobre.
+      documento: "fase",
+    });
 
     try {
       const outcome = await runPlan({
@@ -436,33 +504,11 @@ export function createProgram(): Command {
         request,
         language,
         maxAuditReturns: Number(flags.maxAuditReturns),
-        announce: (message) => stdout.write(`${message}\n`),
-        call: async (call) => {
-          const response = await bridge({ role: call.role, stage: call.stage, prompt: call.prompt });
-          return {
-            stdout: response.stdout,
-            exitCode: response.exitCode,
-            ...(response.usage ? { usage: { inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens } } : {}),
-          };
-        },
-        ask: async (question, index, total) => {
-          if (stdin.isTTY !== true) {
-            throw new InitBlockedError(`o plano precisa de uma decisão e não há terminal: ${question.decision}`, runId);
-          }
-          stdout.write(renderQuestion({ question, index, total, document: "fase", style: style() }));
-          const answer = await perguntar("> ", question.decision);
-          return answer.trim().toLowerCase() === BACK ? "" : answer;
-        },
-        ...(stdin.isTTY === true
-          ? {
-              decideStandoff: async (rendered: string) => {
-                stdout.write(`\n${rendered}\n`);
-                return perguntar('> (responda, ou "publicar" para aceitar como está) ', "o impasse do auditor");
-              },
-            }
-          : {}),
+        providers: { writer: roles.writer.provider, auditor: roles.auditor.provider, verifier: roles.verifier.provider },
+        ...ui.hooks,
       });
 
+      ui.live.release();
       stdout.write(`\n${outcome.rendered}\n`);
 
       // O plano executável é o artefato que o loop consome: ele precisa estar no
@@ -475,13 +521,16 @@ export function createProgram(): Command {
       process.exitCode = outcome.readiness.ready ? 0 : 2;
     } catch (error) {
       if (error instanceof InitBlockedError) {
+        ui.progress.halted(error.message.split("\n")[0] ?? "");
+        ui.repaint();
+        ui.live.release();
         stdout.write(`\n${error.message}\n`);
         process.exitCode = 2;
         return;
       }
       throw error;
     } finally {
-      terminal.close();
+      ui.close();
     }
   });
 

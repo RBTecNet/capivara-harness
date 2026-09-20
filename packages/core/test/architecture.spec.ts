@@ -111,3 +111,34 @@ describe("arquitetura", () => {
     expect(missing, "invariante registrado mas nunca reportado por nenhum validador").toEqual([]);
   });
 });
+
+/**
+ * `init` e `plan` são o mesmo orquestrador com estágios diferentes, e por isso
+ * têm a mesma superfície interativa. Enquanto cada comando montava a sua, só o
+ * `init` ganhou painel: o `plan` — o estágio LONGO, dezenas de chamadas contra
+ * uma — escrevia linhas soltas e ficava minutos calado dentro de cada fase.
+ *
+ * Duas cópias divergem na primeira correção aplicada a uma só. Este teste existe
+ * para que a próxima melhoria de painel chegue nos dois sem ninguém lembrar.
+ */
+describe("os dois estágios do ciclo mostram a mesma coisa", () => {
+  const cliProgram = async (): Promise<string> => readFile(join(SRC, "cli-program.ts"), "utf8");
+
+  it("o painel é construído num lugar só", async () => {
+    const fonte = await cliProgram();
+    expect(fonte.split("new HarnessProgress(").length - 1).toBe(1);
+    expect(fonte.split("createLiveRegion(").length - 1).toBe(1);
+  });
+
+  it("init e plan usam esse lugar", async () => {
+    const fonte = await cliProgram();
+    for (const estagio of ["init", "plan"]) {
+      expect(fonte).toContain(`estagioInterativo({\n      estagio: "${estagio}",`);
+    }
+  });
+
+  it("os dois aceitam desligar o painel, para pipe, arquivo e CI", async () => {
+    const fonte = await cliProgram();
+    expect(fonte.split('"--no-dashboard"').length - 1).toBe(2);
+  });
+});

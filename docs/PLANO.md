@@ -2167,3 +2167,79 @@ Quem digita um trecho está quase sempre começando a escrever o nome. Agora que
 começa por ele vem primeiro — no identificador inteiro ou em qualquer pedaço
 dele, já que os nomes vêm partidos por `/`, `-`, `_` e `.`. O que casa só no
 meio continua na lista, no fim: descartar seria trocar um erro por outro.
+
+## 30. Três defeitos que uma execução de teste expôs
+
+Um `plan` real com minimax-m3 via opencode, num projeto pequeno. Nenhum dos três
+aparece na suíte com provider falso, e os três custam caro em execução de verdade.
+
+### O fracasso sem diagnóstico custava o run inteiro
+
+A chamada de coerência voltou com código 1 e **stdout vazio**. Três fases já
+estavam escritas e auditadas; a execução morreu, e a seguinte refez as três.
+
+O orquestrador já dava segunda chance ao estouro de tempo (código 124), pelo
+mesmo motivo: estouro não diz nada sobre o conteúdo. Mas sair com erro **sem
+escrever nada** é o único fracasso que também não diz nada — credencial vencida,
+modelo inexistente e free tier recusando uso externo saem todos com código 1 e
+todos explicam o que houve. Quando o stdout vem vazio não há o que ler, e a
+causa mais provável é o soluço: a sessão que não subiu, a conexão que caiu antes
+do primeiro byte.
+
+Agora essa combinação — código não-zero **e** stdout vazio — ganha uma segunda
+tentativa, uma só. Erro com diagnóstico continua parando na primeira: a mensagem
+é a resposta, e repetir só atrasaria a leitura dela.
+
+### O impasse chamava o desenvolvedor sem mostrar nada
+
+```
+O escritor fez:
+  1. tentativa 1: escreveu project-phases.md
+  2. tentativa 2: escreveu project-phases.md
+  3. tentativa 3: escreveu project-phases.md
+  4. tentativa 4: escreveu project-phases.md
+```
+
+Quatro linhas idênticas, geradas por um template. Chamado a desempatar, o
+desenvolvedor não via se o texto havia mudado nem o que o escritor fechou no
+caminho.
+
+Não há como perguntar ao escritor o que ele fez: ele escreve em sessão nova a
+cada volta e não guarda a anterior. **Mas o auditor leu as duas versões**, e a
+diferença entre os dois vereditos é exatamente isso — o que saiu da lista o
+escritor resolveu, o que ficou ele não resolveu, o que apareceu ele quebrou:
+
+```
+  1. tentativa 1: escreveu o documento; o auditor apontou 2 ponto(s)
+  2. tentativa 2: reescreveu — fechou 1 de 2, 1 seguiu(ram) aberto(s), 1 apareceu(ram) novo(s)
+  3. tentativa 3: devolveu o MESMO texto, sem uma alteração sequer
+```
+
+A terceira linha é a que mais importa, e era a mais escondida. Reenviar o
+documento byte a byte não é desacordo sobre conteúdo: é o escritor sem saber o
+que fazer com o pedido. É o fato que decide se a pergunta ao desenvolvedor é
+sobre o produto ou sobre o prompt — e o harness tinha o hash das duas versões o
+tempo todo.
+
+### O estágio caro era o que menos mostrava
+
+O `init` tinha painel; o `plan` não. O `plan` é o estágio **longo** — dezenas de
+chamadas contra uma — e escrevia linhas soltas, ficando minutos calado dentro de
+cada fase: sem custo acumulado, sem papel ativo, sem pulso.
+
+A correção não foi dar um painel ao `plan`, foi parar de ter dois. `init` e
+`plan` são o mesmo orquestrador com estágios diferentes, e agora montam a mesma
+superfície interativa — painel, janela de log, caixa de pergunta, impasse — por
+uma função só. Um teste de arquitetura garante que ela continue sendo uma:
+
+```ts
+expect(fonte.split("new HarnessProgress(").length - 1).toBe(1);
+```
+
+Duas cópias divergem na primeira correção aplicada a uma só. Foi assim que o
+`plan` ficou sem painel: ninguém decidiu que ele não teria.
+
+O cabeçalho passou a saber qual estágio desenha. Compartilhando o painel, o
+`plan` herdou o título do `init` — "INIT · do prompt ao RALPH READY" numa
+execução que **começa** com o esqueleto pronto e termina exatamente no RALPH
+READY.

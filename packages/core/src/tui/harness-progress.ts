@@ -28,6 +28,15 @@ export interface HarnessProgressOptions {
   roles?: { role: string; provider: string; model: string }[];
   provider: { perfil: string; transporte: string; contabilidade: string };
   style: Style;
+  /**
+   * Qual estágio do ciclo está na tela.
+   *
+   * Os dois compartilham o painel, e por um tempo o `plan` desenhou o cabeçalho
+   * do `init`: "INIT · do prompt ao RALPH READY" numa execução que começa com o
+   * esqueleto pronto e termina exatamente no RALPH READY. O rótulo é a única
+   * coisa que distingue as duas telas.
+   */
+  command?: "init" | "plan";
   width?: number;
   environment?: NodeJS.ProcessEnv;
   now?: () => Date;
@@ -155,8 +164,11 @@ export class HarnessProgress {
   model(): DashboardModel {
     return {
       version: this.options.version,
-      command: "init",
-      subtitle: "init · documentação · do prompt ao RALPH READY",
+      command: this.options.command ?? "init",
+      subtitle:
+        (this.options.command ?? "init") === "plan"
+          ? "plan · detalhamento · do esqueleto ao RALPH READY"
+          : "init · esqueleto · do pedido ao PLAN READY",
       project: this.projeto,
       stage: this.etapa,
       status: this.situacao,

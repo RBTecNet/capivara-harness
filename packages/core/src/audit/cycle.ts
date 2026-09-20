@@ -19,8 +19,8 @@ export interface AuditAttempt {
   /** 1 para a primeira auditoria do documento. */
   attempt: number;
   verdict: AuditVerdict;
-  /** Resumo do que o escritor fez nesta tentativa, para a comparação final. */
-  writerSummary: string;
+  /** Marca do texto auditado nesta tentativa, para saber se ele mudou. */
+  contentSha: string;
 }
 
 export interface AuditCycleState {
@@ -43,7 +43,7 @@ export interface Standoff {
   auditorInsists: Finding[];
   /** Marcas dos findings que já tinham aparecido em tentativa anterior. */
   repeated: Set<string>;
-  /** O que o escritor fez a cada tentativa. */
+  /** O que o escritor fez a cada tentativa, visto pelo próprio auditor. */
   writerDid: string[];
   question: string;
 }
@@ -88,6 +88,50 @@ export function repeatedFindings(history: readonly AuditAttempt[]): Set<string> 
   return new Set([...contagem.entries()].filter(([, vezes]) => vezes > 1).map(([marca]) => marca));
 }
 
+/**
+ * O que o escritor fez a cada tentativa, medido pelo que o auditor deixou de
+ * apontar.
+ *
+ * O resumo era `tentativa N: escreveu <documento>`, repetido uma vez por
+ * tentativa. Chamado a desempatar, o desenvolvedor via quatro linhas idênticas:
+ * nem se o texto tinha mudado, nem o que o escritor havia fechado no caminho.
+ *
+ * Não há como perguntar ao escritor o que ele fez — ele escreve em sessão nova a
+ * cada volta e não guarda a anterior. Mas o auditor leu as duas versões, e a
+ * diferença entre os dois vereditos é exatamente isso: o que saiu da lista o
+ * escritor resolveu, o que ficou ele não resolveu, o que apareceu ele quebrou.
+ *
+ * O caso que mais importa é o texto idêntico. Reenviar byte a byte o mesmo
+ * documento não é desacordo sobre conteúdo: é o escritor sem saber o que fazer
+ * com o pedido — e é o fato que decide se a pergunta ao desenvolvedor é sobre o
+ * produto ou sobre o prompt.
+ */
+export function writerDid(history: readonly AuditAttempt[]): string[] {
+  return history.map((attempt, index) => {
+    const anterior = index === 0 ? null : history[index - 1];
+    const apontados = attempt.verdict.findings.length;
+    const agora = new Set(attempt.verdict.findings.map(fingerprint));
+
+    if (!anterior) {
+      return `tentativa ${attempt.attempt}: escreveu o documento; o auditor apontou ${apontados} ponto(s)`;
+    }
+
+    if (anterior.contentSha === attempt.contentSha) {
+      return `tentativa ${attempt.attempt}: devolveu o MESMO texto, sem uma alteração sequer`;
+    }
+
+    const antes = anterior.verdict.findings.map(fingerprint);
+    const fechados = antes.filter((marca) => !agora.has(marca)).length;
+    const abertos = antes.filter((marca) => agora.has(marca)).length;
+    const novos = [...agora].filter((marca) => !antes.includes(marca)).length;
+
+    const partes = [`fechou ${fechados} de ${antes.length}`];
+    if (abertos > 0) partes.push(`${abertos} seguiu(ram) aberto(s)`);
+    if (novos > 0) partes.push(`${novos} apareceu(ram) novo(s)`);
+    return `tentativa ${attempt.attempt}: reescreveu — ${partes.join(", ")}`;
+  });
+}
+
 export function nextAuditAction(state: AuditCycleState): AuditAction {
   const last = state.history.at(-1);
   if (!last) throw new Error("o ciclo de auditoria precisa de ao menos uma auditoria realizada");
@@ -123,7 +167,7 @@ export function nextAuditAction(state: AuditCycleState): AuditAction {
       returns,
       auditorInsists: persistentFindings(state.history),
       repeated: repeatedFindings(state.history),
-      writerDid: state.history.map((attempt) => attempt.writerSummary),
+      writerDid: writerDid(state.history),
       question:
         last.verdict.mechanical === true
           ? `O self-check devolveu ${state.document} ${mechanical} vezes e a forma não fechou. ` +

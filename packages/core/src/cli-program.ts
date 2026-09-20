@@ -26,6 +26,7 @@ import {
 } from "./tui/index.js";
 import { runWizard } from "./commands/wizard.js";
 import { InputEndedError, createLineIO } from "./commands/line-io.js";
+import { listarModelos } from "./provider/index.js";
 import { runIdFor } from "./state/index.js";
 import { VERSION } from "./version.js";
 
@@ -563,6 +564,7 @@ export function createProgram(): Command {
       resultado = await runWizard({
         io: createLineIO(terminal, (text) => void stdout.write(text)),
         cwd: process.cwd(),
+        listModels: (providerId) => listarModelos(providerId),
         fileExists: (path) => stat(path).then((info) => info.isFile()).catch(() => false),
         directoryExists: (path) => stat(path).then((info) => info.isDirectory()).catch(() => false),
       });

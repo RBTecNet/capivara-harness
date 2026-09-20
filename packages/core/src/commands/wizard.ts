@@ -34,6 +34,13 @@ export interface WizardDeps {
   /** Existe e é arquivo. Usado para validar o pedido e detectar documentação pronta. */
   fileExists: (path: string) => Promise<boolean>;
   directoryExists: (path: string) => Promise<boolean>;
+  /**
+   * Os modelos que um provider oferece, para escolher pelo número.
+   *
+   * Injetado para o wizard ser exercitável sem CLI instalada. Ausente, ou
+   * devolvendo vazio, faz a pergunta voltar a ser o nome digitado.
+   */
+  listModels?: (providerId: string) => Promise<string[]>;
 }
 
 export interface WizardResult {
@@ -145,6 +152,68 @@ export async function runWizard(deps: WizardDeps): Promise<WizardResult | null> 
   }
 }
 
+
+/** Quantos modelos ainda cabem numa tela de terminal sem virar ruído. */
+const MODELOS_SEM_FILTRO = 20;
+
+/**
+ * Escolher o modelo pelo número, quando dá para saber quais existem.
+ *
+ * Três situações, e nenhuma delas pode travar quem está no meio do wizard:
+ *
+ * - **A CLI não sabe listar, ou não está instalada** — a lista vem vazia e a
+ *   pergunta volta a ser o nome digitado, que é como era antes de existir
+ *   listagem. Um provider indisponível continua aparecendo na escolha anterior,
+ *   porque saber que ele existe é útil; o que ele não faz é ser consultado.
+ * - **Poucos modelos** — lista numerada direto.
+ * - **Muitos** — o cursor oferece 223, que numerados não ajudam ninguém: pede-se
+ *   um trecho do nome primeiro e numera-se o que casou.
+ *
+ * `0` volta para a escolha do provider, para quem se enganou não precisar
+ * recomeçar o wizard.
+ */
+async function escolherModelo(
+  io: WizardIO,
+  providerId: string,
+  rotulo: string,
+  listar: (providerId: string) => Promise<string[]>,
+): Promise<{ modelo: string } | "voltar"> {
+  const modelos = await listar(providerId).catch(() => []);
+
+  if (modelos.length === 0) {
+    const digitado = await text(io, `\n${rotulo} (vazio usa o padrão do provider): `);
+    return { modelo: digitado };
+  }
+
+  let candidatos = modelos;
+  if (modelos.length > MODELOS_SEM_FILTRO) {
+    io.write(`\n${providerId} oferece ${modelos.length} modelos.\n`);
+    const filtro = (await pergunta(io, "Digite parte do nome para filtrar (vazio lista todos, 0 volta ao provider): ")).trim();
+    if (filtro === "0") return "voltar";
+    if (filtro !== "") {
+      const casaram = modelos.filter((modelo) => modelo.toLowerCase().includes(filtro.toLowerCase()));
+      if (casaram.length === 0) io.write(`Nenhum modelo com "${filtro}"; mostrando todos.\n`);
+      else candidatos = casaram;
+    }
+  }
+
+  const opcoes: Choice[] = candidatos.map((modelo) => ({ label: modelo }));
+  io.write(`\n${renderChoices(rotulo, opcoes, 0)}\n`);
+  for (;;) {
+    const resposta = (await pergunta(io, "Escolha [1, 0 volta ao provider, ou digite o nome]: ")).trim();
+    if (resposta === "0") return "voltar";
+    if (resposta === "") return { modelo: candidatos[0] ?? "" };
+    if (/^\d+$/.test(resposta)) {
+      const escolhido = candidatos[Number(resposta) - 1];
+      if (escolhido) return { modelo: escolhido };
+      io.write(`Responda com um número entre 1 e ${candidatos.length}, 0 para voltar, ou o nome do modelo.\n`);
+      continue;
+    }
+    // Nome digitado vale mesmo fora da lista: a CLI pode conhecer o que ela não lista.
+    return { modelo: resposta };
+  }
+}
+
 async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
   const { io } = deps;
   io.write("capivara · monta o comando com você e imprime o equivalente no fim\n");
@@ -201,11 +270,16 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
     }
   }
 
-  const provider = PROVIDERS[await choose(io, "Qual provider usar em todos os papéis?", PROVIDERS, 0)]?.label ?? "codex";
+  // O laço existe para o `0` da escolha de modelo ter para onde voltar.
+  let provider = "codex";
+  for (;;) {
+    provider = PROVIDERS[await choose(io, "Qual provider usar em todos os papéis?", PROVIDERS, 0)]?.label ?? "codex";
+    const escolha = await escolherModelo(io, provider, "Modelo", deps.listModels ?? (async () => []));
+    if (escolha === "voltar") continue;
+    if (escolha.modelo !== "") answers.global.model = escolha.modelo;
+    break;
+  }
   answers.global.provider = provider;
-
-  const model = await text(io, "\nModelo (vazio usa o padrão do provider): ");
-  if (model !== "") answers.global.model = model;
 
   const effort = EFFORTS[await choose(io, "Intensidade de raciocínio?", EFFORTS, 0)]?.label ?? "desligado";
   if (effort !== "desligado") answers.global.effort = effort;
@@ -214,6 +288,7 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
   // pedir uma decisão que não vai ser usada.
   const usados: RoleName[] = command === "build" ? ["builder", "verifier"] : ["writer", "auditor", "verifier"];
   if (await yesNo(io, "\nAjustar algum papel separadamente?", false)) {
+    const fila: RoleName[] = [...usados];
     /*
      * A numeração dos providers é a MESMA aqui e na pergunta global.
      *
@@ -226,7 +301,9 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
      * pertence.
      */
     const manterPadrao = -1;
-    for (const role of usados) {
+    for (;;) {
+      const role = fila.shift();
+      if (!role) break;
       const definition = ROLES[role];
       const escolhido = await choose(
         io,
@@ -236,9 +313,15 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
         `Enter mantém ${provider}`,
       );
       if (escolhido === manterPadrao) continue;
-      const proprio: { provider?: string; model?: string } = { provider: PROVIDERS[escolhido]?.label ?? provider };
-      const modeloDoPapel = await text(io, `Modelo do ${role} (vazio usa o padrão do provider): `);
-      if (modeloDoPapel !== "") proprio.model = modeloDoPapel;
+      const providerDoPapel = PROVIDERS[escolhido]?.label ?? provider;
+      const proprio: { provider?: string; model?: string } = { provider: providerDoPapel };
+      const escolha = await escolherModelo(io, providerDoPapel, `Modelo do ${role}`, deps.listModels ?? (async () => []));
+      // Voltar aqui é voltar à escolha de provider DESTE papel.
+      if (escolha === "voltar") {
+        fila.unshift(role);
+        continue;
+      }
+      if (escolha.modelo !== "") proprio.model = escolha.modelo;
       answers.roles[role] = proprio;
     }
   }

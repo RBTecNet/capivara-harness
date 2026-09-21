@@ -11,7 +11,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FLOWS_DIR, FLOW_CONFIG, checkFlowScript, flowScriptName, gate4, renderFlowConfig } from "../../src/loop/index.js";
+import { FLOWS_DIR, FLOW_CONFIG, checkFlowScript, faltaORunner, flowScriptName, gate4, renderFlowConfig } from "../../src/loop/index.js";
 import type { FlowRun } from "../../src/loop/index.js";
 import type { SkeletonWorkflow } from "../../src/contract/index.js";
 
@@ -96,6 +96,20 @@ describe("a configuração é do harness, nunca do modelo", () => {
     expect(config).toContain("http://127.0.0.1:4001");
     expect(config).toContain("forbidOnly: true");
     expect(config).toContain("reuseExistingServer: false");
+  });
+
+  /*
+   * O gate percorre o produto como ele é. Forçar NODE_ENV=test era uma suposição
+   * sobre o produto alheio: no MCP_teste a aplicação trocava de banco ao ver essa
+   * variável, exigia outra que ninguém definiu, não subia — e o executor levou a
+   * culpa por uma configuração nossa.
+   */
+  it("não impõe modo de teste à aplicação", () => {
+    const config = renderFlowConfig({ startCommand: "npm start", port: 4001 });
+    expect(config).not.toContain("NODE_ENV");
+    // PORT e HOST ficam: são convenção de quem sobe processo, não opinião sobre o produto.
+    expect(config).toContain("PORT: '4001'");
+    expect(config).toContain("HOST: '127.0.0.1'");
   });
 });
 
@@ -271,6 +285,24 @@ describe("o gate", () => {
     if (resultado.green) throw new Error("deveria reprovar");
     expect(resultado.startupFailed).toBeUndefined();
     expect(resultado.cause).toContain("não cumpriu um fluxo declarado");
+  });
+
+  /*
+   * A saída literal do MCP_teste. O padrão antigo dizia "Cannot find module" e o
+   * Node moderno diz "Cannot find package": o gate classificou dependência
+   * ausente como fluxo reprovado, e o executor foi consertar o produto.
+   */
+  it("reconhece as duas formas de o Node dizer que falta o pacote", () => {
+    const formas = [
+      "Error: Cannot find package '@playwright/test' imported from /projeto/.capivara/flows/workflow-1.spec.ts",
+      "Error: Cannot find module '@playwright/test'",
+      "npx playwright install chromium",
+    ];
+    for (const saida of formas) {
+      expect(faltaORunner(saida, 1), saida).toBe(true);
+    }
+    // E o que É fluxo reprovado continua sendo fluxo reprovado.
+    expect(faltaORunner("1) passo 2: clica em Interpretar\n   botão não encontrado", 1)).toBe(false);
   });
 
   it("runner ausente é defeito de ambiente, e diz o que instalar", async () => {

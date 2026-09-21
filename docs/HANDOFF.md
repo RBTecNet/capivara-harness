@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 936 testes em 50 arquivos, `npm run check` verde |
+| suíte | 967 testes em 52 arquivos, `npm run check` verde |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
 O ciclo de três estágios foi desenvolvido no branch `ciclo-unico` e fundido em
@@ -128,13 +128,17 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 - **Quem abre o envelope é quem sabe o que havia dentro.** Depois da ponte, o
   stdout é o texto do agente; procurar ali o envelope da CLI é procurar o que foi
   retirado. Fato de envelope viaja como campo, nunca como regex sobre o texto.
+- **Defeito de ambiente nunca vira defeito de produto.** Três vezes o executor
+  foi mandado consertar o que não estava quebrado — envelope aberto pela ponte,
+  aplicação que não subiu, pacote não instalado. A causa precisa dizer de quem é
+  o defeito. Ver §34.8.
 - **A correção que fica pela metade** é a forma de defeito mais comum aqui: a
   verificação existe num lugar e falta no irmão. Ver a tabela no `CAPIVARA.md`.
 
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 936 testes
+npm run check     # build + typecheck + 967 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se
@@ -169,3 +173,4 @@ As mais recentes são as mais úteis para quem chega agora:
 - **§31** — o que o harness sabia e não contava a ninguém
 - **§32** — o gate que procurava o envelope que a ponte já tinha aberto (`cron5`)
 - **§8.6** — as correções do incidente `cron5`, fora da ordem por ser emenda do §8
+- **§34** — a base documental: o que ela guarda e como chega a quem precisa

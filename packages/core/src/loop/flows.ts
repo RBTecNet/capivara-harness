@@ -144,7 +144,17 @@ export function renderFlowConfig(options: { startCommand: string; port: number; 
     `    url: '${url}',`,
     "    reuseExistingServer: false,",
     `    timeout: ${(options.timeoutSeconds ?? 180) * 1000},`,
-    `    env: { PORT: '${options.port}', HOST: '127.0.0.1', NODE_ENV: 'test' },`,
+    /*
+     * PORT e HOST, e mais nada.
+     *
+     * O gate subia a aplicação com NODE_ENV=test, o que era uma suposição nossa
+     * sobre o produto alheio — e produto que se comporta diferente em teste faz
+     * exatamente o contrário do que este gate existe para provar. No MCP_teste a
+     * aplicação trocava de banco ao ver essa variável, exigia outra que ninguém
+     * definiu e não subia; o executor levou "a aplicação não subiu" por culpa da
+     * nossa configuração. O fluxo percorre o produto como ele é.
+     */
+    `    env: { PORT: '${options.port}', HOST: '127.0.0.1' },`,
     "    cwd: '../..',",
     "  },",
     "};",
@@ -162,6 +172,23 @@ export interface FlowRun {
 export type FlowRunner = (projectRoot: string, scripts: string[]) => Promise<FlowRun>;
 
 /**
+ * A saída diz que o runner não está instalado?
+ *
+ * Exportada para ser exercitável: a decisão vive aqui, e não numa regex escondida
+ * dentro do runner que só um processo de verdade alcançaria.
+ *
+ * O padrão dizia `Cannot find module`, e o Node moderno diz `Cannot find
+ * package`. No MCP_teste isso fez o executor receber "um passo falhou onde o
+ * usuário passaria" quando o que faltava era `@playwright/test` — ele foi caçar
+ * defeito no produto e quebrou o que estava de pé. Uma palavra no padrão custou
+ * uma fase inteira.
+ */
+export function faltaORunner(output: string, exitCode: number): boolean {
+  if (exitCode === 127) return true;
+  return /could not determine executable|not found|Cannot find (module|package)|Please install|npx playwright install/i.test(output);
+}
+
+/**
  * Playwright, rodado pelo loop.
  *
  * `npx --no-install` é deliberado: instalar por conta própria, no meio de um
@@ -177,7 +204,7 @@ export const defaultFlowRunner: FlowRunner = async (projectRoot, scripts) =>
       (error, stdout, stderr) => {
         const saida = `${stdout}${stderr}`;
         const code = error && typeof (error as { code?: number }).code === "number" ? (error as { code: number }).code : error ? 1 : 0;
-        const ausente = code === 127 || /could not determine executable|not found|Cannot find module|Please install/i.test(saida);
+        const ausente = faltaORunner(saida, code);
         resolve({ exitCode: code, output: saida, ...(ausente ? { toolMissing: true } : {}) });
       },
     );

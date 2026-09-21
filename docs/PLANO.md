@@ -2580,3 +2580,224 @@ variáveis eles são configurados; o gate 4 sobe a aplicação e escolhe o ambie
 Falta ligar as duas pontas. Enquanto não ligar, o gate prova que o produto sobe e
 que os fluxos locais acontecem — e sobre os que atravessam a fronteira, não prova
 o que parece provar.
+
+---
+
+## 34. A base documental, e o que cada lado consome dela
+
+O harness passou a falar MCP (§35 registra o cliente), e a base documental
+existe — o `doc-center`, em repositório próprio. Esta seção decide **o que ela
+guarda e como isso chega a quem precisa**, porque a resposta não é a mesma para
+cada coisa que ela guarda.
+
+O princípio que governa tudo o que vem abaixo:
+
+> **A base é conveniência, não dependência.** Tudo que um run precisa existe
+> dentro do `.capivara/` do projeto. A base é de onde aquilo veio e para onde
+> volta — não um serviço que, caindo, para o trabalho.
+
+### 34.1 Skill é um pacote, não um texto
+
+Uma skill de verdade tem a forma que o exemplo `frontend-design` mostra:
+
+```
+frontend-design/
+  SKILL.md                  9,8 KB   a base, auto-contida, com frontmatter
+  references/
+    typography.md           5,5 KB
+    color-and-contrast.md   5,3 KB
+    …mais cinco             31 KB no total
+```
+
+O `SKILL.md` não repete as referências: ele aponta para elas no momento certo —
+*"Consult [typography reference](references/typography.md) for scales…"*. A base
+é **24% do pacote**, e injetar a skill inteira custaria quatro vezes mais
+contexto do que injetar o que basta.
+
+O frontmatter já traz `name`, `description` com *use when* e *do NOT use*,
+`version` e `source`. É a vitrine do catálogo, já escrita: importar preenche o
+cartão sozinho, e ninguém redigita o que o arquivo diz.
+
+Binário entra — um print de interface é a melhor referência de layout que existe,
+e uma skill sem imagem perderia justamente o que ela tem de melhor para
+descrever aparência.
+
+### 34.2 A skill chega ao executor pelo disco, não pelo protocolo
+
+O harness **materializa** a skill em `.capivara/skills/<slug>/` antes da fase. O
+`SKILL.md` entra no prompt; o resto fica no disco.
+
+Três coisas vêm de graça com isso, e nenhuma vinha pelo MCP:
+
+- os caminhos relativos do próprio `SKILL.md` funcionam **literalmente** — o
+  modelo lê `references/typography.md` com a ferramenta de leitura que toda CLI
+  tem;
+- **o build volta a funcionar em qualquer CLI.** Só `claude` e `codex` aceitam
+  servidor MCP por invocação; materializando, `opencode`, `agy` e `cursor`
+  recebem a skill igual;
+- o custo é zero até alguém abrir o arquivo.
+
+O MCP fica onde ele é bom — o harness buscando material antes do run — e sai de
+onde era frágil: o modelo lembrando de chamar uma ferramenta no meio da fase. É o
+§24 aplicado ao insumo em vez do veredito.
+
+| momento | quem fala MCP | o que acontece |
+|---|---|---|
+| `init` / `plan` | o harness | busca pedido, decisões, skills do projeto |
+| antes da fase | o harness | materializa `.capivara/skills/<slug>/` |
+| durante a fase | **ninguém** | o modelo lê arquivos, como sempre leu |
+
+### 34.3 Qual skill vai para qual fase: os dois lados declaram área
+
+Carregar uma skill de frontend para construir um backend é contexto pago que
+compete com o que importa — e aumenta o risco de o modelo seguir o conselho
+errado. A seleção precisa ser automática, e **nenhuma heurística de texto**:
+casar "usar quando" com o título da fase erraria para os dois lados, e erro
+escondido é a forma de defeito mais cara deste projeto.
+
+Então:
+
+- a skill declara uma **área**: `frontend`, `backend`, `dados`, `infra`,
+  `qualidade`, `geral` — lista fechada;
+- **a fase também declara a dela**, no plano. Quem escreve o plano sabe
+  perfeitamente que a fase 3 é de interface;
+- o harness cruza as duas listas e grava o resultado no documento de fases.
+
+Quem escolhe não é o modelo do ralph nem o do plan: é uma tabela. O escritor só
+classifica a fase numa lista fechada — não pode inventar uma skill, porque o
+cruzamento é validado contra o catálogo real. Área inexistente é defeito de
+contrato, recusado como qualquer outro.
+
+Uma fase pode declarar várias áreas. Separar isso milimetricamente seria esforço
+grande para ganho pequeno, e provavelmente erraria mais do que acerta.
+
+**O resultado fica no documento de fases**, não num arquivo lateral: é o contrato
+que o ralph já consome, é texto que o desenvolvedor lê antes de dormir, e o
+stamp já sabe cuidar dele.
+
+**Teto de contexto por fase.** Mesmo com a área certa, oito skills de 4 KB são 32
+KB repetidos a cada ciclo de correção. As que couberem entram inteiras; o resto
+fica no índice, e o log diz o que ficou de fora. Sem o teto, o dia em que o
+catálogo crescer o custo sobe sem ninguém perceber.
+
+### 34.4 Hook não é skill
+
+> Skill é "como fazer"; hook é "o que pode e o que não pode".
+
+Não é diferença de formato, é de natureza. "Como fazer" é conselho, e o modelo
+pondera; "o que pode" é limite, e limite que o modelo pondera não é limite. Por
+isso hook não vai para o prompt: vira configuração que a ferramenta executa,
+escrita pelo harness antes de a sessão começar.
+
+Também por isso hook precisa ser estruturado — evento, matcher, comando —
+enquanto skill pode ser prosa: um é executado, o outro é lido.
+
+### 34.5 Memória é o que permite retomar o trabalho
+
+Memória aqui é mais que decisão de projeto: é o que faz **qualquer LLM continuar
+de onde o trabalho parou**, só de ler. É o papel que o `docs/HANDOFF.md` cumpre
+neste repositório.
+
+Memória é sempre **do projeto**. Nada de acervo global de memórias: ele cresce,
+ninguém poda, e um dia envenena um projeto que não tinha nada a ver com aquilo.
+Uma armadilha que valha para outro projeto é copiada conscientemente.
+
+Quatro naturezas, e a diferença entre elas decide como envelhecem:
+
+| natureza | exemplo | com o tempo |
+|---|---|---|
+| decisão | "validade é só contagem de campos" | vale até alguém decidir o contrário |
+| armadilha | "`\Z` não é âncora em JS; custou um preflight" | vale para sempre |
+| convenção | "comentários em português" | vale para sempre |
+| **estado** | "a fase 3 está incompleta: falta o endpoint" | **vira mentira quando alguém faz o endpoint** |
+
+As três primeiras **acumulam** — a lista cresce e isso é bom. O estado
+**substitui**: um por assunto, reescrito. Memória de estado desatualizada é pior
+que nenhuma, porque o modelo acredita nela e trabalha sobre o que já não é
+verdade. É a diferença entre o `HANDOFF.md`, que se reescreve, e a tabela de
+armadilhas do `CAPIVARA.md`, que só cresce.
+
+**O estado é escrito pelo harness**, não pelo modelo: ao fim de um build, ele
+sabe exatamente o que fechou e o que falhou, e escreve algo sempre verdadeiro sem
+depender de alguém lembrar de anotar. Ao modelo fica o que só ele sabe — a
+armadilha que descobriu apanhando, o que tentou e não funcionou.
+
+**Como o modelo escreve, e por que não por ferramenta.** A sessão anota em
+arquivo, e o harness recolhe ao fim da fase. Uma ferramenta de escrita no MCP
+gravaria sem revisão e dependeria de o modelo lembrar de chamá-la; o arquivo
+funciona em qualquer CLI e deixa registro no run. O que chega à base entra como
+**rascunho** e vira memória quando o desenvolvedor aprova. O custo de aprovar é
+um clique; o custo de não aprovar é uma memória errada em todo projeto futuro.
+
+**O formato é markdown com índice**, legível sem o capivara e sem o MCP — porque
+o objetivo é continuar a partir de qualquer LLM. A forma já foi provada duas
+vezes: o `HANDOFF.md` deste repositório e o índice de memórias do Claude Code.
+
+```
+.capivara/memoria/
+  MEMORIA.md              índice: uma linha por memória
+  estado-atual.md         perecível, reescrito pelo harness
+  decisoes/*.md
+  armadilhas/*.md
+```
+
+### 34.6 A entrevista vira decisão, não resposta
+
+O handoff local já evita reperguntar, mas é amarrado ao `runId`, que é o sha do
+pedido: **mude uma vírgula no pedido e nada se aproveita** — e numa segunda
+execução isso é quase sempre o caso, porque se reexecuta justamente por ter
+mudado algo.
+
+O que sobrevive à mudança do pedido não é a resposta, é a decisão. "A equipe
+entra com conta, o cliente não" continua verdadeiro com o pedido reescrito, e o
+harness já sabe consumir decisões: ele as injeta no contexto do escritor e tem a
+regra de nunca reabrir o que foi aceito.
+
+Então a base registra **as decisões aceitas**, com o sha do pedido apenas como
+procedência. Na volta, o harness carrega e anuncia quantas vieram de lá. E
+decisão registrada é uma memória do projeto — os dois são a mesma coisa, e a
+entrevista alimenta a memória de graça.
+
+### 34.7 O zip, e o dia em que a base não responder
+
+O `doc-center` exporta o projeto inteiro num zip: pedido, decisões, memórias e as
+skills com seus arquivos, **na mesma estrutura que o harness materializa**. Um
+formato só nas duas direções — jogue numa pasta, rode o capivara, funciona. É o
+que torna o trabalho compartilhável e o que garante que uma base fora do ar não
+impeça ninguém de continuar.
+
+Isso exige uma mudança no que já existe: hoje, `--mcp` que falha mata o comando
+com código 2. Pelo princípio desta seção, o certo é **seguir com o material
+local e avisar** — "a base não respondeu; usando o material materializado em
+<data>". Parar só faz sentido quando não há nada local, porque aí realmente não
+há o que construir.
+
+### 34.8 Defeito de ambiente nunca vira defeito de produto
+
+Três vezes o mesmo erro, e por isso vira regra:
+
+| onde | o executor ouviu | o que era |
+|---|---|---|
+| `cron5`, gate 0 | "o engine terminou sem emitir um resultado" | a ponte já tinha aberto o envelope (§32) |
+| `cron5`, gate 4 | "um passo falhou onde o usuário passaria" | a aplicação não subiu |
+| `MCP_teste`, gate 4 | "um passo falhou onde o usuário passaria" | faltava `@playwright/test` |
+
+Nos três, o executor foi mandado consertar o que não estava quebrado — e no
+terceiro ele mexeu no produto que funcionava e derrubou a fase. **Toda causa que
+o harness devolve ao executor precisa dizer de quem é o defeito**, e quando é do
+ambiente, dizer o que instalar ou configurar.
+
+Do mesmo caso vem outra regra, mais estreita: **o gate 4 não impõe ambiente à
+aplicação.** Ele subia o produto com `NODE_ENV=test`, uma suposição nossa sobre
+produto alheio; no `MCP_teste` isso trocava o banco, exigia outra variável e
+impedia a subida. O gate percorre o produto como ele é — injeta `PORT` e `HOST`,
+que são convenção de quem sobe processo, e nada além disso.
+
+### 34.9 O que fica para depois
+
+- **Teto de ciclos quando há fluxos.** A fase 3 do `MCP_teste` tinha três ciclos
+  e dois foram consumidos por diagnósticos errados nossos. Com eles corrigidos o
+  quadro melhora; se `--max-cycles 3` continua certo quando o gate 4 entra é
+  pergunta para o próximo run real, não para agora.
+- **Duplo de serviço externo** (§33): continua sendo o limite conhecido do gate 4.
+- **Multi-tenant no `doc-center`:** fora do MVP, por decisão.

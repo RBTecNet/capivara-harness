@@ -17,6 +17,7 @@ export {
   checkFlowScript,
   defaultFlowRunner,
   existingFlowScripts,
+  faltaORunner,
   flowScriptName,
   gate4,
   renderFlowConfig,

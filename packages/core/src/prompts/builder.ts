@@ -23,6 +23,8 @@ export interface BuilderContext {
    * meio da fase.
    */
   skills?: string;
+  /** Onde anotar o que aprendeu. Ausente desliga o pedido. */
+  memoriasDir?: string;
 }
 
 export interface FixContext extends BuilderContext {
@@ -30,6 +32,32 @@ export interface FixContext extends BuilderContext {
   cause: string;
   /** Verdadeiro quando a sessão anterior não alterou nenhum arquivo. */
   previousWroteNothing: boolean;
+}
+
+/**
+ * Onde o executor anota o que só ele descobriu.
+ *
+ * Ele apanha para saber que este projeto precisa de `--legacy-peer-deps`, e esse
+ * conhecimento morria com a sessão. Escrever arquivo é coisa que toda CLI sabe
+ * fazer; o harness recolhe no fim da fase e manda para a base como rascunho.
+ *
+ * Só o que NÃO ESTÁ NO CÓDIGO. Um resumo do que a fase implementou seria ruído:
+ * o código já diz isso, e o próximo run vai lê-lo de qualquer forma.
+ */
+function memoriaBlock(context: { memoriasDir?: string }): string[] {
+  if (!context.memoriasDir) return [];
+  return [
+    "## What you learned that is not in the code",
+    "",
+    `If — and only if — you hit something a future session would waste time rediscovering, write it to \`${context.memoriasDir}/\`:`,
+    "",
+    `- \`${context.memoriasDir}/armadilha-<assunto>.md\` — a trap: what failed, what fixed it, and the cost.`,
+    `- \`${context.memoriasDir}/convencao-<assunto>.md\` — a rule this project follows that the code does not state.`,
+    "",
+    "One short file each, starting with a `#` heading. Write nothing when nothing surprised you:",
+    "a summary of what you implemented is noise — the code already says that, and the next session reads it.",
+    "",
+  ];
 }
 
 export const BUILDER_COMPLETE_MARKER = "CAPIVARA_BUILDER_STATUS: COMPLETE";
@@ -126,6 +154,7 @@ export function implementPrompt(context: BuilderContext): string {
     BUILDER_COMPLETE_MARKER,
     "",
     ...(context.skills && context.skills.trim() !== "" ? [context.skills, ""] : []),
+    ...memoriaBlock(context),
     "## The phase to implement",
     context.phaseMarkdown,
   ].join("\n");
@@ -162,6 +191,7 @@ export function fixPrompt(context: FixContext): string {
     BUILDER_COMPLETE_MARKER,
     "",
     ...(context.skills && context.skills.trim() !== "" ? [context.skills, ""] : []),
+    ...memoriaBlock(context),
     "## The phase to complete",
     context.phaseMarkdown,
   ].join("\n");

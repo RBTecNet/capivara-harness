@@ -9,7 +9,7 @@ import { diagnose, renderDiagnosis } from "./commands/doctor.js";
 import { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
 import { BUILD_ROLES, INIT_ROLES, describeRoles, renderUnresolved, rolesFromFlags, unresolvedRoles, type CliRoleFlags } from "./commands/options.js";
 import { InitBlockedError, readRequestState, readSkeletonState, requestFromLibrary, resolveRequest, runInit, runPlan } from "./init/index.js";
-import { createMcpClient, fetchProjectMaterial, listLibraryProjects } from "./mcp/index.js";
+import { createMcpClient, fetchProjectMaterial, listLibraryProjects, registrarMemorias, type MemoriaParaRegistrar } from "./mcp/index.js";
 import type { ProjectMaterial } from "./mcp/index.js";
 import type { InitOptions } from "./init/index.js";
 import { commitSpecification, runBuild } from "./loop/index.js";
@@ -460,6 +460,15 @@ export function createProgram(): Command {
         projectRoot,
         request,
         ...(material ? { library: material.documents } : {}),
+        ...(material && flags.mcp && flags.mcpProject
+          ? {
+              onMemorias: async (memorias) => {
+                const client = createMcpClient({ url: flags.mcp! }, { timeoutSeconds: 20 });
+                await client.initialize();
+                await registrarMemorias(client, flags.mcpProject!, memorias, (mensagem) => stdout.write(`${mensagem}\n`));
+              },
+            }
+          : {}),
         language,
         maxAuditReturns: Number(flags.maxAuditReturns),
         maxInterviewRounds: Number(flags.maxInterviewRounds),
@@ -708,11 +717,39 @@ export function createProgram(): Command {
      */
     const materialDoBuild = await lerDaBase(flags, (mensagem) => stdout.write(`${mensagem}\n`), { tolerante: true });
 
+    /*
+     * A volta para a base. Só existe quando o operador apontou uma: sem `--mcp`,
+     * o build continua sendo o que sempre foi, e o que o executor anotar fica em
+     * `.capivara/memorias/` para alguém ler.
+     */
+    const devolverMemorias =
+      flags.mcp && flags.mcpProject
+        ? async (memorias: MemoriaParaRegistrar[]): Promise<void> => {
+            try {
+              const client = createMcpClient({ url: flags.mcp! }, { timeoutSeconds: 20 });
+              await client.initialize();
+              const resultado = await registrarMemorias(client, flags.mcpProject!, memorias, (mensagem) =>
+                stdout.write(`${mensagem}\n`),
+              );
+              if (resultado.registradas > 0) {
+                stdout.write(
+                  `${resultado.registradas} memória(s) enviada(s) à base como rascunho; aprove na interface para valerem\n`,
+                );
+              }
+            } catch (erro) {
+              // Um servidor fora do ar no fim de um build não transforma um run
+              // bem-sucedido em falha: a base é conveniência, não dependência.
+              stdout.write(`aviso: não consegui enviar as memórias à base (${erro instanceof Error ? erro.message : String(erro)})\n`);
+            }
+          }
+        : undefined;
+
     const outcome = await runBuild({
       projectRoot,
       skeleton: esqueletoDoBuild,
       skipFlows: flags.flows === false,
       ...(materialDoBuild && materialDoBuild !== "erro" ? { library: materialDoBuild.documents } : {}),
+      ...(devolverMemorias ? { onMemorias: devolverMemorias } : {}),
       ...(terminalBuild
         ? {
             askPrerequisite: async (rendered: string) => {

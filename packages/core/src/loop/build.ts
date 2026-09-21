@@ -12,7 +12,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { sha12 } from "../contract/stamps.js";
 import { workflowsForPhase, type Skeleton } from "../contract/index.js";
-import { escolherSkills, materializarSkill, renderSkillBlock, type McpDocument } from "../mcp/index.js";
+import { escolherSkills, estadoComoMemoria, materializarSkill, renderSkillBlock, type McpDocument, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { startCommandFor } from "./acceptance.js";
 import type { FlowRunner } from "./flows.js";
 import {
@@ -57,6 +57,11 @@ export interface BuildOptions {
   flowRunner?: FlowRunner;
   /** Desliga o gate 4 mesmo havendo esqueleto. */
   skipFlows?: boolean;
+  /**
+   * Recebe o que este build tem a devolver à base: o estado e o que o executor
+   * anotou. Ausente significa build sem base — nada muda no resto.
+   */
+  onMemorias?: (memorias: MemoriaParaRegistrar[]) => Promise<void>;
   /**
    * Os documentos que a base entregou para este projeto.
    *
@@ -272,6 +277,42 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
      * cruza é esta função, e o que o teto cortar aparece no log — skill escondida
      * em silêncio é pior que skill ausente.
      */
+    /**
+     * Onde o trabalho parou, escrito por quem sabe.
+     *
+     * O harness conhece o desfecho de cada fase sem depender de alguém anotar, e
+     * esta é a memória que mais envelhece — por isso ela substitui a anterior em
+     * vez de acumular. Falhar aqui não derruba o build: a base é conveniência.
+     */
+    const registrarEstado = async (
+      concluidas: PhaseReport[],
+      todas: readonly { id: string; title: string }[],
+      parou: PhaseOutcome | null,
+    ): Promise<void> => {
+      if (!options.onMemorias) return;
+
+      const porId = new Map(concluidas.map((fase) => [fase.id, fase]));
+      const fases = todas.map((sessao) => {
+        const relatada = porId.get(sessao.id);
+        const status = relatada?.outcome.status ?? "pending";
+        const falhou = relatada?.outcome.status === "failed" ? relatada.outcome : null;
+        return {
+          id: sessao.id,
+          title: sessao.title,
+          status,
+          ...(falhou ? { gate: falhou.gate, cause: falhou.cause } : {}),
+        };
+      });
+
+      // A fase que parou o build ainda não está em `phases` quando o loop sai.
+      if (parou && parou.status === "failed") {
+        const ultima = fases.find((fase) => fase.status === "pending");
+        if (ultima) Object.assign(ultima, { status: "failed", gate: parou.gate, cause: parou.cause });
+      }
+
+      await options.onMemorias([estadoComoMemoria({ runId, fases })]);
+    };
+
     const skillsDaFase = (areasDaFase: string): string => {
       if (skills.length === 0) return "";
       const areas = areasDaFase
@@ -313,6 +354,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
           }),
         call: options.call,
         ...(skills.length > 0 ? { skills: skillsDaFase(session.areas) } : {}),
+        ...(options.onMemorias ? { onMemorias: options.onMemorias } : {}),
         ...(fluxosDaFase ? { flows: fluxosDaFase(session.number) } : {}),
         ...(options.testRunner !== undefined ? { testRunner: options.testRunner } : {}),
         systemInstall: options.systemInstall === true,
@@ -342,10 +384,13 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
             status: "paused",
             detail,
           });
+          await registrarEstado(phases, checked.sessions, outcome);
           return { runId, exitCode: 2, phases, warnings: checked.warnings, errors: [detail], acceptance: null };
         }
       }
     }
+
+    await registrarEstado(phases, checked.sessions, null);
 
     // Todas as fases verdes provam que as regras estão implementadas e testadas.
     // Não provam que o produto sobe: o piloto 1b entregou 30 testes verdes sem

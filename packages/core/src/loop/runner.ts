@@ -18,6 +18,7 @@ import { commitPhase, hasPendingChanges, treeSignature } from "./git.js";
 import { declaredComplete, gate0, gate1, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
 import { detectRateLimit, planWait } from "./ratelimit.js";
 import { FLOW_PORT, gate4, type FlowRunner } from "./flows.js";
+import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mcp/index.js";
 import type { SkeletonWorkflow } from "../contract/index.js";
 import type { PhaseSession } from "./split.js";
 import type { TestCommand } from "./testcmd.js";
@@ -91,6 +92,13 @@ export interface PhaseRunOptions {
    * decide nada sobre elas, só as carrega.
    */
   skills?: string;
+  /**
+   * Recolhe o que o executor anotou, ao fim da fase.
+   *
+   * Ausente desliga o pedido no prompt: sem alguém para receber, pedir anotação
+   * seria pedir trabalho que ninguém lê.
+   */
+  onMemorias?: (memorias: MemoriaParaRegistrar[]) => Promise<void>;
   /** Se o executor pode instalar fora do projeto. Muda o que o gate 2 pede a ele. */
   systemInstall?: boolean;
   maxCycles?: number;
@@ -141,6 +149,19 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     });
   };
 
+  /*
+   * O que o executor anotou vai embora com ele se ninguém recolher. Recolher
+   * também quando a fase falha é deliberado: a armadilha que ele encontrou
+   * apanhando é justamente o que a próxima tentativa precisa saber.
+   */
+  const recolher = async (cycle: number): Promise<void> => {
+    if (!options.onMemorias) return;
+    const memorias = await recolherMemorias(options.projectRoot, `${options.runId} · ${session.id} ciclo ${cycle}`);
+    if (memorias.length === 0) return;
+    announce(`[${session.id}] ${memorias.length} memória(s) anotada(s) pelo executor`);
+    await options.onMemorias(memorias);
+  };
+
   for (let cycle = 1; cycle <= maxCycles; ) {
     await event("started", cycle === 1 ? "implementação" : `ciclo de correção ${cycle}`, cycle);
     announce(cycle === 1 ? `[${session.id}] ${session.title}` : `[${session.id}] ciclo de correção ${cycle}/${maxCycles}`);
@@ -161,6 +182,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       containerized: options.testCommand?.containerized ?? false,
       phaseMarkdown: session.markdown,
       ...(options.skills !== undefined && options.skills !== "" ? { skills: options.skills } : {}),
+      ...(options.onMemorias ? { memoriasDir: MEMORIAS_DIR } : {}),
     };
 
     const prompt =
@@ -314,6 +336,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
             return { status: "already-implemented", cycles: cycle };
           }
 
+          await recolher(cycle);
           await event("complete", commit.message, cycle);
           relatar({ kind: "phase", id: session.id, state: "concluído", cycle, detail: commit.committed ? "commitada" : "completa" });
           announce(`[${session.id}] COMPLETA${commit.committed ? ` — ${commit.message}` : ""}`);
@@ -330,6 +353,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     cycle += 1;
   }
 
+  await recolher(maxCycles);
   await event("blocked", `${lastGate ?? "desconhecido"}: ${lastCause.split("\n")[0] ?? ""}`, maxCycles);
   relatar({ kind: "phase", id: session.id, state: "falhou", cycle: maxCycles, detail: lastGate ?? "sem gate" });
 

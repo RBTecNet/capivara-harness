@@ -29,7 +29,7 @@ import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEve
 import type { RunStage } from "../state/index.js";
 import { detectRateLimit, planWait } from "../loop/ratelimit.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
-import { renderLibraryBlock, type McpDocument } from "../mcp/index.js";
+import { decisoesComoMemorias, renderLibraryBlock, type McpDocument, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { INIT_ARTIFACTS, evaluateReadiness } from "./readiness.js";
 import { evaluatePlanReadiness, renderPlanReadiness } from "./plan-readiness.js";
 import { readSkeletonState, writeSkeletonState } from "./skeleton-state.js";
@@ -65,6 +65,14 @@ export interface InitOptions {
   request: DeveloperRequest;
   /** Documentos que a base documental entregou para este projeto. */
   library?: McpDocument[];
+  /**
+   * Devolve à base o que a entrevista fechou.
+   *
+   * Decisões, não respostas cruas: a resposta morre quando o pedido muda, e a
+   * decisão continua verdadeira. É o que faz a segunda execução do mesmo projeto
+   * não repetir dezessete perguntas.
+   */
+  onMemorias?: (memorias: MemoriaParaRegistrar[]) => Promise<void>;
   language: string;
   call: AgentCaller;
   ask: AskDeveloper;
@@ -1828,6 +1836,20 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     await writeRunState(options.projectRoot, { ...state, stage: readiness.ready ? "ready" : "publish", status: readiness.ready ? "complete" : "blocked" }, now);
     await event(readiness.ready ? "ready" : "publish", "-", readiness.ready ? "complete" : "blocked", readiness.ready ? "RALPH READY" : "NOT READY");
 
+
+    /*
+     * O que a entrevista fechou volta para a base, como rascunho. Falhar aqui
+     * não invalida o run: o documento está publicado e o registro é conveniência.
+     */
+    if (options.onMemorias) {
+      const decisoes = decisoesComoMemorias(allAnswers, allQuestions, runId);
+      if (decisoes.length > 0) {
+        announce(`  ${decisoes.length} decisão(ões) da entrevista enviada(s) à base como rascunho`);
+        await options.onMemorias(decisoes).catch((erro: unknown) => {
+          announce(`  não consegui registrar as decisões: ${erro instanceof Error ? erro.message : String(erro)}`);
+        });
+      }
+    }
 
     return { runId, readiness, report, rendered: renderReport(report) };
   }

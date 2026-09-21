@@ -13,3 +13,11 @@ export {
   slugDaSkill,
 } from "./skills.js";
 export type { Area, SelecaoDeSkills, SkillMaterializada, TetoDeContexto } from "./skills.js";
+export {
+  MEMORIAS_DIR,
+  decisoesComoMemorias,
+  estadoComoMemoria,
+  recolherMemorias,
+  registrarMemorias,
+} from "./memoria.js";
+export type { EstadoDoBuild, MemoriaParaRegistrar, Natureza } from "./memoria.js";

@@ -32,6 +32,16 @@ export interface Question {
   /** Opção recomendada, quando há opções. Deve ser uma delas. */
   recommended: string;
   recommendationBasis: string;
+  /**
+   * O que a resposta anterior deixou em aberto, quando esta pergunta volta.
+   *
+   * Quem classificou a resposta escreveu exatamente o que faltava — e isso
+   * morria no handoff. O desenvolvedor via a MESMA pergunta pela segunda e
+   * terceira vez, idêntica, sem nada indicando o que ainda faltava dizer; a
+   * conclusão natural é que a resposta não foi lida. É a família do §31: o
+   * harness sabia e não contava.
+   */
+  pending?: string;
 }
 
 export interface Answer {

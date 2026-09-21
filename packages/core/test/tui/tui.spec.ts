@@ -116,6 +116,24 @@ describe("tela da entrevista", () => {
     expect(renderQuestion({ question, index: 2, total: 5, document: "d.md", style: plain })).toContain("pergunta 2/5");
   });
 
+  /*
+   * A pergunta que volta é a mesma tela de antes, e a única novidade é o que
+   * faltou. Ela vem primeiro porque quem já respondeu uma vez não relê a
+   * evidência — e sem ela a repetição parece que a resposta não foi lida.
+   */
+  it("a repergunta abre dizendo o que faltou", () => {
+    const repetida = { ...question, pending: "falta definir o prazo de devolução" };
+    const screen = renderQuestion({ question: repetida, index: 1, total: 1, document: "d.md", style: plain });
+    expect(screen).toContain("ficou faltando");
+    expect(screen).toContain("falta definir o prazo de devolução");
+    expect(screen.indexOf("ficou faltando")).toBeLessThan(screen.indexOf("Já descobri:"));
+  });
+
+  it("pergunta nova não fala em faltar nada", () => {
+    const screen = renderQuestion({ question, index: 1, total: 1, document: "d.md", style: plain });
+    expect(screen).not.toContain("ficou faltando");
+  });
+
   it("oferece voltar, não sei e as recomendações", () => {
     const screen = renderQuestion({ question, index: 1, total: 1, document: "d.md", style: plain });
     expect(screen).toContain("voltar");

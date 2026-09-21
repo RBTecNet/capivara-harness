@@ -55,6 +55,25 @@ describe("regra de idioma", () => {
   });
 });
 
+/*
+ * Uma pergunta composta é impossível de responder de primeira: as opções cobrem
+ * uma das decisões, e a resposta volta marcada incompleta sem culpa de quem
+ * respondeu. Num run real, "o que o valor cobre, existe prazo e o que acontece
+ * se passar?" voltou três vezes.
+ */
+describe("uma decisão por pergunta", () => {
+  it("o prompt do levantamento proíbe juntar decisões", () => {
+    const prompt = interviewPrompt("skeleton", context, "Projeto vazio.", []);
+    expect(prompt).toContain("ONE DECISION PER QUESTION");
+    expect(prompt).toContain("write three questions");
+  });
+
+  it("e exige que as opções cubram a decisão inteira", () => {
+    const prompt = interviewPrompt("skeleton", context, "Projeto vazio.", []);
+    expect(prompt).toContain("span the WHOLE decision");
+  });
+});
+
 describe("neutralidade de execução", () => {
   it("nenhum prompt do escritor menciona provider, modelo, effort ou CLI", () => {
     const proibidos = ["codex", "claude", "opencode", "openai", "anthropic", "deepseek", "--effort", "--model"];

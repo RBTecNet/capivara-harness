@@ -49,6 +49,25 @@ describe("planRound", () => {
     expect(planRound(state([])).ask).toHaveLength(3);
   });
 
+  /*
+   * O caso que motivou isto, de um run real: uma pergunta composta voltou três
+   * vezes idêntica. O classificador tinha escrito o que faltava — "falta definir
+   * o período coberto e o prazo de devolução" — e a tela mostrava a mesma
+   * pergunta de sempre. Quem respondia concluía que não tinha sido lido.
+   */
+  it("a pergunta que volta leva junto o que faltou na resposta anterior", () => {
+    const plano = planRound(state([answer("Q-02", "PARTIAL")], 2));
+    const repetida = plano.ask.find((pergunta) => pergunta.id === "Q-02");
+    expect(repetida?.pending).toBe("o que falta");
+    // As outras, nunca respondidas, não ganham pendência nenhuma.
+    expect(plano.ask.find((pergunta) => pergunta.id === "Q-01")?.pending).toBeUndefined();
+  });
+
+  it("a pergunta original não é mutada: o pendente é desta rodada", () => {
+    planRound(state([answer("Q-02", "PARTIAL")], 2));
+    expect(QUESTIONS.find((pergunta) => pergunta.id === "Q-02")?.pending).toBeUndefined();
+  });
+
   it("as seguintes só reperguntam o que continua aberto", () => {
     const plan = planRound(state([answer("Q-01", "ACCEPTED"), answer("Q-02", "PARTIAL")], 2));
     expect(plan.ask.map((q) => q.id)).toEqual(["Q-02", "Q-03"]);

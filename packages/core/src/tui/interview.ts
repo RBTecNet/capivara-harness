@@ -26,6 +26,15 @@ export function renderQuestion(screen: QuestionScreen): string {
 
   lines.push(paint(`${screen.document} · pergunta ${screen.index}/${screen.total}`, "gray", style));
   lines.push("");
+
+  // Quando a pergunta volta, o que faltou vem ANTES de tudo: é a única novidade
+  // desta tela, e quem já respondeu uma vez não relê a evidência.
+  if (question.pending && question.pending.trim() !== "") {
+    lines.push(paint("Sua resposta foi registrada, mas ficou faltando:", "yellow", style));
+    for (const line of wrap(question.pending, 76)) lines.push(paint(`  ${line}`, "yellow", style));
+    lines.push("");
+  }
+
   lines.push(paint("Já descobri:", "gray", style));
   for (const line of wrap(question.evidence, 76)) lines.push(`  ${line}`);
   lines.push("");

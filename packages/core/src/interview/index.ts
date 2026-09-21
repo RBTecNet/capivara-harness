@@ -9,7 +9,7 @@ export type {
   Question,
   QuestionOption,
 } from "./types.js";
-export { parseQuestionBatch } from "./protocol.js";
+export { decisoesJuntas, parseQuestionBatch } from "./protocol.js";
 export type { QuestionBatch, QuestionDefect } from "./protocol.js";
 export { buildAnswer, classifyLocally, isNonAnswer, parseClassification } from "./classify.js";
 export type { LocalClassification, ModelVerdict } from "./classify.js";

@@ -22,6 +22,45 @@ export type QuestionBatch =
 
 const ID = /^Q-\d{2,}$/;
 
+/**
+ * A pergunta pede mais de uma decisão?
+ *
+ * Instrução no prompt não basta: o modelo às vezes junta três decisões numa
+ * frase, as opções respondem só uma delas, e a resposta volta marcada incompleta
+ * sem culpa de quem respondeu. Num run real isso aconteceu com quatro perguntas,
+ * e uma delas voltou três vezes — "o que o valor cobre, existe prazo e o que
+ * acontece se passar?".
+ *
+ * A conferência é deliberadamente conservadora, porque reprovar pergunta boa
+ * custa uma volta de levantamento. Dois interrogatórios numa frase é prova
+ * suficiente; um "e" ligando duas frases interrogativas também. Um "e" simples
+ * — "terá login e senha?" — passa, porque é uma decisão só.
+ */
+const INTERROGATIVO = /\b(o que|que|qual|quais|como|quando|onde|quanto|quantos|existe|existem|haver[áa]|deve|devem|precisa)\b/gi;
+
+export function decisoesJuntas(decision: string): string | null {
+  const texto = decision.trim();
+
+  const perguntas = (texto.match(/\?/g) ?? []).length;
+  if (perguntas > 1) return `${perguntas} perguntas numa linha`;
+
+  /*
+   * Conjunção emendando outra cláusula interrogativa: "…, e o que acontece…",
+   * "… e, se existir, …", "…obrigatórios e quais não podem repetir?". As três
+   * formas saíram do mesmo run.
+   *
+   * O interrogativo depois do "e" é o que separa isto de "terá login e senha?",
+   * onde o "e" liga duas coisas de UMA decisão.
+   */
+  const emenda = /\be,?\s*(o que|qual|quais|como|quando|quanto|onde|se)\b/i.exec(texto);
+  if (emenda) return `duas decisões ligadas por "${emenda[0].trim()}"`;
+
+  const marcadores = [...texto.matchAll(INTERROGATIVO)];
+  if (marcadores.length >= 3) return `${marcadores.length} decisões na mesma frase`;
+
+  return null;
+}
+
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -86,6 +125,15 @@ export function parseQuestionBatch(source: string): QuestionBatch {
 
     if (question.evidence === "") complain("sem evidência", "declare o que já foi descoberto sobre o tema; perguntar o descobrível é proibido");
     if (question.decision === "") complain("sem a decisão que falta", "escreva a decisão em forma de pergunta objetiva");
+    else {
+      const juntas = decisoesJuntas(question.decision);
+      if (juntas !== null) {
+        complain(
+          `a pergunta junta mais de uma decisão (${juntas})`,
+          "uma decisão por pergunta: quebre em perguntas separadas, cada uma respondível numa frase",
+        );
+      }
+    }
     if (question.why === "") complain("sem o motivo", "diga o que muda no resultado conforme a resposta");
 
     if (question.options.length === 1) {

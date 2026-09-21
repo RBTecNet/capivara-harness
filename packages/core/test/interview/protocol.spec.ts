@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { QUESTIONS_CONTRACT, parseQuestionBatch } from "../../src/interview/index.js";
+import { QUESTIONS_CONTRACT, decisoesJuntas, parseQuestionBatch } from "../../src/interview/index.js";
 
 const question = (overrides: Record<string, unknown> = {}) => ({
   id: "Q-01",
@@ -100,5 +100,68 @@ describe("uma pergunta incompleta nunca chega à tela", () => {
     const result = parseQuestionBatch(batch([question(), question()]));
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.defects.map((d) => d.problem)).toContain("id repetido");
+  });
+});
+
+/**
+ * Pergunta composta, conferida por máquina.
+ *
+ * A regra existe no prompt, e o modelo às vezes a desobedece. Os casos abaixo
+ * são literais de um run real: quatro perguntas juntavam decisões, uma delas
+ * voltou três vezes, e quem respondia não tinha como acertar — as opções
+ * cobriam uma das decisões e a resposta voltava incompleta.
+ */
+describe("uma decisão por pergunta", () => {
+  it("reprova o que apareceu no run real", () => {
+    const compostas = [
+      "O que o valor por aluguel cobre, existe prazo de devolução e, se existir, o que deve acontecer quando ele for ultrapassado?",
+      "Quais campos são obrigatórios e quais não podem se repetir?",
+      "Como calcular o valor da locação a partir da diária e das datas, e o que acontece quando a retirada e a entrega são no mesmo dia?",
+    ];
+    for (const decision of compostas) {
+      expect(decisoesJuntas(decision), decision).not.toBeNull();
+    }
+  });
+
+  /*
+   * Conservador de propósito: reprovar pergunta boa custa uma volta inteira de
+   * levantamento. Um "e" simples liga duas coisas de UMA decisão.
+   */
+  it("deixa passar a pergunta única, mesmo com 'e' na frase", () => {
+    const boas = [
+      "Qual stack o projeto usa?",
+      "A aplicação terá login e senha?",
+      "Quem poderá operar a aplicação e será necessário entrar com uma conta?",
+      "Como a aplicação deve controlar a disponibilidade dos filmes?",
+      "O cadastro de clientes guarda CPF?",
+    ];
+    for (const decision of boas) {
+      expect(decisoesJuntas(decision), decision).toBeNull();
+    }
+  });
+
+  it("o lote com pergunta composta é recusado antes de chegar ao desenvolvedor", () => {
+    const lote = JSON.stringify({
+      contract: "capivara-questions/v1",
+      questions: [
+        {
+          id: "Q-01",
+          topic: "Valores e prazos",
+          evidence: "Cada filme terá um valor por aluguel.",
+          decision: "O que o valor cobre, existe prazo de devolução e o que acontece quando ele passa?",
+          why: "define o cálculo do total",
+          options: [],
+          recommended: "",
+          recommendationBasis: "",
+        },
+      ],
+    });
+
+    const lido = parseQuestionBatch(lote);
+    expect(lido.ok).toBe(false);
+    if (!lido.ok) {
+      expect(lido.defects[0]?.problem).toContain("junta mais de uma decisão");
+      expect(lido.defects[0]?.hint).toContain("uma decisão por pergunta");
+    }
   });
 });

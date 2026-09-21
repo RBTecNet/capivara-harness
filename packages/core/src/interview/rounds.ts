@@ -36,11 +36,22 @@ export function latestAnswers(answers: readonly Answer[]): Map<string, Answer> {
 
 export function planRound(state: RoundState): RoundPlan {
   const latest = latestAnswers(state.answers);
-  const pending = state.questions.filter((question) => {
-    const answer = latest.get(question.id);
-    if (!answer) return true;
-    return UNRESOLVED.includes(answer.disposition);
-  });
+  const pending = state.questions
+    .filter((question) => {
+      const answer = latest.get(question.id);
+      if (!answer) return true;
+      return UNRESOLVED.includes(answer.disposition);
+    })
+    /*
+     * A pergunta que volta leva junto o que faltou. Repeti-la idêntica faz quem
+     * responde achar que não foi lido — e responder de novo a mesma coisa, que
+     * é como uma entrevista de três rodadas termina sem convergir.
+     */
+    .map((question) => {
+      const anterior = latest.get(question.id);
+      const falta = anterior?.open?.trim() ?? "";
+      return falta === "" ? question : { ...question, pending: falta };
+    });
 
   const capReached = state.round > state.maxRounds;
   if (capReached) return { ask: [], converged: false, capReached: true };

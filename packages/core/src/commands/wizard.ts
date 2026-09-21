@@ -57,6 +57,16 @@ export interface WizardDeps {
    * é o que ele fazia antes, menos o `minimal` que ninguém aceitava.
    */
   listEfforts?: (providerId: string, model: string) => Promise<string[]>;
+  /**
+   * Os projetos de uma base documental, para escolher pelo número.
+   *
+   * Injetado para o wizard ser exercitável sem servidor nenhum de pé. Ausente,
+   * a opção de ler o pedido da base não é oferecida — melhor não mostrar um
+   * caminho que este binário não sabe percorrer.
+   */
+  listMcpProjects?: (url: string) => Promise<{ slug: string; hasRequest: boolean; documents: number }[]>;
+  /** O endereço sugerido, quando o operador já tem um de costume. */
+  defaultMcpUrl?: string;
 }
 
 export interface WizardResult {
@@ -267,6 +277,80 @@ async function escolherModelo(
   }
 }
 
+/**
+ * Conectar à base documental e escolher o projeto.
+ *
+ * Duas coisas separam isto de um campo de texto com o nome do projeto.
+ *
+ * A primeira é que o wizard **conecta na hora**: digitar uma URL errada aqui
+ * custa uma mensagem, e não um run inteiro que morre na primeira chamada. Se a
+ * base não responde, a pergunta volta — endereço errado é o caso comum, não o
+ * excepcional.
+ *
+ * A segunda é que ele lista o que existe lá. Um projeto sem pedido escrito
+ * aparece marcado e não pode ser escolhido: o `init` não teria o que ler, e
+ * descobrir isso depois de montar o comando inteiro é tarde.
+ */
+async function escolherDaBase(
+  deps: WizardDeps,
+  projectRoot: string,
+): Promise<{ url: string; projeto: string } | null> {
+  const { io } = deps;
+  const listar = deps.listMcpProjects!;
+  const sugerida = deps.defaultMcpUrl ?? "http://localhost:7777/mcp";
+
+  for (;;) {
+    const url = await text(io, `\nEndereço da base [${sugerida}]: `, sugerida);
+    if (url === "") {
+      io.write("O endereço não pode ficar vazio.\n");
+      continue;
+    }
+
+    io.write("conectando…\n");
+    let projetos: { slug: string; hasRequest: boolean; documents: number }[];
+    try {
+      projetos = await listar(url);
+    } catch (erro) {
+      io.write(`${erro instanceof Error ? erro.message : String(erro)}\n`);
+      const saida: Choice[] = [
+        { label: "tentar outro endereço" },
+        { label: "voltar e escrever o pedido aqui" },
+      ];
+      if ((await choose(io, "E agora?", saida, 0)) === 1) return null;
+      continue;
+    }
+
+    if (projetos.length === 0) {
+      io.write("Esta base não tem projeto nenhum cadastrado. Crie um na interface dela e volte.\n");
+      const saida: Choice[] = [{ label: "tentar outro endereço" }, { label: "desistir" }];
+      if ((await choose(io, "E agora?", saida, 1)) === 1) return null;
+      continue;
+    }
+
+    const utilizaveis = projetos.filter((projeto) => projeto.hasRequest);
+    if (utilizaveis.length === 0) {
+      io.write(
+        `Os ${projetos.length} projeto(s) desta base ainda não têm pedido escrito: ` +
+          `${projetos.map((projeto) => projeto.slug).join(", ")}.\n` +
+          "Escreva o pedido de um deles na interface da base — é ele que o init lê.\n",
+      );
+      return null;
+    }
+
+    const opcoes: Choice[] = utilizaveis.map((projeto) => ({
+      label: projeto.slug,
+      hint: `${projeto.documents} documento(s) selecionado(s)`,
+    }));
+    const escolhido = utilizaveis[await choose(io, "Qual projeto da base?", opcoes, 0)];
+    if (!escolhido) continue;
+
+    const semPedido = projetos.length - utilizaveis.length;
+    if (semPedido > 0) io.write(`(${semPedido} projeto(s) sem pedido escrito ficaram de fora)\n`);
+    io.write(`\nO harness vai ler o pedido e ${escolhido.documents} documento(s) de ${escolhido.slug}, em ${projectRoot}.\n`);
+    return { url, projeto: escolhido.slug };
+  }
+}
+
 async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
   const { io } = deps;
   io.write("capivara · monta o comando com você e imprime o equivalente no fim\n");
@@ -321,11 +405,20 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
   }
 
   if (command === "init") {
+    const temBase = deps.listMcpProjects !== undefined;
     const fontes: Choice[] = [
       { label: "escrever agora", hint: "cole ou digite; várias linhas" },
       { label: "ler de um arquivo", hint: "um .md ou .txt já escrito" },
+      ...(temBase ? [{ label: "base documental (MCP)", hint: "o pedido e as memórias já cadastrados de um projeto" }] : []),
     ];
-    if (await choose(io, "De onde vem o pedido?", fontes, 0) === 1) {
+
+    const fonte = await choose(io, "De onde vem o pedido?", fontes, 0);
+    if (fonte === 2 && temBase) {
+      const escolhido = await escolherDaBase(deps, projectRoot);
+      if (escolhido === null) return null;
+      answers.mcpUrl = escolhido.url;
+      answers.mcpProject = escolhido.projeto;
+    } else if (fonte === 1) {
       answers.requestFile = await arquivoDoPedido();
     } else {
       const pedido = await multiline(io, "O que você quer construir?");

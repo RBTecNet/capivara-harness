@@ -9,7 +9,7 @@ import { diagnose, renderDiagnosis } from "./commands/doctor.js";
 import { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
 import { BUILD_ROLES, INIT_ROLES, describeRoles, renderUnresolved, rolesFromFlags, unresolvedRoles, type CliRoleFlags } from "./commands/options.js";
 import { InitBlockedError, readRequestState, readSkeletonState, requestFromLibrary, resolveRequest, runInit, runPlan } from "./init/index.js";
-import { createMcpClient, fetchProjectMaterial } from "./mcp/index.js";
+import { createMcpClient, fetchProjectMaterial, listLibraryProjects } from "./mcp/index.js";
 import type { ProjectMaterial } from "./mcp/index.js";
 import type { InitOptions } from "./init/index.js";
 import { commitSpecification, runBuild } from "./loop/index.js";
@@ -787,6 +787,17 @@ export function createProgram(): Command {
         cwd: process.cwd(),
         listModels: (providerId) => listarModelos(providerId),
         listEfforts: (providerId, model) => listarEfforts(providerId, model),
+        /*
+         * O wizard conecta de verdade para listar os projetos. Perguntar o nome
+         * do projeto num campo livre deixaria o erro de digitação para o run
+         * descobrir; aqui ele custa uma mensagem.
+         */
+        listMcpProjects: async (url) => {
+          const client = createMcpClient({ url }, { timeoutSeconds: 15 });
+          await client.initialize();
+          return listLibraryProjects(client);
+        },
+        ...(process.env.CAPIVARA_MCP_URL ? { defaultMcpUrl: process.env.CAPIVARA_MCP_URL } : {}),
         fileExists: (path) => stat(path).then((info) => info.isFile()).catch(() => false),
         directoryExists: (path) => stat(path).then((info) => info.isDirectory()).catch(() => false),
         requestRecorded: async (root) => (await readRequestState(root)) !== null,

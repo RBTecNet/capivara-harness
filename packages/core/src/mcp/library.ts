@@ -127,3 +127,38 @@ export function renderLibraryBlock(documents: readonly McpDocument[]): string {
   }
   return linhas.join("\n");
 }
+
+export interface LibraryProject {
+  slug: string;
+  /** Há pedido escrito? Sem ele o `init` não tem o que ler. */
+  hasRequest: boolean;
+  /** Quantos documentos o projeto usa. */
+  documents: number;
+}
+
+/**
+ * Os projetos que a base oferece, deduzidos do que ela expõe.
+ *
+ * Não há método de "listar projetos" no protocolo, e inventar uma ferramenta
+ * nossa para isso obrigaria toda base documental a implementá-la para servir ao
+ * harness. Os recursos já dizem tudo: o escopo do URI é o projeto, e a presença
+ * do pedido se vê pelo sufixo.
+ *
+ * A área geral não é um projeto — é o acervo de onde os projetos escolhem, e
+ * oferecê-la como destino de um run seria oferecer o acervo inteiro.
+ */
+export async function listLibraryProjects(client: McpClient): Promise<LibraryProject[]> {
+  const contagem = new Map<string, LibraryProject>();
+
+  for (const recurso of await client.listResources()) {
+    const slug = projetoDoUri(recurso.uri);
+    if (slug === "" || slug === "geral") continue;
+
+    const atual = contagem.get(slug) ?? { slug, hasRequest: false, documents: 0 };
+    if (recurso.uri.endsWith(PEDIDO_SUFIXO)) atual.hasRequest = true;
+    else atual.documents += 1;
+    contagem.set(slug, atual);
+  }
+
+  return [...contagem.values()].sort((esquerda, direita) => esquerda.slug.localeCompare(direita.slug));
+}

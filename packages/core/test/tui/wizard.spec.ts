@@ -272,3 +272,110 @@ describe("filtrar 223 modelos por um trecho do nome", () => {
     expect(filtrarModelos(["GPT-6-Astra"], "gpt")).toEqual(["GPT-6-Astra"]);
   });
 });
+
+/**
+ * O pedido vindo da base documental.
+ *
+ * O wizard conecta de verdade para listar os projetos, e é isso que ele precisa
+ * provar aqui: que escolher o projeto é escolher de uma lista do que existe, e
+ * que uma base fora do ar não derruba quem está no meio do wizard.
+ */
+describe("conectar à base documental", () => {
+  const base = [
+    { slug: "biblioteca", hasRequest: true, documents: 3 },
+    { slug: "cron", hasRequest: true, documents: 1 },
+  ];
+
+  it("lista os projetos e monta o comando com a URL e o projeto escolhido", async () => {
+    // pasta, comando=init, fonte=3 (base), url (vazio=padrão), projeto=2, provider=1, modelo, effort, papéis…
+    const { deps, tela } = roteiro(["", "1", "3", "", "2", "1", "", "1", "n", "n", "n", "n", "s"]);
+    const resultado = await runWizard({ ...deps, listMcpProjects: async () => base });
+
+    expect(tela()).toContain("base documental (MCP)");
+    expect(tela()).toContain("biblioteca");
+    expect(tela()).toContain("1 documento(s) selecionado(s)");
+    expect(resultado?.argv).toEqual([
+      "init",
+      "--provider",
+      "codex",
+      "--mcp",
+      "http://localhost:7777/mcp",
+      "--mcp-project",
+      "cron",
+    ]);
+    // O comando impresso ensina exatamente o que foi montado.
+    expect(resultado?.command).toContain("--mcp http://localhost:7777/mcp --mcp-project cron");
+  });
+
+  it("projeto sem pedido escrito não é oferecido, e o wizard diz por quê", async () => {
+    const { deps, tela } = roteiro(["", "1", "3", "", "1", "1", "", "1", "n", "n", "n", "n", "s"]);
+    const resultado = await runWizard({
+      ...deps,
+      listMcpProjects: async () => [
+        { slug: "com-pedido", hasRequest: true, documents: 0 },
+        { slug: "sem-pedido", hasRequest: false, documents: 5 },
+      ],
+    });
+
+    expect(resultado?.argv).toContain("com-pedido");
+    expect(resultado?.argv).not.toContain("sem-pedido");
+    expect(tela()).toContain("1 projeto(s) sem pedido escrito ficaram de fora");
+  });
+
+  /*
+   * Endereço errado é o caso comum, não o excepcional. Sem esta saída, quem
+   * digitou a porta errada perderia o wizard inteiro.
+   */
+  it("base fora do ar oferece tentar de novo, e o segundo endereço vale", async () => {
+    let tentativas = 0;
+    const { deps, tela } = roteiro([
+      "", "1", "3",
+      "http://localhost:9999/mcp", // primeira, quebrada
+      "1", // tentar outro endereço
+      "http://localhost:7777/mcp", // segunda, boa
+      "1", // projeto
+      "1", "", "1", "n", "n", "n", "n", "s",
+    ]);
+    const resultado = await runWizard({
+      ...deps,
+      listMcpProjects: async (url: string) => {
+        tentativas += 1;
+        if (url.includes("9999")) throw new Error("não consegui falar com o servidor MCP em " + url);
+        return base;
+      },
+    });
+
+    expect(tentativas).toBe(2);
+    expect(tela()).toContain("não consegui falar com o servidor MCP");
+    expect(resultado?.argv).toEqual([
+      "init", "--provider", "codex", "--mcp", "http://localhost:7777/mcp", "--mcp-project", "biblioteca",
+    ]);
+  });
+
+  it("quem desiste da base escreve o pedido como sempre escreveu", async () => {
+    const { deps } = roteiro([
+      "", "1", "3",
+      "http://localhost:9999/mcp",
+      "2", // voltar e escrever aqui
+      "um quadro kanban", ".",
+      "1", "", "1", "n", "n", "n", "n", "s",
+    ]);
+    const resultado = await runWizard({
+      ...deps,
+      listMcpProjects: async () => {
+        throw new Error("fora do ar");
+      },
+    });
+    expect(resultado).toBeNull();
+  });
+
+  /*
+   * Sem a dependência injetada, este binário não sabe falar com base nenhuma —
+   * e oferecer um caminho que ele não percorre é pior que não oferecer.
+   */
+  it("sem suporte a base, a opção não aparece", async () => {
+    const { deps, tela } = roteiro(["", "1", "1", "uma agenda", ".", "1", "", "1", "n", "n", "n", "n", "s"]);
+    await runWizard(deps);
+    expect(tela()).not.toContain("base documental");
+  });
+});

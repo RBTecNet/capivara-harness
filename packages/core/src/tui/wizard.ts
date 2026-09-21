@@ -16,6 +16,9 @@ export interface WizardAnswers {
   roles: Partial<Record<RoleName, { provider?: string; model?: string; effort?: string }>>;
   /** Caminho do pedido, quando ele vem de arquivo em vez de digitado. */
   requestFile?: string;
+  /** A base documental e o projeto, quando o pedido vem de lá. */
+  mcpUrl?: string;
+  mcpProject?: string;
   projectRoot?: string;
   testCommand?: string;
   maxCycles?: number;
@@ -52,6 +55,8 @@ export function toArgv(answers: WizardAnswers): string[] {
   }
 
   if (answers.requestFile) argv.push("--file", answers.requestFile);
+  // As duas andam juntas: a URL diz onde é a base, o projeto diz o que ler dela.
+  if (answers.mcpUrl && answers.mcpProject) argv.push("--mcp", answers.mcpUrl, "--mcp-project", answers.mcpProject);
   if (answers.projectRoot) argv.push("--project", answers.projectRoot);
   if (answers.testCommand) argv.push("--test-cmd", answers.testCommand);
   if (answers.maxCycles !== undefined) argv.push("--max-cycles", String(answers.maxCycles));
@@ -79,6 +84,7 @@ export function renderCommand(answers: WizardAnswers): string {
   }
 
   if (answers.requestFile) parts.push("--file", quote(answers.requestFile));
+  if (answers.mcpUrl && answers.mcpProject) parts.push("--mcp", quote(answers.mcpUrl), "--mcp-project", quote(answers.mcpProject));
   if (answers.projectRoot) parts.push("--project", quote(answers.projectRoot));
   if (answers.testCommand) parts.push("--test-cmd", quote(answers.testCommand));
   if (answers.maxCycles !== undefined) parts.push("--max-cycles", String(answers.maxCycles));

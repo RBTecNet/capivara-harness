@@ -221,6 +221,15 @@ export interface FlowGateOptions {
   projectRoot: string;
   /** Os fluxos que ESTA fase entrega. Vazio significa nada a exercitar ainda. */
   workflows: SkeletonWorkflow[];
+  /**
+   * Os fluxos das fases JÁ CONCLUÍDAS — a regressão.
+   *
+   * Tem que ser uma lista explícita, e não o que houver no disco. Rodar tudo o
+   * que existe cobra da fase 1 uma interface que só a fase 3 constrói, e no
+   * MCP_teste ainda ressuscitou roteiros de um esqueleto anterior: a fase de
+   * banco reprovava por não ter a tela de cadastro que nunca prometeu.
+   */
+  regressao?: SkeletonWorkflow[];
   /** Como a aplicação sobe. Sem isto não há o que abrir. */
   startCommand: string | null;
   /** Chama a sessão independente que redige o roteiro. */
@@ -261,9 +270,9 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   const port = options.port ?? FLOW_PORT;
   const pasta = join(options.projectRoot, FLOWS_DIR);
 
-  const jaEscritos = await existingFlowScripts(options.projectRoot);
-  if (options.workflows.length === 0 && jaEscritos.length === 0) {
-    return { green: true, skipped: "a fase não declara fluxos e nenhum roteiro anterior existe", scripts: [] };
+  const regressao = options.regressao ?? [];
+  if (options.workflows.length === 0 && regressao.length === 0) {
+    return { green: true, skipped: "a fase não declara fluxos e nenhuma anterior deixou fluxo a revalidar", scripts: [] };
   }
 
   if (options.startCommand === null) {
@@ -311,7 +320,16 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
 
   await writeFile(join(pasta, FLOW_CONFIG), renderFlowConfig({ startCommand: options.startCommand, port }), "utf8");
 
-  const scripts = await existingFlowScripts(options.projectRoot);
+  /*
+   * Só os roteiros dos fluxos desta fase e das anteriores. O que estiver na
+   * pasta e não pertencer a nenhum deles é resto de outro plano — rodá-lo
+   * cobraria da fase um comportamento que ninguém prometeu nela.
+   */
+  const noDisco = new Set(await existingFlowScripts(options.projectRoot));
+  const scripts = [...regressao, ...options.workflows]
+    .map((workflow) => flowScriptName(workflow.number))
+    .filter((nome, indice, todos) => todos.indexOf(nome) === indice && noDisco.has(nome));
+
   if (scripts.length === 0) return { green: true, skipped: "nenhum fluxo a percorrer", scripts: [] };
 
   const runner = options.runner ?? defaultFlowRunner;

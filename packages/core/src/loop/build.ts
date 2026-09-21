@@ -11,7 +11,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { sha12 } from "../contract/stamps.js";
-import { workflowsForPhase, type Skeleton } from "../contract/index.js";
+import { workflowsForPhase, type Skeleton, type SkeletonWorkflow } from "../contract/index.js";
 import {
   escolherSkills,
   escreverIndice,
@@ -253,10 +253,22 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       announce("aviso: sem esqueleto legível, o gate 4 não percorre fluxo nenhum nesta execução");
     }
 
+    /*
+     * A regressão é o que as fases ANTERIORES já fizeram passar — não o que
+     * houver na pasta de roteiros. Um roteiro de outro plano, ou de uma fase que
+     * ainda não rodou, cobraria da fase atual um comportamento que ela não
+     * prometeu: no MCP_teste a fase 1, de banco e infra, reprovava por não ter a
+     * tela de cadastro que só a fase 3 constrói.
+     */
+    const fluxosCumpridos: SkeletonWorkflow[] = [];
+
     const fluxosDaFase =
       esqueleto !== null
         ? (phaseNumber: number) => ({
             workflows: workflowsForPhase(esqueleto, phaseNumber),
+            regressao: fluxosCumpridos.filter(
+              (workflow) => !workflowsForPhase(esqueleto, phaseNumber).some((atual) => atual.number === workflow.number),
+            ),
             resolveStart: () => startCommandFor(options.projectRoot),
             ...(options.flowRunner !== undefined ? { runner: options.flowRunner } : {}),
           })
@@ -346,7 +358,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       await options.onMemorias([estadoComoMemoria({ runId, fases })]);
     };
 
-    const skillsDaFase = (areasDaFase: string): string => {
+    const skillsDaFase = (sessionId: string, areasDaFase: string): string => {
       if (skills.length === 0) return "";
       const areas = areasDaFase
         .split(/[,;·]/)
@@ -354,9 +366,24 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         .filter((area) => area !== "");
 
       const selecao = escolherSkills(skills, areas);
+
+      /*
+       * Dizer o que entrou, e não só o que ficou de fora.
+       *
+       * Quem olha a tela precisa saber que a skill de frontend NÃO foi carregada
+       * numa fase de banco — é o motivo de a seleção existir. Sem esta linha, a
+       * única forma de descobrir seria abrir o prompt gravado em disco.
+       */
+      const rotulo = areas.length > 0 ? `área ${areas.join(", ")}` : "sem área declarada";
+      announce(
+        `[${sessionId}] skills (${rotulo}): ${
+          selecao.inteiras.map((documento) => documento.name).join(", ") || "nenhuma no prompt"
+        }${selecao.noIndice.length > 0 ? ` · ${selecao.noIndice.length} só no índice` : ""}`,
+      );
       if (selecao.cortadas.length > 0) {
-        announce(`  o teto de contexto deixou de fora: ${selecao.cortadas.join(", ")} (ficam no índice)`);
+        announce(`           o teto de contexto deixou de fora: ${selecao.cortadas.join(", ")} (ficam no índice)`);
       }
+
       return renderSkillBlock(selecao, pastaPorUri);
     };
 
@@ -373,6 +400,8 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         continue;
       }
 
+      const fluxosDestaFase = esqueleto !== null ? workflowsForPhase(esqueleto, session.number) : [];
+
       const outcome = await runPhase({
         projectRoot: options.projectRoot,
         runId,
@@ -386,7 +415,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
             ...(options.environment !== undefined ? { environment: options.environment } : {}),
           }),
         call: options.call,
-        ...(skills.length > 0 ? { skills: skillsDaFase(session.areas) } : {}),
+        ...(skills.length > 0 ? { skills: skillsDaFase(session.id, session.areas) } : {}),
         ...(options.onMemorias ? { onMemorias: options.onMemorias } : {}),
         ...(fluxosDaFase ? { flows: fluxosDaFase(session.number) } : {}),
         ...(options.testRunner !== undefined ? { testRunner: options.testRunner } : {}),
@@ -400,6 +429,14 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       });
 
       phases.push({ id: session.id, title: session.title, outcome });
+
+      // Fluxo que passou vira regressão das fases seguintes: é o que faz um
+      // defeito introduzido na fase 5 aparecer na fase 5.
+      if (outcome.status === "complete" || outcome.status === "already-implemented") {
+        for (const workflow of fluxosDestaFase) {
+          if (!fluxosCumpridos.some((cumprido) => cumprido.number === workflow.number)) fluxosCumpridos.push(workflow);
+        }
+      }
 
       if (outcome.status === "failed" || outcome.status === "rate-limit-exhausted") {
         const detail = outcome.status === "failed" ? `${outcome.gate}: ${outcome.cause}` : "limite de uso esgotado";

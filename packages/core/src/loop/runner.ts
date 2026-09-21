@@ -72,6 +72,8 @@ export interface PhaseRunOptions {
   flows?: {
     /** Os fluxos que esta fase entrega, vindos do esqueleto. */
     workflows: SkeletonWorkflow[];
+    /** Os fluxos das fases já concluídas: a regressão desta fase. */
+    regressao?: SkeletonWorkflow[];
     /**
      * Como a aplicação sobe — resolvido DEPOIS da sessão, não antes dela.
      *
@@ -237,6 +239,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       const g4 = await gate4({
         projectRoot: options.projectRoot,
         workflows: fluxos.workflows,
+        ...(fluxos.regressao ? { regressao: fluxos.regressao } : {}),
         startCommand: await fluxos.resolveStart(),
         author: async (workflow, rejected) => {
           const resposta = await options.call({

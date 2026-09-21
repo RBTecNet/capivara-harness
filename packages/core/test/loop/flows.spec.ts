@@ -201,8 +201,57 @@ describe("o gate", () => {
    * continua sendo percorrido na fase 5, e um defeito introduzido lá aparece lá.
    */
   it("percorre também os fluxos das fases anteriores", async () => {
+    const anterior = { ...WORKFLOW, number: "1" };
     await mkdir(join(projectRoot, FLOWS_DIR), { recursive: true });
-    await writeFile(join(projectRoot, FLOWS_DIR, "workflow-1.spec.ts"), roteiroBom({ ...WORKFLOW, number: "1" }), "utf8");
+    await writeFile(join(projectRoot, FLOWS_DIR, "workflow-1.spec.ts"), roteiroBom(anterior), "utf8");
+
+    const rodados: string[][] = [];
+    const resultado = await gate4({
+      ...base,
+      projectRoot,
+      regressao: [anterior],
+      author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
+      runner: async (_root, scripts) => {
+        rodados.push(scripts);
+        return verde;
+      },
+    });
+
+    expect(resultado.green).toBe(true);
+    expect(rodados[0]).toEqual(["workflow-1.spec.ts", "workflow-2.spec.ts"]);
+  });
+
+  /*
+   * O defeito que travou a fase 1 do MCP_teste. Roteiros de um build anterior
+   * ficaram na pasta e passaram a ser cobrados de uma fase de banco e infra, que
+   * nunca prometeu tela nenhuma — e, pior, eram de um esqueleto que já não
+   * existia. A fase nunca teria como passar.
+   */
+  it("roteiro órfão na pasta não é cobrado de quem não o prometeu", async () => {
+    await mkdir(join(projectRoot, FLOWS_DIR), { recursive: true });
+    await writeFile(join(projectRoot, FLOWS_DIR, "workflow-9.spec.ts"), roteiroBom({ ...WORKFLOW, number: "9" }), "utf8");
+
+    let rodou = false;
+    const resultado = await gate4({
+      projectRoot,
+      workflows: [],
+      regressao: [],
+      startCommand: "npm start",
+      author: async () => "",
+      runner: async () => {
+        rodou = true;
+        return verde;
+      },
+    });
+
+    expect(resultado.green).toBe(true);
+    if (resultado.green) expect(resultado.skipped).toContain("não declara fluxos");
+    expect(rodou, "fase sem fluxo não abre a aplicação").toBe(false);
+  });
+
+  it("com fluxo próprio, o órfão continua de fora", async () => {
+    await mkdir(join(projectRoot, FLOWS_DIR), { recursive: true });
+    await writeFile(join(projectRoot, FLOWS_DIR, "workflow-9.spec.ts"), roteiroBom({ ...WORKFLOW, number: "9" }), "utf8");
 
     const rodados: string[][] = [];
     const resultado = await gate4({
@@ -216,7 +265,7 @@ describe("o gate", () => {
     });
 
     expect(resultado.green).toBe(true);
-    expect(rodados[0]).toEqual(["workflow-1.spec.ts", "workflow-2.spec.ts"]);
+    expect(rodados[0]).toEqual(["workflow-2.spec.ts"]);
   });
 
   it("reprova quando a aplicação não cumpre o fluxo, com a saída do roteiro", async () => {

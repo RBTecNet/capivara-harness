@@ -953,7 +953,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           }
 
           fases[posicao] = assemblePhase(
-            { number: fase.number, title: fase.title, goal: fase.goal, dependsOn: fase.dependsOn, covers: fase.covers },
+            { number: fase.number, title: fase.title, goal: fase.goal, dependsOn: fase.dependsOn, covers: fase.covers, areas: fase.areas },
             tarefas.tasks,
           ).trim();
           announce(`  fase ${fase.number} pronta`);
@@ -1067,7 +1067,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               const limpa = stripDeadDesignRefs(repairDeterministically(saida).content, designExiste);
               for (const conserto of limpa.applied) announce(`    fase ${numero}: ${conserto}`);
               proximas[numero - 1] = assemblePhase(
-                { number: fase.number, title: fase.title, goal: fase.goal, dependsOn: fase.dependsOn, covers: fase.covers },
+                { number: fase.number, title: fase.title, goal: fase.goal, dependsOn: fase.dependsOn, covers: fase.covers, areas: fase.areas },
                 extractTasks(limpa.content).tasks,
               ).trim();
             }

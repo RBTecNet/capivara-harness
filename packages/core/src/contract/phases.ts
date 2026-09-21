@@ -51,6 +51,8 @@ export interface PhaseBlock {
   goal: string;
   dependsOn: string;
   covers: string;
+  /** Onde a fase mexe: decide quais skills ela recebe. Vazio é "só as gerais". */
+  areas: string;
   subPhases: SubPhaseBlock[];
   /** Todas as tasks da fase, em ordem de leitura, atravessando as sub-fases. */
   tasks: TaskBlock[];
@@ -84,7 +86,13 @@ const HEADING_3 = /^### (.*)$/;
 const PHASE_HEADING = /^Phase (\d+): (\S.*)$/;
 const SUBPHASE_HEADING = /^Phase (\d+)\.(\d+): (\S.*)$/;
 const PHASE_WORD = /^Phase\b/;
-const METADATA = /\*\*Goal:\*\*\s*(.*?)\s*·\s*\*\*Depends on:\*\*\s*(.*?)\s*·\s*\*\*Covers:\*\*\s*(.*?)\s*$/;
+/*
+ * `Areas` é o quarto campo e é OPCIONAL: documento escrito antes dele continua
+ * válido, e a fase sem área declarada recebe só as skills gerais. Quebrar plano
+ * publicado para acrescentar um campo seria pior que a informação que ele traz.
+ */
+const METADATA =
+  /\*\*Goal:\*\*\s*(.*?)\s*·\s*\*\*Depends on:\*\*\s*(.*?)\s*·\s*\*\*Covers:\*\*\s*(.*?)\s*(?:·\s*\*\*Areas:\*\*\s*(.*?)\s*)?$/;
 const TASK = /^- \[([ xX])\] \*\*Task:\*\* (\S.*)$/;
 const CRITERIA_LABEL = "- **Acceptance criteria:**";
 const FEATURE_TESTS = /^- \*\*Feature tests:\*\* (\S.*)$/;
@@ -101,6 +109,7 @@ interface PhaseDraft {
   goal: string | null;
   dependsOn: string;
   covers: string;
+  areas: string;
   subPhases: SubPhaseBlock[];
   tasks: TaskBlock[];
   line: number;
@@ -154,6 +163,7 @@ export function parsePhases(source: string): ParseResult {
           goal: null,
           dependsOn: "",
           covers: "",
+          areas: "",
           subPhases: [],
           tasks: [],
           line,
@@ -225,6 +235,7 @@ export function parsePhases(source: string): ParseResult {
         phase.goal = (metadata[1] ?? "").trim();
         phase.dependsOn = (metadata[2] ?? "").trim();
         phase.covers = (metadata[3] ?? "").trim();
+        phase.areas = (metadata[4] ?? "").trim();
         continue;
       }
     }
@@ -323,6 +334,7 @@ export function parsePhases(source: string): ParseResult {
         goal: draft.goal ?? "",
         dependsOn: draft.dependsOn,
         covers: draft.covers,
+        areas: draft.areas,
         subPhases: draft.subPhases,
         tasks: draft.tasks,
         line: draft.line,

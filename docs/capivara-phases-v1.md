@@ -25,7 +25,7 @@ executa não podem divergir.
 
 ## Phase 1: <título>
 
-**Goal:** <resultado observável> · **Depends on:** <none | Phase N> · **Covers:** <stories/entidades/workflows>
+**Goal:** <resultado observável> · **Depends on:** <none | Phase N> · **Covers:** <stories/entidades/workflows> · **Areas:** <frontend|backend|dados|infra|qualidade>
 
 ### Phase 1.1: <sub-fase>
 

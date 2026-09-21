@@ -21,6 +21,14 @@ export interface PhaseSession {
   taskCount: number;
   markdown: string;
   file: string;
+  /**
+   * As áreas que a fase declara, como vieram do plano.
+   *
+   * Vazio em plano escrito antes do campo existir — e aí a fase recebe só as
+   * skills gerais, que é a degradação certa: nada quebra, e o que é universal
+   * continua chegando.
+   */
+  areas: string;
 }
 
 export type SplitResult =
@@ -43,6 +51,7 @@ export function splitPhases(source: string, projectRoot: string, runId: string):
     taskCount: phase.tasks.length,
     markdown: phase.markdown,
     file: join(directory, `${phaseId(phase.number)}.md`),
+    areas: phase.areas,
   }));
 
   return { ok: true, sessions };

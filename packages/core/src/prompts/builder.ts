@@ -15,6 +15,14 @@ export interface BuilderContext {
   testCommand: string | null;
   containerized: boolean;
   phaseMarkdown: string;
+  /**
+   * As skills desta fase, já escolhidas por área e materializadas no disco.
+   *
+   * Vem pronto porque quem escolhe não é quem executa: o §34 decidiu que a
+   * seleção é o cruzamento de duas listas fechadas, não uma decisão de modelo no
+   * meio da fase.
+   */
+  skills?: string;
 }
 
 export interface FixContext extends BuilderContext {
@@ -117,6 +125,7 @@ export function implementPrompt(context: BuilderContext): string {
     "When the phase is genuinely finished, end your answer with this line, alone:",
     BUILDER_COMPLETE_MARKER,
     "",
+    ...(context.skills && context.skills.trim() !== "" ? [context.skills, ""] : []),
     "## The phase to implement",
     context.phaseMarkdown,
   ].join("\n");
@@ -152,6 +161,7 @@ export function fixPrompt(context: FixContext): string {
     "When the phase is genuinely finished, end your answer with this line, alone:",
     BUILDER_COMPLETE_MARKER,
     "",
+    ...(context.skills && context.skills.trim() !== "" ? [context.skills, ""] : []),
     "## The phase to complete",
     context.phaseMarkdown,
   ].join("\n");

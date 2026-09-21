@@ -13,7 +13,7 @@
  * seleciona é a aplicação, e o harness só enxerga o resultado.
  */
 
-import type { McpClient, McpDocument, McpResource } from "./client.js";
+import type { McpClient, McpDocument, McpFile, McpResource } from "./client.js";
 
 export const PEDIDO_SUFIXO = "/pedido";
 
@@ -59,15 +59,59 @@ export async function fetchProjectMaterial(client: McpClient, projeto: string): 
 
   const request = await lerPedido(client, projeto, doProjeto);
 
+  /*
+   * Um pacote chega partido em recursos: a base e um recurso por arquivo, todos
+   * sob o mesmo URI. Remontá-lo aqui é o que permite materializar a skill com os
+   * caminhos relativos que o próprio SKILL.md cita.
+   */
+  const bases = doProjeto.filter((recurso) => !recurso.uri.endsWith(PEDIDO_SUFIXO) && !ehArquivoDePacote(recurso.uri, doProjeto));
+
   const documents: McpDocument[] = [];
-  for (const recurso of doProjeto) {
-    if (recurso.uri.endsWith(PEDIDO_SUFIXO)) continue;
+  for (const recurso of bases) {
     const text = await client.readResource(recurso.uri);
     if (text.trim() === "") continue;
-    documents.push({ uri: recurso.uri, name: recurso.name || recurso.uri, text });
+
+    const files: McpFile[] = [];
+    for (const arquivo of doProjeto.filter((outro) => outro.uri.startsWith(`${recurso.uri}/`))) {
+      const lido = await client.readBinary(arquivo.uri);
+      files.push({ path: arquivo.uri.slice(recurso.uri.length + 1), content: lido.content, binary: lido.binary });
+    }
+
+    documents.push({
+      uri: recurso.uri,
+      name: recurso.name || recurso.uri,
+      text,
+      kind: tipoDoDocumento(recurso.uri),
+      ...(areaDe(recurso.description ?? "") ? { area: areaDe(recurso.description ?? "") } : {}),
+      ...(files.length > 0 ? { files } : {}),
+    });
   }
 
   return { request, documents };
+}
+
+/**
+ * O recurso é um arquivo de dentro de outro recurso?
+ *
+ * O contrato não marca isso: `.../skill/frontend/references/x.md` é apenas um
+ * URI mais longo. Quem decide é a existência de um prefixo que também é recurso
+ * — assim o harness não precisa saber de antemão quais tipos são pacote.
+ */
+function ehArquivoDePacote(uri: string, todos: readonly McpResource[]): boolean {
+  return todos.some((outro) => outro.uri !== uri && uri.startsWith(`${outro.uri}/`));
+}
+
+/**
+ * A área que a base declara na descrição do recurso: `skill · area=frontend · …`.
+ *
+ * O marcador é `area=`, sem acento e sem espaço, porque é dado e não prosa. A
+ * primeira versão procurava "área " com acento e `\b`, que em JavaScript não
+ * casa antes de caractere acentuado: toda skill chegava sem área, e uma fase de
+ * banco recebia a skill de frontend — exatamente o que a seleção existe para
+ * impedir. Os testes não pegaram; a primeira execução de verdade, sim.
+ */
+export function areaDe(descricao: string): string {
+  return /area=([a-z]+)/i.exec(descricao)?.[1]?.toLowerCase() ?? "";
 }
 
 async function lerPedido(client: McpClient, projeto: string, recursos: McpResource[]): Promise<string> {

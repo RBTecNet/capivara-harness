@@ -71,6 +71,9 @@ export interface SkeletonRule {
   statement: string;
 }
 
+/** As áreas que uma fase pode declarar. Fechada dos dois lados, como o §34 pede. */
+const AREAS_VALIDAS = new Set(["frontend", "backend", "dados", "infra", "qualidade", "geral"]);
+
 export interface SkeletonPhase {
   number: number;
   title: string;
@@ -79,6 +82,14 @@ export interface SkeletonPhase {
   dependsOn: string;
   /** Stories, entidades e workflows que esta fase entrega. */
   covers: string[];
+  /**
+   * Onde a fase mexe — `frontend`, `backend`, `dados`, `infra`, `qualidade`.
+   *
+   * É o que decide quais skills o executor recebe naquela fase. Lista fechada e
+   * opcional: esqueleto escrito antes disso existir continua válido, e a fase
+   * sem área recebe só as skills gerais.
+   */
+  areas: string[];
   taskCount: number;
 }
 
@@ -182,6 +193,9 @@ export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number
     goal: text(item.goal),
     dependsOn: text(item.dependsOn) || "none",
     covers: strings(item.covers),
+    // Área fora da lista é descartada em silêncio, não vira campo livre: a
+    // seleção de skills depende de os dois lados falarem o mesmo vocabulário.
+    areas: strings(item.areas).map((area) => area.trim().toLowerCase()).filter((area) => AREAS_VALIDAS.has(area)),
     taskCount: typeof item.taskCount === "number" ? item.taskCount : 0,
   }));
 
@@ -263,6 +277,7 @@ export function sliceForPhase(skeleton: Skeleton, phaseNumber: number): string {
     `**Goal:** ${phase.goal}`,
     `**Depends on:** ${phase.dependsOn}`,
     `**Covers:** ${phase.covers.join(", ")}`,
+    ...(phase.areas.length > 0 ? [`**Áreas:** ${phase.areas.join(", ")}`] : []),
     `**Tasks alocadas:** ${phase.taskCount}`,
     "",
     "## Stack",

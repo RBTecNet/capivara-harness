@@ -36,6 +36,24 @@ export interface McpDocument {
   uri: string;
   name: string;
   text: string;
+  /**
+   * O tipo declarado pela base — `skill`, `memoria`, `hook`, `documentacao`.
+   * Vazio quando a base não diz; o harness então trata como documento comum.
+   */
+  kind?: string;
+  /** A área, quando declarada. É ela que decide em que fase a skill entra. */
+  area?: string;
+  /** Os arquivos que acompanham a base, quando o documento é um pacote. */
+  files?: McpFile[];
+}
+
+/** Um arquivo de dentro de um pacote, pronto para ser materializado. */
+export interface McpFile {
+  /** Caminho relativo à raiz do pacote: `references/typography.md`. */
+  path: string;
+  /** Texto, ou os bytes quando o arquivo é binário. */
+  content: Buffer;
+  binary: boolean;
 }
 
 export class McpError extends Error {
@@ -108,6 +126,7 @@ export interface McpClient {
   prompt: (name: string, args?: Record<string, string>) => Promise<string>;
   listResources: () => Promise<McpResource[]>;
   readResource: (uri: string) => Promise<string>;
+  readBinary: (uri: string) => Promise<{ content: Buffer; binary: boolean }>;
   callTool: (name: string, args?: Record<string, unknown>) => Promise<string>;
 }
 
@@ -217,6 +236,23 @@ export function createMcpClient(endpoint: McpEndpoint, options: McpClientOptions
         .filter((texto) => texto.trim() !== "")
         .join("\n\n")
         .trim();
+    },
+
+    /**
+     * O mesmo recurso, preservando o que for binário.
+     *
+     * `readResource` devolve texto e serve para pedido e memória. Um print de
+     * interface não passa por ali: o protocolo o entrega em `blob`, base64, e
+     * convertê-lo para texto destruiria justamente o arquivo que alguém guardou
+     * para servir de referência de layout.
+     */
+    readBinary: async (uri) => {
+      const resultado = (await enviar("resources/read", { uri })) as { contents?: Record<string, unknown>[] } | null;
+      for (const item of resultado?.contents ?? []) {
+        if (typeof item.blob === "string") return { content: Buffer.from(item.blob, "base64"), binary: true };
+        if (typeof item.text === "string") return { content: Buffer.from(item.text, "utf8"), binary: false };
+      }
+      return { content: Buffer.alloc(0), binary: false };
     },
 
     callTool: async (name, args) => {

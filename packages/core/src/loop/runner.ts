@@ -84,6 +84,13 @@ export interface PhaseRunOptions {
     port?: number;
   };
   testRunner?: TestRunner;
+  /**
+   * As skills desta fase, prontas para o prompt.
+   *
+   * Já escolhidas por área e materializadas no disco pelo build — o runner não
+   * decide nada sobre elas, só as carrega.
+   */
+  skills?: string;
   /** Se o executor pode instalar fora do projeto. Muda o que o gate 2 pede a ele. */
   systemInstall?: boolean;
   maxCycles?: number;
@@ -153,6 +160,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       testCommand: options.testCommand?.command ?? null,
       containerized: options.testCommand?.containerized ?? false,
       phaseMarkdown: session.markdown,
+      ...(options.skills !== undefined && options.skills !== "" ? { skills: options.skills } : {}),
     };
 
     const prompt =

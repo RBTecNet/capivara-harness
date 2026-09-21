@@ -22,7 +22,7 @@ export const GRAMMAR_BLOCK: readonly string[] = [
   "",
   "## Phase 1: <título>",
   "",
-  "**Goal:** <resultado observável> · **Depends on:** <none | Phase N> · **Covers:** <stories/entidades/workflows>",
+  "**Goal:** <resultado observável> · **Depends on:** <none | Phase N> · **Covers:** <stories/entidades/workflows> · **Areas:** <frontend|backend|dados|infra|qualidade>",
   "",
   "### Phase 1.1: <sub-fase>",
   "",
@@ -40,7 +40,7 @@ export const GRAMMAR_BLOCK: readonly string[] = [
 export const PHASE_BLOCK: readonly string[] = [
   "## Phase {{PHASE_NUMBER}}: <title>",
   "",
-  "**Goal:** <one line> · **Depends on:** <none | Phase N> · **Covers:** <stories/entities/workflows>",
+  "**Goal:** <one line> · **Depends on:** <none | Phase N> · **Covers:** <stories/entities/workflows> · **Areas:** <frontend|backend|dados|infra|qualidade>",
   "",
   "### Phase {{PHASE_NUMBER}}.<M>: <sub-phase name>",
   "",
@@ -67,6 +67,7 @@ export const STRUCTURAL_LABELS: readonly string[] = [
   "**Goal:**",
   "**Depends on:**",
   "**Covers:**",
+  "**Areas:**",
   "**Conventions:**",
 ];
 
@@ -111,6 +112,8 @@ export interface PhaseEnvelope {
   goal: string;
   dependsOn: string;
   covers: readonly string[];
+  /** Onde a fase mexe. Decide quais skills ela recebe; ausente é só as gerais. */
+  areas?: readonly string[];
 }
 
 /**
@@ -119,10 +122,13 @@ export interface PhaseEnvelope {
  */
 export function assemblePhase(envelope: PhaseEnvelope, tasks: string): string {
   const covers = envelope.covers.length > 0 ? envelope.covers.join(", ") : "—";
+  // `Areas` só aparece quando há o que declarar: uma linha com campo vazio
+  // convida o próximo leitor a preenchê-lo com qualquer coisa.
+  const areas = envelope.areas && envelope.areas.length > 0 ? ` · **Areas:** ${envelope.areas.join(", ")}` : "";
   return [
     `## Phase ${envelope.number}: ${envelope.title}`,
     "",
-    `**Goal:** ${envelope.goal} · **Depends on:** ${envelope.dependsOn} · **Covers:** ${covers}`,
+    `**Goal:** ${envelope.goal} · **Depends on:** ${envelope.dependsOn} · **Covers:** ${covers}${areas}`,
     "",
     tasks.trim(),
     "",

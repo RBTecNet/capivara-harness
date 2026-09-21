@@ -12,6 +12,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { sha12 } from "../contract/stamps.js";
 import { workflowsForPhase, type Skeleton } from "../contract/index.js";
+import { escolherSkills, materializarSkill, renderSkillBlock, type McpDocument } from "../mcp/index.js";
 import { startCommandFor } from "./acceptance.js";
 import type { FlowRunner } from "./flows.js";
 import {
@@ -56,6 +57,14 @@ export interface BuildOptions {
   flowRunner?: FlowRunner;
   /** Desliga o gate 4 mesmo havendo esqueleto. */
   skipFlows?: boolean;
+  /**
+   * Os documentos que a base entregou para este projeto.
+   *
+   * As skills são materializadas em `.capivara/skills/` antes da primeira fase e
+   * escolhidas por área a cada uma. O resto (memória, documentação) já foi ao
+   * estágio de documentação e não se repete aqui.
+   */
+  library?: McpDocument[];
   testRunner?: TestRunner;
   explicitTestCommand?: string;
   maxCycles?: number;
@@ -239,6 +248,44 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
           })
         : null;
 
+    /*
+     * As skills vão para o disco UMA vez, antes da primeira fase.
+     *
+     * Materializar por fase reescreveria os mesmos arquivos a cada volta sem
+     * nada mudar. O que muda por fase é a escolha — quais entram no prompt —, e
+     * essa é barata.
+     */
+    const skills = (options.library ?? []).filter((documento) => (documento.kind ?? "") === "skill");
+    const pastaPorUri = new Map<string, string>();
+    for (const skill of skills) {
+      const escrita = await materializarSkill(options.projectRoot, skill);
+      pastaPorUri.set(skill.uri, escrita.pasta);
+      announce(
+        `skill materializada: ${escrita.pasta}/ (${escrita.arquivos + 1} arquivo(s), ${Math.round(escrita.bytes / 1024)} KB)`,
+      );
+    }
+
+    /**
+     * O bloco de skills de uma fase: as da área dela, mais as gerais.
+     *
+     * A fase declara as áreas no plano; a skill declara a sua no catálogo. Quem
+     * cruza é esta função, e o que o teto cortar aparece no log — skill escondida
+     * em silêncio é pior que skill ausente.
+     */
+    const skillsDaFase = (areasDaFase: string): string => {
+      if (skills.length === 0) return "";
+      const areas = areasDaFase
+        .split(/[,;·]/)
+        .map((area) => area.trim())
+        .filter((area) => area !== "");
+
+      const selecao = escolherSkills(skills, areas);
+      if (selecao.cortadas.length > 0) {
+        announce(`  o teto de contexto deixou de fora: ${selecao.cortadas.join(", ")} (ficam no índice)`);
+      }
+      return renderSkillBlock(selecao, pastaPorUri);
+    };
+
     options.onPlanned?.(checked.sessions.map((session) => ({ id: session.id, title: session.title })));
 
     const done = new Set(progress.completed);
@@ -265,6 +312,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
             ...(options.environment !== undefined ? { environment: options.environment } : {}),
           }),
         call: options.call,
+        ...(skills.length > 0 ? { skills: skillsDaFase(session.areas) } : {}),
         ...(fluxosDaFase ? { flows: fluxosDaFase(session.number) } : {}),
         ...(options.testRunner !== undefined ? { testRunner: options.testRunner } : {}),
         systemInstall: options.systemInstall === true,

@@ -321,6 +321,7 @@ function estagioInterativo(options: {
 async function lerDaBase(
   flags: { mcp?: string; mcpProject?: string },
   escrever: (mensagem: string) => void,
+  modo: { tolerante?: boolean } = {},
 ): Promise<ProjectMaterial | null | "erro"> {
   const url = flags.mcp?.trim();
   const projeto = flags.mcpProject?.trim();
@@ -342,7 +343,17 @@ async function lerDaBase(
     for (const documento of material.documents) escrever(`  · ${documento.name}`);
     return material;
   } catch (erro) {
-    escrever(`erro: ${erro instanceof Error ? erro.message : String(erro)}`);
+    const causa = erro instanceof Error ? erro.message : String(erro);
+    /*
+     * No `init`, sem base não há pedido: parar é o certo. No `build`, o material
+     * já foi materializado antes — seguir com o que está no disco é o certo, e
+     * parar seria transformar conveniência em dependência.
+     */
+    if (modo.tolerante === true) {
+      escrever(`aviso: a base documental não respondeu (${causa}); seguindo com o que já está em .capivara/`);
+      return null;
+    }
+    escrever(`erro: ${causa}`);
     return "erro";
   }
 }
@@ -605,9 +616,11 @@ export function createProgram(): Command {
       .option("--no-system-install", "mantém o executor dentro do workspace, sem instalar pacotes de sistema")
       .option("--no-acceptance", "pula a aceitação operacional final")
       .option("--no-flows", "pula o gate 4: não abre a aplicação para percorrer os fluxos do esqueleto")
+      .option("--mcp <url>", "base documental por MCP, de onde vêm as skills do projeto")
+      .option("--mcp-project <nome>", "de qual projeto da base vêm as skills")
       .option("--no-dashboard", "não desenha o painel; só as linhas de progresso"),
     ["builder", "verifier"],
-  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean; flows?: boolean; dashboard?: boolean }) => {
+  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean; flows?: boolean; mcp?: string; mcpProject?: string; dashboard?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const roles = rolesFromFlags(flags);
     const semProvider = unresolvedRoles(roles, BUILD_ROLES);
@@ -687,10 +700,19 @@ export function createProgram(): Command {
       ? await readSkeletonState(projectRoot, runIdFor("init", pedidoRegistrado.sha12))
       : null;
 
+    /*
+     * O build também consulta a base — é dela que vêm as skills que serão
+     * materializadas. Se ela não responder, o run segue com o que já está em
+     * `.capivara/skills/` de uma execução anterior: a base é conveniência, não
+     * dependência (§34).
+     */
+    const materialDoBuild = await lerDaBase(flags, (mensagem) => stdout.write(`${mensagem}\n`), { tolerante: true });
+
     const outcome = await runBuild({
       projectRoot,
       skeleton: esqueletoDoBuild,
       skipFlows: flags.flows === false,
+      ...(materialDoBuild && materialDoBuild !== "erro" ? { library: materialDoBuild.documents } : {}),
       ...(terminalBuild
         ? {
             askPrerequisite: async (rendered: string) => {

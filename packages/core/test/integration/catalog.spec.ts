@@ -920,8 +920,8 @@ const ESQUELETO: Skeleton = {
   ],
   rules: [],
   phases: [
-    { number: 1, title: "Fundação de dados", goal: "migrations", dependsOn: "none", covers: ["workflow 1"], taskCount: 2 },
-    { number: 2, title: "API", goal: "rotas", dependsOn: "Phase 1", covers: ["statuses"], taskCount: 2 },
+    { number: 1, title: "Fundação de dados", goal: "migrations", dependsOn: "none", covers: ["workflow 1"], areas: ["dados"], taskCount: 2 },
+    { number: 2, title: "API", goal: "rotas", dependsOn: "Phase 1", covers: ["statuses"], areas: ["backend"], taskCount: 2 },
   ],
   mvpCutPhase: 2,
 };

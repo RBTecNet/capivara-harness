@@ -8,6 +8,7 @@ export * from "./init/index.js";
 export * from "./loop/index.js";
 export * from "./tui/index.js";
 export * from "./prompts/index.js";
+export * from "./mcp/index.js";
 export { listProviders, renderProviderList } from "./commands/providers.js";
 export { diagnose, renderDiagnosis } from "./commands/doctor.js";
 export type { Diagnosis, DoctorOptions, Health } from "./commands/doctor.js";

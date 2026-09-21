@@ -8,7 +8,9 @@ import { listProviders, renderProviderList } from "./commands/providers.js";
 import { diagnose, renderDiagnosis } from "./commands/doctor.js";
 import { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
 import { BUILD_ROLES, INIT_ROLES, describeRoles, renderUnresolved, rolesFromFlags, unresolvedRoles, type CliRoleFlags } from "./commands/options.js";
-import { InitBlockedError, readRequestState, readSkeletonState, resolveRequest, runInit, runPlan } from "./init/index.js";
+import { InitBlockedError, readRequestState, readSkeletonState, requestFromLibrary, resolveRequest, runInit, runPlan } from "./init/index.js";
+import { createMcpClient, fetchProjectMaterial } from "./mcp/index.js";
+import type { ProjectMaterial } from "./mcp/index.js";
 import type { InitOptions } from "./init/index.js";
 import { commitSpecification, runBuild } from "./loop/index.js";
 import {
@@ -308,6 +310,43 @@ function estagioInterativo(options: {
   };
 }
 
+/**
+ * O material do projeto na base documental, quando o operador pediu por ela.
+ *
+ * Devolve `null` quando não há base a consultar — e aí o pedido vem por texto ou
+ * arquivo, como sempre veio. Devolve `"erro"` quando havia base e ela não
+ * respondeu: seguir em frente com o pedido digitado seria construir outra coisa
+ * sem avisar.
+ */
+async function lerDaBase(
+  flags: { mcp?: string; mcpProject?: string },
+  escrever: (mensagem: string) => void,
+): Promise<ProjectMaterial | null | "erro"> {
+  const url = flags.mcp?.trim();
+  const projeto = flags.mcpProject?.trim();
+  if (!url && !projeto) return null;
+
+  if (!url || !projeto) {
+    escrever("erro: --mcp e --mcp-project andam juntos: a URL diz onde é a base, o projeto diz o que ler dela.");
+    return "erro";
+  }
+
+  try {
+    const client = createMcpClient({ url });
+    await client.initialize();
+    const material = await fetchProjectMaterial(client, projeto);
+    escrever(
+      `base documental: ${client.server?.name ?? "servidor"} — pedido do projeto ${projeto}` +
+        `, ${material.documents.length} documento(s) selecionado(s)`,
+    );
+    for (const documento of material.documents) escrever(`  · ${documento.name}`);
+    return material;
+  } catch (erro) {
+    escrever(`erro: ${erro instanceof Error ? erro.message : String(erro)}`);
+    return "erro";
+  }
+}
+
 export function createProgram(): Command {
   const program = new Command();
   program
@@ -343,12 +382,14 @@ export function createProgram(): Command {
       .description("Entrevista e desenha as fases do projeto até PLAN READY")
       .argument("[pedido]", "o que você quer construir; aceita @arquivo")
       .option("--file <caminho>", "lê o pedido de um arquivo")
+      .option("--mcp <url>", "base documental por MCP, como http://localhost:7777/mcp")
+      .option("--mcp-project <nome>", "de qual projeto da base vêm o pedido e os documentos")
       .option("--max-audit-returns <n>", "devoluções do auditor por documento", "3")
       .option("--max-interview-rounds <n>", "rodadas de entrevista", "3")
       .option("--fresh", "ignora o que este run já publicou e recomeça do zero")
       .option("--no-dashboard", "não desenha o painel; só as linhas de progresso")
       .option("--no-commit", "não versiona a especificação ao chegar em PLAN READY"),
-  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; maxAuditReturns: string; maxInterviewRounds: string; fresh?: boolean; dashboard?: boolean; commit?: boolean }) => {
+  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; mcp?: string; mcpProject?: string; maxAuditReturns: string; maxInterviewRounds: string; fresh?: boolean; dashboard?: boolean; commit?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const configured = rolesFromFlags(flags);
     const semProvider = unresolvedRoles(configured, INIT_ROLES);
@@ -357,10 +398,27 @@ export function createProgram(): Command {
       process.exitCode = 2;
       return;
     }
-    const request = await resolveRequest(projectRoot, {
-      ...(pedido !== undefined ? { prompt: pedido } : {}),
-      ...(flags.file !== undefined ? { file: flags.file } : {}),
-    });
+    /*
+     * A terceira forma de dizer o que construir.
+     *
+     * Quem busca é o harness, não o modelo: o pedido e os documentos do projeto
+     * são o insumo do run, e insumo não pode depender de alguém lembrar de
+     * chamar uma ferramenta. O que chega aqui é texto com sha, indistinguível
+     * de um arquivo lido do disco — e é assim que o resto do ciclo continua
+     * funcionando sem saber que existe uma base documental.
+     */
+    const material = await lerDaBase(flags, (mensagem) => stdout.write(`${mensagem}\n`));
+    if (material === "erro") {
+      process.exitCode = 2;
+      return;
+    }
+
+    const request = material
+      ? requestFromLibrary(flags.mcpProject!, material.request)
+      : await resolveRequest(projectRoot, {
+          ...(pedido !== undefined ? { prompt: pedido } : {}),
+          ...(flags.file !== undefined ? { file: flags.file } : {}),
+        });
     const language = detectLanguage(request.text, flags.language);
     const roles = configured;
 
@@ -390,6 +448,7 @@ export function createProgram(): Command {
       const outcome = await runInit({
         projectRoot,
         request,
+        ...(material ? { library: material.documents } : {}),
         language,
         maxAuditReturns: Number(flags.maxAuditReturns),
         maxInterviewRounds: Number(flags.maxInterviewRounds),

@@ -1,24 +1,36 @@
 /**
  * Resolução do pedido do desenvolvedor.
  *
- * Texto direto, `@arquivo` ou `--file`. A fonte é hasheada porque ela define a
- * identidade do run: o mesmo pedido retoma o mesmo run, e um pedido alterado
- * começa outro em vez de reaproveitar entrevista e documentos de um pedido que
- * já não é aquele.
+ * Texto direto, `@arquivo`, `--file` — ou a base documental, por MCP. A fonte é
+ * hasheada porque ela define a identidade do run: o mesmo pedido retoma o mesmo
+ * run, e um pedido alterado começa outro em vez de reaproveitar entrevista e
+ * documentos de um pedido que já não é aquele.
+ *
+ * Isso vale igual para o pedido que veio da base: se ele for editado lá, o sha
+ * muda e o run é outro. O harness não precisa saber que a origem é remota para
+ * se comportar direito — precisa apenas ter o texto e o hash dele.
  */
 
 import { readFile } from "node:fs/promises";
 import { sha12 } from "../contract/stamps.js";
 import { safeProjectPath } from "../state/paths.js";
+import { uriDoPedido } from "../mcp/index.js";
 
-export type RequestOrigin = "text" | "file";
+export type RequestOrigin = "text" | "file" | "mcp";
 
 export interface DeveloperRequest {
   text: string;
   origin: RequestOrigin;
-  /** Caminho relativo ao projeto quando veio de arquivo. */
+  /** Caminho relativo ao projeto, ou o URI do recurso quando veio da base. */
   path: string | null;
   sha12: string;
+}
+
+/** O pedido de um projeto da base documental, já lido. */
+export function requestFromLibrary(projeto: string, texto: string): DeveloperRequest {
+  const text = texto.trim();
+  if (text === "") throw new EmptyRequestError();
+  return { text, origin: "mcp", path: uriDoPedido(projeto), sha12: sha12(text) };
 }
 
 export class EmptyRequestError extends Error {

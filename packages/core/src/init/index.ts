@@ -1,4 +1,4 @@
-export { EmptyRequestError, resolveRequest } from "./request.js";
+export { EmptyRequestError, requestFromLibrary, resolveRequest } from "./request.js";
 export type { DeveloperRequest, RequestOrigin } from "./request.js";
 export { INVENTORY_LIMITS, inspectProject, summarizeInventory } from "./inventory.js";
 export type { Inventory, InventoryEntry } from "./inventory.js";

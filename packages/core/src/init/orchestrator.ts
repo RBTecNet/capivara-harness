@@ -29,6 +29,7 @@ import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEve
 import type { RunStage } from "../state/index.js";
 import { detectRateLimit, planWait } from "../loop/ratelimit.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
+import { renderLibraryBlock, type McpDocument } from "../mcp/index.js";
 import { INIT_ARTIFACTS, evaluateReadiness } from "./readiness.js";
 import { evaluatePlanReadiness, renderPlanReadiness } from "./plan-readiness.js";
 import { readSkeletonState, writeSkeletonState } from "./skeleton-state.js";
@@ -62,6 +63,8 @@ export type DecideStandoff = (rendered: string) => Promise<string>;
 export interface InitOptions {
   projectRoot: string;
   request: DeveloperRequest;
+  /** Documentos que a base documental entregou para este projeto. */
+  library?: McpDocument[];
   language: string;
   call: AgentCaller;
   ask: AskDeveloper;
@@ -331,7 +334,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   };
 
   const inventory = await inspectProject(options.projectRoot);
-  const inventoryText = summarizeInventory(inventory);
+  const daBase = renderLibraryBlock(options.library ?? []);
+  const inventoryText = daBase === "" ? summarizeInventory(inventory) : `${summarizeInventory(inventory)}\n\n${daBase}`;
+  if (daBase !== "") announce(`  ${options.library?.length} documento(s) da base documental no contexto`);
   announce(inventory.empty ? "Projeto vazio: greenfield." : `Inventário: ${inventory.files.length} arquivo(s).`);
 
   /** O plano executável publicado por este run. */

@@ -45,7 +45,9 @@ export async function readRequestState(projectRoot: string): Promise<DeveloperRe
     if (text === "") return null;
     return {
       text,
-      origin: parsed.origin === "file" ? "file" : "text",
+      // As três origens viajam de volta como são. Achatar a origem da base em
+      // "text" faria o `plan` relatar um pedido digitado à mão que ninguém digitou.
+      origin: parsed.origin === "file" || parsed.origin === "mcp" ? parsed.origin : "text",
       path: typeof parsed.path === "string" ? parsed.path : null,
       sha12: sha12(text),
     };

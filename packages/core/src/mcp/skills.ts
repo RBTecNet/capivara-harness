@@ -13,7 +13,7 @@
  * nenhum — é o cruzamento de duas listas fechadas.
  */
 
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { McpDocument } from "./client.js";
 
@@ -22,6 +22,16 @@ export const SKILLS_DIR = join(".capivara", "skills");
 
 /** A base de um pacote, com o nome que a skill espera ver. */
 export const ARQUIVO_BASE = "SKILL.md";
+
+/** O índice que torna as skills legíveis sem a base. */
+export const INDICE = "index.json";
+
+interface EntradaDoIndice {
+  slug: string;
+  nome: string;
+  area: string;
+  uri: string;
+}
 
 export const AREAS = ["frontend", "backend", "dados", "infra", "qualidade", "geral"] as const;
 export type Area = (typeof AREAS)[number];
@@ -75,6 +85,66 @@ export async function materializarSkill(projectRoot: string, documento: McpDocum
   }
 
   return { slug, pasta, arquivos: (documento.files ?? []).length, bytes };
+}
+
+/**
+ * Escreve o índice das skills materializadas.
+ *
+ * Sem ele, uma execução com a base fora do ar acharia as pastas e não saberia a
+ * área de cada uma — e a seleção por fase, que é o motivo de tudo isto existir,
+ * voltaria a carregar tudo em toda fase. É o mesmo arquivo que o zip do projeto
+ * carrega, e por isso um projeto vindo de zip funciona igual.
+ */
+export async function escreverIndice(projectRoot: string, documentos: readonly McpDocument[]): Promise<void> {
+  const entradas: EntradaDoIndice[] = documentos.map((documento) => ({
+    slug: slugDaSkill(documento.uri),
+    nome: documento.name,
+    area: areaValida(documento.area ?? "geral"),
+    uri: documento.uri,
+  }));
+
+  await mkdir(join(projectRoot, SKILLS_DIR), { recursive: true });
+  await writeFile(join(projectRoot, SKILLS_DIR, INDICE), `${JSON.stringify(entradas, null, 2)}\n`, "utf8");
+}
+
+/**
+ * As skills que já estão no disco.
+ *
+ * É o caminho de quando a base não responde — e o de quem recebeu o projeto num
+ * zip e nunca teve base nenhuma. O harness lê o que foi materializado antes e
+ * segue: a base é conveniência, não dependência (§34).
+ *
+ * Os arquivos das skills não são carregados para a memória aqui: quem os lê é o
+ * modelo, direto do disco, que é o ponto do desenho.
+ */
+export async function lerSkillsDoDisco(projectRoot: string): Promise<McpDocument[]> {
+  const pasta = join(projectRoot, SKILLS_DIR);
+
+  const indiceBruto = await readFile(join(pasta, INDICE), "utf8").catch(() => "");
+  const indice: EntradaDoIndice[] = indiceBruto === "" ? [] : (JSON.parse(indiceBruto) as EntradaDoIndice[]);
+  const porSlug = new Map(indice.map((entrada) => [entrada.slug, entrada]));
+
+  const entradas = await readdir(pasta, { withFileTypes: true }).catch(() => []);
+  const documentos: McpDocument[] = [];
+
+  for (const entrada of entradas) {
+    if (!entrada.isDirectory()) continue;
+    const texto = await readFile(join(pasta, entrada.name, ARQUIVO_BASE), "utf8").catch(() => "");
+    if (texto.trim() === "") continue;
+
+    const doIndice = porSlug.get(entrada.name);
+    documentos.push({
+      uri: doIndice?.uri ?? `capivara://local/docs/skill/${entrada.name}`,
+      name: doIndice?.nome ?? entrada.name,
+      text: texto,
+      kind: "skill",
+      // Sem índice não há área declarada: `geral` é a degradação certa, porque
+      // faz a skill chegar em toda fase em vez de não chegar em nenhuma.
+      area: doIndice?.area ?? "geral",
+    });
+  }
+
+  return documentos;
 }
 
 export interface SelecaoDeSkills {

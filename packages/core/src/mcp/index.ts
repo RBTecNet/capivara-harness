@@ -5,9 +5,12 @@ export type { LibraryProject, ProjectMaterial } from "./library.js";
 export {
   AREAS,
   ARQUIVO_BASE,
+  INDICE,
   SKILLS_DIR,
   areaValida,
   escolherSkills,
+  escreverIndice,
+  lerSkillsDoDisco,
   materializarSkill,
   renderSkillBlock,
   slugDaSkill,

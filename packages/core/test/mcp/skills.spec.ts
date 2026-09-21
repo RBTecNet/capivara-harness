@@ -13,7 +13,17 @@ import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ARQUIVO_BASE, SKILLS_DIR, areaDe, areaValida, escolherSkills, materializarSkill, renderSkillBlock } from "../../src/mcp/index.js";
+import {
+  ARQUIVO_BASE,
+  SKILLS_DIR,
+  areaDe,
+  areaValida,
+  escolherSkills,
+  escreverIndice,
+  lerSkillsDoDisco,
+  materializarSkill,
+  renderSkillBlock,
+} from "../../src/mcp/index.js";
 import type { McpDocument } from "../../src/mcp/index.js";
 
 let projectRoot = "";
@@ -185,6 +195,44 @@ describe("o bloco que vai ao prompt", () => {
  * recebia a skill de frontend. O teste unitário de cada lado passava; a primeira
  * execução real não.
  */
+/**
+ * O projeto que veio de um zip, rodando sem base nenhuma.
+ *
+ * É a prova do princípio do §34: a base é conveniência. Quem recebeu o material
+ * de outra pessoa, ou está com o servidor fora do ar, continua trabalhando — e
+ * a seleção por área continua valendo, que é o que impede a fase de banco de
+ * carregar a skill de frontend.
+ */
+describe("sem base, o disco", () => {
+  it("lê as skills materializadas e respeita a área do índice", async () => {
+    await materializarSkill(projectRoot, skill("frontend-design", "frontend", "## Design"));
+    await materializarSkill(projectRoot, skill("revisar-diff", "geral", "## Revisar"));
+    await escreverIndice(projectRoot, [skill("frontend-design", "frontend"), skill("revisar-diff", "geral")]);
+
+    const doDisco = await lerSkillsDoDisco(projectRoot);
+    expect(doDisco.map((documento) => documento.name).sort()).toEqual(["frontend-design", "revisar-diff"]);
+    expect(doDisco.find((documento) => documento.name === "frontend-design")?.area).toBe("frontend");
+
+    // E a escolha por fase continua valendo, sem base nenhuma.
+    expect(escolherSkills(doDisco, ["dados"]).inteiras.map((d) => d.name)).toEqual(["revisar-diff"]);
+  });
+
+  /*
+   * Sem índice não há área declarada. `geral` é a degradação certa: faz a skill
+   * chegar em toda fase, em vez de não chegar em nenhuma.
+   */
+  it("pasta sem índice vira skill geral, em vez de sumir", async () => {
+    await materializarSkill(projectRoot, skill("solta", "frontend", "## Solta"));
+    const doDisco = await lerSkillsDoDisco(projectRoot);
+    expect(doDisco).toHaveLength(1);
+    expect(doDisco[0]?.area).toBe("geral");
+  });
+
+  it("projeto sem skills não quebra", async () => {
+    expect(await lerSkillsDoDisco(projectRoot)).toEqual([]);
+  });
+});
+
 describe("a área atravessa o protocolo", () => {
   it("lê o marcador que a base escreve hoje", () => {
     expect(areaDe("skill · area=frontend · usado pelo projeto Biblioteca")).toBe("frontend");

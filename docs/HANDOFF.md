@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 967 testes em 52 arquivos, `npm run check` verde |
+| suíte | 984 testes em 53 arquivos, `npm run check` verde |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
 O ciclo de três estágios foi desenvolvido no branch `ciclo-unico` e fundido em
@@ -43,6 +43,13 @@ caro terminou as sete fases quando o harness parou de esconder informação dele
 
 Quatro frentes, todas nascidas de um run real. As três primeiras estão
 commitadas; o gate 4 é o trabalho corrente.
+
+**§34 — a base documental.** O harness lê o pedido, as decisões e as skills de
+uma base MCP (`doc-center`, em repositório próprio), materializa as skills em
+`.capivara/skills/` e escolhe por área quais entram em cada fase. De volta,
+registra as decisões da entrevista, o que o executor aprendeu e onde o trabalho
+parou — tudo como rascunho, que não é servido a run nenhum até alguém aprovar. A
+base é conveniência: fora do ar, o build segue com o que está no disco.
 
 **§33 — o gate 4, que abre a aplicação.** O §28 deixou de ser pendente. Os fluxos
 que o esqueleto sempre declarou viram roteiros Playwright, escritos por uma sessão
@@ -138,7 +145,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 967 testes
+npm run check     # build + typecheck + 984 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

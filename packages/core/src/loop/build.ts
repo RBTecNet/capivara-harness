@@ -12,7 +12,16 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { sha12 } from "../contract/stamps.js";
 import { workflowsForPhase, type Skeleton } from "../contract/index.js";
-import { escolherSkills, estadoComoMemoria, materializarSkill, renderSkillBlock, type McpDocument, type MemoriaParaRegistrar } from "../mcp/index.js";
+import {
+  escolherSkills,
+  escreverIndice,
+  estadoComoMemoria,
+  lerSkillsDoDisco,
+  materializarSkill,
+  renderSkillBlock,
+  type McpDocument,
+  type MemoriaParaRegistrar,
+} from "../mcp/index.js";
 import { startCommandFor } from "./acceptance.js";
 import type { FlowRunner } from "./flows.js";
 import {
@@ -260,14 +269,38 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
      * nada mudar. O que muda por fase é a escolha — quais entram no prompt —, e
      * essa é barata.
      */
-    const skills = (options.library ?? []).filter((documento) => (documento.kind ?? "") === "skill");
+    const daBase = (options.library ?? []).filter((documento) => (documento.kind ?? "") === "skill");
     const pastaPorUri = new Map<string, string>();
-    for (const skill of skills) {
+
+    for (const skill of daBase) {
       const escrita = await materializarSkill(options.projectRoot, skill);
       pastaPorUri.set(skill.uri, escrita.pasta);
       announce(
         `skill materializada: ${escrita.pasta}/ (${escrita.arquivos + 1} arquivo(s), ${Math.round(escrita.bytes / 1024)} KB)`,
       );
+    }
+    if (daBase.length > 0) await escreverIndice(options.projectRoot, daBase);
+
+    /*
+     * Sem base, o disco.
+     *
+     * É o caminho de quem está com a base fora do ar e o de quem recebeu o
+     * projeto num zip e nunca teve base nenhuma. Materializar não é preciso: os
+     * arquivos já estão lá, e o índice diz a área de cada um.
+     */
+    const skills =
+      daBase.length > 0
+        ? daBase
+        : await (async (): Promise<McpDocument[]> => {
+            const doDisco = await lerSkillsDoDisco(options.projectRoot);
+            if (doDisco.length > 0) {
+              announce(`${doDisco.length} skill(s) lida(s) de .capivara/skills/ (a base não entregou nenhuma)`);
+            }
+            return doDisco;
+          })();
+
+    for (const skill of skills) {
+      if (!pastaPorUri.has(skill.uri)) pastaPorUri.set(skill.uri, `.capivara/skills/${skill.uri.split("/").pop() ?? ""}`);
     }
 
     /**

@@ -2528,3 +2528,55 @@ botão e uma lista, e o fluxo declarado em três passos.
 
 O segundo caso é o defeito do §28 em miniatura: o código está lá, o fluxo não
 acontece, e agora alguma coisa no harness percebe.
+
+### O primeiro run real do gate, e o que ele mostrou
+
+O `cron5` foi reconstruído do zero com o sonnet nos quatro papéis: `init` → `plan`
+→ `build`, quatro fases, aceitação operacional aprovada. O gate 4 reprovou **três
+das quatro fases**, e nas três o executor tinha declarado conclusão com os outros
+quatro gates verdes:
+
+| fase | o que o gate 4 pegou |
+|---|---|
+| P01 | a aplicação não subia |
+| P03 | `AI_BASE_URL` ausente matava o processo na subida — derrubando inclusive a aba que não usa IA |
+| P04 | o runner de fluxos não estava instalado |
+
+A P03 é o §28 acontecendo: os testes da fase passavam com ambiente controlado, o
+verificador leu o código e aprovou, e o produto não subia numa máquina limpa. A
+aceitação operacional pegaria isso também — mas só depois de todas as fases
+fecharem verdes, longe de onde nasceu.
+
+**A mensagem estava errada.** Nas duas primeiras reprovações a causa entregue ao
+executor foi "um passo falhou onde o usuário passaria" quando nenhum passo tinha
+rodado: o produto não subira. Mandar consertar o fluxo em vez do entrypoint é a
+mesma família do §31 — o harness sabia a diferença e não contava. Corrigido: as
+três formas do runner dizer que não subiu viram uma causa própria, que nomeia o
+comando de subida e a porta.
+
+**E o gate induziu um conserto de mentira.** Para satisfazer "a aplicação precisa
+subir", o executor não fez o servidor subir sem configuração de IA: criou um
+`.env` apontando `AI_BASE_URL` para `127.0.0.1:9` — a porta de descarte. O
+produto sobe, o gate passa, e sem aquele arquivo ele continua morrendo.
+
+O roteiro do fluxo da IA fechou o círculo. Como o produto chama o provedor **do
+servidor**, e não do navegador, o roteirista não tinha como tornar o caminho
+feliz determinístico — e escreveu ramos condicionais:
+
+```ts
+if (respostaOk) { /* afirma a linha e as explicações na tela */ }
+else            { expect(resposta.ok()).toBe(false); }   // tautologia
+```
+
+Esse roteiro passa nos dois mundos, e passa em todas as conferências mecânicas:
+cita os sete passos, tem `expect` em cada um, não usa `skip`, não intercepta o
+backend do produto. É o afrouxamento que o §33 admitiu não conseguir pegar,
+encontrado no primeiro run de verdade.
+
+**O que isso exige, e ainda não existe:** um fluxo que depende de terceiro só é
+verificável se o harness puder dar ao produto um duplo previsível daquele
+terceiro. O esqueleto já sabe quais serviços externos existem e por quais
+variáveis eles são configurados; o gate 4 sobe a aplicação e escolhe o ambiente.
+Falta ligar as duas pontas. Enquanto não ligar, o gate prova que o produto sobe e
+que os fluxos locais acontecem — e sobre os que atravessam a fronteira, não prova
+o que parece provar.

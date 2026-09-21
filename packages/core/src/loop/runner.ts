@@ -242,6 +242,10 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       lastCause = g4.toolMissing === true ? g4.cause : `${noChangeNote}${g4.cause}`;
       if (g4.toolMissing === true) {
         announce(`[${session.id}] o runner de fluxos não está instalado; o executor vai instalá-lo no projeto`);
+      } else if (g4.startupFailed === true) {
+        // Dito na tela também: quem olha o log precisa saber que o produto não
+        // subiu, e não que um fluxo reprovou.
+        announce(`[${session.id}] gate 4: a aplicação não subiu; nenhum fluxo foi percorrido`);
       }
       return false;
     };

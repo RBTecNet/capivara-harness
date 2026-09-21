@@ -207,7 +207,20 @@ export interface FlowGateOptions {
 
 export type FlowGateResult =
   | { green: true; skipped: string; scripts: string[] }
-  | { green: false; cause: string; toolMissing?: boolean };
+  | { green: false; cause: string; toolMissing?: boolean; startupFailed?: boolean };
+
+/**
+ * A aplicação nem chegou a subir.
+ *
+ * As três formas que o runner usa para dizer isso — estourou o tempo, saiu
+ * cedo, não conseguiu iniciar — têm em comum o nome da configuração. Distinguir
+ * importa: no primeiro run real do gate, a fase 1 recebeu "um passo falhou onde
+ * o usuário passaria" quando nenhum passo tinha rodado, porque o produto não
+ * subiu. O executor foi mandado consertar o fluxo em vez do entrypoint.
+ */
+function falhouAoSubir(output: string): boolean {
+  return /config\.webServer/.test(output);
+}
 
 /**
  * O gate inteiro: garante um roteiro por fluxo da fase e roda todos os que existem.
@@ -285,6 +298,19 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
         "o runner de fluxos não está instalado: o gate 4 abre a aplicação com @playwright/test. " +
         `Instale-o como dependência de desenvolvimento do projeto e garanta o navegador ` +
         `(\`npx playwright install chromium\`). Saída:\n${tail(run.output)}`,
+    };
+  }
+
+  if (run.exitCode !== 0 && falhouAoSubir(run.output)) {
+    return {
+      green: false,
+      startupFailed: true,
+      cause:
+        `a aplicação NÃO SUBIU, e por isso nenhum fluxo chegou a ser percorrido — isto não é ` +
+        `defeito dos fluxos.\n\nO gate 4 executa \`${options.startCommand}\` a partir da raiz do ` +
+        `projeto, com PORT=${port} no ambiente, e espera http://127.0.0.1:${port} responder. ` +
+        `O entrypoint precisa escutar na porta que vem em PORT e servir alguma resposta ali.` +
+        `\n${tail(run.output)}`,
     };
   }
 

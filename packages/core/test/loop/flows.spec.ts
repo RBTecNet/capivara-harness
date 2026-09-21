@@ -218,6 +218,61 @@ describe("o gate", () => {
     expect(resultado.cause).toContain("botão não encontrado");
   });
 
+  /*
+   * O primeiro run real do gate, no cron5: a fase 1 recebeu "um passo falhou
+   * onde o usuário passaria" quando nenhum passo tinha rodado — o produto não
+   * subiu. A causa mandava o executor consertar o fluxo em vez do entrypoint.
+   */
+  it("aplicação que não sobe é dita como tal, e não como fluxo reprovado", async () => {
+    const saidaReal = "Error: Timed out waiting 180000ms from config.webServer.";
+    const resultado = await gate4({
+      ...base,
+      projectRoot,
+      startCommand: "npm run build && npm start",
+      author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
+      runner: async () => ({ exitCode: 1, output: saidaReal }),
+    });
+
+    if (resultado.green) throw new Error("deveria reprovar");
+    expect(resultado.startupFailed).toBe(true);
+    expect(resultado.cause).toContain("NÃO SUBIU");
+    expect(resultado.cause).toContain("nenhum fluxo chegou a ser percorrido");
+    // O executor precisa saber o que rodar e onde escutar para consertar.
+    expect(resultado.cause).toContain("npm run build && npm start");
+    expect(resultado.cause).toContain("PORT=");
+    expect(resultado.cause).not.toContain("um passo falhou");
+  });
+
+  it("as três formas do runner dizer que não subiu contam como falha de subida", async () => {
+    const formas = [
+      "Error: Timed out waiting 180000ms from config.webServer.",
+      "[WebServer] Process from config.webServer exited early.",
+      "Error: Process from config.webServer was not able to start. Exit code: 1",
+    ];
+    for (const saida of formas) {
+      const resultado = await gate4({
+        ...base,
+        projectRoot,
+        author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
+        runner: async () => ({ exitCode: 1, output: saida }),
+      });
+      if (resultado.green) throw new Error("deveria reprovar");
+      expect(resultado.startupFailed, saida).toBe(true);
+    }
+  });
+
+  it("fluxo que reprova de verdade continua sendo dito como fluxo", async () => {
+    const resultado = await gate4({
+      ...base,
+      projectRoot,
+      author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
+      runner: async () => ({ exitCode: 1, output: "1) passo 2: clica em Interpretar\n   botão não encontrado" }),
+    });
+    if (resultado.green) throw new Error("deveria reprovar");
+    expect(resultado.startupFailed).toBeUndefined();
+    expect(resultado.cause).toContain("não cumpriu um fluxo declarado");
+  });
+
   it("runner ausente é defeito de ambiente, e diz o que instalar", async () => {
     const resultado = await gate4({
       ...base,

@@ -31,6 +31,7 @@ import {
   type SurveyDomain,
 } from "../contract/index.js";
 import { surveyDomainPrompt, surveyMapPrompt } from "../prompts/index.js";
+import { slugDoProjeto } from "../mcp/index.js";
 
 export const MAX_DOMINIOS = 8;
 
@@ -46,6 +47,31 @@ export interface SurveyCall {
   }>;
 }
 
+/** O que fazer quando a base já tem um projeto com aquele nome. */
+export type DecisaoDeColisao = "atualizar" | "novo" | "local";
+
+/**
+ * A base, vista pelo levantamento.
+ *
+ * O levantamento não sabe o que é MCP: recebe três perguntas fechadas e um
+ * envio. Isso mantém o protocolo na CLI e deixa a política — quando checar, o
+ * que fazer na colisão, o que acontece quando ninguém responde — aqui, onde dá
+ * para testá-la sem servidor nenhum.
+ */
+export interface SurveyBase {
+  /** `true`, `false`, ou `null` quando a base não respondeu. */
+  existe: (slug: string) => Promise<boolean | null>;
+  enviar: (slug: string, markdown: string) => Promise<{ ok: boolean; mensagem: string }>;
+  /** O slug que o operador apontou. Sem ele, o nome sai da aplicação levantada. */
+  projeto?: string;
+  /**
+   * O que fazer quando já existe. Ausente significa não tocar na base: sem
+   * ninguém para responder, sobrescrever o levantamento de outro projeto seria
+   * decidir no lugar de quem não foi perguntado.
+   */
+  decidir?: (slug: string) => Promise<DecisaoDeColisao>;
+}
+
 export interface SurveyOptions {
   /** A aplicação a levantar. Nunca é escrita. */
   projectRoot: string;
@@ -55,14 +81,17 @@ export interface SurveyOptions {
   call: SurveyCall;
   announce?: (line: string) => void;
   maxDomains?: number;
+  base?: SurveyBase;
 }
 
 export interface SurveyOutcome {
   survey: Survey;
   coverage: SurveyCoverage;
   markdown: string;
-  /** Os arquivos escritos, em caminho absoluto. */
+  /** Os arquivos escritos, em caminho absoluto. Sempre existem. */
   written: string[];
+  /** O que aconteceu com a base, quando havia uma apontada. */
+  destino?: { slug: string; enviado: boolean; mensagem: string };
 }
 
 export class SurveyBlockedError extends Error {
@@ -142,6 +171,64 @@ async function pedir(
   throw new SurveyBlockedError(`o levantamento de ${subject} veio inválido ${tentativas} vezes: ${defeitos.join("; ")}`);
 }
 
+/**
+ * Qual slug usar, e se a base pode receber.
+ *
+ * Chamado no primeiro instante em que o nome é conhecido — antes de gastar uma
+ * sessão por domínio. Descobrir a colisão no fim, com o levantamento inteiro
+ * pago, é descobrir tarde.
+ */
+async function resolverDestino(
+  base: SurveyBase,
+  nome: string,
+  announce: (linha: string) => void,
+): Promise<{ slug: string; podeEnviar: boolean }> {
+  const slug = base.projeto?.trim() || slugDoProjeto(nome);
+  if (slug === "") return { slug: "", podeEnviar: false };
+
+  const existe = await base.existe(slug);
+
+  if (existe === null) {
+    // Silêncio não é ausência: criar por cima no primeiro soluço de rede seria
+    // escrever em projeto alheio. O levantamento segue e fica em disco (§34).
+    announce(`a base não respondeu; o levantamento fica só nos arquivos locais`);
+    return { slug, podeEnviar: false };
+  }
+
+  if (!existe) return { slug, podeEnviar: true };
+
+  announce(`a base já tem um projeto chamado "${slug}"`);
+  if (!base.decidir) {
+    announce("  sem ninguém para decidir, não vou mexer nele; o levantamento fica nos arquivos locais");
+    return { slug, podeEnviar: false };
+  }
+
+  const decisao = await base.decidir(slug);
+  if (decisao === "local") {
+    announce("  o levantamento fica só nos arquivos locais");
+    return { slug, podeEnviar: false };
+  }
+  if (decisao === "atualizar") {
+    announce(`  o levantamento de "${slug}" será substituído; o pedido escrito lá é preservado`);
+    return { slug, podeEnviar: true };
+  }
+
+  /*
+   * Um nome livre ao lado do que existe. O sufixo é numérico e não uma data:
+   * quem abre a base vê `locadora-2` e entende sem precisar de legenda.
+   */
+  for (let sufixo = 2; sufixo <= 50; sufixo += 1) {
+    const candidato = `${slug}-${sufixo}`;
+    if ((await base.existe(candidato)) === false) {
+      announce(`  vai como "${candidato}", ao lado do que já existe`);
+      return { slug: candidato, podeEnviar: true };
+    }
+  }
+
+  announce("  não achei nome livre; o levantamento fica nos arquivos locais");
+  return { slug, podeEnviar: false };
+}
+
 export async function runSurvey(options: SurveyOptions): Promise<SurveyOutcome> {
   const announce = options.announce ?? ((): void => {});
   const maxDomains = options.maxDomains ?? MAX_DOMINIOS;
@@ -162,6 +249,16 @@ export async function runSurvey(options: SurveyOptions): Promise<SurveyOutcome> 
   );
 
   announce(`${mapa.domains.length} domínio(s): ${mapa.domains.map((domain) => domain.name).join(", ")}`);
+
+  /*
+   * O destino é resolvido AQUI, e não no fim.
+   *
+   * É o primeiro instante em que o nome da aplicação existe — e é uma chamada de
+   * modelo antes das N sessões de domínio. Perguntar "já existe um projeto com
+   * esse nome, o que faço?" depois de pagar o levantamento inteiro seria
+   * perguntar quando a resposta já não muda o custo.
+   */
+  const destino = options.base ? await resolverDestino(options.base, mapa.application, announce) : null;
 
   /*
    * O mapa manda nas três coisas que são dele — nome, stack e domínios — e em
@@ -208,5 +305,24 @@ export async function runSurvey(options: SurveyOptions): Promise<SurveyOutcome> 
   await writeFile(caminhoJson, `${JSON.stringify(survey, null, 2)}\n`, "utf8");
   await writeFile(caminhoCobertura, `${JSON.stringify(coverage, null, 2)}\n`, "utf8");
 
-  return { survey, coverage, markdown, written: [caminhoMarkdown, caminhoJson, caminhoCobertura] };
+  const written = [caminhoMarkdown, caminhoJson, caminhoCobertura];
+
+  /*
+   * A base recebe depois dos arquivos, sempre.
+   *
+   * O levantamento custou uma sessão por domínio e já está escrito; um servidor
+   * que cai no último segundo não pode fazê-lo sumir. A base é conveniência, não
+   * dependência (§34).
+   */
+  if (options.base && destino && destino.slug !== "") {
+    if (!destino.podeEnviar) {
+      return { survey, coverage, markdown, written, destino: { slug: destino.slug, enviado: false, mensagem: "não enviado" } };
+    }
+
+    const envio = await options.base.enviar(destino.slug, markdown);
+    announce(envio.ok ? `base: ${envio.mensagem}` : `aviso: não consegui enviar à base (${envio.mensagem}); os arquivos locais estão escritos`);
+    return { survey, coverage, markdown, written, destino: { slug: destino.slug, enviado: envio.ok, mensagem: envio.mensagem } };
+  }
+
+  return { survey, coverage, markdown, written };
 }

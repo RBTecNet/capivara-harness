@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SURVEY_CONTRACT } from "../../src/contract/index.js";
 import { SurveyBlockedError, runSurvey } from "../../src/survey/index.js";
+import type { SurveyBase } from "../../src/survey/index.js";
 
 let legado = "";
 let saida = "";
@@ -187,5 +188,140 @@ describe("o levantamento", () => {
       runSurvey({ projectRoot: vazio, outputRoot: saida, language: "português do Brasil", call }),
     ).rejects.toThrow(/vazio/);
     await rm(vazio, { recursive: true, force: true });
+  });
+});
+
+/**
+ * Onde o levantamento fica guardado.
+ *
+ * Os arquivos locais são o piso, sempre: a base é conveniência, não dependência
+ * (§34). O que a base acrescenta é o caminho até o `init` — e o nome do projeto
+ * sai do nome da aplicação, sem ninguém digitar. Quando esse nome já existe lá,
+ * ninguém decide por quem não foi perguntado.
+ */
+describe("o destino do levantamento", () => {
+  const base = (overrides: Partial<SurveyBase> = {}): SurveyBase & { enviados: { slug: string }[] } => {
+    const enviados: { slug: string }[] = [];
+    return {
+      enviados,
+      existe: async () => false,
+      enviar: async (slug: string) => {
+        enviados.push({ slug });
+        return { ok: true, mensagem: `gravado em ${slug}` };
+      },
+      ...overrides,
+    } as SurveyBase & { enviados: { slug: string }[] };
+  };
+
+  it("o projeto é criado com o nome da aplicação levantada, sem ninguém digitar", async () => {
+    const { call } = modelo(respostasBoas());
+    const destino = base();
+    const resultado = await runSurvey({ projectRoot: legado, outputRoot: saida, language: "pt", call, base: destino });
+
+    expect(destino.enviados.map((envio) => envio.slug)).toEqual(["locadora"]);
+    expect(resultado.destino).toEqual({ slug: "locadora", enviado: true, mensagem: "gravado em locadora" });
+  });
+
+  it("o slug pedido na linha de comando ganha do nome da aplicação", async () => {
+    const { call } = modelo(respostasBoas());
+    const destino = base({ projeto: "locadora-antiga" });
+    await runSurvey({ projectRoot: legado, outputRoot: saida, language: "pt", call, base: destino });
+
+    expect(destino.enviados.map((envio) => envio.slug)).toEqual(["locadora-antiga"]);
+  });
+
+  /*
+   * Sem ninguém para responder, mexer no projeto de outra pessoa é decidir no
+   * lugar de quem não foi perguntado.
+   */
+  it("projeto que já existe, e ninguém para decidir: a base não é tocada", async () => {
+    const { call } = modelo(respostasBoas());
+    const destino = base({ existe: async () => true });
+    const resultado = await runSurvey({ projectRoot: legado, outputRoot: saida, language: "pt", call, base: destino });
+
+    expect(destino.enviados).toEqual([]);
+    expect(resultado.destino?.enviado).toBe(false);
+    // E o levantamento continua escrito.
+    expect(resultado.written).toHaveLength(3);
+  });
+
+  it("quem decide atualizar substitui o levantamento do projeto que existe", async () => {
+    const { call } = modelo(respostasBoas());
+    const destino = base({ existe: async () => true, decidir: async () => "atualizar" });
+    await runSurvey({ projectRoot: legado, outputRoot: saida, language: "pt", call, base: destino });
+
+    expect(destino.enviados.map((envio) => envio.slug)).toEqual(["locadora"]);
+  });
+
+  it("quem decide criar outro ganha o primeiro nome livre ao lado", async () => {
+    const ocupados = new Set(["locadora", "locadora-2"]);
+    const { call } = modelo(respostasBoas());
+    const destino = base({ existe: async (slug: string) => ocupados.has(slug), decidir: async () => "novo" });
+    await runSurvey({ projectRoot: legado, outputRoot: saida, language: "pt", call, base: destino });
+
+    expect(destino.enviados.map((envio) => envio.slug)).toEqual(["locadora-3"]);
+  });
+
+  it("quem decide ficar local não manda nada", async () => {
+    const { call } = modelo(respostasBoas());
+    const destino = base({ existe: async () => true, decidir: async () => "local" });
+    await runSurvey({ projectRoot: legado, outputRoot: saida, language: "pt", call, base: destino });
+
+    expect(destino.enviados).toEqual([]);
+  });
+
+  /*
+   * Silêncio da base não é "não existe". Tratar como ausência criaria projeto
+   * por cima de outro no primeiro soluço de rede.
+   */
+  it("base que não responde não vira projeto novo — e o levantamento fica em disco", async () => {
+    const { call } = modelo(respostasBoas());
+    const destino = base({ existe: async () => null });
+    const linhas: string[] = [];
+    const resultado = await runSurvey({
+      projectRoot: legado,
+      outputRoot: saida,
+      language: "pt",
+      call,
+      base: destino,
+      announce: (linha) => void linhas.push(linha),
+    });
+
+    expect(destino.enviados).toEqual([]);
+    expect(linhas.join(" ")).toContain("a base não respondeu");
+    expect(await readFile(join(saida, "levantamento.md"), "utf8")).toContain("Levantamento");
+    expect(resultado.destino?.enviado).toBe(false);
+  });
+
+  /*
+   * A colisão é descoberta depois do mapa e antes das sessões de domínio: é o
+   * primeiro instante em que o nome existe, e o último em que a resposta ainda
+   * muda o custo.
+   */
+  it("a pergunta acontece antes de gastar uma sessão por domínio", async () => {
+    const { call, chamadas } = modelo(respostasBoas());
+    let quandoPerguntou = -1;
+    const destino = base({
+      existe: async () => true,
+      decidir: async () => {
+        quandoPerguntou = chamadas.length;
+        return "local";
+      },
+    });
+
+    await runSurvey({ projectRoot: legado, outputRoot: saida, language: "pt", call, base: destino });
+
+    // Uma chamada feita — o mapa. As duas de domínio ainda não aconteceram.
+    expect(quandoPerguntou).toBe(1);
+    expect(chamadas).toHaveLength(3);
+  });
+
+  it("falha no envio não derruba o levantamento: os arquivos já estão escritos", async () => {
+    const { call } = modelo(respostasBoas());
+    const destino = base({ enviar: async () => ({ ok: false, mensagem: "connection refused" }) });
+    const resultado = await runSurvey({ projectRoot: legado, outputRoot: saida, language: "pt", call, base: destino });
+
+    expect(resultado.destino).toEqual({ slug: "locadora", enviado: false, mensagem: "connection refused" });
+    expect(await readFile(join(saida, "levantamento.md"), "utf8")).toContain("Levantamento");
   });
 });

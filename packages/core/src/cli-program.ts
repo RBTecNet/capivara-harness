@@ -18,7 +18,7 @@ import {
   runInit,
   runPlan,
 } from "./init/index.js";
-import { createMcpClient, enviarLevantamento, fetchProjectMaterial, listLibraryProjects, registrarMemorias, type MemoriaParaRegistrar } from "./mcp/index.js";
+import { createMcpClient, enviarLevantamento, projetoExiste, fetchProjectMaterial, listLibraryProjects, registrarMemorias, type MemoriaParaRegistrar } from "./mcp/index.js";
 import type { ProjectMaterial } from "./mcp/index.js";
 import type { InitOptions } from "./init/index.js";
 import { commitSpecification, runBuild } from "./loop/index.js";
@@ -43,6 +43,7 @@ import { listarEfforts, listarModelos } from "./provider/index.js";
 import { runIdFor } from "./state/index.js";
 import { sha12 } from "./contract/index.js";
 import { MAX_DOMINIOS, SurveyBlockedError, runSurvey } from "./survey/index.js";
+import type { DecisaoDeColisao } from "./survey/index.js";
 import { VERSION } from "./version.js";
 
 interface CommonFlags extends CliRoleFlags {
@@ -405,7 +406,7 @@ export function createProgram(): Command {
       .option("--saida <caminho>", "onde gravar o levantamento", "./levantamento")
       .option("--max-dominios <n>", "teto de domínios do mapa", String(MAX_DOMINIOS))
       .option("--mcp <url>", "base documental por MCP, onde o levantamento vira projeto")
-      .option("--mcp-project <nome>", "o slug do projeto a criar ou atualizar na base"),
+      .option("--mcp-project <nome>", "força o slug do projeto; o padrão é o nome da aplicação levantada"),
     ["writer"],
   ).action(async (flags: CommonFlags & { saida?: string; maxDominios?: string; mcp?: string; mcpProject?: string }) => {
     const projectRoot = flags.project ?? ".";
@@ -431,40 +432,64 @@ export function createProgram(): Command {
     const runId = runIdFor("survey", sha12(resolve(projectRoot)));
     const bridge = createAgentBridge({ projectRoot: saida, runId, language, roles, limits: DEFAULT_LIMITS });
 
+    /*
+     * A base, quando há uma. O cliente é criado aqui e as três perguntas que o
+     * levantamento faz são traduzidas para o protocolo — ele não sabe o que é
+     * MCP, e não precisa saber.
+     */
+    const terminalSurvey = stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
+    const linhasSurvey = terminalSurvey ? createLineIO(terminalSurvey, (texto) => void stdout.write(texto)) : null;
+
+    const base = flags.mcp
+      ? await (async () => {
+          const client = createMcpClient({ url: flags.mcp! }, { timeoutSeconds: 30 });
+          const conectado = await client
+            .initialize()
+            .then(() => true)
+            .catch((erro: unknown) => {
+              stdout.write(`aviso: a base não respondeu (${erro instanceof Error ? erro.message : String(erro)})\n`);
+              return false;
+            });
+
+          return {
+            existe: async (slug: string) => (conectado ? await projetoExiste(client, slug) : null),
+            enviar: async (slug: string, markdown: string) =>
+              await enviarLevantamento(client, { projeto: slug, nome: "", conteudo: markdown, procedencia: runId }),
+            ...(flags.mcpProject ? { projeto: flags.mcpProject } : {}),
+            ...(linhasSurvey
+              ? {
+                  decidir: async (slug: string): Promise<DecisaoDeColisao> => {
+                    stdout.write(
+                      [
+                        "",
+                        `  1) atualizar o levantamento de "${slug}" (o pedido escrito lá é preservado)`,
+                        `  2) criar um projeto novo ao lado, com outro nome`,
+                        "  3) não mexer na base; ficar só com os arquivos locais",
+                        "",
+                      ].join("\n"),
+                    );
+                    const resposta = await linhasSurvey.ask("  o que faço? [1] ").catch(() => "3");
+                    return resposta.trim() === "2" ? "novo" : resposta.trim() === "3" ? "local" : "atualizar";
+                  },
+                }
+              : {}),
+          };
+        })()
+      : null;
+
     try {
       const resultado = await runSurvey({
         projectRoot,
         outputRoot: saida,
         language,
         announce: (linha) => void stdout.write(`${linha}\n`),
+        ...(base ? { base } : {}),
         ...(flags.maxDominios !== undefined ? { maxDomains: Number(flags.maxDominios) } : {}),
         call: async (request) =>
           await bridge({ role: "writer", stage: `survey:${request.subject}`, prompt: request.prompt }),
       });
 
       const { survey, coverage } = resultado;
-
-      /*
-       * A ida para a base, quando o operador apontou uma.
-       *
-       * Depois de escrever os arquivos, nunca antes: o levantamento custou uma
-       * sessão por domínio, e um servidor fora do ar não pode fazê-lo sumir.
-       */
-      if (flags.mcp && flags.mcpProject) {
-        const client = createMcpClient({ url: flags.mcp }, { timeoutSeconds: 30 });
-        try {
-          await client.initialize();
-          const envio = await enviarLevantamento(client, {
-            projeto: flags.mcpProject,
-            nome: survey.application,
-            conteudo: resultado.markdown,
-            procedencia: runId,
-          });
-          stdout.write(envio.ok ? `base: ${envio.mensagem}\n` : `aviso: não consegui enviar à base (${envio.mensagem})\n`);
-        } catch (erro) {
-          stdout.write(`aviso: não consegui falar com a base (${erro instanceof Error ? erro.message : String(erro)})\n`);
-        }
-      }
 
       stdout.write(
         [
@@ -479,10 +504,10 @@ export function createProgram(): Command {
           ...resultado.written.map((caminho) => `  ${caminho}`),
           "",
           "Para reescrever, diga o que muda — a stack de destino e o que fica de fora — e rode o init:",
-          ...(flags.mcp && flags.mcpProject
+          ...(resultado.destino?.enviado === true
             ? [
-                `  o pedido já está rascunhado em ${flags.mcp.replace(/\/mcp$/, "")}/projeto/${flags.mcpProject}`,
-                `  capivara init --mcp ${flags.mcp} --mcp-project ${flags.mcpProject}`,
+                `  o pedido já está rascunhado em ${(flags.mcp ?? "").replace(/\/mcp$/, "")}/projeto/${resultado.destino.slug}`,
+                `  capivara init --mcp ${flags.mcp} --mcp-project ${resultado.destino.slug}`,
               ]
             : [`  capivara init --file ${join(saida, "levantamento.md")}`]),
           "",
@@ -496,6 +521,8 @@ export function createProgram(): Command {
         return;
       }
       throw error;
+    } finally {
+      terminalSurvey?.close();
     }
   });
 

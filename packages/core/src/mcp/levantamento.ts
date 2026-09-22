@@ -12,6 +12,40 @@
  */
 
 import type { McpClient } from "./client.js";
+import { listLibraryProjects } from "./library.js";
+
+/**
+ * O slug do projeto, a partir do nome da aplicação levantada.
+ *
+ * A mesma regra do `doc-center` — minúsculas, números e hífen —, porque é ele
+ * que vai gravar. Divergir aqui faria o harness perguntar por `Locadora Antiga`
+ * e a base criar `locadora-antiga`, e a checagem de "já existe" nunca casaria.
+ */
+export function slugDoProjeto(nome: string): string {
+  return nome
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+}
+
+/**
+ * Já existe projeto com este slug?
+ *
+ * `null` quando a base não respondeu — que é diferente de "não existe". Tratar
+ * silêncio como ausência criaria um projeto novo por cima de outro no primeiro
+ * soluço de rede.
+ */
+export async function projetoExiste(client: McpClient, slug: string): Promise<boolean | null> {
+  try {
+    const projetos = await listLibraryProjects(client);
+    return projetos.some((projeto) => projeto.slug === slug);
+  } catch {
+    return null;
+  }
+}
 
 export interface EnvioDoLevantamento {
   projeto: string;

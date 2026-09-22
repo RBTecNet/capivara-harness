@@ -24,5 +24,5 @@ export {
   registrarMemorias,
 } from "./memoria.js";
 export type { EstadoDoBuild, MemoriaParaRegistrar, Natureza } from "./memoria.js";
-export { enviarLevantamento } from "./levantamento.js";
+export { enviarLevantamento, projetoExiste, slugDoProjeto } from "./levantamento.js";
 export type { EnvioDoLevantamento, ResultadoDoEnvio } from "./levantamento.js";

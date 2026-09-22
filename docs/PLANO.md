@@ -2990,10 +2990,38 @@ reprovar por isso faria o levantamento inventar domínio para calar a conferênc
 — exatamente o oposto do que se quer. É a mesma escolha do inventário de testes
 nomeados do §35: o mecânico informa, o humano decide.
 
-### 36.7 Da leitura para a reescrita
+### 36.7 Onde o levantamento fica
 
-Com `--mcp`, o levantamento vira um projeto do `doc-center`: o documento fica lá e
-o pedido nasce **rascunhado**, com as duas linhas que faltam —
+**Os arquivos locais são o piso, sempre.** `--saida` recebe o documento, o JSON e
+a cobertura em toda execução, com base ou sem base, e são escritos ANTES de
+qualquer envio. Um levantamento custa uma sessão de modelo por domínio; um
+servidor que cai no último segundo não pode fazê-lo sumir.
+
+**O nome do projeto sai do nome da aplicação.** Ninguém digita: o mapa descobre
+como a aplicação se chama e o slug sai dali, pela mesma regra do `doc-center` —
+divergir faria o harness perguntar por um nome e a base criar outro, e a
+checagem de existência nunca casaria. `--mcp-project` continua existindo para
+quem quiser mandar em outro.
+
+**Já existe um projeto com esse nome?** Então ninguém decide sozinho:
+
+| situação | o que acontece |
+|---|---|
+| não existe | cria e grava |
+| existe, e há um terminal | pergunta: atualizar, criar ao lado, ou ficar local |
+| existe, e não há terminal | **não toca na base**, e diz por quê |
+| a base não respondeu | não toca em nada: silêncio não é ausência |
+
+A pergunta acontece **logo depois do mapa** — o primeiro instante em que o nome
+da aplicação existe, e o último em que a resposta ainda muda o custo. Perguntar
+no fim seria perguntar quando as sessões de domínio já foram pagas.
+
+"Criar ao lado" procura o primeiro nome livre — `locadora-2`, `locadora-3` —, e
+"atualizar" substitui o documento **preservando o pedido** que alguém escreveu
+lá: é ele que diz o que a reescrita vai fazer, e levantar de novo é o caso comum.
+
+Com a base recebendo, o pedido nasce **rascunhado**, com as duas linhas que
+faltam —
 
 ```
 - Stack de destino: (a mesma de hoje | outra — diga qual)

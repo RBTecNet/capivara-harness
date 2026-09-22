@@ -505,3 +505,70 @@ describe("wizard da mudança", () => {
     expect(tela()).not.toContain("executor do loop");
   });
 });
+
+/**
+ * A terceira origem de um pedido: um prompt guardado na base.
+ *
+ * Digitar e apontar um arquivo já existiam. Esta existe porque o mesmo pedido
+ * volta — "acrescente o CRUD completo deste cadastro" serve a três projetos, e
+ * redigitá-lo em cada um é como as três versões começam a divergir.
+ */
+describe("escolher um prompt guardado", () => {
+  // Como em produção: a base oferece projetos E prompts, então a lista do init
+  // tem quatro origens. A posição de cada uma depende do que existe — e é por
+  // isso que o wizard mapeia por chave, não por número fixo.
+  const comPrompts = {
+    listMcpProjects: async () => [{ slug: "mcp-teste", hasRequest: true, documents: 3 }],
+    listMcpPrompts: async () => [
+      { name: "mcp-teste/editar-cliente", title: "Editar cliente", description: "a edição que faltou" },
+      { name: "geral/crud-completo", title: "CRUD completo", description: "serve a qualquer projeto" },
+    ],
+    readMcpPrompt: async (_url: string, name: string) =>
+      name === "geral/crud-completo" ? "para cada cadastro, garanta criar, listar, editar e remover" : "editar clientes",
+  };
+
+  it("no init, o texto do prompt vira o pedido", async () => {
+    const { deps, tela } = roteiro([
+      "",                              // pasta
+      "1",                             // init
+      "4",                             // prompt guardado na base
+      "http://127.0.0.1:7777/mcp",
+      "2",                             // CRUD completo
+      "1",                             // provider
+      "",
+      "1",
+      "n",
+      "n",
+    ]);
+
+    const resultado = await runWizard({ ...deps, ...comPrompts });
+    expect(resultado?.argv[0]).toBe("init");
+    expect(resultado?.argv[1]).toContain("criar, listar, editar e remover");
+    // A lista mostra o NOME, que é para isso que eles têm nome.
+    expect(tela()).toContain("CRUD completo");
+    expect(tela()).toContain("serve a qualquer projeto");
+  });
+
+  it("no change, também", async () => {
+    const { deps } = roteiro(["", "4", "3", "http://127.0.0.1:7777/mcp", "1", "1", "", "1", "n", "n"]);
+    const resultado = await runWizard({ ...deps, ...comPrompts });
+
+    expect(resultado?.argv[0]).toBe("change");
+    expect(resultado?.argv[1]).toBe("editar clientes");
+  });
+
+  it("base sem prompt nenhum diz isso e não deixa o wizard travado", async () => {
+    // Sem `listMcpProjects` a lista tem três origens, e o prompt é a terceira.
+    const { deps, tela } = roteiro(["", "1", "3", "http://127.0.0.1:7777/mcp"]);
+    const resultado = await runWizard({ ...deps, listMcpPrompts: async () => [], readMcpPrompt: async () => "" });
+
+    expect(tela()).toContain("não tem prompt guardado");
+    expect(resultado).toBeNull();
+  });
+
+  it("sem a capacidade de listar prompts, a opção não aparece", async () => {
+    const { deps, tela } = roteiro(["", "1", "1", "um quadro kanban", ".", "1", "", "1", "n", "n"]);
+    await runWizard(deps);
+    expect(tela()).not.toContain("prompt guardado na base");
+  });
+});

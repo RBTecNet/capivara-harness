@@ -3134,3 +3134,53 @@ confiança.
 Uma rodada só, no máximo três perguntas: a mudança é pequena por definição, e uma
 segunda rodada custaria mais que ela inteira. Sem terminal, o comando para e diz
 quais decisões faltam — em vez de escolher sozinho e planejar em cima.
+
+
+## §38 — Prompt guardado é a terceira origem de um pedido
+
+Digitar e apontar um arquivo davam conta enquanto cada pedido era único. Com o
+`change`, deixaram de ser: o mesmo pedido volta. "Acrescente o CRUD completo
+deste cadastro" serve a três projetos, e redigitá-lo em cada um é exatamente como
+as três versões dele começam a divergir — e como a quarta sai pior que a
+primeira.
+
+### 38.1 Prompt tem nome
+
+O `pedido` de um projeto é único e é dele. Os guardados são outra coisa, e
+precisam de duas identificações diferentes:
+
+- o **nome**, que é o que alguém lê para escolher — "Editar cliente", "CRUD
+  completo" —, com uma descrição ao lado para distinguir dois parecidos;
+- o **endereço**, que é o que o comando usa: `mcp-teste` é o pedido daquele
+  projeto, `mcp-teste/editar-cliente` é um prompt dele, `geral/crud-completo`
+  serve a qualquer projeto.
+
+A tela mostra o nome; o endereço fica embaixo, em cinza, e reaparece no comando
+equivalente que o wizard imprime. Escolher é pelo nome, repetir é pelo endereço.
+
+### 38.2 As três origens, em todo lugar que pede um pedido
+
+`init` e `change` passam a oferecer as mesmas três — e qualquer comando futuro
+que precise de um pedido herda o mesmo caminho:
+
+| origem | linha de comando | wizard |
+|---|---|---|
+| texto | o argumento | escrever agora |
+| arquivo | `--file` | ler de um arquivo |
+| prompt guardado | `--prompt <endereço> --mcp <url>` | escolher pelo nome |
+
+`--prompt` sem `--mcp` é recusado dizendo por quê: é na base que eles estão. E
+nome que não existe **ensina os que existem** — errar o nome é o caso comum,
+eles são muitos e parecidos, e uma mensagem que só diz "não existe" obriga a
+abrir a interface da base para descobrir o quê.
+
+### 38.3 O menu que muda de tamanho
+
+A lista de origens do `init` tem duas opções condicionais — projeto da base e
+prompt guardado —, e a posição de cada uma depende do que o servidor oferece. A
+primeira versão comparava a escolha com um número fixo, e o defeito não era
+visível: com base e sem prompts, escolher "prompt" caía em "projeto". Agora as
+origens são mapeadas por chave, e a posição não significa nada.
+
+É a mesma família de `-p` casando dentro de `--dangerously-skip-permissions`:
+comparar pela forma em vez de pela identidade.

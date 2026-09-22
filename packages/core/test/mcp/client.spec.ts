@@ -203,3 +203,37 @@ describe("o material de um projeto", () => {
     await expect(fetchProjectMaterial(mcp, "inventado")).rejects.toThrow(/biblioteca/);
   });
 });
+
+/**
+ * Os prompts guardados no servidor.
+ *
+ * `name` é o endereço e `title` é o nome — e é o nome que vai à tela na hora de
+ * escolher. Servidor que não implementa prompts responde com erro, e isso vira
+ * lista vazia: não ter prompt guardado não é falha de ninguém.
+ */
+describe("listar os prompts do servidor", () => {
+  it("lê nome, título e descrição", async () => {
+    respostas["prompts/list"] = {
+      prompts: [
+        { name: "mcp-teste", title: "pedido — MCP Teste", description: "o que construir" },
+        { name: "geral/crud-completo", title: "CRUD completo" },
+      ],
+    };
+
+    const client = createMcpClient({ url });
+    await client.initialize();
+
+    expect(await client.listPrompts()).toEqual([
+      { name: "mcp-teste", title: "pedido — MCP Teste", description: "o que construir" },
+      { name: "geral/crud-completo", title: "CRUD completo", description: "" },
+    ]);
+  });
+
+  it("servidor que recusa prompts devolve lista vazia, não derruba quem perguntou", async () => {
+    const client = createMcpClient({ url });
+    await client.initialize();
+    erroJsonRpc = { code: -32601, message: "method not found" };
+
+    expect(await client.listPrompts()).toEqual([]);
+  });
+});

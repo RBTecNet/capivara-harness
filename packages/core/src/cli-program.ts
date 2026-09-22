@@ -14,6 +14,7 @@ import {
   readRequestState,
   readSkeletonState,
   requestFromLibrary,
+  requestFromPrompt,
   resolveRequest,
   runInit,
   runPlan,
@@ -324,6 +325,58 @@ function estagioInterativo(options: {
 }
 
 /**
+ * O texto de um prompt guardado na base.
+ *
+ * Terceira origem de um pedido, ao lado do texto digitado e do arquivo. Sem
+ * `--mcp` não há onde procurar, e dizer isso é mais útil que devolver lista
+ * vazia: quem escreveu `--prompt` quer um prompt de algum lugar.
+ */
+async function lerPromptDaBase(
+  flags: { mcp?: string; prompt?: string },
+  escrever: (linha: string) => void,
+): Promise<{ texto: string; nome: string } | "erro"> {
+  const nome = (flags.prompt ?? "").trim();
+  if (!flags.mcp) {
+    escrever("erro: --prompt precisa de --mcp: é na base que os prompts estão guardados.");
+    return "erro";
+  }
+
+  const client = createMcpClient({ url: flags.mcp }, { timeoutSeconds: 20 });
+
+  /*
+   * Nome errado ensina os certos.
+   *
+   * Errar o nome de um prompt é o caso comum — eles são muitos e parecidos — e
+   * a mensagem que só diz "não existe" obriga a abrir a interface da base para
+   * descobrir o que existe. A lista custa uma chamada e resolve ali.
+   */
+  const comOsQueExistem = async (primeira: string): Promise<"erro"> => {
+    const disponiveis = await client.listPrompts().catch(() => []);
+    escrever(
+      [
+        primeira,
+        ...(disponiveis.length > 0
+          ? ["", "Os prompts desta base:", ...disponiveis.map((item) => `  ${item.name} — ${item.title}`)]
+          : []),
+      ].join("\n"),
+    );
+    return "erro";
+  };
+
+  try {
+    await client.initialize();
+    const texto = await client.prompt(nome);
+    if (texto.trim() === "") return await comOsQueExistem(`erro: o prompt "${nome}" está vazio nesta base.`);
+    escrever(`prompt "${nome}" carregado da base`);
+    return { texto, nome };
+  } catch (erro) {
+    return await comOsQueExistem(
+      `erro: não consegui ler o prompt "${nome}" (${erro instanceof Error ? erro.message : String(erro)})`,
+    );
+  }
+}
+
+/**
  * O material do projeto na base documental, quando o operador pediu por ela.
  *
  * Devolve `null` quando não há base a consultar — e aí o pedido vem por texto ou
@@ -405,9 +458,11 @@ export function createProgram(): Command {
       .command("change")
       .description("Acrescenta ou altera funcionalidade numa aplicação que a capivara já construiu")
       .argument("[pedido]", "o que mudar; aceita @arquivo")
-      .option("--file <caminho>", "lê o pedido de mudança de um arquivo"),
+      .option("--file <caminho>", "lê o pedido de mudança de um arquivo")
+      .option("--prompt <nome>", "usa um prompt guardado na base, pelo nome")
+      .option("--mcp <url>", "base documental por MCP, de onde vem o prompt"),
     ["writer"],
-  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string }) => {
+  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; prompt?: string; mcp?: string }) => {
     const projectRoot = flags.project ?? ".";
     const roles = rolesFromFlags(flags);
     const semProvider = unresolvedRoles(roles, ["writer"]);
@@ -417,12 +472,20 @@ export function createProgram(): Command {
       return;
     }
 
+    const guardado = flags.prompt ? await lerPromptDaBase(flags, (linha) => stdout.write(`${linha}\n`)) : null;
+    if (guardado === "erro") {
+      process.exitCode = 2;
+      return;
+    }
+
     let request: { text: string };
     try {
-      request = await resolveRequest(projectRoot, {
-        ...(pedido !== undefined ? { prompt: pedido } : {}),
-        ...(flags.file !== undefined ? { file: flags.file } : {}),
-      });
+      request = guardado
+        ? { text: guardado.texto }
+        : await resolveRequest(projectRoot, {
+            ...(pedido !== undefined ? { prompt: pedido } : {}),
+            ...(flags.file !== undefined ? { file: flags.file } : {}),
+          });
     } catch (error) {
       stdout.write(`${error instanceof Error ? error.message : String(error)}\n`);
       process.exitCode = 2;
@@ -617,6 +680,7 @@ export function createProgram(): Command {
       .description("Entrevista e desenha as fases do projeto até PLAN READY")
       .argument("[pedido]", "o que você quer construir; aceita @arquivo")
       .option("--file <caminho>", "lê o pedido de um arquivo")
+      .option("--prompt <nome>", "usa um prompt guardado na base, pelo nome")
       .option("--mcp <url>", "base documental por MCP, como http://localhost:7777/mcp")
       .option("--mcp-project <nome>", "de qual projeto da base vêm o pedido e os documentos")
       .option("--max-audit-returns <n>", "devoluções do auditor por documento", "3")
@@ -624,7 +688,7 @@ export function createProgram(): Command {
       .option("--fresh", "ignora o que este run já publicou e recomeça do zero")
       .option("--no-dashboard", "não desenha o painel; só as linhas de progresso")
       .option("--no-commit", "não versiona a especificação ao chegar em PLAN READY"),
-  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; mcp?: string; mcpProject?: string; maxAuditReturns: string; maxInterviewRounds: string; fresh?: boolean; dashboard?: boolean; commit?: boolean }) => {
+  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; prompt?: string; mcp?: string; mcpProject?: string; maxAuditReturns: string; maxInterviewRounds: string; fresh?: boolean; dashboard?: boolean; commit?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const configured = rolesFromFlags(flags);
     const semProvider = unresolvedRoles(configured, INIT_ROLES);
@@ -648,12 +712,25 @@ export function createProgram(): Command {
       return;
     }
 
+    /*
+     * Três origens, nesta ordem de precedência: o projeto da base, um prompt
+     * guardado, e o que veio pela linha de comando. Quem aponta um projeto quer
+     * o pedido dele; quem aponta um prompt quer aquele texto.
+     */
+    const guardado = flags.prompt ? await lerPromptDaBase(flags, (linha) => stdout.write(`${linha}\n`)) : null;
+    if (guardado === "erro") {
+      process.exitCode = 2;
+      return;
+    }
+
     const request = material
       ? requestFromLibrary(flags.mcpProject!, material.request, flags.mcp)
-      : await resolveRequest(projectRoot, {
-          ...(pedido !== undefined ? { prompt: pedido } : {}),
-          ...(flags.file !== undefined ? { file: flags.file } : {}),
-        });
+      : guardado
+        ? requestFromPrompt(guardado.nome, guardado.texto, flags.mcp)
+        : await resolveRequest(projectRoot, {
+            ...(pedido !== undefined ? { prompt: pedido } : {}),
+            ...(flags.file !== undefined ? { file: flags.file } : {}),
+          });
     const language = detectLanguage(request.text, flags.language);
     const roles = configured;
 
@@ -1088,6 +1165,16 @@ export function createProgram(): Command {
           const client = createMcpClient({ url }, { timeoutSeconds: 15 });
           await client.initialize();
           return listLibraryProjects(client);
+        },
+        listMcpPrompts: async (url) => {
+          const client = createMcpClient({ url }, { timeoutSeconds: 15 });
+          await client.initialize();
+          return await client.listPrompts();
+        },
+        readMcpPrompt: async (url, name) => {
+          const client = createMcpClient({ url }, { timeoutSeconds: 15 });
+          await client.initialize();
+          return await client.prompt(name);
         },
         ...(process.env.CAPIVARA_MCP_URL ? { defaultMcpUrl: process.env.CAPIVARA_MCP_URL } : {}),
         fileExists: (path) => stat(path).then((info) => info.isFile()).catch(() => false),

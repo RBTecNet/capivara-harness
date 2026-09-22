@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 1105 testes em 53 arquivos, `npm run check` verde |
+| suíte | 1111 testes em 53 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
@@ -43,6 +43,11 @@ caro terminou as sete fases quando o harness parou de esconder informação dele
 ## O que veio depois do checkpoint
 
 Quatro frentes, todas nascidas de um run real e todas commitadas.
+
+**§38 — prompt guardado é a terceira origem de um pedido.** `init` e `change`
+passam a oferecer, ao lado de digitar e de apontar um arquivo, escolher um prompt
+guardado na base pelo NOME. A base ganhou o contêiner `prompt` — no projeto ou na
+área geral — e `prompts/list` os serve junto dos pedidos.
 
 **§37 — `change`, mexer no que já roda.** Depois do primeiro build, todo pedido
 novo deixa de ser "o que construir" e vira "o que mudar". O comando lê o esqueleto
@@ -199,7 +204,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 1105 testes
+npm run check     # build + typecheck + 1111 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

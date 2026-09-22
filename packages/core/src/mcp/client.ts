@@ -120,9 +120,17 @@ function textoDoConteudo(item: Record<string, unknown>): string {
   return "";
 }
 
+/** Um prompt oferecido pelo servidor. O `title` é o nome que a gente lê. */
+export interface McpPrompt {
+  name: string;
+  title: string;
+  description: string;
+}
+
 export interface McpClient {
   readonly server: { name: string; version: string; protocolVersion: string } | null;
   initialize: () => Promise<void>;
+  listPrompts: () => Promise<McpPrompt[]>;
   prompt: (name: string, args?: Record<string, string>) => Promise<string>;
   listResources: () => Promise<McpResource[]>;
   readResource: (uri: string) => Promise<string>;
@@ -208,6 +216,27 @@ export function createMcpClient(endpoint: McpEndpoint, options: McpClientOptions
      * que vira texto e ganha um sha. Papel de sistema e de usuário entram na
      * ordem em que vieram — quem escreveu o prompt decidiu essa ordem.
      */
+    /*
+     * Os prompts guardados no servidor.
+     *
+     * `name` é o endereço e `title` é o nome — e é o nome que vai à tela. Um
+     * servidor que não implementa prompts devolve erro, e aqui isso vira lista
+     * vazia: não ter prompt guardado não é falha de ninguém.
+     */
+    listPrompts: async () => {
+      const resultado = (await enviar("prompts/list").catch(() => null)) as {
+        prompts?: { name?: string; title?: string; description?: string }[];
+      } | null;
+
+      return (resultado?.prompts ?? [])
+        .map((item) => ({
+          name: String(item.name ?? "").trim(),
+          title: String(item.title ?? item.name ?? "").trim(),
+          description: String(item.description ?? "").trim(),
+        }))
+        .filter((item) => item.name !== "");
+    },
+
     prompt: async (name, args) => {
       const resultado = (await enviar("prompts/get", { name, ...(args ? { arguments: args } : {}) })) as {
         messages?: { role?: string; content?: Record<string, unknown> | Record<string, unknown>[] }[];

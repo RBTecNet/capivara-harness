@@ -65,6 +65,16 @@ export interface WizardDeps {
    * caminho que este binário não sabe percorrer.
    */
   listMcpProjects?: (url: string) => Promise<{ slug: string; hasRequest: boolean; documents: number }[]>;
+  /**
+   * Os prompts guardados na base, pelo nome que alguém deu a eles.
+   *
+   * É a terceira origem de um pedido, ao lado de digitar e de apontar um
+   * arquivo. Existe porque o mesmo pedido volta: "acrescente o CRUD completo
+   * deste cadastro" serve a três projetos, e redigitá-lo em cada um é como as
+   * três versões dele começam a divergir.
+   */
+  listMcpPrompts?: (url: string) => Promise<{ name: string; title: string; description: string }[]>;
+  readMcpPrompt?: (url: string, name: string) => Promise<string>;
   /** O endereço sugerido, quando o operador já tem um de costume. */
   defaultMcpUrl?: string;
 }
@@ -278,6 +288,60 @@ async function escolherModelo(
 }
 
 /**
+ * Escolher um prompt guardado na base.
+ *
+ * A lista mostra o NOME que alguém deu a cada um — é para isso que eles têm
+ * nome. O endereço técnico fica embaixo, em cinza, porque serve para o comando
+ * equivalente e não para a escolha.
+ *
+ * Devolve o texto do prompt, ou `null` quando não há o que escolher ou quando
+ * quem escolheu desistiu.
+ */
+async function escolherPrompt(deps: WizardDeps, io: WizardIO): Promise<{ texto: string; url: string; nome: string } | null> {
+  const listar = deps.listMcpPrompts!;
+  const ler = deps.readMcpPrompt!;
+  const sugerida = deps.defaultMcpUrl ?? "http://localhost:7777/mcp";
+
+  for (;;) {
+    const url = await text(io, `\nEndereço da base [${sugerida}]: `, sugerida);
+    io.write("conectando…\n");
+
+    let prompts: { name: string; title: string; description: string }[];
+    try {
+      prompts = await listar(url);
+    } catch (erro) {
+      io.write(`${erro instanceof Error ? erro.message : String(erro)}\n`);
+      const saida: Choice[] = [{ label: "tentar outro endereço" }, { label: "voltar e escrever o pedido aqui" }];
+      if ((await choose(io, "E agora?", saida, 0)) === 1) return null;
+      continue;
+    }
+
+    if (prompts.length === 0) {
+      io.write("Esta base não tem prompt guardado nenhum. Guarde um na interface dela e volte.\n");
+      return null;
+    }
+
+    const opcoes: Choice[] = prompts.map((prompt) => ({
+      label: prompt.title,
+      hint: prompt.description !== "" ? `${prompt.description} · ${prompt.name}` : prompt.name,
+    }));
+    const escolhido = prompts[await choose(io, "Qual prompt?", opcoes, 0)]!;
+
+    try {
+      const texto = await ler(url, escolhido.name);
+      if (texto.trim() === "") {
+        io.write("Esse prompt está vazio na base.\n");
+        continue;
+      }
+      return { texto, url, nome: escolhido.name };
+    } catch (erro) {
+      io.write(`${erro instanceof Error ? erro.message : String(erro)}\n`);
+      return null;
+    }
+  }
+}
+
+/**
  * Conectar à base documental e escolher o projeto.
  *
  * Duas coisas separam isto de um campo de texto com o nome do projeto.
@@ -420,11 +484,23 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
      * `init` — digitar ou apontar um arquivo —, e não há base aqui porque o que
      * manda é o que já está no projeto, não um pedido guardado em outro lugar.
      */
+    const temPrompts = deps.listMcpPrompts !== undefined && deps.readMcpPrompt !== undefined;
     const fontes: Choice[] = [
       { label: "escrever agora", hint: "o que acrescentar ou alterar; várias linhas" },
       { label: "ler de um arquivo", hint: "um .md ou .txt já escrito" },
+      ...(temPrompts ? [{ label: "prompt guardado na base", hint: "escolhe pelo nome entre os prompts já salvos" }] : []),
     ];
-    if ((await choose(io, "De onde vem o pedido de mudança?", fontes, 0)) === 1) {
+
+    const fonte = await choose(io, "De onde vem o pedido de mudança?", fontes, 0);
+    // Só uma opção é condicional aqui, e ela é a última: a posição 2 é dela ou
+    // de ninguém. Ainda assim o `temPrompts` é conferido, para o dia em que
+    // outra entrar no meio.
+    if (fonte === 2 && temPrompts) {
+      const escolhido = await escolherPrompt(deps, io);
+      if (escolhido === null) return null;
+      answers.request = escolhido.texto;
+      io.write(`\nprompt "${escolhido.nome}" carregado: ${escolhido.texto.split("\n")[0]?.slice(0, 70) ?? ""}…\n`);
+    } else if (fonte === 1) {
       answers.requestFile = await arquivoDoPedido();
     } else {
       const pedido = await multiline(io, "O que você quer mudar?");
@@ -478,20 +554,38 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
   }
 
   if (command === "init") {
-    const temBase = deps.listMcpProjects !== undefined;
-    const fontes: Choice[] = [
-      { label: "escrever agora", hint: "cole ou digite; várias linhas" },
-      { label: "ler de um arquivo", hint: "um .md ou .txt já escrito" },
-      ...(temBase ? [{ label: "base documental (MCP)", hint: "o pedido e as memórias já cadastrados de um projeto" }] : []),
+    /*
+     * As origens são mapeadas por CHAVE, nunca por posição.
+     *
+     * Duas delas são condicionais — projeto da base e prompt guardado —, então a
+     * posição de cada uma muda conforme o que está disponível. Um `fonte === 3`
+     * escrito à mão acerta numa configuração e erra na outra, e o erro é mudo:
+     * escolhe a origem errada em vez de falhar.
+     */
+    const origens: { chave: "texto" | "arquivo" | "projeto" | "prompt"; opcao: Choice }[] = [
+      { chave: "texto", opcao: { label: "escrever agora", hint: "cole ou digite; várias linhas" } },
+      { chave: "arquivo", opcao: { label: "ler de um arquivo", hint: "um .md ou .txt já escrito" } },
+      ...(deps.listMcpProjects
+        ? ([{ chave: "projeto", opcao: { label: "projeto da base documental (MCP)", hint: "o pedido e as memórias já cadastrados de um projeto" } }] as const)
+        : []),
+      ...(deps.listMcpPrompts && deps.readMcpPrompt
+        ? ([{ chave: "prompt", opcao: { label: "prompt guardado na base", hint: "escolhe pelo nome entre os prompts já salvos" } }] as const)
+        : []),
     ];
 
-    const fonte = await choose(io, "De onde vem o pedido?", fontes, 0);
-    if (fonte === 2 && temBase) {
+    const escolha = origens[await choose(io, "De onde vem o pedido?", origens.map((origem) => origem.opcao), 0)]?.chave ?? "texto";
+
+    if (escolha === "prompt") {
+      const escolhido = await escolherPrompt(deps, io);
+      if (escolhido === null) return null;
+      answers.request = escolhido.texto;
+      io.write(`\nprompt "${escolhido.nome}" carregado: ${escolhido.texto.split("\n")[0]?.slice(0, 70) ?? ""}…\n`);
+    } else if (escolha === "projeto") {
       const escolhido = await escolherDaBase(deps, projectRoot);
       if (escolhido === null) return null;
       answers.mcpUrl = escolhido.url;
       answers.mcpProject = escolhido.projeto;
-    } else if (fonte === 1) {
+    } else if (escolha === "arquivo") {
       answers.requestFile = await arquivoDoPedido();
     } else {
       const pedido = await multiline(io, "O que você quer construir?");

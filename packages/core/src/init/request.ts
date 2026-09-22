@@ -35,6 +35,25 @@ export interface DeveloperRequest {
   base?: string;
 }
 
+/**
+ * Um prompt guardado na base, já lido.
+ *
+ * Origem `mcp` como o pedido de projeto — é da base, e o `path` guarda de qual
+ * prompt veio. A diferença é que aqui não há projeto: o prompt é o texto, e o
+ * projeto que ele vai produzir ainda não existe.
+ */
+export function requestFromPrompt(nome: string, texto: string, base?: string): DeveloperRequest {
+  const text = texto.trim();
+  if (text === "") throw new EmptyRequestError();
+  return {
+    text,
+    origin: "mcp",
+    path: `prompt:${nome}`,
+    sha12: sha12(text),
+    ...(base && base.trim() !== "" ? { base: base.trim() } : {}),
+  };
+}
+
 /** O pedido de um projeto da base documental, já lido. */
 export function requestFromLibrary(projeto: string, texto: string, base?: string): DeveloperRequest {
   const text = texto.trim();

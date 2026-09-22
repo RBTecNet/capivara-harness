@@ -24,13 +24,28 @@ export interface DeveloperRequest {
   /** Caminho relativo ao projeto, ou o URI do recurso quando veio da base. */
   path: string | null;
   sha12: string;
+  /**
+   * O endereço da base, quando o pedido veio de uma.
+   *
+   * O URI diz de QUAL projeto o pedido é; só ele não diz ONDE está a base. Sem
+   * o endereço, o `build` do mesmo projeto não tem como voltar lá sozinho — e
+   * foi exatamente isso que fez um executor de frontend trabalhar sem a skill
+   * de frontend que o próprio documento da fase mandava seguir.
+   */
+  base?: string;
 }
 
 /** O pedido de um projeto da base documental, já lido. */
-export function requestFromLibrary(projeto: string, texto: string): DeveloperRequest {
+export function requestFromLibrary(projeto: string, texto: string, base?: string): DeveloperRequest {
   const text = texto.trim();
   if (text === "") throw new EmptyRequestError();
-  return { text, origin: "mcp", path: uriDoPedido(projeto), sha12: sha12(text) };
+  return {
+    text,
+    origin: "mcp",
+    path: uriDoPedido(projeto),
+    sha12: sha12(text),
+    ...(base && base.trim() !== "" ? { base: base.trim() } : {}),
+  };
 }
 
 export class EmptyRequestError extends Error {

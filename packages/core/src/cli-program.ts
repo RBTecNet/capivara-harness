@@ -8,7 +8,16 @@ import { listProviders, renderProviderList } from "./commands/providers.js";
 import { diagnose, renderDiagnosis } from "./commands/doctor.js";
 import { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
 import { BUILD_ROLES, INIT_ROLES, describeRoles, renderUnresolved, rolesFromFlags, unresolvedRoles, type CliRoleFlags } from "./commands/options.js";
-import { InitBlockedError, readRequestState, readSkeletonState, requestFromLibrary, resolveRequest, runInit, runPlan } from "./init/index.js";
+import {
+  InitBlockedError,
+  baseRegistrada,
+  readRequestState,
+  readSkeletonState,
+  requestFromLibrary,
+  resolveRequest,
+  runInit,
+  runPlan,
+} from "./init/index.js";
 import { createMcpClient, fetchProjectMaterial, listLibraryProjects, registrarMemorias, type MemoriaParaRegistrar } from "./mcp/index.js";
 import type { ProjectMaterial } from "./mcp/index.js";
 import type { InitOptions } from "./init/index.js";
@@ -425,7 +434,7 @@ export function createProgram(): Command {
     }
 
     const request = material
-      ? requestFromLibrary(flags.mcpProject!, material.request)
+      ? requestFromLibrary(flags.mcpProject!, material.request, flags.mcp)
       : await resolveRequest(projectRoot, {
           ...(pedido !== undefined ? { prompt: pedido } : {}),
           ...(flags.file !== undefined ? { file: flags.file } : {}),
@@ -715,6 +724,13 @@ export function createProgram(): Command {
      * `.capivara/skills/` de uma execução anterior: a base é conveniência, não
      * dependência (§34).
      */
+    const herdada = baseRegistrada(pedidoRegistrado);
+    if (herdada && (flags.mcp ?? "").trim() === "") {
+      flags.mcp = herdada.url;
+      flags.mcpProject = herdada.projeto;
+      stdout.write(`base do projeto: ${herdada.projeto} em ${herdada.url} (registrada pelo init)\n`);
+    }
+
     const materialDoBuild = await lerDaBase(flags, (mensagem) => stdout.write(`${mensagem}\n`), { tolerante: true });
 
     /*

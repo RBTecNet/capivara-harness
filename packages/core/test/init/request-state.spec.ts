@@ -12,7 +12,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readRequestState, writeRequestState } from "../../src/init/index.js";
+import { baseRegistrada, readRequestState, requestFromLibrary, writeRequestState } from "../../src/init/index.js";
 import { sha12 } from "../../src/contract/stamps.js";
 
 let projectRoot = "";
@@ -71,5 +71,36 @@ describe("o registro de qual pedido gerou o esqueleto", () => {
   it("registro sem texto devolve null: um pedido vazio não reencontra run nenhum", async () => {
     await writeRequestState(projectRoot, { ...pedido, text: "   " });
     expect(await readRequestState(projectRoot)).toBeNull();
+  });
+});
+
+/**
+ * Por que o endereço da base é gravado junto.
+ *
+ * O URI diz de qual projeto o pedido é; não diz onde a base está. Sem o
+ * endereço, o `build` do mesmo projeto não voltava lá — e um executor de
+ * frontend trabalhou sem a skill de frontend que o documento da fase mandava
+ * seguir, sem que nada reclamasse.
+ */
+describe("a base que o init usou", () => {
+  it("volta da leitura como endereço e projeto, prontos para o build", async () => {
+    await writeRequestState(projectRoot, requestFromLibrary("mcp-teste", "uma locadora", "http://127.0.0.1:7777/mcp"));
+    const lido = await readRequestState(projectRoot);
+
+    expect(baseRegistrada(lido)).toEqual({ url: "http://127.0.0.1:7777/mcp", projeto: "mcp-teste" });
+  });
+
+  it("pedido que não veio de base nenhuma não inventa uma", async () => {
+    await writeRequestState(projectRoot, pedido);
+    expect(baseRegistrada(await readRequestState(projectRoot))).toBeNull();
+  });
+
+  /*
+   * Os projetos anteriores a este campo: o registro diz `mcp` e não tem
+   * endereço. Herdar dele seria adivinhar a URL.
+   */
+  it("registro antigo, sem endereço, não vira palpite", async () => {
+    await writeRequestState(projectRoot, requestFromLibrary("mcp-teste", "uma locadora"));
+    expect(baseRegistrada(await readRequestState(projectRoot))).toBeNull();
   });
 });

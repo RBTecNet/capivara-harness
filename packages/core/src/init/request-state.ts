@@ -19,6 +19,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { sha12 } from "../contract/stamps.js";
+import { projetoDoUri } from "../mcp/index.js";
 import { artifactPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
 import type { DeveloperRequest } from "./request.js";
@@ -50,8 +51,26 @@ export async function readRequestState(projectRoot: string): Promise<DeveloperRe
       origin: parsed.origin === "file" || parsed.origin === "mcp" ? parsed.origin : "text",
       path: typeof parsed.path === "string" ? parsed.path : null,
       sha12: sha12(text),
+      ...(typeof parsed.base === "string" && parsed.base.trim() !== "" ? { base: parsed.base.trim() } : {}),
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * A base que o `init` usou, pronta para os estágios seguintes.
+ *
+ * Quem escolheu a base escolheu uma vez, no começo do projeto. Obrigar a repetir
+ * `--mcp` e `--mcp-project` em cada `build` é a forma de esquecer: o comando
+ * roda, nada reclama, e as skills simplesmente não chegam — o executor descobre
+ * sozinho, no meio da fase, que o que o documento manda ler não existe.
+ *
+ * Um `--mcp` explícito continua ganhando: quem aponta outra base está dizendo
+ * que quer outra.
+ */
+export function baseRegistrada(request: DeveloperRequest | null): { url: string; projeto: string } | null {
+  if (!request || request.origin !== "mcp" || !request.base) return null;
+  const projeto = projetoDoUri(request.path ?? "");
+  return projeto === "" ? null : { url: request.base, projeto };
 }

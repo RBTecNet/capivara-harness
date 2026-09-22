@@ -395,7 +395,23 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     for (const session of checked.sessions) {
       if (done.has(session.id)) {
         announce(`[${session.id}] já concluída neste run`);
-        options.onProgress?.({ kind: "phase", id: session.id, state: "pulado", cycle: 0, detail: "já concluída" });
+        /*
+         * A fase fechou NESTE run, e fechar é passar por todos os gates. Anunciá-la
+         * como "pulada", com as cinco bolinhas apagadas, faz a tela dizer que
+         * ninguém olhou para ela — e o resumo contá-la como fase que falta. Quem
+         * retoma um build precisa ver de longe onde a execução está.
+         *
+         * O G4 só entra quando este run tem fluxos: sem `--no-flows` e sem
+         * esqueleto, ele não foi avaliado nem na primeira passagem, e pintá-lo
+         * verde diria que a aplicação foi aberta quando não foi.
+         */
+        for (const gate of ["G0", "G1", "G2", "G3"] as const) {
+          options.onProgress?.({ kind: "gate", id: session.id, gate, state: "verde", cycle: 0 });
+        }
+        if (fluxosDaFase !== null) {
+          options.onProgress?.({ kind: "gate", id: session.id, gate: "G4", state: "verde", cycle: 0 });
+        }
+        options.onProgress?.({ kind: "phase", id: session.id, state: "concluído", cycle: 0, detail: "concluída antes" });
         phases.push({ id: session.id, title: session.title, outcome: { status: "already-implemented", cycles: 0 } });
         continue;
       }

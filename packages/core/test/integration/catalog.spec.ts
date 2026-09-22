@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InitBlockedError, runInit } from "../../src/init/index.js";
 import { runBuild, splitPhases } from "../../src/loop/index.js";
 import type { FlowRunner } from "../../src/loop/index.js";
+import type { BuildProgress } from "../../src/loop/index.js";
 import { readEvents, runIdFor, runPaths } from "../../src/state/index.js";
 import { sha12 } from "../../src/contract/index.js";
 import type { Skeleton } from "../../src/contract/index.js";
@@ -93,6 +94,7 @@ async function build(
     skeleton?: Skeleton;
     flowRunner?: FlowRunner;
     skipAcceptance?: boolean;
+    onProgress?: (evento: BuildProgress) => void;
   } = {},
 ) {
   const engine = fakeEngine(projectRoot, steps);
@@ -109,6 +111,7 @@ async function build(
     ...(options.skeleton !== undefined ? { skeleton: options.skeleton } : {}),
     ...(options.flowRunner !== undefined ? { flowRunner: options.flowRunner } : {}),
     ...(options.skipAcceptance !== undefined ? { skipAcceptance: options.skipAcceptance } : {}),
+    ...(options.onProgress !== undefined ? { onProgress: options.onProgress } : {}),
     testRunner: async () => {
       const exit = options.testExit?.[testRun] ?? 0;
       testRun += 1;
@@ -132,6 +135,67 @@ describe("B-01 · caminho feliz completo", () => {
 
     expect(built.exitCode).toBe(0);
     expect(built.phases.every((phase) => phase.outcome.status === "complete")).toBe(true);
+  });
+});
+
+/**
+ * Retomar um build é o caso comum: o id do run é o hash do plano, então rodar de
+ * novo cai no mesmo run e as fases já fechadas não são refeitas. O que a tela
+ * dizia delas, porém, era "pulada" — travessão cinza, as cinco bolinhas
+ * apagadas, e o resumo contando zero de cinco. Quem retoma olha para a tela
+ * justamente para achar onde a execução está.
+ */
+describe("o build retomado mostra o que já fechou", () => {
+  it("fase concluída antes volta verde, com os gates que ela passou", async () => {
+    await init(happyPath());
+    const { tasks } = await publishPlan();
+
+    const passos: EngineStep[] = [
+      { match: { role: "builder" }, writes: [{ path: "src/app.ts", content: "export const app = 1;" }], respond: { stdout: "feito" }, repeat: true },
+      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) } },
+      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) } },
+    ];
+
+    const primeiro = await build(passos);
+    expect(primeiro.outcome.exitCode).toBe(0);
+
+    const eventos: BuildProgress[] = [];
+    const segundo = await build(passos, { onProgress: (evento) => void eventos.push(evento) });
+    expect(segundo.outcome.phases.every((fase) => fase.outcome.status === "already-implemented")).toBe(true);
+    // O que prova que este é o caminho da retomada, e não uma segunda execução
+    // que por acaso terminou igual: nenhum modelo foi chamado.
+    expect(segundo.engine.calls, "a retomada não chama o executor de novo").toHaveLength(0);
+
+    const p01 = eventos.filter((evento) => evento.id === "P01");
+    const fase = p01.find((evento) => evento.kind === "phase");
+    expect(fase?.kind === "phase" ? fase.state : "", "a fase fechada aparece fechada, não pulada").toBe("concluído");
+    expect(fase?.kind === "phase" ? fase.detail : "").toBe("concluída antes");
+
+    const verdes = p01.filter((evento) => evento.kind === "gate" && evento.state === "verde");
+    expect(verdes.map((evento) => (evento.kind === "gate" ? evento.gate : ""))).toEqual(["G0", "G1", "G2", "G3"]);
+  });
+
+  /*
+   * Sem esqueleto não há gate 4 nem na primeira passagem. Pintá-lo verde diria
+   * que a aplicação foi aberta e percorrida — que é exatamente o que este gate
+   * existe para provar, e o que não aconteceu.
+   */
+  it("o gate 4 só volta verde quando este run tem fluxos", async () => {
+    await init(happyPath());
+    const { tasks } = await publishPlan();
+
+    const passos: EngineStep[] = [
+      { match: { role: "builder" }, writes: [{ path: "src/app.ts", content: "export const app = 1;" }], respond: { stdout: "feito" }, repeat: true },
+      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) } },
+      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) } },
+    ];
+
+    await build(passos);
+
+    const eventos: BuildProgress[] = [];
+    await build(passos, { onProgress: (evento) => void eventos.push(evento) });
+
+    expect(eventos.some((evento) => evento.kind === "gate" && evento.gate === "G4")).toBe(false);
   });
 });
 
@@ -939,6 +1003,30 @@ const ROTEIRO = [
 ].join("\n");
 
 const MANIFESTO = { path: "package.json", content: JSON.stringify({ name: "p", scripts: { start: "node server.js" } }) };
+
+describe("o build retomado, quando o run tem fluxos", () => {
+  it("o gate 4 da fase já fechada volta verde junto com os outros", async () => {
+    const { tasks } = await publishPlan();
+    const passos: EngineStep[] = [
+      { match: { role: "builder" }, writes: [MANIFESTO, { path: "src/a.ts", content: "export const a = 1;" }], respond: { stdout: "fiz" }, repeat: true },
+      { match: { role: "verifier", prompt: "CAPIVARA_FLOW" }, respond: { stdout: ROTEIRO }, repeat: true },
+      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0] ?? 2) }, repeat: true },
+      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1] ?? 2) }, repeat: true },
+    ];
+    const comFluxos = { skeleton: ESQUELETO, skipAcceptance: true, flowRunner: async () => ({ exitCode: 0, output: "3 passed" }) };
+
+    expect((await build(passos, comFluxos)).outcome.exitCode).toBe(0);
+
+    const eventos: BuildProgress[] = [];
+    const segundo = await build(passos, { ...comFluxos, onProgress: (evento) => void eventos.push(evento) });
+    expect(segundo.engine.calls).toHaveLength(0);
+
+    const verdes = eventos
+      .filter((evento) => evento.kind === "gate" && evento.id === "P01" && evento.state === "verde")
+      .map((evento) => (evento.kind === "gate" ? evento.gate : ""));
+    expect(verdes).toEqual(["G0", "G1", "G2", "G3", "G4"]);
+  });
+});
 
 describe("B-41 · o gate que abre a aplicação", () => {
   it("fluxo reprovado devolve a fase ao ciclo de correção, e a causa fala de fluxo", async () => {

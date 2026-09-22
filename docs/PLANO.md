@@ -3308,3 +3308,61 @@ donos diferentes: a **forma** é responsabilidade de quem escreveu o parser, e o
 **conteúdo** é responsabilidade de quem respondeu. Um parser que trata desleixo
 de forma como erro de conteúdo transfere para o modelo uma exigência que é nossa
 — e cobra dela o preço mais caro que existe no harness, que é um run inteiro.
+
+
+## §41 — O preflight confere o que o projeto declara para si
+
+A fase 1 do `MCP_teste2` queimou os três ciclos sem sair do lugar, e o log do
+executor conta tudo:
+
+> A suíte quebrou porque o pacote `tsx` não estava instalado. Vou instalar as
+> dependências. **O shell foi bloqueado.** Vou tentar de novo pedindo permissão.
+> […] Vou fazer o comando de teste carregar TypeScript com o Node, sem depender
+> desse pacote.
+
+O `package.json` declarava `tsx` em `devDependencies` e o `node_modules` nunca
+tinha existido naquele diretório. O `npm test` morria por falta de pacote, o gate
+2 devolvia a fase, e o executor — que não tem permissão de shell para instalar,
+porque a permissão é de quem invocou a CLI dele — fez a única coisa que lhe
+restava: **reescreveu o comando de teste do projeto** para não precisar da
+dependência.
+
+Um defeito de ambiente virou mudança de produto. É o §34.8 pelo avesso: lá o
+harness culpava o produto por um defeito de ambiente; aqui ele empurrou o
+executor, cercado, a mudar o produto para caber no ambiente.
+
+### 41.1 Duas perguntas diferentes
+
+O preflight sempre conferiu os binários de SISTEMA que a stack exige — `node`,
+`psql`, `docker` —, lendo a seção `## Stack` do esqueleto. Nunca conferiu o que o
+**projeto declara para si**, que é outra pergunta e tem outra resposta:
+
+| pergunta | onde mora | como se confere |
+|---|---|---|
+| a stack existe nesta máquina? | `## Stack` do esqueleto | `which node` |
+| as dependências estão instaladas? | `package.json` do projeto | existe `node_modules/`? |
+
+A segunda é a que falha no primeiro build de um projeto cujo `init` rodou noutra
+máquina, ou que nunca teve `npm install` — e custa um ciclo por vez para
+descobrir.
+
+### 41.2 Curto de propósito
+
+Só `package.json → node_modules/` e `composer.json → vendor/`. Go guarda módulos
+num cache global, Rust compila sob demanda, Python instala num virtualenv que
+pode estar em qualquer lugar: nesses, a ausência da pasta não prova nada, e um
+falso positivo bloquearia um build válido. É o mesmo critério do catálogo de
+pré-requisitos, pela mesma razão.
+
+Manifesto que não declara dependência nenhuma também não exige instalação, e
+manifesto ilegível não vira bloqueio: quem julga a forma dele é outro gate.
+
+### 41.3 Erro, não aviso — a menos que o executor possa resolver
+
+Sem `--system-install`, faltar dependência é **erro de preflight**: nenhuma
+chamada de modelo acontece, e a mensagem diz o que rodar. Com `--system-install`
+ligado, o executor tem permissão para instalar e isso vira aviso — ele resolve na
+primeira sessão.
+
+A mensagem diz as três coisas que o operador precisa, na ordem: o que falta, por
+que isso reprovaria a fase sem que o código estivesse errado, e o comando.

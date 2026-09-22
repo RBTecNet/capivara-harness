@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { checkStamp, parsePhases } from "../contract/index.js";
 import type { ContractError, StampInput } from "../contract/index.js";
 import { artifactPaths } from "../state/paths.js";
+import { dependenciasAusentes, descreverDependencias } from "./dependencias.js";
 import { resolveTestCommand, type TestCommand } from "./testcmd.js";
 import { splitPhases, type PhaseSession } from "./split.js";
 import { checkPrerequisites, describeMissing, detectPrerequisites, unverifiedTechnologies, type PrerequisiteStatus } from "./prerequisites.js";
@@ -134,6 +135,23 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
   if (missing !== "") {
     if (options.systemInstall === true) warnings.push({ code: "instala-sistema", message: missing });
     else errors.push(missing);
+  }
+
+  /*
+   * E as dependências do PRÓPRIO projeto?
+   *
+   * O catálogo acima cuida do que precisa existir na máquina. Isto cuida do que
+   * o projeto declara para si — e que, faltando, faz o gate 2 reprovar a fase
+   * por defeito que não é do código. No `MCP_teste2` foram os três ciclos da
+   * fase 1, com o executor tentando instalar e esbarrando na permissão da CLI.
+   */
+  const semDependencias = await dependenciasAusentes(options.projectRoot);
+  if (semDependencias.length > 0) {
+    const mensagem = descreverDependencias(semDependencias);
+    // Com `--system-install` o executor tem permissão para instalar, então isto
+    // é aviso: ele resolve na primeira sessão.
+    if (options.systemInstall === true) warnings.push({ code: "instala-dependencias", message: mensagem });
+    else errors.push(mensagem);
   }
 
   /*

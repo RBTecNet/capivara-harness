@@ -3275,7 +3275,33 @@ para descobrir que a chave estava lá, colada numa frase, foi preciso abrir o lo
 com `cat -A`. Agora a recusa mostra os primeiros 300 caracteres do que o auditor
 respondeu. A causa cabia na tela desde sempre.
 
-### 40.3 A regra
+### 40.3 Três parsers, o mesmo defeito
+
+Depois de a auditoria voltar a funcionar, o mesmo run parou de novo — agora no
+ensaio, com dez critérios "NÃO ENSAIADOS". A saída do verificador era uma linha
+só:
+
+```
+Vou cruzar o texto com as decisões.CRITERION P8.T7.C3 …: OBSERVABLE — …
+```
+
+O comentário acima do regex do ensaio já contava essa história: no piloto 4, 21
+de 72 critérios voltaram como não ensaiados com o verificador tendo respondido
+todos, e a conclusão escrita lá é *"o defeito nunca esteve na resposta — estava
+em quem a lia"*. A correção daquela vez tolerou prosa em volta e indentação, e
+parou aí. Faltava a chave colada na frase anterior.
+
+| parser | o que o modelo escreveu | o que o harness entendeu |
+|---|---|---|
+| auditoria | `…afirma.CAPIVARA_AUDIT_STATUS: APPROVED` | saída inválida; run parado |
+| ensaio | `…decisões.CRITERION P8.T7.C3 …: OBSERVABLE` | critério não ensaiado |
+| verificação | `Vou conferir.TASK 1: DONE` | task sem veredito |
+
+Os três passam a usar a mesma função — `desgrudarChaves` —, e o terceiro foi
+corrigido antes de aparecer num run: a forma já se provou três vezes, e esperar a
+quarta seria esperar de propósito.
+
+### 40.4 A regra
 
 Toda saída de modelo que o harness lê por protocolo tem duas camadas, e elas têm
 donos diferentes: a **forma** é responsabilidade de quem escreveu o parser, e o

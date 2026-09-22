@@ -483,3 +483,39 @@ describe("o levantamento de uma aplicação existente", () => {
     expect(dominio).toContain("not yours to report");
   });
 });
+
+/**
+ * A chave colada no fim da frase anterior.
+ *
+ * O ensaio do MCP_teste2 veio numa linha só — a prosa de abertura e a chave sem
+ * `\n` entre elas — e dez critérios voltaram como "não ensaiados" com o
+ * verificador tendo julgado todos. O comentário acima do regex do ensaio já
+ * contava essa história do piloto 4; a correção de lá tolerou indentação e
+ * parou aí.
+ */
+describe("o ensaio lê o que o verificador respondeu", () => {
+  /** A saída real que derrubou dez critérios, encurtada. */
+  const REAL =
+    "Vou ler as decisões confirmadas e o plano para julgar se esse critério pode ser observado." +
+    "O critério mistura bloqueio de quantidade, cadastro ativo e sessão." +
+    "CRITERION P8.T7.C3 sem o cookie `sessao`, o envio deixa a linha com todas as colunas anteriores.: OBSERVABLE — a linha permanece igual";
+
+  it("a chave colada na prosa continua sendo um veredito", () => {
+    expect(parseRehearsal(REAL)).toEqual([
+      { address: "P8.T7.C3", ruling: "OBSERVABLE", reason: "a linha permanece igual" },
+    ]);
+  });
+
+  it("vários vereditos numa linha só viram vários vereditos", () => {
+    const grudado = "CRITERION P1.T1.C1: OBSERVABLE — dá para ver CRITERION P1.T2.C1: UNOBSERVABLE — não dá";
+    expect(parseRehearsal(grudado).map((veredito) => `${veredito.address} ${veredito.ruling}`)).toEqual([
+      "P1.T1.C1 OBSERVABLE",
+      "P1.T2.C1 UNOBSERVABLE",
+    ]);
+  });
+
+  it("o que já vinha em linhas próprias continua igual", () => {
+    const certo = "CRITERION P1.T1.C1: OBSERVABLE — dá para ver\nCRITERION P1.T2.C1: UNSATISFIABLE — nada satisfaz";
+    expect(parseRehearsal(certo)).toHaveLength(2);
+  });
+});

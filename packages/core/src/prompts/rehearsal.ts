@@ -27,6 +27,7 @@
 
 import type { PhasesDocument } from "../contract/index.js";
 import { languageBlock } from "./language.js";
+import { desgrudarChaves } from "../contract/protocolo.js";
 
 export const REHEARSAL_HEADER = "CAPIVARA_REHEARSAL";
 
@@ -158,10 +159,18 @@ export interface CriterionVerdict {
  */
 const CRITERION_LINE = /^CRITERION\s+(P\d+\.T\d+\.C\d+)\b[^:]*:\s*(OBSERVABLE|UNSATISFIABLE|UNOBSERVABLE)\b\s*(?:[—:-]\s*(.*))?$/;
 
-/** Lê as linhas CRITERION, ignorando prosa em volta e indentação acidental. */
+/**
+ * Lê as linhas CRITERION, ignorando prosa em volta e indentação acidental.
+ *
+ * E a chave colada no fim da frase anterior, que é a forma que faltava: no
+ * `MCP_teste2` o ensaio inteiro veio numa linha só — "Vou cruzar o texto com as
+ * decisões.CRITERION P8.T7.C3 …: OBSERVABLE — …" —, e dez critérios voltaram
+ * como não ensaiados com o verificador tendo julgado todos. A mesma lição do
+ * piloto 4, meia corrigida: o defeito nunca esteve na resposta.
+ */
 export function parseRehearsal(output: string): CriterionVerdict[] {
   const verdicts = new Map<string, CriterionVerdict>();
-  for (const rawLine of output.split("\n")) {
+  for (const rawLine of desgrudarChaves(output, String.raw`CRITERION\s+P\d+\.T\d+\.C\d+`).split("\n")) {
     const match = CRITERION_LINE.exec(rawLine.replace(/\r$/, "").trim());
     if (!match) continue;
     const address = match[1] ?? "";

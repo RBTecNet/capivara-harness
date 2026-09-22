@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 1120 testes em 53 arquivos, `npm run check` verde |
+| suíte | 1124 testes em 53 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
@@ -179,7 +179,9 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 - **Chave de protocolo colada no fim de uma frase mata um run.** O auditor do
   `MCP_teste2` escreveu `…afirma.CAPIVARA_AUDIT_STATUS: APPROVED` e o parser, que
   exigia coluna 1, chamou de saída inválida — duas vezes, e o `plan` morreu com o
-  plano pronto. Forma é responsabilidade do parser; conteúdo, de quem responde.
+  plano pronto. O mesmo aconteceu no ensaio (`CRITERION` colado) e o verificador
+  do build tinha a mesma meia tolerância. Os três leem pelo `desgrudarChaves`
+  agora. Forma é responsabilidade do parser; conteúdo, de quem responde.
 - **Juiz consultado duas vezes sobre a mesma coisa responde diferente.** O
   `plan` do `MCP_teste2` aprovou quatro fases na rodada 1 e reprovou as mesmas
   quatro na rodada 2, sem que uma linha delas mudasse. Onde o objeto não mudou, a
@@ -212,7 +214,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 1120 testes
+npm run check     # build + typecheck + 1124 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

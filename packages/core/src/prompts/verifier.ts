@@ -11,6 +11,7 @@
  */
 
 import { languageBlock } from "./language.js";
+import { desgrudarChaves } from "../contract/protocolo.js";
 
 export interface VerifierContext {
   language: string;
@@ -100,10 +101,14 @@ export interface TaskVerdict {
 
 const TASK_LINE = /^TASK\s+(\d+):\s*(DONE|INCOMPLETE)\s*(?:[—-]\s*(.*))?$/;
 
-/** Lê as linhas TASK, ignorando prosa em volta e indentação acidental. */
+/**
+ * Lê as linhas TASK, ignorando prosa em volta, indentação acidental — e a chave
+ * colada no fim da frase anterior, que foi a forma que derrubou a auditoria e o
+ * ensaio do `MCP_teste2` antes de aparecer aqui (§40).
+ */
 export function parseVerification(output: string): TaskVerdict[] {
   const verdicts: TaskVerdict[] = [];
-  for (const rawLine of output.split("\n")) {
+  for (const rawLine of desgrudarChaves(output, String.raw`TASK\s+\d+:`).split("\n")) {
     const match = TASK_LINE.exec(rawLine.replace(/\r$/, "").trim());
     if (!match) continue;
     verdicts.push({

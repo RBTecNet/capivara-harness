@@ -125,3 +125,20 @@ describe("prompt e protocolo do verificador", () => {
     expect(parseVerification("TASK um: DONE\nTASK 1: TALVEZ")).toEqual([]);
   });
 });
+
+/**
+ * O mesmo desleixo, no verificador do build.
+ *
+ * Ele ainda não apareceu num run — a auditoria e o ensaio morreram antes —, mas
+ * o parser tinha a mesma meia tolerância, e a forma de defeito já se provou
+ * três vezes (§40).
+ */
+describe("o verificador com a chave colada na prosa", () => {
+  it("lê os vereditos de uma linha só", () => {
+    const grudado = "Vou conferir cada task.TASK 1: DONE TASK 2: INCOMPLETE — falta o teste de sessão";
+    expect(parseVerification(grudado)).toEqual([
+      { index: 1, done: true, missing: "" },
+      { index: 2, done: false, missing: "falta o teste de sessão" },
+    ]);
+  });
+});

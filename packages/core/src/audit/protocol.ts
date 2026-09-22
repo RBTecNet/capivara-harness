@@ -9,6 +9,8 @@
  * O escritor não paga por um erro de formato de quem o auditou.
  */
 
+import { desgrudarChaves } from "../contract/protocolo.js";
+
 export type AuditStatus = "APPROVED" | "REJECTED";
 
 export interface Finding {
@@ -74,9 +76,7 @@ const CHAVES = "CAPIVARA_(?:AUDIT_STATUS|FINDING|REMARK|REASON)";
  * continua igual: três campos num finding, um status, um motivo.
  */
 export function desembrulhar(output: string): string {
-  return output
-    // A chave que não começa a linha ganha a sua própria.
-    .replace(new RegExp(`([^\n])(${CHAVES}:)`, "g"), "$1\n$2")
+  return desgrudarChaves(output, `${CHAVES}:`)
     .split("\n")
     .map((linha) =>
       linha

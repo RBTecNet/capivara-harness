@@ -7,7 +7,7 @@
  * entrevista e um interrogatório.
  */
 
-import { QUESTIONS_CONTRACT, type Assumption, type Question, type QuestionOption } from "./types.js";
+import { QUESTIONS_CONTRACT, type Assumption, type Omission, type Question, type QuestionOption } from "./types.js";
 
 export interface QuestionDefect {
   index: number;
@@ -17,10 +17,21 @@ export interface QuestionDefect {
 }
 
 export type QuestionBatch =
-  | { ok: true; questions: Question[]; assumptions: Assumption[] }
+  | { ok: true; questions: Question[]; assumptions: Assumption[]; omissions: Omission[] }
   | { ok: false; defects: QuestionDefect[] };
 
 const ID = /^Q-\d{2,}$/;
+const OMISSION_ID = /^O-\d{2,}$/;
+
+/**
+ * Quantas omissões cabem numa entrevista.
+ *
+ * O teto existe pela mesma razão do teto de perguntas: o desenvolvedor que
+ * responde quarenta coisas para documentar um produto pequeno para de responder
+ * com cuidado lá pela décima quinta. Quatro é o que cabe depois das seis
+ * perguntas sem transformar a entrevista em questionário.
+ */
+export const MAX_OMISSOES = 4;
 
 /**
  * A pergunta pede mais de uma decisão?
@@ -102,7 +113,8 @@ export function parseQuestionBatch(source: string): QuestionBatch {
   const questions: Question[] = [];
   const seen = new Set<string>();
 
-  root.questions.forEach((entry, index) => {
+  /** Tudo o que vale para pergunta vale igual para omissão: é a mesma tela. */
+  const ler = (entry: unknown, index: number, formato: RegExp, comoUsar: string): Question => {
     const record = (entry ?? {}) as Record<string, unknown>;
     const question: Question = {
       id: text(record.id),
@@ -119,7 +131,7 @@ export function parseQuestionBatch(source: string): QuestionBatch {
       defects.push({ index, questionId: question.id || `#${index + 1}`, problem, hint });
     };
 
-    if (!ID.test(question.id)) complain("id fora do formato", "use Q-01, Q-02, … estáveis entre rodadas");
+    if (!formato.test(question.id)) complain("id fora do formato", comoUsar);
     else if (seen.has(question.id)) complain("id repetido", "cada pergunta tem um id único no lote");
     else seen.add(question.id);
 
@@ -149,8 +161,50 @@ export function parseQuestionBatch(source: string): QuestionBatch {
       }
     }
 
-    questions.push(question);
+    return question;
+  };
+
+  root.questions.forEach((entry, index) => {
+    questions.push(ler(entry, index, ID, "use Q-01, Q-02, … estáveis entre rodadas"));
   });
+
+  /*
+   * As omissões: o que o pedido NÃO diz.
+   *
+   * Elas vêm em lista própria porque a regra é outra — e porque disputar o teto
+   * de seis perguntas seria trocar uma pergunta sobre o que foi dito por uma
+   * sobre o que não foi. No MCP_teste as seis eram todas boas e todas
+   * necessárias; a edição de clientes não caberia em nenhuma delas.
+   *
+   * O excedente é cortado em silêncio, e não recusado: um lote inteiro
+   * rejeitado custa uma volta de levantamento, e o prompt já diz o teto.
+   */
+  const omissions: Omission[] = [];
+  if (Array.isArray(root.omissions)) {
+    root.omissions.slice(0, MAX_OMISSOES).forEach((entry, index) => {
+      const record = (entry ?? {}) as Record<string, unknown>;
+      const question = ler(entry, index, OMISSION_ID, "use O-01, O-02, … para omissões");
+      const include = text(record.include);
+
+      if (question.options.length !== 2) {
+        defects.push({
+          index,
+          questionId: question.id || `#${index + 1}`,
+          problem: "omissão sem exatamente duas opções",
+          hint: "a omissão é sim ou não: uma opção que inclui a área no escopo e outra que a deixa de fora",
+        });
+      } else if (!question.options.some((option) => option.label === include)) {
+        defects.push({
+          index,
+          questionId: question.id || `#${index + 1}`,
+          problem: "`include` não é o rótulo de nenhuma das opções",
+          hint: "declare em `include` o rótulo EXATO da opção que traz a área para o escopo",
+        });
+      }
+
+      omissions.push({ ...question, include });
+    });
+  }
 
   /*
    * A suposição precisa de um canal.
@@ -172,7 +226,7 @@ export function parseQuestionBatch(source: string): QuestionBatch {
         .filter((assumption) => assumption.statement !== "")
     : [];
 
-  return defects.length > 0 ? { ok: false, defects } : { ok: true, questions, assumptions };
+  return defects.length > 0 ? { ok: false, defects } : { ok: true, questions, assumptions, omissions };
 }
 
 function stripFence(source: string): string {

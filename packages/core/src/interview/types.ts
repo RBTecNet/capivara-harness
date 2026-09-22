@@ -44,6 +44,25 @@ export interface Question {
   pending?: string;
 }
 
+/**
+ * Uma área que o pedido não menciona.
+ *
+ * Não é ambiguidade do que foi dito — para isso existe `Question`. É ausência:
+ * o pedido descreve cadastrar clientes e nunca fala em alterá-los, e quem
+ * escreveu não decidiu que alterar está fora, apenas não pensou nisso. O
+ * MCP_teste terminou com cinco fases verdes e sem tela de edição de cliente
+ * nenhuma, porque ninguém perguntou.
+ *
+ * Ela é uma pergunta como as outras — é respondida, classificada e reperguntada
+ * pelo mesmo caminho —, com uma diferença: o harness precisa saber qual das
+ * duas opções INCLUI a área, para transformar a recusa em não-objetivo escrito
+ * em vez de em silêncio.
+ */
+export interface Omission extends Question {
+  /** O rótulo exato da opção que traz a área para o escopo. */
+  include: string;
+}
+
 export interface Answer {
   questionId: string;
   /** A resposta crua, preservada sempre e nunca sobrescrita pela normalização. */

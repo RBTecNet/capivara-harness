@@ -139,3 +139,36 @@ describe("a fatia de uma fase", () => {
     expect(sliceForPhase(skeleton, 2).length).toBeLessThan(inteiro.length);
   });
 });
+
+/**
+ * O que ficou de fora, escrito.
+ *
+ * Sem esta seção, quem lê o esqueleto seis meses depois não distingue "não tem
+ * edição de cliente porque decidimos que não tem" de "ninguém pensou nisso" — e
+ * a segunda leitura é a que faz alguém implementar o que o pedido não pediu.
+ */
+describe("os não-objetivos do esqueleto", () => {
+  const esqueleto = (parseSkeleton(comoTexto(COMPLETO), LIMITES) as { ok: true; skeleton: Skeleton }).skeleton;
+  const base = { ...esqueleto, nonGoals: ["edição de clientes — fora do escopo por decisão do desenvolvedor: correções saem pelo banco"] };
+
+  it("aparecem numa seção própria, depois das fases", () => {
+    const markdown = renderSkeleton(base);
+    expect(markdown).toContain("## Fora do escopo");
+    expect(markdown).toContain("edição de clientes");
+    expect(markdown.indexOf("## Fora do escopo")).toBeGreaterThan(markdown.indexOf("## Fases"));
+  });
+
+  it("esqueleto sem não-objetivo não ganha seção vazia", () => {
+    expect(renderSkeleton(esqueleto)).not.toContain("## Fora do escopo");
+  });
+
+  /*
+   * O esqueleto é retomado do estado em todo `plan` e pode voltar de um zip: se
+   * a leitura perdesse o campo, a decisão sumiria na primeira retomada.
+   */
+  it("sobrevivem à ida e volta pelo JSON", () => {
+    const lido = parseSkeleton(JSON.stringify(base), LIMITES);
+    if (!lido.ok) throw new Error(lido.defects.map((defeito) => defeito.problem).join("; "));
+    expect(lido.skeleton.nonGoals).toEqual(base.nonGoals);
+  });
+});

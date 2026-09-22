@@ -57,6 +57,43 @@ const APPEARANCE = [
   "Recommend the one that fits the product described, and say why in one sentence.",
 ].join("\n");
 
+const OMISSIONS = [
+  "## What the request does not mention",
+  "",
+  "Besides the questions, raise up to FOUR omissions — areas the request never mentions that a",
+  "product of this kind normally has, and whose absence the developer would notice while using",
+  "what you are about to specify.",
+  "",
+  "This is the opposite of a question. A question is about something the request DID say and said",
+  "ambiguously. An omission is about something it never said at all — not because the developer",
+  "decided against it, but because it did not occur to them. A real example: a request described",
+  "registering clients and films and never mentioned changing or removing either. The product",
+  "shipped complete, correct, and with no way to fix a mistyped phone number.",
+  "",
+  "Where to look, in this order:",
+  "- the life cycle of each thing the request asks to store: create, read, change, remove;",
+  "- what happens when something goes wrong: a wrong value, a duplicate, a record in use;",
+  "- who else touches the product: an operator, an administrator, someone who only reads;",
+  "- what the developer will need the day after it works: seeing history, correcting the past.",
+  "",
+  "An omission is worth raising only when ALL of these hold:",
+  "1. The request truly does not mention it — not once, not implicitly.",
+  "2. Its absence is visible to whoever uses the product, not to whoever reads the code.",
+  "3. Including it changes scope: it means more entities, screens, flows or phases.",
+  "4. A competent developer, reading the request aloud, would stop and ask about it.",
+  "",
+  "Never raise as an omission: a technical convention, a quality practice (tests, logging,",
+  "accessibility), anything already covered by a question, or anything the request excludes on",
+  "purpose. And never raise four weak ones to fill the quota — zero omissions is a valid answer,",
+  "and a common one for a request that was written carefully.",
+  "",
+  "Each omission is answered yes or no, so it carries EXACTLY TWO options: one that brings the",
+  "area into scope and one that leaves it out. `include` repeats, verbatim, the label of the one",
+  "that brings it in. Recommend the one that fits THIS product and say why in one sentence — you",
+  "are advising a developer who forgot, not selling them work: an area that would double the",
+  "delivery for a marginal gain is recommended OUT, and you say that.",
+].join("\n");
+
 const FRAME = [
   "You are a specification writer for the Capivara harness. You produce documentation only.",
   "You never write application code, never run build or test commands, never install anything,",
@@ -87,6 +124,14 @@ export function interviewPrompt(
   writer: WriterContext,
   inventory: string,
   previous: { question: string; answer: string; disposition: string }[],
+  /**
+   * A rodada. As omissões só existem na primeira.
+   *
+   * Ampliar escopo na terceira rodada refaz o que as duas primeiras decidiram —
+   * e a entrevista existe para fechar decisões, não para reabri-las. Quem leu o
+   * pedido inteiro na rodada 1 já viu o que falta nele.
+   */
+  round = 1,
 ): string {
   return [
     languageBlock(writer.language),
@@ -120,10 +165,21 @@ export function interviewPrompt(
     // A pergunta de aparência vale para o levantamento do produto: a identidade
     // visual é decidida uma vez, e não fase a fase.
     ...(document === "skeleton" ? [APPEARANCE, ""] : []),
+    ...(document === "skeleton" && round === 1 ? [OMISSIONS, ""] : []),
     "",
     "Return only JSON, with both lists — `assumptions` may be empty, and so may `questions`:",
     '{ "contract": "capivara-questions/v1",',
     '  "assumptions": [ { "topic": "...", "statement": "what you decided", "basis": "why it is low risk" } ],',
+    ...(document === "skeleton" && round === 1
+      ? [
+          '  "omissions": [ {',
+          '  "id": "O-01", "topic": "...", "evidence": "what the request does say about it",',
+          '  "decision": "the missing area, as one yes-or-no question", "why": "what the developer loses without it",',
+          '  "options": [ { "label": "...", "consequence": "..." }, { "label": "...", "consequence": "..." } ],',
+          '  "include": "<the label of the option that brings it into scope>",',
+          '  "recommended": "<exactly one option label>", "recommendationBasis": "..." } ],',
+        ]
+      : []),
     '  "questions": [ {',
     '  "id": "Q-01", "topic": "...", "evidence": "what you already found",',
     '  "decision": "the missing decision as a question", "why": "what changes with the answer",',

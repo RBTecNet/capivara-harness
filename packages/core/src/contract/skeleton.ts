@@ -103,6 +103,14 @@ export interface Skeleton {
   rules: SkeletonRule[];
   phases: SkeletonPhase[];
   mvpCutPhase: number;
+  /**
+   * O que ficou de fora por decisão, e não por esquecimento.
+   *
+   * Vem da entrevista — das omissões que o desenvolvedor recusou —, nunca do
+   * escritor. É opcional porque esqueleto escrito antes disto existir continua
+   * válido, e porque a maioria dos projetos não terá nenhum.
+   */
+  nonGoals?: string[];
 }
 
 export interface SkeletonDefect {
@@ -222,6 +230,10 @@ export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number
 
   const mvpCutPhase = typeof root.mvpCutPhase === "number" ? root.mvpCutPhase : phases.length;
 
+  // Os não-objetivos vêm da entrevista, não do escritor. Aceitos na leitura para
+  // que um esqueleto retomado do estado ou de um zip não os perca.
+  const nonGoals = strings(root.nonGoals);
+
   const skeleton: Skeleton = {
     contract: SKELETON_CONTRACT,
     projectName: text(root.projectName) || "Projeto",
@@ -232,6 +244,7 @@ export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number
     rules,
     phases,
     mvpCutPhase,
+    ...(nonGoals.length > 0 ? { nonGoals } : {}),
   };
 
   return defects.length > 0 ? { ok: false, defects } : { ok: true, skeleton };
@@ -355,6 +368,17 @@ export function renderSkeleton(skeleton: Skeleton): string {
     "",
     `MVP fecha na fase ${skeleton.mvpCutPhase}.`,
   );
+
+  /*
+   * O que ficou de fora, escrito.
+   *
+   * Vai depois das fases e antes de mais nada ser derivado daqui: quem lê o
+   * esqueleto para implementar precisa ver que a ausência é decisão, e quem
+   * escreve as fases precisa não tratá-la como esquecimento a corrigir.
+   */
+  if (skeleton.nonGoals && skeleton.nonGoals.length > 0) {
+    linhas.push("", "## Fora do escopo", ...skeleton.nonGoals.map((item) => `- ${item}`));
+  }
 
   return `${linhas.join("\n")}\n`;
 }

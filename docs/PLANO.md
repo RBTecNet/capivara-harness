@@ -2801,3 +2801,97 @@ que são convenção de quem sobe processo, e nada além disso.
   pergunta para o próximo run real, não para agora.
 - **Duplo de serviço externo** (§33): continua sendo o limite conhecido do gate 4.
 - **Multi-tenant no `doc-center`:** fora do MVP, por decisão.
+
+## §35 — A entrevista cobre o que o pedido não menciona
+
+O `MCP_teste` terminou com cinco fases verdes, `npm test` inteiro passando, os
+fluxos percorridos num navegador de verdade — e sem nenhuma forma de corrigir o
+telefone de um cliente. O pedido dizia "cadastro de cliente" e nunca dizia
+"alterar cliente"; o esqueleto é derivado do pedido, o plano do esqueleto, e os
+gates cobram o plano. O que ninguém pediu não tinha por onde entrar.
+
+Isso é o comportamento certo, e é a propriedade que faz o harness valer: ele não
+inventa escopo. O desenvolvedor mediu isso com todas as letras — *"os modelos não
+inventaram nada e isso já é ótimo"*. O problema não é o harness construir só o
+que foi pedido; é **ninguém ter perguntado** antes de construir.
+
+A entrevista já tinha um precedente exato para isto: a pergunta obrigatória de
+identidade visual, que existe porque quem planeja um produto está mergulhado nas
+regras de negócio e aparência não lhe ocorre. A omissão é a mesma ideia,
+generalizada.
+
+### 35.1 O canal próprio, e por que não cabia nas perguntas
+
+As seis perguntas da entrevista do `MCP_teste` foram todas boas e todas sobre
+ambiguidade do que **foi** dito: quem opera, qual autenticação, qual diária vale
+se o preço mudou, se o CPF repete, quais estados a locação tem, qual identidade
+visual. O teto de seis estava cheio.
+
+Uma omissão disputando esse teto trocaria uma pergunta sobre o que foi dito por
+uma sobre o que não foi — o remédio custando o diagnóstico. Por isso `omissions`
+é lista própria, com teto próprio de quatro, e o excedente é **cortado em
+silêncio** em vez de reprovar o lote: um lote recusado custa uma volta inteira de
+levantamento.
+
+### 35.2 Uma omissão não é uma pergunta
+
+| | pergunta | omissão |
+|---|---|---|
+| sobre | o que o pedido disse, ambiguamente | o que o pedido não disse |
+| origem | duas leituras plausíveis do texto | uma área que não ocorreu a ninguém |
+| forma | 2 a 4 opções, ou aberta | exatamente duas: entra ou não entra |
+| resposta vazia | fica `[NEEDS DECISION]` | fica fora do escopo, e escrito |
+
+Onde procurar, em ordem: o ciclo de vida do que o pedido manda guardar (criar,
+consultar, alterar, remover); o que acontece quando dá errado; quem mais toca no
+produto; e o que o desenvolvedor vai precisar no dia seguinte a funcionar.
+
+O que **não** é omissão: convenção técnica, prática de qualidade, coisa já
+coberta por uma pergunta, e coisa que o pedido exclui de propósito. Zero omissões
+é resposta válida — e a esperada para um pedido escrito com cuidado.
+
+### 35.3 Elas entram na mesma fila
+
+Depois das perguntas, na mesma fila, respondidas pelo mesmo caminho. Com isso
+herdam de graça tudo o que já existe: a repergunta que mostra o que faltou, a
+classificação local que resolve escolha por número sem chamar modelo, o registro
+no handoff que sobrevive ao processo, a memória enviada à base e o relatório
+final. Um segundo caminho de entrevista seria um segundo caminho para manter.
+
+Depois, e não antes, porque o que o pedido diz vale mais do que o que ele não
+diz: quem responde chega nelas já tendo decidido o essencial.
+
+**Só na primeira rodada.** Ampliar escopo na terceira refaz o que as duas
+primeiras decidiram, e a entrevista existe para fechar decisões, não para
+reabri-las.
+
+### 35.4 A recusa é decisão, e fica escrita
+
+A recomendação é a mesma regra das outras perguntas — o modelo recomenda o que
+serve a **este** produto e justifica numa frase, com a instrução explícita de
+recomendar de fora a área que dobraria a entrega por um ganho marginal. Ele está
+aconselhando quem esqueceu, não vendendo trabalho.
+
+Recusada, a omissão vira **não-objetivo escrito no esqueleto**, numa seção
+própria:
+
+```markdown
+## Fora do escopo
+- edição de clientes — fora do escopo por decisão do desenvolvedor: correções saem pelo banco
+```
+
+Sem isso, quem lê o esqueleto seis meses depois não distingue "não tem edição de
+cliente porque decidimos que não tem" de "ninguém pensou nisso" — e a segunda
+leitura é a que faz alguém implementar por conta própria o que o pedido não
+pediu.
+
+O reconhecimento da recusa é mecânico e exato: quando o desenvolvedor escolhe uma
+opção pelo número ou pelo rótulo, a decisão gravada **é** o rótulo da opção.
+Resposta em texto livre, normalizada por um modelo, não casa com rótulo nenhum —
+e aí o harness não afirma nada, porque não sabe. Omissão adiada também não vira
+não-objetivo: declarar fora do escopo o que ninguém decidiu é o erro que a
+disposição `DEFERRED` existe para impedir.
+
+O não-objetivo é posto no esqueleto **pelo harness, depois do parser** — não pelo
+escritor. Ele escreveria "não haverá edição de clientes" como prosa dele, e prosa
+do escritor é palpite; isto é decisão do desenvolvedor, gravada como ele a tomou.

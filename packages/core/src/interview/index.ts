@@ -5,11 +5,13 @@ export type {
   Checkpoint,
   Disposition,
   Handoff,
+  Omission,
   OpenDecision,
   Question,
   QuestionOption,
 } from "./types.js";
-export { decisoesJuntas, parseQuestionBatch } from "./protocol.js";
+export { MAX_OMISSOES, decisoesJuntas, parseQuestionBatch } from "./protocol.js";
+export { ehOmissao, naoObjetivos } from "./omissions.js";
 export type { QuestionBatch, QuestionDefect } from "./protocol.js";
 export { buildAnswer, classifyLocally, isNonAnswer, parseClassification } from "./classify.js";
 export type { LocalClassification, ModelVerdict } from "./classify.js";

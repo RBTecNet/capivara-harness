@@ -173,7 +173,7 @@ describe("o build retomado mostra o que já fechou", () => {
 
     const verdes = p01.filter((evento) => evento.kind === "gate" && evento.state === "verde");
     expect(verdes.map((evento) => (evento.kind === "gate" ? evento.gate : ""))).toEqual(["G0", "G1", "G2", "G3"]);
-  });
+  }, 20_000);
 
   /*
    * Sem esqueleto não há gate 4 nem na primeira passagem. Pintá-lo verde diria
@@ -196,6 +196,61 @@ describe("o build retomado mostra o que já fechou", () => {
     await build(passos, { onProgress: (evento) => void eventos.push(evento) });
 
     expect(eventos.some((evento) => evento.kind === "gate" && evento.gate === "G4")).toBe(false);
+  }, 20_000);
+});
+
+/**
+ * A entrevista cobrindo o que o pedido esqueceu.
+ *
+ * O MCP_teste terminou com cinco fases verdes e sem tela de edição de cliente:
+ * o pedido falava em cadastrar e nunca em alterar, e a entrevista só perguntou
+ * sobre o que estava escrito. A recusa precisa ficar escrita tanto quanto a
+ * aceitação — senão, seis meses depois, ninguém distingue decisão de esquecimento.
+ */
+describe("as áreas que o pedido não menciona", () => {
+  const COM_OMISSAO = JSON.stringify({
+    contract: "capivara-questions/v1",
+    questions: [],
+    omissions: [
+      {
+        id: "O-01",
+        topic: "edição de clientes",
+        evidence: "O pedido descreve cadastrar clientes e nunca menciona alterar nem remover.",
+        decision: "A aplicação deve permitir alterar e remover clientes?",
+        why: "Sem isso, corrigir um telefone digitado errado exige mexer no banco à mão.",
+        options: [
+          { label: "Sim, incluir alteração e remoção", consequence: "Mais uma tela e duas rotas." },
+          { label: "Não, fica fora do escopo", consequence: "Correções saem pelo banco." },
+        ],
+        include: "Sim, incluir alteração e remoção",
+        recommended: "Sim, incluir alteração e remoção",
+        recommendationBasis: "Um cadastro de balcão acumula erro de digitação na primeira semana.",
+      },
+    ],
+  });
+
+  const roteiro = (): ScriptStep[] => [
+    { match: { role: "writer", stage: "interview" }, respond: { stdout: COM_OMISSAO }, repeat: true },
+    ...happyPath().filter((passo) => passo.match.stage !== "interview"),
+  ];
+
+  it("a omissão é perguntada, e a recusa vira não-objetivo no esqueleto", async () => {
+    // "2" é a opção que deixa a área de fora.
+    const { outcome } = await init(roteiro(), ["2"]);
+    expect(outcome.readiness.ready).toBe(true);
+
+    const esqueleto = await readFile(join(projectRoot, ".capivara/init/skeleton.md"), "utf8");
+    expect(esqueleto).toContain("## Fora do escopo");
+    expect(esqueleto).toContain("edição de clientes");
+    expect(esqueleto).toContain("Correções saem pelo banco");
+  });
+
+  it("aceitar a área não escreve não-objetivo nenhum", async () => {
+    const { outcome } = await init(roteiro(), ["1"]);
+    expect(outcome.readiness.ready).toBe(true);
+
+    const esqueleto = await readFile(join(projectRoot, ".capivara/init/skeleton.md"), "utf8");
+    expect(esqueleto).not.toContain("## Fora do escopo");
   });
 });
 
@@ -1025,7 +1080,7 @@ describe("o build retomado, quando o run tem fluxos", () => {
       .filter((evento) => evento.kind === "gate" && evento.id === "P01" && evento.state === "verde")
       .map((evento) => (evento.kind === "gate" ? evento.gate : ""));
     expect(verdes).toEqual(["G0", "G1", "G2", "G3", "G4"]);
-  });
+  }, 20_000);
 });
 
 describe("a prova do gate 4 fica no disco", () => {

@@ -21,7 +21,7 @@ import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
 import { tasksBlock } from "../contract/templates.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, isRepairable, publish, repairDeterministically, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
-import { buildAnswer, buildCheckpoint, classifyLocally, isNonAnswer, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
+import { buildAnswer, buildCheckpoint, classifyLocally, isNonAnswer, naoObjetivos, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Assumption, Question } from "../interview/index.js";
 import { amendPhasePrompt, assessRehearsal, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
 import type { AskedQuestion, CriterionRef, RehearsalResult, WriterContext } from "../prompts/index.js";
@@ -432,7 +432,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       // Lote malformado repete SÓ o levantamento, com os defeitos nomeados.
       // O desenvolvedor não paga por um erro de formato de quem levanta as
       // perguntas, e nomear o defeito quase sempre resolve na segunda.
-      const base = interviewPrompt(document, writer, inventoryText, previous);
+      const base = interviewPrompt(document, writer, inventoryText, previous, round);
       let batch = parseQuestionBatch(await track({ role: "writer", stage: "interview", subject: document, attempt: round, prompt: base }));
 
       if (!batch.ok) {
@@ -458,6 +458,22 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }
 
       for (const question of batch.questions) if (!questions.some((entry) => entry.id === question.id)) questions.push(question);
+
+      /*
+       * As omissões entram DEPOIS das perguntas, na mesma fila.
+       *
+       * Depois porque o que o pedido diz vale mais que o que ele não diz: quem
+       * responde chega nelas já tendo decidido o essencial. Na mesma fila porque
+       * assim elas herdam tudo — repergunta com o que faltou, classificação,
+       * registro no handoff, memória e relatório —, sem um segundo caminho para
+       * manter.
+       */
+      for (const omission of batch.omissions) {
+        if (!questions.some((entry) => entry.id === omission.id)) questions.push(omission);
+      }
+      if (batch.omissions.length > 0) {
+        announce(`  ${batch.omissions.length} área(s) que o pedido não menciona; você decide se entram`);
+      }
       for (const assumption of batch.assumptions) {
         if (!allAssumptions.some((entry) => entry.statement === assumption.statement)) allAssumptions.push(assumption);
       }
@@ -769,6 +785,17 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     const decisoes = allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision);
     const suposicoes = allAssumptions.map((assumption) => `${assumption.topic}: ${assumption.statement} (${assumption.basis})`);
 
+    /*
+     * O que o desenvolvedor recusou fica escrito no esqueleto.
+     *
+     * Não passa pelo escritor: ele escreveria "não haverá edição de clientes"
+     * como prosa dele, e prosa do escritor é palpite. Isto é decisão do
+     * desenvolvedor, gravada como ele a tomou, e por isso é o harness que a
+     * põe lá — depois do parser, onde nada pode reescrevê-la.
+     */
+    const fora = naoObjetivos(entrevista.questions, entrevista.answers);
+    if (fora.length > 0) announce(`  ${fora.length} área(s) registrada(s) como fora do escopo`);
+
     // O esqueleto é recusado pelo parser antes de custar qualquer fase escrita.
     await event("authoring", "skeleton", "started");
     /*
@@ -836,6 +863,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     if (!esqueleto) {
       throw new InitBlockedError(`o esqueleto veio inválido duas vezes: ${defeitos.join("; ")}`, runId);
     }
+
+    if (fora.length > 0) esqueleto = { ...esqueleto, nonGoals: fora };
 
     await publish(options.projectRoot, [{ name: "skeleton.md", content: renderSkeleton(esqueleto) }]);
     await event("publish", "skeleton", "complete", `${esqueleto.phases.length} fase(s), ${esqueleto.entities.length} entidade(s)`);

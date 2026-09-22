@@ -386,3 +386,42 @@ describe("onde o executor constrói", () => {
     expect(prompt).toContain("not `tmp/`");
   });
 });
+
+/**
+ * As omissões: o que o pedido não menciona.
+ *
+ * O MCP_teste entregou cinco fases verdes sem uma tela de edição de cliente,
+ * porque o pedido falava em cadastrar e nunca em alterar. A entrevista perguntou
+ * seis coisas, todas boas, todas sobre o que ESTAVA escrito.
+ */
+describe("o levantamento das áreas faltantes", () => {
+  it("o levantamento do produto pede omissões na primeira rodada", () => {
+    const prompt = interviewPrompt("skeleton", context, "Projeto vazio.", [], 1);
+    expect(prompt).toContain("What the request does not mention");
+    expect(prompt).toContain("create, read, change, remove");
+    expect(prompt).toContain('"omissions"');
+    expect(prompt).toContain('"include"');
+  });
+
+  /*
+   * Ampliar escopo na terceira rodada refaz o que as duas primeiras decidiram.
+   * Quem leu o pedido inteiro na rodada 1 já viu o que falta nele.
+   */
+  it("da segunda rodada em diante, não se abre escopo novo", () => {
+    expect(interviewPrompt("skeleton", context, "Projeto vazio.", [], 2)).not.toContain("What the request does not mention");
+  });
+
+  it("a entrevista de uma fase não levanta omissão: ali o produto já está decidido", () => {
+    expect(interviewPrompt("phase 3", context, "Projeto vazio.", [], 1)).not.toContain("What the request does not mention");
+  });
+
+  it("diz que zero omissões é resposta válida — nada de preencher cota", () => {
+    const prompt = interviewPrompt("skeleton", context, "Projeto vazio.", [], 1);
+    expect(prompt).toContain("zero omissions is a valid answer");
+  });
+
+  it("manda recomendar o que serve ao produto, e recomendar de fora o que não serve", () => {
+    const prompt = interviewPrompt("skeleton", context, "Projeto vazio.", [], 1);
+    expect(prompt).toContain("not selling them work");
+  });
+});

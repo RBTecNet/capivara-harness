@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 1012 testes em 53 arquivos, `npm run check` verde |
+| suíte | 1034 testes em 53 arquivos, `npm run check` verde |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
 O ciclo de três estágios foi desenvolvido no branch `ciclo-unico` e fundido em
@@ -42,6 +42,13 @@ caro terminou as sete fases quando o harness parou de esconder informação dele
 ## O que veio depois do checkpoint
 
 Quatro frentes, todas nascidas de um run real e todas commitadas.
+
+**§35 — a entrevista cobre o que o pedido não menciona.** O `MCP_teste` fechou
+cinco fases verdes e não tinha como corrigir o telefone de um cliente: o pedido
+dizia "cadastro" e nunca dizia "alterar". A entrevista ganhou um canal próprio de
+omissões — até quatro, só na primeira rodada, cada uma respondida com sim ou não
+na mesma fila das perguntas. Recusada, a área vira não-objetivo escrito numa
+seção `## Fora do escopo` do esqueleto, posta lá pelo harness e não pelo escritor.
 
 **§34 — a base documental.** O harness lê o pedido, as decisões e as skills de
 uma base MCP (`doc-center`, em repositório próprio), materializa as skills em
@@ -176,7 +183,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 1012 testes
+npm run check     # build + typecheck + 1034 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

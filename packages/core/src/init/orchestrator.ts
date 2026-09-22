@@ -75,6 +75,8 @@ export interface InitOptions {
   onMemorias?: (memorias: MemoriaParaRegistrar[]) => Promise<void>;
   language: string;
   call: AgentCaller;
+  /** Quem rodou: provider, modelo e effort de cada papel, para o `run.json`. */
+  roles?: Record<string, { provider: string; model: string; effort: string }>;
   ask: AskDeveloper;
   decideStandoff?: DecideStandoff;
   announce?: (message: string) => void;
@@ -201,7 +203,13 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const runId = runIdFor("init", options.request.sha12);
   const paths = runPaths(options.projectRoot, runId);
   await ensureArtifactTree(options.projectRoot);
-  const state = createRunState({ runId, command: "init", language: options.language, now });
+  const state = createRunState({
+    runId,
+    command: "init",
+    language: options.language,
+    now,
+    ...(options.roles ? { roles: options.roles } : {}),
+  });
   await writeRunState(options.projectRoot, state, now);
 
   const costs = new Map<string, RoleCost>();

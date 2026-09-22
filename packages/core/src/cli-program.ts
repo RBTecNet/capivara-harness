@@ -325,6 +325,22 @@ function estagioInterativo(options: {
 }
 
 /**
+ * Quem rodou, para o `run.json`.
+ *
+ * O campo existia e nascia vazio. Diagnosticar o `MCP_teste2` exigiu adivinhar
+ * qual CLI tinha sido usada — e a resposta mudava o veredito, porque o acesso de
+ * sistema que o executor recebe é escolhido pelo adaptador de cada uma.
+ */
+function snapshotDePapeis(roles: ReturnType<typeof rolesFromFlags>, usados: readonly string[]): Record<string, { provider: string; model: string; effort: string }> {
+  const registro: Record<string, { provider: string; model: string; effort: string }> = {};
+  for (const papel of usados) {
+    const config = roles[papel as keyof typeof roles];
+    if (config) registro[papel] = { provider: config.provider, model: config.model, effort: config.effort };
+  }
+  return registro;
+}
+
+/**
  * O texto de um prompt guardado na base.
  *
  * Terceira origem de um pedido, ao lado do texto digitado e do arquivo. Sem
@@ -759,6 +775,7 @@ export function createProgram(): Command {
     try {
       const outcome = await runInit({
         projectRoot,
+        roles: snapshotDePapeis(roles, INIT_ROLES),
         request,
         ...(material ? { library: material.documents } : {}),
         ...(material && flags.mcp && flags.mcpProject
@@ -1055,6 +1072,7 @@ export function createProgram(): Command {
 
     const outcome = await runBuild({
       projectRoot,
+      roles: snapshotDePapeis(roles, BUILD_ROLES),
       skeleton: esqueletoDoBuild,
       skipFlows: flags.flows === false,
       ...(flags.rebuildAll === true ? { rebuildAll: true } : {}),

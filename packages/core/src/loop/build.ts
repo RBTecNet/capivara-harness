@@ -67,6 +67,15 @@ export interface BuildOptions {
   flowRunner?: FlowRunner;
   /** Desliga o gate 4 mesmo havendo esqueleto. */
   skipFlows?: boolean;
+  /**
+   * Quem rodou: provider, modelo e effort de cada papel.
+   *
+   * O `run.json` sempre teve o campo e ele sempre ficou vazio. Diagnosticar o
+   * `MCP_teste2` exigiu adivinhar qual CLI tinha sido usada — e a resposta
+   * mudava o veredito, porque o acesso de sistema que o executor recebe depende
+   * do adaptador. O run precisa dizer quem o executou.
+   */
+  roles?: Record<string, { provider: string; model: string; effort: string }>;
   /** Refaz até o que já fechou em run anterior com o mesmo texto. */
   rebuildAll?: boolean;
   /**
@@ -238,7 +247,17 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   const paths = runPaths(options.projectRoot, runId);
 
   try {
-    await writeRunState(options.projectRoot, createRunState({ runId, command: "build", language: options.language, now }), now);
+    await writeRunState(
+      options.projectRoot,
+      createRunState({
+        runId,
+        command: "build",
+        language: options.language,
+        now,
+        ...(options.roles ? { roles: options.roles } : {}),
+      }),
+      now,
+    );
     await materializeSessions(checked.sessions);
 
     const progress = replayEvents(await readEvents(paths.events));

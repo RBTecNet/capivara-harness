@@ -105,6 +105,7 @@ async function build(
     flowRunner?: FlowRunner;
     skipAcceptance?: boolean;
     rebuildAll?: boolean;
+    roles?: Record<string, { provider: string; model: string; effort: string }>;
     onProgress?: (evento: BuildProgress) => void;
   } = {},
 ) {
@@ -123,6 +124,7 @@ async function build(
     ...(options.flowRunner !== undefined ? { flowRunner: options.flowRunner } : {}),
     ...(options.skipAcceptance !== undefined ? { skipAcceptance: options.skipAcceptance } : {}),
     ...(options.rebuildAll !== undefined ? { rebuildAll: options.rebuildAll } : {}),
+    ...(options.roles !== undefined ? { roles: options.roles } : {}),
     ...(options.onProgress !== undefined ? { onProgress: options.onProgress } : {}),
     testRunner: async () => {
       const exit = options.testExit?.[testRun] ?? 0;
@@ -1295,5 +1297,31 @@ describe("fase fechada em run anterior não é refeita", () => {
 
     const segundo = await build(passos(tasks), { rebuildAll: true });
     expect(segundo.engine.calls.some((call) => call.phase.id === "P01")).toBe(true);
+  }, 20_000);
+});
+
+/**
+ * Quem rodou fica registrado.
+ *
+ * O `run.json` sempre teve o campo `roles` e ele sempre nasceu vazio.
+ * Diagnosticar o `MCP_teste2` exigiu adivinhar qual CLI tinha sido usada — e a
+ * resposta mudava o veredito, porque o acesso de sistema que o executor recebe
+ * é escolhido pelo adaptador de cada CLI.
+ */
+describe("o run diz quem o executou", () => {
+  it("o build grava provider, modelo e effort de cada papel", async () => {
+    const { tasks } = await publishPlan();
+    const { outcome } = await build(
+      [
+        { match: { role: "builder" }, writes: [{ path: "src/app.ts", content: "export const app = 1;" }], respond: { stdout: "fiz" }, repeat: true },
+        { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0] ?? 2) }, repeat: true },
+        { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1] ?? 2) }, repeat: true },
+      ],
+      { roles: { builder: { provider: "codex", model: "gpt-6", effort: "high" }, verifier: { provider: "claude", model: "opus", effort: "" } } },
+    );
+
+    const estado = JSON.parse(await readFile(runPaths(projectRoot, outcome.runId).state, "utf8"));
+    expect(estado.roles.builder).toEqual({ provider: "codex", model: "gpt-6", effort: "high" });
+    expect(estado.roles.verifier.provider).toBe("claude");
   }, 20_000);
 });

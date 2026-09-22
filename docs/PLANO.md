@@ -3234,3 +3234,51 @@ Todas as três nasceram do mesmo sintoma: **um juiz consultado duas vezes sobre 
 mesma coisa dá respostas diferentes**, e o harness tratava a segunda resposta
 como informação nova. Onde a pergunta é idêntica e o objeto não mudou, a resposta
 já é conhecida — e perguntar de novo não acrescenta rigor, acrescenta variância.
+
+
+## §40 — Defeito de forma não pode custar um run
+
+O `plan` do `MCP_teste2` parou com oito fases escritas, seis aprovadas e duas
+emendas pendentes. A causa, inteira:
+
+```
+Vou conferir o calendário das datas usadas na fase.CAPIVARA_AUDIT_STATUS: APPROVED
+```
+
+A frase de abertura e a chave grudadas, sem `\n` no meio. O parser exigia a chave
+na primeira coluna, não a achou, repetiu a chamada — e o modelo, sendo o mesmo
+modelo, repetiu o mesmo hábito. Duas saídas "inválidas" e o run morreu. O
+veredito era **aprovado**, com uma ressalva e um motivo.
+
+### 40.1 Tolerar a embalagem, nunca o conteúdo
+
+A régua já existia em outro lugar do harness: o verificador do build lê as linhas
+`TASK` "ignorando prosa em volta e indentação acidental". O auditor documental
+tinha régua diferente para o mesmo tipo de desleixo — e a diferença só apareceu
+com um modelo de hábitos diferentes, três meses depois de escrita.
+
+O que passou a ser tolerado é embalagem: a chave colada no fim de uma frase,
+indentação, marcador de lista na frente, negrito do Markdown em volta. O que
+continua cobrado é conteúdo: três campos num finding, um status, um motivo, a
+orientação que não repete o problema. Afrouxar o conteúdo seria aceitar uma
+devolução que o escritor não consegue fechar; afrouxar a embalagem é deixar de
+matar um run por um caractere.
+
+Relido com o parser novo, o run inteiro do `MCP_teste2` se lê: seis fases
+aprovadas, duas devolvidas com um finding cada, coerência aprovada. Era um plano
+a duas emendas de ficar pronto.
+
+### 40.2 Quando desistir, mostrar o que veio
+
+A mensagem dizia "nenhum CAPIVARA_AUDIT_STATUS na resposta" — verdade, e inútil:
+para descobrir que a chave estava lá, colada numa frase, foi preciso abrir o log
+com `cat -A`. Agora a recusa mostra os primeiros 300 caracteres do que o auditor
+respondeu. A causa cabia na tela desde sempre.
+
+### 40.3 A regra
+
+Toda saída de modelo que o harness lê por protocolo tem duas camadas, e elas têm
+donos diferentes: a **forma** é responsabilidade de quem escreveu o parser, e o
+**conteúdo** é responsabilidade de quem respondeu. Um parser que trata desleixo
+de forma como erro de conteúdo transfere para o modelo uma exigência que é nossa
+— e cobra dela o preço mais caro que existe no harness, que é um run inteiro.

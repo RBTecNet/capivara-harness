@@ -51,7 +51,47 @@ const FINDING = /^CAPIVARA_FINDING:\s*(.*)$/;
 const REMARK = /^CAPIVARA_REMARK:\s*(.*)$/;
 const REASON = /^CAPIVARA_REASON:\s*(.*)$/;
 
-export function parseAudit(output: string): AuditParse {
+/** As quatro chaves do protocolo, para achá-las onde quer que tenham parado. */
+const CHAVES = "CAPIVARA_(?:AUDIT_STATUS|FINDING|REMARK|REASON)";
+
+/**
+ * Tolerar a embalagem, nunca o conteúdo.
+ *
+ * O plano do `MCP_teste2` morreu por uma quebra de linha. O auditor escreveu
+ * "Vou conferir o calendário das datas…CAPIVARA_AUDIT_STATUS: APPROVED" — a
+ * frase de abertura e a chave grudadas, sem `\n` no meio. O veredito era bom:
+ * aprovado, com uma ressalva e um motivo. O parser não achou a chave na coluna
+ * 1, o auditor repetiu o mesmo hábito na segunda tentativa, e o run inteiro
+ * parou com oito fases prontas e duas emendas pendentes.
+ *
+ * Isso é defeito de forma, e defeito de forma não pode custar um run — é a mesma
+ * regra do §34.8. O verificador do build já lê as linhas TASK "ignorando prosa
+ * em volta e indentação acidental"; aqui a régua era outra, e a diferença só
+ * aparecia com um modelo de hábitos diferentes.
+ *
+ * O que é tolerado: a chave colada no fim de uma frase, indentação, um marcador
+ * de lista na frente e o negrito do Markdown em volta. O que NÃO é tolerado
+ * continua igual: três campos num finding, um status, um motivo.
+ */
+export function desembrulhar(output: string): string {
+  return output
+    // A chave que não começa a linha ganha a sua própria.
+    .replace(new RegExp(`([^\n])(${CHAVES}:)`, "g"), "$1\n$2")
+    .split("\n")
+    .map((linha) =>
+      linha
+        .trim()
+        // Marcador de lista ou citação antes da chave.
+        .replace(new RegExp(`^[-*>\\s]+(?=\\*{0,2}${CHAVES})`), "")
+        // O negrito que sobrou depois da chave: **CAPIVARA_FINDING:** …
+        // O de antes já saiu com o marcador, porque `*` está na classe acima.
+        .replace(new RegExp(`^(${CHAVES}:)\\*\\*`), "$1"),
+    )
+    .join("\n");
+}
+
+export function parseAudit(rawOutput: string): AuditParse {
+  const output = desembrulhar(rawOutput);
   const defects: string[] = [];
   const statuses: string[] = [];
   const reasons: string[] = [];

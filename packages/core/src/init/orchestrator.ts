@@ -749,13 +749,31 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       : { status: "APPROVED", findings: [], remarks: remarksDoPlano, reason: "" };
   }
 
-  /** Uma chamada de auditoria, com a repetição por saída inválida que já existia. */
+  /**
+   * Uma chamada de auditoria, com a repetição por saída inválida que já existia.
+   *
+   * Quando ela desiste, mostra O QUE VEIO. Dizer "nenhum CAPIVARA_AUDIT_STATUS"
+   * é verdade e não ajuda: no `MCP_teste2` o auditor tinha respondido certo e
+   * apenas colado a chave no fim da frase de abertura, e descobrir isso exigiu
+   * abrir o log com `cat -A`. A causa cabia na tela.
+   */
   async function auditCall(subject: string, attempt: number, prompt: () => string): Promise<AuditVerdict> {
+    let ultima = "";
     for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
-      const parsed = parseAudit(await track({ role: "auditor", stage: "audit", subject, attempt, prompt: prompt() }));
+      ultima = await track({ role: "auditor", stage: "audit", subject, attempt, prompt: prompt() });
+      const parsed = parseAudit(ultima);
       if (parsed.ok) return parsed.verdict;
       if (tentativa === 2) {
-        throw new InitBlockedError(`o auditor de ${subject} devolveu saída inválida duas vezes: ${parsed.defects.join("; ")}`, runId);
+        const amostra = ultima.trim().slice(0, 300).replace(/\n/g, "\n  ");
+        throw new InitBlockedError(
+          [
+            `o auditor de ${subject} devolveu saída inválida duas vezes: ${parsed.defects.join("; ")}`,
+            "",
+            "O que ele respondeu, do começo:",
+            `  ${amostra || "(nada)"}`,
+          ].join("\n"),
+          runId,
+        );
       }
     }
     throw new InitBlockedError("inalcançável", runId);

@@ -379,3 +379,57 @@ describe("defeito mecânico tem orçamento próprio", () => {
     expect(action.action).toBe("ask-developer");
   });
 });
+
+/**
+ * A embalagem é tolerada; o conteúdo, não.
+ *
+ * O plano do MCP_teste2 morreu por uma quebra de linha. O auditor escreveu a
+ * frase de abertura e a chave grudadas — "…confrontar as regras.CAPIVARA_AUDIT_
+ * STATUS: APPROVED" —, o parser não achou a chave na coluna 1, o modelo repetiu
+ * o mesmo hábito na segunda tentativa, e o run parou com oito fases prontas e
+ * duas emendas pendentes. O veredito era bom.
+ */
+describe("o que o parser do auditor tolera", () => {
+  const bom = (extra = "") =>
+    [
+      "CAPIVARA_AUDIT_STATUS: APPROVED",
+      extra,
+      "CAPIVARA_REASON: as oito tarefas cobrem as stories da fase",
+    ]
+      .filter((linha) => linha !== "")
+      .join("\n");
+
+  it("a chave colada no fim de uma frase — o caso real", () => {
+    const real = "Vou conferir o calendário das datas usadas na fase.CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: está coerente";
+    const lido = parseAudit(real);
+    if (!lido.ok) throw new Error(lido.defects.join("; "));
+    expect(lido.verdict.status).toBe("APPROVED");
+  });
+
+  it("indentação acidental e marcador de lista na frente", () => {
+    const lido = parseAudit("   CAPIVARA_AUDIT_STATUS: REJECTED\n- CAPIVARA_FINDING: Phase 2 | critério vago | use um limite numérico\n  CAPIVARA_REASON: falta precisão");
+    if (!lido.ok) throw new Error(lido.defects.join("; "));
+    expect(lido.verdict.status).toBe("REJECTED");
+    expect(lido.verdict.findings).toHaveLength(1);
+  });
+
+  it("o negrito do Markdown em volta da chave", () => {
+    const lido = parseAudit("**CAPIVARA_AUDIT_STATUS:** APPROVED\n**CAPIVARA_REASON:** tudo certo");
+    if (!lido.ok) throw new Error(lido.defects.join("; "));
+    expect(lido.verdict.status).toBe("APPROVED");
+  });
+
+  /*
+   * Tolerar a embalagem não é tolerar o conteúdo: as regras que fazem a
+   * devolução ser útil continuam valendo, e é por isso que elas existem.
+   */
+  it("mas o conteúdo continua cobrado: finding sem orientação segue inválido", () => {
+    const lido = parseAudit("CAPIVARA_AUDIT_STATUS: REJECTED\nCAPIVARA_FINDING: Phase 2 | está ruim\nCAPIVARA_REASON: ruim");
+    expect(lido.ok).toBe(false);
+  });
+
+  it("e dois status continuam sendo erro", () => {
+    const lido = parseAudit(`${bom()}\nCAPIVARA_AUDIT_STATUS: REJECTED`);
+    expect(lido.ok).toBe(false);
+  });
+});

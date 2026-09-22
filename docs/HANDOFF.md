@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 1111 testes em 53 arquivos, `npm run check` verde |
+| suíte | 1115 testes em 53 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
@@ -176,6 +176,10 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
   foi mandado consertar o que não estava quebrado — envelope aberto pela ponte,
   aplicação que não subiu, pacote não instalado. A causa precisa dizer de quem é
   o defeito. Ver §34.8.
+- **Juiz consultado duas vezes sobre a mesma coisa responde diferente.** O
+  `plan` do `MCP_teste2` aprovou quatro fases na rodada 1 e reprovou as mesmas
+  quatro na rodada 2, sem que uma linha delas mudasse. Onde o objeto não mudou, a
+  resposta já é conhecida: reperguntar não acrescenta rigor, acrescenta variância.
 - **O verificador acha um buraco por ciclo se ninguém lhe der a lista.** Na
   fase 4 do `MCP_teste` ele aprovou a task 6 no ciclo 1 e a reprovou no ciclo 2,
   sobre o mesmo código, enquanto reprovava a task 8 no ciclo 1. Os dois buracos
@@ -204,7 +208,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 1111 testes
+npm run check     # build + typecheck + 1115 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

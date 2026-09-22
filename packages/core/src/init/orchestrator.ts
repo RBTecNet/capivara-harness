@@ -350,6 +350,22 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   /** O plano executável publicado por este run. */
   let plano = "";
   let planoAprovado = false;
+  /**
+   * As fases já aprovadas neste run, pelo sha do texto delas.
+   *
+   * O auditor é independente e sem memória — é o que o torna auditor. Mas
+   * perguntar de novo sobre um texto que não mudou não é independência: é pagar
+   * por um sorteio. No `MCP_teste2` a rodada 1 aprovou P1, P3, P5 e P8 e
+   * reprovou P4; a rodada 2 reauditou tudo e trouxe dez findings nas QUATRO que
+   * ela mesma tinha aprovado, sem que uma linha delas tivesse mudado. O teto de
+   * devoluções estourou e o plano não saiu.
+   *
+   * A pergunta global continua sendo feita toda rodada: a auditoria de coerência
+   * lê o índice de critérios inteiro, e é ela que pega a contradição que nasce
+   * quando uma fase muda. O que não se repete é o julgamento do que não mudou.
+   */
+  const fasesAprovadas = new Set<string>();
+
   const allAnswers: Answer[] = [];
   const allQuestions: Question[] = [];
   /** Suposições que o escritor registrou em vez de perguntar; o relatório as mostra. */
@@ -678,8 +694,14 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     const fatia = (numero: number): { name: string; content: string }[] =>
       skeletonAtual ? [{ name: "fatia do esqueleto", content: sliceForPhase(skeletonAtual, numero) }] : upstream;
 
+    const aReauditar = fases.filter((fase) => !fasesAprovadas.has(sha12(fase.markdown.trim())));
+    const puladas = fases.length - aReauditar.length;
+    if (puladas > 0) {
+      announce(`  ${puladas} fase(s) já aprovada(s) neste run, com o mesmo texto; não vou reauditá-las`);
+    }
+
     const tarefas: (() => Promise<AuditVerdict>)[] = [
-      ...fases.map((fase) => () =>
+      ...aReauditar.map((fase) => () =>
         auditCall(`project-phases.md#P${fase.number}`, attempt, () =>
           phaseAuditPrompt({
             ...base,
@@ -688,7 +710,11 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             phaseNumber: fase.number,
             totalPhases: fases.length,
           }),
-        ),
+        ).then((veredicto) => {
+          // Aprovada é fato do run: o texto exato que passou não volta à fila.
+          if (veredicto.findings.length === 0) fasesAprovadas.add(sha12(fase.markdown.trim()));
+          return veredicto;
+        }),
       ),
       () =>
         auditCall("project-phases.md#coerência", attempt, () =>
@@ -716,7 +742,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     const findings = veredictos.flatMap((veredicto) => veredicto.findings);
     const remarksDoPlano = veredictos.flatMap((veredicto) => veredicto.remarks);
 
-    announce(`  auditoria em ${fases.length} fase(s) + coerência: ${findings.length} finding(s)`);
+    announce(`  auditoria em ${aReauditar.length} fase(s) + coerência: ${findings.length} finding(s)`);
 
     return findings.length > 0
       ? { status: "REJECTED", findings, remarks: remarksDoPlano, reason: veredictos.find((v) => v.reason)?.reason ?? "há defeito no plano" }

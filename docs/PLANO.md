@@ -3184,3 +3184,53 @@ origens são mapeadas por chave, e a posição não significa nada.
 
 É a mesma família de `-p` casando dentro de `--dangerously-skip-permissions`:
 comparar pela forma em vez de pela identidade.
+
+
+## §39 — Julgamento não se repete sobre o que não mudou
+
+O `MCP_teste2` rodou o mesmo pedido do `MCP_teste`, com outro modelo, e não
+passou do `plan`. O log conta o que aconteceu:
+
+| rodada | findings | onde |
+|---|---|---|
+| 1 | 2 | P4 |
+| 2 | **10** | P1, P3, P5 e P8 — as quatro que a rodada 1 **aprovou** |
+| 3 | 2 | P1 e P8 |
+
+Nenhuma linha de P1, P3, P5 ou P8 tinha mudado entre a rodada 1 e a 2. O teto de
+devoluções estourou com o plano pronto, e o desenvolvedor concluiu que o modelo
+não dava conta — quando o que não dava conta era o harness perguntando três vezes
+a mesma coisa para um juiz que, por desenho, responde sem memória.
+
+### 39.1 A independência do auditor não é o mesmo que repetição
+
+O auditor não lembra da sessão anterior — é isso que o torna auditor, e não vai
+mudar. Mas **perguntar de novo sobre um texto que não mudou não é independência:
+é pagar por um sorteio.** Com um modelo mais conservador o sorteio sai aprovado
+quase sempre e ninguém percebe; com um mais pedante sai reprovado, e o run morre
+sem que nada no documento esteja errado.
+
+Uma fase aprovada passa a ser **fato do run**, registrado pelo sha do texto dela.
+Enquanto esse texto não mudar, ela não volta à fila. Reescreveu, volta.
+
+### 39.2 O que continua sendo perguntado toda rodada
+
+A auditoria de **coerência**, que lê o índice de critérios inteiro. É ela que
+pega a contradição que nasce quando uma fase muda — e é global por natureza, uma
+chamada e não N. O que deixou de se repetir é o julgamento local do que ninguém
+tocou, nunca a pergunta sobre o conjunto.
+
+### 39.3 A mesma forma, pela terceira vez
+
+É o terceiro lugar do harness onde a mesma ideia aparece, e por isso vira regra:
+
+| onde | o que não se repete |
+|---|---|
+| `build`, §37.4 | fase fechada com o mesmo texto não é reconstruída |
+| `gate 3`, §35 | o inventário mecânico de testes nomeados não depende da atenção do modelo |
+| `plan`, §39 | fase aprovada com o mesmo texto não é reauditada |
+
+Todas as três nasceram do mesmo sintoma: **um juiz consultado duas vezes sobre a
+mesma coisa dá respostas diferentes**, e o harness tratava a segunda resposta
+como informação nova. Onde a pergunta é idêntica e o objeto não mudou, a resposta
+já é conhecida — e perguntar de novo não acrescenta rigor, acrescenta variância.

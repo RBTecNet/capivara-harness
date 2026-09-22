@@ -391,6 +391,41 @@ describe("B-08 a B-12 · auditoria", () => {
     expect(auditorias.every((call) => call.attempt === 1)).toBe(true);
   });
 
+  /**
+   * O que travou o plano do MCP_teste2.
+   *
+   * A rodada 1 aprovou quatro fases e reprovou uma. A rodada 2 reauditou tudo e
+   * trouxe dez findings nas QUATRO que ela mesma tinha aprovado, sem que uma
+   * linha delas tivesse mudado — e o teto de devoluções estourou com o plano
+   * pronto. O auditor é independente e sem memória, que é o que o torna
+   * auditor; perguntar de novo sobre texto que não mudou não é independência,
+   * é pagar por um sorteio.
+   */
+  it("fase aprovada não volta ao auditor enquanto o texto dela não mudar", async () => {
+    const steps = happyPath();
+    // Só a fase 2 é devolvida, e só na primeira rodada.
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2", attempt: 1 },
+      respond: { stdout: reject("Phase 2", "critério não verificável", "use um limite numérico observável") },
+    });
+
+    const { outcome, agent } = await init(steps);
+    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+
+    const daPrimeira = agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-phases.md#P1");
+    // Uma auditoria só para a fase 1: ela passou na rodada 1 e não mudou depois.
+    expect(daPrimeira).toHaveLength(1);
+
+    // A fase reescrita volta, porque o texto dela mudou.
+    expect(agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-phases.md#P2").length).toBeGreaterThan(1);
+
+    /*
+     * E a pergunta global continua sendo feita toda rodada: é a coerência que
+     * pega a contradição que nasce quando uma fase muda.
+     */
+    expect(agent.calls.filter((call) => call.subject === "project-phases.md#coerência").length).toBeGreaterThan(1);
+  });
+
   it("B-10 teto de devoluções esgotado para e pergunta ao desenvolvedor", async () => {
     const steps = happyPath();
     steps.unshift({

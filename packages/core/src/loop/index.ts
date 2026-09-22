@@ -16,6 +16,7 @@ export {
   FLOW_PORT,
   checkFlowScript,
   defaultFlowRunner,
+  ehFalhaDoRoteiro,
   existingFlowScripts,
   faltaORunner,
   flowScriptName,

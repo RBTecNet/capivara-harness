@@ -11,7 +11,16 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FLOWS_DIR, FLOW_CONFIG, checkFlowScript, faltaORunner, flowScriptName, gate4, renderFlowConfig } from "../../src/loop/index.js";
+import {
+  FLOWS_DIR,
+  FLOW_CONFIG,
+  checkFlowScript,
+  ehFalhaDoRoteiro,
+  faltaORunner,
+  flowScriptName,
+  gate4,
+  renderFlowConfig,
+} from "../../src/loop/index.js";
 import type { FlowRun } from "../../src/loop/index.js";
 import type { SkeletonWorkflow } from "../../src/contract/index.js";
 
@@ -352,6 +361,62 @@ describe("o gate", () => {
     }
     // E o que É fluxo reprovado continua sendo fluxo reprovado.
     expect(faltaORunner("1) passo 2: clica em Interpretar\n   botão não encontrado", 1)).toBe(false);
+  });
+
+  /**
+   * O defeito que travou a P02 do MCP_teste.
+   *
+   * O roteiro usou `getByRole('alert')` e casou com dois elementos: o alerta da
+   * página e o `__next-route-announcer__` que o Next injeta em toda rota. O
+   * produto estava certo, e o executor foi chamado para consertá-lo — queimando
+   * um ciclo numa aplicação que funcionava.
+   */
+  it("reconhece a falha que é do roteiro, não do produto", () => {
+    expect(ehFalhaDoRoteiro("Error: strict mode violation: getByRole('alert') resolved to 2 elements")).toBe(true);
+    expect(ehFalhaDoRoteiro("SyntaxError: Unexpected token )")).toBe(true);
+    // O que é do produto continua sendo do produto.
+    expect(ehFalhaDoRoteiro("1) passo 2: clica em Interpretar\n   botão não encontrado")).toBe(false);
+    expect(ehFalhaDoRoteiro("Timed out waiting 180000ms from config.webServer")).toBe(false);
+  });
+
+  it("roteiro com defeito próprio é reescrito e rodado de novo, sem custar ciclo do executor", async () => {
+    let escritas = 0;
+    let execucoes = 0;
+
+    const resultado = await gate4({
+      ...base,
+      projectRoot,
+      author: async () => {
+        escritas += 1;
+        return `\`\`\`ts\n${roteiroBom()}\n\`\`\``;
+      },
+      runner: async () => {
+        execucoes += 1;
+        // A primeira execução falha por seletor ambíguo; a segunda, com o
+        // roteiro reescrito, passa.
+        return execucoes === 1
+          ? { exitCode: 1, output: "Error: strict mode violation: getByRole('alert') resolved to 2 elements" }
+          : verde;
+      },
+    });
+
+    expect(resultado.green, "o gate não reprova a fase por defeito do próprio roteiro").toBe(true);
+    expect(escritas, "o roteiro foi escrito e depois reescrito").toBe(2);
+    expect(execucoes).toBe(2);
+  });
+
+  it("roteiro que falha por si mesmo duas vezes reprova dizendo de quem é o defeito", async () => {
+    const resultado = await gate4({
+      ...base,
+      projectRoot,
+      author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
+      runner: async () => ({ exitCode: 1, output: "Error: strict mode violation: resolved to 3 elements" }),
+    });
+
+    if (resultado.green) throw new Error("deveria reprovar");
+    expect(resultado.scriptFailed).toBe(true);
+    expect(resultado.cause).toContain("não defeito do produto");
+    expect(resultado.cause).toContain("do harness");
   });
 
   it("runner ausente é defeito de ambiente, e diz o que instalar", async () => {

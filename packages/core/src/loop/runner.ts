@@ -279,6 +279,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         // Dito na tela também: quem olha o log precisa saber que o produto não
         // subiu, e não que um fluxo reprovou.
         announce(`[${session.id}] gate 4: a aplicação não subiu; nenhum fluxo foi percorrido`);
+      } else if (g4.scriptFailed === true) {
+        announce(`[${session.id}] gate 4: o roteiro falhou por si mesmo, não o produto — defeito do harness`);
       }
       return false;
     };

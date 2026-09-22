@@ -183,6 +183,24 @@ export type FlowRunner = (projectRoot: string, scripts: string[]) => Promise<Flo
  * defeito no produto e quebrou o que estava de pé. Uma palavra no padrão custou
  * uma fase inteira.
  */
+/**
+ * A falha é do ROTEIRO, não do produto?
+ *
+ * O roteiro é escrito por um modelo que não viu a aplicação rodando, e há
+ * defeitos que são dele: seletor que casa com dois elementos, import quebrado,
+ * sintaxe inválida. No MCP_teste um `getByRole('alert')` casou com o alerta da
+ * página e com o `__next-route-announcer__` que o Next injeta em toda rota — o
+ * produto estava certo, e o executor foi chamado para consertá-lo.
+ *
+ * Isto é o §34.8 um nível acima: defeito do instrumento não vira defeito do
+ * produto. Quando é do roteiro, quem reescreve é quem o escreveu.
+ */
+export function ehFalhaDoRoteiro(output: string): boolean {
+  return /strict mode violation|resolved to \d+ elements|Cannot find name|SyntaxError|Unexpected token|is not a function|Cannot read propert/i.test(
+    output,
+  );
+}
+
 export function faltaORunner(output: string, exitCode: number): boolean {
   if (exitCode === 127) return true;
   return /could not determine executable|not found|Cannot find (module|package)|Please install|npx playwright install/i.test(output);
@@ -243,7 +261,7 @@ export interface FlowGateOptions {
 
 export type FlowGateResult =
   | { green: true; skipped: string; scripts: string[] }
-  | { green: false; cause: string; toolMissing?: boolean; startupFailed?: boolean };
+  | { green: false; cause: string; toolMissing?: boolean; startupFailed?: boolean; scriptFailed?: boolean };
 
 /**
  * A aplicação nem chegou a subir.
@@ -333,7 +351,37 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   if (scripts.length === 0) return { green: true, skipped: "nenhum fluxo a percorrer", scripts: [] };
 
   const runner = options.runner ?? defaultFlowRunner;
-  const run = await runner(options.projectRoot, scripts);
+  let run = await runner(options.projectRoot, scripts);
+
+  /*
+   * Falhou por culpa do roteiro? Reescreve e roda de novo, UMA vez.
+   *
+   * Sem isto, um seletor ambíguo custa um ciclo inteiro do executor mexendo num
+   * produto que funciona — e o roteiro, que continua gravado, falharia de novo
+   * no ciclo seguinte. Uma sessão de roteirista é muito mais barata que um ciclo
+   * de correção, e é quem tem o defeito na mão.
+   */
+  if (run.exitCode !== 0 && run.toolMissing !== true && ehFalhaDoRoteiro(run.output)) {
+    announce("o roteiro falhou por conta própria (seletor ambíguo ou erro de escrita); reescrevendo");
+
+    for (const workflow of options.workflows) {
+      const arquivo = join(pasta, flowScriptName(workflow.number));
+      const script = extractFlowScript(await options.author(workflow, [`o roteiro anterior falhou assim:\n${tail(run.output, 25)}`]));
+      const defeitos = checkFlowScript(script, workflow);
+      if (defeitos.length === 0) await writeFile(arquivo, `${script}\n`, "utf8");
+    }
+
+    run = await runner(options.projectRoot, scripts);
+    if (run.exitCode !== 0 && ehFalhaDoRoteiro(run.output)) {
+      return {
+        green: false,
+        scriptFailed: true,
+        cause:
+          "o roteiro do fluxo falhou por si mesmo duas vezes — seletor ambíguo ou erro de escrita, não defeito do " +
+          `produto. Isto é do harness, não da sua implementação; o roteiro está em ${FLOWS_DIR}/.\n${tail(run.output)}`,
+      };
+    }
+  }
 
   if (run.toolMissing === true) {
     return {

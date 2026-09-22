@@ -85,6 +85,12 @@ export function flowPrompt(context: FlowAuthorContext): string {
     "a button exists proves markup; asserting what happens after it is clicked proves the flow.",
     "Prefer role and visible text over CSS classes — they survive a redesign and they are what the",
     "user actually sees.",
+    "",
+    "SCOPE YOUR LOCATORS. A bare `getByRole(...)` matches everything on the page, including what the",
+    "framework injects: a Next.js app carries a hidden `role=\"alert\"` route announcer on every page,",
+    "so `getByRole(\"alert\")` matches two elements and Playwright refuses it. Anchor each locator to",
+    "the region it belongs to — `page.getByRole(\"main\")`, the form, the dialog — or narrow it by",
+    "accessible name. A locator that matches twice fails on a product that is working.",
     ...(context.rejected && context.rejected.length > 0
       ? [
           "",

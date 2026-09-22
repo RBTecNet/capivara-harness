@@ -43,6 +43,7 @@ import { listarEfforts, listarModelos } from "./provider/index.js";
 import { runIdFor } from "./state/index.js";
 import { sha12 } from "./contract/index.js";
 import { MAX_DOMINIOS, SurveyBlockedError, runSurvey } from "./survey/index.js";
+import { ChangeBlockedError, renderQuestion as renderPerguntaDaMudanca, runChange } from "./change/index.js";
 import type { DecisaoDeColisao } from "./survey/index.js";
 import { VERSION } from "./version.js";
 
@@ -398,6 +399,90 @@ export function createProgram(): Command {
       stdout.write(options.json ? `${JSON.stringify(diagnoses, null, 2)}\n` : `${renderDiagnosis(diagnoses)}\n`);
       process.exitCode = diagnoses.some((diagnosis) => diagnosis.health === "ausente") ? 1 : 0;
     });
+
+  roleFlags(
+    program
+      .command("change")
+      .description("Acrescenta ou altera funcionalidade numa aplicação que a capivara já construiu")
+      .argument("[pedido]", "o que mudar; aceita @arquivo")
+      .option("--file <caminho>", "lê o pedido de mudança de um arquivo"),
+    ["writer"],
+  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string }) => {
+    const projectRoot = flags.project ?? ".";
+    const roles = rolesFromFlags(flags);
+    const semProvider = unresolvedRoles(roles, ["writer"]);
+    if (semProvider.length > 0) {
+      stdout.write(`${renderUnresolved("change", semProvider)}\n`);
+      process.exitCode = 2;
+      return;
+    }
+
+    let request: { text: string };
+    try {
+      request = await resolveRequest(projectRoot, {
+        ...(pedido !== undefined ? { prompt: pedido } : {}),
+        ...(flags.file !== undefined ? { file: flags.file } : {}),
+      });
+    } catch (error) {
+      stdout.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      process.exitCode = 2;
+      return;
+    }
+
+    const language = flags.language ?? detectLanguage(request.text, flags.language);
+    if (flags.splash !== false) {
+      stdout.write(renderSplash({ version: VERSION, roles: describeRoles(roles).filter((role) => role.role === "writer"), style: style() }));
+    }
+
+    const runId = runIdFor("init", sha12(request.text));
+    const bridge = createAgentBridge({ projectRoot, runId, language, roles, limits: DEFAULT_LIMITS });
+
+    const terminalChange = stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
+    const linhasChange = terminalChange ? createLineIO(terminalChange, (texto) => void stdout.write(texto)) : null;
+
+    try {
+      const resultado = await runChange({
+        projectRoot,
+        language,
+        request: request.text,
+        announce: (linha) => void stdout.write(`${linha}\n`),
+        call: async (chamada) => await bridge({ role: "writer", stage: `change:${chamada.subject}`, prompt: chamada.prompt }),
+        ...(linhasChange
+          ? {
+              ask: async (question, indice, total) => {
+                stdout.write(renderPerguntaDaMudanca(question, indice, total));
+                return await linhasChange.ask("\n  sua resposta [Enter aceita a recomendada]: ").catch(() => "");
+              },
+            }
+          : {}),
+      });
+
+      stdout.write(
+        [
+          "",
+          `${resultado.novas.length} fase(s) acrescentada(s) ao plano:`,
+          ...resultado.novas.map((fase) => `  Phase ${fase.number}: ${fase.title} — ${fase.goal}`),
+          "",
+          ...(resultado.avisos.length > 0 ? [...resultado.avisos.map((aviso) => `  aviso: ${aviso}`), ""] : []),
+          "Para construir o que foi planejado:",
+          "  capivara build",
+          "",
+          "As fases que já estavam fechadas não são refeitas — o build reconhece o texto delas.",
+          "",
+        ].join("\n"),
+      );
+      process.exitCode = 0;
+    } catch (error) {
+      if (error instanceof ChangeBlockedError) {
+        stdout.write(`\n${error.message}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      throw error;
+    } finally {
+      terminalChange?.close();
+    }
+  });
 
   roleFlags(
     program

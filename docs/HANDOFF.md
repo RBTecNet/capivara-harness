@@ -16,8 +16,8 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 1081 testes em 53 arquivos, `npm run check` verde |
-| estágios | `survey` (opcional) → `init` → `plan` → `build` |
+| suíte | 1105 testes em 53 arquivos, `npm run check` verde |
+| estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
 O ciclo de três estágios foi desenvolvido no branch `ciclo-unico` e fundido em
@@ -43,6 +43,13 @@ caro terminou as sete fases quando o harness parou de esconder informação dele
 ## O que veio depois do checkpoint
 
 Quatro frentes, todas nascidas de um run real e todas commitadas.
+
+**§37 — `change`, mexer no que já roda.** Depois do primeiro build, todo pedido
+novo deixa de ser "o que construir" e vira "o que mudar". O comando lê o esqueleto
+e o código, planeja de uma a três fases, funde no esqueleto e **preserva letra por
+letra o texto das fases já construídas** — é ele que o registro novo de fases
+fechadas (`handoffs/fases.json`, por sha do texto) usa para não refazer o que já
+está pronto.
 
 **§36 — `survey`, o levantamento de uma aplicação que já existe.** Um comando
 novo, antes do `init`: lê uma aplicação legada e escreve o que ela faz, com a
@@ -192,7 +199,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 1081 testes
+npm run check     # build + typecheck + 1105 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

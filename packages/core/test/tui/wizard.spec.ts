@@ -136,7 +136,7 @@ describe("wizard", () => {
     // Quatro comandos desde que o `survey` entrou na lista.
     const { deps, tela } = roteiro(["", "9", "1", "1", "x", ".", "1", "", "1", "n", "n"]);
     const resultado = await runWizard(deps);
-    expect(tela()).toContain("entre 1 e 4");
+    expect(tela()).toContain("entre 1 e 5");
     expect(resultado?.argv[0]).toBe("init");
   });
 
@@ -393,7 +393,7 @@ describe("wizard do levantamento", () => {
   it("monta o comando com a pasta da aplicação e o destino do levantamento", async () => {
     const { deps } = roteiro([
       "/sistema-antigo", // a aplicação a levantar
-      "4",               // survey
+      "5",               // survey
       "",                // saída: aceita ./levantamento
       "1",               // provider codex
       "",                // modelo padrão
@@ -407,7 +407,7 @@ describe("wizard do levantamento", () => {
   });
 
   it("a saída diferente do padrão entra no comando", async () => {
-    const { deps } = roteiro(["/sistema-antigo", "4", "./docs/legado", "1", "", "1", "n", "n"]);
+    const { deps } = roteiro(["/sistema-antigo", "5", "./docs/legado", "1", "", "1", "n", "n"]);
     const resultado = await runWizard(deps);
     expect(resultado?.argv).toContain("--saida");
     expect(resultado?.argv).toContain("./docs/legado");
@@ -418,7 +418,7 @@ describe("wizard do levantamento", () => {
    * seria pedir três decisões para um comando que usa uma.
    */
   it("pergunta só pelo papel que o levantamento usa", async () => {
-    const { deps, tela } = roteiro(["/sistema-antigo", "4", "", "1", "", "1", "s", "1", "", "1", "n"]);
+    const { deps, tela } = roteiro(["/sistema-antigo", "5", "", "1", "", "1", "s", "1", "", "1", "n"]);
     await runWizard(deps);
     expect(tela()).toContain("escritor documental");
     expect(tela()).not.toContain("auditor documental");
@@ -430,7 +430,7 @@ describe("wizard do levantamento", () => {
    * juntas porque há o que ler.
    */
   it("a base entra pela URL, sem escolher projeto", async () => {
-    const { deps } = roteiro(["/sistema-antigo", "4", "", "1", "http://127.0.0.1:7777/mcp", "1", "", "1", "n", "n"]);
+    const { deps } = roteiro(["/sistema-antigo", "5", "", "1", "http://127.0.0.1:7777/mcp", "1", "", "1", "n", "n"]);
     const resultado = await runWizard({ ...deps, listMcpProjects: async () => [] });
 
     expect(resultado?.argv).toContain("--mcp");
@@ -441,7 +441,7 @@ describe("wizard do levantamento", () => {
   it("base que não responde não impede o levantamento: segue local", async () => {
     const { deps, tela } = roteiro([
       "/sistema-antigo",
-      "4",
+      "5",
       "",
       "1",                            // guardar na base: sim
       "http://127.0.0.1:9999/mcp",
@@ -462,5 +462,46 @@ describe("wizard do levantamento", () => {
 
     expect(tela()).toContain("connection refused");
     expect(resultado?.argv).not.toContain("--mcp");
+  });
+});
+
+/**
+ * O `change` no wizard.
+ *
+ * Ele pede a mesma coisa que o `init` — um pedido — e nada mais: o que já foi
+ * decidido sobre o produto está no projeto, e perguntar de novo seria pedir ao
+ * desenvolvedor o que o harness já sabe.
+ */
+describe("wizard da mudança", () => {
+  it("o pedido de mudança vira argumento, como no init", async () => {
+    const { deps } = roteiro([
+      "",                              // pasta do projeto
+      "4",                             // change
+      "1",                             // escrever agora
+      "quero editar clientes",
+      ".",                             // fim do pedido
+      "1",                             // provider codex
+      "",                              // modelo padrão
+      "1",                             // sem effort
+      "n",                             // sem ajuste por papel
+      "n",                             // não executar
+    ]);
+
+    const resultado = await runWizard(deps);
+    expect(resultado?.argv).toEqual(["change", "quero editar clientes", "--provider", "codex"]);
+  });
+
+  it("o pedido pode vir de arquivo", async () => {
+    const { deps } = roteiro(["", "4", "2", "pedido.md", "1", "", "1", "n", "n"]);
+    const resultado = await runWizard(deps);
+    expect(resultado?.argv).toContain("--file");
+    expect(resultado?.argv[0]).toBe("change");
+  });
+
+  it("pergunta só pelo papel que a mudança usa", async () => {
+    const { deps, tela } = roteiro(["", "4", "1", "editar clientes", ".", "1", "", "1", "s", "1", "", "1", "n"]);
+    await runWizard(deps);
+    expect(tela()).toContain("escritor documental");
+    expect(tela()).not.toContain("executor do loop");
   });
 });

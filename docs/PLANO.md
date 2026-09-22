@@ -3051,3 +3051,86 @@ esqueleto registra a ausência como decisão em vez de esquecimento.
 
 Falhar ao subir não derruba nada: os arquivos já estão em disco, e a base é
 conveniência, não dependência (§34).
+
+## §37 — `change`: mexer no que já roda
+
+O `init` desenha um produto que não existe e o `build` o constrói. Depois disso o
+produto passa a existir — e todo pedido novo deixa de ser "o que construir" para
+ser "o que mudar no que está construído". O `MCP_teste` chegou nesse ponto no
+primeiro dia de uso: cinco fases verdes, a aplicação de pé, e faltando a edição
+de clientes que ninguém tinha pedido.
+
+Sem um caminho para isso, sobravam dois, os dois ruins: editar o plano à mão, ou
+rodar um `init` novo que desenharia o produto inteiro outra vez.
+
+### 37.1 O que muda quando o produto existe
+
+Duas coisas mandam em todo o resto:
+
+1. **O que existe é autoridade.** O esqueleto diz o que foi combinado, o código
+   diz o que aconteceu, e onde os dois divergem o código é o fato. Uma mudança
+   que contradiz o esqueleto sem dizer que contradiz produz duas verdades sobre o
+   mesmo produto, e a próxima fase a ser implementada escolhe a errada.
+2. **O que já funciona precisa continuar funcionando.** Por isso a mudança
+   declara o que TOCA, e não só o que acrescenta: é o que diz ao build quais
+   fluxos são regressão e ao executor onde pisar com cuidado.
+
+E uma terceira, que é a diferença entre um comando útil e um que ninguém usa duas
+vezes: **o texto das fases já construídas não pode ser reescrito.**
+
+### 37.2 Por que o `plan` não serve aqui
+
+O `plan` detalha o esqueleto INTEIRO — é o que ele existe para fazer. Usá-lo para
+acrescentar uma fase reescreveria as cinco anteriores: outra redação para as
+mesmas tasks, outros critérios com as mesmas palavras trocadas de lugar. O
+produto não mudaria, mas o TEXTO sim — e o texto é a chave do registro de fases
+fechadas (§37.4). O build deixaria de reconhecer o que ele mesmo construiu e
+refaria a aplicação inteira para acrescentar um formulário.
+
+Então o `change` detalha só as fases novas, e as antigas voltam ao documento
+letra por letra. Provado contra o plano real do `MCP_teste`: cinco fases
+intactas, uma nova no fim.
+
+### 37.3 Substituição é por texto exato
+
+Trocar "a cor de destaque é amarela" por "a cor de destaque é azul" exige citar a
+frase antiga **como ela está escrita**. Se não bater, a regra nova entra como
+acréscimo e o harness avisa — em vez de apagar em silêncio a linha errada.
+
+O mesmo vale para o resto, com a chave de cada um: entidade por nome, fluxo por
+número, regra por texto. Regra não pode ser por assunto: duas regras falam de
+`interface.tema` sem serem a mesma, e apagar pelo assunto derrubaria a que
+ninguém mandou mexer.
+
+### 37.4 O registro de fases fechadas
+
+O id do run do build é o hash do plano inteiro. Isso sempre resolveu a retomada —
+rodar de novo cai no mesmo run —, mas não resolve o plano que CRESCEU:
+acrescentar uma fase muda o hash, o run é outro, e as cinco prontas voltam para a
+fila para serem verificadas uma a uma. Cinco chamadas de verificador antes de
+escrever a primeira linha do que foi pedido.
+
+Agora cada fase que fecha é anotada em `.capivara/handoffs/fases.json` com o
+**sha do seu texto**. Um build seguinte pula a fase cujo texto ele já viu fechar.
+Por texto e não por id: fase cujo markdown mudou é outra fase, ainda que com o
+mesmo número, e volta a ser construída — que é exatamente o certo quando alguém
+edita um critério. `--rebuild-all` ignora as duas memórias, a do run e a dos
+anteriores: um "tudo" que poupa metade é pior que não existir.
+
+### 37.5 Teto de três fases
+
+Acima de três fases não é mudança, é projeto — e projeto se faz com `init`, onde
+há entrevista, auditoria documental e ensaio. O parser recusa e diz isso. É o
+mesmo limite que o `MAX_TASKS_PER_PHASE` impõe dentro de uma fase, pela mesma
+razão: o que não cabe numa sessão precisa ser dividido por quem sabe dividir.
+
+### 37.6 A dúvida vai à tela antes de virar fase
+
+Quando o pedido é ambíguo — "remover um cliente apaga o histórico?" —, o
+planejador emite perguntas e **nenhuma fase**. Planejar sobre a suposição que a
+pergunta ainda vai desfazer é como se constrói a coisa errada com toda a
+confiança.
+
+Uma rodada só, no máximo três perguntas: a mudança é pequena por definição, e uma
+segunda rodada custaria mais que ela inteira. Sem terminal, o comando para e diz
+quais decisões faltam — em vez de escolher sozinho e planejar em cima.

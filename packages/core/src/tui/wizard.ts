@@ -10,7 +10,7 @@ import { ROLE_NAMES, ROLES } from "../provider/roles.js";
 import type { RoleName } from "../provider/roles.js";
 
 export interface WizardAnswers {
-  command: "survey" | "init" | "plan" | "build";
+  command: "survey" | "init" | "plan" | "build" | "change";
   request?: string;
   global: { provider?: string; model?: string; effort?: string };
   roles: Partial<Record<RoleName, { provider?: string; model?: string; effort?: string }>>;
@@ -42,7 +42,8 @@ function quote(value: string): string {
 export function toArgv(answers: WizardAnswers): string[] {
   const argv: string[] = [answers.command];
 
-  if (answers.command === "init" && answers.request) argv.push(answers.request);
+  // O `change` recebe o pedido como argumento, igual ao `init`: é o que mudar.
+  if ((answers.command === "init" || answers.command === "change") && answers.request) argv.push(answers.request);
 
   if (answers.global.provider) argv.push("--provider", answers.global.provider);
   if (answers.global.model) argv.push("--model", answers.global.model);
@@ -77,7 +78,7 @@ export function toArgv(answers: WizardAnswers): string[] {
 export function renderCommand(answers: WizardAnswers): string {
   const parts = ["capivara", answers.command];
 
-  if (answers.command === "init" && answers.request) parts.push(quote(answers.request));
+  if ((answers.command === "init" || answers.command === "change") && answers.request) parts.push(quote(answers.request));
 
   if (answers.global.provider) parts.push("--provider", answers.global.provider);
   if (answers.global.model) parts.push("--model", quote(answers.global.model));

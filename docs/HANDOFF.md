@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 995 testes em 53 arquivos, `npm run check` verde |
+| suíte | 999 testes em 53 arquivos, `npm run check` verde |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
 O ciclo de três estágios foi desenvolvido no branch `ciclo-unico` e fundido em
@@ -148,6 +148,11 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
   foi mandado consertar o que não estava quebrado — envelope aberto pela ponte,
   aplicação que não subiu, pacote não instalado. A causa precisa dizer de quem é
   o defeito. Ver §34.8.
+- **O relógio de primeira saída vira relógio da resposta inteira.** Numa CLI
+  que só imprime o resultado no fim — `claude -p --output-format json`, cursor,
+  agy — ficar calado é o estado normal de quem trabalha. O limite matou a fase 3
+  do `MCP_teste` aos 20 minutos com o modelo escrevendo código. Hoje o adaptador
+  declara se transmite, e quem não transmite fica sob o limite de parede.
 - **Um seletor que casa duas vezes reprova um produto que funciona.** O Next
   injeta um `role="alert"` escondido em toda página; `getByRole("alert")` sozinho
   acha dois elementos e o Playwright recusa. O roteiro se ancora na região a que
@@ -158,7 +163,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 995 testes
+npm run check     # build + typecheck + 999 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

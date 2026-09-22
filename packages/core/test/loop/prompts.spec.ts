@@ -85,6 +85,30 @@ describe("prompt e protocolo do verificador", () => {
     expect(verifyPrompt(context)).toContain("When in doubt, INCOMPLETE");
   });
 
+  /*
+   * O inventário entra como FATO sobre nomes, não como veredito: um nome
+   * ausente pode estar coberto por um teste com outro nome. O que ele resolve é
+   * a ordem de descoberta — a fase 4 do MCP_teste gastou um ciclo por buraco,
+   * com os dois presentes desde o primeiro.
+   */
+  it("leva o inventário dos testes nomeados, dizendo quais não existem", () => {
+    const prompt = verifyPrompt({
+      ...context,
+      featureTests: [
+        { task: 6, name: "consulta_sem_sessao", found: false },
+        { task: 8, name: "consulta_vazia_e_falha", found: true },
+      ],
+    });
+
+    expect(prompt).toContain("consulta_sem_sessao");
+    expect(prompt).toContain("NAME NOT FOUND");
+    expect(prompt).toContain("may still be covered by a test written under another name");
+  });
+
+  it("sem inventário, o prompt é o de sempre — nada de seção vazia", () => {
+    expect(verifyPrompt(context)).not.toContain("Mechanical check");
+  });
+
   it("lê as linhas TASK ignorando prosa e indentação", () => {
     const output = ["Vou verificar:", "  TASK 1: DONE", "TASK 2: INCOMPLETE — falta o teste de sobreposição", "pronto."].join("\n");
     expect(parseVerification(output)).toEqual([

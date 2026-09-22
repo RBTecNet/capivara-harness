@@ -41,3 +41,5 @@ export type { Prerequisite, PrerequisiteChoice, PrerequisiteStatus, Resolution }
 export { deriveAcceptance, defaultRunner, runAcceptance, serviceRunner, startCommandFor } from "./acceptance.js";
 export type { AcceptanceOptions, AcceptanceResult, AcceptanceStep, CommandRunner, StepResult } from "./acceptance.js";
 export type { BuildProgress, BuildProgressListener, LoopGate, LoopGateState, LoopPhaseState } from "./progress.js";
+export { procurarTestesNomeados } from "./feature-tests.js";
+export type { FeatureTestSearch } from "./feature-tests.js";

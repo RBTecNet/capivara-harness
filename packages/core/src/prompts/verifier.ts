@@ -16,6 +16,39 @@ export interface VerifierContext {
   language: string;
   phaseMarkdown: string;
   taskCount: number;
+  /** O inventário mecânico: os testes que a fase nomeia e se o nome existe na árvore. */
+  featureTests?: readonly { task: number; name: string; found: boolean }[];
+}
+
+/**
+ * O inventário, em texto.
+ *
+ * Ele entra no prompt como FATO, não como veredito: um nome ausente pode estar
+ * coberto por um teste com outro nome, e isso só se decide lendo. O que ele
+ * resolve é a ordem de descoberta — na fase 4 do MCP_teste o verificador achou
+ * um buraco por ciclo, e os dois já estavam lá desde o primeiro.
+ */
+function featureTestBlock(tests: readonly { task: number; name: string; found: boolean }[]): string[] {
+  const ausentes = tests.filter((test) => !test.found);
+  if (tests.length === 0) return [];
+
+  return [
+    "",
+    "## Mechanical check, already done for you",
+    "",
+    "The phase names specific feature tests. The harness searched the whole project tree for each",
+    "name, literally. This is a fact about names, not a verdict about coverage:",
+    "",
+    ...tests.map((test) => `- task ${test.task}: \`${test.name}\` — ${test.found ? "name found in the tree" : "NAME NOT FOUND ANYWHERE"}`),
+    "",
+    ...(ausentes.length > 0
+      ? [
+          "A name that was not found may still be covered by a test written under another name —",
+          "read the code and decide. But a task whose named test is missing AND whose rule is not",
+          "asserted anywhere is INCOMPLETE, and you must say which name is missing.",
+        ]
+      : ["Every named test exists by name. Judging whether each one asserts what the task requires is still yours."]),
+  ];
 }
 
 export const VERIFY_HEADER = "CAPIVARA_VERIFY";
@@ -51,6 +84,8 @@ export function verifyPrompt(context: VerifierContext): string {
     "- Missing code, a TODO, a placeholder or a missing test means INCOMPLETE.",
     "- A task marked [x] is verified like any other. The mark is a claim, not evidence.",
     "- When in doubt, INCOMPLETE.",
+    "",
+    ...featureTestBlock(context.featureTests ?? []),
     "",
     "## The phase to verify",
     context.phaseMarkdown,

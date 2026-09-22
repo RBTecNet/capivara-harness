@@ -33,6 +33,8 @@ export { canonicalDependsOn, canonicalWorkflowTraces, extractTasks, joinPhaseMet
 export type { NormalizedPart, PhasePartExpectation } from "./phase-part.js";
 export { checkRewriteDrift, parsePhaseFragment } from "./drift.js";
 export { affectedPhases } from "./phase-references.js";
+export { featureTestNames } from "./feature-tests.js";
+export type { NamedFeatureTest } from "./feature-tests.js";
 export type { DriftInput } from "./drift.js";
 export { SKELETON_CONTRACT, coverageFromSkeleton, parseSkeleton, renderSkeleton, sliceForPhase, workflowsForPhase } from "./skeleton.js";
 export type {

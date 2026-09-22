@@ -18,7 +18,9 @@ import { commitPhase, hasPendingChanges, treeSignature } from "./git.js";
 import { declaredComplete, gate0, gate1, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
 import { detectRateLimit, planWait } from "./ratelimit.js";
 import { FLOW_PORT, gate4, type FlowRunner } from "./flows.js";
+import { procurarTestesNomeados } from "./feature-tests.js";
 import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mcp/index.js";
+import { featureTestNames } from "../contract/index.js";
 import type { SkeletonWorkflow } from "../contract/index.js";
 import type { PhaseSession } from "./split.js";
 import type { TestCommand } from "./testcmd.js";
@@ -326,11 +328,27 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       } else {
         if (g2.skipped) announce(`[${session.id}] gate 2 pulado: nenhum comando de teste resolvido`);
         gate("G3", "corrente", cycle);
+        /*
+         * O inventário mecânico dos testes nomeados, antes de gastar o
+         * verificador. Ele não decide nada — decide quem lê o código —, mas
+         * entrega todos os buracos de uma vez, em vez de um por ciclo.
+         */
+        const nomeados = await procurarTestesNomeados(options.projectRoot, featureTestNames(session.markdown));
+        const semNome = nomeados.filter((teste) => !teste.found);
+        if (semNome.length > 0) {
+          announce(`[${session.id}] testes nomeados que não existem na árvore: ${semNome.map((teste) => teste.name).join(", ")}`);
+        }
+
         const verification = await options.call({
           role: "verifier",
           phase: session,
           attempt: cycle,
-          prompt: verifyPrompt({ language: options.language, phaseMarkdown: session.markdown, taskCount: session.taskCount }),
+          prompt: verifyPrompt({
+            language: options.language,
+            phaseMarkdown: session.markdown,
+            taskCount: session.taskCount,
+            featureTests: nomeados,
+          }),
         });
         await writeAtomic(`${paths.logs}/${session.id}.verify-${cycle}.log`, verification.stdout);
 

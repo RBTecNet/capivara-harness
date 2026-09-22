@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 1001 testes em 53 arquivos, `npm run check` verde |
+| suíte | 1012 testes em 53 arquivos, `npm run check` verde |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
 O ciclo de três estágios foi desenvolvido no branch `ciclo-unico` e fundido em
@@ -148,6 +148,11 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
   foi mandado consertar o que não estava quebrado — envelope aberto pela ponte,
   aplicação que não subiu, pacote não instalado. A causa precisa dizer de quem é
   o defeito. Ver §34.8.
+- **O verificador acha um buraco por ciclo se ninguém lhe der a lista.** Na
+  fase 4 do `MCP_teste` ele aprovou a task 6 no ciclo 1 e a reprovou no ciclo 2,
+  sobre o mesmo código, enquanto reprovava a task 8 no ciclo 1. Os dois buracos
+  existiam desde o início. O que é mecânico — o nome do teste existe na árvore? —
+  não pode depender da atenção de um modelo.
 - **`Module not found` do Next não é `Cannot find module '@playwright/test'`.**
   Um padrão que aceita `not found` solto classifica import quebrado do produto
   como ambiente faltando, e manda instalar o que já está instalado. Detecção de
@@ -171,7 +176,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 1001 testes
+npm run check     # build + typecheck + 1012 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

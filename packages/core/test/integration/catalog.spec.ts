@@ -26,6 +26,7 @@ import {
   approve,
   fakeAgent,
   happyPath,
+  PHASE_3,
   oneQuestion,
   reject,
 } from "../support/fake-agent.js";
@@ -69,14 +70,23 @@ async function gitRepo(): Promise<void> {
   await run("git", ["commit", "-q", "-m", "inicial"], { cwd: projectRoot });
 }
 
-async function publishPlan(): Promise<{ phases: number; tasks: number[] }> {
+async function publishPlan(
+  options: { extra?: string; mudarPrimeira?: boolean } = {},
+): Promise<{ phases: number; tasks: number[] }> {
   await mkdir(join(projectRoot, ".capivara", "init"), { recursive: true });
   const { assemblePhasesDocument } = await import("../../src/contract/index.js");
+  // Uma fase cujo texto mudou é outra fase: um critério a mais basta.
+  const primeira = options.mudarPrimeira
+    ? PHASE_1.trim().replace(
+        "    - A tabela statuses existe e contém exatamente pendente, confirmada e cancelada",
+        "    - A tabela statuses existe e contém exatamente pendente, confirmada e cancelada\n    - O seed é idempotente",
+      )
+    : PHASE_1.trim();
   const plan = assemblePhasesDocument({
     projectName: "Pousada",
     stamp: "<!-- inputs: project-description.md@sha256:aaaaaaaaaaaa -->",
     overview: "Fundação primeiro.",
-    phases: [PHASE_1.trim(), PHASE_2.trim()],
+    phases: [primeira, PHASE_2.trim(), ...(options.extra ? [options.extra.trim()] : [])],
     openQuestions: [],
   });
   await writeFile(join(projectRoot, ".capivara/init/project-phases.md"), plan, "utf8");
@@ -94,6 +104,7 @@ async function build(
     skeleton?: Skeleton;
     flowRunner?: FlowRunner;
     skipAcceptance?: boolean;
+    rebuildAll?: boolean;
     onProgress?: (evento: BuildProgress) => void;
   } = {},
 ) {
@@ -111,6 +122,7 @@ async function build(
     ...(options.skeleton !== undefined ? { skeleton: options.skeleton } : {}),
     ...(options.flowRunner !== undefined ? { flowRunner: options.flowRunner } : {}),
     ...(options.skipAcceptance !== undefined ? { skipAcceptance: options.skipAcceptance } : {}),
+    ...(options.rebuildAll !== undefined ? { rebuildAll: options.rebuildAll } : {}),
     ...(options.onProgress !== undefined ? { onProgress: options.onProgress } : {}),
     testRunner: async () => {
       const exit = options.testExit?.[testRun] ?? 0;
@@ -1192,4 +1204,61 @@ describe("B-41 · o gate que abre a aplicação", () => {
     expect(outcome.exitCode).toBe(0);
     expect(avisos.join("\n")).toContain("sem esqueleto legível");
   });
+});
+
+/**
+ * O plano que cresceu.
+ *
+ * O id do run é o hash do plano inteiro, então acrescentar uma fase muda o hash
+ * e devolve à fila as que já estavam prontas. Enquanto o plano nascia inteiro e
+ * morria inteiro isso nunca aparecia; o `change` acrescenta fase a uma aplicação
+ * que já roda, e aí custa uma chamada de verificador por fase antiga antes de
+ * escrever a primeira linha do que foi pedido.
+ */
+describe("fase fechada em run anterior não é refeita", () => {
+  const passos = (tasks: number[]): EngineStep[] => [
+    { match: { role: "builder" }, writes: [{ path: "src/app.ts", content: "export const app = 1;" }], respond: { stdout: "fiz" }, repeat: true },
+    { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0] ?? 2) }, repeat: true },
+    { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1] ?? 2) }, repeat: true },
+    { match: { role: "verifier", phase: "P03" }, respond: { stdout: allDone(1) }, repeat: true },
+  ];
+
+  it("o registro sobrevive ao plano mudar de hash", async () => {
+    const { tasks } = await publishPlan();
+    expect((await build(passos(tasks))).outcome.exitCode).toBe(0);
+
+    const fechadas = await readFile(join(projectRoot, ".capivara/handoffs/fases.json"), "utf8");
+    expect(JSON.parse(fechadas)).toHaveLength(2);
+
+    /*
+     * O plano cresce: mesmo texto nas duas primeiras, uma terceira no fim. O
+     * hash do plano muda, o run é outro, e mesmo assim as duas antigas não
+     * voltam para a fila.
+     */
+    await publishPlan({ extra: PHASE_3 });
+
+    const segundo = await build(passos(tasks));
+    expect(segundo.engine.calls.filter((call) => call.phase.id === "P01")).toHaveLength(0);
+    expect(segundo.outcome.phases[0]?.outcome.status).toBe("already-implemented");
+    // E a fase nova foi construída.
+    expect(segundo.engine.calls.some((call) => call.phase.id === "P03")).toBe(true);
+  }, 20_000);
+
+  it("fase cujo texto mudou volta a ser construída", async () => {
+    const { tasks } = await publishPlan();
+    await build(passos(tasks));
+
+    await publishPlan({ mudarPrimeira: true });
+    const segundo = await build(passos(tasks));
+
+    expect(segundo.engine.calls.some((call) => call.phase.id === "P01")).toBe(true);
+  }, 20_000);
+
+  it("--rebuild-all ignora o registro", async () => {
+    const { tasks } = await publishPlan();
+    await build(passos(tasks));
+
+    const segundo = await build(passos(tasks), { rebuildAll: true });
+    expect(segundo.engine.calls.some((call) => call.phase.id === "P01")).toBe(true);
+  }, 20_000);
 });

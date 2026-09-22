@@ -47,6 +47,7 @@ import { runPhase, type EngineCaller, type PhaseOutcome } from "./runner.js";
 import { runAcceptance, type AcceptanceResult, type CommandRunner } from "./acceptance.js";
 import { acceptancePrompt, installPrompt } from "../prompts/index.js";
 import type { BuildProgressListener } from "./progress.js";
+import { lerFasesFechadas, registrarFaseFechada, shaDaFase } from "./ledger.js";
 import type { TestRunner } from "./gates.js";
 
 export interface BuildOptions {
@@ -66,6 +67,8 @@ export interface BuildOptions {
   flowRunner?: FlowRunner;
   /** Desliga o gate 4 mesmo havendo esqueleto. */
   skipFlows?: boolean;
+  /** Refaz até o que já fechou em run anterior com o mesmo texto. */
+  rebuildAll?: boolean;
   /**
    * Recebe o que este build tem a devolver à base: o estado e o que o executor
    * anotou. Ausente significa build sem base — nada muda no resto.
@@ -389,10 +392,47 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
 
     options.onPlanned?.(checked.sessions.map((session) => ({ id: session.id, title: session.title })));
 
-    const done = new Set(progress.completed);
+    /*
+     * `rebuildAll` ignora as DUAS memórias: a do próprio run, que é a retomada
+     * depois de uma queda, e a dos runs anteriores. Quem pede para refazer tudo
+     * está dizendo que não confia no que está lá — e um "tudo" que poupa metade
+     * é pior que não existir.
+     */
+    const done = new Set(options.rebuildAll === true ? [] : progress.completed);
+
+    /*
+     * As fases que fecharam em runs ANTERIORES, com o mesmo texto.
+     *
+     * O id do run é o hash do plano inteiro, então acrescentar uma fase — o que
+     * o `change` faz — muda o hash e devolve à fila as que já estavam prontas.
+     * O registro é por texto: fase cujo markdown mudou volta a ser construída,
+     * que é o certo quando alguém editou um critério.
+     */
+    const fechadasAntes = options.rebuildAll === true ? [] : await lerFasesFechadas(options.projectRoot);
+    const shaFechado = new Map(fechadasAntes.map((fase) => [fase.sha, fase]));
+
     const phases: PhaseReport[] = [];
 
     for (const session of checked.sessions) {
+      const fechadaAntes = shaFechado.get(shaDaFase(session.markdown));
+      if (!done.has(session.id) && fechadaAntes) {
+        announce(`[${session.id}] já fechada no run ${fechadaAntes.runId}, com este mesmo texto; não vou refazer`);
+        options.onProgress?.({ kind: "phase", id: session.id, state: "concluído", cycle: 0, detail: "fechada antes" });
+        for (const gate of ["G0", "G1", "G2", "G3"] as const) {
+          options.onProgress?.({ kind: "gate", id: session.id, gate, state: "verde", cycle: 0 });
+        }
+        if (fluxosDaFase !== null) options.onProgress?.({ kind: "gate", id: session.id, gate: "G4", state: "verde", cycle: 0 });
+
+        phases.push({ id: session.id, title: session.title, outcome: { status: "already-implemented", cycles: 0 } });
+        // O fluxo de uma fase fechada continua sendo regressão das seguintes.
+        if (esqueleto !== null) {
+          for (const workflow of workflowsForPhase(esqueleto, session.number)) {
+            if (!fluxosCumpridos.some((cumprido) => cumprido.number === workflow.number)) fluxosCumpridos.push(workflow);
+          }
+        }
+        continue;
+      }
+
       if (done.has(session.id)) {
         announce(`[${session.id}] já concluída neste run`);
         /*
@@ -445,6 +485,16 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       });
 
       phases.push({ id: session.id, title: session.title, outcome });
+
+      if (outcome.status === "complete" || outcome.status === "already-implemented") {
+        await registrarFaseFechada(options.projectRoot, {
+          id: session.id,
+          title: session.title,
+          sha: shaDaFase(session.markdown),
+          runId,
+          closedAt: now().toISOString(),
+        });
+      }
 
       // Fluxo que passou vira regressão das fases seguintes: é o que faz um
       // defeito introduzido na fase 5 aparecer na fase 5.

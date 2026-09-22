@@ -137,6 +137,19 @@ export function rehearsalApproves(): ScriptStep {
   };
 }
 
+/** Uma fase acrescentada depois, como o `change` faz num plano que já rodou. */
+export const PHASE_3 = `## Phase 3: Editar a reserva
+
+**Goal:** o hóspede corrige uma reserva já criada · **Depends on:** Phase 2 · **Covers:** US-1.1
+
+- [ ] **Task:** Implementar a edição de uma reserva existente
+  - **Acceptance criteria:**
+    - Alterar as datas revalida a sobreposição antes de gravar
+    - Uma reserva já cancelada não pode ser editada
+  - **Feature tests:** edicao_revalida_sobreposicao → a edição que sobrepõe é recusada
+  - **Traces:** US-1.1, reservations
+`;
+
 /** Um esqueleto coerente com PHASE_1 e PHASE_2, para o caminho novo. */
 export const SKELETON = JSON.stringify({
   contract: "capivara-skeleton/v1",

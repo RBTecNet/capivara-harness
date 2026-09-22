@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 999 testes em 53 arquivos, `npm run check` verde |
+| suíte | 1001 testes em 53 arquivos, `npm run check` verde |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
 O ciclo de três estágios foi desenvolvido no branch `ciclo-unico` e fundido em
@@ -148,6 +148,14 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
   foi mandado consertar o que não estava quebrado — envelope aberto pela ponte,
   aplicação que não subiu, pacote não instalado. A causa precisa dizer de quem é
   o defeito. Ver §34.8.
+- **`Module not found` do Next não é `Cannot find module '@playwright/test'`.**
+  Um padrão que aceita `not found` solto classifica import quebrado do produto
+  como ambiente faltando, e manda instalar o que já está instalado. Detecção de
+  ferramenta ausente cita o nome da ferramenta.
+- **Gate que decide sobre o produto deixa a prova no disco.** O evento do run
+  guarda só a primeira linha da causa, e o painel some com o resto: a P03 do
+  `MCP_teste` reprovou três vezes sem deixar uma linha do que o Playwright disse.
+  Hoje a saída vai para `logs/<fase>.flow-run-<ciclo>.log`.
 - **O relógio de primeira saída vira relógio da resposta inteira.** Numa CLI
   que só imprime o resultado no fim — `claude -p --output-format json`, cursor,
   agy — ficar calado é o estado normal de quem trabalha. O limite matou a fase 3
@@ -163,7 +171,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 999 testes
+npm run check     # build + typecheck + 1001 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

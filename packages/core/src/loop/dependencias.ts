@@ -15,7 +15,12 @@
  * precisar do pacote. Um defeito de ambiente virou mudança de produto, que é
  * exatamente o que o §34.8 existe para impedir.
  *
- * Descobrir isto no preflight custa um `stat`.
+ * A conclusão NÃO é que alguém deva rodar `npm install` antes. O objetivo do
+ * harness é dar munição para o executor conseguir sozinho — se ele precisa de
+ * uma dependência instalada, instalar faz parte do trabalho dele, e a permissão
+ * para isso é o que o harness tem que garantir (§41.3). O que este aviso faz é
+ * dizer o que vai acontecer na primeira sessão, e qual é o remédio na hora em
+ * que a CLI não deixar.
  */
 
 import { readFile, stat } from "node:fs/promises";
@@ -73,7 +78,13 @@ export async function dependenciasAusentes(projectRoot: string): Promise<Depende
   return ausentes;
 }
 
-/** A mensagem do preflight: o que falta, por que importa, e o que fazer. */
+/**
+ * A mensagem do preflight: o que falta, quem resolve, e o que fazer se não der.
+ *
+ * Aviso, nunca bloqueio. Instalar o que o projeto declara é trabalho do
+ * executor, e pedir que o desenvolvedor prepare o ambiente antes seria trocar o
+ * problema de lugar: o harness existe para que o executor consiga sozinho.
+ */
 export function descreverDependencias(ausentes: readonly DependenciaAusente[]): string {
   if (ausentes.length === 0) return "";
 
@@ -81,10 +92,8 @@ export function descreverDependencias(ausentes: readonly DependenciaAusente[]): 
     `as dependências declaradas em ${ausentes.map((item) => `\`${item.manifesto}\``).join(" e ")} não estão instaladas: ` +
       `não existe ${ausentes.map((item) => `\`${item.pasta}/\``).join(" nem ")}.`,
     "",
-    "O gate 2 roda a suíte do projeto, e ela vai falhar por falta de pacote — não por defeito do código.",
-    "O executor tenta instalar e quase sempre não pode: a permissão de shell é de quem invocou a CLI dele.",
-    "",
-    "Resolva antes de gastar um ciclo:",
-    ...ausentes.map((item) => `  ${item.comando}`),
+    `O executor instala na primeira sessão — ${ausentes.map((item) => `\`${item.comando}\``).join(", ")} — e a suíte só roda depois disso.`,
+    "Se a CLI dele recusar o comando, o gate 2 vai reprovar por falta de pacote, e não por defeito do código:",
+    "aí o remédio é instalar à mão, ou usar uma CLI cujo executor possa executar.",
   ].join("\n");
 }

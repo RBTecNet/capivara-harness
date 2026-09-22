@@ -3386,12 +3386,20 @@ Acesso de sistema, além disso, desliga o sandbox (`--sandbox disabled`), como o
 `danger-full-access` do codex — `--force` libera o comando, e o sandbox ainda
 podia recusar o que ele faz.
 
-### 41.4 Erro, não aviso — a menos que o executor possa resolver
+### 41.4 Aviso, nunca bloqueio
 
-Sem `--system-install`, faltar dependência é **erro de preflight**: nenhuma
-chamada de modelo acontece, e a mensagem diz o que rodar. Com `--system-install`
-ligado, o executor tem permissão para instalar e isso vira aviso — ele resolve na
-primeira sessão.
+A primeira versão desta conferência reprovava o build e mandava rodar `npm
+install` antes. Está errada, e a correção veio do desenvolvedor em uma frase: *"o
+objetivo não é ajudar o modelo a criar a aplicação, é dar munição para que ele
+consiga sozinho"*.
 
-A mensagem diz as três coisas que o operador precisa, na ordem: o que falta, por
-que isso reprovaria a fase sem que o código estivesse errado, e o comando.
+Instalar o que o projeto declara é **trabalho do executor**. Exigir que alguém
+prepare o ambiente antes troca o problema de lugar: transforma um harness que
+arma quem executa num harness que pede preparação a quem chama — e o dia em que
+o `build` roda sozinho de madrugada é justamente o dia em que não há ninguém para
+preparar nada.
+
+Então o preflight avisa e segue. A mensagem diz o que vem pela frente — *"o
+executor instala na primeira sessão"* —, e só depois o remédio para o caso em que
+a CLI recusar o comando. Quando isso acontece, a causa não é a dependência: é a
+permissão, e ela se conserta no adaptador (§41.3).

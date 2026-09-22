@@ -147,11 +147,16 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
    */
   const semDependencias = await dependenciasAusentes(options.projectRoot);
   if (semDependencias.length > 0) {
-    const mensagem = descreverDependencias(semDependencias);
-    // Com `--system-install` o executor tem permissão para instalar, então isto
-    // é aviso: ele resolve na primeira sessão.
-    if (options.systemInstall === true) warnings.push({ code: "instala-dependencias", message: mensagem });
-    else errors.push(mensagem);
+    /*
+     * Aviso, nunca erro.
+     *
+     * A primeira versão disto bloqueava o build e mandava rodar `npm install`.
+     * Está errado: instalar o que o projeto declara é trabalho do executor, e
+     * exigir que o desenvolvedor prepare o ambiente antes troca o problema de
+     * lugar — o harness existe para que o executor consiga sozinho. O que o
+     * preflight deve fazer é dizer o que vem pela frente.
+     */
+    warnings.push({ code: "instala-dependencias", message: descreverDependencias(semDependencias) });
   }
 
   /*

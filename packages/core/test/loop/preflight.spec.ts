@@ -163,3 +163,35 @@ describe("preflight", () => {
     expect(result.sessions).toHaveLength(2);
   });
 });
+
+/**
+ * Dependência ausente é aviso, nunca bloqueio.
+ *
+ * A primeira versão desta conferência reprovava o build e mandava rodar `npm
+ * install`. Está errado: instalar o que o projeto declara é trabalho do
+ * executor, e exigir que o desenvolvedor prepare o ambiente antes troca o
+ * problema de lugar — o harness existe para dar munição a quem executa, não
+ * para pedir preparação a quem chama.
+ */
+describe("o projeto sem as dependências instaladas", () => {
+  it("avisa o que vem pela frente e deixa o build correr", async () => {
+    await plan();
+    await writeFile(join(projectRoot, "package.json"), JSON.stringify({ name: "x", devDependencies: { tsx: "^4" } }), "utf8");
+
+    const resultado = await preflight({ projectRoot, runId: RUN, git, environment: {} });
+
+    if (!resultado.ok) throw new Error(`não devia bloquear: ${resultado.errors.join("; ")}`);
+    const aviso = resultado.warnings.find((entrada) => entrada.code === "instala-dependencias");
+    expect(aviso?.message).toContain("O executor instala na primeira sessão");
+  });
+
+  it("com as dependências instaladas, não há aviso nenhum", async () => {
+    await plan();
+    await writeFile(join(projectRoot, "package.json"), JSON.stringify({ name: "x", dependencies: { next: "^15" } }), "utf8");
+    await mkdir(join(projectRoot, "node_modules"), { recursive: true });
+
+    const resultado = await preflight({ projectRoot, runId: RUN, git, environment: {} });
+    if (!resultado.ok) throw new Error(resultado.errors.join("; "));
+    expect(resultado.warnings.some((entrada) => entrada.code === "instala-dependencias")).toBe(false);
+  });
+});

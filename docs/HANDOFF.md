@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 1134 testes em 53 arquivos, `npm run check` verde |
+| suíte | 1138 testes em 53 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
@@ -183,7 +183,8 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 - **Dependência do projeto não instalada vira mudança de produto.** No
   `MCP_teste2`, sem `node_modules`, o `npm test` morria por falta de `tsx`; o
   executor não pôde instalar — "o shell foi bloqueado" — e reescreveu o comando
-  de teste do projeto para não precisar do pacote. O preflight confere isso agora.
+  de teste do projeto para não precisar do pacote. A causa era a permissão da
+  CLI; o preflight avisa, mas quem instala é o executor.
 - **Chave de protocolo colada no fim de uma frase mata um run.** O auditor do
   `MCP_teste2` escreveu `…afirma.CAPIVARA_AUDIT_STATUS: APPROVED` e o parser, que
   exigia coluna 1, chamou de saída inválida — duas vezes, e o `plan` morreu com o
@@ -222,7 +223,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 1134 testes
+npm run check     # build + typecheck + 1138 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

@@ -69,12 +69,17 @@ describe("as dependências declaradas estão instaladas?", () => {
     expect(ausentes[0]?.comando).toBe("composer install");
   });
 
-  it("a mensagem diz o que falta, por que importa e o que rodar", () => {
+  /*
+   * A mensagem não manda ninguém preparar o ambiente: instalar é trabalho do
+   * executor, e o harness existe para que ele consiga sozinho. O que ela faz é
+   * dizer o que vem pela frente e qual é o remédio se a CLI recusar o comando.
+   */
+  it("a mensagem diz quem resolve, e o que fazer quando não der", () => {
     const texto = descreverDependencias([{ manifesto: "package.json", pasta: "node_modules", comando: "npm install" }]);
 
     expect(texto).toContain("não estão instaladas");
+    expect(texto).toContain("O executor instala na primeira sessão");
     expect(texto).toContain("não por defeito do código");
-    expect(texto).toContain("npm install");
   });
 
   it("sem ausências, não há mensagem", () => {

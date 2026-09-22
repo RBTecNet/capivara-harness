@@ -1028,6 +1028,31 @@ describe("o build retomado, quando o run tem fluxos", () => {
   });
 });
 
+describe("a prova do gate 4 fica no disco", () => {
+  /*
+   * A fase 3 do MCP_teste reprovou três vezes no gate 4 e não havia no disco uma
+   * linha do que o Playwright tinha dito: o evento do run guarda só a primeira
+   * linha da causa e o painel some com o resto. Diagnosticar virou adivinhação.
+   */
+  it("a saída do runner vira log da fase, verde ou vermelho", async () => {
+    const { tasks } = await publishPlan();
+    const SAIDA = "Running 1 test using 1 worker\n  ✓ workflow 1 (1.2s)\n\n  1 passed (2s)";
+
+    const { outcome } = await build(
+      [
+        { match: { role: "builder" }, writes: [MANIFESTO, { path: "src/a.ts", content: "export const a = 1;" }], respond: { stdout: "fiz" }, repeat: true },
+        { match: { role: "verifier", prompt: "CAPIVARA_FLOW" }, respond: { stdout: ROTEIRO }, repeat: true },
+        { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0] ?? 2) }, repeat: true },
+        { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1] ?? 2) }, repeat: true },
+      ],
+      { skeleton: ESQUELETO, skipAcceptance: true, flowRunner: async () => ({ exitCode: 0, output: SAIDA }) },
+    );
+
+    const log = join(runPaths(projectRoot, outcome.runId).logs, "P01.flow-run-1.log");
+    expect(await readFile(log, "utf8")).toContain("1 passed");
+  });
+});
+
 describe("B-41 · o gate que abre a aplicação", () => {
   it("fluxo reprovado devolve a fase ao ciclo de correção, e a causa fala de fluxo", async () => {
     const { tasks } = await publishPlan();

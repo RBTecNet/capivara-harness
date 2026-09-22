@@ -264,6 +264,18 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         announce: (message) => announce(`[${session.id}] ${message}`),
       });
 
+      /*
+       * A saída do Playwright vira arquivo SEMPRE, verde ou vermelho.
+       *
+       * O evento do run guarda só a primeira linha da causa e o painel some com
+       * o resto: quando a fase 3 do MCP_teste reprovou três vezes, não havia no
+       * disco uma linha do que tinha acontecido. Um gate que decide sobre o
+       * produto precisa deixar a prova no lugar onde já se procura.
+       */
+      if (g4.output !== undefined && g4.output !== "") {
+        await writeAtomic(`${paths.logs}/${session.id}.flow-run-${cycleAtual}.log`, g4.output);
+      }
+
       gate("G4", g4.green ? "verde" : "vermelho", cycleAtual);
       if (g4.green) {
         if (g4.skipped !== "") announce(`[${session.id}] gate 4 pulado: ${g4.skipped}`);

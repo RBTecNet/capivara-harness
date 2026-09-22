@@ -203,7 +203,19 @@ export function ehFalhaDoRoteiro(output: string): boolean {
 
 export function faltaORunner(output: string, exitCode: number): boolean {
   if (exitCode === 127) return true;
-  return /could not determine executable|not found|Cannot find (module|package)|Please install|npx playwright install/i.test(output);
+  return [
+    // O npm dizendo que não achou o que executar.
+    /could not determine executable/i,
+    /playwright: (command )?not found/i,
+    // O import do runner, e só dele: `Module not found` de um import do PRODUTO
+    // é defeito do produto, e foi assim que a fase 3 do MCP_teste foi mandada
+    // instalar um Playwright que já estava instalado.
+    /Cannot find (module|package) ['"`]?@playwright\/test/i,
+    /Please install @playwright\/test/i,
+    // O navegador, que é metade do runner: sem ele nada abre.
+    /npx playwright install/i,
+    /Executable doesn't exist at/i,
+  ].some((padrao) => padrao.test(output));
 }
 
 /**
@@ -260,8 +272,16 @@ export interface FlowGateOptions {
 }
 
 export type FlowGateResult =
-  | { green: true; skipped: string; scripts: string[] }
-  | { green: false; cause: string; toolMissing?: boolean; startupFailed?: boolean; scriptFailed?: boolean };
+  /**
+   * `output` é a saída crua do runner, quando ele chegou a correr.
+   *
+   * Ela precisa virar arquivo: o evento do run guarda só a primeira linha da
+   * causa, e o painel some com o resto. Quando a fase 3 do MCP_teste reprovou
+   * três vezes seguidas, não havia no disco uma linha do que o Playwright tinha
+   * dito — e sem isso o diagnóstico vira adivinhação.
+   */
+  | { green: true; skipped: string; scripts: string[]; output?: string }
+  | { green: false; cause: string; output?: string; toolMissing?: boolean; startupFailed?: boolean; scriptFailed?: boolean };
 
 /**
  * A aplicação nem chegou a subir.
@@ -376,6 +396,7 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
       return {
         green: false,
         scriptFailed: true,
+        output: run.output,
         cause:
           "o roteiro do fluxo falhou por si mesmo duas vezes — seletor ambíguo ou erro de escrita, não defeito do " +
           `produto. Isto é do harness, não da sua implementação; o roteiro está em ${FLOWS_DIR}/.\n${tail(run.output)}`,
@@ -387,6 +408,7 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
     return {
       green: false,
       toolMissing: true,
+      output: run.output,
       cause:
         "o runner de fluxos não está instalado: o gate 4 abre a aplicação com @playwright/test. " +
         `Instale-o como dependência de desenvolvimento do projeto e garanta o navegador ` +
@@ -398,6 +420,7 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
     return {
       green: false,
       startupFailed: true,
+      output: run.output,
       cause:
         `a aplicação NÃO SUBIU, e por isso nenhum fluxo chegou a ser percorrido — isto não é ` +
         `defeito dos fluxos.\n\nO gate 4 executa \`${options.startCommand}\` a partir da raiz do ` +
@@ -410,6 +433,7 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   if (run.exitCode !== 0) {
     return {
       green: false,
+      output: run.output,
       cause:
         `a aplicação não cumpriu um fluxo declarado — o roteiro rodou contra o produto de pé em ` +
         `http://127.0.0.1:${port} e reprovou. Isto não é teste de unidade: um passo falhou onde o ` +
@@ -417,7 +441,7 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
     };
   }
 
-  return { green: true, skipped: "", scripts };
+  return { green: true, skipped: "", scripts, output: run.output };
 }
 
 /** As últimas linhas, que é onde o playwright escreve o que falhou. */

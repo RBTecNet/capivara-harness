@@ -364,6 +364,35 @@ describe("o gate", () => {
   });
 
   /**
+   * O que reprovou a P03 do MCP_teste três vezes.
+   *
+   * O padrão aceitava `not found` e `Cannot find module` soltos — e o Next
+   * escreve `Module not found: Can't resolve` quando um import do PRODUTO não
+   * existe. O gate leu isso como "o Playwright não está instalado" e mandou o
+   * executor instalar o que já estava instalado, enquanto o defeito de verdade,
+   * que era dele, ficava intocado.
+   */
+  it("defeito de import do produto não vira runner ausente", () => {
+    const doProduto = [
+      "Module not found: Can't resolve '@/componentes/Campo'",
+      "Error: Cannot find module '../../src/dados/locacoes'",
+      "npm ERR! Missing script: \"conta:provisionar\"",
+      "Error: Cannot find module 'react-server-dom-webpack/client'",
+      "  1) workflow 3 › cadastro\n     Error: page not found",
+    ];
+    for (const saida of doProduto) {
+      expect(faltaORunner(saida, 1), saida).toBe(false);
+    }
+
+    // O runner de verdade ausente continua reconhecido, pelo nome dele.
+    expect(faltaORunner("sh: 1: playwright: not found", 1)).toBe(true);
+    expect(faltaORunner("npm ERR! could not determine executable to run", 1)).toBe(true);
+    expect(faltaORunner("Executable doesn't exist at /home/x/.cache/ms-playwright/chromium-1200/chrome", 1)).toBe(true);
+    // E o 127 do shell, que não precisa de texto nenhum.
+    expect(faltaORunner("", 127)).toBe(true);
+  });
+
+  /**
    * O defeito que travou a P02 do MCP_teste.
    *
    * O roteiro usou `getByRole('alert')` e casou com dois elementos: o alerta da

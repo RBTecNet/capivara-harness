@@ -19,6 +19,7 @@
  */
 
 import { execFile } from "node:child_process";
+import { createServer } from "node:net";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { SkeletonWorkflow } from "../contract/index.js";
@@ -30,7 +31,44 @@ export const FLOWS_DIR = join(".capivara", "flows");
 export const FLOW_CONFIG = "playwright.config.mjs";
 
 /** A porta em que o gate sobe o produto. Alta e fixa: nada disputa com ela. */
+/**
+ * A porta preferida do gate 4. Preferida, não fixa.
+ *
+ * Ela era fixa, e isso derrubou a fase 2 do `MCP_teste2` no último ciclo: o
+ * executor subiu a aplicação para conferir o próprio trabalho, disse ter
+ * encerrado o processo e não encerrou. O Playwright achou a porta ocupada e
+ * recusou — "is already used, make sure that nothing is running on the port" —,
+ * e o gate relatou que a aplicação não subiu. Defeito de ambiente cobrado como
+ * defeito de produto, no ciclo em que não havia mais volta.
+ *
+ * Um número fixo transforma qualquer processo esquecido — do executor, de outro
+ * run, de outro projeto — em reprovação. A porta passa a ser escolhida livre a
+ * cada passagem, e esta fica como primeira tentativa por ser a conhecida.
+ */
 export const FLOW_PORT = 47533;
+
+/**
+ * Uma porta que ninguém está usando agora.
+ *
+ * Tenta a preferida e, ocupada, pede uma efêmera ao sistema. A janela entre
+ * fechar o servidor de teste e o Playwright abrir o dele é pequena e real; ela
+ * existia antes com número fixo, e continua existindo — a diferença é que agora
+ * a colisão é improvável em vez de garantida por qualquer órfão.
+ */
+export async function portaLivre(preferida = FLOW_PORT): Promise<number> {
+  const tentar = async (porta: number): Promise<number | null> =>
+    await new Promise((resolve) => {
+      const servidor = createServer();
+      servidor.once("error", () => resolve(null));
+      servidor.listen(porta, "127.0.0.1", () => {
+        const endereco = servidor.address();
+        const escolhida = typeof endereco === "object" && endereco ? endereco.port : porta;
+        servidor.close(() => resolve(escolhida));
+      });
+    });
+
+  return (await tentar(preferida)) ?? (await tentar(0)) ?? preferida;
+}
 
 /** `workflow 2` e `workflow 2.1` viram nomes de arquivo estáveis. */
 export function flowScriptName(workflowNumber: string): string {
@@ -263,7 +301,13 @@ export interface FlowGateOptions {
   /** Como a aplicação sobe. Sem isto não há o que abrir. */
   startCommand: string | null;
   /** Chama a sessão independente que redige o roteiro. */
-  author: (workflow: SkeletonWorkflow, rejected: string[]) => Promise<string>;
+  /**
+   * Chama a sessão que redige o roteiro.
+   *
+   * O `baseUrl` vem do gate porque é o gate quem escolhe a porta — quem monta o
+   * prompt não tem como saber qual delas sobrou livre nesta passagem.
+   */
+  author: (workflow: SkeletonWorkflow, rejected: string[], baseUrl: string) => Promise<string>;
   runner?: FlowRunner;
   port?: number;
   /** Tentativas de redação por fluxo, contando a primeira. */
@@ -305,7 +349,9 @@ function falhouAoSubir(output: string): boolean {
  */
 export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   const announce = options.announce ?? ((): void => {});
-  const port = options.port ?? FLOW_PORT;
+  const port = options.port ?? (await portaLivre());
+  if (port !== FLOW_PORT) announce(`porta ${port} para subir a aplicação; a preferida estava ocupada`);
+  const baseUrl = `http://127.0.0.1:${port}`;
   const pasta = join(options.projectRoot, FLOWS_DIR);
 
   const regressao = options.regressao ?? [];
@@ -336,7 +382,7 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
       announce(
         `roteiro do workflow ${workflow.number} (${workflow.name})` + (tentativa > 1 ? ` — tentativa ${tentativa}` : ""),
       );
-      const script = extractFlowScript(await options.author(workflow, rejeitado));
+      const script = extractFlowScript(await options.author(workflow, rejeitado, baseUrl));
       const defeitos = checkFlowScript(script, workflow);
       if (defeitos.length === 0) {
         await writeFile(arquivo, `${script}\n`, "utf8");
@@ -386,7 +432,9 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
 
     for (const workflow of options.workflows) {
       const arquivo = join(pasta, flowScriptName(workflow.number));
-      const script = extractFlowScript(await options.author(workflow, [`o roteiro anterior falhou assim:\n${tail(run.output, 25)}`]));
+      const script = extractFlowScript(
+        await options.author(workflow, [`o roteiro anterior falhou assim:\n${tail(run.output, 25)}`], baseUrl),
+      );
       const defeitos = checkFlowScript(script, workflow);
       if (defeitos.length === 0) await writeFile(arquivo, `${script}\n`, "utf8");
     }
@@ -413,6 +461,25 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
         "o runner de fluxos não está instalado: o gate 4 abre a aplicação com @playwright/test. " +
         `Instale-o como dependência de desenvolvimento do projeto e garanta o navegador ` +
         `(\`npx playwright install chromium\`). Saída:\n${tail(run.output)}`,
+    };
+  }
+
+  /*
+   * Porta ocupada não é a aplicação falhando.
+   *
+   * Com a porta escolhida livre a cada passagem isto virou raro, mas a janela
+   * entre escolher e abrir é real. Quando acontece, a causa precisa dizer que é
+   * do ambiente: no `MCP_teste2` a mensagem "a aplicação NÃO SUBIU" mandou o
+   * executor procurar defeito num produto que subia — no último ciclo dele.
+   */
+  if (run.exitCode !== 0 && /is already used|EADDRINUSE/i.test(run.output)) {
+    return {
+      green: false,
+      startupFailed: true,
+      output: run.output,
+      cause:
+        `a porta ${port} foi ocupada por outro processo entre a escolha e a subida, e o gate não chegou a abrir a ` +
+        `aplicação. Isto é do ambiente, não do seu código: nada precisa ser corrigido na implementação.\n${tail(run.output)}`,
     };
   }
 

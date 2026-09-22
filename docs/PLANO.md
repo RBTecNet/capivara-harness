@@ -3453,3 +3453,56 @@ três perguntas são sempre as mesmas, e as três já apanharam alguém:
 2. ele roda no diretório do projeto? (agy: não, faltava `--add-dir`)
 3. ele consegue instalar uma dependência declarada? (as três: sim, uma vez
    resolvidos os dois primeiros)
+
+
+## §43 — Porta fixa é armadilha de ambiente
+
+A fase 2 do `MCP_teste2` reprovou no último ciclo com esta linha:
+
+```
+Error: http://127.0.0.1:47533 is already used, make sure that nothing is running
+on the port/url or set reuseExistingServer:true
+```
+
+E o gate traduziu para o executor: *"a aplicação NÃO SUBIU"*. Ela subia. O que
+havia na porta era um `next-server` que o **próprio executor** tinha iniciado no
+ciclo anterior para conferir o trabalho dele — e que ele declarou ter encerrado:
+
+> O servidor na porta 47533 subiu e respondeu em `/` e em `/entrar`. Eu encerrei
+> esse processo depois da verificação.
+
+Não encerrou. Ficou vivo, e o gate seguinte morreu nele.
+
+### 43.1 Por que a porta era fixa, e por que isso estava errado
+
+Um número fixo é previsível: aparece no prompt do roteirista, na configuração e
+na mensagem de erro, e não muda entre execuções. O preço é que **qualquer
+processo esquecido vira reprovação** — do executor, de um run anterior, de outro
+projeto, ou do desenvolvedor que deixou um `npm start` aberto noutro terminal.
+
+A porta passa a ser escolhida livre a cada passagem do gate, com 47533 como
+primeira tentativa. Como a configuração do Playwright já era gerada a cada
+passagem, e o roteiro usa caminhos relativos, nada mais precisou mudar — exceto
+o prompt do roteirista, que agora recebe do gate a URL que o gate escolheu, em
+vez de montá-la a partir da constante.
+
+### 43.2 E quando ela for ocupada mesmo assim
+
+A janela entre escolher a porta e o Playwright abri-la é pequena e real. Quando
+alguém a toma nesse intervalo, o gate agora diz o que é:
+
+> a porta N foi ocupada por outro processo entre a escolha e a subida, e o gate
+> não chegou a abrir a aplicação. **Isto é do ambiente, não do seu código:** nada
+> precisa ser corrigido na implementação.
+
+É o §34.8 outra vez, e a terceira vez que ele aparece no gate 4 — envelope,
+aplicação que não sobe, pacote ausente, e agora porta ocupada. A regra continua
+valendo: toda causa devolvida ao executor diz de quem é o defeito.
+
+### 43.3 O processo órfão continua sendo um problema
+
+Nada aqui mata o servidor esquecido: ele é do executor, não do harness, e matar
+processo alheio por número de porta é o tipo de atalho que um dia derruba o
+banco de desenvolvimento de alguém. O que o harness faz é deixar de depender
+daquela porta específica — e o órfão fica onde está, visível, para quem quiser
+encerrá-lo.

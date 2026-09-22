@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 1139 testes em 53 arquivos, `npm run check` verde |
+| suíte | 1142 testes em 53 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
@@ -176,6 +176,10 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
   foi mandado consertar o que não estava quebrado — envelope aberto pela ponte,
   aplicação que não subiu, pacote não instalado. A causa precisa dizer de quem é
   o defeito. Ver §34.8.
+- **Porta fixa do gate 4 vira reprovação por processo esquecido.** No
+  `MCP_teste2`, um `next-server` que o executor deixou vivo ocupou a 47533 e o
+  gate relatou "a aplicação NÃO SUBIU" — no último ciclo da fase. A porta é
+  escolhida livre a cada passagem agora.
 - **O `agy` não trabalha no diretório em que foi lançado.** Sem `--add-dir`, o
   terminal dele roda em `~/.gemini/antigravity-cli/scratch`: o `npm install`
   funciona e instala na pasta errada, e o sintoma no harness é "a sessão não
@@ -227,7 +231,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 1139 testes
+npm run check     # build + typecheck + 1142 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

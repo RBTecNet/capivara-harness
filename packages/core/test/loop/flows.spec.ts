@@ -14,11 +14,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   FLOWS_DIR,
   FLOW_CONFIG,
+  FLOW_PORT,
   checkFlowScript,
   ehFalhaDoRoteiro,
   faltaORunner,
   flowScriptName,
   gate4,
+  portaLivre,
   renderFlowConfig,
 } from "../../src/loop/index.js";
 import type { FlowRun } from "../../src/loop/index.js";
@@ -489,5 +491,79 @@ describe("o gate", () => {
 
     expect(resultado.green).toBe(true);
     expect(pedidos).toBe(0);
+  });
+});
+
+/**
+ * A porta do gate 4.
+ *
+ * Ela era fixa, e isso derrubou a fase 2 do MCP_teste2 no último ciclo: o
+ * executor subiu a aplicação para conferir o próprio trabalho, disse ter
+ * encerrado o processo e não encerrou. O Playwright achou a porta ocupada e
+ * recusou; o gate relatou que a aplicação não subiu, e o executor foi procurar
+ * defeito num produto que subia.
+ */
+describe("a porta em que a aplicação sobe", () => {
+  const base = { projectRoot: "", workflows: [WORKFLOW], startCommand: "npm start" };
+
+  it("livre, é a que foi pedida; ocupada, é outra", async () => {
+    const { createServer } = await import("node:net");
+
+    // Uma porta que este teste ocupa de fato — nada de supor que a preferida
+    // esteja livre nesta máquina, que é justamente o que o defeito provou.
+    const ocupante = createServer();
+    const ocupada = await new Promise<number>((resolve) => {
+      ocupante.listen(0, "127.0.0.1", () => {
+        const endereco = ocupante.address();
+        resolve(typeof endereco === "object" && endereco ? endereco.port : 0);
+      });
+    });
+
+    try {
+      expect(await portaLivre(ocupada)).not.toBe(ocupada);
+    } finally {
+      await new Promise((resolve) => ocupante.close(resolve));
+    }
+
+    // Livre de novo, ela volta a ser a escolhida.
+    expect(await portaLivre(ocupada)).toBe(ocupada);
+  });
+
+  it("o roteirista recebe a porta que o gate escolheu, não uma constante", async () => {
+    const urls: string[] = [];
+    await gate4({
+      ...base,
+      projectRoot,
+      port: 51234,
+      author: async (_workflow, _rejeitado, baseUrl) => {
+        urls.push(baseUrl);
+        return `\`\`\`ts\n${roteiroBom()}\n\`\`\``;
+      },
+      runner: async () => verde,
+    });
+
+    expect(urls).toEqual(["http://127.0.0.1:51234"]);
+  });
+
+  /*
+   * A janela entre escolher a porta e o Playwright abri-la é pequena e real.
+   * Quando alguém a ocupa nesse intervalo, a causa é do ambiente — e dizer "a
+   * aplicação não subiu" manda consertar o que não está quebrado.
+   */
+  it("porta tomada no intervalo é dita como ambiente, não como produto", async () => {
+    const resultado = await gate4({
+      ...base,
+      projectRoot,
+      author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
+      runner: async () => ({
+        exitCode: 1,
+        output: "Error: http://127.0.0.1:47533 is already used, make sure that nothing is running on the port/url",
+      }),
+    });
+
+    if (resultado.green) throw new Error("deveria reprovar");
+    expect(resultado.startupFailed).toBe(true);
+    expect(resultado.cause).toContain("Isto é do ambiente, não do seu código");
+    expect(resultado.cause).not.toContain("NÃO SUBIU");
   });
 });

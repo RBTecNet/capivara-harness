@@ -47,3 +47,4 @@ export { lerFasesFechadas, registrarFaseFechada, shaDaFase } from "./ledger.js";
 export type { FaseFechada } from "./ledger.js";
 export { dependenciasAusentes, descreverDependencias } from "./dependencias.js";
 export type { DependenciaAusente } from "./dependencias.js";
+export { portaLivre } from "./flows.js";

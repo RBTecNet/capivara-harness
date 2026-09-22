@@ -17,7 +17,7 @@ import type { BuildProgressListener, LoopGate, LoopGateState } from "./progress.
 import { commitPhase, hasPendingChanges, treeSignature } from "./git.js";
 import { declaredComplete, gate0, gate1, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
 import { detectRateLimit, planWait } from "./ratelimit.js";
-import { FLOW_PORT, gate4, type FlowRunner } from "./flows.js";
+import { gate4, type FlowRunner } from "./flows.js";
 import { procurarTestesNomeados } from "./feature-tests.js";
 import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { featureTestNames } from "../contract/index.js";
@@ -243,7 +243,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         workflows: fluxos.workflows,
         ...(fluxos.regressao ? { regressao: fluxos.regressao } : {}),
         startCommand: await fluxos.resolveStart(),
-        author: async (workflow, rejected) => {
+        author: async (workflow, rejected, baseUrl) => {
           const resposta = await options.call({
             role: "verifier",
             phase: session,
@@ -251,7 +251,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
             prompt: flowPrompt({
               language: options.language,
               workflow: { number: workflow.number, name: workflow.name, steps: workflow.steps },
-              baseUrl: `http://127.0.0.1:${fluxos.port ?? FLOW_PORT}`,
+              // A porta é do gate: ele escolhe uma livre a cada passagem.
+              baseUrl,
               ...(rejected.length > 0 ? { rejected } : {}),
             }),
           });

@@ -226,6 +226,22 @@ describe("cursor", () => {
    * install`, relatou "o shell foi bloqueado", e no terceiro ciclo reescreveu o
    * comando de teste do projeto para não precisar da dependência.
    */
+  /**
+   * O `agy` não trabalha no diretório em que foi lançado.
+   *
+   * Medido com um `pwd`: sem `--add-dir`, o terminal dela responde
+   * `~/.gemini/antigravity-cli/scratch`. Com ele, responde a raiz do projeto. É
+   * defeito que não aparece como erro — o `npm install` funciona, instala, e
+   * instala no lugar errado.
+   */
+  it("agy: todo papel é dito onde o projeto está", () => {
+    for (const papel of ROLE_NAMES) {
+      const args = buildInvocation(papel, config({ provider: "agy", model: "" }), context).args;
+      expect(args, papel).toContain("--add-dir");
+      expect(args[args.indexOf("--add-dir") + 1], papel).toBe(context.projectRoot);
+    }
+  });
+
   it("o executor recebe --force: sem ele, escrever pode e executar não", () => {
     const args = buildInvocation("builder", config({ provider: "cursor", model: "" }), context).args;
     expect(args).toContain("--force");

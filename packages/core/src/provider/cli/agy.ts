@@ -18,6 +18,13 @@
  * sessão morria na primeira linha, com "auto-rejecting", e o gate relatava "a
  * sessão não escreveu nada": verdade que escondia a causa inteira.
  *
+ * **E ela precisa ser dita onde o projeto está.** Esta CLI não trabalha no
+ * diretório em que foi lançada: sem `--add-dir`, o terminal dela roda em
+ * `~/.gemini/antigravity-cli/scratch`. Medido com um `pwd`, e é o tipo de
+ * defeito que não aparece como erro — o comando "funciona", instala o pacote,
+ * roda a suíte, e tudo acontece na pasta errada. O gate 1 então relata que a
+ * sessão não escreveu nada, e a causa está a um diretório de distância.
+ *
  * O prompt vai por stdin. O `-p` desta CLI espera o texto como valor do próprio
  * flag (`-p='...'`), e passá-lo vazio faz ela tomar o argumento seguinte como
  * prompt — foi o primeiro erro ao integrá-la.
@@ -33,8 +40,9 @@ export const agyAdapter = {
   transcript: "agy-json",
   // Objeto único no fim.
   streams: false,
-  build: ({ model, effort, access }) => {
-    const args = ["--output-format", "json"];
+  build: ({ projectRoot, model, effort, access }) => {
+    // Onde o projeto está. Sem isto, o terminal dela roda no scratch dela.
+    const args = ["--output-format", "json", "--add-dir", projectRoot];
     if (model) args.push("--model", model);
     if (effort) args.push("--effort", effort);
 

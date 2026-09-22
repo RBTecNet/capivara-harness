@@ -3403,3 +3403,53 @@ Então o preflight avisa e segue. A mensagem diz o que vem pela frente — *"o
 executor instala na primeira sessão"* —, e só depois o remédio para o caso em que
 a CLI recusar o comando. Quando isso acontece, a causa não é a dependência: é a
 permissão, e ela se conserta no adaptador (§41.3).
+
+
+## §42 — Toda CLI é conferida executando, nunca lendo a flag
+
+Depois do `--force` do cursor, a pergunta certa era: as outras conseguem? A
+resposta só vale medida, e medi as três com o argv que o harness realmente monta
+— um diretório temporário, um `touch` e um `npm install` de verdade.
+
+| CLI | executa comando? | onde executa | instala dependência? |
+|---|---|---|---|
+| cursor | **não**, sem `--force` | projeto | depois do `--force`, sim |
+| opencode | sim | projeto (`--dir`) | sim |
+| agy | sim | **`~/.gemini/antigravity-cli/scratch`** | sim, no lugar errado |
+
+### 42.1 O `agy` não trabalha onde foi lançado
+
+Esta é a que ninguém acha lendo documentação. A CLI da Antigravity ignora o
+diretório em que o processo nasce: um `pwd` pedido a ela responde
+`/home/<usuário>/.gemini/antigravity-cli/scratch`. O adaptador nunca lhe dizia
+onde era o projeto — o parâmetro `projectRoot` chegava ao `build()` e não era
+usado.
+
+O defeito não aparece como erro. O comando roda, o `npm install` instala, a suíte
+executa — tudo na pasta errada. Do lado do harness, o sintoma é o gate 1 dizendo
+que a sessão não escreveu nada, com a causa a um diretório de distância.
+
+`--add-dir <raiz>` resolve, e foi medido nas duas pontas: sem ele, `pwd` responde
+o scratch; com ele, responde a raiz do projeto, e o arquivo aparece onde deveria.
+
+### 42.2 A prova é o efeito colateral
+
+A primeira medição que fiz do `agy` foi ruim: pedi para ele rodar `echo
+CAPIVARA-7731` e devolver a saída. Ele devolveu — e isso não prova nada, porque
+a saída de um `echo` é adivinhável sem executá-lo. Um modelo que não consegue
+rodar comando nenhum acerta essa resposta.
+
+O que prova é o **efeito colateral observável de fora**: um arquivo que aparece,
+um `node_modules` que passa a existir, um `pwd` cujo valor é um diretório
+temporário de nome aleatório. Vale para medir CLI e vale para medir modelo — a
+diferença entre "ele disse que fez" e "está feito" é a única que interessa.
+
+### 42.3 A regra
+
+CLI nova entra no harness com uma medição, não com uma leitura do `--help`. As
+três perguntas são sempre as mesmas, e as três já apanharam alguém:
+
+1. o executor consegue rodar um comando? (cursor: não, faltava `--force`)
+2. ele roda no diretório do projeto? (agy: não, faltava `--add-dir`)
+3. ele consegue instalar uma dependência declarada? (as três: sim, uma vez
+   resolvidos os dois primeiros)

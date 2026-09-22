@@ -13,7 +13,15 @@
 /** Os cinco gates, na ordem em que a fase passa por eles. */
 export type LoopGate = "G0" | "G1" | "G2" | "G3" | "G4";
 
-export type LoopGateState = "corrente" | "verde" | "vermelho";
+/**
+ * `neutro` é o gate avaliado que não tem nada a dizer.
+ *
+ * O gate 1 pergunta "a sessão escreveu alguma coisa?", e a resposta "não" é
+ * informação, não reprovação: numa fase já implementada, não escrever é o
+ * comportamento certo. Pintá-la de vermelho ao lado dos gates que de fato
+ * reprovam faz a tela dizer que algo falhou numa fase que fechou inteira.
+ */
+export type LoopGateState = "corrente" | "verde" | "vermelho" | "neutro";
 
 export type LoopPhaseState = "em andamento" | "concluído" | "falhou" | "pulado";
 

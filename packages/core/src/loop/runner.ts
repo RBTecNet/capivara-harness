@@ -13,7 +13,7 @@ import { appendEvent } from "../state/events.js";
 import { runPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
 import { fixPrompt, flowPrompt, implementPrompt, verifyPrompt } from "../prompts/index.js";
-import type { BuildProgressListener, LoopGate } from "./progress.js";
+import type { BuildProgressListener, LoopGate, LoopGateState } from "./progress.js";
 import { commitPhase, hasPendingChanges, treeSignature } from "./git.js";
 import { declaredComplete, gate0, gate1, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
 import { detectRateLimit, planWait } from "./ratelimit.js";
@@ -139,7 +139,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   let previousWroteNothing = false;
 
   const relatar = options.onProgress ?? (() => undefined);
-  const gate = (nome: LoopGate, estado: "corrente" | "verde" | "vermelho", cycle: number): void =>
+  const gate = (nome: LoopGate, estado: LoopGateState, cycle: number): void =>
     relatar({ kind: "gate", id: session.id, gate: nome, state: estado, cycle });
 
   const event = async (status: "started" | "complete" | "retry" | "blocked" | "skipped", detail: string, attempt: number): Promise<void> => {
@@ -301,10 +301,17 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
 
     const g0 = gate0(result, options.engine);
     gate("G0", g0.green ? "verde" : "vermelho", cycle);
-    // O gate 1 é sinal, não veredito: não escrever nada não reprova a fase, mas
-    // muda tudo na leitura de quem olha a tela. Vem depois do gate 0 porque a
-    // ordem na tela é a ordem dos gates, não a da avaliação.
-    gate("G1", wrote ? "verde" : "vermelho", cycle);
+    /*
+     * O gate 1 é sinal, não veredito: não escrever nada não reprova a fase, mas
+     * muda tudo na leitura de quem olha a tela. Vem depois do gate 0 porque a
+     * ordem na tela é a ordem dos gates, não a da avaliação.
+     *
+     * E por isso ele nunca fica vermelho. Numa fase já implementada — o caso
+     * comum de todo build retomado e de todo `change` — não escrever é o certo,
+     * e a bolinha vermelha ao lado de quatro verdes fazia a tela relatar uma
+     * falha que não houve. Cinza: rodou, e não há o que reportar.
+     */
+    gate("G1", wrote ? "verde" : "neutro", cycle);
     if (!g0.green) {
       lastGate = g0.gate;
       lastCause = g0.cause;

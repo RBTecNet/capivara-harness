@@ -16,7 +16,7 @@ import { paint, padVisible, truncateVisible, visibleWidth, type Style } from "./
 export const GATES = ["G0", "G1", "G2", "G3", "G4"] as const;
 export type GateId = (typeof GATES)[number];
 
-export type GateState = "aguardando" | "corrente" | "verde" | "vermelho";
+export type GateState = "aguardando" | "corrente" | "verde" | "vermelho" | "neutro";
 
 export type PhaseState = "aguardando" | "em andamento" | "concluído" | "falhou" | "pulado";
 
@@ -36,6 +36,13 @@ const GATE_MARK: Record<GateState, string> = {
   corrente: "●",
   verde: "●",
   vermelho: "●",
+  /*
+   * Avaliado, e sem nada a dizer. A bolinha é cheia — o gate rodou —, mas
+   * apagada: numa fase já implementada, "a sessão não escreveu nada" é o
+   * comportamento certo, e pintá-lo de vermelho faria a tela relatar uma
+   * falha que não houve.
+   */
+  neutro: "●",
 };
 
 const GATE_TONE: Record<GateState, "green" | "yellow" | "gray" | "red"> = {
@@ -43,6 +50,7 @@ const GATE_TONE: Record<GateState, "green" | "yellow" | "gray" | "red"> = {
   corrente: "yellow",
   verde: "green",
   vermelho: "red",
+  neutro: "gray",
 };
 
 const PHASE_MARK: Record<PhaseState, string> = {

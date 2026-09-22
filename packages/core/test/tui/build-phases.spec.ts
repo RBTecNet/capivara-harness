@@ -146,3 +146,34 @@ describe("a linha que não cabe continua colorida", () => {
     expect(linha).toContain("…");
   });
 });
+
+/**
+ * O gate 1 que não reprova.
+ *
+ * "A sessão não escreveu nada" é informação, não reprovação: numa fase já
+ * implementada — o caso comum de todo build retomado e de todo `change` — não
+ * escrever é o comportamento certo. A bolinha vermelha ao lado de quatro verdes
+ * fazia a tela relatar uma falha que não houve, e foi assim que ela foi lida
+ * num run real do MCP_teste.
+ */
+describe("o estado neutro de um gate", () => {
+  const linha = (gates: Partial<BuildPhaseRow["gates"]>): BuildPhaseRow => ({
+    id: "P01",
+    title: "Dados",
+    state: "concluído",
+    gates: { ...emptyGates(), ...gates },
+    detail: "completa",
+  });
+
+  it("é cheio como o avaliado, e apagado como o que não tem o que dizer", () => {
+    const neutro = renderPhaseRows([linha({ G0: "verde", G1: "neutro", G2: "verde" })], 1, 120, semCor)[0] ?? "";
+
+    // A bolinha existe — o gate rodou — e não é a de "ainda não avaliado".
+    expect(neutro).toContain("G1●");
+    expect(neutro).not.toContain("G1○");
+  });
+
+  it("uma fase inteira neutra continua sendo uma fase concluída", () => {
+    expect(phaseSummary([linha({ G0: "verde", G1: "neutro", G2: "verde", G3: "verde" })])).toContain("1/1 fases");
+  });
+});

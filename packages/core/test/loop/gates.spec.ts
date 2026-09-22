@@ -299,3 +299,19 @@ describe("commit por fase", () => {
     expect(result.message).toContain("já estava implementada");
   });
 });
+
+/**
+ * O gate 1 nunca reprova.
+ *
+ * Ele pergunta se a sessão escreveu alguma coisa, e "não" é informação: numa
+ * fase já implementada — o caso comum de todo build retomado e de todo `change`
+ * — não escrever é o comportamento certo. Num run real do MCP_teste as três
+ * primeiras fases fecharam inteiras com o G1 vermelho na tela, e quem olhou
+ * leu isso como falha.
+ */
+describe("o que o gate 1 responde", () => {
+  it("árvore igual antes e depois significa que a sessão não escreveu", () => {
+    expect(gate1("abc", "abc")).toBe(false);
+    expect(gate1("abc", "def")).toBe(true);
+  });
+});

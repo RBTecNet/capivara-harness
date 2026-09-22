@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessRehearsal, enumerateCriteria, gapPrompt, interviewPrompt, languageBlock, parseRehearsal, phaseFromSlicePrompt, rehearsalPrompt, skeletonPrompt } from "../../src/prompts/index.js";
+import { assessRehearsal, enumerateCriteria, gapPrompt, interviewPrompt, languageBlock, parseRehearsal, phaseFromSlicePrompt, rehearsalPrompt, skeletonPrompt, surveyDomainPrompt, surveyMapPrompt } from "../../src/prompts/index.js";
 import type { WriterContext } from "../../src/prompts/index.js";
 import { parsePhases, tasksBlock } from "../../src/contract/index.js";
 import { STRUCTURAL_LABELS } from "../../src/contract/index.js";
@@ -423,5 +423,63 @@ describe("o levantamento das áreas faltantes", () => {
   it("manda recomendar o que serve ao produto, e recomendar de fora o que não serve", () => {
     const prompt = interviewPrompt("skeleton", context, "Projeto vazio.", [], 1);
     expect(prompt).toContain("not selling them work");
+  });
+});
+
+/**
+ * Os prompts do levantamento.
+ *
+ * O que eles protegem: o papel não toca na aplicação, a evidência é obrigatória,
+ * e as três camadas existem porque a reescrita pode trocar de stack.
+ */
+describe("o levantamento de uma aplicação existente", () => {
+  const mapa = surveyMapPrompt({ language: "português do Brasil", inventory: "app/Locacao.php  2 KB", maxDomains: 8 });
+  const dominio = surveyDomainPrompt({
+    language: "português do Brasil",
+    application: "Locadora",
+    domain: { id: "D-01", name: "Locação", purpose: "Aluga filmes.", files: ["app/Locacao.php"] },
+    others: [{ id: "D-02", name: "Clientes" }],
+  });
+
+  it("o papel não escreve, não roda e não instala nada na aplicação levantada", () => {
+    for (const prompt of [mapa, dominio]) {
+      expect(prompt).toContain("strictly read-only");
+      expect(prompt).toContain("never run its build, its tests or the application");
+      expect(prompt).toContain("may be in production");
+    }
+  });
+
+  it("afirmação sem evidência não é achado", () => {
+    expect(dominio).toContain("Every statement you make cites where you read it");
+    expect(dominio).toContain("goes in `questions`, never into a rule");
+  });
+
+  /*
+   * A camada é o que permite reescrever em outra stack: sem ela, quem reescreve
+   * herda o vocabulário da stack antiga e reproduz a solução em vez do problema.
+   */
+  it("as três camadas estão no prompt do domínio, com a regra de desempate", () => {
+    expect(dominio).toContain("`dominio` — survives any rewrite");
+    expect(dominio).toContain("`implementacao` — dies with the stack");
+    expect(dominio).toContain("`contrato` — must survive EVEN IF the stack changes");
+    expect(dominio).toContain("would someone OUTSIDE this codebase notice");
+  });
+
+  it("manda declarar a divergência entre o que o código faz e o que parecia querer", () => {
+    expect(dominio).toContain("You never resolve a divergence");
+  });
+
+  it("o mapa não lê regra nenhuma: isso é da sessão de cada domínio", () => {
+    expect(mapa).toContain("the map, not the contents");
+    expect(mapa).toContain("stay EMPTY here");
+  });
+
+  it("domínio é parte do negócio, não pasta nem camada da stack", () => {
+    expect(mapa).toContain("`controllers`, `models`, `utils` are not");
+  });
+
+  it("a sessão de um domínio sabe onde parar", () => {
+    expect(dominio).toContain("D-02 Clientes");
+    expect(dominio).toContain("not yours to report");
   });
 });

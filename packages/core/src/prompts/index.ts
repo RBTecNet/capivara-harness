@@ -15,3 +15,5 @@ export { amendPhasePrompt } from "./amend.js";
 export type { AmendContext } from "./amend.js";
 export { phaseFromSlicePrompt, skeletonPrompt } from "./skeleton.js";
 export type { PhaseFromSliceContext, SkeletonContext } from "./skeleton.js";
+export { SURVEY_HEADER, surveyDomainPrompt, surveyMapPrompt } from "./survey.js";
+export type { SurveyDomainContext, SurveyMapContext } from "./survey.js";

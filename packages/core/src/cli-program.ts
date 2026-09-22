@@ -41,6 +41,8 @@ import { runWizard } from "./commands/wizard.js";
 import { InputEndedError, createLineIO } from "./commands/line-io.js";
 import { listarEfforts, listarModelos } from "./provider/index.js";
 import { runIdFor } from "./state/index.js";
+import { sha12 } from "./contract/index.js";
+import { MAX_DOMINIOS, SurveyBlockedError, runSurvey } from "./survey/index.js";
 import { VERSION } from "./version.js";
 
 interface CommonFlags extends CliRoleFlags {
@@ -395,6 +397,77 @@ export function createProgram(): Command {
       stdout.write(options.json ? `${JSON.stringify(diagnoses, null, 2)}\n` : `${renderDiagnosis(diagnoses)}\n`);
       process.exitCode = diagnoses.some((diagnosis) => diagnosis.health === "ausente") ? 1 : 0;
     });
+
+  roleFlags(
+    program
+      .command("survey")
+      .description("Levanta uma aplicação que já existe: domínios, regras, dados e contratos")
+      .option("--saida <caminho>", "onde gravar o levantamento", "./levantamento")
+      .option("--max-dominios <n>", "teto de domínios do mapa", String(MAX_DOMINIOS)),
+    ["writer"],
+  ).action(async (flags: CommonFlags & { saida?: string; maxDominios?: string }) => {
+    const projectRoot = flags.project ?? ".";
+    const roles = rolesFromFlags(flags);
+    const semProvider = unresolvedRoles(roles, ["writer"]);
+    if (semProvider.length > 0) {
+      stdout.write(`${renderUnresolved("survey", semProvider)}\n`);
+      process.exitCode = 2;
+      return;
+    }
+
+    const language = flags.language ?? "português do Brasil";
+    if (flags.splash !== false) {
+      stdout.write(renderSplash({ version: VERSION, roles: describeRoles(roles).filter((role) => role.role === "writer"), style: style() }));
+    }
+
+    /*
+     * A ponte grava logs e prompts sob a raiz que recebe. Aqui ela recebe a
+     * SAÍDA, nunca a aplicação levantada: um levantamento que suja o repositório
+     * de outra pessoa é um levantamento que ninguém deixa rodar duas vezes.
+     */
+    const saida = resolve(flags.saida ?? "./levantamento");
+    const runId = runIdFor("survey", sha12(resolve(projectRoot)));
+    const bridge = createAgentBridge({ projectRoot: saida, runId, language, roles, limits: DEFAULT_LIMITS });
+
+    try {
+      const resultado = await runSurvey({
+        projectRoot,
+        outputRoot: saida,
+        language,
+        announce: (linha) => void stdout.write(`${linha}\n`),
+        ...(flags.maxDominios !== undefined ? { maxDomains: Number(flags.maxDominios) } : {}),
+        call: async (request) =>
+          await bridge({ role: "writer", stage: `survey:${request.subject}`, prompt: request.prompt }),
+      });
+
+      const { survey, coverage } = resultado;
+      stdout.write(
+        [
+          "",
+          `Levantamento de ${survey.application}:`,
+          `  ${survey.domains.length} domínio(s), ${survey.rules.length} regra(s), ${survey.flows.length} fluxo(s), ${survey.entities.length} entidade(s)`,
+          `  ${survey.rules.filter((rule) => rule.layer === "contrato").length} contrato(s) externo(s) — o que precisa sobreviver a uma troca de stack`,
+          `  ${survey.rules.filter((rule) => rule.divergence !== "").length} divergência(s) entre o que o código faz e o que parecia querer fazer`,
+          `  ${survey.questions.length} pergunta(s) que o código não responde`,
+          `  cobertura: ${coverage.claimed} de ${coverage.total} arquivo(s) de código reivindicados por algum domínio`,
+          "",
+          ...resultado.written.map((caminho) => `  ${caminho}`),
+          "",
+          "Para reescrever, aponte o levantamento como pedido e diga o que muda:",
+          `  capivara init --file ${join(saida, "levantamento.md")}`,
+          "",
+        ].join("\n"),
+      );
+      process.exitCode = 0;
+    } catch (error) {
+      if (error instanceof SurveyBlockedError) {
+        stdout.write(`\n${error.message}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      throw error;
+    }
+  });
 
   roleFlags(
     program

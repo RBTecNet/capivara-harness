@@ -14,7 +14,8 @@ import { runPaths } from "./paths.js";
 
 export const RUN_CONTRACT = "capivara-run/v1" as const;
 
-export type RunCommand = "init" | "build";
+/** `survey` levanta uma aplicação existente; não constrói nem documenta produto novo. */
+export type RunCommand = "init" | "build" | "survey";
 
 export type RunStage =
   | "preflight"

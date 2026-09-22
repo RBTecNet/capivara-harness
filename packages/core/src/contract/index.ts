@@ -49,3 +49,21 @@ export type {
   SkeletonStory,
   SkeletonWorkflow,
 } from "./skeleton.js";
+export { CAMADAS, SURVEY_CONTRACT, parseSurvey } from "./survey.js";
+export type {
+  Camada,
+  Evidencia,
+  Survey,
+  SurveyDeadCode,
+  SurveyDefect,
+  SurveyDomain,
+  SurveyEntity,
+  SurveyFlow,
+  SurveyIntegration,
+  SurveyQuestion,
+  SurveyParseOptions,
+  SurveyResult,
+  SurveyRule,
+} from "./survey.js";
+export { renderSurvey, surveyCoverage } from "./survey-render.js";
+export type { SurveyCoverage } from "./survey-render.js";

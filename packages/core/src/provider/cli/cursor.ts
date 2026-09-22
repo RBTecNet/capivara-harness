@@ -37,7 +37,38 @@ export const cursorAdapter = {
     if (model) args.push("--model", model);
     // Sem `--effort`: esta CLI expõe a intensidade dentro do nome do modelo
     // (`gpt-5.3-codex-high`, `-xhigh`), e inventar a flag quebraria a chamada.
-    if (access === "read-only") args.push("--mode", "ask");
+    if (access === "read-only") {
+      args.push("--mode", "ask");
+      return { args };
+    }
+
+    /*
+     * `--force` é o que dá comando ao executor.
+     *
+     * `--trust` confia no diretório e `-p` promete "access to all tools,
+     * including write and shell" — e as duas coisas juntas ainda param na
+     * aprovação de cada comando, que o próprio `--help` descreve: "-f, --force:
+     * Force allow commands unless explicitly denied (default: false)". Numa
+     * chamada `-p` não há ninguém para aprovar, e aprovação pendente vira
+     * negação.
+     *
+     * Foi o que travou a fase 1 do `MCP_teste2`: o executor precisava de um
+     * `npm install` para a suíte rodar, relatou "o shell foi bloqueado", tentou
+     * de novo "pedindo permissão", e no terceiro ciclo reescreveu o comando de
+     * teste do PROJETO para não precisar da dependência. Escrever ele podia;
+     * executar, não — e a diferença entre as duas é uma flag.
+     */
+    args.push("--force");
+
+    /*
+     * Acesso de sistema desliga o sandbox, como nas outras CLIs.
+     *
+     * `--force` libera o comando; o sandbox ainda pode recusar o que ele faz —
+     * instalar pacote de sistema, alcançar a rede. Quem ligou o acesso de
+     * sistema pediu justamente isso, e é o equivalente ao
+     * `--sandbox danger-full-access` do codex.
+     */
+    if (access === "system") args.push("--sandbox", "disabled");
     return { args };
   },
 } as const satisfies CliAdapter;

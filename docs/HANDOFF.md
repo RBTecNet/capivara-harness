@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 1132 testes em 53 arquivos, `npm run check` verde |
+| suíte | 1134 testes em 53 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
@@ -176,6 +176,10 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
   foi mandado consertar o que não estava quebrado — envelope aberto pela ponte,
   aplicação que não subiu, pacote não instalado. A causa precisa dizer de quem é
   o defeito. Ver §34.8.
+- **Permissão concedida pelo harness só vale se a CLI a honrar.** O executor
+  pelo `cursor` recebia `-p --trust` e parava na aprovação de cada comando —
+  aprovação que, em `-p`, não tem quem responda. Faltava `--force`. Toda CLI
+  nova precisa ser conferida com um comando de verdade, não pelo `--help`.
 - **Dependência do projeto não instalada vira mudança de produto.** No
   `MCP_teste2`, sem `node_modules`, o `npm test` morria por falta de `tsx`; o
   executor não pôde instalar — "o shell foi bloqueado" — e reescreveu o comando
@@ -218,7 +222,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 1132 testes
+npm run check     # build + typecheck + 1134 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

@@ -3357,7 +3357,36 @@ pré-requisitos, pela mesma razão.
 Manifesto que não declara dependência nenhuma também não exige instalação, e
 manifesto ilegível não vira bloqueio: quem julga a forma dele é outro gate.
 
-### 41.3 Erro, não aviso — a menos que o executor possa resolver
+### 41.3 A causa raiz era uma flag
+
+O `MCP_teste2` rodou pela CLI do Cursor, e o adaptador dela mandava para o
+executor exatamente os mesmos argumentos do papel de escrita: `-p
+--output-format json --trust`. O `--help` da própria CLI explica o que faltava:
+
+```
+-p, --print   Has access to all tools, including write and shell.
+-f, --force   Force allow commands unless explicitly denied (default: false)
+```
+
+`-p` dá acesso às ferramentas e `--trust` confia no diretório; cada comando
+ainda para numa aprovação. Numa chamada `-p` não há quem aprove, e aprovação
+pendente vira negação. Reproduzido em vinte segundos, com a mesma frase que o
+executor usou no run:
+
+| chamada | o que aconteceu |
+|---|---|
+| `-p --trust --force` | criou o arquivo, respondeu OK |
+| `-p --trust` | *"O comando foi bloqueado; vou tentar de novo. O comando `touch provou.txt` foi bloqueado pelo ambiente."* |
+
+Escrever ele podia; executar, não — e a diferença entre as duas é uma flag. Foi
+por isso que o executor, cercado, foi reescrever o comando de teste do projeto:
+era a única coisa que ele ainda tinha permissão de fazer.
+
+Acesso de sistema, além disso, desliga o sandbox (`--sandbox disabled`), como o
+`danger-full-access` do codex — `--force` libera o comando, e o sandbox ainda
+podia recusar o que ele faz.
+
+### 41.4 Erro, não aviso — a menos que o executor possa resolver
 
 Sem `--system-install`, faltar dependência é **erro de preflight**: nenhuma
 chamada de modelo acontece, e a mensagem diz o que rodar. Com `--system-install`

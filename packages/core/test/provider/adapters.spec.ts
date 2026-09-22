@@ -217,6 +217,38 @@ describe("cursor", () => {
     expect(args).toContain("-p");
   });
 
+  /**
+   * O que travou a fase 1 do MCP_teste2.
+   *
+   * `--trust` confia no diretório e `-p` promete "access to all tools, including
+   * write and shell" — e ainda assim cada comando parava numa aprovação que,
+   * numa chamada `-p`, não tem quem responda. O executor precisava de um `npm
+   * install`, relatou "o shell foi bloqueado", e no terceiro ciclo reescreveu o
+   * comando de teste do projeto para não precisar da dependência.
+   */
+  it("o executor recebe --force: sem ele, escrever pode e executar não", () => {
+    const args = buildInvocation("builder", config({ provider: "cursor", model: "" }), context).args;
+    expect(args).toContain("--force");
+  });
+
+  it("acesso de sistema desliga o sandbox, como nas outras CLIs", () => {
+    const comSistema = { ...context, systemInstall: true };
+    const args = buildInvocation("builder", config({ provider: "cursor", model: "" }), comSistema).args;
+    expect(args).toContain("--sandbox");
+    expect(args[args.indexOf("--sandbox") + 1]).toBe("disabled");
+
+    // Sem o acesso de sistema, o sandbox fica como o operador configurou.
+    expect(buildInvocation("builder", config({ provider: "cursor", model: "" }), context).args).not.toContain("--sandbox");
+  });
+
+  it("papel de leitura não ganha --force: ele não executa nada", () => {
+    for (const papel of ROLE_NAMES.filter((nome) => ROLES[nome].permission === "read-only")) {
+      const args = buildInvocation(papel, config({ provider: "cursor", model: "" }), context).args;
+      expect(args, papel).not.toContain("--force");
+      expect(args, papel).toContain("--mode");
+    }
+  });
+
   it("a intensidade vive no nome do modelo, e nenhum --effort é inventado", () => {
     const args = buildInvocation("builder", config({ provider: "cursor", model: "composer-2.5", effort: "high" }), context).args.join(" ");
     expect(args).toContain("--model composer-2.5");

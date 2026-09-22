@@ -133,9 +133,10 @@ describe("wizard", () => {
   });
 
   it("número inválido é recusado sem derrubar o wizard", async () => {
+    // Quatro comandos desde que o `survey` entrou na lista.
     const { deps, tela } = roteiro(["", "9", "1", "1", "x", ".", "1", "", "1", "n", "n"]);
     const resultado = await runWizard(deps);
-    expect(tela()).toContain("entre 1 e 3");
+    expect(tela()).toContain("entre 1 e 4");
     expect(resultado?.argv[0]).toBe("init");
   });
 
@@ -377,5 +378,89 @@ describe("conectar à base documental", () => {
     const { deps, tela } = roteiro(["", "1", "1", "uma agenda", ".", "1", "", "1", "n", "n", "n", "n", "s"]);
     await runWizard(deps);
     expect(tela()).not.toContain("base documental");
+  });
+});
+
+/**
+ * O `survey` no wizard.
+ *
+ * Ele não faz parte da esteira init → plan → build: é a porta de entrada de quem
+ * tem código e não tem documento. Por isso fica por último na lista e nunca é
+ * sugerido — sugerir por ausência de `.capivara/` confundiria com o greenfield,
+ * que também não tem.
+ */
+describe("wizard do levantamento", () => {
+  it("monta o comando com a pasta da aplicação e o destino do levantamento", async () => {
+    const { deps } = roteiro([
+      "/sistema-antigo", // a aplicação a levantar
+      "4",               // survey
+      "",                // saída: aceita ./levantamento
+      "1",               // provider codex
+      "",                // modelo padrão
+      "1",               // sem effort
+      "n",               // sem ajuste por papel
+      "n",               // não executar agora
+    ]);
+
+    const resultado = await runWizard(deps);
+    expect(resultado?.argv).toEqual(["survey", "--provider", "codex", "--project", "/sistema-antigo"]);
+  });
+
+  it("a saída diferente do padrão entra no comando", async () => {
+    const { deps } = roteiro(["/sistema-antigo", "4", "./docs/legado", "1", "", "1", "n", "n"]);
+    const resultado = await runWizard(deps);
+    expect(resultado?.argv).toContain("--saida");
+    expect(resultado?.argv).toContain("./docs/legado");
+  });
+
+  /*
+   * O survey chama um papel só. Perguntar pelo auditor e pelo verificador aqui
+   * seria pedir três decisões para um comando que usa uma.
+   */
+  it("pergunta só pelo papel que o levantamento usa", async () => {
+    const { deps, tela } = roteiro(["/sistema-antigo", "4", "", "1", "", "1", "s", "1", "", "1", "n"]);
+    await runWizard(deps);
+    expect(tela()).toContain("escritor documental");
+    expect(tela()).not.toContain("auditor documental");
+  });
+
+  /*
+   * No `survey` a URL vai sozinha: o projeto ainda não existe lá, e o nome dele
+   * sai da aplicação levantada. É o contrário do `init`, onde as duas andam
+   * juntas porque há o que ler.
+   */
+  it("a base entra pela URL, sem escolher projeto", async () => {
+    const { deps } = roteiro(["/sistema-antigo", "4", "", "1", "http://127.0.0.1:7777/mcp", "1", "", "1", "n", "n"]);
+    const resultado = await runWizard({ ...deps, listMcpProjects: async () => [] });
+
+    expect(resultado?.argv).toContain("--mcp");
+    expect(resultado?.argv).toContain("http://127.0.0.1:7777/mcp");
+    expect(resultado?.argv).not.toContain("--mcp-project");
+  });
+
+  it("base que não responde não impede o levantamento: segue local", async () => {
+    const { deps, tela } = roteiro([
+      "/sistema-antigo",
+      "4",
+      "",
+      "1",                            // guardar na base: sim
+      "http://127.0.0.1:9999/mcp",
+      "2",                            // seguir sem base
+      "1",
+      "",
+      "1",
+      "n",
+      "n",
+    ]);
+
+    const resultado = await runWizard({
+      ...deps,
+      listMcpProjects: async () => {
+        throw new Error("connection refused");
+      },
+    });
+
+    expect(tela()).toContain("connection refused");
+    expect(resultado?.argv).not.toContain("--mcp");
   });
 });

@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 1076 testes em 53 arquivos, `npm run check` verde |
+| suíte | 1081 testes em 53 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
@@ -192,7 +192,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 1076 testes
+npm run check     # build + typecheck + 1081 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

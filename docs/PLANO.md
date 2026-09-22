@@ -2990,6 +2990,22 @@ reprovar por isso faria o levantamento inventar domínio para calar a conferênc
 — exatamente o oposto do que se quer. É a mesma escolha do inventário de testes
 nomeados do §35: o mecânico informa, o humano decide.
 
+### 36.6.1 No wizard
+
+O `survey` aparece na lista de comandos, por último e **nunca sugerido**. A
+sugestão do wizard lê o que existe na pasta — sem esqueleto é `init`, com
+esqueleto é `plan`, com plano é `build` —, e o levantamento não cabe nessa
+escada: ele é a porta de entrada de quem tem código e não tem documento.
+Sugeri-lo por ausência de `.capivara/` o confundiria com o greenfield, que também
+não tem, e wizard que sugere errado custa mais caro que wizard que não sugere.
+
+Ele pergunta três coisas e nenhuma a mais: a pasta da aplicação (que é a pergunta
+que o wizard já fazia), onde gravar o levantamento, e se vai também para uma base
+— aí só o endereço, porque o projeto ainda não existe lá e o nome dele sai da
+aplicação levantada. Base que não responde não impede nada: o wizard diz o erro e
+oferece seguir sem ela. E os papéis perguntados são só os que o comando chama:
+um, o escritor.
+
 ### 36.7 Onde o levantamento fica
 
 **Os arquivos locais são o piso, sempre.** `--saida` recebe o documento, o JSON e

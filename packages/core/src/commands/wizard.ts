@@ -371,9 +371,18 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
     { label: "init", hint: "entrevista e desenha as fases do projeto até PLAN READY" },
     { label: "plan", hint: "detalha as fases que o init produziu, até RALPH READY" },
     { label: "build", hint: "constrói a aplicação a partir do plano pronto" },
+    { label: "survey", hint: "lê uma aplicação que já existe e escreve o que ela faz, para reescrever depois" },
   ];
+  /*
+   * O `survey` fica por último e nunca é sugerido.
+   *
+   * Ele não faz parte da esteira: é a porta de entrada de quem tem código e não
+   * tem documento. Sugerir por ausência de `.capivara/` confundiria com o
+   * greenfield, que também não tem — e o wizard sugerindo errado custa mais caro
+   * que o wizard não sugerindo.
+   */
   const sugerido = temPlano ? 2 : temEsqueleto ? 1 : 0;
-  const command = (["init", "plan", "build"] as const)[await choose(io, "O que você quer fazer?", comandos, sugerido)] ?? "init";
+  const command = (["init", "plan", "build", "survey"] as const)[await choose(io, "O que você quer fazer?", comandos, sugerido)] ?? "init";
 
   const answers: WizardAnswers = { command, global: {}, roles: {} };
   if (projectRoot !== deps.cwd) answers.projectRoot = projectRoot;
@@ -402,6 +411,47 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
   if (command === "plan" && !(await (deps.requestRecorded ?? (async () => true))(projectRoot).catch(() => true))) {
     io.write("\nEste projeto não registra qual pedido o init usou — aponte o mesmo arquivo de novo.\n");
     answers.requestFile = await arquivoDoPedido();
+  }
+
+  if (command === "survey") {
+    /*
+     * A pasta já perguntada é a aplicação levantada — e ela nunca é escrita. O
+     * levantamento sai para outro lugar, e o padrão é ao lado de onde o wizard
+     * está rodando, nunca dentro do código de outra pessoa.
+     */
+    const saida = await text(io, `\nOnde gravar o levantamento [./levantamento]: `, "./levantamento");
+    if (saida !== "./levantamento") answers.saida = saida;
+
+    /*
+     * A base é opcional por desenho: os arquivos locais são o piso, e o que ela
+     * acrescenta é o caminho até o `init` da reescrita. Aqui não se escolhe
+     * projeto — ele ainda não existe, e o nome dele sai da aplicação levantada.
+     */
+    if (deps.listMcpProjects) {
+      const guardar: Choice[] = [
+        { label: "sim", hint: "o levantamento vira um projeto lá, com o pedido de reescrita já rascunhado" },
+        { label: "não", hint: "fica só nos arquivos locais" },
+      ];
+      if ((await choose(io, "Guardar também numa base documental?", guardar, 0)) === 0) {
+        const sugerida = deps.defaultMcpUrl ?? "http://localhost:7777/mcp";
+        for (;;) {
+          const url = await text(io, `\nEndereço da base [${sugerida}]: `, sugerida);
+          io.write("conectando…\n");
+          try {
+            await deps.listMcpProjects(url);
+            answers.mcpUrl = url;
+            break;
+          } catch (erro) {
+            io.write(`${erro instanceof Error ? erro.message : String(erro)}\n`);
+            const saida: Choice[] = [
+              { label: "tentar outro endereço" },
+              { label: "seguir sem base", hint: "o levantamento fica nos arquivos locais" },
+            ];
+            if ((await choose(io, "E agora?", saida, 0)) === 1) break;
+          }
+        }
+      }
+    }
   }
 
   if (command === "init") {
@@ -455,7 +505,8 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
 
   // Papéis: só os que ESTE comando chama. Perguntar pelo executor num init é
   // pedir uma decisão que não vai ser usada.
-  const usados: RoleName[] = command === "build" ? ["builder", "verifier"] : ["writer", "auditor", "verifier"];
+  const usados: RoleName[] =
+    command === "build" ? ["builder", "verifier"] : command === "survey" ? ["writer"] : ["writer", "auditor", "verifier"];
   if (await yesNo(io, "\nAjustar algum papel separadamente?", false)) {
     const fila: RoleName[] = [...usados];
     /*

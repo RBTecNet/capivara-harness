@@ -10,7 +10,7 @@ import { ROLE_NAMES, ROLES } from "../provider/roles.js";
 import type { RoleName } from "../provider/roles.js";
 
 export interface WizardAnswers {
-  command: "init" | "plan" | "build";
+  command: "survey" | "init" | "plan" | "build";
   request?: string;
   global: { provider?: string; model?: string; effort?: string };
   roles: Partial<Record<RoleName, { provider?: string; model?: string; effort?: string }>>;
@@ -23,6 +23,8 @@ export interface WizardAnswers {
   testCommand?: string;
   maxCycles?: number;
   noSplash?: boolean;
+  /** Onde o `survey` grava o levantamento. */
+  saida?: string;
 }
 
 function quote(value: string): string {
@@ -55,8 +57,14 @@ export function toArgv(answers: WizardAnswers): string[] {
   }
 
   if (answers.requestFile) argv.push("--file", answers.requestFile);
-  // As duas andam juntas: a URL diz onde é a base, o projeto diz o que ler dela.
+  /*
+   * No `init` as duas andam juntas — a URL diz onde é a base, o projeto diz o
+   * que ler dela. No `survey` não há o que ler: o projeto ainda não existe, e o
+   * nome dele sai da aplicação levantada. Ali a URL sozinha basta.
+   */
   if (answers.mcpUrl && answers.mcpProject) argv.push("--mcp", answers.mcpUrl, "--mcp-project", answers.mcpProject);
+  else if (answers.mcpUrl && answers.command === "survey") argv.push("--mcp", answers.mcpUrl);
+  if (answers.saida) argv.push("--saida", answers.saida);
   if (answers.projectRoot) argv.push("--project", answers.projectRoot);
   if (answers.testCommand) argv.push("--test-cmd", answers.testCommand);
   if (answers.maxCycles !== undefined) argv.push("--max-cycles", String(answers.maxCycles));
@@ -85,6 +93,8 @@ export function renderCommand(answers: WizardAnswers): string {
 
   if (answers.requestFile) parts.push("--file", quote(answers.requestFile));
   if (answers.mcpUrl && answers.mcpProject) parts.push("--mcp", quote(answers.mcpUrl), "--mcp-project", quote(answers.mcpProject));
+  else if (answers.mcpUrl && answers.command === "survey") parts.push("--mcp", quote(answers.mcpUrl));
+  if (answers.saida) parts.push("--saida", quote(answers.saida));
   if (answers.projectRoot) parts.push("--project", quote(answers.projectRoot));
   if (answers.testCommand) parts.push("--test-cmd", quote(answers.testCommand));
   if (answers.maxCycles !== undefined) parts.push("--max-cycles", String(answers.maxCycles));

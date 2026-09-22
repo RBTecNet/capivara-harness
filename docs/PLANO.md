@@ -2895,3 +2895,115 @@ disposição `DEFERRED` existe para impedir.
 O não-objetivo é posto no esqueleto **pelo harness, depois do parser** — não pelo
 escritor. Ele escreveria "não haverá edição de clientes" como prosa dele, e prosa
 do escritor é palpite; isto é decisão do desenvolvedor, gravada como ele a tomou.
+
+## §36 — `survey`: levantar o que já existe
+
+O `init` parte de um pedido e chega a uma aplicação. O `survey` vai na direção
+inversa: a aplicação existe, ninguém escreveu o que ela faz, e o que se quer é
+esse texto — para que uma reescrita, **depois e à parte**, possa partir dele.
+
+A separação entre levantar e reescrever não é etapa burocrática. Levantar é
+leitura e produz um documento que alguém confere; reescrever é decisão sobre o
+que fica, o que sai e em que stack. Juntar as duas coisas numa passagem faria o
+modelo decidir escopo enquanto ainda está descobrindo o que existe.
+
+### 36.1 A forma: um mapa, depois um domínio por vez
+
+Nenhum modelo lê uma aplicação legada inteira numa sessão — a mesma razão que
+separou o esqueleto das fases no `init`. Então:
+
+1. **inventário** — mecânico, o mesmo `inspectProject` que o `init` já usava;
+2. **mapa** — uma chamada olha a árvore, os manifestos e os pontos de entrada e
+   decide quais são os DOMÍNIOS, atribuindo cada arquivo a um deles;
+3. **um domínio por vez** — uma sessão lê os arquivos do domínio e devolve
+   regras, fluxos, entidades e integrações. Ela recebe o nome dos outros
+   domínios para saber onde PARAR: sem isso cada sessão lê a aplicação inteira de
+   novo e as regras voltam repetidas, cada vez com outra redação, e ninguém
+   consegue dizer se são a mesma.
+
+Domínio é parte do negócio, não pasta: `clientes` e `faturamento` são domínios,
+`controllers` e `models` não são — são como esta stack organiza arquivos, e uma
+reescrita em outra não os terá.
+
+### 36.2 Evidência obrigatória
+
+Toda regra, entidade, fluxo e integração cita **arquivo e símbolo**, e o parser
+recusa a que não cita. Afirmação sem evidência é palpite de um modelo sobre
+código que ele leu por cima — e é pior que uma lacuna, porque lacuna se vê e
+palpite não. O que a leitura não sustenta vira pergunta em aberto, nunca regra.
+
+É a mesma tese do §24 aplicada a outro lugar: o harness não pede confiança, pede
+verificabilidade. Quem ler o levantamento pode abrir o arquivo citado e conferir.
+
+### 36.3 As três camadas, porque a reescrita pode trocar de stack
+
+O pedido de reescrita pode dizer "a mesma coisa, em Go". Um levantamento que
+misture o que a aplicação FAZ com o que ESTA stack faz é inútil para isso: quem
+reescreve herda o vocabulário antigo e reproduz a solução em vez do problema.
+Então todo achado nasce com uma camada:
+
+| camada | sobrevive à troca de stack? | exemplo |
+|---|---|---|
+| `dominio` | sim, sempre | "o total não conta os dias em que a loja não abre" |
+| `implementacao` | não | "o accessor `getTotalAttribute` chama `diffInWeekdays`" |
+| `contrato` | **precisa** | "exporta `/var/exports/locacoes-AAAAMMDD.csv`, com ponto e vírgula" |
+
+A terceira é a que derruba reescrita. Banco que será migrado, URL que alguém já
+usa, payload que um parceiro consome, formato de arquivo exportado, job que outro
+sistema espera de madrugada: ninguém anota, e só aparece quando o parceiro liga
+reclamando. A regra de desempate está no prompt: *alguém FORA deste código
+perceberia se a gente mudasse? Se sim, `contrato`.*
+
+A regra de domínio é escrita **sem vocabulário de framework**. Se não dá para
+enunciá-la sem citar uma biblioteca, ela ainda não foi entendida — e aí vira
+pergunta, não regra.
+
+### 36.4 O que faz e o que parecia querer fazer
+
+Cada regra registra o comportamento de hoje e, quando o código deixa ver, a
+intenção: um comentário, um nome de variável, o rótulo de uma tela, uma validação
+que o formulário promete e o servidor não faz. Onde os dois divergem, a
+divergência é **declarada e nunca resolvida**.
+
+Resolver é de quem reescreve. Pode ser defeito a corrigir, pode ser a regra real
+do negócio que o comentário descreve errado — e só quem conhece o negócio sabe
+qual. A lista de divergências é, na prática, a lista de decisões que a reescrita
+tem que tomar de propósito em vez de por omissão.
+
+### 36.5 Somente leitura, em todos os sentidos
+
+O papel não escreve na aplicação levantada, não roda a suíte dela, não sobe o
+produto e não instala nada. Código legado costuma ser de outra pessoa e às vezes
+está em produção: o levantamento não pode ser a primeira coisa a derrubá-lo. Os
+arquivos que o comando produz vão para `--saida`, fora da aplicação, e é essa
+pasta — não o legado — que a ponte usa para gravar prompts e logs.
+
+Isso custa uma evidência que existiria se ele rodasse a aplicação, e é um limite
+conhecido, não um esquecimento: fica anotado aqui para o dia em que alguém quiser
+pagar por ele.
+
+### 36.6 A cobertura informa, não reprova
+
+Quantos arquivos de código nenhum domínio reivindicou, e quais domínios não
+trouxeram regra nenhuma. Não é gate: uma aplicação legada TEM código órfão, e
+reprovar por isso faria o levantamento inventar domínio para calar a conferência
+— exatamente o oposto do que se quer. É a mesma escolha do inventário de testes
+nomeados do §35: o mecânico informa, o humano decide.
+
+### 36.7 Da leitura para a reescrita
+
+Com `--mcp`, o levantamento vira um projeto do `doc-center`: o documento fica lá e
+o pedido nasce **rascunhado**, com as duas linhas que faltam —
+
+```
+- Stack de destino: (a mesma de hoje | outra — diga qual)
+- Fica de fora: (nada | os domínios ou funcionalidades que não serão reescritos)
+```
+
+O desenvolvedor edita, e o `init` seguinte lê os dois de lá. O que ele tirar cai
+na seção `## Fora do escopo` que o §35 criou — a simetria já estava pronta: o
+levantamento diz o que existe, o pedido diz o que dessa vez não vai existir, e o
+esqueleto registra a ausência como decisão em vez de esquecimento.
+
+Falhar ao subir não derruba nada: os arquivos já estão em disco, e a base é
+conveniência, não dependência (§34).

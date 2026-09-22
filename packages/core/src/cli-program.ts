@@ -18,7 +18,7 @@ import {
   runInit,
   runPlan,
 } from "./init/index.js";
-import { createMcpClient, fetchProjectMaterial, listLibraryProjects, registrarMemorias, type MemoriaParaRegistrar } from "./mcp/index.js";
+import { createMcpClient, enviarLevantamento, fetchProjectMaterial, listLibraryProjects, registrarMemorias, type MemoriaParaRegistrar } from "./mcp/index.js";
 import type { ProjectMaterial } from "./mcp/index.js";
 import type { InitOptions } from "./init/index.js";
 import { commitSpecification, runBuild } from "./loop/index.js";
@@ -403,9 +403,11 @@ export function createProgram(): Command {
       .command("survey")
       .description("Levanta uma aplicação que já existe: domínios, regras, dados e contratos")
       .option("--saida <caminho>", "onde gravar o levantamento", "./levantamento")
-      .option("--max-dominios <n>", "teto de domínios do mapa", String(MAX_DOMINIOS)),
+      .option("--max-dominios <n>", "teto de domínios do mapa", String(MAX_DOMINIOS))
+      .option("--mcp <url>", "base documental por MCP, onde o levantamento vira projeto")
+      .option("--mcp-project <nome>", "o slug do projeto a criar ou atualizar na base"),
     ["writer"],
-  ).action(async (flags: CommonFlags & { saida?: string; maxDominios?: string }) => {
+  ).action(async (flags: CommonFlags & { saida?: string; maxDominios?: string; mcp?: string; mcpProject?: string }) => {
     const projectRoot = flags.project ?? ".";
     const roles = rolesFromFlags(flags);
     const semProvider = unresolvedRoles(roles, ["writer"]);
@@ -441,6 +443,29 @@ export function createProgram(): Command {
       });
 
       const { survey, coverage } = resultado;
+
+      /*
+       * A ida para a base, quando o operador apontou uma.
+       *
+       * Depois de escrever os arquivos, nunca antes: o levantamento custou uma
+       * sessão por domínio, e um servidor fora do ar não pode fazê-lo sumir.
+       */
+      if (flags.mcp && flags.mcpProject) {
+        const client = createMcpClient({ url: flags.mcp }, { timeoutSeconds: 30 });
+        try {
+          await client.initialize();
+          const envio = await enviarLevantamento(client, {
+            projeto: flags.mcpProject,
+            nome: survey.application,
+            conteudo: resultado.markdown,
+            procedencia: runId,
+          });
+          stdout.write(envio.ok ? `base: ${envio.mensagem}\n` : `aviso: não consegui enviar à base (${envio.mensagem})\n`);
+        } catch (erro) {
+          stdout.write(`aviso: não consegui falar com a base (${erro instanceof Error ? erro.message : String(erro)})\n`);
+        }
+      }
+
       stdout.write(
         [
           "",
@@ -453,8 +478,13 @@ export function createProgram(): Command {
           "",
           ...resultado.written.map((caminho) => `  ${caminho}`),
           "",
-          "Para reescrever, aponte o levantamento como pedido e diga o que muda:",
-          `  capivara init --file ${join(saida, "levantamento.md")}`,
+          "Para reescrever, diga o que muda — a stack de destino e o que fica de fora — e rode o init:",
+          ...(flags.mcp && flags.mcpProject
+            ? [
+                `  o pedido já está rascunhado em ${flags.mcp.replace(/\/mcp$/, "")}/projeto/${flags.mcpProject}`,
+                `  capivara init --mcp ${flags.mcp} --mcp-project ${flags.mcpProject}`,
+              ]
+            : [`  capivara init --file ${join(saida, "levantamento.md")}`]),
           "",
         ].join("\n"),
       );

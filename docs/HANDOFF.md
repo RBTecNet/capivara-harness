@@ -16,7 +16,8 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 1034 testes em 53 arquivos, `npm run check` verde |
+| suíte | 1064 testes em 53 arquivos, `npm run check` verde |
+| estágios | `survey` (opcional) → `init` → `plan` → `build` |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
 O ciclo de três estágios foi desenvolvido no branch `ciclo-unico` e fundido em
@@ -42,6 +43,14 @@ caro terminou as sete fases quando o harness parou de esconder informação dele
 ## O que veio depois do checkpoint
 
 Quatro frentes, todas nascidas de um run real e todas commitadas.
+
+**§36 — `survey`, o levantamento de uma aplicação que já existe.** Um comando
+novo, antes do `init`: lê uma aplicação legada e escreve o que ela faz, com a
+evidência de onde cada regra foi lida, para que a reescrita parta dali. Um mapa
+de domínios, uma sessão por domínio, e cada achado marcado como `dominio`,
+`implementacao` ou `contrato` — porque a reescrita pode trocar de stack e só a
+primeira e a terceira sobrevivem a isso. Somente leitura: não escreve, não roda e
+não instala nada na aplicação levantada.
 
 **§35 — a entrevista cobre o que o pedido não menciona.** O `MCP_teste` fechou
 cinco fases verdes e não tinha como corrigir o telefone de um cliente: o pedido
@@ -183,7 +192,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 1034 testes
+npm run check     # build + typecheck + 1064 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

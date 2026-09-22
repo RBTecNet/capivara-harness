@@ -28,6 +28,8 @@ export const opencodeAdapter = {
   binaryEnv: "CAPIVARA_OPENCODE_BIN",
   defaultBinary: "opencode",
   transcript: "opencode-jsonl",
+  // JSONL evento a evento, como o codex.
+  streams: true,
   build: ({ projectRoot, model, effort, access, env }) => {
     const args = ["run", "--dir", projectRoot, "--format", "json"];
     if (model) args.push("--model", model);

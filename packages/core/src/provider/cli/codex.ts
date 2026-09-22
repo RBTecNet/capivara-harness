@@ -8,6 +8,8 @@ export const codexAdapter = {
   binaryEnv: "CAPIVARA_CODEX_BIN",
   defaultBinary: "codex",
   transcript: "codex-jsonl",
+  // Eventos em JSONL, um por acontecimento: dá para ver o trabalho acontecendo.
+  streams: true,
   build: ({ projectRoot, model, effort, access }) => {
     /*
      * `--json` não é preferência de formato: é o que torna a chamada observável.

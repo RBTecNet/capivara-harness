@@ -21,7 +21,7 @@ export type {
   ReasoningDecision,
   ReasoningPolicy,
 } from "./registry.js";
-export { buildInvocation } from "./adapters.js";
+export { buildInvocation, limitsFor } from "./adapters.js";
 export type { Invocation, InvocationContext } from "./adapters.js";
 export { killTree, runProvider } from "./supervisor.js";
 export type { RunOptions, RunResult, SupervisorLimits, TimeoutKind } from "./supervisor.js";

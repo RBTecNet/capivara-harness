@@ -9,6 +9,7 @@
 import {
   buildInvocation,
   createLineSplitter,
+  limitsFor,
   readCredentials,
   readTranscript,
   runProvider,
@@ -88,7 +89,8 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
     const result = await runProvider({
       invocation,
       prompt: request.prompt,
-      limits: options.limits,
+      // Quem não transmite não pode ser medido pelo relógio da primeira saída.
+      limits: limitsFor(invocation, options.limits),
       ...(observador ? { onOutput: (chunk: string, stream: "out" | "err") => stream === "out" && observador(chunk) } : {}),
     });
 

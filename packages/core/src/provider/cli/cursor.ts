@@ -30,6 +30,8 @@ export const cursorAdapter = {
   binaryEnv: "CAPIVARA_CURSOR_BIN",
   defaultBinary: "cursor-agent",
   transcript: "cursor-json",
+  // Objeto único no fim.
+  streams: false,
   build: ({ model, access }) => {
     const args = ["-p", "--output-format", "json", "--trust"];
     if (model) args.push("--model", model);

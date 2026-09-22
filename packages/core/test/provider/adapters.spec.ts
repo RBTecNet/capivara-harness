@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ROLE_NAMES, ROLES, buildInvocation } from "../../src/provider/index.js";
+import { ROLE_NAMES, ROLES, buildInvocation, limitsFor } from "../../src/provider/index.js";
 import type { RoleConfig } from "../../src/provider/index.js";
 
 const context = {
@@ -221,5 +221,36 @@ describe("cursor", () => {
     const args = buildInvocation("builder", config({ provider: "cursor", model: "composer-2.5", effort: "high" }), context).args.join(" ");
     expect(args).toContain("--model composer-2.5");
     expect(args).not.toContain("--effort");
+  });
+});
+
+/**
+ * O defeito que matou a fase 3 do MCP_teste.
+ *
+ * O limite de primeira saída existe para pegar o provider que nunca começou.
+ * Com `claude -p --output-format json` não sai byte nenhum antes do fim, então
+ * ele virava um relógio sobre a resposta inteira: aos 20 minutos a chamada
+ * morreu sem uma linha de saída, e o ciclo de correção foi cobrado do código —
+ * que estava sendo escrito.
+ */
+describe("o relógio de primeira saída só vale para quem transmite", () => {
+  const limites = { firstOutputSeconds: 1200, idleSeconds: 600, wallSeconds: 3600, maxOutputBytes: 1_000 };
+
+  it("CLI de objeto único fica sob o limite de parede, não o de primeira saída", () => {
+    for (const provider of ["claude", "cursor", "agy"]) {
+      const invocation = buildInvocation("builder", config({ provider, model: "" }), context);
+      expect(invocation.streams, provider).toBe(false);
+      expect(limitsFor(invocation, limites).firstOutputSeconds, provider).toBe(0);
+      // E o que mede a chamada inteira continua de pé.
+      expect(limitsFor(invocation, limites).wallSeconds, provider).toBe(3600);
+    }
+  });
+
+  it("CLI que transmite mantém o limite: ficar calada nela é sinal de que não começou", () => {
+    for (const provider of ["codex", "opencode"]) {
+      const invocation = buildInvocation("builder", config({ provider, model: "" }), context);
+      expect(invocation.streams, provider).toBe(true);
+      expect(limitsFor(invocation, limites).firstOutputSeconds, provider).toBe(1200);
+    }
   });
 });

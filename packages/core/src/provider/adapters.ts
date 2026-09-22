@@ -14,6 +14,7 @@ import { ROLES, type RoleConfig, type RoleName } from "./roles.js";
 import { decideReasoning, directProvider, isCliProvider, isDirectProvider } from "./registry.js";
 import { cliAdapter } from "./cli/index.js";
 import type { TranscriptKind } from "./transcript.js";
+import type { SupervisorLimits } from "./supervisor.js";
 
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:\/-]*$/;
 
@@ -38,6 +39,26 @@ export interface Invocation {
   stdinIsPrompt: true;
   /** Como ler o que a CLI escreveu. Ausente significa texto puro. */
   transcript?: TranscriptKind;
+  /** A CLI escreve enquanto trabalha? Decide se o limite de primeira saída vale. */
+  streams: boolean;
+}
+
+/**
+ * Os limites desta chamada.
+ *
+ * O limite de PRIMEIRA SAÍDA existe para pegar o provider que nunca começou.
+ * Numa CLI que só imprime o resultado no fim, "não escreveu nada ainda" é o
+ * estado normal de quem está trabalhando, e o limite deixa de medir o que
+ * promete: vira um relógio sobre a resposta inteira, e mata a chamada longa que
+ * ia dar certo. Foi o que aconteceu na fase 3 do MCP_teste — o executor foi
+ * encerrado aos 20 minutos, sem uma linha de saída, e o ciclo de correção foi
+ * cobrado como se o código estivesse errado.
+ *
+ * Quem não transmite fica sob o limite de PAREDE, que mede o que realmente
+ * importa nesse caso: a chamada inteira passou do tempo aceitável.
+ */
+export function limitsFor(invocation: Invocation, limits: SupervisorLimits): SupervisorLimits {
+  return invocation.streams ? limits : { ...limits, firstOutputSeconds: 0 };
 }
 
 function safe(value: string, field: string): string {
@@ -95,6 +116,9 @@ export function buildInvocation(role: RoleName, config: RoleConfig, context: Inv
         ...(context.secret ? { [provider.envKey]: context.secret } : {}),
       },
       stdinIsPrompt: true,
+      // A ponte de API direta devolve a resposta de uma vez, como as CLIs de
+      // objeto único.
+      streams: false,
     };
   }
 
@@ -124,6 +148,7 @@ export function buildInvocation(role: RoleName, config: RoleConfig, context: Inv
     args: built.args,
     env: built.env ?? env,
     stdinIsPrompt: true,
+    streams: adapter.streams,
     ...(adapter.transcript ? { transcript: adapter.transcript } : {}),
   };
 }

@@ -14,6 +14,8 @@ export const customAdapter = {
   label: "Adapter custom",
   binaryEnv: "CAPIVARA_CUSTOM_BIN",
   defaultBinary: "",
+  // Executável de terceiro: não temos como prometer que ele transmite.
+  streams: false,
   build: ({ command }) => {
     if (command.trim() === "") throw new Error("o provider custom exige o caminho do executável do adapter");
     return { command: command.trim(), args: [] };

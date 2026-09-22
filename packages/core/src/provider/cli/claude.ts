@@ -25,6 +25,8 @@ export const claudeAdapter = {
   binaryEnv: "CAPIVARA_CLAUDE_BIN",
   defaultBinary: "claude",
   transcript: "claude-json",
+  // `-p --output-format json`: um objeto só, no fim. Nada antes disso.
+  streams: false,
   build: ({ model, effort, access, env }) => {
     const args = [
       "-p",

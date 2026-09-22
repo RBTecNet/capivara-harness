@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { runProvider } from "../../src/provider/index.js";
+import { limitsFor, runProvider } from "../../src/provider/index.js";
 import type { Invocation } from "../../src/provider/index.js";
 
 function node(script: string): Invocation {
-  return { command: process.execPath, args: ["-e", script], env: { ...process.env }, stdinIsPrompt: true };
+  return { command: process.execPath, args: ["-e", script], env: { ...process.env }, stdinIsPrompt: true, streams: true };
 }
 
 const limits = { firstOutputSeconds: 0, idleSeconds: 0, wallSeconds: 0, maxOutputBytes: 1_000_000, graceMilliseconds: 200 };
@@ -152,7 +152,7 @@ describe("contenção", () => {
 
   it("comando inexistente devolve 127 em vez de explodir", async () => {
     const result = await runProvider({
-      invocation: { command: "/nao/existe/binario", args: [], env: {}, stdinIsPrompt: true },
+      invocation: { command: "/nao/existe/binario", args: [], env: {}, stdinIsPrompt: true, streams: true },
       prompt: "",
       limits,
     });
@@ -168,11 +168,47 @@ describe("segredos", () => {
         args: ["-e", "process.stdout.write('vazou: '+process.env.OPENAI_API_KEY)"],
         env: { ...process.env, OPENAI_API_KEY: "sk-supersecretovalor" },
         stdinIsPrompt: true,
+        streams: true,
       },
       prompt: "",
       limits,
     });
     expect(result.stdout).not.toContain("sk-supersecretovalor");
     expect(result.stdout).toContain("[REDACTED:OPENAI_API_KEY]");
+  });
+});
+
+/**
+ * O que acontece com quem trabalha calado.
+ *
+ * A fase 3 do MCP_teste morreu assim: `claude -p --output-format json` não
+ * escreve nada até terminar, e o limite de primeira saída — pensado para pegar
+ * o provider que nunca começou — encerrou a chamada aos 20 minutos com o modelo
+ * no meio do trabalho. O log da fase ficou com um byte.
+ */
+describe("o limite de primeira saída e quem não transmite", () => {
+  const calado = "setTimeout(() => process.stdout.write('pronto'), 400)";
+
+  it("com o limite ligado, o processo calado é encerrado mesmo estando vivo", async () => {
+    const result = await runProvider({
+      invocation: { ...node(calado), streams: true },
+      prompt: "",
+      limits: { ...limits, firstOutputSeconds: 0.2 },
+    });
+
+    expect(result.timedOut).toBe("first-output");
+    expect(result.stdout).toBe("");
+  });
+
+  it("para quem não transmite, o limite sai do caminho e a resposta chega", async () => {
+    const invocation = { ...node(calado), streams: false };
+    const result = await runProvider({
+      invocation,
+      prompt: "",
+      limits: limitsFor(invocation, { ...limits, firstOutputSeconds: 0.2 }),
+    });
+
+    expect(result.timedOut).toBeNull();
+    expect(result.stdout).toBe("pronto");
   });
 });

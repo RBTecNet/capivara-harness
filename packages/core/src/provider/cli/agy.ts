@@ -31,6 +31,8 @@ export const agyAdapter = {
   binaryEnv: "CAPIVARA_AGY_BIN",
   defaultBinary: "agy",
   transcript: "agy-json",
+  // Objeto único no fim.
+  streams: false,
   build: ({ model, effort, access }) => {
     const args = ["--output-format", "json"];
     if (model) args.push("--model", model);

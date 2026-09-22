@@ -40,10 +40,26 @@ describe("G0 — o engine terminou de verdade", () => {
     if (!result.green) expect(result.cause).toContain("erro de compilação");
   });
 
-  it("reprova timeout nomeando o tipo", () => {
-    const result = gate0({ ...engineOk, timedOut: "idle" }, "codex");
-    if (result.green) throw new Error("deveria reprovar");
-    expect(result.cause).toContain("idle");
+  /*
+   * "estourou o timeout (first-output)" não diz nada a quem lê o log de
+   * madrugada, e soa como defeito do código. Nenhum dos três limites é: são do
+   * harness, e a causa precisa dizer isso — senão o ciclo seguinte manda o
+   * executor consertar o que não está quebrado (§34.8).
+   */
+  it("reprova timeout dizendo o que aconteceu e de quem é o defeito", () => {
+    const parado = gate0({ ...engineOk, timedOut: "idle" }, "codex");
+    if (parado.green) throw new Error("deveria reprovar");
+    expect(parado.cause).toContain("parou de produzir");
+    expect(parado.cause).toContain("não defeito do produto");
+
+    const calado = gate0({ ...engineOk, timedOut: "first-output" }, "claude");
+    if (calado.green) throw new Error("deveria reprovar");
+    expect(calado.cause).toContain("não escrever nada");
+    expect(calado.cause).toContain("limite do harness");
+
+    const longa = gate0({ ...engineOk, timedOut: "wall" }, "claude");
+    if (longa.green) throw new Error("deveria reprovar");
+    expect(longa.cause).toContain("passou do tempo máximo");
   });
 
   /*

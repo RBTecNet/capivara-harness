@@ -49,5 +49,16 @@ export interface CliAdapter {
   defaultBinary: string;
   /** Como ler a saída. Ausente significa texto puro, sem envelope. */
   transcript?: TranscriptKind;
+  /**
+   * A CLI escreve enquanto trabalha, ou só no fim?
+   *
+   * Isto não é detalhe de formatação: é o que decide se o limite de PRIMEIRA
+   * SAÍDA mede o que promete. Numa CLI que transmite, ficar calado é sinal de
+   * que ela nunca começou. Numa que só imprime o resultado — `claude -p
+   * --output-format json` e as outras de objeto único —, ficar calado é o
+   * comportamento normal, e o limite vira um relógio sobre a resposta inteira:
+   * a fase 3 do MCP_teste foi morta aos 20 minutos com o modelo trabalhando.
+   */
+  streams: boolean;
   build: (input: CliInvocationInput) => CliInvocation;
 }

@@ -45,7 +45,7 @@ export function gate0(
   engine: string,
 ): GateResult {
   if (result.timedOut) {
-    return { green: false, gate: "gate 0 — engine", cause: `o engine estourou o timeout (${result.timedOut}). Últimas linhas:\n${tail(result.stdout || result.stderr)}` };
+    return { green: false, gate: "gate 0 — engine", cause: `${explicarTimeout(result.timedOut, engine)} Últimas linhas:\n${tail(result.stdout || result.stderr)}` };
   }
   if (result.engineError === true) {
     return { green: false, gate: "gate 0 — engine", cause: `o engine ${engine} reportou a volta como erro. Últimas linhas:\n${tail(result.stdout)}` };
@@ -57,6 +57,27 @@ export function gate0(
     return { green: false, gate: "gate 0 — engine", cause: `o engine saiu com código ${result.exitCode}. Últimas linhas:\n${tail(result.stdout || result.stderr)}` };
   }
   return green;
+}
+
+/**
+ * O que o timeout quer dizer — e de quem é o defeito.
+ *
+ * "estourou o timeout (first-output)" não diz nada a quem lê o log às três da
+ * manhã, e o pior: soa como defeito do código. Nenhum dos três é. O limite é do
+ * harness, e a frase precisa dizer isso (§34.8), senão o ciclo seguinte manda o
+ * executor consertar o que não está quebrado.
+ */
+function explicarTimeout(kind: string, engine: string): string {
+  if (kind === "first-output") {
+    return `o engine ${engine} foi encerrado por não escrever nada dentro do limite de primeira saída (first-output) — é limite do harness, não defeito do produto.`;
+  }
+  if (kind === "idle") {
+    return `o engine ${engine} parou de produzir saída e foi encerrado por inatividade (idle) — é limite do harness, não defeito do produto.`;
+  }
+  if (kind === "wall") {
+    return `a chamada ao engine ${engine} passou do tempo máximo (wall) e foi encerrada — é limite do harness, não defeito do produto.`;
+  }
+  return `o engine ${engine} foi encerrado por um limite do harness (${kind}), não por defeito do produto.`;
 }
 
 /** O executor declarou conclusão? Informação, não gate: G3 é quem decide. */

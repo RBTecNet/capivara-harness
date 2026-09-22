@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { checkStamp, parsePhases } from "../contract/index.js";
 import type { ContractError, StampInput } from "../contract/index.js";
 import { artifactPaths } from "../state/paths.js";
-import { dependenciasAusentes, descreverDependencias } from "./dependencias.js";
+import { AVISO_DO_RUNNER, dependenciasAusentes, descreverDependencias, faltaORunnerDeFluxos } from "./dependencias.js";
 import { resolveTestCommand, type TestCommand } from "./testcmd.js";
 import { splitPhases, type PhaseSession } from "./split.js";
 import { checkPrerequisites, describeMissing, detectPrerequisites, unverifiedTechnologies, type PrerequisiteStatus } from "./prerequisites.js";
@@ -145,6 +145,15 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
    * por defeito que não é do código. No `MCP_teste2` foram os três ciclos da
    * fase 1, com o executor tentando instalar e esbarrando na permissão da CLI.
    */
+  /*
+   * O runner de fluxos é ferramenta do harness, mas mora no projeto: o gate 4 o
+   * resolve dali para que o roteiro rode com as dependências que o produto tem.
+   * Descobrir a falta dele no gate 4 da fase 2 custou um ciclo no `MCP_teste2`.
+   */
+  if (await faltaORunnerDeFluxos(options.projectRoot, esqueletoLido)) {
+    warnings.push({ code: "sem-runner-de-fluxos", message: AVISO_DO_RUNNER });
+  }
+
   const semDependencias = await dependenciasAusentes(options.projectRoot);
   if (semDependencias.length > 0) {
     /*

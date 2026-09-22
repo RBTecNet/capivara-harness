@@ -97,3 +97,31 @@ export function descreverDependencias(ausentes: readonly DependenciaAusente[]): 
     "aí o remédio é instalar à mão, ou usar uma CLI cujo executor possa executar.",
   ].join("\n");
 }
+
+/**
+ * O runner de fluxos, que é ferramenta do HARNESS e mora no projeto.
+ *
+ * O gate 4 abre a aplicação com `@playwright/test`, resolvido a partir do
+ * projeto — é o que faz o roteiro rodar com as dependências que o produto
+ * realmente tem. A consequência é que o projeto precisa declará-lo, mesmo quando
+ * a suíte dele usa outro runner.
+ *
+ * No `MCP_teste2` isso só apareceu no gate 4 da fase 2, e custou um ciclo: a
+ * aplicação estava pronta, o roteiro escrito, e a passagem morreu em "Cannot
+ * find package '@playwright/test'". O preflight tinha como saber disso antes da
+ * primeira chamada de modelo — o esqueleto declara os fluxos, e o manifesto diz
+ * o que está instalado.
+ */
+export async function faltaORunnerDeFluxos(projectRoot: string, esqueleto: string): Promise<boolean> {
+  // Sem fluxo declarado, o gate 4 não roda e o runner não faz falta.
+  if (!/^###\s+workflow\s+/m.test(esqueleto)) return false;
+  return !(await existe(join(projectRoot, "node_modules", "@playwright", "test")));
+}
+
+export const AVISO_DO_RUNNER = [
+  "o gate 4 abre a aplicação com `@playwright/test`, e ele não está instalado neste projeto.",
+  "",
+  "O executor instala quando o gate pedir, e isso custa um ciclo da fase em que acontecer.",
+  "Para evitá-lo, declare `@playwright/test` como dependência de desenvolvimento antes de começar",
+  "— ou rode com `--no-flows`, se não quiser que a aplicação seja aberta.",
+].join("\n");

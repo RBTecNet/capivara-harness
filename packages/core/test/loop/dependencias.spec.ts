@@ -12,7 +12,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { dependenciasAusentes, descreverDependencias } from "../../src/loop/index.js";
+import { AVISO_DO_RUNNER, dependenciasAusentes, descreverDependencias, faltaORunnerDeFluxos } from "../../src/loop/index.js";
 
 let projectRoot = "";
 
@@ -84,5 +84,40 @@ describe("as dependências declaradas estão instaladas?", () => {
 
   it("sem ausências, não há mensagem", () => {
     expect(descreverDependencias([])).toBe("");
+  });
+});
+
+/**
+ * O runner de fluxos é ferramenta do harness e mora no projeto.
+ *
+ * O gate 4 resolve `@playwright/test` a partir do projeto — é o que faz o
+ * roteiro rodar com as dependências que o produto realmente tem. No MCP_teste2
+ * a falta dele só apareceu no gate 4 da fase 2, com a aplicação pronta e o
+ * roteiro escrito, e custou um ciclo inteiro.
+ */
+describe("o runner que o gate 4 usa", () => {
+  const COM_FLUXO = "## Fluxos\n\n### workflow 1 — Cadastrar cliente\n- abre a tela\n";
+
+  it("falta quando o esqueleto declara fluxo e o pacote não está instalado", async () => {
+    expect(await faltaORunnerDeFluxos(projectRoot, COM_FLUXO)).toBe(true);
+  });
+
+  it("não falta quando está instalado", async () => {
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(join(projectRoot, "node_modules", "@playwright", "test"), { recursive: true });
+    expect(await faltaORunnerDeFluxos(projectRoot, COM_FLUXO)).toBe(false);
+  });
+
+  /*
+   * Sem fluxo declarado o gate 4 não roda, e exigir o runner seria cobrar uma
+   * dependência que o projeto não vai usar.
+   */
+  it("esqueleto sem fluxo nenhum não exige o runner", async () => {
+    expect(await faltaORunnerDeFluxos(projectRoot, "## Fases\n- Phase 1: X\n")).toBe(false);
+  });
+
+  it("o aviso diz o custo e as duas saídas", () => {
+    expect(AVISO_DO_RUNNER).toContain("custa um ciclo");
+    expect(AVISO_DO_RUNNER).toContain("--no-flows");
   });
 });

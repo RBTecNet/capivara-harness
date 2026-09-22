@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.2.0 (`capivara --ver`) |
-| suíte | 984 testes em 53 arquivos, `npm run check` verde |
+| suíte | 989 testes em 53 arquivos, `npm run check` verde |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
 O ciclo de três estágios foi desenvolvido no branch `ciclo-unico` e fundido em
@@ -41,8 +41,7 @@ caro terminou as sete fases quando o harness parou de esconder informação dele
 
 ## O que veio depois do checkpoint
 
-Quatro frentes, todas nascidas de um run real. As três primeiras estão
-commitadas; o gate 4 é o trabalho corrente.
+Quatro frentes, todas nascidas de um run real e todas commitadas.
 
 **§34 — a base documental.** O harness lê o pedido, as decisões e as skills de
 uma base MCP (`doc-center`, em repositório próprio), materializa as skills em
@@ -59,6 +58,14 @@ continua sendo percorrido na fase 7. O que dá para conferir sem abrir navegador
 um passo por `test.step`, um `expect` por passo, nada de `skip`, nada de
 interceptar o próprio backend — é conferido antes. Provado contra navegador de
 verdade: produto íntegro verde, produto sem o botão vermelho no passo 2.
+
+O gate roda só os fluxos que a fase prometeu, mais os das fases já fechadas —
+antes ele varria a pasta e cobrava de uma fase sem interface os roteiros de outra.
+E quando o roteiro falha por si mesmo — violação de modo estrito, erro de sintaxe —
+o harness o reescreve uma vez e roda de novo, em vez de mandar o executor consertar
+um produto que está certo. Foi assim que a P02 do `MCP_teste` reprovou: um
+`getByRole("alert")` sem âncora casava também com o anunciador de rota que o Next
+injeta em toda página.
 
 **§8.6 do plano — as correções do incidente `cron5`.** A função que decide de
 quais fases os findings falam saiu do `init/orchestrator.ts` para
@@ -104,7 +111,9 @@ Em ordem de importância, não de esforço:
    não há driver, e o caminho hoje é `--no-flows`. Os limites estão ditos no fim
    do §33.
 3. **Falha de infraestrutura ainda consome ciclo de correção** e é devolvida ao
-   executor como se fosse defeito do código dele. Está no fim do §32.
+   executor como se fosse defeito do código dele. Está no fim do §32. O gate 4 já
+   trata os três casos que conhece — aplicação que não sobe, pacote ausente,
+   roteiro quebrado —, mas isso é caso a caso, não regra geral.
 4. **Cosmético:** o painel do `plan` mostra "esqueleto do produto — aguardando"
    mesmo lendo um esqueleto que já existe. O pipeline foi desenhado para o `init`
    e o `plan` o herdou.
@@ -139,13 +148,17 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
   foi mandado consertar o que não estava quebrado — envelope aberto pela ponte,
   aplicação que não subiu, pacote não instalado. A causa precisa dizer de quem é
   o defeito. Ver §34.8.
+- **Um seletor que casa duas vezes reprova um produto que funciona.** O Next
+  injeta um `role="alert"` escondido em toda página; `getByRole("alert")` sozinho
+  acha dois elementos e o Playwright recusa. O roteiro se ancora na região a que
+  pertence, e o gate sabe distinguir o roteiro quebrado do produto quebrado.
 - **A correção que fica pela metade** é a forma de defeito mais comum aqui: a
   verificação existe num lugar e falta no irmão. Ver a tabela no `CAPIVARA.md`.
 
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 984 testes
+npm run check     # build + typecheck + 989 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

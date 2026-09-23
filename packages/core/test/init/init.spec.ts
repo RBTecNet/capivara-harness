@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InitBlockedError, evaluateReadiness, inspectProject, resolveRequest, runInit, summarizeInventory } from "../../src/init/index.js";
 import { readEvents, runIdFor, runPaths } from "../../src/state/index.js";
+import { ID_DO_BANCO } from "../../src/interview/index.js";
 import { assemblePhasesDocument } from "../../src/contract/index.js";
 import { SKELETON, PHASE_1, PHASE_2, approve, fakeAgent, happyPath, oneQuestion, reject, rehearsedAddresses } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
@@ -19,6 +20,14 @@ afterEach(async () => {
 });
 
 const request = { text: "um sistema de reservas para uma pousada", origin: "text" as const, path: null, sha12: "abc123abc123" };
+
+/**
+ * As decisões do roteiro do teste, sem a do banco.
+ *
+ * A pergunta de banco é do harness e é feita em toda entrevista; contá-la junto
+ * faria cada teste afirmar um número que não é sobre o que ele está testando.
+ */
+const doRoteiro = <T extends { questionId: string }>(decisions: T[]): T[] => decisions.filter((decision) => !decision.questionId.endsWith(ID_DO_BANCO));
 
 /** Um plano que passa no contrato, para exercitar o gate sem rodar o run inteiro. */
 const PLANO = assemblePhasesDocument({
@@ -40,7 +49,12 @@ async function run(steps: ScriptStep[], answers: string[] = [], extras: { fresh?
     announce: (message) => void dito.push(message),
     ...extras,
     call: agent.call,
-    ask: async () => answers[asked++] ?? "use as recomendações",
+    /*
+     * A pergunta de banco é do harness, não do roteiro do teste: ela vem antes
+     * de tudo em toda entrevista. Respondê-la aqui mantém os `answers` de cada
+     * teste alinhados com as perguntas que ELE escreveu.
+     */
+    ask: async (question) => (question.id === ID_DO_BANCO ? "1" : (answers[asked++] ?? "use as recomendações")),
   });
   return { outcome, agent, anunciado: dito.join("\n") };
 }
@@ -116,6 +130,37 @@ describe("init ponta a ponta — caminho feliz", () => {
       const content = await readFile(join(projectRoot, ".capivara/init", artefato), "utf8");
       expect(content.length).toBeGreaterThan(50);
     }
+  });
+
+  it("as regras de banco entram no esqueleto a partir da decisão, não do escritor", async () => {
+    const { anunciado } = await run(happyPath());
+    const esqueleto = await readFile(join(projectRoot, ".capivara/init/skeleton.md"), "utf8");
+
+    // A pergunta é respondida com "1" pelo helper: banco embutido.
+    expect(esqueleto).toContain(".env.example");
+    expect(esqueleto).toContain("comando único de migração");
+    expect(esqueleto).toContain("banco descartável");
+    expect(esqueleto).toContain("embutido em arquivo");
+    expect(anunciado).toContain("regra(s) de banco");
+
+    // Elas atravessam para as fases: é lá que o executor as lê.
+    const plano = await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8");
+    expect(plano.length).toBeGreaterThan(50);
+  });
+
+  it("não escreve regra de banco quando o desenvolvedor diz que não há banco", async () => {
+    const agent = fakeAgent(happyPath());
+    const outcome = await runInit({
+      projectRoot,
+      request,
+      language: "português do Brasil",
+      call: agent.call,
+      ask: async (question) => (question.id === ID_DO_BANCO ? "4" : "use as recomendações"),
+    });
+    expect(outcome.readiness.ready).toBe(true);
+
+    const esqueleto = await readFile(join(projectRoot, ".capivara/init/skeleton.md"), "utf8");
+    expect(esqueleto).not.toContain(".env.example");
   });
 
   it("o plano publicado passa no próprio contrato", async () => {
@@ -208,7 +253,7 @@ describe("entrevista dentro do init", () => {
     const steps = happyPath();
     steps.unshift({ match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 }, respond: { stdout: oneQuestion() } });
     const { outcome } = await run(steps, ["não sei"]);
-    expect(outcome.report.checkpoint.decisions).toHaveLength(0);
+    expect(doRoteiro(outcome.report.checkpoint.decisions)).toHaveLength(0);
     expect(outcome.report.checkpoint.deferrals).toHaveLength(1);
   });
 
@@ -233,7 +278,7 @@ describe("entrevista dentro do init", () => {
     const { outcome, anunciado } = await run(steps, ["três colunas fixas", "três colunas fixas, e não há remoção"]);
     expect(anunciado).toContain("Sua resposta não fechou a decisão");
     expect(anunciado).toContain("falta dizer o que acontece com os cartões");
-    expect(outcome.report.checkpoint.decisions).toHaveLength(1);
+    expect(doRoteiro(outcome.report.checkpoint.decisions)).toHaveLength(1);
   });
 
   it("o que segue em aberto é dito, nunca sumido", async () => {
@@ -247,7 +292,7 @@ describe("entrevista dentro do init", () => {
 
     const { outcome, anunciado } = await run(steps, ["sei lá, o que for melhor", ""]);
     expect(anunciado).toContain("Segue em aberto");
-    expect(outcome.report.checkpoint.decisions).toHaveLength(0);
+    expect(doRoteiro(outcome.report.checkpoint.decisions)).toHaveLength(0);
   });
 
   it("o classificador recebe a evidência e as opções, não só a pergunta", async () => {

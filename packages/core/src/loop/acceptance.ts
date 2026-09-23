@@ -15,7 +15,7 @@
  */
 
 import { execFile, spawn } from "node:child_process";
-import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { killTree } from "../provider/supervisor.js";
@@ -38,8 +38,17 @@ export type AcceptanceResult =
   | { accepted: true; steps: StepResult[]; skipped: string }
   | { accepted: false; steps: StepResult[]; failure: { id: string; cause: string } };
 
-/** Diretórios que não atravessam para a cópia limpa. */
-const EXCLUDED = new Set([".git", "node_modules", ".capivara", "dist", "build", "coverage", ".next", ".venv"]);
+/**
+ * O que não atravessa para a cópia limpa.
+ *
+ * `.env` está aqui pelo motivo mais sério da lista: ele é o arquivo onde o
+ * desenvolvedor põe a conexão do banco DELE. A aceitação instala, MIGRA e sobe o
+ * produto — copiar o `.env` junto faria o harness rodar uma migração contra o
+ * banco de produção de quem o chamou, sem nunca ter pedido licença. A cópia
+ * recebe o `.env.example` como `.env`, que é exatamente o ambiente descartável
+ * que as regras transversais do esqueleto prometem.
+ */
+const EXCLUDED = new Set([".git", "node_modules", ".capivara", "dist", "build", "coverage", ".next", ".venv", ".env"]);
 
 /** Manifestos que o projeto pode declarar. Ausente é `null`. */
 export interface Manifests {
@@ -293,6 +302,16 @@ export async function runAcceptance(options: AcceptanceOptions): Promise<Accepta
         recursive: true,
         filter: (source) => !source.split("/").some((part) => EXCLUDED.has(part)),
       });
+
+      /*
+       * O ambiente da cópia sai do exemplo versionado, nunca do `.env` real.
+       *
+       * Sem isto, um produto que lê a conexão do ambiente não sobe na cópia
+       * limpa e a aceitação reprovaria por falta de configuração — que é defeito
+       * de ambiente cobrado como defeito de produto, o §34.8 de novo.
+       */
+      const exemplo = await readFile(join(options.projectRoot, ".env.example"), "utf8").catch(() => null);
+      if (exemplo !== null) await writeFile(join(room, ".env"), exemplo, "utf8");
     }
 
     const results: StepResult[] = [];

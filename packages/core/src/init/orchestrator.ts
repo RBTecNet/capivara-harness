@@ -21,7 +21,7 @@ import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
 import { tasksBlock } from "../contract/templates.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, isRepairable, publish, repairDeterministically, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
-import { buildAnswer, buildCheckpoint, classifyLocally, isNonAnswer, naoObjetivos, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
+import { PERGUNTA_DO_BANCO, buildAnswer, buildCheckpoint, classifyLocally, decisaoDeBanco, isNonAnswer, naoObjetivos, regrasDeBanco, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Assumption, Question } from "../interview/index.js";
 import { amendPhasePrompt, assessRehearsal, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
 import type { AskedQuestion, CriterionRef, RehearsalResult, WriterContext } from "../prompts/index.js";
@@ -404,9 +404,19 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * Semeado aqui, o `planRound` vê as respostas que já existem e só pede o que
      * falta; o levantamento novo chega e é deduplicado por id contra estas.
      */
+    /*
+     * A pergunta que o harness faz por conta própria.
+     *
+     * Ela entra ANTES do levantamento do escritor porque é a decisão de que todo
+     * o resto depende: a stack, as fases de dados e o que os gates podem testar.
+     * E entra pela mesma fila, para herdar repergunta, classificação e handoff
+     * sem um segundo caminho para manter.
+     */
+    if (document === "skeleton") questions.push(PERGUNTA_DO_BANCO);
+
     const retomado = options.fresh === true ? null : await readHandoff(options.projectRoot, runId, document);
     if (retomado && retomado.answers.length > 0) {
-      questions.push(...retomado.questions);
+      questions.push(...retomado.questions.filter((question) => !questions.some((entry) => entry.id === question.id)));
       answers.push(...retomado.answers);
       announce(`  ${retomado.answers.length} resposta(s) retomada(s) de ${document}; não vou perguntar de novo`);
 
@@ -917,6 +927,24 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     }
 
     if (fora.length > 0) esqueleto = { ...esqueleto, nonGoals: fora };
+
+    /*
+     * As regras de banco entram aqui, e não no prompt.
+     *
+     * Pedir ao escritor que as reproduza seria pedir que ele as reescrevesse — e
+     * uma regra reescrita é uma regra diferente. Elas são decisão do
+     * desenvolvedor traduzida pelo harness, então o harness as põe no documento,
+     * depois do parser, com as palavras exatas que valem para todas as fases.
+     */
+    const regrasDoBanco = regrasDeBanco(decisaoDeBanco(entrevista.questions, entrevista.answers));
+    if (regrasDoBanco.length > 0) {
+      const existentes = esqueleto.rules;
+      esqueleto = {
+        ...esqueleto,
+        rules: [...existentes, ...regrasDoBanco.filter((regra) => !existentes.some((atual) => atual.subject === regra.subject))],
+      };
+      announce(`  ${regrasDoBanco.length} regra(s) de banco escritas a partir da sua decisão: .env, .env.example, migração e banco descartável nos testes`);
+    }
 
     await publish(options.projectRoot, [{ name: "skeleton.md", content: renderSkeleton(esqueleto) }]);
     await event("publish", "skeleton", "complete", `${esqueleto.phases.length} fase(s), ${esqueleto.entities.length} entidade(s)`);

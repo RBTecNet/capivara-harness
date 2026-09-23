@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -82,6 +82,41 @@ describe("ecossistemas além do Node", () => {
       pyproject: "[project]",
     });
     expect(steps[0]?.command).toContain("npm");
+  });
+});
+
+describe("o ambiente da cópia limpa", () => {
+  it("não leva o .env do desenvolvedor: a migração rodaria contra o banco dele", async () => {
+    await manifest({ migrate: "node migra.js", start: "node servidor.js" });
+    await writeFile(join(projectRoot, ".env"), "DATABASE_URL=postgres://producao/secreta\n", "utf8");
+    await writeFile(join(projectRoot, ".env.example"), "DATABASE_URL=postgres://localhost/exemplo\n", "utf8");
+
+    let ambienteDaCopia = "";
+    await runAcceptance({
+      projectRoot,
+      runner: async (_command, cwd) => {
+        ambienteDaCopia = await readFile(join(cwd, ".env"), "utf8").catch(() => "");
+        return { exitCode: 0, output: "" };
+      },
+      service: async () => ({ exitCode: 0, output: "" }),
+    });
+
+    expect(ambienteDaCopia).toContain("localhost/exemplo");
+    expect(ambienteDaCopia).not.toContain("producao/secreta");
+  });
+
+  it("sem .env.example não inventa ambiente nenhum", async () => {
+    await manifest({ build: "x", start: "y" });
+    let existe = true;
+    await runAcceptance({
+      projectRoot,
+      runner: async (_command, cwd) => {
+        existe = await readFile(join(cwd, ".env"), "utf8").then(() => true).catch(() => false);
+        return { exitCode: 0, output: "" };
+      },
+      service: async () => ({ exitCode: 0, output: "" }),
+    });
+    expect(existe).toBe(false);
   });
 });
 

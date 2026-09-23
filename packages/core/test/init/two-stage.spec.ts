@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InitBlockedError, evaluatePlanReadiness, readRequestState, runInit, runPlan } from "../../src/init/index.js";
+import { ID_DO_BANCO } from "../../src/interview/index.js";
 import { parseSkeleton } from "../../src/contract/index.js";
 import type { Skeleton } from "../../src/contract/index.js";
 import { PHASE_1, SKELETON, fakeAgent, oneQuestion, skeletonPath } from "../support/fake-agent.js";
@@ -236,8 +237,10 @@ describe("o esqueleto guardado e a entrevista do esqueleto não brigam pelo mesm
     expect(arquivos.filter((nome) => nome.endsWith(".skeleton-state.json"))).toHaveLength(1);
 
     const entrevista = arquivos.find((nome) => nome.endsWith(".skeleton.json"));
-    const guardado = JSON.parse(await readFile(join(handoffs, entrevista ?? ""), "utf8")) as { answers: unknown[] };
-    expect(guardado.answers).toHaveLength(1);
+    // Duas: a pergunta do roteiro e a de banco, que o harness faz em toda entrevista.
+    const guardado = JSON.parse(await readFile(join(handoffs, entrevista ?? ""), "utf8")) as { answers: { questionId: string }[] };
+    expect(guardado.answers).toHaveLength(2);
+    expect(guardado.answers.some((answer) => answer.questionId === ID_DO_BANCO)).toBe(true);
   });
 });
 

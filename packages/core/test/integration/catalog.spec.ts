@@ -18,6 +18,10 @@ import { runBuild, splitPhases } from "../../src/loop/index.js";
 import type { FlowRunner } from "../../src/loop/index.js";
 import type { BuildProgress } from "../../src/loop/index.js";
 import { readEvents, runIdFor, runPaths } from "../../src/state/index.js";
+import { ID_DO_BANCO } from "../../src/interview/index.js";
+
+/** As decisões do roteiro do cenário, sem a pergunta de banco que o harness faz sempre. */
+const doRoteiro = <T extends { questionId: string }>(decisions: T[]): T[] => decisions.filter((decision) => !decision.questionId.endsWith(ID_DO_BANCO));
 import { sha12 } from "../../src/contract/index.js";
 import type { Skeleton } from "../../src/contract/index.js";
 import {
@@ -55,7 +59,12 @@ async function init(steps: ScriptStep[], answers: string[] = [], options: { maxA
     request,
     language: "português do Brasil",
     call: agent.call,
-    ask: async () => answers[asked++] ?? "use as recomendações",
+    /*
+     * A pergunta de banco é do harness, não do roteiro do teste: ela vem antes
+     * de tudo em toda entrevista. Respondê-la aqui mantém os `answers` de cada
+     * teste alinhados com as perguntas que ELE escreveu.
+     */
+    ask: async (question) => (question.id === ID_DO_BANCO ? "1" : (answers[asked++] ?? "use as recomendações")),
     ...(options.maxAuditReturns !== undefined ? { maxAuditReturns: options.maxAuditReturns } : {}),
   });
   return { outcome, agent };
@@ -273,14 +282,14 @@ describe("B-02 a B-04 · entrevista", () => {
     const steps = happyPath();
     steps.unshift({ match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 }, respond: { stdout: oneQuestion() } });
     const { outcome } = await init(steps, ["1"]);
-    expect(outcome.report.checkpoint.decisions[0]?.decision).toBe("Node + Vitest");
+    expect(doRoteiro(outcome.report.checkpoint.decisions)[0]?.decision).toBe("Node + Vitest");
   });
 
   it("B-03 resposta adiada nunca confirma a recomendação", async () => {
     const steps = happyPath();
     steps.unshift({ match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 }, respond: { stdout: oneQuestion() } });
     const { outcome } = await init(steps, ["não sei"]);
-    expect(outcome.report.checkpoint.decisions).toHaveLength(0);
+    expect(doRoteiro(outcome.report.checkpoint.decisions)).toHaveLength(0);
     expect(outcome.report.checkpoint.deferrals).toHaveLength(1);
   });
 
@@ -635,7 +644,7 @@ describe("B-35 · impasse do auditor", () => {
     expect(outcome.readiness.ready).toBe(true);
     expect(asked).toBe(1);
     expect(agent.calls.filter((call) => call.subject === "project-phases.md#P1").map((call) => call.attempt)).toEqual([1, 2, 3, 4]);
-    expect(outcome.report.checkpoint.decisions).toHaveLength(0);
+    expect(doRoteiro(outcome.report.checkpoint.decisions)).toHaveLength(0);
     expect(outcome.report.remarks.some((entry) => entry.remark.observation.includes("decisão do desenvolvedor"))).toBe(false);
     expect(agent.calls.some((call) => call.prompt.includes("acima do auditor: REINICIAR"))).toBe(false);
     const { readHandoff } = await import("../../src/interview/index.js");

@@ -52,7 +52,33 @@ describe("apresentação da parada", () => {
     expect(tudo.indexOf("\u001B[?1049l")).toBeLessThan(tudo.lastIndexOf("o runner de testes não está instalado"));
   });
 
-  it("não abre telinha quando não há log a rolar", async () => {
+  it("o detalhe rola no corpo; o topo fica com as quatro respostas", async () => {
+    const j = janela(true);
+    const detalhe = Array.from({ length: 40 }, (_, indice) => `linha ${indice} do que o gate devolveu`).join("\n");
+    const promessa = apresentarParada({ ...PARADA, detalhe }, ["log do arquivo"], j);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // O que a telinha desenhou, antes de o texto puro sair.
+    const desenhado = j.escrito.join("");
+    expect(desenhado).toContain("o runner de testes não está instalado");
+    expect(desenhado).toContain("para seguir");
+    // O detalhe é longo: ele NÃO pode ter empurrado o cabeçalho para fora.
+    expect(desenhado).not.toContain("linha 39 do que o gate devolveu");
+    expect(desenhado).toContain("linha 0 do que o gate devolveu");
+
+    j.digitar("q");
+    await promessa;
+  });
+
+  it("abre a telinha só com o detalhe, mesmo sem arquivo de evidência", async () => {
+    const j = janela(true);
+    const promessa = apresentarParada({ ...PARADA, detalhe: "duas linhas\nde saída" }, [], j);
+    await new Promise((resolve) => setImmediate(resolve));
+    j.digitar("q");
+    expect(await promessa).toBe(true);
+  });
+
+  it("não abre telinha quando não há log nem detalhe a rolar", async () => {
     const j = janela(true);
     expect(await apresentarParada(PARADA, [], j)).toBe(false);
     expect(j.escrito.join("")).toContain("para seguir");

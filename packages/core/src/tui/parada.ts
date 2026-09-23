@@ -80,9 +80,87 @@ export interface Parada {
 
 const ROTULOS = ["o quê", "de quem", "custou", "evidência"] as const;
 const COLUNA = Math.max(...ROTULOS.map((rotulo) => visibleWidth(rotulo)));
+/** Onde o VALOR começa: dois de margem, o rótulo, dois de separação. */
+const RECUO = 2 + COLUNA + 2;
 
-function campo(rotulo: string, valor: string, style: Style): string {
-  return `  ${paint(padVisible(rotulo, COLUNA), "gray", style)}  ${valor}`;
+/**
+ * Quebra o valor pendurado sob ele mesmo, e não sob o rótulo.
+ *
+ * Sem isto, a segunda linha de um `o quê` longo começa na coluna do rótulo e a
+ * tabela deixa de ser tabela — foi assim que a primeira telinha de verdade
+ * saiu, com "contra o produto de pé em…" alinhado com "de quem".
+ *
+ * `largura` ausente não quebra nada: no terminal puro quem dobra é o terminal,
+ * e forçar uma largura ali cortaria o texto de quem tem a janela maior.
+ */
+function campo(rotulo: string, valor: string, style: Style, largura?: number): string[] {
+  const etiqueta = `  ${paint(padVisible(rotulo, COLUNA), "gray", style)}  `;
+  if (largura === undefined || largura - RECUO < 20) return [`${etiqueta}${valor}`];
+
+  const [primeira, ...resto] = dobrarTexto(valor, largura - RECUO);
+  return [`${etiqueta}${primeira ?? ""}`, ...resto.map((linha) => `${" ".repeat(RECUO)}${linha}`)];
+}
+
+/** Dobra em espaço; palavra maior que a largura desce inteira, sem cortar. */
+function dobrarTexto(texto: string, largura: number): string[] {
+  const linhas: string[] = [];
+  let atual = "";
+
+  for (const palavra of texto.split(/\s+/).filter((parte) => parte !== "")) {
+    if (atual === "") atual = palavra;
+    else if (visibleWidth(atual) + 1 + visibleWidth(palavra) <= largura) atual += ` ${palavra}`;
+    else {
+      linhas.push(atual);
+      atual = palavra;
+    }
+  }
+  if (atual !== "") linhas.push(atual);
+  return linhas.length > 0 ? linhas : [""];
+}
+
+export interface FormaDoRelatorio {
+  /** Onde quebrar. Ausente deixa o terminal dobrar, que é o certo no texto puro. */
+  largura?: number;
+  /**
+   * O detalhe entra?
+   *
+   * Na telinha, NÃO: o cabeçalho é fixo, e um detalhe de quarenta linhas empurra
+   * para fora exatamente o log que a telinha existe para mostrar. Lá ele desce
+   * para o corpo, que rola. No texto puro entra sempre — ali não há o que rolar,
+   * e o que não estiver escrito se perde.
+   */
+  comDetalhe?: boolean;
+}
+
+/** As linhas do relatório, sem as margens em branco. É o que a telinha fixa no topo. */
+export function linhasDaParada(parada: Parada, style: Style, forma: FormaDoRelatorio = {}): string[] {
+  const linhas: string[] = [paint(TITULO[parada.natureza], TOM[parada.natureza], style), ""];
+
+  linhas.push(...campo("o quê", parada.oQue, style, forma.largura));
+  linhas.push(...campo("de quem", parada.deQuem ?? DE_QUEM[parada.natureza], style, forma.largura));
+  linhas.push(...campo("custou", parada.custou, style, forma.largura));
+
+  const evidencias = parada.evidencia ?? [];
+  for (const [indice, caminho] of evidencias.entries()) {
+    linhas.push(...campo(indice === 0 ? "evidência" : "", caminho, style, forma.largura));
+  }
+
+  if (parada.paraSeguir.length > 0) {
+    linhas.push("", `  ${paint("para seguir", "gray", style)}`);
+    for (const [indice, passo] of parada.paraSeguir.entries()) {
+      // A continuação alinha sob o TEXTO, não sob o número.
+      const partes = forma.largura === undefined ? passo.split("\n") : passo.split("\n").flatMap((parte) => dobrarTexto(parte, Math.max(20, forma.largura! - 7)));
+      const [primeira, ...resto] = partes;
+      linhas.push(`    ${indice + 1}. ${primeira ?? ""}`);
+      for (const continuacao of resto) linhas.push(`       ${continuacao}`);
+    }
+  }
+
+  if (forma.comDetalhe !== false && parada.detalhe && parada.detalhe.trim() !== "") {
+    linhas.push("", `  ${paint("o que veio", "gray", style)}`, ...parada.detalhe.trimEnd().split("\n").map((linha) => `    ${linha}`));
+  }
+
+  return linhas;
 }
 
 /**
@@ -94,34 +172,7 @@ function campo(rotulo: string, valor: string, style: Style): string {
  * que ninguém precise abrir uma tela para entender o que já está aqui.
  */
 export function renderParada(parada: Parada, style: Style = { enabled: false }): string {
-  const linhas: string[] = ["", paint(TITULO[parada.natureza], TOM[parada.natureza], style), ""];
-
-  linhas.push(campo("o quê", parada.oQue, style));
-  linhas.push(campo("de quem", parada.deQuem ?? DE_QUEM[parada.natureza], style));
-  linhas.push(campo("custou", parada.custou, style));
-
-  const evidencias = parada.evidencia ?? [];
-  if (evidencias.length > 0) {
-    linhas.push(campo("evidência", evidencias[0]!, style));
-    for (const extra of evidencias.slice(1)) linhas.push(campo("", extra, style));
-  }
-
-  if (parada.paraSeguir.length > 0) {
-    linhas.push("", `  ${paint("para seguir", "gray", style)}`);
-    for (const [indice, passo] of parada.paraSeguir.entries()) {
-      // A indentação alinha a continuação de um passo de várias linhas sob o
-      // texto, não sob o número: passo longo é comum e quebra feio sem isso.
-      const [primeira, ...resto] = passo.split("\n");
-      linhas.push(`    ${indice + 1}. ${primeira ?? ""}`);
-      for (const continuacao of resto) linhas.push(`       ${continuacao}`);
-    }
-  }
-
-  if (parada.detalhe && parada.detalhe.trim() !== "") {
-    linhas.push("", `  ${paint("o que veio", "gray", style)}`, ...parada.detalhe.trimEnd().split("\n").map((linha) => `    ${linha}`));
-  }
-
-  return `${linhas.join("\n")}\n`;
+  return `\n${linhasDaParada(parada, style).join("\n")}\n`;
 }
 
 /**
@@ -141,11 +192,11 @@ export interface Conclusao {
 
 export function renderConclusao(conclusao: Conclusao, style: Style = { enabled: false }): string {
   const linhas: string[] = ["", paint("CONCLUÍDO", "green", style), ""];
-  linhas.push(campo("o quê", conclusao.oQue, style));
-  linhas.push(campo("custou", conclusao.custou, style));
+  linhas.push(...campo("o quê", conclusao.oQue, style));
+  linhas.push(...campo("custou", conclusao.custou, style));
 
   for (const [indice, caminho] of (conclusao.evidencia ?? []).entries()) {
-    linhas.push(campo(indice === 0 ? "evidência" : "", caminho, style));
+    linhas.push(...campo(indice === 0 ? "evidência" : "", caminho, style));
   }
 
   if (conclusao.paraSeguir && conclusao.paraSeguir.length > 0) {

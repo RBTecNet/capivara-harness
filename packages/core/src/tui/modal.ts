@@ -20,8 +20,14 @@ import { padVisible, paint, truncateVisible, visibleWidth, type Style } from "./
 
 export interface Modal {
   titulo: string;
-  /** Fica parado no topo enquanto o corpo rola. */
-  cabecalho: string[];
+  /**
+   * Fica parado no topo enquanto o corpo rola.
+   *
+   * Aceita uma função da largura interna: quem monta o cabeçalho quase sempre
+   * precisa alinhar colunas, e só aqui dentro se sabe quanto sobrou depois da
+   * moldura — inclusive depois de a janela mudar de tamanho.
+   */
+  cabecalho: string[] | ((largura: number) => string[]);
   /** O log. Rola. */
   corpo: string[];
   /** Substitui a dica padrão de teclas. */
@@ -121,6 +127,11 @@ function quebrar(linha: string, largura: number): string[] {
   return partes;
 }
 
+/** O cabeçalho já dobrado na largura de dentro da moldura. */
+export function linhasDoCabecalho(modal: Modal, largura: number): string[] {
+  return dobrar(typeof modal.cabecalho === "function" ? modal.cabecalho(largura) : modal.cabecalho, largura);
+}
+
 /**
  * O cabeçalho nunca come a tela inteira.
  *
@@ -131,7 +142,16 @@ function quebrar(linha: string, largura: number): string[] {
  * que sai logo abaixo.
  */
 export function encolher(cabecalho: readonly string[], tela: Tela): string[] {
-  const teto = Math.max(3, Math.floor((tela.rows - 7) / 2));
+  /*
+   * O teto é "o que sobra depois de garantir corpo", e não metade da tela.
+   *
+   * Meio a meio parecia justo e cortava o `para seguir` num terminal de 24
+   * linhas — a parte mais acionável do relatório, a única que diz o comando que
+   * retoma. Em qualquer terminal de tamanho normal o cabeçalho passa inteiro; só
+   * numa janela muito baixa ele cede, e mesmo aí o log continua com quatro
+   * linhas.
+   */
+  const teto = Math.max(3, tela.rows - 7 - 4);
   if (cabecalho.length <= teto) return [...cabecalho];
   return [...cabecalho.slice(0, teto - 1), `… mais ${cabecalho.length - teto + 1} linha(s) do relatório, abaixo da telinha`];
 }
@@ -239,7 +259,7 @@ export function renderModal(modal: Modal, desenho: Desenho): string[] {
   const style = desenho.style ?? { enabled: false };
   const largura = larguraDoModal(desenho.tela);
   const interno = largura - 2;
-  const cabecalho = encolher(dobrar(modal.cabecalho, interno - 2), desenho.tela);
+  const cabecalho = encolher(linhasDoCabecalho(modal, interno - 2), desenho.tela);
   const visiveis = alturaDoCorpo(desenho.tela, cabecalho.length);
   const corpo = dobrar(modal.corpo, interno - 2);
   const offset = Math.min(limiteDeRolagem(corpo.length, visiveis), Math.max(0, desenho.offset));
@@ -357,7 +377,7 @@ export async function abrirModal(
         if (tecla === "nenhuma") return;
 
         const largura = larguraDoModal(tela()) - 4;
-        const visiveis = alturaDoCorpo(tela(), dobrar(modal.cabecalho, largura).length);
+        const visiveis = alturaDoCorpo(tela(), encolher(linhasDoCabecalho(modal, largura), tela()).length);
         const total = dobrar(modal.corpo, largura).length;
         const novo = rolar(offset, tecla, total, visiveis);
         if (novo !== offset) {

@@ -3695,6 +3695,43 @@ Então `.env` não atravessa para a cópia, e o `.env.example` entra no lugar de
 como `.env`. Sem `.env.example`, nenhum ambiente é inventado. É a regra 4 do item
 anterior, executada pelo harness em vez de prometida ao modelo.
 
+### 46.3 O `.env` que ninguém criou
+
+A regra manda o projeto ler tudo do ambiente e versionar só o `.env.example`.
+Isso deixa um buraco exatamente onde o harness trabalha: o executor entrega o
+exemplo, o `.env` não existe em máquina nenhuma, e a aplicação sobe sem saber
+onde está o banco.
+
+O estrago não aparece como erro de configuração. No primeiro projeto a usar a
+regra — o `teste`, no WSL — o servidor registrou, a cada requisição:
+
+```
+[WebServer] ⨯ Error: DB_NAME deve indicar um nome de arquivo dentro da pasta
+            do projeto ou um caminho absoluto.
+```
+
+A página vinha vazia, todo passo do roteiro morria esperando um campo que nunca
+seria renderizado, e o gate 4 relatou **"a aplicação não cumpriu um fluxo
+declarado"** apontando o seletor. O executor foi consertar um formulário que
+estava certo.
+
+Duas correções, porque são dois defeitos:
+
+- **antes dos gates, o `.env` é semeado do `.env.example`** se não existir. A
+  aceitação operacional já fazia isso na cópia limpa (46.2) e faltava no irmão,
+  que é onde os gates rodam — a mesma correção pela metade que este projeto já
+  pagou duas vezes. Nunca sobrescreve um `.env` existente, que é do
+  desenvolvedor e pode apontar para o banco dele; nunca inventa valor, porque o
+  que entra é o exemplo versionado, que por regra não tem credencial;
+- **o erro da aplicação vem primeiro na causa do gate 4**. O runner prefixa a
+  saída do servidor com `[WebServer]`, e ela some no meio de quarenta linhas de
+  rastro do Playwright. Quando há erro ali, a causa começa dizendo que *a
+  aplicação* errou — porque a ordem é o conserto: o executor lê o começo da
+  mensagem e age.
+
+É a quarta forma de "de quem é o defeito?" no gate 4, e a mais traiçoeira: as
+outras três falham ruidosamente, esta falha parecendo defeito de produto.
+
 ## §47 — O `doctor` confere o ambiente dos GATES
 
 O `doctor` sempre conferiu o que o *harness* precisa: Node, CLI no PATH,

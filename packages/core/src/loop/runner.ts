@@ -19,6 +19,7 @@ import { declaredComplete, gate0, gate1, gate2, gate3, type GateName, type TestR
 import { detectRateLimit, planWait } from "./ratelimit.js";
 import { gate4, type FlowRunner } from "./flows.js";
 import { procurarTestesNomeados } from "./feature-tests.js";
+import { semearAmbiente } from "./ambiente.js";
 import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { featureTestNames } from "../contract/index.js";
 import type { SkeletonWorkflow } from "../contract/index.js";
@@ -338,6 +339,15 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       lastGate = g0.gate;
       lastCause = g0.cause;
     } else {
+      /*
+       * Antes de qualquer gate rodar o produto: o `.env` que o projeto lê pode
+       * não existir ainda, e sem ele a aplicação sobe quebrada. Aqui e não no
+       * preflight porque quem entrega o `.env.example` é o executor, e ele o
+       * entrega no meio da fase.
+       */
+      const semeado = await semearAmbiente(options.projectRoot);
+      if (semeado !== null) announce(`[${session.id}] ${semeado}`);
+
       gate("G2", "corrente", cycle);
       const g2 = await gate2(options.projectRoot, testeAgora?.command ?? null, options.testRunner, options.systemInstall === true);
       gate("G2", g2.green ? "verde" : "vermelho", cycle);

@@ -350,6 +350,34 @@ function falhouAoSubir(output: string): boolean {
 }
 
 /**
+ * O que a PRÓPRIA aplicação registrou enquanto o roteiro rodava.
+ *
+ * O runner de fluxos prefixa a saída do servidor com `[WebServer]`, e ela some
+ * no meio de quarenta linhas de rastro do Playwright. É a informação mais cara
+ * do gate 4: quando a aplicação erra a cada requisição, todo passo do roteiro
+ * falha por timeout esperando um elemento que nunca vai ser renderizado — e o
+ * relatório acusa o seletor.
+ *
+ * Foi assim que uma configuração de banco ausente virou "a aplicação não cumpriu
+ * um fluxo declarado", e o executor foi consertar um formulário que estava
+ * certo.
+ */
+export function errosDoServidor(output: string): string[] {
+  const vistos = new Set<string>();
+
+  for (const linha of output.split("\n")) {
+    if (!/^\s*\[WebServer\]/.test(linha)) continue;
+    if (!/⨯|\bError\b|\bFATAL\b|Unhandled|ECONNREFUSED/.test(linha)) continue;
+    const limpa = linha.replace(/^\s*\[WebServer\]\s*/, "").trim();
+    // Rastro de pilha não acrescenta: o que decide é a mensagem.
+    if (limpa === "" || /^at\s/.test(limpa)) continue;
+    vistos.add(limpa);
+  }
+
+  return [...vistos].slice(0, 5);
+}
+
+/**
  * O gate inteiro: garante um roteiro por fluxo da fase e roda todos os que existem.
  *
  * Roda também os das fases anteriores porque um fluxo que passou a funcionar na
@@ -537,11 +565,25 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   }
 
   if (run.exitCode !== 0) {
+    /*
+     * Quando o servidor registrou erro, ELE vem primeiro na causa.
+     *
+     * A ordem é o conserto: o executor lê o começo da mensagem e age. Deixar o
+     * erro da aplicação enterrado na cauda do rastro é o mesmo que escondê-lo.
+     */
+    const doServidor = errosDoServidor(run.output);
+    const cabecalho =
+      doServidor.length > 0
+        ? `A APLICAÇÃO registrou erro enquanto o roteiro rodava. Comece por aqui: um passo que espera um ` +
+          `elemento falha por timeout quando a página nem chega a renderizar, e aí o seletor é o sintoma, ` +
+          `não a causa.\n${doServidor.map((linha) => `  ${linha}`).join("\n")}\n\n`
+        : "";
+
     return {
       green: false,
       output: run.output,
       cause:
-        `a aplicação não cumpriu um fluxo declarado — o roteiro rodou contra o produto de pé em ` +
+        `${cabecalho}a aplicação não cumpriu um fluxo declarado — o roteiro rodou contra o produto de pé em ` +
         `http://127.0.0.1:${port} e reprovou. Isto não é teste de unidade: um passo falhou onde o ` +
         `usuário passaria.\n${tail(run.output)}`,
     };

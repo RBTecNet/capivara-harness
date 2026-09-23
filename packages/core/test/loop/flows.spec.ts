@@ -293,6 +293,35 @@ describe("o gate", () => {
   });
 
   /*
+   * O run de `teste` no WSL: a aplicação subiu, respondeu a cada requisição com
+   * erro, e todo passo do roteiro morreu esperando um campo que a página nunca
+   * renderizou. O relatório acusou o seletor, e o executor foi consertar um
+   * formulário que estava certo.
+   */
+  it("põe o erro da APLICAÇÃO antes do seletor, quando o servidor registrou algum", async () => {
+    const saida = [
+      "  ✘  1 workflow-2.spec.ts:3:1 › workflow 2 — Cadastro de filmes (1.0m)",
+      "    Error: locator.fill: Test timeout of 60000ms exceeded.",
+      "      - waiting for getByLabel(/^Título/)",
+      "[WebServer] ⨯ Error: DB_NAME deve indicar um nome de arquivo dentro da pasta do projeto.",
+      "[WebServer]     at <unknown> (.next/server/chunks/ssr/x.js:5:5423)",
+    ].join("\n");
+
+    const resultado = await gate4({
+      ...base,
+      projectRoot,
+      author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
+      runner: async () => ({ exitCode: 1, output: saida }),
+    });
+
+    if (resultado.green) throw new Error("deveria reprovar");
+    expect(resultado.cause).toContain("A APLICAÇÃO registrou erro");
+    expect(resultado.cause).toContain("DB_NAME deve indicar");
+    // A ordem É o conserto: quem lê o começo da causa age sobre a causa certa.
+    expect(resultado.cause.indexOf("DB_NAME")).toBeLessThan(resultado.cause.indexOf("não cumpriu um fluxo declarado"));
+  });
+
+  /*
    * O primeiro run real do gate, no cron5: a fase 1 recebeu "um passo falhou
    * onde o usuário passaria" quando nenhum passo tinha rodado — o produto não
    * subiu. A causa mandava o executor consertar o fluxo em vez do entrypoint.

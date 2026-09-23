@@ -142,6 +142,36 @@ export function checkFlowScript(script: string, workflow: SkeletonWorkflow): Flo
     }
   }
 
+  /*
+   * O roteiro NÃO sobe a aplicação.
+   *
+   * Quem constrói, sobe e espera o produto responder é o harness — é o que dá ao
+   * gate a autoridade de dizer que a aplicação está de pé. No `teste` o
+   * roteirista escreveu oitenta linhas antes do primeiro passo: importava
+   * `child_process`, subia um segundo servidor numa porta sua e ficava
+   * consultando com `fetch` até responder. Esse servidor morria, e o gate
+   * relatava "O servidor de teste encerrou antes de abrir a página" — uma
+   * mensagem do próprio roteiro, sobre um servidor que o harness nem sabia que
+   * existia, enquanto a aplicação de verdade estava de pé ao lado.
+   */
+  if (/from\s*['"`]node:child_process['"`]|from\s*['"`]child_process['"`]|require\s*\(\s*['"`](?:node:)?child_process['"`]/.test(script)) {
+    defects.push({
+      problem: "o roteiro sobe a própria aplicação",
+      hint:
+        "a aplicação JÁ ESTÁ DE PÉ quando o roteiro começa: o harness a constrói, sobe e espera responder. " +
+        "Remova o child_process e use `page.goto('/rota')` com caminho relativo",
+    });
+  }
+
+  if (/(?:goto|fetch|request\s*\.\s*\w+)\s*\(\s*[`'"]https?:\/\/(?:127\.0\.0\.1|localhost)/.test(script)) {
+    defects.push({
+      problem: "o roteiro escolhe onde a aplicação está",
+      hint:
+        "a URL base é do harness, e é ela que garante que o roteiro fala com o produto que acabou de ser " +
+        "construído; use caminho relativo, como `page.goto('/clientes')`",
+    });
+  }
+
   // Interceptar a própria API transforma o gate em teatro: a tela passa a ser
   // exercitada contra respostas inventadas pelo roteiro.
   if (/page\s*\.\s*route\s*\(\s*['"`][^'"`]*(\/api\/|localhost)/.test(script)) {

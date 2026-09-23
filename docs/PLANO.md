@@ -3732,6 +3732,44 @@ Duas correções, porque são dois defeitos:
 É a quarta forma de "de quem é o defeito?" no gate 4, e a mais traiçoeira: as
 outras três falham ruidosamente, esta falha parecendo defeito de produto.
 
+## §46.4 — O roteiro não sobe a aplicação
+
+Com o `.env` semeado, a aplicação passou a subir — e o gate 4 reprovou de novo,
+com isto:
+
+```
+Error: O servidor de teste encerrou antes de abrir a página de clientes.
+  57 |   while (Date.now() < limite) {
+  58 |     if (erroServidor || servidor.exitCode !== null) {
+> 59 |       throw new Error('O servidor de teste encerrou antes de abrir a página…
+```
+
+Leia de onde vem a mensagem: **do próprio roteiro**. O roteirista escreveu
+oitenta linhas antes do primeiro passo — importava `child_process`, subia um
+segundo servidor numa porta escolhida por ele, e consultava com `fetch` até
+responder. Esse servidor morria, e o gate relatava a morte de um processo que o
+harness nem sabia que existia, enquanto a aplicação de verdade estava de pé ao
+lado, servida pelo `webServer` que o loop configura.
+
+Quem constrói, sobe e espera o produto responder é o harness — é isso que dá ao
+gate a autoridade de afirmar que a aplicação está de pé naquela URL. Um roteiro
+que sobe a própria cópia não prova nada sobre o que foi construído.
+
+Duas conferências novas, mecânicas, antes de abrir navegador nenhum:
+
+- **importar `child_process` reprova o roteiro.** A dica diz o que ele precisa
+  saber: *a aplicação JÁ ESTÁ DE PÉ quando o roteiro começa*;
+- **URL absoluta para `127.0.0.1` ou `localhost` reprova o roteiro.** Onde a
+  aplicação vive é decisão do harness; fixar o endereço é como um roteiro acaba
+  provando algo sobre outro processo.
+
+E o prompt passa a dizer isso antes, em vez de deixar o modelo descobrir pela
+recusa.
+
+A conferência vale também para o roteiro GUARDADO: um script de run anterior que
+não passe nas regras de hoje é reescrito na próxima passagem, sem ninguém
+precisar apagar arquivo.
+
 ## §47 — O `doctor` confere o ambiente dos GATES
 
 O `doctor` sempre conferiu o que o *harness* precisa: Node, CLI no PATH,

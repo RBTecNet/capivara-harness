@@ -66,6 +66,33 @@ describe("a conferência do roteiro, antes de abrir navegador nenhum", () => {
     expect(defeitos.map((d) => d.problem).join(" ")).toContain("passo 3");
   });
 
+  /*
+   * O run de `teste` no WSL: o roteirista escreveu oitenta linhas antes do
+   * primeiro passo, subindo um segundo servidor e consultando com fetch até
+   * responder. Esse servidor morria, e o gate relatava "O servidor de teste
+   * encerrou antes de abrir a página" — mensagem do próprio roteiro, sobre um
+   * processo que o harness nem sabia que existia.
+   */
+  it("recusa o roteiro que sobe a própria aplicação", () => {
+    const comServidor = `import { spawn } from 'node:child_process';\n${roteiroBom()}`;
+    const defeitos = checkFlowScript(comServidor, WORKFLOW);
+    expect(defeitos.map((defeito) => defeito.problem).join(" ")).toContain("sobe a própria aplicação");
+    expect(defeitos.map((defeito) => defeito.hint).join(" ")).toContain("JÁ ESTÁ DE PÉ");
+  });
+
+  it("recusa o roteiro que escolhe onde a aplicação está", () => {
+    const comUrl = roteiroBom().replace("page.goto('/')", "page.goto('http://127.0.0.1:3000/clientes')");
+    expect(checkFlowScript(comUrl, WORKFLOW).map((defeito) => defeito.problem).join(" ")).toContain("escolhe onde");
+
+    const comFetch = `${roteiroBom()}\nawait fetch('http://localhost:4000/pronto');`;
+    expect(checkFlowScript(comFetch, WORKFLOW).map((defeito) => defeito.problem).join(" ")).toContain("escolhe onde");
+  });
+
+  it("não confunde uma URL de terceiro com a da aplicação", () => {
+    const externo = roteiroBom().replace("page.goto('/')", "page.goto('/')\n    // ver https://exemplo.com/docs");
+    expect(checkFlowScript(externo, WORKFLOW)).toEqual([]);
+  });
+
   it("recusa o roteiro que só clica", () => {
     const semExpect = roteiroBom().replace(/\s*expect\(await page\.title\(\)\)\.toBeTruthy\(\);/g, "");
     const defeitos = checkFlowScript(semExpect, WORKFLOW);
@@ -298,6 +325,23 @@ describe("o gate", () => {
    * renderizou. O relatório acusou o seletor, e o executor foi consertar um
    * formulário que estava certo.
    */
+  it("reescreve o roteiro guardado que não passa mais na conferência", async () => {
+    // O roteiro do run anterior, com o servidor que o roteirista subiu sozinho.
+    await mkdir(join(projectRoot, FLOWS_DIR), { recursive: true });
+    const arquivo = join(projectRoot, FLOWS_DIR, flowScriptName(WORKFLOW.number));
+    await writeFile(arquivo, `import { spawn } from 'node:child_process';\n${roteiroBom()}\n`, "utf8");
+
+    const resultado = await gate4({
+      ...base,
+      projectRoot,
+      author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
+      runner: async () => verde,
+    });
+
+    expect(resultado.green).toBe(true);
+    expect(await readFile(arquivo, "utf8")).not.toContain("child_process");
+  });
+
   it("põe o erro da APLICAÇÃO antes do seletor, quando o servidor registrou algum", async () => {
     const saida = [
       "  ✘  1 workflow-2.spec.ts:3:1 › workflow 2 — Cadastro de filmes (1.0m)",

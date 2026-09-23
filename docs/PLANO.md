@@ -3506,3 +3506,73 @@ processo alheio por número de porta é o tipo de atalho que um dia derruba o
 banco de desenvolvimento de alguém. O que o harness faz é deixar de depender
 daquela porta específica — e o órfão fica onde está, visível, para quem quiser
 encerrá-lo.
+
+
+## §44 — O executor pode dizer que o roteiro está errado
+
+A fase 4 do `MCP_teste2` reprovou no gate 4 assim:
+
+```
+Locator: locator('section')
+  .filter({ has: getByRole('heading', { name: 'Novo cadastro' }) })
+  .locator('form')
+  .getByRole('heading', { name: 'Novo cadastro', exact: true })
+Expected: visible — element(s) not found
+```
+
+Leia o seletor: ele acha a seção **pelo título**, desce para o `form` de dentro
+dela, e procura ali o mesmo título. O título é irmão do formulário, não filho. O
+roteiro estava errado.
+
+E o executor, no ciclo seguinte, escreveu isto:
+
+> O título "Novo cadastro" está na seção, fora do `form`. O fluxo procura esse
+> heading dentro do formulário — vou colocá-lo lá. […] O `h2` agora é o primeiro
+> filho do formulário de inclusão.
+
+**O produto foi remodelado para caber num seletor.** A fase passou, a suíte ficou
+verde, e a aplicação ficou pior: um título de seção virou filho de um formulário
+porque um teste o procurava ali. Ninguém decidiu isso — foi a única saída que o
+harness deixava.
+
+### 44.1 A saída que faltava
+
+Contra um gate 4 vermelho, o executor só podia mexer no produto. Agora o prompt
+de correção do gate 4 — e só dele — oferece a outra:
+
+```
+CAPIVARA_ROTEIRO_ERRADO: <por quê>
+```
+
+Quando ele responde assim, o harness reescreve o ROTEIRO antes de rodar de novo,
+passando o motivo a quem reescreve. Uma vez por fase.
+
+### 44.2 Por que isso não vira atalho
+
+O escape se corrige sozinho, e é isso que o torna aceitável:
+
+- quem reescreve é **outra sessão**, que lê o produto de novo — não o executor
+  que contestou;
+- se o produto estiver mesmo errado, o roteiro novo reprova igual, e a fase
+  continua devendo o que devia;
+- o prompt diz isso com todas as letras: *"use quando você estiver certo, e
+  conserte o produto quando não estiver"*.
+
+Não há como ganhar tempo mentindo: a mentira custa uma sessão de roteirista e
+devolve o mesmo vermelho.
+
+### 44.3 A família
+
+É a terceira forma do mesmo problema no gate 4, e as três têm a mesma pergunta:
+**de quem é o defeito?**
+
+| sintoma | quem errou | como o harness decide |
+|---|---|---|
+| seletor casa com dois elementos | roteiro | mecânico: `strict mode violation` |
+| porta ocupada, app não sobe | ambiente | mecânico: `is already used` |
+| seletor exige estrutura que ninguém pediu | roteiro | **só quem leu os dois sabe: o executor diz** |
+
+As duas primeiras o harness reconhece sozinho. A terceira não tem sinal
+mecânico — "elemento não encontrado" é idêntico quando o produto está errado e
+quando o roteiro está. Aí a decisão vai para quem tem a evidência na mão, com um
+custo que impede o abuso.

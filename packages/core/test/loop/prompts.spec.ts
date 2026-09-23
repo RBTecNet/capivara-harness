@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BUILDER_COMPLETE_MARKER, fixPrompt, implementPrompt, parseVerification, verifyPrompt } from "../../src/prompts/index.js";
+import { BUILDER_COMPLETE_MARKER, declarouRoteiroErrado, fixPrompt, implementPrompt, parseVerification, verifyPrompt } from "../../src/prompts/index.js";
 
 const base = { language: "português do Brasil", testCommand: "npm test", containerized: false, phaseMarkdown: "## Phase 1: X" };
 
@@ -140,5 +140,43 @@ describe("o verificador com a chave colada na prosa", () => {
       { index: 1, done: true, missing: "" },
       { index: 2, done: false, missing: "falta o teste de sessão" },
     ]);
+  });
+});
+
+/**
+ * A saída que o executor não tinha.
+ *
+ * Contra um gate 4 vermelho, a única resposta possível era mexer no produto —
+ * e na fase 4 do MCP_teste2 isso moveu um título para dentro de um `form`
+ * porque o seletor o procurava ali. O marcador dá a outra saída, e só aparece
+ * quando o gate que reprovou foi o 4.
+ */
+describe("contestar o roteiro em vez de remodelar o produto", () => {
+  const base = { language: "pt-BR", testCommand: "npm test", containerized: false, phaseMarkdown: "## Phase 1: X" };
+
+  it("o prompt de correção do gate 4 oferece o marcador", () => {
+    const prompt = fixPrompt({ ...base, gate: "gate 4 — fluxos na aplicação", cause: "um passo falhou", previousWroteNothing: false });
+
+    expect(prompt).toContain("CAPIVARA_ROTEIRO_ERRADO");
+    expect(prompt).toContain("DO NOT reshape the product to satisfy it");
+    // E diz por que o escape não é atalho: o roteiro novo é de outra sessão.
+    expect(prompt).toContain("the new script fails too");
+  });
+
+  it("nos outros gates ele não aparece: ali não há roteiro para contestar", () => {
+    const prompt = fixPrompt({ ...base, gate: "gate 2 — suíte do projeto", cause: "a suíte falhou", previousWroteNothing: false });
+    expect(prompt).not.toContain("CAPIVARA_ROTEIRO_ERRADO");
+  });
+
+  it("lê o motivo que o executor deu, com ou sem negrito", () => {
+    expect(declarouRoteiroErrado("CAPIVARA_ROTEIRO_ERRADO: o título é irmão do form")).toBe("o título é irmão do form");
+    expect(declarouRoteiroErrado("**CAPIVARA_ROTEIRO_ERRADO:** o seletor exige o que a fase não pede")).toBe(
+      "o seletor exige o que a fase não pede",
+    );
+    expect(declarouRoteiroErrado("terminei tudo certo")).toBeNull();
+  });
+
+  it("sem motivo, ainda conta como contestação — mas o log diz que faltou", () => {
+    expect(declarouRoteiroErrado("CAPIVARA_ROTEIRO_ERRADO")).toBe("o executor não explicou o motivo");
   });
 });

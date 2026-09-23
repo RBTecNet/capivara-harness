@@ -567,3 +567,58 @@ describe("a porta em que a aplicação sobe", () => {
     expect(resultado.cause).not.toContain("NÃO SUBIU");
   });
 });
+
+/**
+ * Quando o produto está certo e o roteiro não.
+ *
+ * Na fase 4 do MCP_teste2 o roteiro se ancorava no `form` e procurava dentro
+ * dele um heading que é irmão, não filho. O gate disse "a aplicação não cumpriu
+ * um fluxo declarado", e o executor — que só tinha essa saída — moveu o título
+ * para dentro do formulário: "o fluxo procura esse heading dentro do `form`, vou
+ * colocá-lo lá". O produto foi remodelado para caber num seletor.
+ */
+describe("o roteiro contestado pelo executor", () => {
+  const base = { projectRoot: "", workflows: [WORKFLOW], startCommand: "npm start" };
+
+  it("é reescrito antes de rodar, com o motivo na mão de quem reescreve", async () => {
+    const motivos: string[][] = [];
+    let execucoes = 0;
+
+    const resultado = await gate4({
+      ...base,
+      projectRoot,
+      roteiroContestado: "o título é irmão do form, não filho; o produto está certo",
+      author: async (_workflow, rejeitado) => {
+        motivos.push(rejeitado);
+        return `\`\`\`ts\n${roteiroBom()}\n\`\`\``;
+      },
+      runner: async () => {
+        execucoes += 1;
+        return verde;
+      },
+    });
+
+    expect(resultado.green).toBe(true);
+    // Escreveu o roteiro que faltava e reescreveu o contestado: duas chamadas.
+    expect(motivos.at(-1)?.join(" ")).toContain("o executor diz que este roteiro está errado");
+    expect(execucoes).toBe(1);
+  });
+
+  /*
+   * A contestação não é licença para ignorar o fluxo: quem reescreve é outra
+   * sessão, que lê o produto de novo. Errado o produto, o roteiro novo reprova
+   * igual — e a fase continua devendo o que devia.
+   */
+  it("não vira licença: roteiro novo que reprova continua reprovando a fase", async () => {
+    const resultado = await gate4({
+      ...base,
+      projectRoot,
+      roteiroContestado: "acho que o roteiro está errado",
+      author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
+      runner: async () => ({ exitCode: 1, output: "1) passo 2: clica em Interpretar\n   botão não encontrado" }),
+    });
+
+    if (resultado.green) throw new Error("deveria reprovar");
+    expect(resultado.cause).toContain("não cumpriu um fluxo declarado");
+  });
+});

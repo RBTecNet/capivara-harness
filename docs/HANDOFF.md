@@ -176,6 +176,10 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
   foi mandado consertar o que não estava quebrado — envelope aberto pela ponte,
   aplicação que não subiu, pacote não instalado. A causa precisa dizer de quem é
   o defeito. Ver §34.8.
+- **Roteiro errado vira produto pior.** Na fase 4 do `MCP_teste2` o seletor
+  procurava um título dentro do `form`, e o título é irmão dele; o executor moveu
+  o título para dentro do formulário, porque era a única saída que o harness
+  deixava. Hoje ele pode responder `CAPIVARA_ROTEIRO_ERRADO: <por quê>`.
 - **Porta fixa do gate 4 vira reprovação por processo esquecido.** No
   `MCP_teste2`, um `next-server` que o executor deixou vivo ocupou a 47533 e o
   gate relatou "a aplicação NÃO SUBIU" — no último ciclo da fase. A porta é

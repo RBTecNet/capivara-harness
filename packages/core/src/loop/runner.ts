@@ -12,7 +12,7 @@
 import { appendEvent } from "../state/events.js";
 import { runPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
-import { fixPrompt, flowPrompt, implementPrompt, verifyPrompt } from "../prompts/index.js";
+import { declarouRoteiroErrado, fixPrompt, flowPrompt, implementPrompt, verifyPrompt } from "../prompts/index.js";
 import type { BuildProgressListener, LoopGate, LoopGateState } from "./progress.js";
 import { commitPhase, hasPendingChanges, treeSignature } from "./git.js";
 import { declaredComplete, gate0, gate1, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
@@ -137,6 +137,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   let lastGate: GateName | null = null;
   let lastCause = "";
   let previousWroteNothing = false;
+  /** A contestação do roteiro vale uma vez por fase. */
+  let roteiroJaContestado = false;
 
   const relatar = options.onProgress ?? (() => undefined);
   const gate = (nome: LoopGate, estado: LoopGateState, cycle: number): void =>
@@ -233,7 +235,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
      * errada: abrir o produto para percorrer um fluxo que o código nem tem
      * gastaria uma sessão e um navegador para descobrir o que o gate 3 já sabia.
      */
-    const passouNosFluxos = async (cycleAtual: number): Promise<boolean> => {
+    const passouNosFluxos = async (cycleAtual: number, contestacao?: string): Promise<boolean> => {
       const fluxos = options.flows;
       if (!fluxos) return true;
 
@@ -241,6 +243,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       const g4 = await gate4({
         projectRoot: options.projectRoot,
         workflows: fluxos.workflows,
+        ...(contestacao ? { roteiroContestado: contestacao } : {}),
         ...(fluxos.regressao ? { regressao: fluxos.regressao } : {}),
         startCommand: await fluxos.resolveStart(),
         author: async (workflow, rejected, baseUrl) => {
@@ -299,6 +302,24 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       }
       return false;
     };
+
+    /*
+     * O executor pode dizer que o roteiro é que está errado.
+     *
+     * Ele é a única parte do ciclo que leu o produto E o erro do seletor. Sem
+     * esta saída, a única resposta possível a um gate 4 vermelho é mexer no
+     * produto — e na fase 4 do MCP_teste2 isso moveu um título para dentro de um
+     * `form` só porque o seletor o procurava ali.
+     *
+     * Uma vez por fase: a contestação manda reescrever o roteiro antes de rodar,
+     * e se o produto estiver mesmo errado o roteiro novo reprova igual.
+     */
+    const contestacao = roteiroJaContestado ? null : declarouRoteiroErrado(result.stdout);
+    const contestacaoDoRoteiro = contestacao ?? undefined;
+    if (contestacao) {
+      roteiroJaContestado = true;
+      announce(`[${session.id}] o executor contestou o roteiro em vez de mexer no produto: ${contestacao}`);
+    }
 
     const g0 = gate0(result, options.engine);
     gate("G0", g0.green ? "verde" : "vermelho", cycle);
@@ -365,7 +386,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         if (!g3.green) {
           lastGate = g3.gate;
           lastCause = `${noChangeNote}${g3.cause}`;
-        } else if (!(await passouNosFluxos(cycle))) {
+        } else if (!(await passouNosFluxos(cycle, contestacaoDoRoteiro))) {
           // A causa já foi registrada por `passouNosFluxos`; o ciclo segue.
         } else {
           const commit = options.commitsEnabled

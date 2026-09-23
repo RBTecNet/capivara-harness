@@ -3,7 +3,7 @@ export { gapPrompt, interviewPrompt } from "./writer.js";
 export type { AskedQuestion, WriterContext } from "./writer.js";
 export { auditorPrompt, coherencePrompt, phaseAuditPrompt, rewriteInstruction } from "./auditor.js";
 export type { AuditorContext, CoherenceContext, PhaseAuditContext } from "./auditor.js";
-export { BUILDER_COMPLETE_MARKER, acceptancePrompt, fixPrompt, implementPrompt, installPrompt } from "./builder.js";
+export { BUILDER_COMPLETE_MARKER, BUILDER_FLOW_WRONG_MARKER, acceptancePrompt, declarouRoteiroErrado, fixPrompt, implementPrompt, installPrompt } from "./builder.js";
 export type { BuilderContext, FixContext, InstallContext } from "./builder.js";
 export { VERIFY_HEADER, parseVerification, verifyPrompt } from "./verifier.js";
 export type { TaskVerdict, VerifierContext } from "./verifier.js";

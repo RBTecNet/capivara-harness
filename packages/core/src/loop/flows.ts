@@ -309,6 +309,15 @@ export interface FlowGateOptions {
    */
   author: (workflow: SkeletonWorkflow, rejected: string[], baseUrl: string) => Promise<string>;
   runner?: FlowRunner;
+  /**
+   * O executor declarou que o roteiro é que está errado, e por quê.
+   *
+   * Quando isto vem preenchido, o roteiro é reescrito ANTES de rodar, com o
+   * motivo dele na mão de quem reescreve. É a alternativa a remodelar o produto
+   * para caber num seletor — e ela se corrige sozinha: se o produto estiver
+   * mesmo errado, o roteiro novo reprova igual.
+   */
+  roteiroContestado?: string;
   port?: number;
   /** Tentativas de redação por fluxo, contando a primeira. */
   maxDrafts?: number;
@@ -417,6 +426,36 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   if (scripts.length === 0) return { green: true, skipped: "nenhum fluxo a percorrer", scripts: [] };
 
   const runner = options.runner ?? defaultFlowRunner;
+
+  /*
+   * O executor contestou o roteiro: reescreve antes de rodar.
+   *
+   * Ele acabou de ler o produto e o erro do seletor, e é a única parte do ciclo
+   * que viu os dois. Quem reescreve é outra sessão, que lê o produto de novo —
+   * então a contestação não vira licença para ignorar o fluxo, só troca quem é
+   * corrigido primeiro.
+   */
+  if (options.roteiroContestado) {
+    announce(`o executor contestou o roteiro: ${options.roteiroContestado}`);
+    for (const workflow of options.workflows) {
+      const arquivo = join(pasta, flowScriptName(workflow.number));
+      const script = extractFlowScript(
+        await options.author(
+          workflow,
+          [`o executor diz que este roteiro está errado, e não o produto: ${options.roteiroContestado}`],
+          baseUrl,
+        ),
+      );
+      const defeitos = checkFlowScript(script, workflow);
+      if (defeitos.length === 0) {
+        await writeFile(arquivo, `${script}\n`, "utf8");
+        announce(`  roteiro do fluxo ${workflow.number} reescrito`);
+      } else {
+        announce(`  o roteiro reescrito do fluxo ${workflow.number} veio com defeito; mantive o anterior`);
+      }
+    }
+  }
+
   let run = await runner(options.projectRoot, scripts);
 
   /*

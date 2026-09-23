@@ -408,6 +408,20 @@ export function errosDoServidor(output: string): string[] {
 }
 
 /**
+ * O erro do servidor é de esquema ausente?
+ *
+ * Vale a pergunta separada porque a resposta muda quem trabalha. "no such table"
+ * não é a tela errada nem o seletor errado: é o banco sem estrutura, e o conserto
+ * é a migração que o projeto declara. Sem dizer isso, o executor lê "um passo
+ * falhou onde o usuário passaria" e vai mexer no formulário.
+ */
+export function ehEsquemaAusente(erros: readonly string[]): boolean {
+  return erros.some((erro) =>
+    /no such table|no such column|relation "[^"]+" does not exist|Table '[^']+' doesn't exist|ER_NO_SUCH_TABLE|undefined table/i.test(erro),
+  );
+}
+
+/**
  * O gate inteiro: garante um roteiro por fluxo da fase e roda todos os que existem.
  *
  * Roda também os das fases anteriores porque um fluxo que passou a funcionar na
@@ -606,7 +620,13 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
       doServidor.length > 0
         ? `A APLICAÇÃO registrou erro enquanto o roteiro rodava. Comece por aqui: um passo que espera um ` +
           `elemento falha por timeout quando a página nem chega a renderizar, e aí o seletor é o sintoma, ` +
-          `não a causa.\n${doServidor.map((linha) => `  ${linha}`).join("\n")}\n\n`
+          `não a causa.\n${doServidor.map((linha) => `  ${linha}`).join("\n")}\n` +
+          (ehEsquemaAusente(doServidor)
+            ? `\nIsto é ESQUEMA AUSENTE: o banco existe e as tabelas não. O harness aplica a migração que o ` +
+              `projeto declara no manifesto (\`migrate\`) antes de cada passagem dos gates — então ou ela não ` +
+              `está declarada, ou ela não cria estas tabelas. É ali que se corrige, não no roteiro nem na tela.\n`
+            : "") +
+          "\n"
         : "";
 
     return {

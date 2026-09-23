@@ -15,11 +15,11 @@ import { writeAtomic } from "../state/atomic.js";
 import { declarouRoteiroErrado, fixPrompt, flowPrompt, implementPrompt, verifyPrompt } from "../prompts/index.js";
 import type { BuildProgressListener, LoopGate, LoopGateState } from "./progress.js";
 import { commitPhase, hasPendingChanges, treeSignature } from "./git.js";
-import { declaredComplete, gate0, gate1, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
+import { declaredComplete, defaultTestRunner, gate0, gate1, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
 import { detectRateLimit, planWait } from "./ratelimit.js";
 import { gate4, type FlowRunner } from "./flows.js";
 import { procurarTestesNomeados } from "./feature-tests.js";
-import { semearAmbiente } from "./ambiente.js";
+import { prepararAmbiente } from "./ambiente.js";
 import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { featureTestNames } from "../contract/index.js";
 import type { SkeletonWorkflow } from "../contract/index.js";
@@ -340,13 +340,14 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       lastCause = g0.cause;
     } else {
       /*
-       * Antes de qualquer gate rodar o produto: o `.env` que o projeto lê pode
-       * não existir ainda, e sem ele a aplicação sobe quebrada. Aqui e não no
-       * preflight porque quem entrega o `.env.example` é o executor, e ele o
-       * entrega no meio da fase.
+       * Antes de qualquer gate rodar o produto: configuração e esquema.
+       *
+       * Aqui e não no preflight porque quem entrega o `.env.example` e a
+       * migração é o executor, e ele os entrega no meio da fase. A cada ciclo
+       * porque cada fase acrescenta tabela.
        */
-      const semeado = await semearAmbiente(options.projectRoot);
-      if (semeado !== null) announce(`[${session.id}] ${semeado}`);
+      const ambiente = await prepararAmbiente(options.projectRoot, options.testRunner ?? defaultTestRunner);
+      for (const aviso of ambiente.anuncios) announce(`[${session.id}] ${aviso}`);
 
       gate("G2", "corrente", cycle);
       const g2 = await gate2(options.projectRoot, testeAgora?.command ?? null, options.testRunner, options.systemInstall === true);

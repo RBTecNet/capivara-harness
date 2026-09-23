@@ -365,6 +365,25 @@ describe("o gate", () => {
     expect(resultado.cause.indexOf("DB_NAME")).toBeLessThan(resultado.cause.indexOf("não cumpriu um fluxo declarado"));
   });
 
+  it("esquema ausente manda corrigir a migração, não o roteiro", async () => {
+    const saida = [
+      "    Error: locator.fill: Test timeout of 60000ms exceeded.",
+      "[WebServer] ⨯ Error: no such table: clientes",
+    ].join("\n");
+
+    const resultado = await gate4({
+      ...base,
+      projectRoot,
+      author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
+      runner: async () => ({ exitCode: 1, output: saida }),
+    });
+
+    if (resultado.green) throw new Error("deveria reprovar");
+    expect(resultado.cause).toContain("ESQUEMA AUSENTE");
+    expect(resultado.cause).toContain("migrate");
+    expect(resultado.cause).toContain("não no roteiro nem na tela");
+  });
+
   /*
    * O primeiro run real do gate, no cron5: a fase 1 recebeu "um passo falhou
    * onde o usuário passaria" quando nenhum passo tinha rodado — o produto não

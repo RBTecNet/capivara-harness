@@ -29,6 +29,20 @@ export const ARQUIVO_DE_AMBIENTE = ".env";
 export const EXEMPLO_DE_AMBIENTE = ".env.example";
 
 /**
+ * A marca que diz "este ambiente é nosso".
+ *
+ * Ela existe para uma decisão só, e é a mais séria deste módulo: o harness roda
+ * a migração do projeto antes dos gates, e migração cria e altera esquema. Fazer
+ * isso contra o `.env` que o DESENVOLVEDOR escreveu seria mexer no banco dele —
+ * exatamente o que a regra do §46 promete que nunca acontece.
+ *
+ * Então o harness só migra o ambiente que ele mesmo criou, e a marca é como ele
+ * reconhece o próprio. Um `.env` sem marca é de quem o escreveu: semear, migrar
+ * ou sobrescrever, nenhum dos três.
+ */
+export const MARCA_DO_HARNESS = "# capivara: ambiente descartável dos gates, gerado de .env.example — apague esta linha para assumi-lo";
+
+/**
  * Cria o `.env` a partir do `.env.example`, quando ele falta.
  *
  * Devolve a mensagem para anunciar, ou `null` quando não havia o que fazer —
@@ -44,10 +58,77 @@ export async function semearAmbiente(projectRoot: string): Promise<string | null
   const exemplo = await readFile(join(projectRoot, EXEMPLO_DE_AMBIENTE), "utf8").catch(() => null);
   if (exemplo === null || exemplo.trim() === "") return null;
 
-  await writeFile(destino, exemplo, "utf8");
+  await writeFile(destino, `${MARCA_DO_HARNESS}\n${exemplo}`, "utf8");
   return (
     `${ARQUIVO_DE_AMBIENTE} não existia e foi criado a partir de ${EXEMPLO_DE_AMBIENTE}: ` +
     "os gates precisam da aplicação configurada para subir. São os valores de exemplo, descartáveis — " +
     "edite-o quando quiser apontar para o seu banco, e ele não será sobrescrito."
   );
+}
+
+/** O `.env` que está lá é o que o harness gerou? */
+export async function ambienteEhDescartavel(projectRoot: string): Promise<boolean> {
+  const conteudo = await readFile(join(projectRoot, ARQUIVO_DE_AMBIENTE), "utf8").catch(() => null);
+  return conteudo !== null && conteudo.startsWith(MARCA_DO_HARNESS);
+}
+
+/**
+ * O comando de migração que o PROJETO declara.
+ *
+ * Declara, nunca adivinhado: rodar um comando que o projeto não anunciou é a
+ * mesma classe de suposição que já derrubou uma aplicação antes (o gate subindo
+ * o produto com `NODE_ENV=test`). Se não houver `migrate` no manifesto, não há
+ * migração a rodar — e a regra do §46 manda que haja.
+ */
+export async function comandoDeMigracao(projectRoot: string): Promise<string | null> {
+  const manifesto = await readFile(join(projectRoot, "package.json"), "utf8").catch(() => null);
+  if (manifesto === null) return null;
+
+  const scripts = (JSON.parse(manifesto) as { scripts?: Record<string, unknown> }).scripts ?? {};
+  return typeof scripts.migrate === "string" && scripts.migrate.trim() !== "" ? "npm run migrate" : null;
+}
+
+export interface PreparoDoAmbiente {
+  /** O que contar na tela, em ordem. */
+  anuncios: string[];
+  /** A migração rodou e falhou; a saída dela, para quem precisar da causa. */
+  migracaoFalhou: string | null;
+}
+
+/**
+ * O ambiente dos gates, pronto: configuração e esquema.
+ *
+ * Os dois juntos porque metade não serve para nada. Com o `.env` semeado e sem
+ * migração, a aplicação sobe, conecta num banco vazio e responde
+ * `no such table: clientes` a cada requisição — que foi o que aconteceu no
+ * `teste`, e é a mesma correção pela metade de sempre: eu escrevi a primeira
+ * metade ontem e deixei a segunda para o log descobrir.
+ *
+ * Roda a cada ciclo porque cada fase acrescenta tabela, e a regra do §46 exige
+ * que a migração possa ser repetida sem erro.
+ */
+export async function prepararAmbiente(
+  projectRoot: string,
+  executar?: (comando: string, cwd: string) => Promise<{ exitCode: number; output: string }>,
+): Promise<PreparoDoAmbiente> {
+  const anuncios: string[] = [];
+
+  const semeado = await semearAmbiente(projectRoot);
+  if (semeado !== null) anuncios.push(semeado);
+
+  if (executar === undefined) return { anuncios, migracaoFalhou: null };
+  if (!(await ambienteEhDescartavel(projectRoot))) return { anuncios, migracaoFalhou: null };
+
+  const comando = await comandoDeMigracao(projectRoot);
+  if (comando === null) return { anuncios, migracaoFalhou: null };
+
+  const resultado = await executar(comando, projectRoot);
+  if (resultado.exitCode === 0) {
+    anuncios.push(`esquema do banco aplicado com \`${comando}\` no ambiente descartável dos gates`);
+    return { anuncios, migracaoFalhou: null };
+  }
+
+  const saida = resultado.output.split("\n").slice(-20).join("\n").trim();
+  anuncios.push(`\`${comando}\` FALHOU (código ${resultado.exitCode}); os gates vão rodar contra um banco sem esquema:\n${saida}`);
+  return { anuncios, migracaoFalhou: saida };
 }

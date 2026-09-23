@@ -3,8 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { semearAmbiente } from "../../src/loop/ambiente.js";
-import { errosDoServidor } from "../../src/loop/flows.js";
+import { MARCA_DO_HARNESS, ambienteEhDescartavel, comandoDeMigracao, prepararAmbiente, semearAmbiente } from "../../src/loop/ambiente.js";
+import { ehEsquemaAusente, errosDoServidor } from "../../src/loop/flows.js";
 
 let projectRoot = "";
 
@@ -22,7 +22,7 @@ describe("o .env que ninguém criou", () => {
 
     const mensagem = await semearAmbiente(projectRoot);
     expect(mensagem).toContain(".env.example");
-    expect(await readFile(join(projectRoot, ".env"), "utf8")).toBe("DB_NAME=locadora.db\nPORT=3000\n");
+    expect(await readFile(join(projectRoot, ".env"), "utf8")).toContain("DB_NAME=locadora.db\nPORT=3000\n");
   });
 
   it("NUNCA sobrescreve o .env do desenvolvedor — ele pode apontar para o banco dele", async () => {
@@ -74,5 +74,85 @@ describe("o que a aplicação registrou", () => {
 
   it("não acha erro onde não há", () => {
     expect(errosDoServidor("[WebServer] pronto em http://127.0.0.1:3000\n  ✓ 2 passed")).toEqual([]);
+  });
+});
+
+describe("o esquema, que é a outra metade do ambiente", () => {
+  const manifesto = async (scripts: Record<string, string>) =>
+    await writeFile(join(projectRoot, "package.json"), JSON.stringify({ name: "app", scripts }), "utf8");
+
+  it("lê o comando que o projeto declara, e não inventa nenhum", async () => {
+    await manifesto({ migrate: "node migra.js" });
+    expect(await comandoDeMigracao(projectRoot)).toBe("npm run migrate");
+
+    await manifesto({ test: "vitest" });
+    expect(await comandoDeMigracao(projectRoot)).toBeNull();
+  });
+
+  it("aplica a migração no ambiente que o próprio harness criou", async () => {
+    await writeFile(join(projectRoot, ".env.example"), "DB_NAME=app.db\n", "utf8");
+    await manifesto({ migrate: "node migra.js" });
+
+    const executados: string[] = [];
+    const preparo = await prepararAmbiente(projectRoot, async (comando) => {
+      executados.push(comando);
+      return { exitCode: 0, output: "" };
+    });
+
+    expect(executados).toEqual(["npm run migrate"]);
+    expect(preparo.anuncios.join(" ")).toContain("esquema do banco aplicado");
+    expect(await ambienteEhDescartavel(projectRoot)).toBe(true);
+  });
+
+  it("NÃO migra o .env do desenvolvedor: migração cria e altera esquema", async () => {
+    await writeFile(join(projectRoot, ".env"), "DB_URL=postgres://producao/real\n", "utf8");
+    await writeFile(join(projectRoot, ".env.example"), "DB_URL=postgres://localhost/x\n", "utf8");
+    await manifesto({ migrate: "node migra.js" });
+
+    const executados: string[] = [];
+    await prepararAmbiente(projectRoot, async (comando) => {
+      executados.push(comando);
+      return { exitCode: 0, output: "" };
+    });
+
+    expect(executados).toEqual([]);
+    expect(await ambienteEhDescartavel(projectRoot)).toBe(false);
+  });
+
+  it("migra de novo a cada passagem: cada fase acrescenta tabela", async () => {
+    await writeFile(join(projectRoot, ".env.example"), "DB_NAME=app.db\n", "utf8");
+    await manifesto({ migrate: "node migra.js" });
+
+    const executados: string[] = [];
+    const executar = async (comando: string) => {
+      executados.push(comando);
+      return { exitCode: 0, output: "" };
+    };
+
+    await prepararAmbiente(projectRoot, executar);
+    await prepararAmbiente(projectRoot, executar);
+    expect(executados).toHaveLength(2);
+  });
+
+  it("conta quando a migração falha, com a saída dela", async () => {
+    await writeFile(join(projectRoot, ".env.example"), "DB_NAME=app.db\n", "utf8");
+    await manifesto({ migrate: "node migra.js" });
+
+    const preparo = await prepararAmbiente(projectRoot, async () => ({ exitCode: 1, output: "SyntaxError na migração" }));
+    expect(preparo.migracaoFalhou).toContain("SyntaxError");
+    expect(preparo.anuncios.join(" ")).toContain("FALHOU");
+  });
+
+  it("marca o ambiente que criou, para reconhecer o próprio depois", async () => {
+    await writeFile(join(projectRoot, ".env.example"), "DB_NAME=app.db\n", "utf8");
+    await semearAmbiente(projectRoot);
+    expect((await readFile(join(projectRoot, ".env"), "utf8")).startsWith(MARCA_DO_HARNESS)).toBe(true);
+  });
+
+  it("reconhece esquema ausente em mais de um banco", () => {
+    expect(ehEsquemaAusente(["⨯ Error: no such table: clientes"])).toBe(true);
+    expect(ehEsquemaAusente(['error: relation "clientes" does not exist'])).toBe(true);
+    expect(ehEsquemaAusente(["Error: Table 'app.clientes' doesn't exist"])).toBe(true);
+    expect(ehEsquemaAusente(["Error: connect ECONNREFUSED"])).toBe(false);
   });
 });

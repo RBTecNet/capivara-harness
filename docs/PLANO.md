@@ -3732,6 +3732,57 @@ Duas correções, porque são dois defeitos:
 É a quarta forma de "de quem é o defeito?" no gate 4, e a mais traiçoeira: as
 outras três falham ruidosamente, esta falha parecendo defeito de produto.
 
+## §46.5 — Configurar sem migrar não é preparar ambiente
+
+Com o `.env` semeado e o roteiro consertado, a aplicação subiu, o roteiro rodou,
+e o servidor respondeu isto a cada requisição:
+
+```
+[WebServer] ⨯ Error: no such table: clientes
+[WebServer] ⨯ Error: no such table: filmes
+```
+
+O banco existia — o arquivo estava lá, criado pelo driver. As tabelas não. A
+migração que a regra do §46 manda o projeto entregar **nunca foi executada pelos
+gates**: ela só rodava na aceitação operacional, na cópia limpa, no fim do build.
+
+É a correção pela metade outra vez, e desta vez a metade era minha: eu escrevi o
+semeador do `.env` e deixei o esquema para o log descobrir. Configuração sem
+esquema é um ambiente que sobe e não serve.
+
+### O que impede isso de virar migração no banco de quem chamou
+
+Migração cria e altera esquema. Rodá-la contra o `.env` que o **desenvolvedor**
+escreveu seria exatamente o que o §46 promete que nunca acontece.
+
+Então o `.env` que o harness gera leva uma marca na primeira linha, e ela governa
+a decisão:
+
+```
+# capivara: ambiente descartável dos gates, gerado de .env.example — apague esta linha para assumi-lo
+```
+
+- `.env` com a marca: é nosso, é descartável, o harness migra antes de cada
+  passagem dos gates — a cada ciclo, porque cada fase acrescenta tabela e a regra
+  exige que a migração possa ser repetida;
+- `.env` sem a marca: é de quem o escreveu. Não semeia, não migra, não
+  sobrescreve. E a linha dá a saída: apagar a marca é como o desenvolvedor assume
+  o arquivo.
+
+O comando é o que o projeto **declara** (`migrate`, no manifesto), nunca um
+adivinhado — a mesma disciplina que fez o gate 4 parar de impor `NODE_ENV=test` a
+produto alheio.
+
+### E quando não há migração declarada
+
+O gate 4 passa a reconhecer `no such table` e equivalentes de Postgres, MySQL e
+SQLite, e a causa diz onde se corrige:
+
+> Isto é ESQUEMA AUSENTE: o banco existe e as tabelas não. O harness aplica a
+> migração que o projeto declara no manifesto (`migrate`) antes de cada passagem
+> dos gates — então ou ela não está declarada, ou ela não cria estas tabelas. É
+> ali que se corrige, não no roteiro nem na tela.
+
 ## §46.4 — O roteiro não sobe a aplicação
 
 Com o `.env` semeado, a aplicação passou a subir — e o gate 4 reprovou de novo,

@@ -16,6 +16,7 @@ import { artifactPaths } from "../state/paths.js";
 import { isClean, isRepository } from "../loop/git.js";
 import { resolveTestCommand } from "../loop/testcmd.js";
 import { INIT_ARTIFACTS } from "../init/readiness.js";
+import { ambienteDosGates, type SondaDoAmbiente } from "./gate-environment.js";
 
 const run = promisify(execFile);
 
@@ -44,6 +45,8 @@ export interface DoctorOptions {
   credentialsFile?: string;
   nodeVersion?: string;
   environment?: NodeJS.ProcessEnv;
+  /** Sondas injetáveis: o teste do doctor não pode depender da máquina que o roda. */
+  gateEnvironment?: SondaDoAmbiente;
 }
 
 export async function diagnose(options: DoctorOptions): Promise<Diagnosis[]> {
@@ -79,6 +82,20 @@ export async function diagnose(options: DoctorOptions): Promise<Diagnosis[]> {
       health: saved.length > 0 ? "ok" : "aviso",
       detail: saved.length > 0 ? `${saved.length} credencial(is) salva(s)` : "sem credencial salva",
     });
+  }
+
+  /*
+   * O ambiente dos gates vem antes do projeto de propósito: ele é o que decide
+   * se a suíte e os fluxos conseguem rodar, e é a resposta para "por que o gate
+   * 4 falhou numa máquina nova".
+   */
+  for (const item of await ambienteDosGates({
+    ...(options.gateEnvironment ?? {}),
+    ...(options.environment !== undefined && options.gateEnvironment?.environment === undefined
+      ? { environment: options.environment }
+      : {}),
+  })) {
+    found.push({ area: "ambiente dos gates", item: item.item, health: item.ok ? "ok" : "aviso", detail: item.detail });
   }
 
   const repository = await isRepository(options.projectRoot);
@@ -145,7 +162,7 @@ export function renderDiagnosis(diagnoses: readonly Diagnosis[]): string {
       area = diagnosis.area;
       lines.push("", area);
     }
-    lines.push(`  ${SYMBOL[diagnosis.health]}${diagnosis.item.padEnd(24)}${diagnosis.detail}`);
+    lines.push(`  ${SYMBOL[diagnosis.health]}${diagnosis.item.padEnd(26)}${diagnosis.detail}`);
   }
 
   const blockers = diagnoses.filter((diagnosis) => diagnosis.health === "ausente");

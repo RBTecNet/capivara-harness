@@ -40,6 +40,19 @@ npm run build
 npm run install:user     # instala o binário em ~/.local
 ```
 
+### O que os gates precisam da máquina
+
+O harness tem uma dependência de runtime só (`commander`) e não precisa de mais
+nada. Os **gates**, sim: eles rodam a suíte e abrem o navegador do projeto que
+está sendo construído, e é aí que uma máquina nova quebra. O `doctor` confere os
+três, e nenhum deles bloqueia — cada um vale para o projeto que o usa:
+
+| o quê | para quê | macOS | Linux |
+|---|---|---|---|
+| `sqlite3` | a suíte de um projeto que guarda dados em SQLite | `brew install sqlite` | `sudo apt install sqlite3` |
+| compilador C e `make` | drivers de banco e outros módulos nativos | `xcode-select --install` | `sudo apt install build-essential` |
+| navegadores do Playwright | o gate 4, que percorre os fluxos na aplicação de pé | `npx playwright install` | `npx playwright install` |
+
 Confira o ambiente antes de gastar a primeira chamada:
 
 ```bash

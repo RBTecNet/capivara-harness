@@ -3576,3 +3576,155 @@ As duas primeiras o harness reconhece sozinho. A terceira não tem sinal
 mecânico — "elemento não encontrado" é idêntico quando o produto está errado e
 quando o roteiro está. Aí a decisão vai para quem tem a evidência na mão, com um
 custo que impede o abuso.
+
+## §45 — Toda parada diz as mesmas quatro coisas
+
+O harness parava e o desenvolvedor perguntava o que aconteceu. Não uma vez: toda
+vez. A informação sempre esteve em disco — `events.tsv`, `run.json`, o log do
+gate —, e a mensagem na tela não respondia nenhuma das perguntas que se faz em
+seguida.
+
+O pior caso era o build: ele terminava com `process.exitCode = 2` e **nada**
+impresso, porque o `announce` já tinha contado a falha minutos antes, e a
+rolagem do terminal já a tinha levado embora.
+
+### 45.1 O formato
+
+Todo ponto de parada — build, `init`, `plan`, `survey`, `change` — imprime o
+mesmo bloco:
+
+```
+PAROU — dependência de ambiente
+
+  o quê       P04 — o runner de testes não está instalado
+  de quem     do ambiente desta máquina; seu código não foi tocado
+  custou      3 de 8 fase(s) fechada(s); elas não serão refeitas
+  evidência   .capivara/runs/build-9f2a/logs/P04.cycle-3.log
+
+  para seguir
+    1. resolva a dependência de ambiente apontada acima
+    2. rode `capivara build` — retoma de P04
+```
+
+Cada campo existe porque a falta dele custou tempo:
+
+| campo | responde | o que custou não tê-lo |
+|---|---|---|
+| o quê | o que aconteceu | "saída inválida" sem dizer o que veio |
+| de quem | quem trabalha agora | executor mandado consertar o que não quebrou |
+| custou | o que se perdeu | pânico de "perdi o run" quando nada se perdeu |
+| evidência | onde está a prova | meia hora procurando o log certo |
+| para seguir | o que fazer | achar que quebrou quando era só continuar |
+
+`custou` é o campo menos óbvio e o que mais muda a leitura: **"nenhuma sessão
+gasta" é uma informação completamente diferente de "parou"**.
+
+### 45.2 De quem é o defeito, decidido por quem já sabia
+
+A classificação não é adivinhada da saída do modelo: ela lê a mensagem que o
+próprio gate escreveu. `gates.ts` já distingue "o runner não está instalado" de
+"dois testes falharam"; `flows.ts` já distingue "a porta está ocupada" de "o
+fluxo reprovou". O tradutor (`loop/parada.ts`) só transporta a decisão que já
+tinha sido tomada — e o teste quebra se alguém reescrever um desses textos sem
+reescrever o tradutor.
+
+Gate 0 vermelho é da **sessão do modelo**; gates 2, 3 e 4 são do **produto**,
+salvo quando o gate disse que é do ambiente; código de saída 1 não é defeito de
+ninguém — é uma etapa fora de ordem, e dizer "PAROU — defeito" a quem esqueceu
+de rodar o `init` manda a pessoa procurar um problema que não existe.
+
+### 45.3 A telinha
+
+O relatório responde ao "o quê"; o log responde ao "por quê", e o log não cabe no
+terminal. Quando há TTY, a parada abre um modal centrado com o cabeçalho FIXO —
+as quatro respostas à vista — e o log rolando com `↑ ↓`, `PgUp`/`PgDn`, `g`, `G`,
+`q`.
+
+Duas decisões que não se negociam:
+
+- **o texto puro é o piso.** Ele é impresso DEPOIS de o modal fechar, porque a
+  tela alternativa apaga tudo ao sair. Sem TTY o modal não abre e a saída é
+  idêntica — um harness que precisa de tela interativa para se explicar é um
+  harness que não roda em CI;
+- **o terminal é sempre restaurado.** Modo raw, cursor e tela alternativa voltam
+  no `finally`, mesmo se o desenho quebrar no meio.
+
+`--no-modal` e `CAPIVARA_MODAL=never` desligam a telinha sem tirar nada do texto.
+
+## §46 — O banco é decisão de entrevista; as regras são do harness
+
+Toda pergunta da entrevista é levantada por quem escreve. Uma não: **o banco**. É
+a única decisão que o executor não consegue tomar e não consegue contornar — sem
+conexão, ele inventa uma, e uma conexão inventada faz o gate passar contra nada.
+
+Por isso a pergunta é do harness (`interview/banco.ts`), entra sempre e entra
+primeiro. Quatro opções: banco embutido no projeto (recomendada), servidor que já
+existe com a conexão vinda do `.env`, servidor instalado nesta máquina durante o
+build, ou aplicação sem persistência.
+
+### 46.1 As regras transversais, escritas pelo harness
+
+A escolha vira regra do esqueleto **depois do parser**, onde nada pode
+reescrevê-la — o mesmo caminho dos não-objetivos (§35), e pelo mesmo motivo:
+pedir ao escritor que reproduza a regra é pedir que ele a reescreva, e regra
+reescrita é regra diferente.
+
+Quatro valem para qualquer banco:
+
+1. a conexão inteira vem de variáveis de ambiente carregadas do `.env`; nenhum
+   arquivo versionado, documento ou log contém credencial, e `.env` está no
+   `.gitignore` desde a primeira fase;
+2. o projeto versiona um `.env.example` com todas as variáveis que lê, com
+   valores de exemplo e nenhuma credencial real;
+3. existe **um** comando de migração que cria o esquema a partir de um banco
+   vazio e pode ser repetido — é o que o desenvolvedor roda depois de preencher
+   o `.env`;
+4. a suíte e os fluxos rodam contra um banco **descartável**; nenhum teste toca
+   o banco configurado no `.env`.
+
+É o padrão que o Laravel ensinou a uma geração, e é o que permite ao harness
+verificar o produto sem nunca abrir o banco de quem o encomendou.
+
+### 46.2 A aceitação não leva o `.env` junto
+
+A aceitação operacional copia o projeto para uma pasta limpa e roda instalação,
+**migração** e subida. Copiar o `.env` junto faria o harness migrar o banco de
+produção de quem o chamou, sem nunca ter pedido licença.
+
+Então `.env` não atravessa para a cópia, e o `.env.example` entra no lugar dele
+como `.env`. Sem `.env.example`, nenhum ambiente é inventado. É a regra 4 do item
+anterior, executada pelo harness em vez de prometida ao modelo.
+
+## §47 — O `doctor` confere o ambiente dos GATES
+
+O `doctor` sempre conferiu o que o *harness* precisa: Node, CLI no PATH,
+credencial, árvore limpa. Nada disso é o que quebra na hora do gate.
+
+O que quebra é o gate 2 precisando compilar um módulo nativo numa máquina sem
+compilador, e o gate 4 abrindo um navegador que nunca foi baixado. Três itens
+novos, nenhum bloqueante — cada um vale para o projeto que o usa:
+
+| item | para quê | macOS | Linux |
+|---|---|---|---|
+| `sqlite3` | a suíte de um projeto que guarda dados em SQLite | `brew install sqlite` | `apt install sqlite3` |
+| compilador C e `make` | drivers de banco e outros módulos nativos | `xcode-select --install` | `apt install build-essential` |
+| navegadores do Playwright | o gate 4 | `npx playwright install` | `npx playwright install` |
+
+O comando é o **daquele sistema**: "instale as ferramentas de compilação" não é
+acionável no Mac de quem nunca abriu o Xcode.
+
+## §48 — O visor de runs é opcional por construção
+
+O doc-center ganhou uma tela que lê `.capivara/runs/<run>/` e mostra eventos,
+logs e estado de fase. Ela é uma comodidade sobre arquivos que já existiam.
+
+A restrição que define o desenho: **o harness não sabe que ela existe**. Não fala
+com ela, não a procura, não muda de comportamento se ela estiver fora do ar. A
+dependência é de uma direção só — disco escrito lá, disco lido aqui — e é por
+isso que o harness continua rodando inteiro numa máquina onde o doc-center nunca
+foi instalado.
+
+Só leitura, também literalmente: nada naquele módulo escreve, apaga ou renomeia.
+O pior que uma falha dele pode fazer é não mostrar uma página. Desligado — que é
+o padrão —, a rota explica como ligá-lo (`doc-center --runs <pasta>`) em vez de
+dar 404: um link morto ensina menos que uma frase.

@@ -22,10 +22,12 @@ import {
 import { createMcpClient, enviarLevantamento, projetoExiste, fetchProjectMaterial, listLibraryProjects, registrarMemorias, type MemoriaParaRegistrar } from "./mcp/index.js";
 import type { ProjectMaterial } from "./mcp/index.js";
 import type { InitOptions } from "./init/index.js";
-import { commitSpecification, runBuild } from "./loop/index.js";
+import { commitSpecification, relatorioDoBuild, runBuild } from "./loop/index.js";
 import {
   BACK,
   BuildPhaseTracker,
+  apresentarConclusao,
+  apresentarParada,
   HarnessProgress,
   createLiveRegion,
   detectLanguage,
@@ -38,6 +40,8 @@ import {
   supportsColor,
   supportsTrueColor,
 } from "./tui/index.js";
+import type { EntradaDeTeclado, Janela, Parada, SaidaDeTela } from "./tui/index.js";
+import { paradaDeProntidao, paradaDoEstagio, type Estagio } from "./commands/paradas.js";
 import { runWizard } from "./commands/wizard.js";
 import { InputEndedError, createLineIO } from "./commands/line-io.js";
 import { listarEfforts, listarModelos } from "./provider/index.js";
@@ -52,10 +56,55 @@ interface CommonFlags extends CliRoleFlags {
   project?: string;
   language?: string;
   splash?: boolean;
+  modal?: boolean;
 }
 
 function style() {
   return { enabled: supportsColor() };
+}
+
+/**
+ * Onde a parada é mostrada.
+ *
+ * O terminal é o mesmo objeto de sempre; o que muda é que agora alguém pode
+ * dizer que não quer a telinha — `--no-modal`, ou `CAPIVARA_MODAL=never` para
+ * quem roda o harness dentro de outra ferramenta. Sem TTY nada disso importa: o
+ * modal não abre e o texto puro sai igual.
+ */
+function janela(flags: { modal?: boolean }): Janela {
+  const semModal = flags.modal === false || process.env.CAPIVARA_MODAL === "never";
+  return {
+    entrada: stdin as unknown as EntradaDeTeclado,
+    saida: stdout as unknown as SaidaDeTela,
+    style: style(),
+    ...(semModal ? { semModal: true } : {}),
+  };
+}
+
+/** Quantas linhas do log a telinha carrega. O resto está no arquivo. */
+const LINHAS_DE_EVIDENCIA = 5_000;
+
+/**
+ * A primeira evidência que existe em disco, lida para dentro da telinha.
+ *
+ * Só a primeira: os caminhos vêm em ordem de utilidade, e o log do gate que
+ * reprovou explica a parada melhor do que o `events.tsv` inteiro.
+ */
+async function lerEvidencia(projectRoot: string, caminhos: readonly string[] | undefined): Promise<string[]> {
+  for (const caminho of caminhos ?? []) {
+    const conteudo = await readFile(resolve(projectRoot, caminho), "utf8").catch(() => null);
+    if (conteudo === null || conteudo.trim() === "") continue;
+    const linhas = conteudo.trimEnd().split("\n");
+    return linhas.length > LINHAS_DE_EVIDENCIA
+      ? [`(as primeiras ${linhas.length - LINHAS_DE_EVIDENCIA} linha(s) estão só em ${caminho})`, ...linhas.slice(-LINHAS_DE_EVIDENCIA)]
+      : linhas;
+  }
+  return [];
+}
+
+/** Imprime a parada no formato único, com a telinha quando há terminal. */
+async function mostrarParada(parada: Parada, projectRoot: string, flags: { modal?: boolean }): Promise<void> {
+  await apresentarParada(parada, await lerEvidencia(projectRoot, parada.evidencia), janela(flags));
 }
 
 function roleFlags(command: Command, roles = ["writer", "auditor", "builder", "verifier"]): Command {
@@ -74,7 +123,8 @@ function roleFlags(command: Command, roles = ["writer", "auditor", "builder", "v
   return command
     .option("--project <caminho>", "raiz do projeto", ".")
     .option("--language <idioma>", "idioma da interface e dos documentos")
-    .option("--no-splash", "não mostra a abertura");
+    .option("--no-splash", "não mostra a abertura")
+    .option("--no-modal", "não abre a telinha de parada; só o texto");
 }
 
 /**
@@ -516,6 +566,7 @@ export function createProgram(): Command {
     const runId = runIdFor("init", sha12(request.text));
     const bridge = createAgentBridge({ projectRoot, runId, language, roles, limits: DEFAULT_LIMITS });
 
+    let parada: Parada | null = null;
     const terminalChange = stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
     const linhasChange = terminalChange ? createLineIO(terminalChange, (texto) => void stdout.write(texto)) : null;
 
@@ -553,14 +604,16 @@ export function createProgram(): Command {
       process.exitCode = 0;
     } catch (error) {
       if (error instanceof ChangeBlockedError) {
-        stdout.write(`\n${error.message}\n`);
+        parada = paradaDoEstagio(error, "change");
         process.exitCode = 2;
-        return;
-      }
-      throw error;
+      } else throw error;
     } finally {
       terminalChange?.close();
     }
+
+    // Depois do `finally`: a telinha põe o terminal em modo raw, e o readline
+    // aberto disputaria cada tecla com ela.
+    if (parada) await mostrarParada(parada, projectRoot, flags);
   });
 
   roleFlags(
@@ -601,6 +654,7 @@ export function createProgram(): Command {
      * levantamento faz são traduzidas para o protocolo — ele não sabe o que é
      * MCP, e não precisa saber.
      */
+    let paradaDoSurvey: Parada | null = null;
     const terminalSurvey = stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
     const linhasSurvey = terminalSurvey ? createLineIO(terminalSurvey, (texto) => void stdout.write(texto)) : null;
 
@@ -680,14 +734,14 @@ export function createProgram(): Command {
       process.exitCode = 0;
     } catch (error) {
       if (error instanceof SurveyBlockedError) {
-        stdout.write(`\n${error.message}\n`);
+        paradaDoSurvey = paradaDoEstagio(error, "survey", runId);
         process.exitCode = 2;
-        return;
-      }
-      throw error;
+      } else throw error;
     } finally {
       terminalSurvey?.close();
     }
+
+    if (paradaDoSurvey) await mostrarParada(paradaDoSurvey, saida, flags);
   });
 
   roleFlags(
@@ -772,6 +826,7 @@ export function createProgram(): Command {
       documento: "entrevista",
     });
 
+    let parada: Parada | null = null;
     try {
       const outcome = await runInit({
         projectRoot,
@@ -807,20 +862,23 @@ export function createProgram(): Command {
         stdout.write(`${commit.committed ? `versionado: ${commit.message}` : commit.message}\n`);
       }
 
+      if (!outcome.readiness.ready) parada = paradaDeProntidao(outcome.readiness, "init", outcome.runId);
       process.exitCode = outcome.readiness.ready ? 0 : 2;
     } catch (error) {
       if (error instanceof InitBlockedError) {
         ui.progress.halted(error.message.split("\n")[0] ?? "");
         ui.repaint();
         ui.live.release();
-        stdout.write(`\n${error.message}\n`);
+        parada = paradaDoEstagio(error, "init", error.runId);
         process.exitCode = 2;
-        return;
-      }
-      throw error;
+      } else throw error;
     } finally {
       ui.close();
     }
+
+    // A telinha só depois de o readline do estágio fechar: os dois leem o mesmo
+    // stdin, e quem estivesse aberto comeria as setas.
+    if (parada) await mostrarParada(parada, projectRoot, flags);
   });
 
   roleFlags(
@@ -897,6 +955,7 @@ export function createProgram(): Command {
       documento: "fase",
     });
 
+    let parada: Parada | null = null;
     try {
       const outcome = await runPlan({
         projectRoot,
@@ -917,20 +976,23 @@ export function createProgram(): Command {
         stdout.write(`${commit.committed ? `versionado: ${commit.message}` : commit.message}\n`);
       }
 
+      if (!outcome.readiness.ready) parada = paradaDeProntidao(outcome.readiness, "plan", outcome.runId);
       process.exitCode = outcome.readiness.ready ? 0 : 2;
     } catch (error) {
       if (error instanceof InitBlockedError) {
         ui.progress.halted(error.message.split("\n")[0] ?? "");
         ui.repaint();
         ui.live.release();
-        stdout.write(`\n${error.message}\n`);
+        parada = paradaDoEstagio(error, "plan", error.runId);
         process.exitCode = 2;
-        return;
-      }
-      throw error;
+      } else throw error;
     } finally {
       ui.close();
     }
+
+    // A telinha só depois de o readline do estágio fechar: os dois leem o mesmo
+    // stdin, e quem estivesse aberto comeria as setas.
+    if (parada) await mostrarParada(parada, projectRoot, flags);
   });
 
   roleFlags(
@@ -974,6 +1036,8 @@ export function createProgram(): Command {
      * morreu" — dois diagnósticos opostos, o mesmo silêncio.
      */
     const fases = new BuildPhaseTracker();
+    // O plano inteiro, para a parada poder dizer "3 de 8" em vez de só "3".
+    let totalDeFases = 0;
     const painelBuild = new HarnessProgress({
       version: VERSION,
       command: "build",
@@ -1115,6 +1179,7 @@ export function createProgram(): Command {
         else stdout.write(`${message}\n`);
       },
       onPlanned: (planejadas) => {
+        totalDeFases = planejadas.length;
         fases.plan(planejadas);
         repaintBuild();
       },
@@ -1155,8 +1220,19 @@ export function createProgram(): Command {
     liveBuild.release();
     terminalBuild?.close();
 
-    // Nada a reimprimir: o `announce` acima já é a saída do build, e
-    // `outcome.errors` existe para quem consome o resultado como dado.
+    /*
+     * O desfecho, no formato único.
+     *
+     * Aqui o build não reimprimia nada: `announce` tinha contado a falha durante
+     * a execução, e a última linha da tela era o que a rolagem tivesse deixado.
+     * Quem voltava ao terminal de manhã não sabia se as oito fases fecharam, se
+     * parou na terceira, nem se o que estava feito continuava valendo — e era
+     * por isso que toda parada virava uma pergunta.
+     */
+    const relatorio = relatorioDoBuild(outcome, totalDeFases > 0 ? { totalDeFases } : {});
+    if (relatorio.tipo === "parada") await mostrarParada(relatorio.parada, projectRoot, flags);
+    else await apresentarConclusao(relatorio.conclusao, [], janela(flags));
+
     process.exitCode = outcome.exitCode;
   });
 

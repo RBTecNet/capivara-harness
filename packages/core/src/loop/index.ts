@@ -48,3 +48,5 @@ export type { FaseFechada } from "./ledger.js";
 export { AVISO_DO_RUNNER, dependenciasAusentes, descreverDependencias, faltaORunnerDeFluxos } from "./dependencias.js";
 export type { DependenciaAusente } from "./dependencias.js";
 export { portaLivre } from "./flows.js";
+export { relatorioDoBuild } from "./parada.js";
+export type { ContextoDaParada, RelatorioDoBuild } from "./parada.js";

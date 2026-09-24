@@ -4542,3 +4542,52 @@ Nas regras transversais do esqueleto, escritas no `init`. Um projeto já planeja
 não a recebe por atualizar o binário — e é o preço de decisões que vivem no
 documento em vez de no código do harness. O que o documento ganha em troca é
 poder ser lido, auditado e contestado; o que ele perde é a correção retroativa.
+
+## §63 — A decisão que nasce na reescrita
+
+O `assitencia`, refeito do zero com o esqueleto certo, parou assim:
+
+```
+1. tentativa 1: escreveu o documento; o auditor apontou 2 ponto(s)
+2. tentativa 2: reescreveu — fechou 2 de 2, 2 apareceu(ram) novo(s)
+3. tentativa 3: reescreveu — fechou 2 de 2, 4 apareceu(ram) novo(s)
+```
+
+O escritor fechou **tudo** em toda volta, e a pilha cresceu. Os quatro achados
+que sobraram diziam a mesma coisa em lugares diferentes:
+
+> A matriz de permissões permanece **pendente**… *Registrar a matriz aceita*
+> Permanecem **indefinidos** a data de referência e os limites… *Obter a decisão aceita*
+> O plano deixa **pendente** se uma entrega sem garantia preserva o período…
+> A tarefa mantém **pendentes** os valores permitidos para quantidades…
+
+São decisões em aberto — marcadas com `[NEEDS DECISION]` pela própria emenda, que
+ganhou essa saída no §56 justamente para não inventar. A rodada de lacunas, que
+leva essas perguntas ao desenvolvedor, **rodava uma vez, antes da auditoria**. O
+que a emenda marcava nascia depois dela.
+
+Ninguém era perguntado. O auditor devolvia dizendo, com razão, "obter a decisão
+aceita" — e a única pessoa que podia decidir nunca ficava sabendo que havia o que
+decidir.
+
+### 63.1 O ciclo fechado
+
+A cada reescrita, se o texto voltar com marcador, a entrevista reabre ANTES da
+próxima auditoria. As três peças passam a se encaixar:
+
+| quem | o que faz com uma decisão que falta |
+|---|---|
+| escritor de fase (§54) | marca em vez de inventar |
+| emenda da auditoria (§56) | marca em vez de mandar carta |
+| rodada de lacunas | pergunta ao desenvolvedor — **agora também depois da emenda** |
+
+E o que já foi perguntado é lembrado pelo run inteiro, não por chamada: um
+marcador que sobrevive a uma reescrita não vira a mesma pergunta duas vezes.
+
+### 63.2 A armadilha de sempre
+
+O `Set` dessas perguntas nasceu ao lado da função que o usa — abaixo do
+`return await buildFromSkeleton()`, que nunca é alcançado. Função é içada,
+`const` não: `ReferenceError: Cannot access 'lacunasPerguntadas' before
+initialization`. É a segunda vez que este arquivo cobra isso, e a primeira foi
+`fasesAprovadas`. Estado do run mora no topo do run.

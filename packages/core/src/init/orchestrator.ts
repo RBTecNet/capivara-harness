@@ -156,6 +156,11 @@ function driftBetween(antes: string, depois: string, findings: readonly Finding[
 const MAX_ESPERAS_POR_CHAMADA = 2;
 
 /** Quantas tasks há neste markdown. Zero é resposta inválida do escritor. */
+/** Há decisão pendente no texto? O marcador é o contrato entre escritor e entrevista. */
+function temDecisaoPendente(markdown: string): boolean {
+  return /\[NEEDS DECISION\]/.test(markdown);
+}
+
 function contaTasks(markdown: string): number {
   return [...markdown.matchAll(/^\s*-\s*\[[ xX]\]\s*\*\*Task:\*\*/gm)].length;
 }
@@ -443,6 +448,16 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * quando uma fase muda. O que não se repete é o julgamento do que não mudou.
    */
   const fasesAprovadas = new Set<string>();
+
+  /*
+   * As lacunas já perguntadas, para o run inteiro.
+   *
+   * Aqui em cima e não ao lado de `closeGaps` porque as declarações abaixo do
+   * `return await buildFromSkeleton()` nunca chegam a ser executadas: a função é
+   * içada, o `const` não, e o uso estoura em TDZ. Já foi assim com
+   * `fasesAprovadas`, e a armadilha é a mesma.
+   */
+  const lacunasPerguntadas = new Set<string>();
 
   /*
    * O que este run já escreveu e já teve aprovado, guardado em disco.
@@ -1473,9 +1488,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    */
   async function closeGaps(document: string, initial: Authored, writer: WriterContext): Promise<Authored> {
     let authored = initial;
-    // Um marcador já perguntado não volta. Reperguntar o que a pessoa acabou de
-    // responder é a forma mais rápida de fazê-la desistir da entrevista.
-    const asked = new Set<string>();
+    const asked = lacunasPerguntadas;
 
     for (let round = 1; round <= maxGapRounds; round += 1) {
       // Marcadores idênticos são UMA decisão, não uma por ocorrência: no piloto 1
@@ -1911,6 +1924,25 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       announce(`  auditor devolveu ${document} (${action.findings.length} finding)`);
 
       authored = await authored.rewrite(action.findings, action.attempt);
+
+      /*
+       * Decisão que aparece NA REESCRITA também vai ao desenvolvedor.
+       *
+       * A rodada de lacunas rodava uma vez, antes da auditoria. Só que a emenda
+       * tem a mesma saída legal do escritor — marcar `[NEEDS DECISION]` em vez de
+       * inventar (§56) — e o que ela marca nascia depois da única rodada que
+       * existia. Ninguém era perguntado, e o auditor devolvia a fase dizendo,
+       * com razão, "obter a decisão aceita".
+       *
+       * No `assitencia` isso se leu assim: tentativa 1 com 2 achados, fechou 2 e
+       * apareceram 2; fechou 2 e apareceram 4. O escritor fechava tudo e a
+       * pilha crescia, porque cada volta criava perguntas que não tinham a quem
+       * ser feitas.
+       */
+      if (temDecisaoPendente(authored.content)) {
+        announce(`  a reescrita deixou decisão pendente; levando ao desenvolvedor antes de auditar de novo`);
+        authored = await closeGaps(document, authored, writer);
+      }
     }
 
     throw new InitBlockedError(`o ciclo de auditoria de ${document} não convergiu`, runId);

@@ -475,3 +475,49 @@ describe("emenda que destrói a fase não entra no documento", () => {
     expect(outcome.readiness.ready).toBe(true);
   });
 });
+
+/*
+ * O `assitencia`, quarta rodada: "tentativa 1, 2 achados; fechou 2, apareceram
+ * 2; fechou 2, apareceram 4". O escritor fechava tudo e a pilha crescia — porque
+ * a EMENDA tem a mesma saída legal que o escritor (marcar `[NEEDS DECISION]` em
+ * vez de inventar), e o que ela marcava nascia depois da única rodada de lacunas
+ * que existia. Ninguém era perguntado, e o auditor devolvia dizendo "obter a
+ * decisão aceita".
+ */
+describe("decisão que nasce na reescrita também chega ao desenvolvedor", () => {
+  it("reabre a entrevista quando a emenda deixa marcador", async () => {
+    await init(skeletonPath());
+
+    // A auditoria devolve uma vez; a emenda responde marcando uma decisão.
+    let auditou = 0;
+    const steps = skeletonPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
+      respond: {
+        stdout: () => {
+          auditou += 1;
+          return auditou === 1
+            ? "CAPIVARA_AUDIT_STATUS: REJECTED\nCAPIVARA_FINDING: Phase 1 | falta dizer o prazo | decida\nCAPIVARA_REASON: falta decisão"
+            : "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: ok";
+        },
+      },
+      repeat: true,
+    });
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "phase-p01", attempt: 2 },
+      respond: { stdout: `${PHASE_1}\n[NEEDS DECISION] qual é o prazo de garantia padrão\n` },
+    });
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-phases.md:gaps" },
+      respond: { stdout: oneQuestion() },
+    });
+
+    const { outcome, agent, anunciado } = await planComAnuncioEResposta(steps, async () => "1");
+
+    expect(anunciado).toContain("a reescrita deixou decisão pendente");
+    const perguntas = agent.calls.filter((call) => call.subject === "project-phases.md:gaps");
+    expect(perguntas.length).toBeGreaterThan(0);
+    expect(perguntas.at(-1)?.prompt).toContain("qual é o prazo de garantia padrão");
+    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+  });
+});

@@ -649,3 +649,41 @@ describe("o escritor de fase sabe qual é o orçamento de tasks", () => {
     expect(fase).toContain("Never drop a capability");
   });
 });
+
+/*
+ * O terceiro impasse do `assitencia`, e o de assinatura mais clara: 23 achados,
+ * o escritor fechou 23; 15 novos, fechou 15; 21 novos. Ele nunca deixou nada em
+ * aberto — e quase todos eram da mesma família, o ADJETIVO que inventa uma
+ * regra: o e-mail "normalizado", a senha "aleatória", os índices "equivalentes",
+ * os dados "normalizados".
+ *
+ * Cada uma dessas palavras é uma regra que ninguém decidiu, e o escritor as
+ * escrevia tentando ser preciso, porque o eixo da precisão pede exatamente isso.
+ * A saída legal — dizer que falta decidir — existia, era testada ponta a ponta,
+ * e o prompt da fase nunca a mencionou.
+ */
+describe("o adjetivo que inventa uma regra", () => {
+  it("nomeia as palavras que mais custaram, em vez de pedir vagamente fidelidade", () => {
+    const fase = fatia(1);
+    expect(fase).toContain("normalized");
+    expect(fase).toContain("random");
+    expect(fase).toContain("Each of those words is a RULE");
+  });
+
+  it("manda escrever na precisão da fonte, e mostra o par certo e errado", () => {
+    const fase = fatia(1);
+    expect(fase).toContain("AT THE PRECISION THEY STATE IT");
+    expect(fase).toContain("is a normalization rule nobody decided");
+  });
+
+  it("ensina a saída legal: o marcador que vai ao desenvolvedor antes da auditoria", () => {
+    const fase = fatia(1);
+    expect(fase).toContain("[NEEDS DECISION]");
+    expect(fase).toContain("goes to the DEVELOPER before anything");
+    expect(fase).toContain("the only legal way to leave something open");
+  });
+
+  it("diz por que o palpite é pior que a pergunta", () => {
+    expect(fatia(1)).toContain("invented default looks like a decision, gets built");
+  });
+});

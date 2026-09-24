@@ -4081,3 +4081,49 @@ A coluna virou parâmetro de `renderPhaseRows` em vez de nascer um segundo
 desenho. Manter dois renderizadores de linha de fase é manter dois que divergem —
 e o primeiro sintoma seria o `plan` deixando de ganhar a correção que o `build`
 ganhasse.
+
+## §54 — O adjetivo que inventa uma regra
+
+O terceiro impasse do `assitencia`, e o de assinatura mais clara:
+
+```
+1. tentativa 1: escreveu o documento; o auditor apontou 23 ponto(s)
+2. tentativa 2: reescreveu — fechou 23 de 23, 15 apareceu(ram) novo(s)
+3. tentativa 3: reescreveu — fechou 15 de 15, 21 apareceu(ram) novo(s)
+```
+
+O escritor nunca deixou nada em aberto: 38 de 38 fechados. E o auditor nunca
+parou de achar — porque quase todos os achados eram a mesma família, dita com
+palavras diferentes em lugares diferentes:
+
+| o que a fase escreveu | o que o auditor devolveu |
+|---|---|
+| "o e-mail **normalizado** é único" | "introduz uma operação sem fonte" |
+| "senha **aleatória** legível" | "impõe uma forma de geração não autorizada" |
+| "**índices** equivalentes entre MySQL e SQLite" | "remova índices do critério" |
+| "persistir dados **normalizados**" | "substitua por dados validados" |
+
+Cada uma dessas palavras **é uma regra**: diz que existe uma transformação, e não
+diz sobre o quê, em que momento, nem o que fica intacto. Se nenhuma fonte a
+declara, ela foi inventada ali — e ninguém consegue implementar nem verificar o
+que o escritor quis dizer.
+
+### 54.1 Por que ele escrevia isso
+
+Porque o eixo da PRECISÃO pede exatamente isso. "Toda regra que nomeia uma
+OPERAÇÃO precisa nomear sobre o que ela opera" — e o caminho mais curto para
+parecer preciso é acrescentar um adjetivo. O eixo da FIDELIDADE então rejeita, e
+o escritor, ao reescrever, inventa outro adjetivo em outro lugar. Três rodadas,
+59 achados, nenhuma convergência.
+
+### 54.2 A saída existia e ninguém tinha contado a ele
+
+`[NEEDS DECISION] <a decisão em aberto>` numa linha própria dentro da task. Ela
+vai ao DESENVOLVEDOR **antes de qualquer auditoria**, volta respondida, e o
+marcador é removido — mecanicamente, se o escritor esquecer. O caminho inteiro já
+existia, com teste ponta a ponta desde o §24.
+
+O prompt da fase nunca mencionou o marcador. Ele mencionava agora, junto com a
+regra que o torna necessário: escreva na precisão da fonte, e quando não der,
+diga que falta decidir. Um palpite inventado parece uma decisão, é construído, e
+ninguém nunca descobre que foi chute.

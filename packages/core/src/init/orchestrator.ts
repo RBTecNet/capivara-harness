@@ -32,6 +32,7 @@ import { inspectProject, summarizeInventory } from "./inventory.js";
 import { decisoesComoMemorias, renderLibraryBlock, type McpDocument, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { INIT_ARTIFACTS, evaluateReadiness } from "./readiness.js";
 import { MemoriaDoPlano } from "./plan-cache.js";
+import type { PlanProgressListener } from "./progress.js";
 import { evaluatePlanReadiness, renderPlanReadiness } from "./plan-readiness.js";
 import { readSkeletonState, writeSkeletonState } from "./skeleton-state.js";
 import { writeRequestState } from "./request-state.js";
@@ -80,6 +81,13 @@ export interface InitOptions {
   roles?: Record<string, { provider: string; model: string; effort: string }>;
   ask: AskDeveloper;
   decideStandoff?: DecideStandoff;
+  /**
+   * A tela de fases do `plan`.
+   *
+   * Opcional como todo o resto da observação: sem ela o estágio funciona igual e
+   * as linhas de `announce` continuam sendo a saída.
+   */
+  onPhaseProgress?: PlanProgressListener;
   announce?: (message: string) => void;
   maxAuditReturns?: number;
   maxInterviewRounds?: number;
@@ -383,6 +391,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * reescrever e reauditar ENTRE execuções.
    */
   const memoria = await MemoriaDoPlano.abrir(options.projectRoot, runId, options.fresh === true);
+  const relatarFase: PlanProgressListener = options.onPhaseProgress ?? ((): void => undefined);
 
   const allAnswers: Answer[] = [];
   const allQuestions: Question[] = [];
@@ -723,6 +732,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       skeletonAtual ? [{ name: "fatia do esqueleto", content: sliceForPhase(skeletonAtual, numero) }] : upstream;
 
     const aReauditar = fases.filter((fase) => !fasesAprovadas.has(sha12(fase.markdown.trim())));
+    for (const fase of fases.filter((fase) => fasesAprovadas.has(sha12(fase.markdown.trim())))) {
+      relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
+    }
     const puladas = fases.length - aReauditar.length;
     if (puladas > 0) {
       announce(`  ${puladas} fase(s) já aprovada(s) neste run, com o mesmo texto; não vou reauditá-las`);
@@ -747,7 +759,10 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       });
 
     const reaproveitadas = aReauditar.filter((fase) => memoria.jaAprovada(promptDaFase(fase)));
-    for (const fase of reaproveitadas) fasesAprovadas.add(sha12(fase.markdown.trim()));
+    for (const fase of reaproveitadas) {
+      fasesAprovadas.add(sha12(fase.markdown.trim()));
+      relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
+    }
     if (reaproveitadas.length > 0) {
       announce(`  ${reaproveitadas.length} fase(s) aprovada(s) numa execução anterior, com a mesma auditoria; não vou repagar`);
     }
@@ -755,16 +770,20 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     const tarefas: (() => Promise<AuditVerdict>)[] = [
       ...aReauditar
         .filter((fase) => !fasesAprovadas.has(sha12(fase.markdown.trim())))
-        .map((fase) => () =>
-          auditCall(`project-phases.md#P${fase.number}`, attempt, () => promptDaFase(fase)).then((veredicto) => {
+        .map((fase) => () => {
+          relatarFase({ kind: "audit", number: fase.number, state: "corrente" });
+          return auditCall(`project-phases.md#P${fase.number}`, attempt, () => promptDaFase(fase)).then((veredicto) => {
             // Aprovada é fato do run: o texto exato que passou não volta à fila.
             if (veredicto.findings.length === 0) {
               fasesAprovadas.add(sha12(fase.markdown.trim()));
               memoria.guardarAprovacao(promptDaFase(fase));
+              relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
+            } else {
+              relatarFase({ kind: "audit", number: fase.number, state: "devolvida", findings: veredicto.findings.length });
             }
             return veredicto;
-          }),
-        ),
+          });
+        }),
       () =>
         auditCall("project-phases.md#coerência", attempt, () =>
           coherencePrompt({
@@ -1031,6 +1050,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     // projeto inteiro em toda chamada.
     const fases = new Array<string>(esqueleto.phases.length).fill("");
     const fila = esqueleto.phases.map((fase, posicao) => ({ fase, posicao }));
+    relatarFase({ kind: "planned", phases: esqueleto.phases.map((fase) => ({ number: fase.number, title: fase.title })) });
     await Promise.all(
       Array.from({ length: Math.min(maxParallelParts, fila.length) }, async () => {
         for (;;) {
@@ -1048,6 +1068,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
            * quantas fases tinham sido tentadas.
            */
           await event("authoring", marca, "started");
+          relatarFase({ kind: "authoring", number: fase.number, state: "corrente" });
 
           /*
            * Fase sem task é resposta inválida, não resultado.
@@ -1081,6 +1102,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           const guardada = memoria.faseEscrita(promptDaFase);
           if (guardada !== null) {
             fases[posicao] = guardada;
+            relatarFase({ kind: "authoring", number: fase.number, state: "reused" });
             announce(`  fase ${fase.number} reaproveitada de uma execução anterior`);
             await event("authoring", marca, "complete", "reaproveitada: o prompt não mudou");
             continue;
@@ -1121,6 +1143,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             tarefas.tasks,
           ).trim();
           memoria.guardarFase(promptDaFase, fases[posicao]!);
+          relatarFase({ kind: "authoring", number: fase.number, state: "pronta" });
           announce(`  fase ${fase.number} pronta`);
           await event("authoring", marca, "complete");
         }
@@ -1154,14 +1177,17 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     skeletonAtual = esqueleto;
 
     const writerDoPlano = writerContext([]);
+    relatarFase({ kind: "documento", etapa: "lacunas" });
     const semGaps = await closeGaps("project-phases.md", planoAutorado(esqueleto, fases), writerDoPlano);
     plano = semGaps.content;
 
+    relatarFase({ kind: "documento", etapa: "auditoria" });
     const verdict = await auditLoop("project-phases.md", semGaps, writerDoPlano, []);
     plano = verdict.content;
     planoAprovado = true;
     remarks.push(...verdict.remarks.map((remark) => ({ document: "project-phases.md", remark })));
 
+    relatarFase({ kind: "documento", etapa: "ensaio do verificador" });
     const final = await rehearse(verdict.authored, writerDoPlano, []);
     plano = final.content;
 

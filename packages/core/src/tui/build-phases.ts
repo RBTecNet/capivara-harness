@@ -16,6 +16,17 @@ import { paint, padVisible, truncateVisible, visibleWidth, type Style } from "./
 export const GATES = ["G0", "G1", "G2", "G3", "G4"] as const;
 export type GateId = (typeof GATES)[number];
 
+/**
+ * As colunas do `plan`: escrita e auditoria.
+ *
+ * A linha de fase nasceu no build, com cinco gates. O `plan` tem o mesmo formato
+ * de trabalho — uma fase por vez, cada uma passando por etapas que ou fecham ou
+ * devolvem — e não tinha tela nenhuma: só linhas de log passando. As colunas
+ * viraram parâmetro para os dois desenharem com o mesmo código, porque manter
+ * dois desenhos de linha de fase é manter dois que divergem.
+ */
+export const PLAN_COLUMNS = ["E", "A"] as const;
+
 export type GateState = "aguardando" | "corrente" | "verde" | "vermelho" | "neutro";
 
 export type PhaseState = "aguardando" | "em andamento" | "concluído" | "falhou" | "pulado";
@@ -25,8 +36,8 @@ export interface BuildPhaseRow {
   id: string;
   title: string;
   state: PhaseState;
-  /** Um estado por gate, na ordem de `GATES`. */
-  gates: Record<GateId, GateState>;
+  /** Um estado por coluna, na ordem que o desenho receber. */
+  gates: Record<string, GateState>;
   /** Uma palavra sobre a fase: `ciclo 2/3`, `commitada`, `gate 2 reprovou`. */
   detail: string;
 }
@@ -71,6 +82,11 @@ const PHASE_TONE: Record<PhaseState, "green" | "yellow" | "gray" | "red"> = {
 
 export function emptyGates(): Record<GateId, GateState> {
   return { G0: "aguardando", G1: "aguardando", G2: "aguardando", G3: "aguardando", G4: "aguardando" };
+}
+
+/** As colunas do `plan`, todas por começar. */
+export function emptyPlanColumns(): Record<string, GateState> {
+  return { E: "aguardando", A: "aguardando" };
 }
 
 /**
@@ -118,17 +134,27 @@ export function phaseWindow(
 }
 
 /** `G0● G1● G2○ G3○`, cada bolinha na cor do seu estado. */
-function gateCells(row: BuildPhaseRow, style: Style): string {
-  return GATES.map((gate) => {
-    const estado = row.gates[gate];
-    return `${paint(gate, "gray", style)}${paint(GATE_MARK[estado], GATE_TONE[estado], style)}`;
-  }).join(" ");
+function gateCells(row: BuildPhaseRow, style: Style, columns: readonly string[]): string {
+  return columns
+    .map((gate) => {
+      const estado = row.gates[gate] ?? "aguardando";
+      return `${paint(gate, "gray", style)}${paint(GATE_MARK[estado], GATE_TONE[estado], style)}`;
+    })
+    .join(" ");
 }
 
-/** Quanto a coluna de gates ocupa: `G0● ` quatro vezes, sem o espaço final. */
-const GATES_WIDTH = GATES.length * 3 + (GATES.length - 1);
+/** Quanto a coluna ocupa: `G0●` por coluna, mais um espaço entre elas. */
+function colunasWidth(columns: readonly string[]): number {
+  return columns.reduce((total, coluna) => total + coluna.length + 1, 0) + Math.max(0, columns.length - 1);
+}
 
-export function renderPhaseRows(rows: readonly BuildPhaseRow[], maxRows: number, width: number, style: Style): string[] {
+export function renderPhaseRows(
+  rows: readonly BuildPhaseRow[],
+  maxRows: number,
+  width: number,
+  style: Style,
+  columns: readonly string[] = GATES,
+): string[] {
   const janela = phaseWindow(rows, maxRows);
   const linhas: string[] = [];
 
@@ -140,14 +166,14 @@ export function renderPhaseRows(rows: readonly BuildPhaseRow[], maxRows: number,
    * O título é o que cede espaço quando o terminal é estreito: o id e os gates
    * são a informação densa, e um título cortado ainda identifica a fase.
    */
-  const reservado = 2 + 1 + 1 + 4 + GATES_WIDTH + 2;
+  const reservado = 2 + 1 + 1 + 4 + colunasWidth(columns) + 2;
   const tituloMax = Math.max(8, width - reservado - 14);
 
   for (const row of janela.visible) {
     const marca = paint(PHASE_MARK[row.state], PHASE_TONE[row.state], style);
     const id = paint(padVisible(row.id, 4), "cyan", style);
     const titulo = padVisible(truncateVisible(row.title, tituloMax), tituloMax);
-    const gates = gateCells(row, style);
+    const gates = gateCells(row, style, columns);
     const detalhe = paint(row.detail, PHASE_TONE[row.state] === "gray" ? "gray" : PHASE_TONE[row.state], style);
     linhas.push(`  ${marca} ${id}${titulo}  ${gates}  ${detalhe}`);
   }
@@ -167,11 +193,11 @@ export function phaseSummary(rows: readonly BuildPhaseRow[]): string {
 }
 
 /** Só para o teste medir a coluna sem reimplementar a conta. */
-export function gatesWidth(): number {
-  return GATES_WIDTH;
+export function gatesWidth(columns: readonly string[] = GATES): number {
+  return colunasWidth(columns);
 }
 
 /** Quanto cada linha realmente ocupa, para o painel decidir quantas cabem. */
-export function phaseRowWidth(row: BuildPhaseRow, style: Style): number {
-  return visibleWidth(renderPhaseRows([row], 1, 200, style)[0] ?? "");
+export function phaseRowWidth(row: BuildPhaseRow, style: Style, columns: readonly string[] = GATES): number {
+  return visibleWidth(renderPhaseRows([row], 1, 200, style, columns)[0] ?? "");
 }

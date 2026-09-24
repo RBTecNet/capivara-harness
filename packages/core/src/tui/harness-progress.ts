@@ -83,7 +83,7 @@ export class HarnessProgress {
   private saida = 0;
   private custo: number | null = null;
   private correcoes = 0;
-  private fases: { rows: BuildPhaseRow[]; summary: string; maxRows: number } | null = null;
+  private fases: { rows: BuildPhaseRow[]; summary: string; maxRows: number; columns?: readonly string[] } | null = null;
 
   constructor(options: HarnessProgressOptions) {
     this.options = options;
@@ -187,8 +187,8 @@ export class HarnessProgress {
    * linhas prontas. `maxRows` vem de quem desenha, porque só ele sabe a altura
    * do terminal.
    */
-  setPhases(rows: BuildPhaseRow[], summary: string, maxRows: number): void {
-    this.fases = { rows, summary, maxRows };
+  setPhases(rows: BuildPhaseRow[], summary: string, maxRows: number, columns?: readonly string[]): void {
+    this.fases = { rows, summary, maxRows, ...(columns ? { columns } : {}) };
   }
 
   model(): DashboardModel {

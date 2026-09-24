@@ -27,3 +27,5 @@ export { abrirModal, alturaDoCorpo, dobrar, larguraDoModal, posicao, renderModal
 export type { EntradaDeTeclado, Modal, SaidaDeTela, Tecla, Tela } from "./modal.js";
 export { apresentarConclusao, apresentarParada } from "./apresentacao.js";
 export type { Janela } from "./apresentacao.js";
+export { PLAN_COLUMNS, PlanPhaseTracker } from "./plan-progress.js";
+export { emptyPlanColumns } from "./build-phases.js";

@@ -26,6 +26,8 @@ import { commitSpecification, relatorioDoBuild, runBuild } from "./loop/index.js
 import {
   BACK,
   BuildPhaseTracker,
+  PLAN_COLUMNS,
+  PlanPhaseTracker,
   apresentarConclusao,
   apresentarParada,
   HarnessProgress,
@@ -250,6 +252,22 @@ function estagioInterativo(options: {
     else stdout.write(`${message}\n`);
   };
 
+  /*
+   * A tela de fases do `plan`.
+   *
+   * O `init` desenha o painel sem ela: ele não tem fases ainda, e uma tabela
+   * vazia só ocuparia espaço. O `plan` é o estágio longo — dezenas de chamadas,
+   * minutos calado dentro de cada uma — e era o que não mostrava nada além de
+   * log passando.
+   */
+  const fases = new PlanPhaseTracker();
+  const onPhaseProgress: NonNullable<InitOptions["onPhaseProgress"]> = (evento) => {
+    fases.apply(evento);
+    if (!fases.vazio) progress.setPhases(fases.rows(), fases.summary(), 12, PLAN_COLUMNS);
+    if (evento.kind === "documento") progress.setStage(evento.etapa);
+    repaint();
+  };
+
   const onProgress: NonNullable<InitOptions["onProgress"]> = (evento) => {
     // O nome do produto vem do documento que o nomeia, assim que ele existe.
     if (evento.stage === "publish" && evento.subject === "skeleton") {
@@ -366,6 +384,7 @@ function estagioInterativo(options: {
     hooks: {
       announce,
       onProgress,
+      onPhaseProgress,
       call,
       ask,
       ...(stdin.isTTY === true ? { decideStandoff } : {}),

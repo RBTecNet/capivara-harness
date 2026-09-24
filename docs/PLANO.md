@@ -4047,3 +4047,37 @@ instrução.
 O prompt da fase passa a dizer que a alocação é orçamento, que o harness conta e
 recusa acima do teto, que ele é o único que pode consertar, e qual é a saída:
 task maior, nunca capacidade a menos.
+
+## §53 — O `plan` também mostra as fases
+
+O `build` sempre teve a tela: uma linha por fase, as bolinhas dos gates, o ciclo
+corrente. O `plan` não tinha nada — e ele é o estágio LONGO, dezenas de chamadas,
+minutos calado dentro de cada uma. Quem olhava via log passando e não sabia em
+que fase ele estava, quantas faltavam, nem se a auditoria já tinha começado.
+
+Agora ele desenha a mesma tabela, com **duas colunas em vez de cinco**:
+
+```
+FASES · 6/18 fases · auditoria
+  ✓ P05 Estrutura visual e navegação      E● A●  aprovada
+  ✓ P06 Cadastro de clientes              E● A●  aprovada
+  ● P07 Abertura da ordem de serviço      E● A●  devolvida · 3 finding(s)
+  ● P08 Cálculo dos vencimentos           E● A●  auditando
+  ● P09 Movimentação da ordem             E● A○  escrevendo
+    P11 Anexos da ordem                   E○ A○  aguardando
+```
+
+**E**scrita e **A**uditoria são as duas coisas que acontecem com uma fase antes
+de ela estar pronta. Fase reaproveitada do cache (§51) acende o E verde e diz
+`reaproveitada`: ela ESTÁ escrita, e o que não houve foi a chamada — pintá-la de
+apagado sugeriria que falta fazer algo ali.
+
+As etapas que são do documento inteiro — lacunas, auditoria de coerência, ensaio
+do verificador — não viram linha de fase: entram no resumo, ao lado da contagem.
+
+### 53.1 Um desenho, duas telas
+
+A coluna virou parâmetro de `renderPhaseRows` em vez de nascer um segundo
+desenho. Manter dois renderizadores de linha de fase é manter dois que divergem —
+e o primeiro sintoma seria o `plan` deixando de ganhar a correção que o `build`
+ganhasse.

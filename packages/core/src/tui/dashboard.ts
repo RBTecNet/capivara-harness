@@ -64,7 +64,7 @@ export interface DashboardModel {
    * Substitui o pipeline — as duas caixas respondem à mesma pergunta, cada uma
    * no seu lado do ciclo.
    */
-  phases?: { rows: BuildPhaseRow[]; summary: string; maxRows: number };
+  phases?: { rows: BuildPhaseRow[]; summary: string; maxRows: number; columns?: readonly string[] };
   provider: { perfil: string; transporte: string; contabilidade: string };
   telemetry: Metric[];
   events: DashboardEvent[];
@@ -261,7 +261,7 @@ function dashboardLines(model: DashboardModel, layout: Layout): string[] {
   );
 
   if (model.phases) {
-    const lista = renderPhaseRows(model.phases.rows, layout.phases, width - 2, style);
+    const lista = renderPhaseRows(model.phases.rows, layout.phases, width - 2, style, model.phases.columns);
     lines.push(
       ...box(
         `FASES · ${model.phases.summary}`,

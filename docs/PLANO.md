@@ -4413,3 +4413,55 @@ passava, porque a auditoria acabava removendo o marcador por outro caminho.
 
 A primeira coisa que a mensagem nova fez, ao rodar a suíte, foi denunciar isso.
 Um harness que desiste calado engana até quem o escreveu.
+
+## §60 — O exemplo precisa RODAR
+
+O `assitencia` chegou à fase 4 com todas as anteriores de primeira, e a tela
+disse:
+
+```
+[P04] `npm run migrate` FALHOU (código 1); os gates vão rodar contra um banco
+sem esquema: > gestao-assistencia-tec…
+```
+
+Duas coisas erradas nessa única linha.
+
+### 60.1 A migração não tinha como conectar, e isso era o esperado
+
+O `.env.example` do projeto trazia, corretamente, o que a regra do §46 manda —
+valores inofensivos:
+
+```
+MYSQL_HOST=servidor.exemplo.invalid
+MYSQL_USER=usuario_exemplo
+```
+
+O harness semeia esse exemplo como `.env` (§46.3) e roda a migração declarada
+(§46.5). Contra `servidor.exemplo.invalid`, ela nunca vai conectar — **por
+construção, e ainda bem**: o que a regra proíbe é justamente apontar para um
+servidor de verdade.
+
+Anunciar isso como "FALHOU" em letras garrafais manda procurar um defeito que não
+existe. Agora a falha de conexão contra o ambiente de exemplo é reconhecida e
+dita como é: *"não conectou, e contra este ambiente isso é o esperado… nada a
+corrigir aqui — os gates rodam contra o banco descartável que a própria suíte
+cria"*. A migração que CONECTA e quebra — SQL errado, tabela que falta —
+continua gritando, porque essa é do produto.
+
+### 60.2 A causa não existia em lugar nenhum
+
+A linha terminava em `> gestao-assistencia-tec…`, cortada pela largura do painel,
+e a saída da migração não era gravada em arquivo nenhum. Mensagem que só cabe na
+tela é mensagem que se perde no primeiro caso interessante. Agora ela vai para
+`logs/<fase>.migrate-<ciclo>.log`, como todos os gates.
+
+### 60.3 E a regra que faltava
+
+O `.env.example` é o arquivo que **sobe a aplicação nos testes de fluxo**. Um
+exemplo que não conecta é uma aplicação que não abre, e o gate 4 reprovaria um
+produto correto. A regra transversal do banco ganhou o que faltava dizer:
+
+> copiar o `.env.example` para `.env` tem de deixar a aplicação de pé e utilizável
+> sem mais nenhuma configuração: ele aponta para o banco descartável, nunca para
+> um servidor de mentira. As variáveis do servidor de produção ficam documentadas
+> ali ao lado, comentadas ou claramente opcionais.

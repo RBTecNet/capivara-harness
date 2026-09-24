@@ -348,6 +348,17 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
        */
       const ambiente = await prepararAmbiente(options.projectRoot, options.testRunner ?? defaultTestRunner);
       for (const aviso of ambiente.anuncios) announce(`[${session.id}] ${aviso}`);
+      /*
+       * A saída da migração vai ao disco SEMPRE que ela roda.
+       *
+       * Ela saía só na tela, e a tela corta: no `assitencia` a linha terminou em
+       * "> gestao-assistencia-tec…" e a causa real não existia em lugar nenhum.
+       * Mensagem que só cabe na tela é mensagem que se perde no primeiro caso
+       * interessante.
+       */
+      if (ambiente.saidaDaMigracao !== "") {
+        await writeAtomic(`${paths.logs}/${session.id}.migrate-${cycle}.log`, ambiente.saidaDaMigracao);
+      }
 
       gate("G2", "corrente", cycle);
       const g2 = await gate2(options.projectRoot, testeAgora?.command ?? null, options.testRunner, options.systemInstall === true);

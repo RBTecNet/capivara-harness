@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { MARCA_DO_HARNESS, ambienteEhDescartavel, comandoDeMigracao, prepararAmbiente, semearAmbiente } from "../../src/loop/ambiente.js";
+import { MARCA_DO_HARNESS, ambienteEhDescartavel, comandoDeMigracao, naoConectou, prepararAmbiente, semearAmbiente } from "../../src/loop/ambiente.js";
 import { ehEsquemaAusente, errosDoServidor } from "../../src/loop/flows.js";
 
 let projectRoot = "";
@@ -154,5 +154,60 @@ describe("o esquema, que é a outra metade do ambiente", () => {
     expect(ehEsquemaAusente(['error: relation "clientes" does not exist'])).toBe(true);
     expect(ehEsquemaAusente(["Error: Table 'app.clientes' doesn't exist"])).toBe(true);
     expect(ehEsquemaAusente(["Error: connect ECONNREFUSED"])).toBe(false);
+  });
+});
+
+/*
+ * O `assitencia`, na fase 4: "`npm run migrate` FALHOU (código 1); os gates vão
+ * rodar contra um banco sem esquema" — em letras garrafais, mandando procurar um
+ * defeito que não existia.
+ *
+ * O `.env.example` de um projeto que usa servidor carrega valores INOFENSIVOS
+ * por regra: `MYSQL_HOST=servidor.exemplo.invalid`. Semear esse exemplo e mandar
+ * migrar produz exatamente isso, e é o esperado.
+ */
+describe("migração que não conecta contra o exemplo", () => {
+  const manifesto = async (scripts: Record<string, string>) =>
+    await writeFile(join(projectRoot, "package.json"), JSON.stringify({ name: "app", scripts }), "utf8");
+
+  it("reconhece a falha de conexão em vez de gritar defeito", async () => {
+    expect(naoConectou("getaddrinfo ENOTFOUND servidor.exemplo.invalid")).toBe(true);
+    expect(naoConectou("Error: connect ECONNREFUSED 127.0.0.1:3306")).toBe(true);
+    expect(naoConectou("Access denied for user 'usuario_exemplo'")).toBe(true);
+    expect(naoConectou("SyntaxError: near 'CRATE TABLE'")).toBe(false);
+  });
+
+  it("não alarma, e explica por que não há o que corrigir", async () => {
+    await writeFile(join(projectRoot, ".env.example"), "MYSQL_HOST=servidor.exemplo.invalid\n", "utf8");
+    await manifesto({ migrate: "node migra.js" });
+
+    const preparo = await prepararAmbiente(projectRoot, async () => ({
+      exitCode: 1,
+      output: "getaddrinfo ENOTFOUND servidor.exemplo.invalid",
+    }));
+
+    expect(preparo.migracaoFalhou).toBeNull();
+    expect(preparo.anuncios.join(" ")).toContain("é o esperado");
+    expect(preparo.anuncios.join(" ")).toContain("banco descartável");
+    expect(preparo.anuncios.join(" ")).not.toContain("FALHOU");
+  });
+
+  it("continua gritando quando a migração conecta e quebra — essa é do produto", async () => {
+    await writeFile(join(projectRoot, ".env.example"), "DB_NAME=app.db\n", "utf8");
+    await manifesto({ migrate: "node migra.js" });
+
+    const preparo = await prepararAmbiente(projectRoot, async () => ({ exitCode: 1, output: "SyntaxError: near 'CRATE TABLE'" }));
+    expect(preparo.migracaoFalhou).toContain("CRATE TABLE");
+    expect(preparo.anuncios.join(" ")).toContain("FALHOU");
+  });
+
+  it("devolve a saída inteira para o disco, porque a tela corta", async () => {
+    await writeFile(join(projectRoot, ".env.example"), "DB_NAME=app.db\n", "utf8");
+    await manifesto({ migrate: "node migra.js" });
+
+    const longa = Array.from({ length: 200 }, (_, i) => `linha ${i}`).join("\n");
+    const preparo = await prepararAmbiente(projectRoot, async () => ({ exitCode: 1, output: longa }));
+    expect(preparo.saidaDaMigracao).toBe(longa);
+    expect(preparo.saidaDaMigracao.split("\n")).toHaveLength(200);
   });
 });

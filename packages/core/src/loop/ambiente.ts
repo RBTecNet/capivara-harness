@@ -91,8 +91,27 @@ export async function comandoDeMigracao(projectRoot: string): Promise<string | n
 export interface PreparoDoAmbiente {
   /** O que contar na tela, em ordem. */
   anuncios: string[];
-  /** A migração rodou e falhou; a saída dela, para quem precisar da causa. */
+  /** A migração rodou e falhou de um jeito que importa; a saída dela. */
   migracaoFalhou: string | null;
+  /** A saída inteira da migração, para ir ao disco. Vazio quando ela não rodou. */
+  saidaDaMigracao: string;
+}
+
+/**
+ * A migração não conectou — e isso, contra o ambiente de exemplo, é o esperado.
+ *
+ * O `.env.example` de um projeto que usa servidor carrega valores INOFENSIVOS
+ * por regra: `servidor.exemplo.invalid`, `usuario_exemplo`. Semear esse exemplo e
+ * mandar migrar produz exatamente isto — e anunciar "FALHOU" em letras garrafais
+ * manda procurar um defeito que não existe.
+ *
+ * O que DEVE gritar é a migração que conecta e quebra: SQL errado, tabela que
+ * falta, esquema que não se aplica. Essa é do produto.
+ */
+export function naoConectou(saida: string): boolean {
+  return /ENOTFOUND|ECONNREFUSED|EAI_AGAIN|ETIMEDOUT|getaddrinfo|Access denied|Unknown database|connect ECONN|não foi possível conectar|could not connect/i.test(
+    saida,
+  );
 }
 
 /**
@@ -116,19 +135,29 @@ export async function prepararAmbiente(
   const semeado = await semearAmbiente(projectRoot);
   if (semeado !== null) anuncios.push(semeado);
 
-  if (executar === undefined) return { anuncios, migracaoFalhou: null };
-  if (!(await ambienteEhDescartavel(projectRoot))) return { anuncios, migracaoFalhou: null };
+  const nada = { anuncios, migracaoFalhou: null, saidaDaMigracao: "" };
+  if (executar === undefined) return nada;
+  if (!(await ambienteEhDescartavel(projectRoot))) return nada;
 
   const comando = await comandoDeMigracao(projectRoot);
-  if (comando === null) return { anuncios, migracaoFalhou: null };
+  if (comando === null) return nada;
 
   const resultado = await executar(comando, projectRoot);
   if (resultado.exitCode === 0) {
     anuncios.push(`esquema do banco aplicado com \`${comando}\` no ambiente descartável dos gates`);
-    return { anuncios, migracaoFalhou: null };
+    return { anuncios, migracaoFalhou: null, saidaDaMigracao: resultado.output };
+  }
+
+  if (naoConectou(resultado.output)) {
+    anuncios.push(
+      `\`${comando}\` não conectou, e contra este ambiente isso é o esperado: o ${ARQUIVO_DE_AMBIENTE} é o ` +
+        `${EXEMPLO_DE_AMBIENTE} do projeto, que por regra traz valores de exemplo e não um servidor de verdade. ` +
+        "Nada a corrigir aqui — os gates rodam contra o banco descartável que a própria suíte cria.",
+    );
+    return { anuncios, migracaoFalhou: null, saidaDaMigracao: resultado.output };
   }
 
   const saida = resultado.output.split("\n").slice(-20).join("\n").trim();
   anuncios.push(`\`${comando}\` FALHOU (código ${resultado.exitCode}); os gates vão rodar contra um banco sem esquema:\n${saida}`);
-  return { anuncios, migracaoFalhou: saida };
+  return { anuncios, migracaoFalhou: saida, saidaDaMigracao: resultado.output };
 }

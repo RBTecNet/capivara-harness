@@ -180,6 +180,15 @@ export function regrasDeBanco(decisao: DecisaoDeBanco): SkeletonRule[] {
         "acrescenta a variável ao `.env.example` na mesma fase",
     },
     {
+      subject: "o exemplo precisa RODAR",
+      statement:
+        "copiar o `.env.example` para `.env` tem de deixar a aplicação de pé e utilizável sem mais nenhuma " +
+        "configuração: ele aponta para o banco descartável, nunca para um servidor de mentira. As variáveis do " +
+        "servidor de produção ficam documentadas ali ao lado, comentadas ou claramente opcionais — quem for " +
+        "usar o servidor preenche e descomenta. É esse arquivo que sobe a aplicação para os testes de fluxo, e " +
+        "um exemplo que não conecta é uma aplicação que não abre",
+    },
+    {
       subject: "comando de migração",
       statement:
         "o projeto entrega um comando único de migração que cria o esquema inteiro a partir de um banco " +

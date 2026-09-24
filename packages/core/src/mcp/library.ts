@@ -148,27 +148,70 @@ export function nomeDeInput(documento: McpDocument): string {
 }
 
 /**
- * Os documentos da base, do jeito que o escritor os lê.
+ * Os documentos da base, do jeito que o escritor os lê, separados por NATUREZA.
  *
- * Vão junto do inventário porque são a mesma categoria de coisa: o que já existe
- * e não se discute. Uma memória que diz "português no código" não é sugestão
- * para o escritor avaliar — é decisão tomada antes deste run, e o texto precisa
- * dizer isso, senão o modelo a trata como opinião e às vezes discorda dela.
+ * Eles vão junto do inventário porque são a mesma categoria de coisa: o que já
+ * existe e não se discute. Uma memória que diz "português no código" não é
+ * sugestão para o escritor avaliar — é decisão tomada antes deste run, e o texto
+ * precisa dizer isso, senão o modelo a trata como opinião e às vezes discorda.
+ *
+ * E é justamente por isso que a separação por natureza faltava.
+ *
+ * O bloco era um só, e mandava: *"são decisões já tomadas… cite-os quando
+ * precisar"*. Uma **skill** entrava ali junto com as decisões, e o escritor fez
+ * exatamente o que lhe foi mandado: citou. O esqueleto do `assitencia` saiu com
+ * "o sistema visual segue a base documental frontend-design fornecida", cada
+ * fase copiou a frase para dentro dos critérios, e o ensaio do verificador
+ * declarou o critério IMPOSSÍVEL — porque quem verifica o produto lê o
+ * repositório, e a skill não está nele. O run só passou quando o desenvolvedor
+ * removeu a skill do projeto.
+ *
+ * As duas coisas são diferentes e agora são ditas como tal:
+ *
+ * - uma **decisão** (memória, levantamento, documento) é autoridade sobre O QUE
+ *   o produto faz, e pode ser citada;
+ * - uma **skill** é instrução de COMO construir. Ela é entregue a quem constrói,
+ *   na fase em que serve. Citá-la num documento cria uma referência que ninguém
+ *   consegue conferir depois.
  */
 export function renderLibraryBlock(documents: readonly McpDocument[]): string {
   if (documents.length === 0) return "";
 
-  const linhas = [
-    "## Documentos da base documental",
-    "",
-    "Selecionados para ESTE projeto por quem o cadastrou. São decisões já tomadas:",
-    "não os trate como sugestão, não os contradiga, e não repita o conteúdo deles",
-    "no documento que você escrever — cite-os quando precisar.",
-  ];
+  const skills = documents.filter((documento) => tipoDoDocumento(documento.uri) === "skill");
+  const decisoes = documents.filter((documento) => tipoDoDocumento(documento.uri) !== "skill");
+  const linhas: string[] = [];
 
-  for (const documento of documents) {
-    linhas.push("", `### ${documento.name} (${tipoDoDocumento(documento.uri)})`, "", documento.text.trim());
+  if (decisoes.length > 0) {
+    linhas.push(
+      "## Documentos da base documental",
+      "",
+      "Selecionados para ESTE projeto por quem o cadastrou. São decisões já tomadas:",
+      "não os trate como sugestão, não os contradiga, e não repita o conteúdo deles",
+      "no documento que você escrever — cite-os quando precisar.",
+    );
+    for (const documento of decisoes) {
+      linhas.push("", `### ${documento.name} (${tipoDoDocumento(documento.uri)})`, "", documento.text.trim());
+    }
   }
+
+  if (skills.length > 0) {
+    if (linhas.length > 0) linhas.push("");
+    linhas.push(
+      "## Skills — como construir, não o que construir",
+      "",
+      "Estas NÃO são requisitos e NÃO são fontes de autoridade. Elas dizem como fazer bem",
+      "o que for decidido, e são entregues a quem escreve o código, na fase em que servem.",
+      "",
+      "Aplique o que elas ensinam; NUNCA as cite. Um documento ou critério que diga",
+      "\"conforme a base X\" cria uma referência que ninguém consegue conferir: quem verifica",
+      "o produto lê o repositório, não encontra a base, e reprova um trabalho correto.",
+      "Escreva o que precisa ser VERDADE no código.",
+    );
+    for (const documento of skills) {
+      linhas.push("", `### ${documento.name} (skill)`, "", documento.text.trim());
+    }
+  }
+
   return linhas.join("\n");
 }
 

@@ -3948,7 +3948,32 @@ escritor de fase passam a dizer isso, e a dizer a troca:
 Proibir sem ensinar a troca deixaria o escritor sem saída — que é exatamente o
 defeito do §49.
 
-### 50.2 O parente
+### 50.2 A causa ficou de pé por mais um dia
+
+O §50 consertou o lado de quem ESCREVE: um critério não pode citar documento fora
+do repositório. E o run continuou travando — até o desenvolvedor **remover a
+skill de frontend do projeto**, e o `plan` fechar de primeira em RALPH READY.
+
+O que faltava estava do outro lado, no bloco que entrega o material da base ao
+escritor:
+
+> Selecionados para ESTE projeto por quem o cadastrou. São decisões já tomadas:
+> não os trate como sugestão, não os contradiga… — **cite-os quando precisar**.
+
+Uma skill entrava ali junto das memórias, e o escritor fez exatamente o que lhe
+foi mandado: citou. Duas instruções nossas em lados opostos, e o modelo no meio —
+o mesmo formato do §49, desta vez entre dois prompts em vez de dois eixos.
+
+Agora o bloco separa por natureza:
+
+- **decisão** (memória, levantamento, documento): autoridade sobre O QUE o
+  produto faz, e citável;
+- **skill**: instrução de COMO construir, entregue a quem escreve o código na
+  fase em que serve. *"Aplique o que elas ensinam; NUNCA as cite"*, com o motivo
+  junto — quem verifica lê o repositório, não encontra a base, e reprova um
+  trabalho correto.
+
+### 50.3 O parente
 
 É o mesmo problema do `Design ref`, que já tinha parágrafo próprio: um caminho
 inventado ali é referência morta, o harness procura o arquivo e recusa a fase. A

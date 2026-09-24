@@ -13,7 +13,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createMcpClient, fetchProjectMaterial } from "../../src/mcp/index.js";
+import { createMcpClient, fetchProjectMaterial, renderLibraryBlock } from "../../src/mcp/index.js";
 import { requestFromLibrary, runInit, readRequestState } from "../../src/init/index.js";
 import { runIdFor } from "../../src/state/index.js";
 import { fakeAgent, happyPath } from "../support/fake-agent.js";
@@ -132,5 +132,45 @@ describe("o pedido que veio da base", () => {
     const depoisDeEditar = requestFromLibrary("biblioteca", `${PEDIDO}, agora com busca`);
     expect(depoisDeEditar.sha12).not.toBe(primeiro.sha12);
     expect(runIdFor("init", depoisDeEditar.sha12)).not.toBe(runIdFor("init", primeiro.sha12));
+  });
+});
+
+/*
+ * O `assitencia` só passou quando o desenvolvedor REMOVEU a skill de frontend do
+ * projeto. A causa estava no bloco que entrega o material da base: ele juntava
+ * skills e decisões e mandava "cite-os quando precisar". O escritor citou — "o
+ * sistema visual segue a base documental frontend-design fornecida" — cada fase
+ * copiou a frase para dentro dos critérios, e o ensaio do verificador declarou o
+ * critério impossível, porque quem verifica lê o repositório e a skill não está
+ * nele.
+ */
+describe("skill não é decisão, e o prompt diz isso", () => {
+  const documento = (uri: string, name: string, text: string) => ({ uri, name, text, kind: uri.split("/docs/")[1]?.split("/")[0] ?? "" });
+
+  it("separa skills de decisões em blocos próprios", () => {
+    const bloco = renderLibraryBlock([
+      documento("capivara://app/docs/memoria/estilo", "estilo", "código em português"),
+      documento("capivara://app/docs/skill/frontend-design", "frontend-design", "use espaçamento de 8px"),
+    ]);
+
+    expect(bloco).toContain("## Documentos da base documental");
+    expect(bloco).toContain("## Skills — como construir, não o que construir");
+    expect(bloco.indexOf("estilo")).toBeLessThan(bloco.indexOf("Skills —"));
+  });
+
+  it("proíbe citar a skill, e diz por quê", () => {
+    const bloco = renderLibraryBlock([documento("capivara://app/docs/skill/frontend-design", "frontend-design", "x")]);
+
+    expect(bloco).toContain("NUNCA as cite");
+    expect(bloco).toContain("quem verifica");
+    expect(bloco).toContain("Escreva o que precisa ser VERDADE no código");
+    // E não manda citar coisa nenhuma quando só há skill.
+    expect(bloco).not.toContain("cite-os quando precisar");
+  });
+
+  it("sem skill, o bloco continua o que sempre foi", () => {
+    const bloco = renderLibraryBlock([documento("capivara://app/docs/memoria/estilo", "estilo", "código em português")]);
+    expect(bloco).toContain("cite-os quando precisar");
+    expect(bloco).not.toContain("Skills —");
   });
 });

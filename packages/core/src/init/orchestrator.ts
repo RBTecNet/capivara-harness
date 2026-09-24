@@ -21,7 +21,7 @@ import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
 import { tasksBlock } from "../contract/templates.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, isRepairable, publish, repairDeterministically, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
-import { PERGUNTA_DO_BANCO, buildAnswer, buildCheckpoint, classifyLocally, decisaoDeBanco, isNonAnswer, naoObjetivos, regrasDeBanco, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
+import { buildAnswer, buildCheckpoint, classifyLocally, decisaoDeBanco, isNonAnswer, naoObjetivos, perguntaDoBanco, regrasDeBanco, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Assumption, Question } from "../interview/index.js";
 import { amendPhasePrompt, assessRehearsal, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
 import type { AskedQuestion, CriterionRef, RehearsalResult, WriterContext } from "../prompts/index.js";
@@ -483,7 +483,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * E entra pela mesma fila, para herdar repergunta, classificação e handoff
      * sem um segundo caminho para manter.
      */
-    if (document === "skeleton") questions.push(PERGUNTA_DO_BANCO);
+    if (document === "skeleton") questions.push(perguntaDoBanco(options.request.text));
 
     const retomado = options.fresh === true ? null : await readHandoff(options.projectRoot, runId, document);
     if (retomado && retomado.answers.length > 0) {

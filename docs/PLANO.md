@@ -4219,3 +4219,49 @@ A emenda passa a saber o que o escritor de fase aprendeu no §54: quando um acha
 não fecha porque ninguém decidiu, escreva `[NEEDS DECISION]` DENTRO da task,
 preservando o resto. Com a diferença de que aqui é preciso dizer também o que não
 adianta fazer — porque ele tentou: *"nobody reads a message you write here"*.
+
+## §57 — A pergunta do harness também não pode perguntar o que já foi respondido
+
+O pedido do `assitencia` dizia, com todas as letras:
+
+> Vamos usar banco de dados **mysql remoto** ou seja, não será instalado
+> localmente, para testes o agente deverá usar **SQLite** ou qualquer outra
+> ferramenta disponível
+
+A pergunta de banco (§46) — escrita fixa, sem olhar o pedido — ofereceu
+**"Ainda não existe: o projeto cria o dele, embutido em arquivo"** como opção
+RECOMENDADA. O desenvolvedor respondeu `1`, que é aceitar a recomendação, e a
+decisão gravada passou a contradizer o que ele mesmo tinha escrito.
+
+O esqueleto então saiu com as duas coisas:
+
+```
+- Banco: MySQL remoto                       ← veio do pedido
+- origem do banco: embutido em arquivo…     ← veio da decisão
+```
+
+Dezoito fases foram escritas sobre essa contradição, e ela reapareceu como
+`[NEEDS DECISION]` no meio da quarta tentativa: *"o banco de produção deve ser o
+MySQL remoto definido na pilha ou o banco embutido em arquivo definido nas regras
+transversais?"*. O escritor estava certo em perguntar.
+
+### 57.1 A regra que eu quebrei escrevendo a pergunta
+
+O campo `evidence` de toda pergunta da entrevista existe para uma coisa: *"o que
+já se descobriu sem perguntar — **perguntar o descobrível é proibido**"*. A
+primeira pergunta escrita à mão pelo harness violou a própria regra que o harness
+impõe a todo modelo que levanta perguntas.
+
+### 57.2 O conserto
+
+A pergunta passa a ler o pedido. Quando ele nomeia um servidor — MySQL,
+PostgreSQL, Oracle, SQL Server, Mongo —, mudam duas coisas:
+
+- a **evidência** cita o que já está decidido: *"O pedido já nomeia MySQL. O que
+  ele não diz é de onde esse servidor vem"*;
+- a **recomendação** vira "já existe, eu informo a conexão", com a base dizendo
+  por quê: *"o pedido é a autoridade acima de tudo; responder outra coisa aqui
+  contraria o que você mesmo escreveu"*.
+
+As opções continuam as quatro, e quem decide continua sendo quem responde. O que
+muda é que apertar Enter deixou de ser um jeito de contradizer o próprio pedido.

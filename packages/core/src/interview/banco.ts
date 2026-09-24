@@ -38,7 +38,62 @@ const ROTULOS: Record<string, DecisaoDeBanco> = {
   [SEM_BANCO]: "sem-banco",
 };
 
-export const PERGUNTA_DO_BANCO: Question = {
+/**
+ * Os servidores que um pedido costuma nomear.
+ *
+ * A lista é curta e nomeada de propósito: ela não decide nada, só muda a
+ * EVIDÊNCIA e a RECOMENDAÇÃO da pergunta. Quem decide continua sendo quem
+ * responde.
+ */
+const SERVIDORES: readonly { padrao: RegExp; nome: string }[] = [
+  { padrao: /\bmysql\b|\bmariadb\b/i, nome: "MySQL" },
+  { padrao: /\bpostgres(?:ql)?\b/i, nome: "PostgreSQL" },
+  { padrao: /\boracle\b/i, nome: "Oracle" },
+  { padrao: /\bsql\s*server\b|\bsqlserver\b/i, nome: "SQL Server" },
+  { padrao: /\bmongo(?:db)?\b/i, nome: "MongoDB" },
+];
+
+/** O servidor que o pedido já nomeou, quando nomeou algum. */
+export function bancoNoPedido(request: string): string | null {
+  return SERVIDORES.find((servidor) => servidor.padrao.test(request))?.nome ?? null;
+}
+
+/**
+ * A pergunta, com a evidência e a recomendação lidas do pedido.
+ *
+ * A primeira versão desta pergunta era fixa, e cometeu o erro que o harness
+ * proíbe em toda pergunta de entrevista: perguntar o que já estava respondido.
+ * No `assitencia` o pedido dizia, com todas as letras, "vamos usar banco de
+ * dados mysql remoto ou seja, não será instalado localmente, para testes o
+ * agente deverá usar SQLite" — e a pergunta ofereceu "o projeto cria o dele,
+ * embutido em arquivo" COMO RECOMENDADA. O desenvolvedor respondeu "1", que é
+ * aceitar a recomendação, e a decisão gravada passou a contradizer o pedido.
+ *
+ * O esqueleto saiu com as duas coisas: MySQL na stack, porque o pedido manda, e
+ * banco embutido nas regras transversais, porque a decisão mandava. Dezoito
+ * fases foram escritas sobre essa contradição.
+ */
+export function perguntaDoBanco(request = ""): Question {
+  const servidor = bancoNoPedido(request);
+
+  return {
+    ...PERGUNTA_BASE,
+    ...(servidor === null
+      ? {}
+      : {
+          evidence:
+            `O pedido já nomeia ${servidor}. O que ele não diz é de onde esse servidor vem: se já existe e ` +
+            `você informa a conexão, ou se ele deve ser instalado nesta máquina durante o build.`,
+          recommended: INFORMADO,
+          recommendationBasis:
+            `O pedido escolheu ${servidor}, e o pedido é a autoridade acima de tudo: o que falta é a conexão, ` +
+            `que é sua. Responder outra coisa aqui contraria o que você mesmo escreveu, e o esqueleto sai com ` +
+            `as duas versões brigando.`,
+        }),
+  };
+}
+
+const PERGUNTA_BASE: Question = {
   id: ID_DO_BANCO,
   topic: "Banco de dados",
   evidence:
@@ -49,7 +104,7 @@ export const PERGUNTA_DO_BANCO: Question = {
     "Ela muda o que o projeto entrega e contra o que os testes rodam. Em qualquer resposta, a conexão fica " +
     "no seu .env (nunca versionado), o projeto entrega um .env.example sem credencial e um comando de " +
     "migração que cria o esquema do zero — e os testes do harness rodam sempre contra um banco descartável, " +
-    "nunca contra o seu.",
+    "nunca contra o seu. Se o pedido já disser qual banco usar, a resposta precisa ser a que combina com ele.",
   options: [
     {
       label: EMBUTIDO,
@@ -80,6 +135,9 @@ export const PERGUNTA_DO_BANCO: Question = {
     "Um banco embutido é o único que roda igual na sua máquina, na do colega e no gate — e ele não impede " +
     "trocar por um servidor depois, porque a conexão já vem do .env desde o primeiro dia.",
 };
+
+/** A pergunta sem pedido nenhum: o que os testes e a retomada usam. */
+export const PERGUNTA_DO_BANCO: Question = PERGUNTA_BASE;
 
 export function decisaoDeBanco(questions: readonly Question[], answers: readonly Answer[]): DecisaoDeBanco {
   const pergunta = questions.find((question) => question.id === ID_DO_BANCO || question.id.endsWith(`:${ID_DO_BANCO}`));

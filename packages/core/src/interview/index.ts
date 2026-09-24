@@ -25,5 +25,5 @@ export {
 } from "./rounds.js";
 export type { RoundPlan, RoundState, UnresolvedItem } from "./rounds.js";
 export { HANDOFF_CONTRACT, handoffPath, readHandoff, writeHandoff } from "./handoff.js";
-export { ID_DO_BANCO, PERGUNTA_DO_BANCO, decisaoDeBanco, regrasDeBanco } from "./banco.js";
+export { ID_DO_BANCO, PERGUNTA_DO_BANCO, bancoNoPedido, decisaoDeBanco, perguntaDoBanco, regrasDeBanco } from "./banco.js";
 export type { DecisaoDeBanco } from "./banco.js";

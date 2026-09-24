@@ -85,6 +85,15 @@ function janela(flags: { modal?: boolean }): Janela {
   };
 }
 
+/**
+ * O teto de linhas de fase que o painel recebe.
+ *
+ * É teto de PEDIDO, não de desenho: o painel encolhe até caber na altura do
+ * terminal. Existe só para um plano de cinquenta fases não fazer o laço de
+ * ajuste renderizar cinquenta vezes.
+ */
+const MAX_LINHAS_DE_FASE = 30;
+
 /** Quantas linhas do log a telinha carrega. O resto está no arquivo. */
 const LINHAS_DE_EVIDENCIA = 5_000;
 
@@ -306,7 +315,17 @@ function estagioInterativo(options: {
   const fases = new PlanPhaseTracker();
   const onPhaseProgress: NonNullable<InitOptions["onPhaseProgress"]> = (evento) => {
     fases.apply(evento);
-    if (!fases.vazio) progress.setPhases(fases.rows(), fases.summary(), 12, PLAN_COLUMNS, PLAN_LEGEND, fases.foco);
+    /*
+     * Pede a tabela INTEIRA; quem corta é o painel.
+     *
+     * O teto era 12, fixo, e num plano de 18 fases isso deixava seis de fora
+     * para sempre — com a janela presa no fim durante a auditoria, que roda em
+     * paralelo e não tem "a fase corrente" para seguir. O painel já sabe
+     * encolher linha a linha até caber na altura do terminal, então pedir tudo
+     * mostra tudo em quem tem tela, e o corte continua existindo em quem não
+     * tem.
+     */
+    if (!fases.vazio) progress.setPhases(fases.rows(), fases.summary(), MAX_LINHAS_DE_FASE, PLAN_COLUMNS, PLAN_LEGEND, fases.foco);
     if (evento.kind === "documento") progress.setStage(evento.etapa);
     repaint();
   };
@@ -1156,7 +1175,7 @@ export function createProgram(): Command {
     })();
 
     const desenharBuild = (): string => {
-      painelBuild.setPhases(fases.rows(), fases.summary(), 12);
+      painelBuild.setPhases(fases.rows(), fases.summary(), MAX_LINHAS_DE_FASE);
       return renderDashboard({
         ...painelBuild.model(),
         width: larguraBuild(),

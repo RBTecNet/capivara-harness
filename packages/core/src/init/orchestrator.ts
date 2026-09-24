@@ -161,6 +161,58 @@ function contaTasks(markdown: string): number {
 }
 
 /**
+ * A emenda estragou a fase?
+ *
+ * Devolve a razão da recusa, ou `null` quando a fase emendada serve. Três
+ * perguntas, nesta ordem de gravidade: sobrou alguma task, sobraram TANTAS
+ * quanto antes, e o que sobrou ainda passa no contrato.
+ *
+ * O marcador de decisão pendente é aceito aqui de propósito: ele é a forma legal
+ * de a emenda dizer que falta decidir, e quem o resolve é a rodada de lacunas,
+ * antes de qualquer publicação.
+ */
+function emendaInutil(candidato: string, anterior: string): string | null {
+  if (contaTasks(candidato) === 0) return "voltou sem nenhuma task";
+
+  /*
+   * Fase que encolhe NÃO é defeito.
+   *
+   * A primeira versão desta conferência recusava a emenda que voltasse com menos
+   * tasks do que tinha — e isso briga com a correção de dimensionamento do §52,
+   * que manda consolidar exatamente assim. Duas tasks que entregam a mesma
+   * capacidade viram uma, e a fase encolhe por acerto.
+   *
+   * O que denuncia a fase destruída é a FORMA: a carta do `assitencia` voltou
+   * com uma task sem critério e sem trace, e é isso que se recusa.
+   */
+
+  /*
+   * A comparação é com o que ela substitui, nunca com a perfeição.
+   *
+   * A emenda existe para consertar uma fase que já tem defeito — recusá-la por
+   * carregar o MESMO defeito que a anterior travaria o ciclo justamente quando
+   * ele está fazendo o seu trabalho. O que não se aceita é defeito NOVO.
+   */
+  const novos = defeitosDaFase(candidato).filter((codigo) => !defeitosDaFase(anterior).includes(codigo));
+  return novos.length === 0 ? null : novos.join(", ");
+}
+
+/** Os códigos de contrato de uma fase isolada. I-13 fica de fora: marcador é legal aqui. */
+function defeitosDaFase(fase: string): string[] {
+  if (fase.trim() === "") return [];
+  const lido = parsePhases(
+    assemblePhasesDocument({
+      projectName: "emenda",
+      stamp: buildStamp([{ name: "skeleton.md", content: "" }]),
+      overview: "conferência da emenda",
+      phases: [fase],
+      openQuestions: [],
+    }),
+  );
+  return lido.ok ? [] : [...new Set(lido.errors.filter((erro) => erro.code !== "I-13").map((erro) => erro.code))];
+}
+
+/**
  * O trecho da saída do provider que cabe num diagnóstico.
  *
  * Uma CLI que falha costuma despejar o envelope inteiro da sessão; o que
@@ -1266,10 +1318,32 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
               const limpa = stripDeadDesignRefs(repairDeterministically(saida).content, designExiste);
               for (const conserto of limpa.applied) announce(`    fase ${numero}: ${conserto}`);
-              proximas[numero - 1] = assemblePhase(
-                { number: fase.number, title: fase.title, goal: fase.goal, dependsOn: fase.dependsOn, covers: fase.covers, areas: fase.areas },
-                extractTasks(limpa.content).tasks,
-              ).trim();
+
+              const envelope = { number: fase.number, title: fase.title, goal: fase.goal, dependsOn: fase.dependsOn, covers: fase.covers, areas: fase.areas };
+              const candidato = assemblePhase(envelope, extractTasks(limpa.content).tasks).trim();
+
+              /*
+               * Emenda que destrói a fase não entra no documento.
+               *
+               * No `assitencia` o escritor, sem decisão para fechar um achado,
+               * respondeu com uma CARTA — quatro perguntas de múltipla escolha
+               * para o desenvolvedor, "responda 1A, 2A, 3A, 4A" — e uma única
+               * task sem critério nem trace. Ninguém jamais leria aquela carta:
+               * o que sai da emenda vai direto para o documento. A fase de nove
+               * tasks virou um toco, o contrato reprovou por I-08 e I-09, e as
+               * três rodadas foram gastas assim, em cinco fases ao mesmo tempo.
+               *
+               * O prompt PROMETIA esta conferência — "this is checked
+               * mechanically after you answer" — e ela nunca tinha sido escrita.
+               */
+              const recusa = emendaInutil(candidato, proximas[numero - 1] ?? "");
+              if (recusa === null) {
+                proximas[numero - 1] = candidato;
+                continue;
+              }
+
+              announce(`    fase ${numero}: emenda recusada (${recusa}); mantendo a versão anterior`);
+              await event("authoring", `phase-p${String(numero).padStart(2, "0")}`, "retry", `emenda recusada: ${recusa}`, attempt);
             }
           }),
         );

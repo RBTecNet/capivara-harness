@@ -4162,3 +4162,60 @@ E o resumo dizia `0/18 fases` com doze linhas escritas na frente, o que parece u
 run que não saiu do lugar. O build conta uma coisa só porque lá a fase fecha ou
 não fecha; aqui são duas etapas, e o resumo passa a contar as duas:
 `12 escrita(s) · 0 aprovada(s) de 18`.
+
+## §56 — Ninguém lê uma carta escrita na emenda
+
+O quarto impasse do `assitencia` veio com achados que os outros não tinham: I-08
+e I-09, erros de CONTRATO, em cinco fases ao mesmo tempo — sempre na *task 1*.
+
+O log do escritor explica. Sem decisão para fechar um achado, ele respondeu à
+emenda com **uma carta**:
+
+```
+Para resolver os quatro pontos, escolha uma opção em cada item:
+
+1. Banco de produção:
+   - A — MySQL remoto em produção e SQLite temporário apenas nos testes (recomendado).
+   - B — SQLite em arquivo também em produção.
+…
+Responda, por exemplo: `1A, 2A, 3A, 4A`.
+
+- [ ] **Task:** Implementar a fundação da aplicação e os dados de administração.
+```
+
+Quatro perguntas de múltipla escolha, com recomendação, bem escritas — e **uma
+única task, sem critério e sem trace**, no lugar das nove que existiam.
+
+Ninguém jamais leria aquela carta: o que sai da emenda **substitui a fase no
+documento**. A fase virou um toco, o contrato reprovou, e as três rodadas foram
+gastas assim em cinco fases de uma vez.
+
+### 56.1 A conferência que o prompt prometia e nunca existiu
+
+O `amendPhasePrompt` dizia, desde sempre:
+
+> This is checked mechanically after you answer. A task that changed without a
+> finding naming it sends this back to you.
+
+Não era verdade. O `rewrite` do plano pegava o que voltasse, montava a fase e
+atribuía — sem olhar. Agora ele confere, e **mantém a versão anterior** quando a
+emenda volta pior: zero tasks, ou um defeito de contrato que a versão anterior
+não tinha.
+
+A comparação é com o que ela substitui, nunca com a perfeição: a emenda existe
+para consertar uma fase que já tem defeito, e recusá-la por carregar o MESMO
+defeito travaria o ciclo justamente quando ele está trabalhando.
+
+### 56.2 Encolher não é defeito
+
+A primeira versão desta conferência recusava a emenda que voltasse com menos
+tasks do que tinha — e brigou na hora com o §52, que manda **consolidar**
+exatamente assim. Duas tasks que entregam a mesma capacidade viram uma, e a fase
+encolhe por acerto. O que denuncia a fase destruída é a forma, não o tamanho.
+
+### 56.3 E a saída, de novo
+
+A emenda passa a saber o que o escritor de fase aprendeu no §54: quando um achado
+não fecha porque ninguém decidiu, escreva `[NEEDS DECISION]` DENTRO da task,
+preservando o resto. Com a diferença de que aqui é preciso dizer também o que não
+adianta fazer — porque ele tentou: *"nobody reads a message you write here"*.

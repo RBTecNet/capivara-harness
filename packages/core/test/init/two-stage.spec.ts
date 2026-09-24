@@ -41,6 +41,13 @@ async function init(steps: ScriptStep[], ask?: (typeof comum)["ask"]) {
   return { outcome, agent };
 }
 
+async function planComAnuncio(steps: ScriptStep[]) {
+  const agent = fakeAgent(steps);
+  const dito: string[] = [];
+  const outcome = await runPlan({ projectRoot, request, ...comum, call: agent.call, announce: (linha) => void dito.push(linha) });
+  return { outcome, agent, anunciado: dito.join("\n") };
+}
+
 async function plan(steps: ScriptStep[], ask?: (typeof comum)["ask"]) {
   const agent = fakeAgent(steps);
   const outcome = await runPlan({ projectRoot, request, ...comum, call: agent.call, ...(ask ? { ask } : {}) });
@@ -396,5 +403,58 @@ describe("o plan não repaga o que já escreveu", () => {
     const agent = fakeAgent(skeletonPath());
     await runPlan({ projectRoot, request, ...comum, call: agent.call, fresh: true });
     expect(agent.calls.filter((call) => call.stage === "authoring").length).toBeGreaterThan(0);
+  });
+});
+
+/*
+ * O quarto impasse do `assitencia`. Sem decisão para fechar um achado, o
+ * escritor respondeu à emenda com uma CARTA — quatro perguntas de múltipla
+ * escolha, "responda 1A, 2A, 3A, 4A" — e uma única task sem critério nem trace.
+ *
+ * Ninguém jamais leria aquela carta: o que sai da emenda vai direto para o
+ * documento. A fase virou um toco, o contrato reprovou por I-08 e I-09, e as
+ * três rodadas foram gastas assim, em cinco fases ao mesmo tempo.
+ */
+describe("emenda que destrói a fase não entra no documento", () => {
+  const carta = [
+    "Para resolver os quatro pontos, escolha uma opção em cada item:",
+    "",
+    "1. Banco de produção:",
+    "   - A — MySQL remoto (recomendado).",
+    "   - B — SQLite em arquivo.",
+    "",
+    "Responda, por exemplo: `1A`.",
+    "",
+    "- [ ] **Task:** Implementar a fundação da aplicação.",
+  ].join("\n");
+
+  it("mantém a versão anterior quando a emenda volta sem critério nem trace", async () => {
+    await init(skeletonPath());
+
+    const steps = skeletonPath();
+    // A auditoria devolve uma vez; a emenda responde com a carta.
+    let auditou = 0;
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
+      respond: {
+        stdout: () => {
+          auditou += 1;
+          return auditou === 1
+            ? "CAPIVARA_AUDIT_STATUS: REJECTED\nCAPIVARA_FINDING: Phase 1 | falta dizer o que acontece | decida e escreva\nCAPIVARA_REASON: falta decisão"
+            : "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: ok";
+        },
+      },
+      repeat: true,
+    });
+    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "phase-p01", attempt: 2 }, respond: { stdout: carta } });
+
+    const { outcome, anunciado } = await planComAnuncio(steps);
+
+    expect(anunciado).toContain("emenda recusada");
+    const plano = await readFile(join(projectRoot, ".capivara", "init", "project-phases.md"), "utf8");
+    // A carta não entrou, e a fase 1 continua com as tasks que tinha.
+    expect(plano).not.toContain("Responda, por exemplo");
+    expect(plano).not.toContain("escolha uma opção em cada item");
+    expect(outcome.readiness.ready).toBe(true);
   });
 });

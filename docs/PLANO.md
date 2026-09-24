@@ -3954,3 +3954,46 @@ defeito do §49.
 inventado ali é referência morta, o harness procura o arquivo e recusa a fase. A
 regra existia para o CAMPO e faltava para a PROSA. Correção pela metade de novo,
 e desta vez a metade ausente custou 90 minutos de escritor.
+
+## §51 — O `plan` não repaga o que já escreveu
+
+O `build` nunca refez fase fechada — o ledger existe desde o §33. O `plan`
+refazia tudo, e é ele o estágio caro.
+
+O `assitencia` cobrou a conta duas vezes no mesmo dia: o run morreu no impasse do
+auditor, foi reiniciado do zero, chegou ao fim e morreu no ensaio do verificador.
+Nas duas vezes as 18 fases foram reescritas inteiras — **5.190 segundos de
+escritor por passada** — para produzir o mesmo texto, porque o que estava escrito
+estava certo.
+
+### 51.1 A chave é o prompt, não a saída
+
+Guardar "a fase 5 já foi escrita" seria errado: se o esqueleto mudar, se uma
+decisão nova entrar, ou se NÓS melhorarmos o prompt do escritor, a fase 5 de
+ontem não serve mais.
+
+O sha do **prompt** carrega tudo isso junto — fatia do esqueleto, regras
+transversais, gramática da task, tetos — e muda quando qualquer um deles muda. O
+mesmo vale para a aprovação, cuja chave é o sha do prompt de AUDITORIA: ele
+contém o texto da fase e o que o auditor foi instruído a julgar, então mexer num
+eixo (como no §49) derruba sozinha toda aprovação anterior.
+
+É um cache que se invalida sozinho. Um que dependesse de alguém lembrar de
+limpá-lo mentiria no primeiro dia em que mudássemos um prompt.
+
+### 51.2 Quando ele grava
+
+A cada fase, e não no fim. O valor inteiro está em sobreviver ao run que morre no
+meio, e um cache salvo só no fim morre junto com ele. As fases são escritas em
+paralelo, então as gravações entram numa fila encadeada — duas gravações
+simultâneas do mesmo arquivo perderiam uma.
+
+E há um `await` explícito depois de escrever todas as fases, antes de a auditoria
+começar: é ali que o dinheiro já gasto fica seguro, logo antes da parte que mais
+mata run.
+
+### 51.3 A saída
+
+`capivara plan --fresh` reescreve tudo, para quem quer descartar o que foi
+produzido. O `init` já tinha a flag; o `plan` não — e uma retomada sem porta de
+saída é uma armadilha em vez de uma economia.

@@ -350,3 +350,51 @@ describe("fase sem task é resposta inválida, não resultado", () => {
     await expect(plan(steps)).rejects.toThrow(/sem nenhuma task em duas tentativas/);
   });
 });
+
+/*
+ * A retomada do `plan`.
+ *
+ * No `assitencia` o run morreu duas vezes perto do fim — impasse do auditor e
+ * ensaio do verificador — e nas duas as 18 fases foram reescritas do zero, 5.190
+ * segundos de escritor cada vez, para produzir o mesmo texto.
+ */
+describe("o plan não repaga o que já escreveu", () => {
+  it("reaproveita as fases quando o prompt não mudou, e não chama o escritor", async () => {
+    await init(skeletonPath());
+    const primeira = await plan(skeletonPath());
+    const escritasNaPrimeira = primeira.agent.calls.filter((call) => call.stage === "authoring").length;
+    expect(escritasNaPrimeira).toBeGreaterThan(0);
+
+    const segunda = await plan(skeletonPath());
+    expect(segunda.agent.calls.filter((call) => call.stage === "authoring")).toHaveLength(0);
+    expect(segunda.outcome.readiness.ready).toBe(true);
+  });
+
+  it("anuncia o reaproveitamento: economia calada parece run quebrado", async () => {
+    await init(skeletonPath());
+    await plan(skeletonPath());
+
+    const dito: string[] = [];
+    const agent = fakeAgent(skeletonPath());
+    await runPlan({ projectRoot, request, ...comum, call: agent.call, announce: (linha) => void dito.push(linha) });
+    expect(dito.join("\n")).toContain("reaproveitada de uma execução anterior");
+  });
+
+  it("não reaproveita a auditoria de um prompt de auditoria diferente", async () => {
+    await init(skeletonPath());
+    await plan(skeletonPath());
+
+    // Mesmo com tudo em cache, o plano volta pronto e aprovado.
+    const terceira = await plan(skeletonPath());
+    expect(terceira.outcome.readiness.ready).toBe(true);
+  });
+
+  it("`--fresh` reescreve tudo, como quem pediu esperava", async () => {
+    await init(skeletonPath());
+    await plan(skeletonPath());
+
+    const agent = fakeAgent(skeletonPath());
+    await runPlan({ projectRoot, request, ...comum, call: agent.call, fresh: true });
+    expect(agent.calls.filter((call) => call.stage === "authoring").length).toBeGreaterThan(0);
+  });
+});

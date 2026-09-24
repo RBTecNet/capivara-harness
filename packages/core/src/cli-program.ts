@@ -887,10 +887,11 @@ export function createProgram(): Command {
       .description("Detalha as fases que o init produziu, até RALPH READY")
       .option("--file <caminho>", "lê o pedido de um arquivo; por padrão, o mesmo que o init usou")
       .option("--max-audit-returns <n>", "devoluções do auditor", "3")
+      .option("--fresh", "reescreve todas as fases; ignora o que execuções anteriores já produziram")
       .option("--no-dashboard", "não desenha o painel; só as linhas de progresso")
       .option("--no-commit", "não versiona a especificação ao chegar em RALPH READY"),
     ["writer", "auditor", "verifier"],
-  ).action(async (flags: CommonFlags & { file?: string; maxAuditReturns: string; dashboard?: boolean; commit?: boolean }) => {
+  ).action(async (flags: CommonFlags & { file?: string; maxAuditReturns: string; fresh?: boolean; dashboard?: boolean; commit?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const roles = rolesFromFlags(flags);
     const semProvider = unresolvedRoles(roles, INIT_ROLES);
@@ -962,6 +963,7 @@ export function createProgram(): Command {
         request,
         language,
         maxAuditReturns: Number(flags.maxAuditReturns),
+        ...(flags.fresh === true ? { fresh: true } : {}),
         providers: { writer: roles.writer.provider, auditor: roles.auditor.provider, verifier: roles.verifier.provider },
         ...ui.hooks,
       });

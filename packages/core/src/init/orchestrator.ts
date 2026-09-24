@@ -31,6 +31,7 @@ import { detectRateLimit, planWait } from "../loop/ratelimit.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
 import { decisoesComoMemorias, renderLibraryBlock, type McpDocument, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { INIT_ARTIFACTS, evaluateReadiness } from "./readiness.js";
+import { MemoriaDoPlano } from "./plan-cache.js";
 import { evaluatePlanReadiness, renderPlanReadiness } from "./plan-readiness.js";
 import { readSkeletonState, writeSkeletonState } from "./skeleton-state.js";
 import { writeRequestState } from "./request-state.js";
@@ -373,6 +374,15 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * quando uma fase muda. O que não se repete é o julgamento do que não mudou.
    */
   const fasesAprovadas = new Set<string>();
+
+  /*
+   * O que este run já escreveu e já teve aprovado, guardado em disco.
+   *
+   * O `fasesAprovadas` acima continua existindo e é o mesmo fato dito de outro
+   * jeito — ele evita reauditar DENTRO de uma execução; a memória evita
+   * reescrever e reauditar ENTRE execuções.
+   */
+  const memoria = await MemoriaDoPlano.abrir(options.projectRoot, runId, options.fresh === true);
 
   const allAnswers: Answer[] = [];
   const allQuestions: Question[] = [];
@@ -718,22 +728,43 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       announce(`  ${puladas} fase(s) já aprovada(s) neste run, com o mesmo texto; não vou reauditá-las`);
     }
 
+    /*
+     * O mesmo julgamento não se paga duas vezes, nem dentro nem entre execuções.
+     *
+     * O prompt de auditoria contém a fase, a fatia do esqueleto, as decisões e o
+     * que o auditor foi instruído a julgar. Se o sha dele é o mesmo de uma
+     * aprovação anterior, nada do que decide o veredito mudou — e quando NÓS
+     * mexemos no eixo do auditor, como no §49, o sha muda e toda aprovação velha
+     * cai sozinha.
+     */
+    const promptDaFase = (fase: { number: number; markdown: string }): string =>
+      phaseAuditPrompt({
+        ...base,
+        upstream: fatia(fase.number),
+        phaseMarkdown: fase.markdown,
+        phaseNumber: fase.number,
+        totalPhases: fases.length,
+      });
+
+    const reaproveitadas = aReauditar.filter((fase) => memoria.jaAprovada(promptDaFase(fase)));
+    for (const fase of reaproveitadas) fasesAprovadas.add(sha12(fase.markdown.trim()));
+    if (reaproveitadas.length > 0) {
+      announce(`  ${reaproveitadas.length} fase(s) aprovada(s) numa execução anterior, com a mesma auditoria; não vou repagar`);
+    }
+
     const tarefas: (() => Promise<AuditVerdict>)[] = [
-      ...aReauditar.map((fase) => () =>
-        auditCall(`project-phases.md#P${fase.number}`, attempt, () =>
-          phaseAuditPrompt({
-            ...base,
-            upstream: fatia(fase.number),
-            phaseMarkdown: fase.markdown,
-            phaseNumber: fase.number,
-            totalPhases: fases.length,
+      ...aReauditar
+        .filter((fase) => !fasesAprovadas.has(sha12(fase.markdown.trim())))
+        .map((fase) => () =>
+          auditCall(`project-phases.md#P${fase.number}`, attempt, () => promptDaFase(fase)).then((veredicto) => {
+            // Aprovada é fato do run: o texto exato que passou não volta à fila.
+            if (veredicto.findings.length === 0) {
+              fasesAprovadas.add(sha12(fase.markdown.trim()));
+              memoria.guardarAprovacao(promptDaFase(fase));
+            }
+            return veredicto;
           }),
-        ).then((veredicto) => {
-          // Aprovada é fato do run: o texto exato que passou não volta à fila.
-          if (veredicto.findings.length === 0) fasesAprovadas.add(sha12(fase.markdown.trim()));
-          return veredicto;
-        }),
-      ),
+        ),
       () =>
         auditCall("project-phases.md#coerência", attempt, () =>
           coherencePrompt({
@@ -760,7 +791,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     const findings = veredictos.flatMap((veredicto) => veredicto.findings);
     const remarksDoPlano = veredictos.flatMap((veredicto) => veredicto.remarks);
 
-    announce(`  auditoria em ${aReauditar.length} fase(s) + coerência: ${findings.length} finding(s)`);
+    announce(`  auditoria em ${aReauditar.length - reaproveitadas.length} fase(s) + coerência: ${findings.length} finding(s)`);
 
     return findings.length > 0
       ? { status: "REJECTED", findings, remarks: remarksDoPlano, reason: veredictos.find((v) => v.reason)?.reason ?? "há defeito no plano" }
@@ -982,6 +1013,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         readiness: { ready: planReadiness.ready, checks: planReadiness.checks, contractErrors: [] },
       };
 
+      await memoria.fechar();
       return { runId, readiness: relatorio.readiness, report: relatorio, rendered: renderPlanReadiness(planReadiness) };
     }
 
@@ -1030,6 +1062,29 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
            * Uma segunda tentativa custa uma chamada. Descobrir no gate custa o
            * run.
            */
+          const promptDaFase = phaseFromSlicePrompt({
+            language: options.language,
+            slice: sliceForPhase(esqueleto, fase.number),
+            phaseNumber: fase.number,
+            totalPhases: esqueleto.phases.length,
+            // O molde de uma TASK. O envelope da fase é montado em código, do
+            // esqueleto: pedi-lo ao modelo só criava mais uma coisa a errar.
+            grammar: tasksBlock(fase.number),
+            maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
+          });
+
+          /*
+           * Já escrita por este mesmo prompt? Então ela não mudou, e a chamada
+           * seria paga para receber o que já está em disco.
+           */
+          const guardada = memoria.faseEscrita(promptDaFase);
+          if (guardada !== null) {
+            fases[posicao] = guardada;
+            announce(`  fase ${fase.number} reaproveitada de uma execução anterior`);
+            await event("authoring", marca, "complete", "reaproveitada: o prompt não mudou");
+            continue;
+          }
+
           let tarefas: { tasks: string; applied: string[] } = { tasks: "", applied: [] };
           for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
             const saida = await track({
@@ -1037,16 +1092,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               stage: "authoring",
               subject: `phase-p${String(fase.number).padStart(2, "0")}`,
               attempt: tentativa,
-              prompt: phaseFromSlicePrompt({
-                language: options.language,
-                slice: sliceForPhase(esqueleto, fase.number),
-                phaseNumber: fase.number,
-                totalPhases: esqueleto.phases.length,
-                // O molde de uma TASK. O envelope da fase é montado em código, do
-                // esqueleto: pedi-lo ao modelo só criava mais uma coisa a errar.
-                grammar: tasksBlock(fase.number),
-                maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
-              }),
+              prompt: promptDaFase,
             });
             const semMortas = stripDeadDesignRefs(repairDeterministically(saida).content, designExiste);
             for (const conserto of semMortas.applied) announce(`    fase ${fase.number}: ${conserto}`);
@@ -1073,11 +1119,21 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             { number: fase.number, title: fase.title, goal: fase.goal, dependsOn: fase.dependsOn, covers: fase.covers, areas: fase.areas },
             tarefas.tasks,
           ).trim();
+          memoria.guardarFase(promptDaFase, fases[posicao]!);
           announce(`  fase ${fase.number} pronta`);
           await event("authoring", marca, "complete");
         }
       }),
     );
+
+    /*
+     * As fases vão ao disco ANTES da auditoria.
+     *
+     * É a parte cara e é a que costuma matar o run: se o cache só fosse gravado
+     * no fim, um impasse de auditoria levaria junto as horas de escrita — que foi
+     * exatamente o que aconteceu duas vezes no `assitencia`.
+     */
+    await memoria.fechar();
 
     const documento = assemblePhasesDocument({
       projectName: esqueleto.projectName,
@@ -1960,6 +2016,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }
     }
 
+    await memoria.fechar();
     return { runId, readiness, report, rendered: renderReport(report) };
   }
 }

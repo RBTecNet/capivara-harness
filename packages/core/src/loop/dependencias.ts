@@ -115,6 +115,20 @@ export function descreverDependencias(ausentes: readonly DependenciaAusente[]): 
 export async function faltaORunnerDeFluxos(projectRoot: string, esqueleto: string): Promise<boolean> {
   // Sem fluxo declarado, o gate 4 não roda e o runner não faz falta.
   if (!/^###\s+workflow\s+/m.test(esqueleto)) return false;
+  return await faltaOPacoteDoRunner(projectRoot);
+}
+
+/**
+ * O pacote em si, sem perguntar se há fluxo declarado.
+ *
+ * Quem já sabe que a fase tem fluxo — o runner de fase, por exemplo — não deve
+ * ter de recitar o esqueleto para descobrir a mesma coisa.
+ *
+ * `@playwright/test` é o RUNNER; `playwright` é a biblioteca. Ter a segunda não
+ * satisfaz o primeiro, e no `assitencia` o projeto tinha exatamente `playwright`
+ * quando o gate pediu o outro.
+ */
+export async function faltaOPacoteDoRunner(projectRoot: string): Promise<boolean> {
   return !(await existe(join(projectRoot, "node_modules", "@playwright", "test")));
 }
 

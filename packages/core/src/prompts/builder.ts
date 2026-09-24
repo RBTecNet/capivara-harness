@@ -25,6 +25,15 @@ export interface BuilderContext {
   skills?: string;
   /** Onde anotar o que aprendeu. Ausente desliga o pedido. */
   memoriasDir?: string;
+  /**
+   * Esta fase será percorrida no navegador, e o runner ainda não existe.
+   *
+   * O harness sabe disso no preflight e sabia de novo ao montar a fase — e
+   * contava só depois, quando o gate 4 reprovava. No `assitencia` a P04 gastou um
+   * ciclo inteiro assim: meia hora de sessão para descobrir uma ausência que já
+   * estava anotada antes da primeira chamada.
+   */
+  runnerDeFluxosAusente?: boolean;
 }
 
 export interface FixContext extends BuilderContext {
@@ -164,6 +173,18 @@ export function implementPrompt(context: BuilderContext): string {
     "You may install dependencies and download scaffolding with the project's package manager.",
     "Prefer the ecosystem's standard tooling and pin versions the way this project already does.",
     "Never add a new stack, framework or tool that the documentation does not call for.",
+    ...(context.runnerDeFluxosAusente
+      ? [
+          "",
+          "This phase declares user flows, and after you finish they are walked through the running",
+          "application with `@playwright/test` — which is NOT installed in this project yet. Install it as",
+          "a dev dependency while you are here, and make sure the browser is available",
+          "(`npx playwright install chromium`). It is not part of the phase's work and no criterion asks",
+          "for it; it is the tooling that proves the phase, and installing it now saves a whole cycle.",
+          "The package is `@playwright/test`, the test runner — not `playwright`, the library. Having the",
+          "second one does not satisfy the first.",
+        ]
+      : []),
     "",
     "## Your task now",
     "Implement the phase below COMPLETELY.",

@@ -4465,3 +4465,34 @@ produto correto. A regra transversal do banco ganhou o que faltava dizer:
 > sem mais nenhuma configuração: ele aponta para o banco descartável, nunca para
 > um servidor de mentira. As variáveis do servidor de produção ficam documentadas
 > ali ao lado, comentadas ou claramente opcionais.
+
+## §61 — O que o harness já sabe, ele diz antes
+
+A P04 do `assitencia` devolveu assim:
+
+```
+gate 4 — fluxos na aplicação: o runner de fluxos não está instalado:
+o gate 4 abre a aplicação com @playwright/test.
+```
+
+Está correto, o executor instala no ciclo seguinte, e a fase fecha. Mas o custo é
+**um ciclo inteiro** — meia hora de sessão — para descobrir uma ausência que o
+preflight já tinha anotado **antes da primeira chamada do build**, e que o
+harness sabia de novo ao montar aquela fase, que é a primeira a declarar fluxo.
+
+O preflight avisava o DESENVOLVEDOR e calava para quem ia trabalhar. Agora a
+sessão da fase que declara fluxo recebe, junto das instruções de dependência:
+
+> This phase declares user flows, and after you finish they are walked through
+> the running application with `@playwright/test` — which is NOT installed in
+> this project yet. […] installing it now saves a whole cycle.
+
+Só na fase que tem fluxo, e só quando o pacote falta: aviso que não muda nada é
+ruído, e ruído num prompt compete com o que importa.
+
+### 61.1 `playwright` não é `@playwright/test`
+
+O projeto tinha `playwright` nas devDependencies — a biblioteca — e o gate pedia
+`@playwright/test`, o runner. São pacotes diferentes, e ter o primeiro não
+satisfaz o segundo. O aviso diz isso com todas as letras, porque é o erro natural
+de quem lê a mensagem correndo.

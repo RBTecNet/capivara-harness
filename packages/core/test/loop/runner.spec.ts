@@ -367,3 +367,52 @@ describe("cada estágio versiona o que ele produziu", () => {
     }
   });
 });
+
+/*
+ * A P04 do `assitencia` gastou meia hora de sessão para descobrir que o
+ * `@playwright/test` não estava instalado — uma ausência que o preflight já
+ * tinha anotado antes da primeira chamada, e que o harness só contava quando o
+ * gate 4 reprovava.
+ */
+describe("o runner de fluxos é dito antes, não depois", () => {
+  const fluxo = { number: "1", name: "Cadastro", steps: ["abre", "salva"] };
+
+  async function comFluxos(instalado: boolean) {
+    if (instalado) {
+      await mkdir(join(projectRoot, "node_modules", "@playwright", "test"), { recursive: true });
+    }
+    const chamadas: EngineCall[] = [];
+    await runPhase({
+      projectRoot,
+      runId: RUN,
+      language: "pt-BR",
+      engine: "codex",
+      session: session(),
+      testCommand: null,
+      commitsEnabled: false,
+      maxCycles: 1,
+      sleep: async () => undefined,
+      flows: { workflows: [fluxo], resolveStart: async () => null, runner: async () => ({ exitCode: 0, output: "" }) },
+      call: async (call) => {
+        chamadas.push(call);
+        return ok(call.role === "verifier" ? "CAPIVARA_VERIFY: 1.1 | DONE | pronto" : "feito");
+      },
+      testRunner: async () => ({ exitCode: 0, output: "" }),
+    });
+    return chamadas;
+  }
+
+  it("avisa na primeira sessão da fase que declara fluxo", async () => {
+    const chamadas = await comFluxos(false);
+    const implementacao = chamadas.find((chamada) => chamada.role === "builder");
+    expect(implementacao?.prompt).toContain("@playwright/test");
+    expect(implementacao?.prompt).toContain("saves a whole cycle");
+    // E diz qual pacote é: ter `playwright` não satisfaz `@playwright/test`.
+    expect(implementacao?.prompt).toContain("not `playwright`, the library");
+  });
+
+  it("não avisa quando o runner já está lá — aviso inútil é ruído", async () => {
+    const chamadas = await comFluxos(true);
+    expect(chamadas.find((chamada) => chamada.role === "builder")?.prompt).not.toContain("saves a whole cycle");
+  });
+});

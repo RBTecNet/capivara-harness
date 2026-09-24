@@ -45,7 +45,7 @@ export { procurarTestesNomeados } from "./feature-tests.js";
 export type { FeatureTestSearch } from "./feature-tests.js";
 export { lerFasesFechadas, registrarFaseFechada, shaDaFase } from "./ledger.js";
 export type { FaseFechada } from "./ledger.js";
-export { AVISO_DO_RUNNER, dependenciasAusentes, descreverDependencias, faltaORunnerDeFluxos } from "./dependencias.js";
+export { AVISO_DO_RUNNER, dependenciasAusentes, descreverDependencias, faltaOPacoteDoRunner, faltaORunnerDeFluxos } from "./dependencias.js";
 export type { DependenciaAusente } from "./dependencias.js";
 export { ehEsquemaAusente, errosDoServidor, portaLivre } from "./flows.js";
 export { relatorioDoBuild } from "./parada.js";

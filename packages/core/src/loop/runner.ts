@@ -20,6 +20,7 @@ import { detectRateLimit, planWait } from "./ratelimit.js";
 import { gate4, type FlowRunner } from "./flows.js";
 import { procurarTestesNomeados } from "./feature-tests.js";
 import { prepararAmbiente } from "./ambiente.js";
+import { faltaOPacoteDoRunner } from "./dependencias.js";
 import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { featureTestNames } from "../contract/index.js";
 import type { SkeletonWorkflow } from "../contract/index.js";
@@ -183,11 +184,23 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     // enquanto a sessão trabalha, e é o que a tela precisa mostrar por minutos.
     gate("G0", "corrente", cycle);
 
+    /*
+     * O runner de fluxos, dito ANTES de a sessão começar.
+     *
+     * O harness já sabia no preflight, e contava de novo só quando o gate 4
+     * reprovava — meia hora de sessão para descobrir uma ausência anotada antes
+     * da primeira chamada. Só é dito na fase que tem fluxo: avisar quem não vai
+     * ser percorrido no navegador é ruído.
+     */
+    const precisaDoRunner =
+      cycle === 1 && (options.flows?.workflows.length ?? 0) > 0 && (await faltaOPacoteDoRunner(options.projectRoot));
+
     const context = {
       language: options.language,
       testCommand: options.testCommand?.command ?? null,
       containerized: options.testCommand?.containerized ?? false,
       phaseMarkdown: session.markdown,
+      ...(precisaDoRunner ? { runnerDeFluxosAusente: true } : {}),
       ...(options.skills !== undefined && options.skills !== "" ? { skills: options.skills } : {}),
       ...(options.onMemorias ? { memoriasDir: MEMORIAS_DIR } : {}),
     };

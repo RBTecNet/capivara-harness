@@ -8,7 +8,7 @@
 import { Readable } from "node:stream";
 import { createInterface } from "node:readline/promises";
 import { describe, expect, it } from "vitest";
-import { createLineIO, filtrarModelos, runWizard, runWizardDePapeis } from "../../src/commands/wizard.js";
+import { createLineIO, filtrarModelos, runWizard, runWizardDePapeis, runWizardDoPedido } from "../../src/commands/wizard.js";
 import { readChoice, renderChoices, renderCommand, toArgv } from "../../src/tui/index.js";
 
 function roteiro(respostas: string[]) {
@@ -611,5 +611,34 @@ describe("o wizard curto, quando faltou só o modelo", () => {
 
     expect(roteiroCurto.tela()).toContain("verificador independente");
     expect(roteiroCurto.tela()).not.toContain("executor do loop");
+  });
+});
+
+/*
+ * `capivara init --fresh --provider codex` — comando completo menos uma coisa:
+ * o que construir. A resposta era um EmptyRequestError com stack trace, depois
+ * de o wizard curto já ter perguntado os papéis. Parece defeito do harness, e
+ * não pergunta nada a quem está ali para responder.
+ */
+describe("o wizard curto do pedido", () => {
+  it("pergunta de onde vem o pedido, sem repetir estágio nem pasta", async () => {
+    const roteiroCurto = roteiro(["1", "uma agenda de consultas", "."]);
+    const pedido = await runWizardDoPedido({ ...roteiroCurto.deps, comando: "init" });
+
+    expect(roteiroCurto.tela()).toContain("falta dizer o que construir");
+    expect(roteiroCurto.tela()).not.toContain("O que você quer fazer?");
+    expect(roteiroCurto.tela()).toContain("De onde vem o pedido?");
+    expect(pedido?.request).toContain("uma agenda de consultas");
+  });
+
+  it("aceita o arquivo, conferindo que ele existe", async () => {
+    const roteiroCurto = roteiro(["2", "pedido.md"]);
+    const pedido = await runWizardDoPedido({ ...roteiroCurto.deps, comando: "init" });
+    expect(pedido?.requestFile).toBe("pedido.md");
+  });
+
+  it("pedido vazio não vira comando: devolve nulo", async () => {
+    const roteiroCurto = roteiro(["1", "."]);
+    expect(await runWizardDoPedido({ ...roteiroCurto.deps, comando: "init" })).toBeNull();
   });
 });

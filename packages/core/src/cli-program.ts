@@ -45,7 +45,7 @@ import {
 } from "./tui/index.js";
 import type { EntradaDeTeclado, Janela, Parada, SaidaDeTela } from "./tui/index.js";
 import { paradaDeProntidao, paradaDoEstagio, type Estagio } from "./commands/paradas.js";
-import { runWizard, runWizardDePapeis } from "./commands/wizard.js";
+import { runWizard, runWizardDePapeis, runWizardDoPedido } from "./commands/wizard.js";
 import { InputEndedError, createLineIO } from "./commands/line-io.js";
 import { listarEfforts, listarModelos } from "./provider/index.js";
 import type { RoleName } from "./provider/index.js";
@@ -151,6 +151,36 @@ async function completarPapeis<T extends CliRoleFlags>(comando: string, faltando
       if (escolhido?.model) completo[`${papel}Model`] = escolhido.model;
     }
     return completo as T;
+  } finally {
+    terminal.close();
+  }
+}
+
+/**
+ * O pedido, perguntado quando ele não veio.
+ *
+ * `capivara init --fresh --provider codex` é um comando completo menos uma
+ * coisa: o que construir. A resposta era um `EmptyRequestError` com stack trace
+ * — o pior desfecho possível, porque parece defeito do harness e não pergunta
+ * nada. Agora ele pergunta, com as mesmas origens do wizard.
+ */
+async function completarPedido(comando: string): Promise<{ prompt?: string; file?: string } | null> {
+  if (stdin.isTTY !== true) return null;
+
+  const terminal = createInterface({ input: stdin, output: stdout });
+  try {
+    const escolhido = await runWizardDoPedido({
+      io: createLineIO(terminal, (texto) => void stdout.write(texto)),
+      cwd: process.cwd(),
+      comando,
+      fileExists: (path) => stat(path).then((info) => info.isFile()).catch(() => false),
+      directoryExists: (path) => stat(path).then((info) => info.isDirectory()).catch(() => false),
+    });
+    if (escolhido === null) return null;
+    return {
+      ...(escolhido.request !== undefined ? { prompt: escolhido.request } : {}),
+      ...(escolhido.requestFile !== undefined ? { file: escolhido.requestFile } : {}),
+    };
   } finally {
     terminal.close();
   }
@@ -631,16 +661,30 @@ export function createProgram(): Command {
       return;
     }
 
+    let deOndeVem: { prompt?: string; file?: string } = {
+      ...(pedido !== undefined ? { prompt: pedido } : {}),
+      ...(flags.file !== undefined ? { file: flags.file } : {}),
+    };
+    if (!guardado && deOndeVem.prompt === undefined && deOndeVem.file === undefined) {
+      const perguntado = await completarPedido("change");
+      if (perguntado !== null) deOndeVem = perguntado;
+    }
+
     let request: { text: string };
     try {
-      request = guardado
-        ? { text: guardado.texto }
-        : await resolveRequest(projectRoot, {
-            ...(pedido !== undefined ? { prompt: pedido } : {}),
-            ...(flags.file !== undefined ? { file: flags.file } : {}),
-          });
+      request = guardado ? { text: guardado.texto } : await resolveRequest(projectRoot, deOndeVem);
     } catch (error) {
-      stdout.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      await mostrarParada(
+        {
+          natureza: "decisão",
+          oQue: error instanceof Error ? error.message : String(error),
+          deQuem: "de ninguém: falta dizer o que mudar",
+          custou: "nenhuma sessão gasta — o change nem começou",
+          paraSeguir: ["passe o pedido: `capivara change \"o que mudar\"`, `capivara change @mudanca.md` ou `--file <arquivo>`"],
+        },
+        projectRoot,
+        flags,
+      );
       process.exitCode = 2;
       return;
     }
@@ -892,14 +936,47 @@ export function createProgram(): Command {
       return;
     }
 
-    const request = material
-      ? requestFromLibrary(flags.mcpProject!, material.request, flags.mcp)
-      : guardado
-        ? requestFromPrompt(guardado.nome, guardado.texto, flags.mcp)
-        : await resolveRequest(projectRoot, {
-            ...(pedido !== undefined ? { prompt: pedido } : {}),
-            ...(flags.file !== undefined ? { file: flags.file } : {}),
-          });
+    /*
+     * Sem pedido, pergunta — em vez de estourar.
+     *
+     * `capivara init --fresh --provider codex` é um comando completo menos uma
+     * coisa, e a resposta era um EmptyRequestError com stack trace: parece
+     * defeito do harness, e não pergunta nada a quem está ali para responder.
+     */
+    let deOndeVem: { prompt?: string; file?: string } = {
+      ...(pedido !== undefined ? { prompt: pedido } : {}),
+      ...(flags.file !== undefined ? { file: flags.file } : {}),
+    };
+    if (!material && !guardado && deOndeVem.prompt === undefined && deOndeVem.file === undefined) {
+      const perguntado = await completarPedido("init");
+      if (perguntado !== null) deOndeVem = perguntado;
+    }
+
+    let request: { text: string; origin: "text" | "file" | "mcp"; path: string | null; sha12: string };
+    try {
+      request = material
+        ? requestFromLibrary(flags.mcpProject!, material.request, flags.mcp)
+        : guardado
+          ? requestFromPrompt(guardado.nome, guardado.texto, flags.mcp)
+          : await resolveRequest(projectRoot, deOndeVem);
+    } catch (erro) {
+      await mostrarParada(
+        {
+          natureza: "decisão",
+          oQue: erro instanceof Error ? erro.message : String(erro),
+          deQuem: "de ninguém: falta dizer o que construir",
+          custou: "nenhuma sessão gasta — o init nem começou",
+          paraSeguir: [
+            "passe o pedido no comando: `capivara init \"o que construir\"`, `capivara init @pedido.md` ou `--file <arquivo>`",
+            "ou rode `capivara` sem argumento nenhum e responda pelo wizard",
+          ],
+        },
+        projectRoot,
+        flags,
+      );
+      process.exitCode = 2;
+      return;
+    }
     const language = detectLanguage(request.text, flags.language);
     const roles = configured;
 

@@ -4299,13 +4299,30 @@ argumento continua valendo. Vale para os cinco comandos — `init`, `plan`,
 comando usa: um `build` sem provider pergunta por executor e verificador, nunca
 pelo escritor.
 
-### 58.1 Sem terminal, nada muda
+### 58.1 E o pedido também
+
+`capivara init --fresh --provider codex` é um comando completo menos uma coisa: o
+que construir. O harness perguntava os papéis, seguia em frente, e morria assim:
+
+```
+EmptyRequestError: nenhum pedido informado.
+    at resolveRequest (dist/cli.js:6511:25)
+    at _Command.<anonymous> (dist/cli.js:14952:179)
+```
+
+Stack trace é o pior desfecho possível: parece defeito do harness, não diz o que
+fazer, e não pergunta nada a quem está ali para responder. Agora o pedido entra
+na mesma regra dos papéis — é perguntado quando falta, com as mesmas origens do
+wizard — e, sem terminal, sai no formato de parada do §45, dizendo as três formas
+de passá-lo.
+
+### 58.2 Sem terminal, nada muda
 
 CI, pipe, `ssh` sem tty: a mensagem completa sai como antes e o código de saída é
 o mesmo. Um comando que abre pergunta dentro de um CI é um comando que trava o
 CI — e a ergonomia de quem está no terminal não pode custar isso.
 
-### 58.2 Um caminho, não dois
+### 58.3 Um caminho, não dois
 
 As perguntas de provider, modelo, effort e papéis saíram do corpo do wizard para
 uma função própria, chamada pelos dois lados. Reimplementá-las no atalho seria

@@ -415,6 +415,83 @@ async function escolherDaBase(
   }
 }
 
+export interface PedidoDoWizard {
+  request?: string;
+  requestFile?: string;
+  mcpUrl?: string;
+  mcpProject?: string;
+}
+
+/** O arquivo do pedido, conferido antes de virar flag. */
+async function arquivoDoPedido(deps: WizardDeps, io: WizardIO, projectRoot: string): Promise<string> {
+  for (;;) {
+    const caminho = await text(io, "Caminho do arquivo: ");
+    if (caminho === "") {
+      io.write("O caminho não pode ficar vazio.\n");
+      continue;
+    }
+    if (!(await deps.fileExists(caminho.startsWith("/") ? caminho : `${projectRoot}/${caminho}`))) {
+      io.write(`Não encontrei ${caminho} dentro de ${projectRoot}.\n`);
+      continue;
+    }
+    return caminho;
+  }
+}
+
+/**
+ * De onde vem o pedido — a pergunta, sozinha.
+ *
+ * Mesma razão da extração dos papéis: quem digitou `capivara init --fresh` já
+ * disse o estágio e a pasta, e esqueceu só o pedido. Mandá-lo ao começo do
+ * wizard é fazê-lo repetir o que já disse.
+ */
+async function perguntarPedido(deps: WizardDeps, projectRoot: string): Promise<PedidoDoWizard | null> {
+  const { io } = deps;
+  const escolhido_: PedidoDoWizard = {};
+    /*
+     * As origens são mapeadas por CHAVE, nunca por posição.
+     *
+     * Duas delas são condicionais — projeto da base e prompt guardado —, então a
+     * posição de cada uma muda conforme o que está disponível. Um `fonte === 3`
+     * escrito à mão acerta numa configuração e erra na outra, e o erro é mudo:
+     * escolhe a origem errada em vez de falhar.
+     */
+    const origens: { chave: "texto" | "arquivo" | "projeto" | "prompt"; opcao: Choice }[] = [
+      { chave: "texto", opcao: { label: "escrever agora", hint: "cole ou digite; várias linhas" } },
+      { chave: "arquivo", opcao: { label: "ler de um arquivo", hint: "um .md ou .txt já escrito" } },
+      ...(deps.listMcpProjects
+        ? ([{ chave: "projeto", opcao: { label: "projeto da base documental (MCP)", hint: "o pedido e as memórias já cadastrados de um projeto" } }] as const)
+        : []),
+      ...(deps.listMcpPrompts && deps.readMcpPrompt
+        ? ([{ chave: "prompt", opcao: { label: "prompt guardado na base", hint: "escolhe pelo nome entre os prompts já salvos" } }] as const)
+        : []),
+    ];
+
+    const escolha = origens[await choose(io, "De onde vem o pedido?", origens.map((origem) => origem.opcao), 0)]?.chave ?? "texto";
+
+    if (escolha === "prompt") {
+      const escolhido = await escolherPrompt(deps, io);
+      if (escolhido === null) return null;
+      escolhido_.request = escolhido.texto;
+      io.write(`\nprompt "${escolhido.nome}" carregado: ${escolhido.texto.split("\n")[0]?.slice(0, 70) ?? ""}…\n`);
+    } else if (escolha === "projeto") {
+      const escolhido = await escolherDaBase(deps, projectRoot);
+      if (escolhido === null) return null;
+      escolhido_.mcpUrl = escolhido.url;
+      escolhido_.mcpProject = escolhido.projeto;
+    } else if (escolha === "arquivo") {
+      escolhido_.requestFile = await arquivoDoPedido(deps, io, projectRoot);
+    } else {
+      const pedido = await multiline(io, "O que você quer construir?");
+      if (pedido === "") {
+        io.write("Sem pedido não há o que documentar.\n");
+        return null;
+      }
+      escolhido_.request = pedido;
+    }
+  return escolhido_;
+}
+
 export interface EscolhaDePapeis {
   global: { provider?: string; model?: string; effort?: string };
   roles: Partial<Record<RoleName, { provider?: string; model?: string }>>;
@@ -507,6 +584,18 @@ async function perguntarPapeis(deps: WizardDeps, usados: readonly RoleName[]): P
  * Faltou dizer com que modelo — e recusar o comando inteiro por isso manda a
  * pessoa reescrever tudo. Aqui ela responde só o que falta e o comando segue.
  */
+/** O wizard curto do pedido: quem esqueceu só ele. */
+export async function runWizardDoPedido(deps: WizardDeps & { comando: string }): Promise<PedidoDoWizard | null> {
+  deps.io.write(`\ncapivara ${deps.comando}: falta dizer o que construir.\n`);
+  deps.io.write("O resto do comando está mantido; responda só isto.\n");
+  try {
+    return await perguntarPedido(deps, deps.cwd);
+  } catch (error) {
+    if (error instanceof InputEnded) return null;
+    throw error;
+  }
+}
+
 export async function runWizardDePapeis(
   deps: WizardDeps & { comando: string; faltando: readonly RoleName[] },
 ): Promise<EscolhaDePapeis | null> {
@@ -562,21 +651,6 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
   const answers: WizardAnswers = { command, global: {}, roles: {} };
   if (projectRoot !== deps.cwd) answers.projectRoot = projectRoot;
 
-  const arquivoDoPedido = async (): Promise<string> => {
-    for (;;) {
-      const caminho = await text(io, "Caminho do arquivo: ");
-      if (caminho === "") {
-        io.write("O caminho não pode ficar vazio.\n");
-        continue;
-      }
-      if (!(await deps.fileExists(caminho.startsWith("/") ? caminho : `${projectRoot}/${caminho}`))) {
-        io.write(`Não encontrei ${caminho} dentro de ${projectRoot}.\n`);
-        continue;
-      }
-      return caminho;
-    }
-  };
-
   /*
    * O `plan` normalmente não pergunta nada: o `init` registrou qual pedido
    * usou, e é por ele que o esqueleto é reencontrado. A pergunta só aparece em
@@ -585,7 +659,7 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
    */
   if (command === "plan" && !(await (deps.requestRecorded ?? (async () => true))(projectRoot).catch(() => true))) {
     io.write("\nEste projeto não registra qual pedido o init usou — aponte o mesmo arquivo de novo.\n");
-    answers.requestFile = await arquivoDoPedido();
+    answers.requestFile = await arquivoDoPedido(deps, io, projectRoot);
   }
 
   if (command === "change") {
@@ -611,7 +685,7 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
       answers.request = escolhido.texto;
       io.write(`\nprompt "${escolhido.nome}" carregado: ${escolhido.texto.split("\n")[0]?.slice(0, 70) ?? ""}…\n`);
     } else if (fonte === 1) {
-      answers.requestFile = await arquivoDoPedido();
+      answers.requestFile = await arquivoDoPedido(deps, io, projectRoot);
     } else {
       const pedido = await multiline(io, "O que você quer mudar?");
       if (pedido === "") {
@@ -664,47 +738,9 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
   }
 
   if (command === "init") {
-    /*
-     * As origens são mapeadas por CHAVE, nunca por posição.
-     *
-     * Duas delas são condicionais — projeto da base e prompt guardado —, então a
-     * posição de cada uma muda conforme o que está disponível. Um `fonte === 3`
-     * escrito à mão acerta numa configuração e erra na outra, e o erro é mudo:
-     * escolhe a origem errada em vez de falhar.
-     */
-    const origens: { chave: "texto" | "arquivo" | "projeto" | "prompt"; opcao: Choice }[] = [
-      { chave: "texto", opcao: { label: "escrever agora", hint: "cole ou digite; várias linhas" } },
-      { chave: "arquivo", opcao: { label: "ler de um arquivo", hint: "um .md ou .txt já escrito" } },
-      ...(deps.listMcpProjects
-        ? ([{ chave: "projeto", opcao: { label: "projeto da base documental (MCP)", hint: "o pedido e as memórias já cadastrados de um projeto" } }] as const)
-        : []),
-      ...(deps.listMcpPrompts && deps.readMcpPrompt
-        ? ([{ chave: "prompt", opcao: { label: "prompt guardado na base", hint: "escolhe pelo nome entre os prompts já salvos" } }] as const)
-        : []),
-    ];
-
-    const escolha = origens[await choose(io, "De onde vem o pedido?", origens.map((origem) => origem.opcao), 0)]?.chave ?? "texto";
-
-    if (escolha === "prompt") {
-      const escolhido = await escolherPrompt(deps, io);
-      if (escolhido === null) return null;
-      answers.request = escolhido.texto;
-      io.write(`\nprompt "${escolhido.nome}" carregado: ${escolhido.texto.split("\n")[0]?.slice(0, 70) ?? ""}…\n`);
-    } else if (escolha === "projeto") {
-      const escolhido = await escolherDaBase(deps, projectRoot);
-      if (escolhido === null) return null;
-      answers.mcpUrl = escolhido.url;
-      answers.mcpProject = escolhido.projeto;
-    } else if (escolha === "arquivo") {
-      answers.requestFile = await arquivoDoPedido();
-    } else {
-      const pedido = await multiline(io, "O que você quer construir?");
-      if (pedido === "") {
-        io.write("Sem pedido não há o que documentar.\n");
-        return null;
-      }
-      answers.request = pedido;
-    }
+    const pedido = await perguntarPedido(deps, projectRoot);
+    if (pedido === null) return null;
+    Object.assign(answers, pedido);
   }
 
   // Papéis: só os que ESTE comando chama. Perguntar pelo executor num init é

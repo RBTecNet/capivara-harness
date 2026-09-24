@@ -4324,10 +4324,17 @@ CI — e a ergonomia de quem está no terminal não pode custar isso.
 
 ### 58.3 Um caminho, não dois
 
-As perguntas de provider, modelo, effort e papéis saíram do corpo do wizard para
-uma função própria, chamada pelos dois lados. Reimplementá-las no atalho seria
-garantir que um dia as duas telas divergissem — e a primeira a ficar para trás
-seria justamente esta, que é a que quase todo mundo vai ver.
+As perguntas de provider, modelo, effort e papéis — e depois a do pedido — saíram
+do corpo do wizard para funções próprias, chamadas pelos dois lados.
+Reimplementá-las no atalho seria garantir que um dia as duas telas divergissem, e
+a primeira a ficar para trás seria justamente esta, que é a que quase todo mundo
+vai ver.
+
+E divergiu na mesma hora, de outro jeito: o atalho do pedido nasceu sem receber
+as funções da base documental, e as duas origens que dependem dela — projeto do
+MCP e prompt guardado — **sumiram da lista sem aviso nenhum**. Não foi a pergunta
+que divergiu; foi o mundo que ela recebe. As dependências viraram uma função só,
+usada pelas três entradas.
 
 ## §59 — A rodada de lacunas desistia sem dizer nada
 

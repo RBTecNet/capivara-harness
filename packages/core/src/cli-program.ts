@@ -139,8 +139,7 @@ async function completarPapeis<T extends CliRoleFlags>(comando: string, faltando
       faltando: faltando as RoleName[],
       listModels: (providerId) => listarModelos(providerId),
       listEfforts: (providerId, model) => listarEfforts(providerId, model),
-      fileExists: (path) => stat(path).then((info) => info.isFile()).catch(() => false),
-      directoryExists: (path) => stat(path).then((info) => info.isDirectory()).catch(() => false),
+      ...mundoDoWizard(),
     });
     if (escolha === null) return null;
 
@@ -154,6 +153,43 @@ async function completarPapeis<T extends CliRoleFlags>(comando: string, faltando
   } finally {
     terminal.close();
   }
+}
+
+/**
+ * O que o wizard precisa do mundo: disco e base documental.
+ *
+ * Um lugar só porque há três entradas para o wizard — o completo, o atalho dos
+ * papéis e o atalho do pedido — e a primeira coisa que divergiu quando o atalho
+ * nasceu foi justamente isto: o atalho do pedido não recebia as funções da base,
+ * e as duas origens que dependem dela sumiam da lista sem nenhum aviso.
+ */
+function mundoDoWizard() {
+  const cliente = (url: string) => createMcpClient({ url }, { timeoutSeconds: 15 });
+  return {
+    /*
+     * O wizard conecta de verdade para listar os projetos. Perguntar o nome do
+     * projeto num campo livre deixaria o erro de digitação para o run descobrir;
+     * aqui ele custa uma mensagem.
+     */
+    listMcpProjects: async (url: string) => {
+      const client = cliente(url);
+      await client.initialize();
+      return listLibraryProjects(client);
+    },
+    listMcpPrompts: async (url: string) => {
+      const client = cliente(url);
+      await client.initialize();
+      return await client.listPrompts();
+    },
+    readMcpPrompt: async (url: string, name: string) => {
+      const client = cliente(url);
+      await client.initialize();
+      return await client.prompt(name);
+    },
+    ...(process.env.CAPIVARA_MCP_URL ? { defaultMcpUrl: process.env.CAPIVARA_MCP_URL } : {}),
+    fileExists: (path: string) => stat(path).then((info) => info.isFile()).catch(() => false),
+    directoryExists: (path: string) => stat(path).then((info) => info.isDirectory()).catch(() => false),
+  };
 }
 
 /**
@@ -173,8 +209,7 @@ async function completarPedido(comando: string): Promise<{ prompt?: string; file
       io: createLineIO(terminal, (texto) => void stdout.write(texto)),
       cwd: process.cwd(),
       comando,
-      fileExists: (path) => stat(path).then((info) => info.isFile()).catch(() => false),
-      directoryExists: (path) => stat(path).then((info) => info.isDirectory()).catch(() => false),
+      ...mundoDoWizard(),
     });
     if (escolhido === null) return null;
     return {
@@ -1445,24 +1480,7 @@ export function createProgram(): Command {
          * do projeto num campo livre deixaria o erro de digitação para o run
          * descobrir; aqui ele custa uma mensagem.
          */
-        listMcpProjects: async (url) => {
-          const client = createMcpClient({ url }, { timeoutSeconds: 15 });
-          await client.initialize();
-          return listLibraryProjects(client);
-        },
-        listMcpPrompts: async (url) => {
-          const client = createMcpClient({ url }, { timeoutSeconds: 15 });
-          await client.initialize();
-          return await client.listPrompts();
-        },
-        readMcpPrompt: async (url, name) => {
-          const client = createMcpClient({ url }, { timeoutSeconds: 15 });
-          await client.initialize();
-          return await client.prompt(name);
-        },
-        ...(process.env.CAPIVARA_MCP_URL ? { defaultMcpUrl: process.env.CAPIVARA_MCP_URL } : {}),
-        fileExists: (path) => stat(path).then((info) => info.isFile()).catch(() => false),
-        directoryExists: (path) => stat(path).then((info) => info.isDirectory()).catch(() => false),
+        ...mundoDoWizard(),
         requestRecorded: async (root) => (await readRequestState(root)) !== null,
       });
     } finally {

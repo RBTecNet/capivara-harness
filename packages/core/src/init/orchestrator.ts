@@ -1071,6 +1071,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             // esqueleto: pedi-lo ao modelo só criava mais uma coisa a errar.
             grammar: tasksBlock(fase.number),
             maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
+            maxTasksPerPhase: MAX_TASKS_PER_PHASE,
           });
 
           /*
@@ -1874,7 +1875,25 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
                   : `a fase declara ${criterios(phase)} critérios de aceite em ${phase.tasks.length} tasks, e uma fase é uma sessão de agente`,
               fix:
                 phase.tasks.length > MAX_TASKS_PER_PHASE
-                  ? `divida em mais fases de topo até nenhuma passar de ${MAX_TASKS_PER_PHASE} tasks, preservando a ordem de dependências`
+                  ? /*
+                     * Consolidar, nunca dividir.
+                     *
+                     * Este texto dizia "divida em mais fases de topo" — e quem o
+                     * recebe escreve UMA fase, cujo número, título e cobertura
+                     * vêm do esqueleto e são montados em código. Criar fase não
+                     * é uma jogada que ele tenha. No `assitencia` a fase 18
+                     * voltou cinco vezes fechando tudo o que era possível
+                     * fechar, e o run parou num impasse sobre a única correção
+                     * que ninguém ali podia fazer.
+                     *
+                     * A instrução certa já existia na linha de baixo, para os
+                     * critérios, escrita depois de a mesma lição ser aprendida.
+                     * Ficou ali sozinha.
+                     */
+                    `consolide as tasks desta fase até ela caber em ${MAX_TASKS_PER_PHASE}: duas tasks que entregam a mesma` +
+                    ` capacidade viram uma. Nada verificável pode desaparecer — se depois de consolidar ainda não couber, diga` +
+                    ` isso em vez de apagar trabalho. Reescreva apenas esta fase: criar fases novas é decisão do esqueleto, não` +
+                    ` desta reescrita`
                   : `consolide critérios redundantes desta fase até ela caber em ${MAX_CRITERIA_PER_PHASE}: dois critérios que` +
                     ` verificam a mesma condição com palavras diferentes viram um só. Nenhuma condição verificável pode desaparecer —` +
                     ` se depois de consolidar ainda não couber, diga isso em vez de apagar critério. Reescreva apenas esta fase:` +

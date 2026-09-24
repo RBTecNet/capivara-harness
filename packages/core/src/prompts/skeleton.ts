@@ -128,6 +128,8 @@ export interface PhaseFromSliceContext {
   totalPhases: number;
   grammar: string;
   maxCriteriaPerTask: number;
+  /** O teto que o harness conta e recusa. Passar dele é defeito só ele pode fechar. */
+  maxTasksPerPhase: number;
 }
 
 export function phaseFromSlicePrompt(context: PhaseFromSliceContext): string {
@@ -162,6 +164,16 @@ export function phaseFromSlicePrompt(context: PhaseFromSliceContext): string {
     "- Never assert the presence of something the skeleton says does not exist. A criterion demanding",
     "  what cannot exist can never be proven: the verifier looks, does not find, and rejects a phase",
     "  that was correct.",
+    "",
+    "## How many tasks",
+    "The slice states how many tasks the skeleton allocated to this phase. That number is a budget:",
+    `stay at it or below, and NEVER go past ${context.maxTasksPerPhase}. The harness counts and refuses the phase`,
+    "above that, and you are the only one who can fix it — you cannot create a phase. The phases were",
+    "decided once, in the skeleton, and nothing after it splits one.",
+    "",
+    "So if the work does not fit, make the tasks BIGGER: two tasks that deliver the same capability",
+    "are one task. Never drop a capability the slice covers to fit the count — coverage is checked",
+    "too, and a phase that fits by forgetting something fails a different way.",
     "",
     "## What you emit, and what you do not",
     "You emit the TASKS of this phase, and nothing else. The phase heading, its number, its title,",

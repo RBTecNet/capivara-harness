@@ -30,6 +30,7 @@ const fatia = (phaseNumber = 1): string =>
     totalPhases: 3,
     grammar: tasksBlock(phaseNumber),
     maxCriteriaPerTask: 4,
+  maxTasksPerPhase: 15,
   });
 
 const todos = [interviewPrompt("skeleton", context, "Projeto vazio.", []), gapPrompt("phase 1", context, ["x"]), esqueleto, fatia()];
@@ -598,6 +599,7 @@ describe("critério se prova lendo o repositório", () => {
       totalPhases: 18,
       grammar: "gramática",
       maxCriteriaPerTask: 4,
+  maxTasksPerPhase: 15,
     });
 
     expect(fase).toContain("proven by reading THIS REPOSITORY");
@@ -615,8 +617,35 @@ describe("critério se prova lendo o repositório", () => {
       totalPhases: 18,
       grammar: "gramática",
       maxCriteriaPerTask: 4,
+  maxTasksPerPhase: 15,
     });
 
     expect(fase).toContain("not even when a rule above phrases itself that way");
+  });
+});
+
+/*
+ * O `assitencia` parou num impasse sobre a fase 18: ela declarou 17 tasks, o
+ * teto é 15, e a correção pedida era "divida em mais fases de topo". Quem a
+ * recebe escreve UMA fase, cujo número, título e cobertura vêm do esqueleto e
+ * são montados em código — criar fase não é jogada que ele tenha. Cinco
+ * reescritas, tudo o que era possível fechado, e o run parou na única correção
+ * que ninguém ali podia fazer.
+ */
+describe("o escritor de fase sabe qual é o orçamento de tasks", () => {
+  it("diz o teto, diz que o harness conta, e diz que ele é o único que pode fechar", () => {
+    const fase = fatia(18);
+    expect(fase).toContain("NEVER go past 15");
+    expect(fase).toContain("you are the only one who can fix it");
+  });
+
+  it("proíbe a saída que não existe — criar fase", () => {
+    expect(fatia(18)).toContain("you cannot create a phase");
+  });
+
+  it("ensina a saída que existe: task maior, nunca capacidade a menos", () => {
+    const fase = fatia(18);
+    expect(fase).toContain("make the tasks BIGGER");
+    expect(fase).toContain("Never drop a capability");
   });
 });

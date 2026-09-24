@@ -3997,3 +3997,53 @@ mata run.
 `capivara plan --fresh` reescreve tudo, para quem quer descartar o que foi
 produzido. O `init` já tinha a flag; o `plan` não — e uma retomada sem porta de
 saída é uma armadilha em vez de uma economia.
+
+## §52 — Dimensionamento: consolidar, porque dividir não é jogada dele
+
+O `plan` do `assitencia` parou num segundo impasse, e o relatório do próprio
+impasse conta a história inteira:
+
+```
+O auditor insiste em:
+  · Phase 18: a fase declara 17 tasks e uma fase é uma sessão de agente
+    correção pedida: divida em mais fases de topo até nenhuma passar de 15 tasks
+
+O escritor fez:
+  1. tentativa 1: escreveu o documento; o auditor apontou 29 ponto(s)
+  2. tentativa 2: reescreveu — fechou 29 de 29, 3 apareceu(ram) novo(s)
+  3. tentativa 3: reescreveu — fechou 3 de 3, 20 apareceu(ram) novo(s)
+  4. tentativa 4: reescreveu — fechou 20 de 20, 2 apareceu(ram) novo(s)
+  5. tentativa 5: reescreveu — fechou 2 de 2, 1 apareceu(ram) novo(s)
+```
+
+Ele fechou **54 de 55 achados**. O que sobrou era o único que ele não podia
+fechar: quem recebe essa correção escreve UMA fase, cujo número, título, goal e
+cobertura vêm do esqueleto e são montados em código. **Criar fase não é uma
+jogada que ele tenha.**
+
+### 52.1 A correção estava escrita na linha de baixo
+
+As duas metades do mesmo ternário, no self-check de dimensionamento:
+
+| ramo | o que manda fazer |
+|---|---|
+| tasks acima do teto | ~~"divida em mais fases de topo"~~ |
+| critérios acima do teto | "consolide… **criar fases novas é decisão do plano, não desta reescrita**" |
+
+O ramo dos critérios já tinha aprendido a lição e a escrito. O ramo das tasks
+ficou como estava, a três linhas de distância. É a mesma família do §49 — achado
+que o escritor não pode fechar — e a mesma correção pela metade de sempre.
+
+Agora os dois mandam **consolidar**: duas tasks que entregam a mesma capacidade
+viram uma, nada verificável desaparece, e se ainda não couber ele DIZ isso em vez
+de apagar trabalho.
+
+### 52.2 E o teto chega antes
+
+O esqueleto alocou **12 tasks** para a fase 18. A fatia dizia `Tasks alocadas:
+12`. O escritor escreveu 17 — porque o número estava lá como dado, e nunca como
+instrução.
+
+O prompt da fase passa a dizer que a alocação é orçamento, que o harness conta e
+recusa acima do teto, que ele é o único que pode consertar, e qual é a saída:
+task maior, nunca capacidade a menos.

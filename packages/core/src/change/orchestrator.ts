@@ -253,6 +253,7 @@ export async function runChange(options: ChangeOptions): Promise<ChangeOutcome> 
           totalPhases: aplicada.skeleton.phases.length,
           grammar: tasksBlock(fase.number),
           maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
+          maxTasksPerPhase: MAX_TASKS_PER_PHASE,
         }),
       });
 

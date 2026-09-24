@@ -4591,3 +4591,43 @@ O `Set` dessas perguntas nasceu ao lado da função que o usa — abaixo do
 `const` não: `ReferenceError: Cannot access 'lacunasPerguntadas' before
 initialization`. É a segunda vez que este arquivo cobra isso, e a primeira foi
 `fasesAprovadas`. Estado do run mora no topo do run.
+
+## §64 — Pergunta discursiva entra em laço
+
+O relato é exato:
+
+> ele às vezes faz uma pergunta discursiva que é impossível de responder, pois
+> espera uma resposta pronta; quando mandamos a resposta que pra gente faz
+> sentido, ele diz que a resposta não cobriu a pergunta e devolve a pergunta, e
+> fica nesse looping
+
+O caminho é sempre o mesmo. O protocolo permitia pergunta **sem opções** — *"ou
+nenhuma quando a pergunta for aberta"* —, e o prompt dizia ao modelo que opções
+eram opcionais. Aí:
+
+1. o modelo pergunta algo aberto;
+2. o desenvolvedor responde o que faz sentido para ele;
+3. o classificador julga que a resposta não cobre tudo o que a pergunta pedia;
+4. `settle` repergunta na hora (duas vezes), e `planRound` a traz de volta na
+   rodada seguinte — três rodadas.
+
+**Seis vezes a mesma pergunta que nunca teve uma resposta certa disponível**, e
+nenhuma delas errada o bastante para o classificador aceitar.
+
+### 64.1 Toda pergunta tem de 2 a 4 opções
+
+Agora é mecânico: um lote com pergunta sem opções é recusado antes de chegar à
+tela, com a orientação dizendo o que fazer quando a resposta parecer texto livre
+— *"enumere as alternativas reais que você consegue imaginar"*.
+
+Escolher pelo número é decisão fechada: o classificador nem chega a ser chamado,
+e o laço não tem onde nascer. Texto livre continua valendo para quem quiser dizer
+outra coisa — o que deixa de existir é a pergunta **sem nada onde clicar**.
+
+### 64.2 O que isso custa
+
+Uma pergunta genuinamente aberta — o nome do produto, um limite numérico — passa
+a exigir que o modelo enumere alternativas plausíveis em vez de perguntar solto.
+É trabalho a mais para ele e uma tela pior em casos raros. Em troca, some a única
+situação em que o harness fazia o desenvolvedor responder a mesma coisa seis
+vezes e desistir.

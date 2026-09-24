@@ -30,9 +30,16 @@ describe("parseQuestionBatch", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("aceita pergunta aberta, sem opções", () => {
+  /*
+   * Pergunta discursiva entra em laço: o desenvolvedor responde o que faz
+   * sentido para ele, o classificador julga que não cobriu tudo, e a pergunta
+   * volta — duas vezes por rodada, três rodadas. Seis vezes uma pergunta que
+   * nunca teve resposta certa disponível.
+   */
+  it("recusa a pergunta sem opções, porque ela não tem como ser respondida", () => {
     const result = parseQuestionBatch(batch([question({ options: [], recommended: "", recommendationBasis: "" })]));
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.defects.map((defeito) => defeito.problem)).toContain("pergunta sem opções");
   });
 
   it("tolera cerca de código em volta do JSON", () => {
@@ -53,9 +60,9 @@ describe("parseQuestionBatch", () => {
 });
 
 describe("uma pergunta incompleta nunca chega à tela", () => {
-  const defectsFor = (overrides: Record<string, unknown>): string[] => {
+  const defectsFor = (overrides: Record<string, unknown>, campo: "problem" | "hint" = "problem"): string[] => {
     const result = parseQuestionBatch(batch([question(overrides)]));
-    return result.ok ? [] : result.defects.map((defect) => defect.problem);
+    return result.ok ? [] : result.defects.map((defect) => defect[campo]);
   };
 
   it("sem evidência", () => {
@@ -83,7 +90,12 @@ describe("uma pergunta incompleta nunca chega à tela", () => {
   });
 
   it("com uma única opção, que não é escolha", () => {
-    expect(defectsFor({ options: [{ label: "A", consequence: "x" }], recommended: "A" })).toContain("uma única opção não é uma escolha");
+    expect(defectsFor({ options: [{ label: "A", consequence: "x" }], recommended: "A" })).toContain("pergunta sem opções");
+  });
+
+  it("a orientação ensina o que fazer quando a resposta parece texto livre", () => {
+    const orientacoes = defectsFor({ options: [], recommended: "" }, "hint");
+    expect(orientacoes.join(" ")).toContain("enumere as alternativas reais");
   });
 
   it("com id fora do formato", () => {

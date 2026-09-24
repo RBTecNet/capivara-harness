@@ -148,8 +148,27 @@ export function parseQuestionBatch(source: string): QuestionBatch {
     }
     if (question.why === "") complain("sem o motivo", "diga o que muda no resultado conforme a resposta");
 
-    if (question.options.length === 1) {
-      complain("uma única opção não é uma escolha", "ofereça de 2 a 4 opções concretas, ou nenhuma quando a pergunta for aberta");
+    /*
+     * Pergunta sem opção é pergunta discursiva, e pergunta discursiva entra em
+     * laço.
+     *
+     * O caminho é sempre o mesmo: o modelo pergunta algo aberto, o desenvolvedor
+     * responde com o que faz sentido para ele, o classificador julga que a
+     * resposta não cobre tudo o que a pergunta pedia, e a pergunta volta — duas
+     * vezes por rodada, três rodadas. Seis vezes a mesma pergunta que nunca teve
+     * uma resposta "certa" possível.
+     *
+     * Com opções isso não acontece: escolher pelo número é decisão fechada, e o
+     * classificador nem chega a ser chamado. Texto livre continua valendo para
+     * quem quiser dizer outra coisa — o que deixa de existir é a pergunta que
+     * SÓ pode ser respondida em prosa.
+     */
+    if (question.options.length < 2) {
+      complain(
+        "pergunta sem opções",
+        "toda pergunta oferece de 2 a 4 opções concretas e excludentes, com a recomendada marcada; " +
+          "quando a resposta parecer texto livre, enumere as alternativas reais que você consegue imaginar",
+      );
     }
     if (question.options.length > 1) {
       if (question.recommended === "") complain("opções sem recomendação", "aponte a opção recomendada e a evidência que a sustenta");

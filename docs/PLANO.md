@@ -3854,3 +3854,55 @@ Só leitura, também literalmente: nada naquele módulo escreve, apaga ou renome
 O pior que uma falha dele pode fazer é não mostrar uma página. Desligado — que é
 o padrão —, a rota explica como ligá-lo (`doc-center --runs <pasta>`) em vez de
 dar 404: um link morto ensina menos que uma frase.
+
+## §49 — O auditor não pode pedir o que o escritor está proibido de escrever
+
+O `plan` do `assitencia` parou depois de escrever e auditar **18 fases**. Dezesseis
+foram aprovadas. As duas que sobraram trouxeram, nas três devoluções, o mesmo
+achado:
+
+> Os critérios restringem status e recorrência a valores enumerados, mas não
+> exigem sua modelagem em tabelas de domínio, **conforme o eixo CONFORMANCE**.
+
+O auditor estava certo sobre o eixo: ele perguntava, palavra por palavra, *"Are
+enumerable fields modelled as lookup tables?"*. E o escritor não tinha como
+fechar o achado — criar as tabelas seria inventar estrutura que o esqueleto não
+declara, e o eixo 1 o proíbe de inventar o que nenhuma fonte diz.
+
+**Dois eixos do mesmo prompt em lados opostos, e o escritor no meio.** Ele não
+cedeu, o auditor não cedeu, as três rodadas queimaram, o run parou num impasse —
+e as 18 fases escritas foram embora junto, porque o plano só é publicado no fim.
+
+### 49.1 A ironia, que é o que torna isto uma família
+
+Duas linhas abaixo, o mesmo eixo já dizia:
+
+> Never review SQL here, never ask for DDL here, and never demand that a notation
+> express what it has no syntax for: **each of those is a finding the writer
+> cannot close, and three in a row stop the run.**
+
+A frase descreve exatamente o que aconteceu. Ela foi escrita depois de um
+incidente anterior da mesma natureza, e a cláusula das tabelas de domínio ficou
+ali em cima, imune ao próprio aviso. É a correção pela metade outra vez.
+
+### 49.2 A regra
+
+Técnica de modelagem é decisão do **esqueleto**, nunca da auditoria. O eixo
+CONFORMANCE passa a dizer:
+
+> NEVER demand a modelling or implementation technique the skeleton does not
+> state — a lookup table for an enumerated field, a soft delete, an audit column,
+> an index, a trigger. […] demanding it puts him between two axes with no way
+> out. If the skeleton DOES state it and the phase dropped it, that is a FIDELITY
+> finding and you raise it as one.
+
+Nada se perde em rigor: se o esqueleto exige a tabela de domínio e a fase a
+largou, continua sendo achado — de fidelidade, que é o eixo a que ele sempre
+pertenceu.
+
+### 49.3 O teste que fica
+
+Todo achado precisa ter uma escrita que o feche. Antes de acrescentar uma
+pergunta a um eixo, a pergunta é: *existe um texto que o escritor possa produzir,
+sem violar outro eixo, que responda a isto?* Se não existir, a pergunta não é uma
+auditoria — é um impasse programado.

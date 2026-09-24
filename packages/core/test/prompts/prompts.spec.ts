@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessRehearsal, enumerateCriteria, gapPrompt, interviewPrompt, languageBlock, parseRehearsal, phaseFromSlicePrompt, rehearsalPrompt, skeletonPrompt, surveyDomainPrompt, surveyMapPrompt } from "../../src/prompts/index.js";
+import { assessRehearsal, enumerateCriteria, gapPrompt, interviewPrompt, languageBlock, parseRehearsal, phaseAuditPrompt, phaseFromSlicePrompt, rehearsalPrompt, skeletonPrompt, surveyDomainPrompt, surveyMapPrompt } from "../../src/prompts/index.js";
 import type { WriterContext } from "../../src/prompts/index.js";
 import { parsePhases, tasksBlock } from "../../src/contract/index.js";
 import { STRUCTURAL_LABELS } from "../../src/contract/index.js";
@@ -517,5 +517,56 @@ describe("o ensaio lê o que o verificador respondeu", () => {
   it("o que já vinha em linhas próprias continua igual", () => {
     const certo = "CRITERION P1.T1.C1: OBSERVABLE — dá para ver\nCRITERION P1.T2.C1: UNSATISFIABLE — nada satisfaz";
     expect(parseRehearsal(certo)).toHaveLength(2);
+  });
+});
+
+/*
+ * O run de `assitencia` parou em RALPH READY com dois achados que se repetiram
+ * nas três devoluções: "os critérios restringem status a valores enumerados, mas
+ * não exigem sua modelagem em tabelas de domínio, conforme o eixo CONFORMANCE".
+ *
+ * O escritor não tinha como fechá-los. Criar as tabelas seria inventar estrutura
+ * que o esqueleto não declara, e o eixo 1 o proíbe de inventar. Ele ficou entre
+ * dois eixos, gastou as três rodadas e o run parou — com 18 fases escritas e
+ * auditadas, 16 delas aprovadas.
+ */
+describe("o auditor não pode pedir o que o escritor está proibido de escrever", () => {
+  const prompt = phaseAuditPrompt({
+    language: "português do Brasil",
+    request: "um sistema de assistência técnica",
+    decisions: [],
+    upstream: [],
+    upstreamRemarks: [],
+    document: "project-phases.md",
+    content: "",
+    executable: true,
+    dispositions: [],
+    phaseMarkdown: "## Phase 1",
+    phaseNumber: 1,
+    totalPhases: 18,
+  });
+
+  it("proíbe exigir técnica de modelagem que o esqueleto não declara", () => {
+    expect(prompt).toContain("NEVER demand a modelling or implementation technique the skeleton does not state");
+    expect(prompt).toContain("lookup");
+    expect(prompt).toContain("soft delete");
+  });
+
+  it("não pergunta mais se os campos enumeráveis viraram tabela de consulta", () => {
+    expect(prompt).not.toContain("Are enumerable fields modelled as lookup tables?");
+  });
+
+  it("diz o caminho certo quando o esqueleto DECLARA a técnica e a fase a largou", () => {
+    expect(prompt).toContain("that is a FIDELITY finding");
+  });
+
+  it("explica por que o pedido é impossível, e não só que é proibido", () => {
+    expect(prompt).toContain("between two axes with no way out");
+  });
+
+  it("numera os quatro eixos sem repetir o 3", () => {
+    for (const eixo of ["1. FIDELITY", "2. CONFORMANCE", "3. PRECISION", "4. EXECUTABILITY"]) {
+      expect(prompt).toContain(eixo);
+    }
   });
 });

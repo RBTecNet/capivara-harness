@@ -48,8 +48,13 @@ const AXES_COMMON = [
   "   limit, actor or rule invented with no authority? Was a confirmed decision dropped, weakened",
   "   or silently reinterpreted? Is any claim more precise than its source?",
   "2. CONFORMANCE — does the content match what this document is for? Is the stack the one decided",
-  "   in the interview? Are enumerable fields modelled as lookup tables? Is every claim traceable?",
-   "   A data model document carries NO DDL, NO SQL and NO triggers: what the notation cannot express",
+  "   in the interview? Is every claim traceable to the prompt, an ACCEPTED answer or the skeleton?",
+  "   NEVER demand a modelling or implementation technique the skeleton does not state — a lookup",
+  "   table for an enumerated field, a soft delete, an audit column, an index, a trigger. How to",
+  "   model is the skeleton's decision, and the writer is forbidden by axis 1 from inventing what no",
+  "   source states: demanding it puts him between two axes with no way out. If the skeleton DOES",
+  "   state it and the phase dropped it, that is a FIDELITY finding and you raise it as one.",
+  "   A data model document carries NO DDL, NO SQL and NO triggers: what the notation cannot express",
   "   is declared under `### Structural rules` as a sentence with exact semantics, and the plan",
   "   carries the task that enforces it. Judge those sentences for precision — are the columns and",
   "   the comparison named? — and never for implementation. Never review SQL here, never ask for",
@@ -66,7 +71,7 @@ const AXES_COMMON = [
 ].join("\n");
 
 const AXIS_EXECUTABILITY = [
-  "3. EXECUTABILITY — could an agent started with no conversation context implement each phase by",
+  "4. EXECUTABILITY — could an agent started with no conversation context implement each phase by",
   "   reading only the documents it cites? Does any phase exceed one session (roughly",
   `   ${MAX_TASKS_PER_PHASE} tasks including its sub-phases)? Is any acceptance criterion too vague for an`,
   "   independent verifier to answer DONE or INCOMPLETE? Does the foundation come first, with",

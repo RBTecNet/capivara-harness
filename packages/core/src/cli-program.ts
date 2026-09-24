@@ -45,9 +45,10 @@ import {
 } from "./tui/index.js";
 import type { EntradaDeTeclado, Janela, Parada, SaidaDeTela } from "./tui/index.js";
 import { paradaDeProntidao, paradaDoEstagio, type Estagio } from "./commands/paradas.js";
-import { runWizard } from "./commands/wizard.js";
+import { runWizard, runWizardDePapeis } from "./commands/wizard.js";
 import { InputEndedError, createLineIO } from "./commands/line-io.js";
 import { listarEfforts, listarModelos } from "./provider/index.js";
+import type { RoleName } from "./provider/index.js";
 import { runIdFor } from "./state/index.js";
 import { sha12 } from "./contract/index.js";
 import { MAX_DOMINIOS, SurveyBlockedError, runSurvey } from "./survey/index.js";
@@ -103,6 +104,47 @@ async function lerEvidencia(projectRoot: string, caminhos: readonly string[] | u
       : linhas;
   }
   return [];
+}
+
+/**
+ * O que faltou no comando, perguntado em vez de recusado.
+ *
+ * Quem escreveu `capivara init --fresh` já disse o estágio, a pasta e o pedido.
+ * Faltou dizer com que modelo — e a resposta do harness era recusar o comando
+ * inteiro e imprimir as duas formas de passar a flag, o que manda a pessoa
+ * reescrever tudo o que ela já tinha escrito.
+ *
+ * Agora ele pergunta só o que falta, e só para os papéis que ESTE comando usa.
+ * Sem terminal — CI, pipe, `ssh` sem tty — nada muda: a mensagem completa sai
+ * como antes, porque um comando que abre pergunta num CI é um comando que trava.
+ */
+async function completarPapeis<T extends CliRoleFlags>(comando: string, faltando: readonly string[], flags: T): Promise<T | null> {
+  if (stdin.isTTY !== true) return null;
+
+  const terminal = createInterface({ input: stdin, output: stdout });
+  try {
+    const escolha = await runWizardDePapeis({
+      io: createLineIO(terminal, (texto) => void stdout.write(texto)),
+      cwd: process.cwd(),
+      comando,
+      faltando: faltando as RoleName[],
+      listModels: (providerId) => listarModelos(providerId),
+      listEfforts: (providerId, model) => listarEfforts(providerId, model),
+      fileExists: (path) => stat(path).then((info) => info.isFile()).catch(() => false),
+      directoryExists: (path) => stat(path).then((info) => info.isDirectory()).catch(() => false),
+    });
+    if (escolha === null) return null;
+
+    const completo = { ...flags } as Record<string, unknown>;
+    for (const [chave, valor] of Object.entries(escolha.global)) if (valor) completo[chave] = valor;
+    for (const [papel, escolhido] of Object.entries(escolha.roles)) {
+      if (escolhido?.provider) completo[`${papel}Provider`] = escolhido.provider;
+      if (escolhido?.model) completo[`${papel}Model`] = escolhido.model;
+    }
+    return completo as T;
+  } finally {
+    terminal.close();
+  }
 }
 
 /** Imprime a parada no formato único, com a telinha quando há terminal. */
@@ -550,12 +592,18 @@ export function createProgram(): Command {
     ["writer"],
   ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; prompt?: string; mcp?: string }) => {
     const projectRoot = flags.project ?? ".";
-    const roles = rolesFromFlags(flags);
+    let escolhas = flags;
+    let roles = rolesFromFlags(escolhas);
     const semProvider = unresolvedRoles(roles, ["writer"]);
     if (semProvider.length > 0) {
-      stdout.write(`${renderUnresolved("change", semProvider)}\n`);
-      process.exitCode = 2;
-      return;
+      const completo = await completarPapeis("change", semProvider, escolhas);
+      if (completo === null) {
+        stdout.write(`${renderUnresolved("change", semProvider)}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      escolhas = completo;
+      roles = rolesFromFlags(escolhas);
     }
 
     const guardado = flags.prompt ? await lerPromptDaBase(flags, (linha) => stdout.write(`${linha}\n`)) : null;
@@ -647,12 +695,18 @@ export function createProgram(): Command {
     ["writer"],
   ).action(async (flags: CommonFlags & { saida?: string; maxDominios?: string; mcp?: string; mcpProject?: string }) => {
     const projectRoot = flags.project ?? ".";
-    const roles = rolesFromFlags(flags);
+    let escolhas = flags;
+    let roles = rolesFromFlags(escolhas);
     const semProvider = unresolvedRoles(roles, ["writer"]);
     if (semProvider.length > 0) {
-      stdout.write(`${renderUnresolved("survey", semProvider)}\n`);
-      process.exitCode = 2;
-      return;
+      const completo = await completarPapeis("survey", semProvider, escolhas);
+      if (completo === null) {
+        stdout.write(`${renderUnresolved("survey", semProvider)}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      escolhas = completo;
+      roles = rolesFromFlags(escolhas);
     }
 
     const language = flags.language ?? "português do Brasil";
@@ -780,12 +834,18 @@ export function createProgram(): Command {
       .option("--no-commit", "não versiona a especificação ao chegar em PLAN READY"),
   ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; prompt?: string; mcp?: string; mcpProject?: string; maxAuditReturns: string; maxInterviewRounds: string; fresh?: boolean; dashboard?: boolean; commit?: boolean }) => {
     const projectRoot = flags.project ?? ".";
-    const configured = rolesFromFlags(flags);
+    let escolhas = flags;
+    let configured = rolesFromFlags(escolhas);
     const semProvider = unresolvedRoles(configured, INIT_ROLES);
     if (semProvider.length > 0) {
-      stdout.write(`${renderUnresolved("init", semProvider)}\n`);
-      process.exitCode = 2;
-      return;
+      const completo = await completarPapeis("init", semProvider, escolhas);
+      if (completo === null) {
+        stdout.write(`${renderUnresolved("init", semProvider)}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      escolhas = completo;
+      configured = rolesFromFlags(escolhas);
     }
     /*
      * A terceira forma de dizer o que construir.
@@ -913,12 +973,18 @@ export function createProgram(): Command {
     ["writer", "auditor", "verifier"],
   ).action(async (flags: CommonFlags & { file?: string; maxAuditReturns: string; fresh?: boolean; dashboard?: boolean; commit?: boolean }) => {
     const projectRoot = flags.project ?? ".";
-    const roles = rolesFromFlags(flags);
+    let escolhas = flags;
+    let roles = rolesFromFlags(escolhas);
     const semProvider = unresolvedRoles(roles, INIT_ROLES);
     if (semProvider.length > 0) {
-      stdout.write(`${renderUnresolved("plan", semProvider)}\n`);
-      process.exitCode = 2;
-      return;
+      const completo = await completarPapeis("plan", semProvider, escolhas);
+      if (completo === null) {
+        stdout.write(`${renderUnresolved("plan", semProvider)}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      escolhas = completo;
+      roles = rolesFromFlags(escolhas);
     }
 
     /*
@@ -1034,12 +1100,18 @@ export function createProgram(): Command {
     ["builder", "verifier"],
   ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean; flows?: boolean; rebuildAll?: boolean; mcp?: string; mcpProject?: string; dashboard?: boolean }) => {
     const projectRoot = flags.project ?? ".";
-    const roles = rolesFromFlags(flags);
+    let escolhas = flags;
+    let roles = rolesFromFlags(escolhas);
     const semProvider = unresolvedRoles(roles, BUILD_ROLES);
     if (semProvider.length > 0) {
-      stdout.write(`${renderUnresolved("build", semProvider)}\n`);
-      process.exitCode = 2;
-      return;
+      const completo = await completarPapeis("build", semProvider, escolhas);
+      if (completo === null) {
+        stdout.write(`${renderUnresolved("build", semProvider)}\n`);
+        process.exitCode = 2;
+        return;
+      }
+      escolhas = completo;
+      roles = rolesFromFlags(escolhas);
     }
     const language = flags.language ?? "português do Brasil";
 

@@ -8,7 +8,7 @@
 import { Readable } from "node:stream";
 import { createInterface } from "node:readline/promises";
 import { describe, expect, it } from "vitest";
-import { createLineIO, filtrarModelos, runWizard } from "../../src/commands/wizard.js";
+import { createLineIO, filtrarModelos, runWizard, runWizardDePapeis } from "../../src/commands/wizard.js";
 import { readChoice, renderChoices, renderCommand, toArgv } from "../../src/tui/index.js";
 
 function roteiro(respostas: string[]) {
@@ -570,5 +570,46 @@ describe("escolher um prompt guardado", () => {
     const { deps, tela } = roteiro(["", "1", "1", "um quadro kanban", ".", "1", "", "1", "n", "n"]);
     await runWizard(deps);
     expect(tela()).not.toContain("prompt guardado na base");
+  });
+});
+
+/*
+ * `capivara init --fresh` sem provider era recusado com a lista das duas formas
+ * de passar a flag — o que manda a pessoa reescrever o comando inteiro que ela
+ * acabou de escrever. Agora ele pergunta só o que falta.
+ */
+describe("o wizard curto, quando faltou só o modelo", () => {
+  it("vai direto ao provider: quem digitou `init` não é perguntado de novo o estágio", async () => {
+    const roteiroCurto = roteiro(["2", "", "", "n"]);
+    const escolha = await runWizardDePapeis({ ...roteiroCurto.deps, comando: "init", faltando: ["writer", "auditor", "verifier"] });
+
+    expect(roteiroCurto.tela()).not.toContain("O que você quer fazer?");
+    expect(roteiroCurto.tela()).not.toContain("Pasta do projeto");
+    expect(roteiroCurto.tela()).toContain("Qual provider usar");
+    expect(escolha?.global.provider).toBe("claude");
+  });
+
+  it("diz o que falta e que o resto do comando está mantido", async () => {
+    const roteiroCurto = roteiro(["1", "", "", "n"]);
+    await runWizardDePapeis({ ...roteiroCurto.deps, comando: "build", faltando: ["builder", "verifier"] });
+
+    expect(roteiroCurto.tela()).toContain("capivara build: falta dizer com que modelo rodar os papéis builder, verifier");
+    expect(roteiroCurto.tela()).toContain("O resto do comando está mantido");
+  });
+
+  it("só oferece ajuste separado dos papéis que faltaram", async () => {
+    const roteiroCurto = roteiro(["1", "", "", "s", "", ""]);
+    await runWizardDePapeis({ ...roteiroCurto.deps, comando: "survey", faltando: ["writer"] });
+
+    expect(roteiroCurto.tela()).toContain("escritor documental");
+    expect(roteiroCurto.tela()).not.toContain("executor do loop");
+  });
+
+  it("responde só pelos papéis que faltaram, e não pelos que o comando já tinha", async () => {
+    const roteiroCurto = roteiro(["1", "", "", "s", "", ""]);
+    await runWizardDePapeis({ ...roteiroCurto.deps, comando: "build", faltando: ["verifier"] });
+
+    expect(roteiroCurto.tela()).toContain("verificador independente");
+    expect(roteiroCurto.tela()).not.toContain("executor do loop");
   });
 });

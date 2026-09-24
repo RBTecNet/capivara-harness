@@ -415,6 +415,116 @@ async function escolherDaBase(
   }
 }
 
+export interface EscolhaDePapeis {
+  global: { provider?: string; model?: string; effort?: string };
+  roles: Partial<Record<RoleName, { provider?: string; model?: string }>>;
+}
+
+/**
+ * As perguntas de provider, modelo, effort e papéis — e só elas.
+ *
+ * Extraídas do wizard inteiro porque há duas entradas para elas: quem chama o
+ * wizard do zero, e quem digitou um comando completo e esqueceu de dizer o
+ * modelo. O segundo caso não pode ser mandado ao começo do wizard — ele já
+ * respondeu tudo o mais, e reperguntar "init, plan ou build?" a quem escreveu
+ * `capivara init` é fazê-lo repetir o que já disse.
+ */
+async function perguntarPapeis(deps: WizardDeps, usados: readonly RoleName[]): Promise<EscolhaDePapeis> {
+  const { io } = deps;
+  const global: EscolhaDePapeis["global"] = {};
+  const roles: EscolhaDePapeis["roles"] = {};
+
+  // O laço existe para o `0` da escolha de modelo ter para onde voltar.
+  let provider = "codex";
+  for (;;) {
+    provider = PROVIDERS[await choose(io, "Qual provider usar em todos os papéis?", PROVIDERS, 0)]?.label ?? "codex";
+    const escolha = await escolherModelo(io, provider, "Modelo", deps.listModels ?? (async () => []));
+    if (escolha === "voltar") continue;
+    if (escolha.modelo !== "") global.model = escolha.modelo;
+    break;
+  }
+  global.provider = provider;
+
+  // O que este modelo aceita, quando a CLI sabe dizer; senão, a lista genérica.
+  const aceitos = global.model
+    ? await (deps.listEfforts ?? (async () => []))(provider, global.model).catch(() => [])
+    : [];
+  const opcoesEffort: Choice[] =
+    aceitos.length > 0
+      ? [{ label: "desligado", hint: `${global.model} aceita: ${aceitos.join(", ")}` }, ...aceitos.map((nivel) => ({ label: nivel }))]
+      : EFFORTS_GENERICOS;
+
+  const effort = opcoesEffort[await choose(io, "Intensidade de raciocínio?", opcoesEffort, 0)]?.label ?? "desligado";
+  if (effort !== "desligado") global.effort = effort;
+
+  if (await yesNo(io, "\nAjustar algum papel separadamente?", false)) {
+    const fila: RoleName[] = [...usados];
+    /*
+     * A numeração dos providers é a MESMA aqui e na pergunta global.
+     *
+     * "manter o padrão" já ocupou a posição 1 desta lista, e então codex era 1
+     * lá em cima e 2 aqui, opencode era 3 lá e 4 aqui. Quem lesse a primeira
+     * lista e respondesse pela memória escolhia o vizinho — e o wizard imprimia
+     * um comando com o provider errado, sem nada parecer estranho.
+     *
+     * Manter o padrão passa a ser o Enter, que é onde um "deixa como está"
+     * pertence.
+     */
+    const manterPadrao = -1;
+    for (;;) {
+      const role = fila.shift();
+      if (!role) break;
+      const definition = ROLES[role];
+      const escolhido = await choose(
+        io,
+        `${definition.label} — ${roleHint(role, definition.requiresCli)}`,
+        PROVIDERS,
+        manterPadrao,
+        `Enter mantém ${provider}`,
+      );
+      if (escolhido === manterPadrao) continue;
+      const providerDoPapel = PROVIDERS[escolhido]?.label ?? provider;
+      const proprio: { provider?: string; model?: string } = { provider: providerDoPapel };
+      const escolha = await escolherModelo(io, providerDoPapel, `Modelo do ${role}`, deps.listModels ?? (async () => []));
+      // Voltar aqui é voltar à escolha de provider DESTE papel.
+      if (escolha === "voltar") {
+        fila.unshift(role);
+        continue;
+      }
+      if (escolha.modelo !== "") proprio.model = escolha.modelo;
+      roles[role] = proprio;
+    }
+  }
+
+
+  return { global, roles };
+}
+
+/**
+ * O wizard curto: só o que faltou no comando que a pessoa digitou.
+ *
+ * Quem escreveu `capivara init --fresh` já disse o estágio, a pasta e o pedido.
+ * Faltou dizer com que modelo — e recusar o comando inteiro por isso manda a
+ * pessoa reescrever tudo. Aqui ela responde só o que falta e o comando segue.
+ */
+export async function runWizardDePapeis(
+  deps: WizardDeps & { comando: string; faltando: readonly RoleName[] },
+): Promise<EscolhaDePapeis | null> {
+  const { io } = deps;
+  const quais = deps.faltando.join(", ");
+  io.write(`\ncapivara ${deps.comando}: falta dizer com que modelo rodar ${deps.faltando.length > 1 ? "os papéis" : "o papel"} ${quais}.\n`);
+  io.write("O resto do comando está mantido; responda só isto.\n");
+
+  try {
+    return await perguntarPapeis(deps, deps.faltando);
+  } catch (error) {
+    // Ctrl-D ou entrada encerrada: quem desistiu de responder recebe a mensagem
+    // completa de sempre, e não um stack trace.
+    if (error instanceof InputEnded) return null;
+    throw error;
+  }
+}
+
 async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
   const { io } = deps;
   io.write("capivara · monta o comando com você e imprime o equivalente no fim\n");
@@ -597,29 +707,6 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
     }
   }
 
-  // O laço existe para o `0` da escolha de modelo ter para onde voltar.
-  let provider = "codex";
-  for (;;) {
-    provider = PROVIDERS[await choose(io, "Qual provider usar em todos os papéis?", PROVIDERS, 0)]?.label ?? "codex";
-    const escolha = await escolherModelo(io, provider, "Modelo", deps.listModels ?? (async () => []));
-    if (escolha === "voltar") continue;
-    if (escolha.modelo !== "") answers.global.model = escolha.modelo;
-    break;
-  }
-  answers.global.provider = provider;
-
-  // O que este modelo aceita, quando a CLI sabe dizer; senão, a lista genérica.
-  const aceitos = answers.global.model
-    ? await (deps.listEfforts ?? (async () => []))(provider, answers.global.model).catch(() => [])
-    : [];
-  const opcoesEffort: Choice[] =
-    aceitos.length > 0
-      ? [{ label: "desligado", hint: `${answers.global.model} aceita: ${aceitos.join(", ")}` }, ...aceitos.map((nivel) => ({ label: nivel }))]
-      : EFFORTS_GENERICOS;
-
-  const effort = opcoesEffort[await choose(io, "Intensidade de raciocínio?", opcoesEffort, 0)]?.label ?? "desligado";
-  if (effort !== "desligado") answers.global.effort = effort;
-
   // Papéis: só os que ESTE comando chama. Perguntar pelo executor num init é
   // pedir uma decisão que não vai ser usada.
   const usados: RoleName[] =
@@ -628,44 +715,10 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
       : command === "survey" || command === "change"
         ? ["writer"]
         : ["writer", "auditor", "verifier"];
-  if (await yesNo(io, "\nAjustar algum papel separadamente?", false)) {
-    const fila: RoleName[] = [...usados];
-    /*
-     * A numeração dos providers é a MESMA aqui e na pergunta global.
-     *
-     * "manter o padrão" já ocupou a posição 1 desta lista, e então codex era 1
-     * lá em cima e 2 aqui, opencode era 3 lá e 4 aqui. Quem lesse a primeira
-     * lista e respondesse pela memória escolhia o vizinho — e o wizard imprimia
-     * um comando com o provider errado, sem nada parecer estranho.
-     *
-     * Manter o padrão passa a ser o Enter, que é onde um "deixa como está"
-     * pertence.
-     */
-    const manterPadrao = -1;
-    for (;;) {
-      const role = fila.shift();
-      if (!role) break;
-      const definition = ROLES[role];
-      const escolhido = await choose(
-        io,
-        `${definition.label} — ${roleHint(role, definition.requiresCli)}`,
-        PROVIDERS,
-        manterPadrao,
-        `Enter mantém ${provider}`,
-      );
-      if (escolhido === manterPadrao) continue;
-      const providerDoPapel = PROVIDERS[escolhido]?.label ?? provider;
-      const proprio: { provider?: string; model?: string } = { provider: providerDoPapel };
-      const escolha = await escolherModelo(io, providerDoPapel, `Modelo do ${role}`, deps.listModels ?? (async () => []));
-      // Voltar aqui é voltar à escolha de provider DESTE papel.
-      if (escolha === "voltar") {
-        fila.unshift(role);
-        continue;
-      }
-      if (escolha.modelo !== "") proprio.model = escolha.modelo;
-      answers.roles[role] = proprio;
-    }
-  }
+
+  const papeis = await perguntarPapeis(deps, usados);
+  answers.global = { ...answers.global, ...papeis.global };
+  answers.roles = { ...answers.roles, ...papeis.roles };
 
   if (command === "build") {
     const comandoDeTeste = await text(io, "\nComando de teste do projeto (vazio detecta pelo manifesto): ");

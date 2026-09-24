@@ -4265,3 +4265,49 @@ PostgreSQL, Oracle, SQL Server, Mongo —, mudam duas coisas:
 
 As opções continuam as quatro, e quem decide continua sendo quem responde. O que
 muda é que apertar Enter deixou de ser um jeito de contradizer o próprio pedido.
+
+## §58 — Falta um parâmetro: pergunte, não recuse
+
+`capivara init --fresh` sem provider respondia assim:
+
+```
+capivara init não tem provider para: writer, auditor, verifier
+
+Nenhum papel tem provider por padrão — rodar modelo custa dinheiro, e a escolha
+é sua. Diga qual usar, de uma das duas formas:
+
+    capivara init ... --provider codex
+```
+
+A mensagem está certa e a exigência está certa: ninguém gasta modelo por engano.
+O que está errado é o que ela faz com quem já digitou o comando — **manda
+reescrever tudo** para acrescentar uma flag.
+
+Agora, quando há terminal, o harness pergunta **só o que faltou**:
+
+```
+capivara init: falta dizer com que modelo rodar os papéis writer, auditor, verifier.
+O resto do comando está mantido; responda só isto.
+
+Qual provider usar em todos os papéis?
+```
+
+E nada mais. Quem escreveu `init` não é perguntado de novo se quer init, plan ou
+build; quem apontou a pasta não a informa outra vez; o pedido que veio no
+argumento continua valendo. Vale para os cinco comandos — `init`, `plan`,
+`build`, `change`, `survey` — e pergunta apenas pelos papéis que **aquele**
+comando usa: um `build` sem provider pergunta por executor e verificador, nunca
+pelo escritor.
+
+### 58.1 Sem terminal, nada muda
+
+CI, pipe, `ssh` sem tty: a mensagem completa sai como antes e o código de saída é
+o mesmo. Um comando que abre pergunta dentro de um CI é um comando que trava o
+CI — e a ergonomia de quem está no terminal não pode custar isso.
+
+### 58.2 Um caminho, não dois
+
+As perguntas de provider, modelo, effort e papéis saíram do corpo do wizard para
+uma função própria, chamada pelos dois lados. Reimplementá-las no atalho seria
+garantir que um dia as duas telas divergissem — e a primeira a ficar para trás
+seria justamente esta, que é a que quase todo mundo vai ver.

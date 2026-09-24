@@ -718,3 +718,43 @@ describe("a emenda pode fazer o que o achado pede", () => {
     expect(emenda).toContain("it never forbids the very change a finding asks for");
   });
 });
+
+/*
+ * O `assitencia` parou com o auditor pedindo: "Fase 2 concentra 19 tarefas —
+ * redistribuir as tarefas existentes em FASES SEQUENCIAIS MENORES".
+ *
+ * Quem recebe essa correção escreve UMA fase, cujo envelope vem do esqueleto.
+ * Criar fase não é jogada que ele tenha — é a mesma lição do §52, que eu tinha
+ * ensinado ao self-check mecânico e não ao auditor, que a inventou por conta.
+ */
+describe("o auditor não pede cirurgia de fase", () => {
+  const prompt = phaseAuditPrompt({
+    language: "português do Brasil",
+    request: "um sistema",
+    decisions: [],
+    upstream: [],
+    upstreamRemarks: [],
+    document: "project-phases.md",
+    content: "",
+    executable: true,
+    dispositions: [],
+    phaseMarkdown: "## Phase 2",
+    phaseNumber: 2,
+    totalPhases: 16,
+  });
+
+  it("diz que as fases não são dele", () => {
+    expect(prompt).toContain("THE PHASES THEMSELVES ARE NOT YOURS TO CHANGE");
+    expect(prompt).toContain("Never ask for a phase to");
+  });
+
+  it("nomeia as correções que existem de verdade", () => {
+    expect(prompt).toContain("consolidate tasks that deliver the same capability");
+    expect(prompt).toContain("demanded IN THE PHASE that already covers it");
+  });
+
+  it("dá o caminho quando o defeito é do esqueleto: ressalva, não achado", () => {
+    expect(prompt).toContain("say that in a REMARK");
+    expect(prompt).toContain("someone who cannot act on it");
+  });
+});

@@ -80,6 +80,18 @@ const AXIS_EXECUTABILITY = [
   "   does not exist? A project with no dependencies cannot have them listed in its artifact metadata,",
   "   and a criterion demanding it can never be proven: the verifier will look, not find, and reject",
   "   the phase for being correct. Such a criterion must name the absence instead.",
+  "",
+  "   THE PHASES THEMSELVES ARE NOT YOURS TO CHANGE. Their number, their titles, what each one",
+  "   covers and their order were decided in the skeleton, before this document existed, and whoever",
+  "   fixes what you find writes ONE phase at a time from a fixed envelope. Never ask for a phase to",
+  "   be created, split, merged, renumbered or reordered, and never ask for work to be moved from one",
+  "   phase to another: none of it is a change he can make, and a finding he cannot close burns a",
+  "   return for nothing — three of them stop the run.",
+  "   A phase that carries too much has one correction available, and it is inside the phase:",
+  "   consolidate tasks that deliver the same capability, keeping every verifiable condition. Work",
+  "   that is missing is demanded IN THE PHASE that already covers it. If neither fits — if the",
+  "   skeleton itself is wrong — say that in a REMARK, which reaches the developer, instead of a",
+  "   finding that reaches someone who cannot act on it.",
 ].join("\n");
 
 const SCOPE_RULE = [

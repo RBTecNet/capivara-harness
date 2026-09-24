@@ -4707,3 +4707,54 @@ A proibição protege **o que os achados não nomeiam**:
 
 O princípio dito por extenso, em vez da lista de exceções: uma lista de exceções
 teria a próxima faltando.
+
+## §67 — O auditor também não pode pedir cirurgia de fase
+
+O `assitencia` parou com dois achados, e o segundo era este:
+
+> **Fase 2** — a fase concentra 19 tarefas… *Redistribuir as tarefas existentes
+> em **fases sequenciais menores**, preservando relacionamentos*
+
+Quem recebe essa correção escreve UMA fase, cujo número, título, goal e cobertura
+vêm do esqueleto e são montados em código. **Criar fase não é jogada que ele
+tenha.**
+
+É exatamente a lição do §52 — que eu ensinei ao self-check mecânico e não ao
+auditor. O self-check parou de dizer "divida em mais fases de topo"; o auditor,
+que é um modelo, inventou a mesma frase por conta própria. Corrigir o código e
+deixar o prompt de fora é meia correção, outra vez.
+
+E o placar da rodada mostra o estrago:
+
+```
+tentativa 1: 2 achados
+tentativa 2: fechou 2, apareceram 2
+tentativa 3: fechou 2, apareceram 10
+tentativa 4: fechou 0 de 10
+tentativa 5: fechou 10, apareceram 2
+```
+
+Cinco reescritas, 24 achados fechados, e o run acabou no mesmo lugar.
+
+### 67.1 O que o auditor pode pedir
+
+O eixo de executabilidade passa a dizer o que não existe e o que existe:
+
+> THE PHASES THEMSELVES ARE NOT YOURS TO CHANGE. […] Never ask for a phase to be
+> created, split, merged, renumbered or reordered, and never ask for work to be
+> moved from one phase to another: none of it is a change he can make, and a
+> finding he cannot close burns a return for nothing.
+>
+> A phase that carries too much has one correction available, and it is inside
+> the phase: consolidate tasks that deliver the same capability. Work that is
+> missing is demanded IN THE PHASE that already covers it.
+
+### 67.2 E quando o defeito é do esqueleto mesmo
+
+Aí não há correção no plano — e existe um canal para isso que não custa
+devolução: a **ressalva**. Ela chega ao desenvolvedor no relatório, sem mandar
+ninguém tentar o impossível. O prompt passa a apontá-la:
+
+> If neither fits — if the skeleton itself is wrong — say that in a REMARK, which
+> reaches the developer, instead of a finding that reaches someone who cannot act
+> on it.

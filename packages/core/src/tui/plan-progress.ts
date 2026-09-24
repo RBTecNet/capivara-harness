@@ -7,16 +7,21 @@
  * pronta.
  */
 
-import { emptyPlanColumns, phaseSummary, PLAN_COLUMNS, type BuildPhaseRow } from "./build-phases.js";
+import { emptyPlanColumns, PLAN_COLUMNS, type BuildPhaseRow } from "./build-phases.js";
 import type { PlanPhaseEvent } from "../init/progress.js";
 
 export { PLAN_COLUMNS };
+
+/** A legenda da tabela do plan. A do build fala de gates que aqui não existem. */
+export const PLAN_LEGEND = ["E escrita", "A auditoria"] as const;
 
 export class PlanPhaseTracker {
   private readonly ordem: number[] = [];
   private readonly linhas = new Map<number, BuildPhaseRow>();
   /** O que o documento inteiro está fazendo, quando não é uma fase. */
   private documento = "";
+  /** A última fase que mudou: é onde a janela deve estar olhando. */
+  private ultima = "";
 
   apply(event: PlanPhaseEvent): void {
     if (event.kind === "planned") {
@@ -40,6 +45,7 @@ export class PlanPhaseTracker {
     }
 
     const linha = this.linhas.get(event.number) ?? this.criar(event.number);
+    this.ultima = linha.id;
 
     if (event.kind === "authoring") {
       if (event.state === "corrente") {
@@ -57,6 +63,8 @@ export class PlanPhaseTracker {
         linha.gates.E = "verde";
         linha.detail = "reaproveitada";
       } else {
+        // Escrita não é concluída: a fase só fecha quando a auditoria aprova.
+        linha.state = "em andamento";
         linha.gates.E = "verde";
         linha.detail = "escrita";
       }
@@ -99,10 +107,25 @@ export class PlanPhaseTracker {
     return this.ordem.map((numero) => this.linhas.get(numero)!).filter((linha) => linha !== undefined);
   }
 
-  /** `3/18 fases · escrevendo` — o resumo, com a etapa do documento quando há uma. */
+  /**
+   * `12 escritas · 3 aprovadas de 18` — e não `3/18 fases`.
+   *
+   * O resumo do build conta uma coisa só porque lá uma fase ou fechou ou não.
+   * Aqui há duas etapas, e durante a escrita — que é metade do estágio — o
+   * contador de aprovadas fica em zero: a tela dizia "0/18" com doze linhas
+   * escritas na frente, o que parece um run que não saiu do lugar.
+   */
   summary(): string {
-    const base = phaseSummary(this.rows());
+    const linhas = this.rows();
+    const escritas = linhas.filter((linha) => linha.gates.E === "verde").length;
+    const aprovadas = linhas.filter((linha) => linha.state === "concluído").length;
+    const base = `${escritas} escrita(s) · ${aprovadas} aprovada(s) de ${linhas.length}`;
     return this.documento === "" ? base : `${base} · ${this.documento}`;
+  }
+
+  /** Onde a janela deve olhar. Vazio antes do primeiro evento de fase. */
+  get foco(): string {
+    return this.ultima;
   }
 
   get vazio(): boolean {

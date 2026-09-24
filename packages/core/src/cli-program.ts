@@ -27,6 +27,7 @@ import {
   BACK,
   BuildPhaseTracker,
   PLAN_COLUMNS,
+  PLAN_LEGEND,
   PlanPhaseTracker,
   apresentarConclusao,
   apresentarParada,
@@ -263,7 +264,7 @@ function estagioInterativo(options: {
   const fases = new PlanPhaseTracker();
   const onPhaseProgress: NonNullable<InitOptions["onPhaseProgress"]> = (evento) => {
     fases.apply(evento);
-    if (!fases.vazio) progress.setPhases(fases.rows(), fases.summary(), 12, PLAN_COLUMNS);
+    if (!fases.vazio) progress.setPhases(fases.rows(), fases.summary(), 12, PLAN_COLUMNS, PLAN_LEGEND, fases.foco);
     if (evento.kind === "documento") progress.setStage(evento.etapa);
     repaint();
   };

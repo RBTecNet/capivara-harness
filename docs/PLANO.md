@@ -4127,3 +4127,38 @@ O prompt da fase nunca mencionou o marcador. Ele mencionava agora, junto com a
 regra que o torna necessário: escreva na precisão da fonte, e quando não der,
 diga que falta decidir. Um palpite inventado parece uma decisão, é construído, e
 ninguém nunca descobre que foi chute.
+
+## §55 — A janela olha para onde o trabalho está
+
+A tela de fases do `plan` (§53) estreou e mostrou três defeitos na primeira vez
+que rodou contra dezoito fases:
+
+```
+FASES · 0/18 fases · lacunas
+  P01 … E● A○  escrita
+  …doze linhas iguais…
+  ↓ 6 fase(s) abaixo
+G0 engine · G1 escrita · G2 suíte · G3 verificação
+```
+
+**A janela ficava parada na P01.** A âncora herdada do build é *a primeira fase
+em execução* — o que é exato lá, onde uma fase roda por vez, e engana aqui, onde
+doze são escritas em paralelo. O trabalho estava na P15 e a tela mostrava a P01,
+dizendo "↓ 6 fases abaixo" sem deixar ver nenhuma delas.
+
+Agora quem recebe o evento diz onde está a novidade, e a janela vai até lá — com
+a âncora CENTRADA, porque as vizinhas de cima e de baixo são o contexto de onde o
+trabalho está.
+
+**"↓ 6 fase(s) abaixo" contava sem dizer.** Seis esperando e seis falhadas são a
+mesma linha, e uma delas é motivo para rolar a tela. Passa a dizer o que há
+ali: `↓ 6 fase(s): 1 falhou, 5 aguardando`.
+
+**A legenda era a do build.** `G0 engine · G1 escrita · G2 suíte · G3
+verificação` embaixo de uma tabela cujas colunas são E e A. Virou parâmetro, como
+as colunas.
+
+E o resumo dizia `0/18 fases` com doze linhas escritas na frente, o que parece um
+run que não saiu do lugar. O build conta uma coisa só porque lá a fase fecha ou
+não fecha; aqui são duas etapas, e o resumo passa a contar as duas:
+`12 escrita(s) · 0 aprovada(s) de 18`.

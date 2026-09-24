@@ -107,25 +107,34 @@ export function emptyPlanColumns(): Record<string, GateState> {
 export function phaseWindow(
   rows: readonly BuildPhaseRow[],
   maxRows: number,
+  anchorId?: string,
 ): { visible: BuildPhaseRow[]; hiddenBefore: number; hiddenAfter: number } {
   if (maxRows <= 0) return { visible: [], hiddenBefore: 0, hiddenAfter: rows.length };
   if (rows.length <= maxRows) return { visible: [...rows], hiddenBefore: 0, hiddenAfter: 0 };
 
   /*
-   * A âncora é a fase em execução. Sem nenhuma em execução — build recém-criado
-   * ou já terminado — a janela fica onde há trabalho por fazer, e, se não houver
-   * nenhum, no fim da lista, que é onde está o desfecho.
+   * A âncora explícita ganha de tudo: quem sabe onde está a novidade é quem
+   * acabou de receber o evento.
+   *
+   * Sem ela, a âncora é a primeira fase em execução — o que funciona no build,
+   * onde uma fase roda por vez, e ENGANA no plan, onde doze são escritas em
+   * paralelo: a janela ficava presa na P01 enquanto o trabalho acontecia na P15,
+   * e a tela dizia "↓ 6 fases abaixo" sem deixar ver nenhuma delas.
    */
+  const explicita = anchorId === undefined ? -1 : rows.findIndex((row) => row.id === anchorId);
   const executando = rows.findIndex((row) => row.state === "em andamento");
   const proxima = rows.findIndex((row) => row.state === "aguardando");
-  const ancora = executando >= 0 ? executando : proxima >= 0 ? proxima : rows.length - 1;
+  const ancora = explicita >= 0 ? explicita : executando >= 0 ? executando : proxima >= 0 ? proxima : rows.length - 1;
 
   /*
-   * A âncora vai para o topo da janela: o que interessa depois dela é o que
-   * falta. Só quando a âncora está no fim da lista é que a janela recua, para
-   * não sobrar espaço vazio embaixo.
+   * A âncora fica CENTRADA quando ela é explícita, e no topo quando é deduzida.
+   *
+   * Centrada porque a fase que acabou de mudar quase nunca é a última novidade:
+   * ver as vizinhas de cima e de baixo é o que dá o contexto de onde o trabalho
+   * está. No topo quando é deduzida, porque ali o que interessa é o que falta.
    */
-  const inicio = Math.min(ancora, Math.max(0, rows.length - maxRows));
+  const desejado = explicita >= 0 ? ancora - Math.floor(maxRows / 2) : ancora;
+  const inicio = Math.max(0, Math.min(desejado, Math.max(0, rows.length - maxRows)));
   return {
     visible: rows.slice(inicio, inicio + maxRows),
     hiddenBefore: inicio,
@@ -148,18 +157,26 @@ function colunasWidth(columns: readonly string[]): number {
   return columns.reduce((total, coluna) => total + coluna.length + 1, 0) + Math.max(0, columns.length - 1);
 }
 
+export interface PhaseRowsOptions {
+  /** As colunas de bolinha: os gates do build, ou E/A do plan. */
+  columns?: readonly string[];
+  /** A fase que acabou de mudar; a janela se move para mostrá-la. */
+  anchorId?: string;
+}
+
 export function renderPhaseRows(
   rows: readonly BuildPhaseRow[],
   maxRows: number,
   width: number,
   style: Style,
-  columns: readonly string[] = GATES,
+  options: PhaseRowsOptions = {},
 ): string[] {
-  const janela = phaseWindow(rows, maxRows);
+  const columns = options.columns ?? GATES;
+  const janela = phaseWindow(rows, maxRows, options.anchorId);
   const linhas: string[] = [];
 
   if (janela.hiddenBefore > 0) {
-    linhas.push(paint(`  ↑ ${janela.hiddenBefore} fase(s) acima`, "gray", style));
+    linhas.push(paint(`  ↑ ${resumoOculto(rows.slice(0, janela.hiddenBefore))}`, "gray", style));
   }
 
   /*
@@ -179,7 +196,7 @@ export function renderPhaseRows(
   }
 
   if (janela.hiddenAfter > 0) {
-    linhas.push(paint(`  ↓ ${janela.hiddenAfter} fase(s) abaixo`, "gray", style));
+    linhas.push(paint(`  ↓ ${resumoOculto(rows.slice(rows.length - janela.hiddenAfter))}`, "gray", style));
   }
 
   return linhas;
@@ -198,6 +215,25 @@ export function gatesWidth(columns: readonly string[] = GATES): number {
 }
 
 /** Quanto cada linha realmente ocupa, para o painel decidir quantas cabem. */
+/**
+ * O que está escondido, e não só quanta coisa.
+ *
+ * "↓ 6 fase(s) abaixo" conta uma quantidade e esconde o que importa: se são seis
+ * esperando, não há nada para ver ali; se uma delas falhou, a tela está
+ * escondendo justamente o que a pessoa procura.
+ */
+function resumoOculto(ocultas: readonly BuildPhaseRow[]): string {
+  const contagem = new Map<PhaseState, number>();
+  for (const row of ocultas) contagem.set(row.state, (contagem.get(row.state) ?? 0) + 1);
+
+  const ordem: PhaseState[] = ["falhou", "em andamento", "concluído", "pulado", "aguardando"];
+  const partes = ordem
+    .filter((estado) => (contagem.get(estado) ?? 0) > 0)
+    .map((estado) => `${contagem.get(estado)} ${estado}`);
+
+  return `${ocultas.length} fase(s): ${partes.join(", ")}`;
+}
+
 export function phaseRowWidth(row: BuildPhaseRow, style: Style, columns: readonly string[] = GATES): number {
-  return visibleWidth(renderPhaseRows([row], 1, 200, style, columns)[0] ?? "");
+  return visibleWidth(renderPhaseRows([row], 1, 200, style, { columns })[0] ?? "");
 }

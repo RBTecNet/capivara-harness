@@ -73,7 +73,7 @@ describe("rastreador de fases do plan", () => {
     fases.apply({ kind: "audit", number: 1, state: "aprovada" });
     fases.apply({ kind: "documento", etapa: "ensaio do verificador" });
 
-    expect(fases.summary()).toContain("1/3 fases");
+    expect(fases.summary()).toContain("1 escrita(s) · 1 aprovada(s) de 3");
     expect(fases.summary()).toContain("ensaio do verificador");
     expect(fases.rows()).toHaveLength(3);
   });
@@ -91,10 +91,69 @@ describe("rastreador de fases do plan", () => {
     fases.apply({ kind: "authoring", number: 1, state: "pronta" });
     fases.apply({ kind: "audit", number: 1, state: "corrente" });
 
-    const linhas = renderPhaseRows(fases.rows(), 10, 100, { enabled: false }, PLAN_COLUMNS);
+    const linhas = renderPhaseRows(fases.rows(), 10, 100, { enabled: false }, { columns: PLAN_COLUMNS });
     expect(linhas[0]).toContain("P01");
     expect(linhas[0]).toContain("E●");
     expect(linhas[0]).toContain("A●");
     expect(linhas[0]).not.toContain("G0");
+  });
+});
+
+/*
+ * A tela real, no `assitencia`: doze fases escritas em paralelo, todas "em
+ * andamento", e a janela presa na P01 dizendo "↓ 6 fase(s) abaixo" — justamente
+ * onde o trabalho estava acontecendo. A âncora do build, que é a primeira fase
+ * em execução, engana quando doze executam ao mesmo tempo.
+ */
+describe("a janela olha para onde o trabalho está", () => {
+  const dezoito = () => {
+    const fases = new PlanPhaseTracker();
+    fases.apply({
+      kind: "planned",
+      phases: Array.from({ length: 18 }, (_, indice) => ({ number: indice + 1, title: `Fase ${indice + 1}` })),
+    });
+    return fases;
+  };
+
+  it("segue a última fase que mudou, e não a primeira em andamento", () => {
+    const fases = dezoito();
+    for (let numero = 1; numero <= 12; numero += 1) fases.apply({ kind: "authoring", number: numero, state: "pronta" });
+    fases.apply({ kind: "authoring", number: 15, state: "corrente" });
+
+    expect(fases.foco).toBe("P15");
+    const linhas = renderPhaseRows(fases.rows(), 12, 120, { enabled: false }, { columns: PLAN_COLUMNS, anchorId: fases.foco });
+    expect(linhas.join("\n")).toContain("P15");
+  });
+
+  it("centra a âncora: as vizinhas são o contexto de onde o trabalho está", () => {
+    const fases = dezoito();
+    fases.apply({ kind: "audit", number: 10, state: "corrente" });
+
+    const linhas = renderPhaseRows(fases.rows(), 6, 120, { enabled: false }, { columns: PLAN_COLUMNS, anchorId: "P10" });
+    const texto = linhas.join("\n");
+    expect(texto).toContain("P08");
+    expect(texto).toContain("P10");
+    expect(texto).toContain("P12");
+  });
+
+  it("o que está escondido diz o que é, não só quanto é", () => {
+    const fases = dezoito();
+    for (let numero = 1; numero <= 8; numero += 1) {
+      fases.apply({ kind: "authoring", number: numero, state: "pronta" });
+      fases.apply({ kind: "audit", number: numero, state: "aprovada" });
+    }
+    fases.apply({ kind: "authoring", number: 14, state: "corrente" });
+
+    const texto = renderPhaseRows(fases.rows(), 6, 120, { enabled: false }, { columns: PLAN_COLUMNS, anchorId: "P14" }).join("\n");
+    expect(texto).toContain("concluído");
+    expect(texto).toContain("aguardando");
+  });
+
+  it("o resumo conta as duas etapas: zero aprovadas com doze escritas parece run parado", () => {
+    const fases = dezoito();
+    for (let numero = 1; numero <= 12; numero += 1) fases.apply({ kind: "authoring", number: numero, state: "pronta" });
+
+    expect(fases.summary()).toContain("12 escrita(s)");
+    expect(fases.summary()).toContain("0 aprovada(s) de 18");
   });
 });

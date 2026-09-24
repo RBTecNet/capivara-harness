@@ -109,7 +109,7 @@ describe("as bolinhas dizem em que gate a fase está", () => {
 
   it("a linha diz quantas ficaram escondidas, em vez de simplesmente sumir com elas", () => {
     const desenhado = renderPhaseRows(seteFases(4), 3, 100, semCor).join("\n");
-    expect(desenhado).toContain("4 fase(s) acima");
+    expect(desenhado).toContain("4 fase(s): 4 concluído");
   });
 
   it("o título cede espaço num terminal estreito; o id e os gates não", () => {

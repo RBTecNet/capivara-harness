@@ -64,7 +64,7 @@ export interface DashboardModel {
    * Substitui o pipeline — as duas caixas respondem à mesma pergunta, cada uma
    * no seu lado do ciclo.
    */
-  phases?: { rows: BuildPhaseRow[]; summary: string; maxRows: number; columns?: readonly string[] };
+  phases?: { rows: BuildPhaseRow[]; summary: string; maxRows: number; columns?: readonly string[]; legend?: readonly string[]; anchorId?: string };
   provider: { perfil: string; transporte: string; contabilidade: string };
   telemetry: Metric[];
   events: DashboardEvent[];
@@ -261,11 +261,16 @@ function dashboardLines(model: DashboardModel, layout: Layout): string[] {
   );
 
   if (model.phases) {
-    const lista = renderPhaseRows(model.phases.rows, layout.phases, width - 2, style, model.phases.columns);
+    const lista = renderPhaseRows(model.phases.rows, layout.phases, width - 2, style, {
+      ...(model.phases.columns ? { columns: model.phases.columns } : {}),
+      ...(model.phases.anchorId ? { anchorId: model.phases.anchorId } : {}),
+    });
     lines.push(
       ...box(
         `FASES · ${model.phases.summary}`,
-        lista.length > 0 ? [...lista, ...(layout.dense ? [] : [paint("G0 engine · G1 escrita · G2 suíte · G3 verificação", "gray", style)])] : [paint("nenhuma fase planejada", "gray", style)],
+        lista.length > 0
+          ? [...lista, ...(layout.dense ? [] : [paint((model.phases.legend ?? PHASE_GATES).join(" · "), "gray", style)])]
+          : [paint("nenhuma fase planejada", "gray", style)],
         width,
         style,
       ),

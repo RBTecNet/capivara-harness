@@ -570,3 +570,53 @@ describe("o auditor não pode pedir o que o escritor está proibido de escrever"
     }
   });
 });
+
+/*
+ * O `assitencia` parou em NOT READY com um critério que o verificador declarou
+ * IMPOSSÍVEL: "Definir o sistema visual compartilhado conforme a base documental
+ * frontend-design fornecida".
+ *
+ * A cadeia inteira foi fiel: o projeto na base documental tem uma skill chamada
+ * `frontend-design`, ela entrou na pergunta da entrevista, a resposta aceita
+ * carregou o nome, o esqueleto virou regra transversal e cada fase copiou.
+ * Ninguém errou — e o critério é improvável, porque a skill não está no
+ * repositório que o verificador lê. Ele procura, não acha, e reprova uma fase
+ * correta.
+ */
+describe("critério se prova lendo o repositório", () => {
+  it("o esqueleto não escreve regra que aponta para fora do repositório", () => {
+    expect(esqueleto).toContain("CHECKED BY READING THIS REPOSITORY");
+    expect(esqueleto).toContain("applied,");
+    expect(esqueleto).toContain("never cited");
+  });
+
+  it("a fase não escreve critério que depende de documento fora do repositório", () => {
+    const fase = phaseFromSlicePrompt({
+      language: "português do Brasil",
+      slice: "stack: Next.js",
+      phaseNumber: 5,
+      totalPhases: 18,
+      grammar: "gramática",
+      maxCriteriaPerTask: 4,
+    });
+
+    expect(fase).toContain("proven by reading THIS REPOSITORY");
+    expect(fase).toContain("skill from the documentation library");
+    // E mostra a troca, porque proibir sem ensinar deixa o escritor sem saída.
+    expect(fase).toContain("cannot be verified");
+    expect(fase).toContain("can.");
+  });
+
+  it("a proibição alcança a regra transversal que já veio escrita assim", () => {
+    const fase = phaseFromSlicePrompt({
+      language: "português do Brasil",
+      slice: "regra: conforme a base documental frontend-design fornecida",
+      phaseNumber: 1,
+      totalPhases: 18,
+      grammar: "gramática",
+      maxCriteriaPerTask: 4,
+    });
+
+    expect(fase).toContain("not even when a rule above phrases itself that way");
+  });
+});

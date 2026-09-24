@@ -3906,3 +3906,51 @@ Todo achado precisa ter uma escrita que o feche. Antes de acrescentar uma
 pergunta a um eixo, a pergunta é: *existe um texto que o escritor possa produzir,
 sem violar outro eixo, que responda a isto?* Se não existir, a pergunta não é uma
 auditoria — é um impasse programado.
+
+## §50 — Critério se prova lendo o repositório
+
+O `plan` do `assitencia` publicou as 18 fases e parou em NOT READY num único
+ponto: o ensaio do verificador declarou um critério IMPOSSÍVEL.
+
+```
+P1.T1.C2 · Inicializar a aplicação Next.js com Tailwind CSS, shadcn/ui e a base
+visual compartilhada. — UNSATISFIABLE: Exige uma base documental frontend-design
+fornecida como referência; a decisão "Sistema visual próprio" define que a
+referência visual será criada pelo projeto.
+```
+
+A cadeia inteira foi fiel, e é isso que faz dela uma família:
+
+1. o projeto na base documental tem uma **skill** chamada `frontend-design`;
+2. o harness a entregou ao escritor junto do material do projeto;
+3. ele a citou na pergunta da entrevista — *"a base frontend-design exige uma
+   direção visual intencional"*;
+4. a resposta aceita carregou o nome;
+5. o esqueleto virou regra transversal: *"conforme a base documental
+   frontend-design fornecida"*;
+6. cada fase copiou a regra para dentro dos critérios.
+
+Ninguém inventou nada. E o critério é improvável, porque **a skill não está no
+repositório que o verificador lê**: ele procura o documento, não acha, e reprova
+uma fase correta. Foi o ensaio que pegou, duas vezes — corrigiu o P5, e o irmão
+no P1 apareceu na rodada seguinte, quando o teto acabou.
+
+### 50.1 A regra
+
+Uma skill é insumo de quem CONSTRÓI — ela vai para a sessão do executor na fase
+em que serve. Não é documento que um critério possa citar. O esqueleto e o
+escritor de fase passam a dizer isso, e a dizer a troca:
+
+> "O sistema visual segue a base frontend-design" não se verifica; "a paleta, a
+> escala de espaçamento e a tipografia estão definidas num módulo compartilhado e
+> toda tela as importa de lá" se verifica.
+
+Proibir sem ensinar a troca deixaria o escritor sem saída — que é exatamente o
+defeito do §49.
+
+### 50.2 O parente
+
+É o mesmo problema do `Design ref`, que já tinha parágrafo próprio: um caminho
+inventado ali é referência morta, o harness procura o arquivo e recusa a fase. A
+regra existia para o CAMPO e faltava para a PROSA. Correção pela metade de novo,
+e desta vez a metade ausente custou 90 minutos de escritor.

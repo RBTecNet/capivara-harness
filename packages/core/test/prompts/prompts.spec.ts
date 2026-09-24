@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessRehearsal, enumerateCriteria, gapPrompt, interviewPrompt, languageBlock, parseRehearsal, phaseAuditPrompt, phaseFromSlicePrompt, rehearsalPrompt, skeletonPrompt, surveyDomainPrompt, surveyMapPrompt } from "../../src/prompts/index.js";
+import { assessRehearsal, enumerateCriteria, gapPrompt, interviewPrompt, languageBlock, parseRehearsal, amendPhasePrompt, phaseAuditPrompt, phaseFromSlicePrompt, rehearsalPrompt, skeletonPrompt, surveyDomainPrompt, surveyMapPrompt } from "../../src/prompts/index.js";
 import type { WriterContext } from "../../src/prompts/index.js";
 import { parsePhases, tasksBlock } from "../../src/contract/index.js";
 import { STRUCTURAL_LABELS } from "../../src/contract/index.js";
@@ -685,5 +685,36 @@ describe("o adjetivo que inventa uma regra", () => {
 
   it("diz por que o palpite é pior que a pergunta", () => {
     expect(fatia(1)).toContain("invented default looks like a decision, gets built");
+  });
+});
+
+/*
+ * O `assitencia` perguntou ao DESENVOLVEDOR se ele "autoriza acrescentar tarefas
+ * exclusivamente para realizar a divisão exigida pela auditoria, apesar da
+ * proibição explícita de adicionar tarefas".
+ *
+ * Duas instruções nossas em lados opostos: o self-check de dimensionamento manda
+ * "divida-a em tasks que façam uma coisa cada", e a emenda proibia acrescentar
+ * task. O escritor, ensinado a marcar em vez de inventar, marcou — e a rodada de
+ * lacunas levou a contradição do harness para quem não tem nada a ver com ela.
+ */
+describe("a emenda pode fazer o que o achado pede", () => {
+  const emenda = amendPhasePrompt({
+    language: "português do Brasil",
+    current: "- [ ] **Task:** x",
+    findings: [{ where: "Phase 1 · Tarefa 2", problem: "a task declara 7 critérios", fix: "divida-a em tasks que façam uma coisa cada" }],
+  });
+
+  it("proíbe mexer no que o achado não nomeia, e só isso", () => {
+    expect(emenda).toContain("never add, drop, merge or renumber tasks on your");
+  });
+
+  it("autoriza a divisão quando é ela que o achado pede", () => {
+    expect(emenda).toContain("splitting it IS the correction");
+    expect(emenda).toContain("keeping every verifiable condition");
+  });
+
+  it("diz o princípio, para não precisar listar todos os casos", () => {
+    expect(emenda).toContain("it never forbids the very change a finding asks for");
   });
 });

@@ -4671,3 +4671,39 @@ laço por outro.
 O princípio é o mesmo nas quatro: **quem não pode decidir nunca deve receber a
 ordem de decidir.** Cada vez que o harness quebrou essa regra, o custo foi um run
 inteiro.
+
+## §66 — A regra que proíbe o conserto que ela mesma pede
+
+O `assitencia` perguntou isto ao desenvolvedor:
+
+> Para a tarefa do segundo marcador, você autoriza acrescentar tarefas
+> exclusivamente para realizar a divisão exigida pela auditoria, **apesar da
+> proibição explícita de adicionar tarefas**?
+
+A pergunta é legítima e o destinatário está errado: ele está pedindo ao
+desenvolvedor que arbitre entre **duas instruções nossas**.
+
+| quem manda | o que manda |
+|---|---|
+| self-check de dimensionamento | "uma task com mais de 4 critérios está fazendo mais de uma coisa: **divida-a**" |
+| prompt da emenda | "Do not merge tasks. **Do not add tasks.**" |
+
+A proibição existe por um bom motivo — impedir que a emenda vire reescrita, que é
+como o ciclo de auditoria nunca fecha. Só que ela foi escrita como absoluta, e
+engoliu junto o caso em que acrescentar task **é** a correção pedida.
+
+O escritor fez tudo certo: ensinado no §54 a marcar em vez de inventar, ele
+marcou. A rodada de lacunas fez tudo certo: levou a decisão a quem decide. E o
+desenvolvedor recebeu uma pergunta sobre a briga interna do harness.
+
+### 66.1 A regra certa
+
+A proibição protege **o que os achados não nomeiam**:
+
+> never add, drop, merge or renumber tasks on your own initiative. When a finding
+> asks for a task to be SPLIT, splitting it IS the correction […] The rule above
+> protects what the findings do not name — **it never forbids the very change a
+> finding asks for.**
+
+O princípio dito por extenso, em vez da lista de exceções: uma lista de exceções
+teria a próxima faltando.

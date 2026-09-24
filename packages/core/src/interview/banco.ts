@@ -201,6 +201,15 @@ export function regrasDeBanco(decisao: DecisaoDeBanco): SkeletonRule[] {
         "a suíte automatizada e os fluxos rodam contra um banco descartável, criado e destruído pela própria " +
         "execução dos testes; nenhum teste lê, escreve ou migra o banco configurado no `.env` do desenvolvedor",
     },
+    {
+      subject: "a aplicação escolhe o banco pelo ambiente",
+      statement:
+        "a origem do banco é uma variável de ambiente, e o banco DESCARTÁVEL é uma das origens que a " +
+        "APLICAÇÃO aceita — não só a suíte dela. Subir a aplicação com o `.env.example`, numa máquina sem " +
+        "servidor de banco nenhum instalado, tem de funcionar: é assim que os fluxos são percorridos, num " +
+        "navegador, contra o produto de pé. Um produto que só conecta no servidor de produção não pode ser " +
+        "aberto em máquina que não tenha esse servidor, e a verificação que mais importa deixa de existir",
+    },
   ];
 
   const especifica: Record<Exclude<DecisaoDeBanco, "sem-banco" | "indefinida">, SkeletonRule> = {

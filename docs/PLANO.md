@@ -4496,3 +4496,49 @@ O projeto tinha `playwright` nas devDependencies — a biblioteca — e o gate p
 `@playwright/test`, o runner. São pacotes diferentes, e ter o primeiro não
 satisfaz o segundo. O aviso diz isso com todas as letras, porque é o erro natural
 de quem lê a mensagem correndo.
+
+## §62 — O gate 4 é um teste, e a aplicação precisa saber disso
+
+O `assitencia` chegou ao gate 4 com a aplicação incapaz de subir. O produto está
+fiel ao pedido — *"MySQL remoto em produção, SQLite para testes"* —, e a leitura
+que ele fez foi a literal:
+
+```ts
+const obrigatorias = ['MYSQL_HOST', 'MYSQL_PORT', 'MYSQL_USER', 'MYSQL_PASSWORD', 'MYSQL_DATABASE'];
+if (!ambiente[chave]?.trim()) throw new Error(`A variável obrigatória ${chave} não foi definida.`);
+```
+
+SQLite na suíte, MySQL na aplicação. E o **gate 4 sobe a aplicação** — com o
+`.env` semeado do exemplo, que aponta para um servidor que não existe de
+propósito. Numa máquina sem MySQL instalado, o gate que mais importa não tem como
+rodar.
+
+O executor viu antes do gate e usou a única saída que tinha, a do §44:
+
+> `CAPIVARA_ROTEIRO_ERRADO:` Os roteiros do gate 4 acessam e alteram o MySQL do
+> `.env` do desenvolvedor, contrariando a exigência de SQLite descartável
+
+Ele está certo no raciocínio e reclamando no lugar errado: reescrever o roteiro
+não troca o banco de uma aplicação. §49 outra vez, numa forma nova.
+
+### 62.1 A regra dizia "os fluxos", e não dizia como
+
+A regra do §46 já mandava *"a suíte automatizada **e os fluxos** rodam contra um
+banco descartável"*. O produto leu "fluxos" como mais um teste automatizado, e
+cumpriu — nos testes. Faltava dizer o que isso exige da APLICAÇÃO:
+
+> a origem do banco é uma variável de ambiente, e o banco DESCARTÁVEL é uma das
+> origens que a APLICAÇÃO aceita — não só a suíte dela. Subir a aplicação com o
+> `.env.example`, numa máquina sem servidor de banco nenhum instalado, tem de
+> funcionar: é assim que os fluxos são percorridos, num navegador, contra o
+> produto de pé.
+
+Com ela, o §60.3 fecha o par: o exemplo aponta para o descartável, e a aplicação
+sabe subir com ele.
+
+### 62.2 Onde essa regra entra
+
+Nas regras transversais do esqueleto, escritas no `init`. Um projeto já planejado
+não a recebe por atualizar o binário — e é o preço de decisões que vivem no
+documento em vez de no código do harness. O que o documento ganha em troca é
+poder ser lido, auditado e contestado; o que ele perde é a correção retroativa.

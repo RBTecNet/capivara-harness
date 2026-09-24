@@ -41,6 +41,13 @@ async function init(steps: ScriptStep[], ask?: (typeof comum)["ask"]) {
   return { outcome, agent };
 }
 
+async function planComAnuncioEResposta(steps: ScriptStep[], ask: (typeof comum)["ask"]) {
+  const agent = fakeAgent(steps);
+  const dito: string[] = [];
+  const outcome = await runPlan({ projectRoot, request, ...comum, ask, call: agent.call, announce: (linha) => void dito.push(linha) });
+  return { outcome, agent, anunciado: dito.join("\n") };
+}
+
 async function planComAnuncio(steps: ScriptStep[]) {
   const agent = fakeAgent(steps);
   const dito: string[] = [];
@@ -138,19 +145,29 @@ describe("a entrevista do plan — o que só a escrita da fase descobre", () => 
       match: { role: "writer", stage: "authoring", subject: "phase-p01" },
       respond: { stdout: `${PHASE_1}\n[NEEDS DECISION] qual provedor de email envia a confirmação\n` },
     });
+    /*
+     * O id precisa ser `Q-NN`: o protocolo recusa qualquer outro, e o fixture
+     * usava `Q-G1`. O lote era rejeitado, a rodada de lacunas desistia EM
+     * SILÊNCIO, e o teste passava mesmo assim porque a auditoria acabava
+     * removendo o marcador por outro caminho. O silêncio escondia o defeito na
+     * nossa própria fixture — que é o mesmo que ele escondeu em produção.
+     */
     steps.unshift({
       match: { role: "writer", stage: "interview", subject: "project-phases.md:gaps" },
-      respond: { stdout: oneQuestion("Q-G1") },
+      respond: { stdout: oneQuestion() },
     });
     return steps;
   }
 
   it("marcador deixado pela fase vira pergunta, e a resposta some com o marcador", async () => {
     await init(skeletonPath());
-    const { outcome, agent } = await plan(comLacuna(), async () => "1");
+    const { outcome, agent, anunciado } = await planComAnuncioEResposta(comLacuna(), async () => "1");
 
     const lacuna = agent.calls.find((call) => call.subject === "project-phases.md:gaps");
     expect(lacuna?.prompt).toContain("qual provedor de email envia a confirmação");
+    // A rodada de lacunas ACONTECEU — e é isso que o silêncio escondia.
+    expect(anunciado).toContain("decisão(ões) pendente(s) nas fases");
+    expect(anunciado).not.toContain("não consegui transformar");
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
 
     const plano = await readFile(join(projectRoot, ".capivara", "init", "project-phases.md"), "utf8");

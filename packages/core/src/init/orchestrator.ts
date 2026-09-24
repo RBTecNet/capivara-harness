@@ -252,7 +252,16 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const announce = options.announce ?? (() => undefined);
   const maxAuditReturns = options.maxAuditReturns ?? DEFAULT_MAX_RETURNS;
   const maxInterviewRounds = options.maxInterviewRounds ?? 3;
-  const maxGapRounds = options.maxGapRounds ?? 2;
+  /*
+   * Rodadas de lacuna suficientes para esvaziar a fila.
+   *
+   * Eram duas, com cinco perguntas cada: dez decisões no máximo. Um plano de
+   * dezoito fases produziu quatorze marcadores, e os que sobraram viraram I-13
+   * no auditor — achado que o escritor não pode fechar. A rodada agora continua
+   * enquanto houver marcador E enquanto cada rodada fechar pelo menos um; o teto
+   * existe só para não haver laço infinito quando nada avança.
+   */
+  const maxGapRounds = options.maxGapRounds ?? 6;
   const maxGapQuestions = options.maxGapQuestions ?? 5;
   const maxRehearsalRounds = options.maxRehearsalRounds ?? 1;
   const maxParallelParts = Math.max(1, options.maxParallelParts ?? 3);
@@ -1484,16 +1493,49 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       announce(`  ${markers.length} decisão(ões) pendente(s) nas fases; reabrindo a entrevista`);
       await event("interview", document, "retry", `${markers.length} gap(s) descobertos na escrita`, round);
 
-      const batch = parseQuestionBatch(
-        await track({
-          role: "writer",
-          stage: "interview",
-          subject: `${document}:gaps`,
-          attempt: round,
-          prompt: gapPrompt(document, writer, markers, perguntadas()),
-        }),
+      const base = gapPrompt(document, writer, markers, perguntadas());
+      let batch = parseQuestionBatch(
+        await track({ role: "writer", stage: "interview", subject: `${document}:gaps`, attempt: round, prompt: base }),
       );
-      if (!batch.ok || batch.questions.length === 0) return authored;
+
+      /*
+       * Lote malformado repete UMA vez, com os defeitos nomeados — e nunca sai
+       * calado.
+       *
+       * Aqui estava um `return authored` mudo: se o levantamento das perguntas
+       * voltasse torto, a rodada inteira era abandonada sem uma linha na tela, e
+       * os marcadores seguiam para a auditoria como I-13 — um achado que o
+       * escritor não pode fechar, porque quem resolve a decisão é o
+       * desenvolvedor. No `assitencia` isso custou o run: quatorze marcadores
+       * chegaram ao auditor e as três devoluções foram gastas neles.
+       */
+      if (!batch.ok) {
+        announce(`  o levantamento das perguntas de lacuna veio malformado; pedindo de novo com os defeitos nomeados`);
+        batch = parseQuestionBatch(
+          await track({
+            role: "writer",
+            stage: "interview",
+            subject: `${document}:gaps`,
+            attempt: round,
+            prompt: [
+              base,
+              "",
+              "## Your previous answer was rejected before it reached the developer",
+              ...batch.defects.map((defeito) => `- ${defeito.questionId}: ${defeito.problem} — ${defeito.hint}`),
+              "",
+              "Emit the whole batch again, complete. One question per open decision above.",
+            ].join("\n"),
+          }),
+        );
+      }
+
+      if (!batch.ok || batch.questions.length === 0) {
+        announce(
+          `  não consegui transformar ${markers.length} decisão(ões) pendente(s) em pergunta; elas seguem abertas e o plano não fecha com elas`,
+        );
+        await event("interview", document, "blocked", `${markers.length} gap(s) sem pergunta`, round);
+        return authored;
+      }
 
       const answered: Answer[] = [];
       let index = 0;
@@ -2007,16 +2049,36 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }
 
       if (!parsed.ok && !isRepairable(parsed.errors)) {
-        return {
-          status: "REJECTED",
-          findings: substanceDefects(parsed.errors).map((error) => ({
-            where: `linha ${error.line}`,
-            problem: `${error.code}: ${error.message}`,
-            fix: error.hint,
-          })),
-          remarks: [],
-          reason: "o plano não passa no contrato",
-        };
+        /*
+         * Decisão pendente não é achado do escritor.
+         *
+         * `I-13` diz que sobrou um `[NEEDS DECISION]`, e a correção que ele pede
+         * é "resolva a decisão na entrevista" — coisa que quem reescreve a fase
+         * não pode fazer: quem decide é o desenvolvedor, na rodada de lacunas.
+         * Mandá-lo assim mesmo é o §49 de novo, e no `assitencia` foram quatorze
+         * marcadores consumindo as três devoluções inteiras.
+         *
+         * O marcador continua bloqueando: a prontidão tem um gate só para ele, e
+         * ele diz ao DESENVOLVEDOR o que ficou em aberto, que é quem pode fechar.
+         */
+        const doEscritor = substanceDefects(parsed.errors).filter((error) => error.code !== "I-13");
+        const pendentes = parsed.errors.filter((error) => error.code === "I-13").length;
+        if (pendentes > 0) {
+          announce(`  ${pendentes} decisão(ões) seguem marcadas como pendentes; elas param a prontidão, não o escritor`);
+        }
+
+        if (doEscritor.length > 0) {
+          return {
+            status: "REJECTED",
+            findings: doEscritor.map((error) => ({
+              where: `linha ${error.line}`,
+              problem: `${error.code}: ${error.message}`,
+              fix: error.hint,
+            })),
+            remarks: [],
+            reason: "o plano não passa no contrato",
+          };
+        }
       }
     }
 

@@ -4311,3 +4311,56 @@ As perguntas de provider, modelo, effort e papéis saíram do corpo do wizard pa
 uma função própria, chamada pelos dois lados. Reimplementá-las no atalho seria
 garantir que um dia as duas telas divergissem — e a primeira a ficar para trás
 seria justamente esta, que é a que quase todo mundo vai ver.
+
+## §59 — A rodada de lacunas desistia sem dizer nada
+
+O `assitencia` deu PLAN READY **sem fazer uma pergunta sequer** e, no `plan`,
+devolveu isto:
+
+```
+linha  26: I-13: o documento contém um marcador [NEEDS DECISION]
+linha  99: I-13: …
+linha 290: I-13: …
+… quatorze vezes …
+
+1. tentativa 1: escreveu o documento; o auditor apontou 21 ponto(s)
+2. tentativa 2: devolveu o MESMO texto, sem uma alteração sequer
+3. tentativa 3: reescreveu — fechou 0 de 21
+```
+
+O `events.tsv` mostrava a rodada de lacunas começando — *"5 gap(s) descobertos na
+escrita"* — e nada depois. Nenhum evento, nenhuma linha na tela.
+
+A causa, em uma linha de código:
+
+```ts
+if (!batch.ok || batch.questions.length === 0) return authored;
+```
+
+Uma das cinco perguntas que o escritor levantou **juntava três decisões numa
+frase** — defeito que o protocolo recusa, com razão. O lote inteiro caiu por
+causa dela, e a rodada abandonou as cinco decisões sem uma palavra. Os marcadores
+seguiram para a auditoria, viraram `I-13`, e o escritor foi mandado *"resolver a
+decisão na entrevista"* — que é a coisa que ele não pode fazer.
+
+### 59.1 Três consertos, um por elo
+
+1. **Lote malformado repete uma vez, com os defeitos nomeados** — é o que a
+   entrevista principal sempre fez, e faltava aqui. Se ainda assim não vier
+   pergunta, a tela DIZ que as decisões seguem abertas e o evento fica gravado.
+   Silêncio nunca mais.
+2. **As rodadas continuam enquanto houver marcador e houver progresso.** Eram
+   duas rodadas de cinco perguntas: dez decisões no máximo, e o plano tinha
+   quatorze. O teto agora existe só contra laço infinito.
+3. **`I-13` deixa de ser achado do escritor.** Marcador pendente para a
+   PRONTIDÃO, que fala com o desenvolvedor — quem pode decidir. Mandar o escritor
+   "resolver a decisão" é o §49 pela quinta vez.
+
+### 59.2 O silêncio escondia um defeito no nosso próprio teste
+
+A fixture da rodada de lacunas usava o id `Q-G1`, e o protocolo exige `Q-NN`. O
+lote era recusado **em todo teste que rodou nos últimos meses** — e o teste
+passava, porque a auditoria acabava removendo o marcador por outro caminho.
+
+A primeira coisa que a mensagem nova fez, ao rodar a suíte, foi denunciar isso.
+Um harness que desiste calado engana até quem o escreveu.

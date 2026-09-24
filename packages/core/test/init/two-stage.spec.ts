@@ -521,3 +521,66 @@ describe("decisão que nasce na reescrita também chega ao desenvolvedor", () =>
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
   });
 });
+
+/*
+ * O `assitencia` quebrou numa pergunta sobre permissões: o desenvolvedor
+ * respondeu, com exemplos, o classificador disse que não cobria, e a decisão
+ * ficou em aberto. O auditor então devolveu a fase três vezes dizendo "obter a
+ * decisão aceita" — coisa que o escritor não pode fazer — e o run abortou com
+ * tudo pronto e uma pergunta de dez segundos sem resposta.
+ */
+describe("decisão em aberto volta a quem decide, não ao escritor", () => {
+  it("reabre a pergunta quando o auditor devolve e há decisão pendente", async () => {
+    await init(skeletonPath(), async () => "");   // a entrevista fica sem resposta
+
+    let auditou = 0;
+    const steps = skeletonPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
+      respond: {
+        stdout: () => {
+          auditou += 1;
+          return auditou === 1
+            ? "CAPIVARA_AUDIT_STATUS: REJECTED\nCAPIVARA_FINDING: Phase 1 | a matriz permanece pendente | obter a decisão aceita\nCAPIVARA_REASON: falta decisão"
+            : "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: ok";
+        },
+      },
+      repeat: true,
+    });
+
+    const { agent, anunciado } = await planComAnuncioEResposta(steps, async () => "1");
+
+    expect(anunciado).toContain("seguem em aberto e o auditor esbarrou nelas");
+    expect(anunciado).toContain("entram na reescrita como autoridade");
+
+    // A decisão do desenvolvedor chega à emenda como autoridade.
+    const emenda = agent.calls.filter((call) => call.stage === "authoring" && call.subject === "phase-p01").at(-1);
+    expect(emenda?.prompt).toContain("esta decisão é a autoridade");
+  });
+
+  it("não repergunta a mesma decisão a cada devolução — isso seria trocar um laço por outro", async () => {
+    await init(skeletonPath(), async () => "");
+
+    const steps = skeletonPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
+      respond: { stdout: "CAPIVARA_AUDIT_STATUS: REJECTED\nCAPIVARA_FINDING: Phase 1 | pendente | decida\nCAPIVARA_REASON: falta" },
+      repeat: true,
+    });
+
+    // O auditor nunca aprova, então o run termina em impasse — e é justamente aí
+    // que reperguntar a cada volta seria o laço novo.
+    const dito: string[] = [];
+    await runPlan({
+      projectRoot,
+      request,
+      ...comum,
+      ask: async () => "1",
+      call: fakeAgent(steps).call,
+      announce: (linha) => void dito.push(linha),
+    }).catch(() => undefined);
+
+    const reaberturas = dito.join("\n").split("seguem em aberto e o auditor esbarrou nelas").length - 1;
+    expect(reaberturas).toBe(1);
+  });
+});

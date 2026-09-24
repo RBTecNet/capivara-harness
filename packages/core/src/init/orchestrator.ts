@@ -460,6 +460,14 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const lacunasPerguntadas = new Set<string>();
 
   /*
+   * As decisões que já voltaram ao desenvolvedor por causa de uma auditoria.
+   *
+   * Uma vez por decisão, no run inteiro: reperguntar a cada devolução seria
+   * trocar um laço por outro.
+   */
+  const decisoesReabertas = new Set<string>();
+
+  /*
    * O que este run já escreveu e já teve aprovado, guardado em disco.
    *
    * O `fasesAprovadas` acima continua existindo e é o mesmo fato dito de outro
@@ -1486,6 +1494,56 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * volta um `[NEEDS DECISION]` viraria bloqueio no fim do run, com o
    * desenvolvedor descobrindo tarde algo que responderia em dez segundos.
    */
+  /**
+   * As decisões que a entrevista não fechou, devolvidas a quem pode fechá-las.
+   *
+   * Devolve as decisões novas no formato de finding, para entrarem na reescrita
+   * como AUTORIDADE — do mesmo jeito que a decisão de um impasse entra.
+   */
+  async function reabrirDecisoes(document: string, attempt: number, writer: WriterContext): Promise<Finding[]> {
+    const abertas = unresolved({
+      round: maxInterviewRounds,
+      questions: allQuestions,
+      answers: allAnswers,
+      assumptions: [],
+      maxRounds: maxInterviewRounds,
+    }).filter((item) => !decisoesReabertas.has(item.questionId));
+
+    if (abertas.length === 0) return [];
+
+    announce(`  ${abertas.length} decisão(ões) seguem em aberto e o auditor esbarrou nelas; perguntando antes de reescrever`);
+    const decididas: Finding[] = [];
+
+    for (const [indice, item] of abertas.entries()) {
+      decisoesReabertas.add(item.questionId);
+      const pergunta = allQuestions.find((entry) => entry.id === item.questionId);
+      if (!pergunta) continue;
+
+      const raw = await options.ask(
+        { ...pergunta, pending: item.statement },
+        indice + 1,
+        abertas.length,
+      );
+      const resposta = await settle(document, pergunta, raw, attempt, indice + 1, abertas.length);
+      allAnswers.push({ ...resposta, questionId: item.questionId });
+      await persistAnswers(document, [pergunta], [resposta]);
+
+      if (resposta.disposition !== "ACCEPTED") continue;
+      decididas.push({
+        where: pergunta.topic,
+        problem: `a decisão "${pergunta.decision}" estava em aberto e o auditor esbarrou nela`,
+        fix: `o desenvolvedor decidiu, e esta decisão é a autoridade: ${resposta.decision}`,
+      });
+    }
+
+    if (decididas.length > 0) {
+      // O escritor passa a ver as decisões novas na próxima chamada dele.
+      writer.decisions = allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision);
+      announce(`  ${decididas.length} decisão(ões) fechada(s); elas entram na reescrita como autoridade`);
+    }
+    return decididas;
+  }
+
   async function closeGaps(document: string, initial: Authored, writer: WriterContext): Promise<Authored> {
     let authored = initial;
     const asked = lacunasPerguntadas;
@@ -1923,7 +1981,20 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       await event("audit", document, "retry", action.findings.map((finding) => finding.problem).join("; "), attempt);
       announce(`  auditor devolveu ${document} (${action.findings.length} finding)`);
 
-      authored = await authored.rewrite(action.findings, action.attempt);
+      /*
+       * Decisão em aberto volta a QUEM DECIDE, antes de o escritor tentar de novo.
+       *
+       * O auditor devolve dizendo "a matriz de permissões permanece pendente,
+       * obter a decisão aceita" — e o escritor não tem como obter decisão
+       * nenhuma. Sem este caminho, as três devoluções são gastas numa coisa
+       * impossível e o run aborta com o trabalho todo pronto e uma pergunta de
+       * dez segundos sem resposta.
+       *
+       * O que reabre é só o que a entrevista deixou em aberto de verdade — o que
+       * ficou PARTIAL, AMBIGUOUS ou adiado —, e uma vez por decisão no run.
+       */
+      const decisoes = await reabrirDecisoes(document, attempt, writer);
+      authored = await authored.rewrite([...decisoes, ...action.findings], action.attempt);
 
       /*
        * Decisão que aparece NA REESCRITA também vai ao desenvolvedor.

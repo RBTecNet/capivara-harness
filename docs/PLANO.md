@@ -4631,3 +4631,43 @@ a exigir que o modelo enumere alternativas plausíveis em vez de perguntar solto
 É trabalho a mais para ele e uma tela pior em casos raros. Em troca, some a única
 situação em que o harness fazia o desenvolvedor responder a mesma coisa seis
 vezes e desistir.
+
+## §65 — A pergunta volta a quem pode respondê-la
+
+O `assitencia` quebrou numa pergunta sobre a matriz de permissões. O
+desenvolvedor respondeu — **com exemplos** —, o classificador julgou que a
+resposta não cobria tudo, e a decisão ficou em aberto. O plano seguiu assim, e o
+auditor devolveu a fase três vezes dizendo:
+
+> A matriz de permissões permanece pendente… **Registrar a matriz aceita** e
+> incorporá-la aos critérios
+
+Registrar a matriz *aceita*. Quem recebe essa correção é o **escritor**, e
+escritor não obtém decisão de ninguém — ele escreve o que as fontes dizem. Três
+devoluções gastas numa coisa impossível, e o run abortou com dezesseis fases
+prontas e uma pergunta de dez segundos sem resposta.
+
+### 65.1 O ciclo curto
+
+Quando o auditor devolve e há decisão em aberto na entrevista, a pergunta volta
+ao DESENVOLVEDOR antes de o escritor tentar de novo. Ele responde, a decisão
+entra na reescrita como **autoridade** — do mesmo jeito que a decisão de um
+impasse entra —, e a fase é refeita uma vez, com a informação que faltava.
+
+Uma vez por decisão no run inteiro: reperguntar a cada devolução seria trocar um
+laço por outro.
+
+### 65.2 O que isso fecha
+
+É a última das quatro bocas por onde uma decisão faltante escapava:
+
+| onde ela aparece | quem resolve |
+|---|---|
+| o escritor de fase percebe que falta (§54) | marca, e a rodada de lacunas pergunta |
+| a emenda percebe que falta (§56) | marca, e a rodada reabre (§63) |
+| a entrevista perguntou e a resposta não fechou | **volta ao desenvolvedor quando o auditor esbarra (§65)** |
+| a pergunta era impossível de responder (§64) | deixa de existir: toda pergunta tem opções |
+
+O princípio é o mesmo nas quatro: **quem não pode decidir nunca deve receber a
+ordem de decidir.** Cada vez que o harness quebrou essa regra, o custo foi um run
+inteiro.

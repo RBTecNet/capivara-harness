@@ -2,20 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  IntervalPartError,
-  assertSinglePhasePart,
-  classifyDefect,
-  discardStaging,
-  isRepairable,
-  partId,
-  publish,
-  readStaged,
-  repairDeterministically,
-  stage,
-  stripResolvedMarkers,
-  substanceDefects,
-} from "../../src/authoring/index.js";
+import { IntervalPartError, assertSinglePhasePart, classifyDefect, discardStaging, isRepairable, partId, publish, readStaged, repairDeterministically, stage, stripAllMarkers, stripResolvedMarkers, substanceDefects } from "../../src/authoring/index.js";
 import { assemblePhasesDocument, parsePhases } from "../../src/contract/index.js";
 import type { ContractError } from "../../src/contract/index.js";
 
@@ -229,5 +216,38 @@ describe("montagem do documento em código", () => {
     const parsed = parsePhases(document);
     if (!parsed.ok) throw new Error("documento montado deveria ser válido");
     expect(parsed.document.phases[0]?.markdown).not.toContain("Open Questions");
+  });
+});
+
+/*
+ * Um marcador vivo fazia `parsePhases` recusar o documento, e a recusa desligava a
+ * auditoria POR FASE em silêncio: uma chamada sobre o documento inteiro em vez de
+ * treze paralelas, sem aprovação por fase e sem memória por task. A estrutura
+ * passou a ser lida sem os marcadores; eles continuam no documento e continuam
+ * bloqueando a prontidão, que é o gate que fala com o desenvolvedor.
+ */
+describe("stripAllMarkers", () => {
+  it("remove toda linha de marcador e conta quantas foram", () => {
+    const antes = [
+      "- [ ] **Task:** Criar a migration",
+      "  - **Acceptance criteria:**",
+      "    - A tabela existe",
+      "    [NEEDS DECISION] o status inicial",
+      "    [NEEDS DECISION] o fuso da data de corte",
+      "  - **Traces:** statuses",
+    ].join("\n");
+
+    const depois = stripAllMarkers(antes);
+    expect(depois.content).not.toContain("[NEEDS DECISION]");
+    expect(depois.content).toContain("A tabela existe");
+    expect(depois.content).toContain("**Traces:** statuses");
+    expect(depois.applied[0]).toContain("2 marcador(es)");
+  });
+
+  it("documento sem marcador volta intacto e sem conserto declarado", () => {
+    const limpo = "- [ ] **Task:** Criar a migration\n  - **Traces:** statuses";
+    const depois = stripAllMarkers(limpo);
+    expect(depois.content).toBe(limpo);
+    expect(depois.applied).toEqual([]);
   });
 });

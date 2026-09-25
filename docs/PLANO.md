@@ -5396,3 +5396,108 @@ quem já andou horas sem ele. Isso resolve de graça a outra reclamação que o 
 vinha fazendo há semanas — *"sem repositório Git: a especificação não foi
 versionada"* —, porque agora há onde versioná-la no instante em que o gate fecha.
 `--no-commit` é a saída de quem não quer que o harness versione nada.
+
+## §76 — Um marcador desligava a auditoria por fase, e ninguém contava
+
+O `assistencia2` parou no `plan` com um impasse sobre dois campos de formulário. O
+impasse era o sintoma; a doença estava três camadas abaixo, e os artefatos a
+mostraram inteira.
+
+### 76.1 O que os logs disseram
+
+Quatro tentativas de auditoria, quatro arquivos de log — e todos com o assunto
+`project-phases.md`, nenhum `#P1`, `#P2`. Em vez de treze chamadas paralelas, uma
+por fase, foi **uma chamada lendo as treze fases de uma vez**, quatro vezes. Os
+achados caíram em fases sempre diferentes:
+
+| tentativa | fases apontadas |
+| --- | --- |
+| 1 | 1, 3, 4, 9, 10 |
+| 2 | 5, 12, 10 |
+| 3 | 4, 5, 8, 9 |
+| 4 | 9, 10 |
+
+É a amostragem do §73, e naquele caminho nada do que foi construído contra ela
+existe: `fasesAprovadas` fica vazio, a memória por task fica vazia — o cache do run
+registra `escritas: 13, aprovadas: 0` —, e como nenhum achado repete, o
+levantamento (§70), que só abre na segunda aparição do MESMO ponto, nunca é
+acionado. Sobra o impasse.
+
+A causa, montando o plano do cache e passando no parser:
+
+```
+parseia? false
+erros: {"I-13": 11}
+```
+
+Onze `[NEEDS DECISION]` vivos. E no orquestrador:
+
+```ts
+if (document === "project-phases.md" && parsePhases(content).ok) {
+  return await auditPlanInParts(...);   // nunca chega aqui
+}
+```
+
+`I-13` é reparável, então o caminho dos defeitos mecânicos também não pega, e a
+execução escorrega para a auditoria genérica de documento único. **Um marcador
+pendente decidia como o plano inteiro seria auditado, e não havia uma linha na tela
+sobre isso.**
+
+O conserto lê a ESTRUTURA sem os marcadores. Eles continuam no documento e
+continuam bloqueando a prontidão — que é o gate que fala com o desenvolvedor —, e
+de quebra saem da vista do auditor, que é o certo: a correção que um marcador pede
+é "resolva a decisão na entrevista", coisa que quem reescreve a fase não pode fazer
+(§49). No run real, o auditor gastou uma devolução exatamente nisso.
+
+### 76.2 Por que onze marcadores chegaram lá
+
+Dois eventos `5 gap(s) descobertos na escrita`, dez perguntas, e as dez seguiram no
+texto. O `closeGaps` sem teto do §74 tinha um buraco meu: ele pergunta o que ainda
+**não foi perguntado**, e saía quando não havia nada NOVO — não quando não havia
+marcador.
+
+Um marcador perguntado, respondido, e que o escritor não apagou ficava invisível:
+`lacunasPerguntadas` guarda o texto, o filtro o tira da fila, `markers.length === 0`,
+e a função devolve o documento com ele dentro. O `temDecisaoPendente` da auditoria
+chamava `closeGaps` de novo e recebia a mesma resposta calada.
+
+Agora cada volta faz três coisas, nesta ordem:
+
+1. **apaga** o marcador cuja decisão já existe — mecânico, porque a pendência
+   deixou de existir e a decisão está nas fontes do escritor;
+2. **pergunta** o que nunca foi perguntado;
+3. **insiste** no que foi perguntado e ficou aberto, pelo caminho do §74, com as
+   duas saídas que fecham qualquer pergunta.
+
+E a saída é não haver marcador. Para isso o harness passou a guardar o vínculo
+pergunta → marcador: sem ele, uma decisão fechada pela insistência três rodadas
+depois não tinha como ser reconhecida como a decisão daquele marcador.
+
+### 76.3 O impasse era a primeira parada, e é a pergunta que a gente proibiu
+
+`renderStandoff` é texto livre com três comandos — `reiniciar`, `publicar`,
+`abortar` — e é exatamente a pergunta discursiva que o §71 baniu, feita no pior
+momento possível. Ela aparecia antes de qualquer arbitragem sempre que os achados
+não repetiam, e no `assistencia2` apareceu com dois achados concretos e
+específicos:
+
+> Phase 9: o campo de descrição não tem as quatro linhas e a rolagem exigidas no pedido
+> Phase 10: o campo de motivo do uso não tem a área de texto com rolagem exigida
+
+Dois pontos que cabiam numa escolha numerada, entregues como um prompt em branco.
+
+Agora o esgotamento do orçamento arbitra primeiro: cada ponto insistido vai à tela
+com as duas leituras — a do auditor, o que o escritor escreveu, ou o que o
+desenvolvedor determinar —, a decisão é gravada como autoridade e chega ao auditor
+da rodada seguinte. No impasse, **insistir é a repetição**: exigir que o achado
+tenha aparecido duas vezes era o que mantinha o levantamento fechado num run em que
+cada volta apontava lugares novos.
+
+A prosa continua existindo para o que não se arbitra: defeito mecânico, que é
+contagem, e ponto já arbitrado antes.
+
+**E este conserto também nasceu meio:** o laço decidia "houve arbitragem?" pelo
+tamanho da lista devolvida, e `levantamentoDeAuditoria` devolve os achados intactos
+quando não há nada novo a arbitrar. "Nada a arbitrar" virou "tudo arbitrado", o laço
+reescrevia e reauditava para sempre, e os testes pegaram na primeira execução, com
+timeout. O que decide é o conjunto de arbitrados ter CRESCIDO.

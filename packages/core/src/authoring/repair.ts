@@ -135,6 +135,33 @@ export function stripResolvedMarkers(content: string, resolved: readonly string[
 }
 
 /**
+ * O plano sem os marcadores, para quem precisa da ESTRUTURA dele.
+ *
+ * Um `[NEEDS DECISION]` faz `parsePhases` recusar o documento (I-13), e essa
+ * recusa tinha um efeito que ninguém tinha visto: a auditoria do plano só roda
+ * fase por fase quando o documento parseia, então UM marcador derrubava as treze
+ * chamadas paralelas, a aprovação por fase e a memória por task, e a auditoria
+ * virava uma leitura do documento inteiro. No `assistencia2` foram onze
+ * marcadores, quatro tentativas, e cada volta apontou fases diferentes — 1, 3, 4,
+ * 9, 10, depois 5, 12, 10, depois 4, 5, 8, 9. Amostragem pura, com o mecanismo
+ * que existe para evitá-la desligado em silêncio.
+ *
+ * O marcador continua bloqueando o que ele existe para bloquear: a PRONTIDÃO tem
+ * um gate só para ele, e é ao desenvolvedor que ele fala. O que ele não pode é
+ * decidir como o documento é auditado — e, de quebra, tirá-lo da vista do auditor
+ * é o certo: a correção que um marcador pede é "resolva a decisão na entrevista",
+ * coisa que quem reescreve a fase não pode fazer (§49).
+ */
+export function stripAllMarkers(content: string): DeterministicRepair {
+  const lines = content.split("\n");
+  const kept = lines.filter((line) => !line.includes("[NEEDS DECISION]"));
+  return {
+    content: kept.join("\n"),
+    applied: kept.length === lines.length ? [] : [`ocultou ${lines.length - kept.length} marcador(es) de decisão pendente para auditar a estrutura`],
+  };
+}
+
+/**
  * Referência de design que aponta para arquivo inexistente.
  *
  * O diretório de design é manual e quase sempre não existe (D-18), mas a

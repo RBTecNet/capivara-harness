@@ -933,3 +933,189 @@ describe("o ensaio também pergunta antes de bloquear", () => {
     expect(outcome.readiness.checks.find((check) => check.id === "ensaio")?.passed).toBe(true);
   });
 });
+
+/*
+ * O `assistencia2` mostrou uma degradação silenciosa: onze marcadores
+ * `[NEEDS DECISION]` vivos fizeram `parsePhases` recusar o documento, e a recusa
+ * desligou a auditoria POR FASE — uma chamada sobre o documento inteiro, quatro
+ * vezes, apontando fases sempre diferentes. Toda a memória por fase e por task
+ * ficou vazia, e nada na tela disse isso.
+ */
+describe("marcador pendente não rebaixa a auditoria", () => {
+  const comMarcador = `## Phase 1: Fundação de dados
+
+**Goal:** migrations e seeds existem · **Depends on:** none · **Covers:** reservations, statuses
+
+- [ ] **Task:** Criar a migration de statuses e semear as três linhas
+  - **Acceptance criteria:**
+    - A tabela statuses existe e contém exatamente pendente, confirmada e cancelada
+    [NEEDS DECISION] o status inicial de uma reserva importada
+  - **Feature tests:** statuses_seed → as três linhas existem após o seed
+  - **Traces:** statuses, reservations
+`;
+
+  it("audita fase por fase mesmo com o marcador no texto", async () => {
+    await init(skeletonPath());
+
+    const steps = skeletonPath();
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "phase-p01" },
+      respond: { stdout: comMarcador },
+      repeat: true,
+    });
+    // O escritor não consegue virar o marcador em pergunta, e o desenvolvedor não
+    // fecha: o marcador atravessa, que é o caso que derrubava a auditoria.
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-phases.md:gaps" },
+      respond: { stdout: JSON.stringify({ contract: "capivara-questions/v1", questions: [] }) },
+      repeat: true,
+    });
+
+    const { agent, anunciado } = await planComAnuncioEResposta(steps, async () => "não sei");
+
+    const auditorias = agent.calls.filter((call) => call.stage === "audit").map((call) => call.subject);
+    expect(auditorias).toContain("project-phases.md#P1");
+    expect(auditorias).toContain("project-phases.md#coerência");
+    expect(auditorias).not.toContain("project-phases.md");
+    expect(anunciado).toContain("marcador(es) de decisão pendente para auditar a estrutura");
+  });
+
+  it("o marcador continua bloqueando a prontidão: é ao desenvolvedor que ele fala", async () => {
+    await init(skeletonPath());
+
+    const steps = skeletonPath();
+    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: comMarcador }, repeat: true });
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-phases.md:gaps" },
+      respond: { stdout: JSON.stringify({ contract: "capivara-questions/v1", questions: [] }) },
+      repeat: true,
+    });
+
+    const { outcome } = await planComAnuncioEResposta(steps, async () => "não sei");
+    expect(outcome.readiness.checks.find((check) => check.id === "decisoes")?.passed).toBe(false);
+  });
+});
+
+/*
+ * O laço de lacunas saía quando não havia marcador NOVO, e não quando não havia
+ * marcador. Um marcador perguntado, respondido e que o escritor não apagou ficava
+ * invisível: `asked` guardava o texto, o filtro o tirava da fila, e o documento
+ * voltava marcado.
+ */
+describe("a rodada de lacunas não devolve plano marcado", () => {
+  it("apaga o marcador que o escritor esqueceu, depois de a decisão existir", async () => {
+    await init(skeletonPath());
+
+    const marcador = "o status inicial de uma reserva importada";
+    const teimoso = `## Phase 1: Fundação de dados
+
+**Goal:** migrations e seeds existem · **Depends on:** none · **Covers:** reservations, statuses
+
+- [ ] **Task:** Criar a migration de statuses e semear as três linhas
+  - **Acceptance criteria:**
+    - A tabela statuses existe e contém exatamente pendente, confirmada e cancelada
+    [NEEDS DECISION] ${marcador}
+  - **Feature tests:** statuses_seed → as três linhas existem após o seed
+  - **Traces:** statuses, reservations
+`;
+
+    const steps = skeletonPath();
+    // O escritor devolve SEMPRE o marcador, inclusive depois de a decisão existir.
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "phase-p01" },
+      respond: { stdout: teimoso },
+      repeat: true,
+    });
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-phases.md:gaps" },
+      respond: {
+        stdout: JSON.stringify({
+          contract: "capivara-questions/v1",
+          questions: [
+            {
+              id: "Q-01",
+              topic: "status inicial",
+              evidence: "a fase parou aqui",
+              decision: "Qual status uma reserva importada recebe?",
+              why: "muda o que a migration semeia",
+              options: [
+                { label: "pendente", consequence: "entra como pendente" },
+                { label: "confirmada", consequence: "entra como confirmada" },
+              ],
+              recommended: "pendente",
+              recommendationBasis: "é o status de entrada das outras reservas",
+            },
+          ],
+        }),
+      },
+      repeat: true,
+    });
+
+    const { outcome, anunciado } = await planComAnuncioEResposta(steps, async () => "1");
+
+    expect(anunciado).toContain("removeu marcador já decidido");
+    const plano = await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8");
+    expect(plano).not.toContain("[NEEDS DECISION]");
+    expect(outcome.readiness.checks.find((check) => check.id === "decisoes")?.passed).toBe(true);
+  });
+});
+
+/*
+ * O impasse era a PRIMEIRA parada quando os achados não repetiam — e é exatamente
+ * a pergunta discursiva que a gente combinou de não fazer mais: texto livre, três
+ * comandos, no pior momento. No `assistencia2` ele apareceu com dois achados
+ * concretos que cabiam numa escolha numerada.
+ */
+describe("o impasse arbitra com opções antes de virar prosa", () => {
+  it("cada ponto insistido vai à tela com as duas leituras, e a prosa não aparece", async () => {
+    await init(skeletonPath());
+
+    // O auditor devolve um achado DIFERENTE a cada volta: nada repete, então o
+    // levantamento normal nunca abriria.
+    let volta = 0;
+    const steps = skeletonPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
+      respond: {
+        stdout: () => {
+          volta += 1;
+          return volta > 4
+            ? "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: ok"
+            : [
+                "CAPIVARA_AUDIT_STATUS: REJECTED",
+                `CAPIVARA_FINDING: Phase 1, ponto ${volta} | o campo ${volta} não tem as quatro linhas exigidas no pedido | exija uma área de texto de quatro linhas com rolagem`,
+                "CAPIVARA_REASON: falta o que o pedido pede",
+              ].join("\n");
+        },
+      },
+      repeat: true,
+    });
+
+    const perguntadas: { topic: string; opcoes: string[] }[] = [];
+    let impasseEmProsa = 0;
+    const agent = fakeAgent(steps);
+    const dito: string[] = [];
+    await runPlan({
+      projectRoot,
+      request,
+      ...comum,
+      call: agent.call,
+      announce: (linha) => void dito.push(linha),
+      ask: async (question) => {
+        perguntadas.push({ topic: question.topic, opcoes: question.options.map((opcao) => opcao.label) });
+        return "1";
+      },
+      decideStandoff: async () => {
+        impasseEmProsa += 1;
+        return "publicar";
+      },
+    });
+
+    const arbitragens = perguntadas.filter((pergunta) => pergunta.topic.startsWith("auditoria ·"));
+    expect(arbitragens.length).toBeGreaterThan(0);
+    // Duas leituras numeradas, nunca um prompt em branco.
+    expect(arbitragens[0]?.opcoes.length).toBeGreaterThanOrEqual(2);
+    expect(dito.join("\n")).toContain("sobreviveram a todas as devoluções");
+    expect(impasseEmProsa).toBe(0);
+  });
+});

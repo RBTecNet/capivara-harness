@@ -10,5 +10,5 @@ export {
   stagingRoot,
 } from "./staging.js";
 export type { StagedDocument } from "./staging.js";
-export { classifyDefect, isRepairable, repairDeterministically, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "./repair.js";
+export { classifyDefect, isRepairable, repairDeterministically, stripAllMarkers, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "./repair.js";
 export type { DefectClass, DeterministicRepair } from "./repair.js";

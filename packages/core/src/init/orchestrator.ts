@@ -20,7 +20,7 @@ import type { CoverageSources, Skeleton, StampInput } from "../contract/index.js
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
 import { tasksBlock } from "../contract/templates.js";
-import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, isRepairable, publish, repairDeterministically, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
+import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, isRepairable, publish, repairDeterministically, stripAllMarkers, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, decisaoDeBanco, isNonAnswer, leituraInsistente, naoObjetivos, perguntaDeLacuna, perguntaDoBanco, perguntaInsistente, regrasDeBanco, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, suposicaoDelegada, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Assumption, Question } from "../interview/index.js";
 import { amendPhasePrompt, assessRehearsal, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
@@ -498,6 +498,18 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    */
   const insistidas = new Set<string>();
   const decisoesDoAuditor = new Set<string>();
+
+  /**
+   * Os marcadores cuja decisão está FECHADA, e a pergunta que fechou cada um.
+   *
+   * `lacunasPerguntadas` responde "já perguntei isto?", e só isso não basta:
+   * perguntar não é decidir, e decidir não é o escritor apagar o marcador. Sem
+   * saber quais marcadores já têm decisão, o laço de lacunas não tinha como
+   * apagar o que sobrou nem como distinguir "não há mais nada a perguntar" de
+   * "não há mais nada a fazer" — e devolvia o plano marcado.
+   */
+  const lacunasDecididas = new Set<string>();
+  const marcadorDaPergunta = new Map<string, string>();
 
   /**
    * O que já foi julgado, por TASK.
@@ -1737,6 +1749,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     attempt: number,
     writer: WriterContext,
     doSelfCheck: boolean,
+    /** No impasse, todo achado insistido vai a arbitragem, repetido ou não. */
+    todos = false,
   ): Promise<Finding[]> {
     /*
      * Achado mecânico não vai a arbitragem.
@@ -1751,12 +1765,29 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      */
     if (doSelfCheck) return [...findings];
 
+    /*
+     * No impasse, insistir É a repetição.
+     *
+     * A regra normal é arbitrar o achado que volta pela SEGUNDA vez: uma vez é
+     * descuido, duas é leitura divergente. Mas um achado que sobreviveu ao
+     * orçamento inteiro de devoluções é, por definição, insistência — mesmo que o
+     * endereço seja novo. Exigir repetição ali era o que fazia o impasse virar
+     * prosa: no `assistencia2` as quatro tentativas apontaram fases sempre
+     * diferentes, nada repetiu, e o levantamento nunca abriu.
+     */
     const repetidos = findings.filter(
-      (finding) => finding.mechanical !== true && ehRepetido(finding, history) && !arbitrados.has(fingerprint(finding)),
+      (finding) =>
+        finding.mechanical !== true &&
+        (todos || ehRepetido(finding, history)) &&
+        !arbitrados.has(fingerprint(finding)),
     );
     if (repetidos.length === 0) return [...findings];
 
-    announce(`  ${repetidos.length} ponto(s) voltaram pela segunda vez: isso é desacordo de leitura, não descuido — perguntando a você`);
+    announce(
+      todos
+        ? `  ${repetidos.length} ponto(s) sobreviveram a todas as devoluções: quem decide é você, e é agora`
+        : `  ${repetidos.length} ponto(s) voltaram pela segunda vez: isso é desacordo de leitura, não descuido — perguntando a você`,
+    );
     const resultado: Finding[] = [];
 
     for (const finding of findings) {
@@ -1891,6 +1922,16 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     return decididas;
   }
 
+  /** Marca como fechados os marcadores cuja pergunta já tem resposta aceita. */
+  function registrarLacunasFechadas(): void {
+    const aceitas = new Set(
+      allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.questionId),
+    );
+    for (const [questionId, marcador] of marcadorDaPergunta) {
+      if (aceitas.has(questionId)) lacunasDecididas.add(marcador.toLowerCase());
+    }
+  }
+
   async function closeGaps(document: string, initial: Authored, writer: WriterContext): Promise<Authored> {
     let authored = initial;
     const asked = lacunasPerguntadas;
@@ -1912,6 +1953,19 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * `maxGapQuestions` continua existindo e vale por RODADA: ele não fecha mais
      * nenhuma porta, só decide quantas perguntas vão juntas na mesma tela.
      *
+     * A condição de saída é NÃO HAVER MARCADOR — e não "não haver marcador novo",
+     * que era o buraco da primeira versão disto. Um marcador perguntado,
+     * respondido e que o escritor não apagou ficava invisível: `asked` guarda o
+     * texto, o filtro o tirava da fila, a função devolvia o documento com ele
+     * dentro, e o `temDecisaoPendente` da auditoria chamava de novo para receber a
+     * mesma resposta calada. No `assistencia2` foram onze marcadores sobrevivendo
+     * a duas rodadas, e eles levaram junto a auditoria por fase inteira.
+     *
+     * Então cada volta faz três coisas, nesta ordem: apaga o que já foi decidido,
+     * pergunta o que nunca foi perguntado, e insiste no que foi perguntado e
+     * ficou em aberto. Só quando nada disso tem o que fazer é que se devolve o
+     * documento.
+     *
      * A parada de segurança abaixo não é um teto de entrevista disfarçado. Ela
      * existe porque um escritor que inventasse um marcador NOVO a cada reescrita
      * faria o laço perguntar para sempre — e perguntar para sempre é pior que o
@@ -1932,14 +1986,54 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
       // Marcadores idênticos são UMA decisão, não uma por ocorrência: no piloto 1
       // o mesmo marcador apareceu 27 vezes e virou 27 perguntas iguais.
-      const markers = [
+      const presentes = [
         ...new Set(
           [...authored.content.matchAll(/\[NEEDS DECISION\]\s*(.+)/g)]
             .map((match) => (match[1] ?? "").trim())
-            .filter((marker) => marker !== "" && !asked.has(marker.toLowerCase())),
+            .filter((marker) => marker !== ""),
         ),
-      ].slice(0, maxGapQuestions);
-      if (markers.length === 0) return authored;
+      ];
+      if (presentes.length === 0) return authored;
+
+      /*
+       * Primeiro: apagar o que JÁ foi decidido e o escritor não apagou.
+       *
+       * Mecânico, e por isso feito aqui e não pedido a ninguém: a pendência
+       * deixou de existir, a decisão está no relatório e nas fontes do escritor.
+       */
+      const jaDecididos = presentes.filter((marker) => lacunasDecididas.has(marker.toLowerCase()));
+      if (jaDecididos.length > 0) {
+        const limpo = stripResolvedMarkers(authored.content, jaDecididos);
+        if (limpo.applied.length > 0) {
+          for (const fix of limpo.applied) announce(`    ${fix}`);
+          authored = { content: limpo.content, rewrite: authored.rewrite };
+          continue;
+        }
+      }
+
+      const markers = presentes.filter((marker) => !asked.has(marker.toLowerCase())).slice(0, maxGapQuestions);
+
+      /*
+       * Marcador perguntado que continua aberto é decisão que o desenvolvedor não
+       * fechou — e isso tem um caminho próprio, com as duas saídas que fecham
+       * qualquer pergunta. Sem isto, o laço não tinha mais o que fazer e devolvia
+       * o documento marcado, que é como onze marcadores chegaram à auditoria.
+       */
+      if (markers.length === 0) {
+        const fechadas = await insistirNasDecisoes(document, round, "marcador pendente no plano", writer);
+        registrarLacunasFechadas();
+        const resolvidosAgora = presentes.filter((marker) => lacunasDecididas.has(marker.toLowerCase()));
+        if (fechadas.length === 0 && resolvidosAgora.length === 0) {
+          announce(
+            `  ${presentes.length} marcador(es) seguem no plano e ninguém os fechou; eles param a prontidão, e o relatório diz quais`,
+          );
+          await event("interview", document, "blocked", `${presentes.length} marcador(es) sem decisão`, round);
+          return authored;
+        }
+        authored = await authored.rewrite(fechadas, round);
+        continue;
+      }
+
       for (const marker of markers) asked.add(marker.toLowerCase());
 
       announce(`  ${markers.length} decisão(ões) pendente(s) nas fases; reabrindo a entrevista`);
@@ -2030,6 +2124,18 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       allQuestions.push(...perguntas.map((question) => ({ ...question, id: scoped(document, question.id, escopo) })));
       allAnswers.push(...answered.map((answer) => ({ ...answer, questionId: scoped(document, answer.questionId, escopo) })));
 
+      /*
+       * Qual pergunta veio de qual marcador.
+       *
+       * É o que permite, depois, apagar o marcador certo — e reconhecer que uma
+       * decisão fechada pela INSISTÊNCIA, rodadas mais tarde, fechou aquele
+       * marcador. Sem esse vínculo, a resposta existia e o marcador ficava.
+       */
+      perguntas.forEach((question, posicao) => {
+        const marcador = markers[posicao];
+        if (marcador !== undefined) marcadorDaPergunta.set(scoped(document, question.id, escopo), marcador);
+      });
+
       // Decisão tomada aqui precisa sobreviver ao processo: sem isto, o run
       // seguinte pergunta a mesma coisa porque a retomada não a encontra.
       await persistAnswers(document, perguntas, answered);
@@ -2047,6 +2153,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
       writer.decisions = allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision);
 
+      registrarLacunasFechadas();
       const resolvidos = accepted
         .map((answer) => markers[perguntas.findIndex((entry) => entry.id === answer.questionId)] ?? "")
         .filter((marker) => marker !== "");
@@ -2377,6 +2484,15 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * estouravam a volta e o run morria com "o ciclo não convergiu" — sem impasse,
      * sem pergunta, sem documento. Foi assim que a medição de 95 minutos terminou.
      */
+    /**
+     * Quantos pontos se arbitram num documento antes de a prosa assumir.
+     *
+     * Cada ponto é arbitrado UMA vez — `arbitrados` garante isso —, então o laço
+     * só continua enquanto o auditor traz pontos novos. O número existe para o
+     * caso patológico em que ele traz pontos novos para sempre: aí o problema não
+     * é a arbitragem, e o impasse em prosa é a mensagem certa.
+     */
+    const PARADA_DE_ARBITRAGEM = 60;
     const cycleBudget = maxAuditReturns + maxMechanicalRounds + 1;
     let attemptLimit = cycleBudget;
     /** Rodadas gastas com decisão do auditor — não são devolução de escrita. */
@@ -2432,6 +2548,57 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }
 
       if (action.action === "ask-developer") {
+        /*
+         * Antes da prosa, a pergunta com opções.
+         *
+         * O impasse era a PRIMEIRA parada quando os achados não repetiam, e é
+         * justamente a pergunta que a gente combinou de não fazer mais: texto
+         * livre, três comandos, no pior momento possível. No `assistencia2` ele
+         * apareceu com dois achados concretos e específicos — "o campo não tem as
+         * quatro linhas e a rolagem exigidas no pedido" — que cabiam numa escolha
+         * numerada e viraram um prompt em branco.
+         *
+         * Agora cada ponto insistido é arbitrado como qualquer desacordo de
+         * leitura: a leitura do auditor, o que o escritor escreveu, ou o que o
+         * desenvolvedor determinar. A decisão é gravada, vira autoridade e chega
+         * ao auditor da rodada seguinte. A prosa continua existindo para o que não
+         * se arbitra — defeito mecânico, ou ponto já arbitrado antes.
+         */
+        if (verdict.mechanical !== true && arbitrados.size < PARADA_DE_ARBITRAGEM) {
+          /*
+           * O que decide se houve arbitragem é o CONJUNTO ter crescido.
+           *
+           * `levantamentoDeAuditoria` devolve os achados intactos quando não há
+           * nada novo a arbitrar — e, medido pelo tamanho da lista devolvida,
+           * "nada a arbitrar" parecia "tudo arbitrado": o laço reescrevia,
+           * reauditava e voltava aqui, para sempre. Os testes pegaram na primeira
+           * execução, com timeout.
+           */
+          const antes = arbitrados.size;
+          const decididos = await levantamentoDeAuditoria(
+            document,
+            content,
+            action.standoff.auditorInsists,
+            history,
+            attempt,
+            writer,
+            false,
+            true,
+          );
+          if (arbitrados.size > antes) {
+            attemptLimit = attempt + cycleBudget;
+            history.length = 0;
+            await event("audit", document, "retry", `${action.standoff.auditorInsists.length} ponto(s) arbitrados por você`, attempt);
+            if (decididos.length === 0) {
+              announce("  você deu razão ao escritor em todos os pontos; o documento segue como está e o auditor reconfere");
+            } else {
+              announce(`  ${decididos.length} ponto(s) voltam ao escritor com a sua decisão como autoridade`);
+            }
+            authored = decididos.length > 0 ? await authored.rewrite(decididos, attempt + 1) : authored;
+            continue;
+          }
+        }
+
         const rendered = renderStandoff(action.standoff);
         await event("audit", document, "blocked", "teto de devoluções esgotado", attempt);
         if (!options.decideStandoff) throw new InitBlockedError(rendered, runId);
@@ -2531,8 +2698,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
        * põe as duas versões na frente do desenvolvedor antes de gastar mais uma
        * reescrita nelas.
        */
-      const arbitrados = await levantamentoDeAuditoria(document, content, action.findings, history, attempt, writer, verdict.mechanical === true);
-      authored = await authored.rewrite([...decisoes, ...arbitrados], action.attempt);
+      const arbitradosDaVolta = await levantamentoDeAuditoria(document, content, action.findings, history, attempt, writer, verdict.mechanical === true);
+      authored = await authored.rewrite([...decisoes, ...arbitradosDaVolta], action.attempt);
 
       /*
        * Decisão que aparece NA REESCRITA também vai ao desenvolvedor.
@@ -2750,8 +2917,28 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * relida. A pergunta global continua vendo tudo, porque contradição entre
      * fases é o defeito que ninguém mais pega.
      */
-    if (document === "project-phases.md" && parsePhases(content).ok) {
-      return await auditPlanInParts(content, writer, upstream, attempt);
+    if (document === "project-phases.md") {
+      if (parsePhases(content).ok) return await auditPlanInParts(content, writer, upstream, attempt);
+
+      /*
+       * Marcador pendente não decide como o plano é auditado.
+       *
+       * `I-13` faz o parser recusar o documento, e a recusa desligava a auditoria
+       * por fase em silêncio: uma chamada sobre o documento inteiro em vez de
+       * treze paralelas, sem aprovação por fase e sem memória por task. No
+       * `assistencia2` foram onze marcadores e quatro tentativas apontando fases
+       * sempre diferentes — 1, 3, 4, 9, 10, depois 5, 12, 10, depois 4, 5, 8, 9.
+       *
+       * Então a estrutura é lida sem os marcadores. Eles continuam no documento e
+       * continuam bloqueando a prontidão, que é o gate que fala com o
+       * desenvolvedor; o que eles deixam de fazer é rebaixar a auditoria e gastar
+       * devolução pedindo ao escritor uma decisão que não é dele (§49).
+       */
+      const semMarcas = stripAllMarkers(content);
+      if (semMarcas.applied.length > 0 && parsePhases(semMarcas.content).ok) {
+        announce(`  ${semMarcas.applied[0]}`);
+        return await auditPlanInParts(semMarcas.content, writer, upstream, attempt);
+      }
     }
 
     for (let tentativa = 1; tentativa <= 2; tentativa += 1) {

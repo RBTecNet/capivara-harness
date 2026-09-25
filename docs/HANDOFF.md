@@ -64,6 +64,25 @@ Na fila, nesta ordem:
    cada passada — provando que o laço termina com um número limitado de perguntas
    ao desenvolvedor. Sem ele, cada descoberta dessas custa duas horas de run.
 
+**O que a primeira aplicação da lei de impacto encontrou, e que NÃO foi consertado
+de propósito** (uma mudança de comportamento por run):
+
+`driftBetween` em `init/orchestrator.ts` é **código morto** — ninguém o chama —, e
+`AmendContext.drift` nunca é preenchido. Ou seja: a proteção que o prompt da emenda
+PROMETE ao escritor com todas as letras —
+
+> This is checked mechanically after you answer. A task that changed without a
+> finding naming it sends this back to you.
+
+— **não existe**. `checkRewriteDrift` está escrito, testado no contrato, e nunca é
+executado. É a mesma família do §76.4 (o comentário que promete o que o código não
+faz), e é candidata forte a estar alimentando o moto-contínuo: a emenda pode
+reescrever tasks que ninguém pediu, o texto da fase muda, o sha muda, a aprovação
+cai, e o auditor acha "defeito novo" em task que estava boa.
+
+Ligar isso começa a RECUSAR emendas, então é mudança de comportamento e vai sozinha
+num run. É a próxima da fila, na frente do teto de tasks por fase.
+
 **E a regra de contexto, que vale para os dois lados:** compactar contexto é
 perder detalhe, e perder detalhe é exatamente o defeito acima. No harness isso tem
 um endereço concreto: o teto de 15 tasks por fase está sendo usado como ALVO pelo

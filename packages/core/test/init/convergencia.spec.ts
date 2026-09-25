@@ -229,3 +229,62 @@ describe("a emenda vai para a fase do achado, e só para ela", () => {
     expect(emendas.map((call) => call.subject)).toEqual(["phase-p02"]);
   }, 30000);
 });
+
+/*
+ * Efeito lateral do `Finding.phase`, encontrado pela análise de impacto e não por
+ * acidente: `oQueOEscritorFez` desistia quando `affectedPhases` não conseguia
+ * fixar UMA fase, e um achado da auditoria por fase nunca citava fase. Então a
+ * pergunta do levantamento oferecia "vale o que o escritor escreveu" sem mostrar o
+ * que ele escreveu — o defeito que o §70.2 consertou na renderização e que
+ * continuava vivo no dado.
+ */
+describe("o levantamento mostra o que o escritor entregou", () => {
+  it("com a fase declarada pelo harness, as tasks da fase chegam à tela", async () => {
+    const agentInit = fakeAgent(skeletonPath());
+    await runInit({ projectRoot, request, ...comum, stage: "init", call: agentInit.call, ask: async () => "use as recomendações" });
+
+    let voltas = 0;
+    const steps = skeletonPath().filter((step) => step.match.role !== "auditor");
+    // O genérico entra primeiro para ficar DEPOIS do específico na fila: o provider
+    // falso casa o primeiro passo compatível, e um passo sem `subject` casa tudo.
+    steps.unshift({
+      match: { role: "auditor", stage: "audit" },
+      respond: { stdout: "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: fiel" },
+      repeat: true,
+    });
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
+      respond: {
+        stdout: () => {
+          voltas += 1;
+          // O mesmo achado duas vezes, sem citar fase: é o que abre o levantamento.
+          return voltas <= 2
+            ? [
+                "CAPIVARA_AUDIT_STATUS: REJECTED",
+                "CAPIVARA_FINDING: Tarefa «Criar a migration de statuses» | falta dizer o que acontece com a linha existente | descreva o efeito",
+                "CAPIVARA_REASON: falta o efeito",
+              ].join("\n")
+            : "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: fiel";
+        },
+      },
+      repeat: true,
+    });
+
+    const evidencias: string[] = [];
+    await runPlan({
+      projectRoot,
+      request,
+      ...comum,
+      call: fakeAgent(steps).call,
+      ask: async (question) => {
+        if (question.topic.startsWith("auditoria ·")) evidencias.push(question.evidence);
+        return "1";
+      },
+      decideStandoff: async () => "publicar",
+    });
+
+    expect(evidencias.length).toBeGreaterThan(0);
+    expect(evidencias[0]).toContain("O escritor entregou:");
+    expect(evidencias[0]).toContain("Criar a migration de statuses");
+  }, 30000);
+});

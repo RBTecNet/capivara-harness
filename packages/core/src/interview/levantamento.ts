@@ -123,3 +123,22 @@ function resumoDeUmaLinha(entrega: string): string {
   const inteiro = linhas.join("; ");
   return inteiro.length <= 160 ? inteiro : `${inteiro.slice(0, 157)}…`;
 }
+
+/**
+ * A decisão como ela precisa ser LIDA depois — e não como ela foi clicada.
+ *
+ * O que fica gravado vai para três lugares: o contexto do escritor, a lista de
+ * decisões que o auditor recebe na rodada seguinte, e o relatório final. Guardar
+ * o rótulo do botão — *"Vale a leitura do auditor"* — entrega aos três uma frase
+ * sem conteúdo: o auditor lê onze decisões iguais, não descobre nada em nenhuma,
+ * e levanta os mesmos pontos de novo com toda a razão.
+ *
+ * Foi o que aconteceu no `assitencia`: o desenvolvedor arbitrou onze vezes, e o
+ * auditor devolveu os dois primeiros pontos outra vez, porque para ele nada
+ * tinha sido decidido.
+ */
+export function decisaoGravada(finding: Finding, escolha: LeituraEscolhida): string {
+  if (escolha.tipo === "outra") return `${finding.where}: ${escolha.texto}`;
+  if (escolha.tipo === "auditor") return `${finding.where}: ${finding.fix}`;
+  return `${finding.where}: fica como está — o ponto levantado pelo auditor ("${finding.problem}") foi decidido a favor do texto atual`;
+}

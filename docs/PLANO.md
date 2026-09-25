@@ -4942,7 +4942,44 @@ O levantamento passa a valer só para achado do AUDITOR. A distinção já exist
 veredito (`mechanical`) e agora está também em cada achado, porque é ela que
 decide **quem resolve**: contagem volta ao escritor, leitura vai a quem decide.
 
-### 70.4 O que faz a decisão durar
+### 70.4 O que se grava é a decisão, não o botão
+
+O `assitencia` arbitrou **onze** pontos numa noite, e o auditor devolveu os dois
+primeiros outra vez. O handoff explicava por quê:
+
+```
+Q-91 | ACCEPTED | decision = "Vale a leitura do auditor"
+Q-92 | ACCEPTED | decision = "Vale a leitura do auditor"
+…onze vezes
+```
+
+O harness guardou o **rótulo do botão**. E essa frase vai para três lugares —
+o contexto do escritor, a lista de decisões que o auditor recebe na rodada
+seguinte, e o relatório final — sem dizer nada em nenhum deles. O auditor lia
+onze decisões idênticas e vazias, não descobria nada, e levantava os mesmos
+pontos **com toda a razão**: para ele, nada tinha sido decidido.
+
+O contraste estava no mesmo arquivo: a única resposta em texto livre gravou
+substância —
+
+```
+Q-96 | ACCEPTED | decision = "SREP representa uma decisão técnica, não a entrega
+                             do equipamento. A única alteração permitida…"
+```
+
+Agora as três saídas gravam conteúdo, com o endereço junto:
+
+| escolha | o que fica gravado |
+|---|---|
+| leitura do auditor | `<onde>: <o que ele pediu>` |
+| texto do escritor | `<onde>: fica como está — o ponto "<X>" foi decidido a favor do texto atual` |
+| terceira via | `<onde>: <o texto do desenvolvedor>` |
+
+A regra que faltava, e que vale para qualquer decisão que o harness registre:
+**ela precisa ser legível sozinha**, sem a pergunta ao lado — porque quem a lê
+depois recebe só a linha.
+
+### 70.5 O que faz a decisão durar
 
 A resposta é gravada como qualquer outra da entrevista, e é isso que a torna
 útil: o auditor da rodada seguinte recebe as decisões junto do documento. Sem

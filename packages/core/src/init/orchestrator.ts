@@ -31,7 +31,7 @@ import { detectRateLimit, planWait } from "../loop/ratelimit.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
 import { decisoesComoMemorias, renderLibraryBlock, type McpDocument, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { INIT_ARTIFACTS, evaluateReadiness } from "./readiness.js";
-import { comAutoridade, lerEscolha, perguntaDeLevantamento } from "../interview/index.js";
+import { comAutoridade, decisaoGravada, lerEscolha, perguntaDeLevantamento } from "../interview/index.js";
 import { ehRepetido, fingerprint } from "../audit/index.js";
 import { MemoriaDoPlano } from "./plan-cache.js";
 import type { PlanProgressListener } from "./progress.js";
@@ -1623,11 +1623,23 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       const raw = await options.ask(pergunta, resultado.length + 1, repetidos.length);
       const resposta = await settle(document, pergunta, raw, attempt, 1, repetidos.length);
 
-      allQuestions.push(pergunta);
-      allAnswers.push(resposta);
-      await persistAnswers(document, [pergunta], [resposta]);
-
       const escolha = lerEscolha(resposta.decision, raw);
+
+      /*
+       * O que se grava é a DECISÃO, não o botão.
+       *
+       * "Vale a leitura do auditor" é rótulo: ele vai para o contexto do
+       * escritor, para a lista que o auditor recebe na rodada seguinte e para o
+       * relatório — e não diz nada em nenhum dos três. No `assitencia` o
+       * desenvolvedor arbitrou onze pontos e o auditor devolveu os mesmos, com
+       * razão: para ele, nada tinha sido decidido.
+       */
+      const gravada: Answer =
+        resposta.disposition === "ACCEPTED" ? { ...resposta, decision: decisaoGravada(finding, escolha) } : resposta;
+
+      allQuestions.push(pergunta);
+      allAnswers.push(gravada);
+      await persistAnswers(document, [pergunta], [gravada]);
       if (escolha.tipo === "escritor") {
         announce(`    ${finding.where}: você deu razão ao escritor; o ponto está encerrado`);
         continue;

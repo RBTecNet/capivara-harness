@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { comAutoridade, lerEscolha, perguntaDeLevantamento } from "../../src/interview/levantamento.js";
+import { comAutoridade, decisaoGravada, lerEscolha, perguntaDeLevantamento } from "../../src/interview/levantamento.js";
 import { ehRepetido, fingerprint } from "../../src/audit/index.js";
 import { parseQuestionBatch } from "../../src/interview/protocol.js";
 import { QUESTIONS_CONTRACT } from "../../src/interview/types.js";
@@ -103,5 +103,46 @@ describe("o que a resposta faz com o achado", () => {
 
   it("resposta vazia não inventa terceira via: fica com o auditor", () => {
     expect(lerEscolha("", "")).toEqual({ tipo: "auditor" });
+  });
+});
+
+/*
+ * O `assitencia` arbitrou ONZE pontos e o auditor devolveu os mesmos dois na
+ * rodada seguinte. O handoff explicava:
+ *
+ *   Q-91 | ACCEPTED | decision = "Vale a leitura do auditor"
+ *   Q-92 | ACCEPTED | decision = "Vale a leitura do auditor"
+ *   …
+ *
+ * O harness guardou o rótulo do botão. Essa frase vai para o contexto do
+ * escritor, para a lista de decisões que o auditor recebe e para o relatório — e
+ * não diz nada em nenhum dos três.
+ */
+describe("o que fica gravado é a decisão, não o botão", () => {
+  it("dar razão ao auditor grava O QUE passa a valer", () => {
+    const gravada = decisaoGravada(finding, { tipo: "auditor" });
+    expect(gravada).toContain(finding.where);
+    expect(gravada).toContain("exclusividade em todo o sistema");
+    expect(gravada).not.toContain("Vale a leitura");
+  });
+
+  it("dar razão ao escritor grava que o ponto foi decidido a favor do texto", () => {
+    const gravada = decisaoGravada(finding, { tipo: "escritor" });
+    expect(gravada).toContain("fica como está");
+    expect(gravada).toContain(finding.problem);
+  });
+
+  it("a terceira via grava o texto do desenvolvedor, com o endereço junto", () => {
+    const gravada = decisaoGravada(finding, { tipo: "outra", texto: "único por tenant" });
+    expect(gravada).toBe(`${finding.where}: único por tenant`);
+  });
+
+  it("a decisão gravada é legível sem a pergunta ao lado", () => {
+    // O auditor da rodada seguinte recebe só esta linha; ela tem de bastar.
+    for (const escolha of [{ tipo: "auditor" as const }, { tipo: "escritor" as const }]) {
+      const gravada = decisaoGravada(finding, escolha);
+      expect(gravada.length).toBeGreaterThan(40);
+      expect(gravada.split(":")[0]).toBe(finding.where);
+    }
   });
 });

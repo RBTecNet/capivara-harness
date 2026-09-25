@@ -44,9 +44,19 @@ export interface InitReport {
  *     · auditoria · Tarefas 4, 6 e 8: Tarefas 4, 6 e 8: Incluir SREP nos…
  */
 function linhaDaDecisao(decision: { topic: string; decision: string }): string {
-  const endereco = decision.topic.replace(/^auditoria ·\s*/, "").trim();
+  /*
+   * Qualquer `<origem> · <endereço>`, e não só `auditoria`.
+   *
+   * O conserto original conhecia um prefixo só, e a arbitragem do ensaio — que
+   * nasceu depois, com tópico `ensaio · P1.T3.C1` — saiu no relatório com o
+   * endereço duas vezes: "ensaio · P1.T3.C1: P1.T3.C1: fica como está". A irmã que
+   * ficou para trás, outra vez.
+   */
+  const partes = /^([^·]+?)\s·\s(.+)$/.exec(decision.topic);
+  const origem = partes?.[1]?.trim() ?? "";
+  const endereco = partes?.[2]?.trim() ?? "";
   return endereco !== "" && decision.decision.startsWith(`${endereco}:`)
-    ? `auditoria · ${decision.decision}`
+    ? `${origem} · ${decision.decision}`
     : `${decision.topic}: ${decision.decision}`;
 }
 

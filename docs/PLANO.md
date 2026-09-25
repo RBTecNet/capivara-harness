@@ -5877,3 +5877,40 @@ E a pergunta de arbitragem do ensaio ganhou a forma que o desenvolvedor definiu 
 do auditor no §78 — a área e o que a escolha resolve, uma leitura, a outra, e nada
 mais. Era a irmã que tinha ficado para trás, e foi colada de volta na conversa
 exatamente com o "por que importa" e o "recomendo porque" que a outra já não tinha.
+
+## §82 — RALPH READY, e as duas mentiras do relatório
+
+O `assistencia2` fechou o `plan`: **RALPH READY**, 12 fases, 107 tasks, 25 stories,
+23 entidades, 15 workflows, versionado no repositório que o `init` criou. Custo total
+de modelo em torno de 49 minutos — escritor 25, auditor 11, verificador 13.
+
+O relatório, lido linha a linha, tinha duas coisas erradas.
+
+### 82.1 A resposta pendurada na pergunta errada
+
+```
+· Vencimento da recorrência: Último dia disponível, preservando o dia original
+· Vencimento da recorrência: Criar uma tarefa única para clientes e equipamentos
+```
+
+A segunda decisão não tem nada a ver com vencimento — é a resposta ao marcador do
+workflow 7 (§80). Cada rodada de lacuna recomeça em `Q-01`, e o handoff guardava o id
+LOCAL: `persistAnswers` descartava a pergunta da rodada 2 por já existir um `Q-01`, mas
+guardava a resposta. A resposta certa ficou pendurada na pergunta da rodada 1.
+
+O texto da decisão estava certo, e é ele que o escritor e o auditor leem. O que saía
+errado era o rótulo no relatório — e, na retomada do §76.4, o par que o escritor
+recebia como "já perguntado": *"como calcular o vencimento → uma tarefa única para
+clientes"*. A rodada de lacunas passou a gravar o id escopado; os outros cinco
+chamadores de `persistAnswers` já gravavam ids únicos.
+
+### 82.2 O endereço dito duas vezes
+
+```
+· ensaio · P1.T3.C1: P1.T3.C1: fica como está
+```
+
+O conserto de `f9ede43` conhecia um prefixo só — `auditoria` — e **saiu sem teste**.
+A arbitragem do ensaio nasceu depois, com tópico `ensaio · …`, e ninguém viu a linha
+irmã. Agora qualquer `<origem> · <endereço>` é tratado, e o teste que faltou existe e
+cobre as duas.

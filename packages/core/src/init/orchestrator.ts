@@ -2358,7 +2358,22 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
       // Decisão tomada aqui precisa sobreviver ao processo: sem isto, o run
       // seguinte pergunta a mesma coisa porque a retomada não a encontra.
-      await persistAnswers(document, perguntas, answered);
+      /*
+       * Com o id ESCOPADO, e não o local.
+       *
+       * Cada rodada de lacuna recomeça em `Q-01`, e `persistAnswers` descarta a
+       * pergunta cujo id já existe no handoff — mas guarda a resposta. No
+       * `assistencia2` a resposta da rodada 2 ("uma tarefa única para clientes e
+       * equipamentos") ficou pendurada na pergunta da rodada 1 ("Vencimento da
+       * recorrência"): o relatório mostrou a decisão sob o tópico errado, e a
+       * retomada do §76.4 entregou ao escritor um par pergunta-resposta sem
+       * sentido. Os outros cinco chamadores já gravam ids únicos; este era o único.
+       */
+      await persistAnswers(
+        document,
+        perguntas.map((question) => ({ ...question, id: scoped(document, question.id, escopo) })),
+        answered.map((answer) => ({ ...answer, questionId: scoped(document, answer.questionId, escopo) })),
+      );
 
       const accepted = answered.filter((answer) => answer.disposition === "ACCEPTED");
       /*

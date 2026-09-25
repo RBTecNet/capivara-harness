@@ -5,7 +5,7 @@
  * que o painel observa sem alterar — ele nem tem como.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PIPELINE_STEPS, HarnessProgress, createLiveRegion, renderDashboard } from "../../src/tui/index.js";
 import type { ProgressEvent } from "../../src/tui/index.js";
 
@@ -235,6 +235,52 @@ describe("região viva", () => {
     region.release();
     region.draw("nova");
     expect(escrito[1]).not.toContain("A");
+  });
+
+  /*
+   * O preflight do build escrevia a pergunta de pré-requisito abaixo do painel e
+   * o pulso seguinte subia as linhas do painel e apagava tudo dali para baixo:
+   * nove minutos numa tela sem pergunta, com o processo esperando resposta.
+   */
+  it("enquanto a tela está cedida, o pulso não apaga a pergunta — e volta depois", async () => {
+    vi.useFakeTimers();
+    try {
+      const escrito: string[] = [];
+      const region = createLiveRegion((text) => void escrito.push(text), true);
+      region.draw("uma\nduas\ntrês");
+      region.beat(() => "painel", 1000);
+
+      const resposta = await region.suspend(async () => {
+        escrito.push("PERGUNTA");
+        vi.advanceTimersByTime(5000);
+        return "1";
+      });
+
+      expect(resposta).toBe("1");
+      expect(escrito.at(-1)).toBe("PERGUNTA");
+
+      vi.advanceTimersByTime(1000);
+      expect(escrito.length).toBeGreaterThan(2);
+      // O painel volta ABAIXO da pergunta: o primeiro desenho não sobe sobre ela.
+      expect(escrito[2]).not.toContain("[3A");
+      expect(escrito[2]).toContain("painel");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("o pulso volta mesmo quando a pergunta falha", async () => {
+    vi.useFakeTimers();
+    try {
+      const escrito: string[] = [];
+      const region = createLiveRegion((text) => void escrito.push(text), true);
+      region.beat(() => "painel", 1000);
+      await expect(region.suspend(async () => Promise.reject(new Error("entrada acabou")))).rejects.toThrow();
+      vi.advanceTimersByTime(1000);
+      expect(escrito.some((t) => t.includes("painel"))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("ao redimensionar, redesenha da origem sem reutilizar a altura anterior", () => {

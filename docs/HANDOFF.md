@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.3.1 (`capivara --ver`) |
-| suíte | 1454 testes em 77 arquivos, `npm run check` verde |
+| suíte | 1456 testes em 77 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
@@ -228,6 +228,17 @@ Em ordem de importância, não de esforço:
 4. **Cosmético:** o painel do `plan` mostra "esqueleto do produto — aguardando"
    mesmo lendo um esqueleto que já existe. O pipeline foi desenhado para o `init`
    e o `plan` o herdou.
+5. **O `init` perde o pulso do painel depois da primeira pergunta.** Ele usa
+   `live.release()` para ceder a tela, e `release` para o pulso para sempre; o
+   painel só volta a se mexer quando chega evento. O build já usa
+   `live.suspend()`, que cede e retoma. Trocar no init mexe no desenho da
+   pergunta dentro do painel — é mudança de outra natureza, fica para um run
+   próprio.
+6. **O preflight exige o PROGRAMA `sqlite3` quando a stack usa o PACOTE.** No
+   `assistencia2` o SQLite entra pelo pacote npm `sqlite3`, que traz a biblioteca
+   embutida; nada chama o binário, e o build parou pedindo para instalá-lo.
+   `detectPrerequisites` confunde "a stack usa SQLite" com "precisa do cliente de
+   linha de comando".
 
 ## As armadilhas, em uma linha cada
 

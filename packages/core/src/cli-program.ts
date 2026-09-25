@@ -1423,22 +1423,26 @@ export function createProgram(): Command {
              * pré-requisito ausente, porque é a mesma categoria de coisa: algo
              * que o build precisa e não está lá. Entrada esgotada é abortar.
              */
-            askGit: async (rendered: string) => {
-              stdout.write(`\n${rendered}\n`);
-              return await linhasBuild!.ask("> ").catch((error: unknown) => {
-                if (error instanceof InputEndedError) return "3";
-                throw error;
-              });
-            },
-            askPrerequisite: async (rendered: string) => {
-              stdout.write(`\n${rendered}\n`);
-              // Entrada esgotada é "abortar": faltando pré-requisito e sem quem
-              // decida, instalar por conta própria seria um palpite caro.
-              return await linhasBuild!.ask("> ").catch((error: unknown) => {
-                if (error instanceof InputEndedError) return "3";
-                throw error;
-              });
-            },
+            askGit: async (rendered: string) =>
+              liveBuild.suspend(async () => {
+                stdout.write(`\n${rendered}\n`);
+                return await linhasBuild!.ask("> ").catch((error: unknown) => {
+                  if (error instanceof InputEndedError) return "3";
+                  throw error;
+                });
+              }),
+            // A pergunta sai do alcance do painel: sem isso o pulso seguinte a
+            // apagava, e o preflight ficava esperando uma resposta invisível.
+            askPrerequisite: async (rendered: string) =>
+              liveBuild.suspend(async () => {
+                stdout.write(`\n${rendered}\n`);
+                // Entrada esgotada é "abortar": faltando pré-requisito e sem quem
+                // decida, instalar por conta própria seria um palpite caro.
+                return await linhasBuild!.ask("> ").catch((error: unknown) => {
+                  if (error instanceof InputEndedError) return "3";
+                  throw error;
+                });
+              }),
             installPrerequisites: async (prompt: string) => {
               const bridge = createAgentBridge({
                 projectRoot,

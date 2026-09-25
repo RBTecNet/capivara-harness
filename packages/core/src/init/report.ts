@@ -33,6 +33,23 @@ export interface InitReport {
   readiness: Readiness;
 }
 
+/**
+ * `tópico: decisão` — sem dizer o tópico duas vezes.
+ *
+ * A decisão de um levantamento de auditoria carrega o endereço dentro dela, e
+ * precisa carregar: ela viaja sozinha para o contexto do escritor e para a lista
+ * que o auditor recebe, onde não há tópico ao lado. Aqui, onde há, o relatório
+ * saía assim:
+ *
+ *     · auditoria · Tarefas 4, 6 e 8: Tarefas 4, 6 e 8: Incluir SREP nos…
+ */
+function linhaDaDecisao(decision: { topic: string; decision: string }): string {
+  const endereco = decision.topic.replace(/^auditoria ·\s*/, "").trim();
+  return endereco !== "" && decision.decision.startsWith(`${endereco}:`)
+    ? `auditoria · ${decision.decision}`
+    : `${decision.topic}: ${decision.decision}`;
+}
+
 export function renderReport(report: InitReport): string {
   const lines: string[] = [];
 
@@ -47,7 +64,7 @@ export function renderReport(report: InitReport): string {
 
   lines.push("", "## Decisões confirmadas");
   if (report.checkpoint.decisions.length === 0) lines.push("  (nenhuma)");
-  for (const decision of report.checkpoint.decisions) lines.push(`  · ${decision.topic}: ${decision.decision}`);
+  for (const decision of report.checkpoint.decisions) lines.push(`  · ${linhaDaDecisao(decision)}`);
 
   if (report.checkpoint.assumptions.length > 0) {
     lines.push("", "## Suposições assumidas");

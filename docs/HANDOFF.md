@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.3.1 (`capivara --ver`) |
-| suíte | 1438 testes em 76 arquivos, `npm run check` verde |
+| suíte | 1439 testes em 76 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
@@ -82,6 +82,13 @@ cai, e o auditor acha "defeito novo" em task que estava boa.
 
 Ligar isso começa a RECUSAR emendas, então é mudança de comportamento e vai sozinha
 num run. É a próxima da fila, na frente do teto de tasks por fase.
+
+**Uma instância restante da mesma família, anotada e não consertada** (uma mudança
+por run): os achados de CONTRATO do self-check — `where: linha N`, quando o plano não
+passa no parser por defeito de substância — também saem sem fase e caem no fallback
+de "todas as fases". É raro, porque `emendaInutil` recusa emenda que introduza código
+de defeito novo, e não mordeu em nenhum run. O conserto é o mesmo de
+`faseDoMarcador`: mapear a linha para a fase cujo cabeçalho a precede.
 
 **E a regra de contexto, que vale para os dois lados:** compactar contexto é
 perder detalhe, e perder detalhe é exatamente o defeito acima. No harness isso tem

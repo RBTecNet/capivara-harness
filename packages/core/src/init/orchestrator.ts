@@ -15,8 +15,8 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { affectedPhases, assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parsePhaseFragment, parseSkeleton, renderSkeleton, sliceForPhase, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
-import type { CoverageSources, Skeleton, StampInput } from "../contract/index.js";
+import { affectedPhases, assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parsePhaseFragment, parseSkeleton, renderSkeleton, sliceForPhase, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
+import type { ContractError, CoverageSources, PhasesDocument, Skeleton, StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
 import { tasksBlock } from "../contract/templates.js";
@@ -1635,6 +1635,61 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * Sem esqueleto não há o que cobrir — e é o caso de quem ainda não rodou o
    * `init`, onde as listas vazias fazem a checagem passar por não ter assunto.
    */
+  /**
+   * Os achados de cobertura, cada um endereçado à fase que o ESQUELETO diz ser a
+   * dona do item.
+   *
+   * Eles saíam com `where: "Traces"` e sem fase, e `affectedPhases` fazia o que
+   * faz com achado sem endereço: mandava para todas. Medido no `assistencia2`: "o
+   * workflow 7 não é coberto por nenhuma task" chegou à fase 11 (Estoque), que
+   * não tem o workflow 7 na fatia e não pode cobri-lo. Ela fez a única coisa legal
+   * que o prompt da emenda permite — escreveu `[NEEDS DECISION] Indicar a task
+   * que implementa workflow 7` —, e esse marcador, que nenhum desenvolvedor pode
+   * responder porque a resposta verdadeira é "isto não é da fase 11", atravessou
+   * a auditoria inteira e reprovou o plano no gate. Todo o resto estava aprovado.
+   *
+   * O harness SABE a resposta: o workflow 7 está no `covers` da fase 6. É o
+   * princípio do §77.7 — o harness diz o que sabe em vez de deixar adivinhar pela
+   * prosa — e ele tinha ficado de fora justamente da conferência que o harness faz
+   * sozinho.
+   *
+   * O QUE falta continua sendo decidido por `checkCoverage`, com as mesmas
+   * mensagens; o que muda é só PARA ONDE vai. Um item em mais de uma fase vira um
+   * achado para cada uma — qualquer uma delas que o rastreie satisfaz a checagem.
+   */
+  function achadosDeCobertura(documento: PhasesDocument): Finding[] {
+    const fontes = coberturaAtual();
+    const fasesDoEsqueleto = skeletonAtual?.phases ?? [];
+    const cobreEste = (item: string): number[] =>
+      fasesDoEsqueleto
+        .filter((fase) => fase.covers.some((coberto) => coberto.trim().toLowerCase() === item.toLowerCase()))
+        .map((fase) => fase.number);
+
+    const itens: { erros: ContractError[]; donos: number[] }[] = [
+      ...fontes.storyIds.map((id) => ({ erros: checkStories(documento, [id]), donos: cobreEste(id) })),
+      ...fontes.entities.map((nome) => ({ erros: checkEntities(documento, [nome]), donos: cobreEste(nome) })),
+      ...fontes.workflows.map((workflow) => ({
+        erros: checkWorkflows(documento, [workflow]),
+        // O esqueleto escreve `workflow 7` ou só `7`; `workflowsForPhase` aceita os dois.
+        donos: [...new Set([...cobreEste(`workflow ${workflow.number}`), ...cobreEste(workflow.number)])],
+      })),
+    ];
+
+    return itens.flatMap(({ erros, donos }) =>
+      erros.flatMap((erro) =>
+        donos.length === 0
+          ? [{ where: "Traces", problem: erro.message, fix: erro.hint, mechanical: true }]
+          : donos.map((fase) => ({
+              where: `Phase ${fase} · Traces`,
+              problem: erro.message,
+              fix: `${erro.hint}. O esqueleto põe este item na fase ${fase}: é nela que a task que o rastreia precisa existir`,
+              phase: fase,
+              mechanical: true,
+            })),
+      ),
+    );
+  }
+
   function coberturaAtual(): CoverageSources {
     return skeletonAtual ? coverageFromSkeleton(skeletonAtual) : { storyIds: [], entities: [], workflows: [] };
   }
@@ -2957,11 +3012,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         if (semCobertura.length > 0) {
           return {
             status: "REJECTED",
-            findings: semCobertura.map((erro) => ({
-              where: "Traces",
-              problem: erro.message,
-              fix: erro.hint,
-            })),
+            findings: achadosDeCobertura(parsed.document),
             remarks: [],
             reason: "há item do esqueleto que nenhuma task rastreia",
             mechanical: true,

@@ -366,3 +366,43 @@ describe("a decisão de uma lacuna não derruba as fases aprovadas", () => {
     expect(emendas.map((call) => call.subject)).toEqual(["phase-p02"]);
   });
 });
+
+/*
+ * O achado de cobertura saía sem fase, e `affectedPhases` o mandava para todas.
+ * No `assistencia2`, "o workflow 7 não é coberto por nenhuma task" chegou à fase
+ * 11 (Estoque), que não tem o workflow 7 na fatia. Ela escreveu o único texto
+ * legal que tinha — `[NEEDS DECISION] Indicar a task que implementa workflow 7` —,
+ * um marcador que nenhum desenvolvedor pode responder, e o plano inteiro,
+ * aprovado, reprovou no gate por causa dele.
+ */
+describe("o achado de cobertura vai para a fase dona do item", () => {
+  it("o workflow que falta é pedido à fase que o esqueleto manda cobri-lo, e a nenhuma outra", async () => {
+    const agentInit = fakeAgent(skeletonPath());
+    await runInit({ projectRoot, request, ...comum, stage: "init", call: agentInit.call, ask: async () => "use as recomendações" });
+
+    // A fase 2 é a dona do workflow 1 no esqueleto; ela nasce sem citá-lo.
+    const semOWorkflow = PHASE_2.replace("US-1.1, reservations, workflow 1", "US-1.1, reservations");
+    let escritas = 0;
+    const steps = skeletonPath();
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "phase-p02" },
+      respond: {
+        stdout: () => {
+          escritas += 1;
+          return escritas === 1 ? semOWorkflow : PHASE_2;
+        },
+      },
+      repeat: true,
+    });
+
+    const agent = fakeAgent(steps);
+    const outcome = await runPlan({ projectRoot, request, ...comum, call: agent.call, ask: async () => "use as recomendações" });
+
+    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+    // Só a fase 2 foi emendada. A 1 não tem o workflow 1 na fatia, e mandar a
+    // ela é o que faz nascer o marcador que ninguém pode responder.
+    const emendas = agent.calls.filter((call) => call.stage === "authoring" && call.prompt.includes("amending a phase"));
+    expect(emendas.map((call) => call.subject)).toEqual(["phase-p02"]);
+    expect(emendas[0]?.prompt).toContain("O esqueleto põe este item na fase 2");
+  });
+});

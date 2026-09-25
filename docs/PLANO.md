@@ -5799,3 +5799,53 @@ que não soube.
 
 O teste novo falha com o código antigo — `expected [] to deeply equal ['phase-p02']`
 —, que é o que faltava na primeira vez.
+
+## §80 — O plano aprovado inteiro, reprovado por uma pergunta sem resposta
+
+A primeira execução depois do §79 **convergiu**. O número que valia olhar era quantas
+fases voltavam à auditoria a cada volta, e ele caiu como tinha de cair:
+
+| tentativa | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| fases reauditadas | 12 | 5 | 2 | 3 | 2 | 2 | 1 |
+
+Todas aprovadas. E o gate reprovou:
+
+```
+✗ O plano executável passa no parser do contrato: linha 807: I-13
+✗ O plano não carrega decisão pendente
+```
+
+Uma linha, na fase 11 (Estoque e dicas de bancada):
+
+> `[NEEDS DECISION] Indicar a task que implementa workflow 7 ("Clientes e equipamentos"); nenhuma task desta fase cobre esse fluxo.`
+
+### 80.1 A cadeia
+
+1. A conferência mecânica de cobertura achou que o workflow 7 não era rastreado por
+   task nenhuma — verdade, e defeito real.
+2. O achado saiu com `where: "Traces"` e sem fase. `affectedPhases` fez o que faz com
+   achado sem endereço: mandou para as treze.
+3. A fase 11 recebeu a emenda *"cubra o workflow 7"*. O workflow 7 não está na fatia
+   dela — é da fase 6 —, e ela fez a única coisa legal que o prompt da emenda
+   permite: marcou `[NEEDS DECISION]`.
+4. A rodada de lacunas perguntou, e a pergunta não tinha resposta possível: a
+   resposta verdadeira é *"isto não é da fase 11"*, e isso não é uma decisão de
+   produto. O marcador sobreviveu a quatro voltas, a auditoria — que lê a estrutura
+   sem marcadores, §76.1 — aprovou tudo, e o gate recusou.
+
+O harness **sabia** a resposta: o workflow 7 está no `covers` da fase 6. É o princípio
+do §77.7 — o harness diz o que sabe em vez de deixar adivinhar pela prosa — e ele
+tinha ficado de fora justamente da conferência que o harness faz sozinho.
+
+### 80.2 O conserto, sem tocar no contrato
+
+`checkCoverage` continua decidindo O QUE falta, com as mesmas mensagens. O que muda é
+PARA ONDE vai: cada item é conferido sozinho, e o achado dele carrega a fase que o
+esqueleto diz ser a dona. Item em mais de uma fase vira um achado para cada uma —
+qualquer uma que o rastreie satisfaz a checagem.
+
+Havia o caminho de acrescentar um campo `subject` ao `ContractError`. A lei de impacto
+escolheu o outro: o orquestrador já tem o esqueleto e pode rotear sozinho, e o contrato
+fica como estava. O teste novo falha com o código antigo —
+`expected ['phase-p01','phase-p02'] to deeply equal ['phase-p02']`.

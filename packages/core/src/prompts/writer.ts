@@ -119,6 +119,35 @@ const FRAME = [
   "  how many agents will implement the work. You do not know those and they are not yours.",
 ].join("\n");
 
+/**
+ * O que vale para TODA pergunta, venha ela da entrevista ou da rodada de lacunas.
+ *
+ * Uma constante e não duas cópias porque as duas já divergiram uma vez: o parser
+ * passou a exigir opções (§64), a entrevista foi ensinada e a rodada de lacunas
+ * não. O lote dela passou a ser recusado sempre, e o `assitencia` publicou NOT
+ * READY com "3 gap(s) sem pergunta" — três decisões que ninguém chegou a ouvir.
+ */
+const REGRAS_DA_PERGUNTA = [
+    "EVERY question carries two to four options, each with its consequence, and recommends exactly",
+    "one of them. Never ask something that can only be answered in prose: the developer writes what",
+    "makes sense to them, the classifier finds the answer does not cover everything the question",
+    "asked, and the same question comes back — twice a round, three rounds. Six times a question",
+    "that never had a right answer available.",
+    "",
+    "When the answer feels open-ended — a name, a limit, a policy — enumerate the real alternatives",
+    "you can see, from the sources and from what a competent developer would pick. They can always",
+    "answer in free text if none fits; what must not exist is the question with nowhere to click.",
+    "",
+    "The options must span the WHOLE decision, so that picking one settles the question entirely.",
+    "If you cannot write options that do that, the question is asking more than one thing: split it.",
+    "",
+    "Every option must be a CONCRETE, FINAL answer to the decision. An option that only postpones",
+    'it — "define a specific stack", "decide during implementation", "choose later" — is a deferral',
+    "wearing the clothes of a choice: the developer picks it, the decision is recorded as made, and",
+    "the writer still has nothing to write. If the honest answer is that it can be decided later,",
+    "do not ask the question at all.",
+].join("\n");
+
 export function interviewPrompt(
   document: string,
   writer: WriterContext,
@@ -206,24 +235,7 @@ export function interviewPrompt(
     "If a subject needs three decisions, write three questions. Questions are cheap; a question",
     "that cannot be answered in one breath is not.",
     "",
-    "EVERY question carries two to four options, each with its consequence, and recommends exactly",
-    "one of them. Never ask something that can only be answered in prose: the developer writes what",
-    "makes sense to them, the classifier finds the answer does not cover everything the question",
-    "asked, and the same question comes back — twice a round, three rounds. Six times a question",
-    "that never had a right answer available.",
-    "",
-    "When the answer feels open-ended — a name, a limit, a policy — enumerate the real alternatives",
-    "you can see, from the sources and from what a competent developer would pick. They can always",
-    "answer in free text if none fits; what must not exist is the question with nowhere to click.",
-    "",
-    "The options must span the WHOLE decision, so that picking one settles the question entirely.",
-    "If you cannot write options that do that, the question is asking more than one thing: split it.",
-    "",
-    "Every option must be a CONCRETE, FINAL answer to the decision. An option that only postpones",
-    'it — "define a specific stack", "decide during implementation", "choose later" — is a deferral',
-    "wearing the clothes of a choice: the developer picks it, the decision is recorded as made, and",
-    "the writer still has nothing to write. If the honest answer is that it can be decided later,",
-    "do not ask the question at all.",
+    REGRAS_DA_PERGUNTA,
     "",
     "## Project evidence",
     inventory,
@@ -285,6 +297,8 @@ export function gapPrompt(
     "",
     "Never ask for the path of a design artifact. The design directory is optional and usually",
     "absent: a task with no matching artifact simply carries no Design ref. That is not a gap.",
+    "",
+    REGRAS_DA_PERGUNTA,
     "",
     "Return only JSON, same shape as the interview batch:",
     '{ "contract": "capivara-questions/v1", "questions": [ { "id": "Q-01", "topic": "...",',

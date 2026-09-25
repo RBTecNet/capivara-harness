@@ -4804,3 +4804,37 @@ desenvolvedor em vez de a mais uma reescrita.
 
 O pêndulo acontecia ABAIXO de 60, onde o arranjo existe e ninguém tinha as duas
 medidas na mão ao mesmo tempo.
+
+## §69 — Apertei o parser e esqueci metade de quem fala com ele
+
+O `assitencia` publicou NOT READY com um marcador vivo no plano:
+
+```
+linha 775: I-13 o documento contém um marcador [NEEDS DECISION]
+O plano não carrega decisão pendente: [NEEDS DECISION] no plano
+```
+
+E o `events.tsv` tinha a explicação, na mensagem que o §59 acabou de criar:
+
+```
+01:04:46  interview  project-phases.md  blocked  3 gap(s) sem pergunta
+```
+
+O lote da rodada de lacunas foi recusado duas vezes seguidas. A causa é minha,
+de horas antes: o §64 passou a exigir de 2 a 4 opções por pergunta — no
+**parser** e no prompt da **entrevista**. A rodada de lacunas, que fala com o
+mesmo parser, continuou mandando pergunta sem opção.
+
+Três decisões que ninguém chegou a ouvir, um plano publicado incompleto, e a
+mensagem de diagnóstico certa aparecendo porque tinha sido escrita duas horas
+antes pelo mesmo motivo.
+
+### 69.1 Uma fonte, dois prompts
+
+As regras da pergunta viraram uma constante, usada pelos dois: quantas opções,
+por que a pergunta discursiva entra em laço, o que fazer quando a resposta parece
+aberta, e a proibição da opção que é adiamento disfarçado.
+
+É o §58.3 outra vez, no mesmo dia: extrair a pergunta e deixar as regras
+espalhadas resolve metade do problema e esconde a outra. Aqui a lição ganhou o
+teste que faltava — um que roda os DOIS prompts contra as mesmas asserções.

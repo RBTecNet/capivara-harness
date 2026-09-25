@@ -758,3 +758,38 @@ describe("o auditor não pede cirurgia de fase", () => {
     expect(prompt).toContain("someone who cannot act on it");
   });
 });
+
+/*
+ * O `assitencia` publicou NOT READY com um marcador vivo no plano, e o evento
+ * dizia "3 gap(s) sem pergunta": o lote da rodada de lacunas foi recusado duas
+ * vezes seguidas.
+ *
+ * A causa foi minha, horas antes: o parser passou a exigir de 2 a 4 opções por
+ * pergunta (§64), a entrevista foi ensinada e a RODADA DE LACUNAS não. Ela
+ * continuou emitindo pergunta sem opção, e três decisões nunca chegaram a ser
+ * ouvidas.
+ */
+describe("as duas entrevistas seguem as mesmas regras de pergunta", () => {
+  const daEntrevista = interviewPrompt("skeleton.md", context, "Projeto vazio.", [], 1);
+  const daLacuna = gapPrompt("project-phases.md", context, ["definir o prazo de garantia"], []);
+
+  it("as duas exigem de 2 a 4 opções com recomendação", () => {
+    for (const prompt of [daEntrevista, daLacuna]) {
+      expect(prompt).toContain("EVERY question carries two to four options");
+      expect(prompt).toContain("recommends exactly");
+    }
+  });
+
+  it("as duas proíbem a pergunta que só se responde em prosa", () => {
+    for (const prompt of [daEntrevista, daLacuna]) {
+      expect(prompt).toContain("Never ask something that can only be answered in prose");
+      expect(prompt).toContain("nowhere to click");
+    }
+  });
+
+  it("as duas recusam a opção que é adiamento disfarçado", () => {
+    for (const prompt of [daEntrevista, daLacuna]) {
+      expect(prompt).toContain("a deferral");
+    }
+  });
+});

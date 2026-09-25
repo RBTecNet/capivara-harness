@@ -433,3 +433,75 @@ describe("o que o parser do auditor tolera", () => {
     expect(lido.ok).toBe(false);
   });
 });
+
+/*
+ * O terceiro canal do auditor. Ele tinha dois — finding, que vai ao escritor, e
+ * ressalva, que só é lida no relatório depois de o run acabar — e nenhum servia
+ * para o que mais aparece: o ponto em que nenhuma fonte diz qual leitura vale.
+ */
+describe("CAPIVARA_DECISION — a pergunta que vai ao desenvolvedor", () => {
+  const comDecisao = [
+    "CAPIVARA_AUDIT_STATUS: REJECTED",
+    "CAPIVARA_FINDING: Phase 1 | o critério não diz o efeito | descreva o efeito observável",
+    "CAPIVARA_DECISION: Phase 1 · statuses | A tabela é fixa ou o operador cria status? | Fixa: vêm do seed | Aberta: o operador cadastra",
+    "CAPIVARA_REASON: falta decisão",
+  ].join("\n");
+
+  it("lê onde, a decisão e as leituras", () => {
+    const lido = parseAudit(comDecisao);
+    if (!lido.ok) throw new Error(lido.defects.join("; "));
+    expect(lido.verdict.decisions).toHaveLength(1);
+    expect(lido.verdict.decisions?.[0]?.where).toBe("Phase 1 · statuses");
+    expect(lido.verdict.decisions?.[0]?.decision).toContain("fixa ou o operador");
+    expect(lido.verdict.decisions?.[0]?.options).toEqual(["Fixa: vêm do seed", "Aberta: o operador cadastra"]);
+  });
+
+  /*
+   * Uma decisão sem alternativas é pergunta discursiva, e pergunta discursiva
+   * entra em laço: quem responde escreve o que faz sentido, o classificador acha
+   * que falta algo, e a mesma pergunta volta. A régua é a mesma da entrevista.
+   */
+  it("recusa a decisão que não traz duas leituras", () => {
+    const lido = parseAudit(
+      [
+        "CAPIVARA_AUDIT_STATUS: APPROVED",
+        "CAPIVARA_DECISION: Phase 1 | O que vale aqui? | Sei lá",
+        "CAPIVARA_REASON: ok",
+      ].join("\n"),
+    );
+    expect(lido.ok).toBe(false);
+    if (!lido.ok) expect(lido.defects.join(" ")).toContain("duas leituras");
+  });
+
+  it("aprovado também pode carregar decisão: falta de decisão não é defeito do texto", () => {
+    const lido = parseAudit(
+      [
+        "CAPIVARA_AUDIT_STATUS: APPROVED",
+        "CAPIVARA_DECISION: Phase 1 | A tabela é fixa? | Fixa: vêm do seed | Aberta: o operador cadastra",
+        "CAPIVARA_REASON: fiel ao pedido",
+      ].join("\n"),
+    );
+    if (!lido.ok) throw new Error(lido.defects.join("; "));
+    expect(lido.verdict.status).toBe("APPROVED");
+    expect(lido.verdict.decisions).toHaveLength(1);
+  });
+
+  it("a chave sobrevive à embalagem, como as outras quatro", () => {
+    const lido = parseAudit(
+      [
+        "Vou conferir as fases.CAPIVARA_AUDIT_STATUS: REJECTED",
+        "- **CAPIVARA_DECISION:** Phase 1 | A tabela é fixa? | Fixa | Aberta",
+        "CAPIVARA_FINDING: Phase 1 | falta o efeito | descreva o efeito",
+        "CAPIVARA_REASON: falta decisão",
+      ].join("\n"),
+    );
+    if (!lido.ok) throw new Error(lido.defects.join("; "));
+    expect(lido.verdict.decisions).toHaveLength(1);
+  });
+
+  it("ida e volta: o que o veredito diz, ele reemite", () => {
+    const lido = parseAudit(comDecisao);
+    if (!lido.ok) throw new Error("deveria ler");
+    expect(formatVerdict(lido.verdict)).toContain("CAPIVARA_DECISION: Phase 1 · statuses |");
+  });
+});

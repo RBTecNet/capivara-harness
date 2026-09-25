@@ -39,6 +39,7 @@ import {
   type Skeleton,
   type SkeletonPhase,
 } from "../contract/index.js";
+import { MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE } from "../authoring/ledger.js";
 import { changePrompt, phaseFromSlicePrompt } from "../prompts/index.js";
 import { inspectProject, summarizeInventory } from "../init/inventory.js";
 import { readRequestState, readSkeletonState, writeSkeletonState } from "../init/index.js";
@@ -46,8 +47,17 @@ import { runIdFor } from "../state/run-store.js";
 import { artifactPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
 
-export const MAX_TASKS_PER_PHASE = 12;
-export const MAX_CRITERIA_PER_TASK = 6;
+/**
+ * Os mesmos tetos do `plan`, e de propósito uma importação em vez de um número.
+ *
+ * Aqui havia 12 tasks e 6 critérios, contra 15 e 4 do razão de autoria. Dois
+ * números para o mesmo conceito — "o que cabe numa sessão de agente" — e eles
+ * divergiam no pior lugar possível: uma fase de mudança com 6 critérios por task
+ * é construída pelo MESMO loop, verificada pelo MESMO verificador, e seria
+ * recusada pelo self-check do plano se um dia passasse por ele. Quem escreve a
+ * fase é o mesmo prompt nas duas pontas; a régua tinha de ser uma só.
+ */
+export { MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE } from "../authoring/ledger.js";
 
 export interface ChangeCall {
   (request: { role: "writer"; stage: string; subject: string; attempt: number; prompt: string }): Promise<{

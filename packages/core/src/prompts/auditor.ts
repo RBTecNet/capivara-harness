@@ -90,8 +90,8 @@ const AXIS_EXECUTABILITY = [
   "   A phase that carries too much has one correction available, and it is inside the phase:",
   "   consolidate tasks that deliver the same capability, keeping every verifiable condition. Work",
   "   that is missing is demanded IN THE PHASE that already covers it. If neither fits — if the",
-  "   skeleton itself is wrong — say that in a REMARK, which reaches the developer, instead of a",
-  "   finding that reaches someone who cannot act on it.",
+  "   skeleton itself is wrong — that is a CAPIVARA_DECISION: it reaches the developer while this run",
+  "   is still going, instead of a finding that reaches someone who cannot act on it.",
 ].join("\n");
 
 const SCOPE_RULE = [
@@ -117,6 +117,45 @@ const DOUBT_RULE = [
   "You may not reject for something you would have written differently.",
 ].join("\n");
 
+/**
+ * O terceiro canal: a pergunta que vai ao desenvolvedor, não ao escritor.
+ *
+ * Sem ele o auditor tinha duas saídas e nenhuma servia para o que mais aparece:
+ * o ponto em que nenhuma fonte diz qual leitura vale. Mandar isso ao escritor é
+ * pedir que ele invente — coisa que o eixo 1 proíbe —, e mandar à ressalva é
+ * contar ao desenvolvedor depois de o run ter terminado.
+ */
+const DECISION_CHANNEL = [
+  "## When the answer is not yours and not the writer's",
+  "Some points cannot be closed by writing better. No source settles them: the request is silent,",
+  "the decisions do not reach that far, and both readings are defensible. Sending one of those to",
+  "the writer asks him to invent what axis 1 forbids him to invent, and he cannot ask anybody —",
+  "he writes alone, in a session with no developer in it.",
+  "",
+  "For exactly that, emit CAPIVARA_DECISION. It goes STRAIGHT to the developer, during this run,",
+  "and whatever he answers becomes authority above you: it is recorded, it reaches the writer, and",
+  "it reaches you in the next round as a confirmed decision.",
+  "",
+  "Use it when ALL of these hold:",
+  "1. Nothing in the request, the decisions or the skeleton answers it.",
+  "2. Two or more readings are genuinely defensible — you can write them both down.",
+  "3. Which one wins changes what gets built, not how it is worded.",
+  "4. Neither you nor the writer can settle it by reading anything you already have.",
+  "",
+  "It carries the readings as OPTIONS, at least two, each one a complete answer. A decision with no",
+  "alternatives is a discursive question, and a discursive question loops: the developer writes what",
+  "makes sense to him, it does not cover everything the question implied, and the same question",
+  "comes back. Write the alternatives you can see, and let him pick a number.",
+  "",
+  "It is not a finding and not a remark. Never use it for something the writer could fix, for taste,",
+  "or to ask the developer to arbitrate arithmetic — a count has one reading.",
+  "",
+  "And it is what you use when the SKELETON is what is wrong: a phase that cannot carry what it was",
+  "given, a rule that contradicts another, work that belongs in a phase that does not exist. None of",
+  "that is fixable by whoever rewrites one phase from a fixed envelope, and a remark about it is read",
+  "after the run is over.",
+].join("\n");
+
 const OUTPUT = [
   "## Output protocol",
   "Plain text. Each key starts at column 1. No markdown, no bullet, no indentation, no code fence.",
@@ -124,6 +163,7 @@ const OUTPUT = [
   "CAPIVARA_AUDIT_STATUS: APPROVED|REJECTED",
   "CAPIVARA_FINDING: <section or ID> | <what is wrong> | <how to fix it>",
   "CAPIVARA_REMARK: <section or ID> | <non-blocking observation>",
+  "CAPIVARA_DECISION: <section or ID> | <the missing decision, as a question> | <reading> | <reading>",
   "CAPIVARA_REASON: <one evidence-based line>",
   "",
   "Rules:",
@@ -131,6 +171,9 @@ const OUTPUT = [
   "- Every CAPIVARA_FINDING carries all three fields. The third field tells the writer what to do,",
   "  concretely. A finding whose third field only restates the problem is an invalid response.",
   "- APPROVED carries no CAPIVARA_FINDING. It may carry CAPIVARA_REMARK lines.",
+  "- Every CAPIVARA_DECISION carries at least four fields: where, the decision, and TWO readings.",
+  "  It may appear with either status — a missing decision is a hole in the sources, not a defect in",
+  "  the text — and each one is asked once, so do not repeat a decision you already emitted.",
   "- Emit exactly one CAPIVARA_AUDIT_STATUS and exactly one CAPIVARA_REASON.",
   "- Emit nothing else: no summary, no preamble, no closing sentence.",
 ].join("\n");
@@ -148,6 +191,8 @@ export function auditorPrompt(context: AuditorContext): string {
     SCOPE_RULE,
     "",
     DOUBT_RULE,
+    "",
+    DECISION_CHANNEL,
     "",
     OUTPUT,
     "",
@@ -231,6 +276,8 @@ export function phaseAuditPrompt(context: PhaseAuditContext): string {
     SCOPE_RULE,
     "",
     DOUBT_RULE,
+    "",
+    DECISION_CHANNEL,
     "",
     ...(context.tasksJaAprovadas && context.tasksJaAprovadas.length > 0
       ? [
@@ -322,6 +369,8 @@ export function coherencePrompt(context: CoherenceContext): string {
     "If the only thing you can say is that something could be clearer, say APPROVED and stay quiet.",
     "",
     DOUBT_RULE,
+    "",
+    DECISION_CHANNEL,
     "",
     OUTPUT,
     "",

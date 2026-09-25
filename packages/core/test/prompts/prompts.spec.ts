@@ -753,9 +753,21 @@ describe("o auditor não pede cirurgia de fase", () => {
     expect(prompt).toContain("demanded IN THE PHASE that already covers it");
   });
 
-  it("dá o caminho quando o defeito é do esqueleto: ressalva, não achado", () => {
-    expect(prompt).toContain("say that in a REMARK");
+  it("dá o caminho quando o defeito é do esqueleto: decisão do desenvolvedor, não achado", () => {
+    /*
+     * Era uma RESSALVA — e ressalva só é lida no relatório, depois de o run
+     * terminar. Se o esqueleto está errado, dizer isso a quem não pode agir é o
+     * mesmo que não dizer: o canal certo é o que chega ao desenvolvedor enquanto
+     * o run está de pé.
+     */
+    expect(prompt).toContain("that is a CAPIVARA_DECISION");
     expect(prompt).toContain("someone who cannot act on it");
+  });
+
+  it("e o canal da decisão exige as duas leituras, para não virar pergunta discursiva", () => {
+    expect(prompt).toContain("CAPIVARA_DECISION: <section or ID>");
+    expect(prompt).toContain("at least four fields: where, the decision, and TWO readings");
+    expect(prompt).toContain("A decision with no");
   });
 });
 

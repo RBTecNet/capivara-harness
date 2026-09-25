@@ -36,10 +36,46 @@ export interface Remark {
   observation: string;
 }
 
+/**
+ * O que o auditor não pode decidir — e o escritor também não.
+ *
+ * O auditor tinha dois canais e nenhum deles chegava a tempo a quem decide: o
+ * finding vai para o escritor, e a ressalva vai para o relatório, que só é lido
+ * depois de o run terminar. Quando o que falta é uma DECISÃO — nenhuma fonte diz
+ * qual das duas leituras vale —, mandar isso ao escritor é pedir que ele invente,
+ * e mandar à ressalva é contar ao desenvolvedor depois que já não havia o que
+ * fazer.
+ *
+ * O caminho até o desenvolvedor existia, mas era caro: ele só abria quando o
+ * MESMO achado voltava pela segunda vez (o levantamento de auditoria) ou quando o
+ * teto de devoluções estourava. Um ciclo inteiro de escrita e auditoria para
+ * chegar a uma pergunta de dez segundos que o auditor já sabia fazer na primeira
+ * leitura.
+ *
+ * As duas leituras são obrigatórias: uma decisão sem alternativas é pergunta
+ * discursiva, e pergunta discursiva entra em laço — é a regra do §71, e ela vale
+ * para quem quer que levante a pergunta.
+ */
+export interface AuditDecision {
+  where: string;
+  /** A decisão que falta, em forma de pergunta objetiva. */
+  decision: string;
+  /** As leituras possíveis, ao menos duas, cada uma respondendo a decisão inteira. */
+  options: string[];
+}
+
 export interface AuditVerdict {
   status: AuditStatus;
   findings: Finding[];
   remarks: Remark[];
+  /**
+   * As decisões que o auditor devolveu ao desenvolvedor.
+   *
+   * Opcional porque o self-check mecânico monta vereditos à mão e nunca levanta
+   * decisão: contagem não tem duas leituras. Quem vem do parser traz sempre a
+   * lista, vazia quando não houve nenhuma.
+   */
+  decisions?: AuditDecision[];
   reason: string;
   /**
    * Verdadeiro quando a reprovação veio de um self-check, não do auditor.
@@ -60,10 +96,11 @@ export type AuditParse =
 const STATUS = /^CAPIVARA_AUDIT_STATUS:\s*(.+?)\s*$/;
 const FINDING = /^CAPIVARA_FINDING:\s*(.*)$/;
 const REMARK = /^CAPIVARA_REMARK:\s*(.*)$/;
+const DECISION = /^CAPIVARA_DECISION:\s*(.*)$/;
 const REASON = /^CAPIVARA_REASON:\s*(.*)$/;
 
-/** As quatro chaves do protocolo, para achá-las onde quer que tenham parado. */
-const CHAVES = "CAPIVARA_(?:AUDIT_STATUS|FINDING|REMARK|REASON)";
+/** As cinco chaves do protocolo, para achá-las onde quer que tenham parado. */
+const CHAVES = "CAPIVARA_(?:AUDIT_STATUS|FINDING|REMARK|DECISION|REASON)";
 
 /**
  * Tolerar a embalagem, nunca o conteúdo.
@@ -106,6 +143,7 @@ export function parseAudit(rawOutput: string): AuditParse {
   const reasons: string[] = [];
   const findings: Finding[] = [];
   const remarks: Remark[] = [];
+  const decisions: AuditDecision[] = [];
 
   for (const rawLine of output.split("\n")) {
     const line = rawLine.replace(/\r$/, "");
@@ -146,6 +184,21 @@ export function parseAudit(rawOutput: string): AuditParse {
       continue;
     }
 
+    const decision = DECISION.exec(line);
+    if (decision) {
+      const fields = (decision[1] ?? "").split("|").map((field) => field.trim()).filter((field) => field !== "");
+      if (fields.length < 4) {
+        defects.push(
+          `decisão incompleta: "${line.trim()}" — todo CAPIVARA_DECISION traz onde | a decisão que falta | ` +
+            "uma leitura | outra leitura, com ao menos duas leituras",
+        );
+        continue;
+      }
+      const [where, pergunta, ...leituras] = fields;
+      decisions.push({ where: where!, decision: pergunta!, options: leituras });
+      continue;
+    }
+
     const reason = REASON.exec(line);
     if (reason) reasons.push((reason[1] ?? "").trim());
   }
@@ -179,7 +232,7 @@ export function parseAudit(rawOutput: string): AuditParse {
 
   return {
     ok: true,
-    verdict: { status: status as AuditStatus, findings, remarks, reason: reasons[0] ?? "" },
+    verdict: { status: status as AuditStatus, findings, remarks, decisions, reason: reasons[0] ?? "" },
   };
 }
 
@@ -190,6 +243,9 @@ export function formatVerdict(verdict: AuditVerdict): string {
   }
   for (const remark of verdict.remarks) {
     lines.push(`CAPIVARA_REMARK: ${remark.where} | ${remark.observation}`);
+  }
+  for (const decision of verdict.decisions ?? []) {
+    lines.push(`CAPIVARA_DECISION: ${decision.where} | ${decision.decision} | ${decision.options.join(" | ")}`);
   }
   lines.push(`CAPIVARA_REASON: ${verdict.reason}`);
   return lines.join("\n");

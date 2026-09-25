@@ -130,6 +130,17 @@ export interface PhaseFromSliceContext {
   maxCriteriaPerTask: number;
   /** O teto que o harness conta e recusa. Passar dele é defeito só ele pode fechar. */
   maxTasksPerPhase: number;
+  /**
+   * Decisões fechadas DEPOIS de o esqueleto existir.
+   *
+   * O esqueleto é escrito das decisões e por isso as carrega — na stack, nas
+   * entidades, nas regras transversais. Mas há decisões que nascem depois dele:
+   * a que ficou em aberto na entrevista e a insistência fechou, e a que o auditor
+   * levantou num run anterior. Sem este bloco elas chegavam à fase apenas como
+   * achado de auditoria, uma reescrita depois — o escritor escrevia sem saber, e
+   * o auditor cobrava com razão.
+   */
+  decisions?: readonly string[];
 }
 
 export function phaseFromSlicePrompt(context: PhaseFromSliceContext): string {
@@ -212,6 +223,24 @@ export function phaseFromSlicePrompt(context: PhaseFromSliceContext): string {
     "## Grammar of a task",
     context.grammar,
     "",
+    /*
+     * O nome do teste é procurado na árvore, e essa regra vivia só no leitor.
+     *
+     * `featureTestNames` extrai o nome antes da seta e o procura no código: é a
+     * única parte do gate 3 que não depende da atenção de um modelo variar entre
+     * um ciclo e o seguinte. Só que ele aceita apenas o que PARECE nome — sem
+     * espaços, de três caracteres para cima — e descarta o resto em silêncio. Uma
+     * fase que escreve "cobertura dos três estados" em vez de
+     * `cobertura_dos_tres_estados` perde a conferência mecânica inteira, e nada
+     * avisa: a verificação simplesmente deixa de existir para aquela task.
+     */
+    "`Feature tests` names are IDENTIFIERS, not descriptions: `cadastro_sem_cpf_recusado`, not",
+    "\"rejects a registration with no CPF\". The harness searches the code for each of those names, and",
+    "that search is the one part of verification that does not depend on a model's attention. A name",
+    "with spaces in it is silently ignored — the check disappears for that task and nothing says so.",
+    "So: lowercase, words joined by `_`, no spaces and no accents, then `->`, then the business rule",
+    "it asserts, in plain words.",
+    "",
     "`Design ref` is the one optional field, and it is USUALLY ABSENT. It points at an artifact the",
     "developer put in the design directory by hand — a mockup, a spec, a screenshot — and that",
     "directory almost never exists. A path you invent there is a dead reference: the harness looks for",
@@ -221,6 +250,16 @@ export function phaseFromSlicePrompt(context: PhaseFromSliceContext): string {
     "Emit the raw bytes of the tasks and nothing else: no phase heading, no Goal line, no document",
     "header, no other phase, no preamble, no fence.",
     "",
+    ...(context.decisions && context.decisions.length > 0
+      ? [
+          "## Decisions taken after the skeleton was written",
+          "The developer settled these after the skeleton existed, so the slice below does not reflect them.",
+          "They are authority, at the same level as the rest: where one of them and the slice disagree, the",
+          "decision wins, and you write the decision.",
+          ...context.decisions.map((entry) => `- ${entry}`),
+          "",
+        ]
+      : []),
     "## This phase's slice",
     context.slice,
   ].join("\n");

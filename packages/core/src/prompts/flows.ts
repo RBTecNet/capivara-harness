@@ -94,8 +94,9 @@ export function flowPrompt(context: FlowAuthorContext): string {
     "user actually sees.",
     "",
     "SCOPE YOUR LOCATORS. A bare `getByRole(...)` matches everything on the page, including what the",
-    "framework injects: a Next.js app carries a hidden `role=\"alert\"` route announcer on every page,",
-    "so `getByRole(\"alert\")` matches two elements and Playwright refuses it. Anchor each locator to",
+    "framework injects, and every framework injects something — a route announcer, a live region, a",
+    "dev overlay. One real case: a hidden `role=\"alert\"` announcer on every page, so",
+    "`getByRole(\"alert\")` matches two elements and Playwright refuses it. Anchor each locator to",
     "the region it belongs to — `page.getByRole(\"main\")`, the form, the dialog — or narrow it by",
     "accessible name. A locator that matches twice fails on a product that is working.",
     ...(context.rejected && context.rejected.length > 0

@@ -13,9 +13,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InitBlockedError, evaluatePlanReadiness, readRequestState, runInit, runPlan } from "../../src/init/index.js";
 import { ID_DO_BANCO } from "../../src/interview/index.js";
+import type { Question } from "../../src/interview/index.js";
 import { parseSkeleton } from "../../src/contract/index.js";
 import type { Skeleton } from "../../src/contract/index.js";
-import { PHASE_1, SKELETON, fakeAgent, oneQuestion, skeletonPath } from "../support/fake-agent.js";
+import { PHASE_1, SKELETON, fakeAgent, oneQuestion, rehearsedAddresses, skeletonPath } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
 
 let projectRoot = "";
@@ -30,9 +31,12 @@ afterEach(async () => {
 
 const request = { text: "uma pousada com reservas", origin: "text" as const, path: null, sha12: "abc123abc123" };
 
+/** A pergunta chega a quem responde: alguns testes decidem pelo tópico dela. */
+type Perguntar = (question: Question, index: number, total: number) => Promise<string>;
+
 const comum = {
   language: "português do Brasil" as const,
-  ask: async () => "use as recomendações",
+  ask: (async () => "use as recomendações") as Perguntar,
 };
 
 async function init(steps: ScriptStep[], ask?: (typeof comum)["ask"]) {
@@ -530,6 +534,23 @@ describe("decisão que nasce na reescrita também chega ao desenvolvedor", () =>
  * tudo pronto e uma pergunta de dez segundos sem resposta.
  */
 describe("decisão em aberto volta a quem decide, não ao escritor", () => {
+  it("insiste ANTES de escrever a fase, e a decisão chega a quem escreve", async () => {
+    /*
+     * O `init` terminou com a decisão em aberto, e o `plan` a carrega pelo
+     * handoff. Antes, ela só voltava ao desenvolvedor se o AUDITOR esbarrasse
+     * nela — ou seja, depois de dezesseis fases escritas em cima do vazio. Agora
+     * a insistência roda antes da primeira fase, e o que ela fecha entra no
+     * prompt de quem escreve.
+     */
+    await init(skeletonPath(), async () => "");
+
+    const { agent, anunciado } = await planComAnuncioEResposta(skeletonPath(), async () => "1");
+
+    expect(anunciado).toContain("não vou fechar o run sem perguntar de novo");
+    const escrita = agent.calls.find((call) => call.stage === "authoring" && call.subject === "phase-p01");
+    expect(escrita?.prompt).toContain("Decisions taken after the skeleton was written");
+  });
+
   it("reabre a pergunta quando o auditor devolve e há decisão pendente", async () => {
     await init(skeletonPath(), async () => "");   // a entrevista fica sem resposta
 
@@ -548,10 +569,20 @@ describe("decisão em aberto volta a quem decide, não ao escritor", () => {
       repeat: true,
     });
 
-    const { agent, anunciado } = await planComAnuncioEResposta(steps, async () => "1");
+    /*
+     * A insistência do começo do `plan` é respondida em aberto — "" mantém a
+     * decisão pendente —, então ela continua em aberto quando o auditor esbarra
+     * nela. É o caso que importa: a decisão fica sem dono até alguém decidir, e
+     * quem decide é perguntado no ponto em que a decisão volta a fazer diferença.
+     */
+    let vez = 0;
+    const { agent, anunciado } = await planComAnuncioEResposta(steps, async () => {
+      vez += 1;
+      return vez <= 3 ? "" : "1";
+    });
 
-    expect(anunciado).toContain("seguem em aberto e o auditor esbarrou nelas");
-    expect(anunciado).toContain("entram na reescrita como autoridade");
+    expect(anunciado).toContain("não vou fechar o run sem perguntar de novo");
+    expect(anunciado).toContain("passam a valer como autoridade");
 
     // A decisão do desenvolvedor chega à emenda como autoridade.
     const emenda = agent.calls.filter((call) => call.stage === "authoring" && call.subject === "phase-p01").at(-1);
@@ -580,7 +611,7 @@ describe("decisão em aberto volta a quem decide, não ao escritor", () => {
       announce: (linha) => void dito.push(linha),
     }).catch(() => undefined);
 
-    const reaberturas = dito.join("\n").split("seguem em aberto e o auditor esbarrou nelas").length - 1;
+    const reaberturas = dito.join("\n").split("não vou fechar o run sem perguntar de novo").length - 1;
     expect(reaberturas).toBe(1);
   });
 });
@@ -628,5 +659,277 @@ describe("achado mecânico não vai a arbitragem", () => {
     }).catch(() => undefined);
 
     expect(perguntou).toBe(0);
+  });
+});
+
+/*
+ * O auditor tinha dois canais e nenhum chegava a tempo a quem decide: o finding
+ * vai ao escritor, e a ressalva só é lida no relatório, depois de o run terminar.
+ * Quando o que falta é uma DECISÃO, mandar ao escritor é pedir que ele invente.
+ *
+ * O caminho até o desenvolvedor existia e era caro: o levantamento abre quando o
+ * MESMO achado volta pela segunda vez, e o impasse quando o teto estoura. Entre a
+ * primeira leitura e a primeira pergunta havia sempre um ciclo inteiro.
+ */
+describe("o auditor pergunta ao desenvolvedor, na primeira leitura", () => {
+  const comDecisao = [
+    "CAPIVARA_AUDIT_STATUS: REJECTED",
+    "CAPIVARA_FINDING: Phase 1 | o critério não diz o que acontece na recusa | descreva o efeito observável",
+    "CAPIVARA_DECISION: Phase 1 · statuses | A tabela de statuses é fixa ou o operador cria status novo? | Fixa: as três linhas vêm do seed e ninguém acrescenta | Aberta: o operador cadastra status novos",
+    "CAPIVARA_REASON: falta uma decisão que nenhuma fonte contém",
+  ].join("\n");
+
+  it("a decisão vai à tela com as leituras dele, e volta ao escritor como autoridade", async () => {
+    await init(skeletonPath());
+
+    let auditou = 0;
+    const steps = skeletonPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
+      respond: {
+        stdout: () => {
+          auditou += 1;
+          return auditou === 1 ? comDecisao : "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: ok";
+        },
+      },
+      repeat: true,
+    });
+
+    const perguntadas: string[] = [];
+    const agent = fakeAgent(steps);
+    const dito: string[] = [];
+    await runPlan({
+      projectRoot,
+      request,
+      ...comum,
+      call: agent.call,
+      announce: (linha) => void dito.push(linha),
+      ask: async (question) => {
+        perguntadas.push(`${question.topic} :: ${question.options.map((opcao) => opcao.label).join(" | ")}`);
+        return "1";
+      },
+    });
+
+    expect(dito.join("\n")).toContain("ninguém na mesa pode tomar");
+    // As duas leituras do auditor chegam como opções: pergunta sem opção entra em laço.
+    expect(perguntadas.join("\n")).toContain("Fixa: as três linhas vêm do seed");
+    expect(perguntadas.join("\n")).toContain("Aberta: o operador cadastra status novos");
+
+    // E a escolha volta ao escritor junto do achado, como autoridade.
+    const emenda = agent.calls.filter((call) => call.stage === "authoring" && call.subject === "phase-p01").at(-1);
+    expect(emenda?.prompt).toContain("esta decisão é a autoridade acima do auditor");
+    expect(emenda?.prompt).toContain("Fixa: as três linhas vêm do seed");
+  });
+
+  it("uma vez por decisão: o auditor é sem memória e a levantaria de novo", async () => {
+    await init(skeletonPath());
+
+    const steps = skeletonPath();
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
+      respond: { stdout: comDecisao },
+      repeat: true,
+    });
+
+    let perguntas = 0;
+    const agent = fakeAgent(steps);
+    await runPlan({
+      projectRoot,
+      request,
+      ...comum,
+      call: agent.call,
+      ask: async (question) => {
+        if (question.topic.includes("statuses")) perguntas += 1;
+        return "1";
+      },
+      decideStandoff: async () => "publicar",
+    }).catch(() => undefined);
+
+    expect(perguntas).toBe(1);
+  });
+});
+
+/*
+ * O teto de lacunas era seis rodadas de cinco perguntas: trinta decisões por run.
+ * Um plano de dezesseis fases produziu quatorze marcadores de uma vez, e o que
+ * passasse do teto virava `[NEEDS DECISION]` no plano e NOT READY no gate — ou
+ * seja, o harness sabia o que faltava, tinha quem responder na frente, e desistia.
+ */
+describe("a rodada de lacunas não tem teto", () => {
+  /** Uma fase com N marcadores de decisão pendente, cada um diferente. */
+  const comMarcadores = (quantos: number, apenas?: readonly string[]): string => {
+    const numeros = apenas ?? Array.from({ length: quantos }, (_unused, indice) => String(indice + 1));
+    return [
+      "## Phase 1: Fundação de dados",
+      "",
+      "**Goal:** migrations e seeds existem · **Depends on:** none · **Covers:** reservations, statuses",
+      "",
+      "- [ ] **Task:** Criar a migration de statuses e semear as três linhas",
+      "  - **Acceptance criteria:**",
+      "    - A tabela statuses existe e contém exatamente pendente, confirmada e cancelada",
+      ...numeros.map((numero) => `    [NEEDS DECISION] decisão pendente número ${numero}`),
+      "  - **Feature tests:** statuses_seed → as três linhas existem após o seed",
+      "  - **Traces:** statuses, reservations",
+      "",
+    ].join("\n");
+  };
+
+  it("pergunta os dezoito marcadores, em rodadas, sem abandonar nenhum", async () => {
+    await init(skeletonPath());
+
+    const steps = skeletonPath();
+    /*
+     * O escritor é teimoso de propósito: ele devolve SEMPRE os dezoito
+     * marcadores. Quem os apaga é o harness, um por decisão fechada
+     * (`stripResolvedMarkers`) — e é isso que faz a rodada seguinte enxergar o que
+     * ainda falta em vez de achar que acabou.
+     */
+    const fechadas = new Set<string>();
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "phase-p01" },
+      respond: {
+        stdout: (call) => {
+          // A emenda nomeia as decisões fechadas; o escritor devolve a fase com os
+          // marcadores que sobraram, que é o que um escritor honesto faria.
+          for (const achado of call.prompt.matchAll(/pendência (\d+)/g)) fechadas.add(achado[1] ?? "");
+          const restantes = Array.from({ length: 18 }, (_unused, indice) => String(indice + 1)).filter(
+            (numero) => !fechadas.has(numero),
+          );
+          return restantes.length === 0 ? PHASE_1 : comMarcadores(18, restantes);
+        },
+      },
+      repeat: true,
+    });
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-phases.md:gaps" },
+      respond: {
+        stdout: (call) => {
+          // Uma pergunta por marcador que o prompt listou nesta rodada.
+          const marcadores = [...call.prompt.matchAll(/^- decisão pendente número (\d+)$/gm)].map((achado) => achado[1] ?? "");
+          return JSON.stringify({
+            contract: "capivara-questions/v1",
+            questions: marcadores.map((numero) => ({
+              id: `Q-${numero.padStart(2, "0")}`,
+              topic: `pendência ${numero}`,
+              evidence: "a fase parou aqui",
+              decision: `O que vale na pendência ${numero}?`,
+              why: "muda o que a fase afirma",
+              options: [
+                { label: "Assim", consequence: "a fase afirma assim" },
+                { label: "Assado", consequence: "a fase afirma assado" },
+              ],
+              recommended: "Assim",
+              recommendationBasis: "é o de menor escopo",
+            })),
+          });
+        },
+      },
+      repeat: true,
+    });
+
+    const perguntadas = new Set<string>();
+    const { outcome } = await plan(steps, async (question) => {
+      perguntadas.add(question.topic);
+      return "1";
+    });
+
+    // Dezoito decisões, nenhuma silenciada por quota.
+    expect(perguntadas.size).toBe(18);
+    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+  });
+
+  it("lote de perguntas inútil não abandona o marcador: o harness pergunta do jeito que sabe", async () => {
+    await init(skeletonPath());
+
+    let escritas = 0;
+    const steps = skeletonPath();
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "phase-p01" },
+      respond: {
+        stdout: () => {
+          escritas += 1;
+          return escritas === 1 ? comMarcadores(2) : PHASE_1;
+        },
+      },
+      repeat: true,
+    });
+    // O escritor não consegue transformar marcador em pergunta — duas vezes.
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-phases.md:gaps" },
+      respond: { stdout: JSON.stringify({ contract: "capivara-questions/v1", questions: [{ id: "Q-01", topic: "t" }] }) },
+      repeat: true,
+    });
+
+    const perguntadas: string[] = [];
+    const dito: string[] = [];
+    const agent = fakeAgent(steps);
+    const outcome = await runPlan({
+      projectRoot,
+      request,
+      ...comum,
+      call: agent.call,
+      announce: (linha) => void dito.push(linha),
+      ask: async (question) => {
+        perguntadas.push(question.decision);
+        // Delegar: a saída fechada que existe justamente para a pergunta que
+        // ninguém soube fazer bem.
+        return "1";
+      },
+    });
+
+    expect(dito.join("\n")).toContain("vou perguntar do jeito que sei");
+    expect(perguntadas.join("\n")).toContain("decisão pendente número 1");
+    expect(perguntadas.join("\n")).toContain("decisão pendente número 2");
+    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+  });
+});
+
+/*
+ * O ensaio do verificador reprovava, o escritor tinha uma rodada, e se o veredito
+ * se mantivesse o run terminava em NOT READY com o plano publicado e uma lista de
+ * endereços na tela. É o mesmo desacordo de leitura do levantamento de auditoria,
+ * com outro par — e a mesma pessoa capaz de encerrá-lo estava no terminal.
+ */
+describe("o ensaio também pergunta antes de bloquear", () => {
+  const reprovaUm = (): ScriptStep => ({
+    match: { role: "verifier", stage: "verify" },
+    respond: {
+      stdout: (call) =>
+        rehearsedAddresses(call.prompt)
+          .map((address, indice) =>
+            indice === 0
+              ? `CRITERION ${address}: UNOBSERVABLE — dois verificadores honestos discordariam`
+              : `CRITERION ${address}: OBSERVABLE — dá para abrir o arquivo e olhar`,
+          )
+          .join("\n"),
+    },
+    repeat: true,
+  });
+
+  it("mantido por decisão do desenvolvedor, o critério deixa de bloquear o gate", async () => {
+    await init(skeletonPath());
+
+    const steps = skeletonPath().filter((step) => step.match.role !== "verifier");
+    steps.push(reprovaUm());
+
+    const perguntadas: string[] = [];
+    const dito: string[] = [];
+    const agent = fakeAgent(steps);
+    const outcome = await runPlan({
+      projectRoot,
+      request,
+      ...comum,
+      call: agent.call,
+      announce: (linha) => void dito.push(linha),
+      ask: async (question) => {
+        perguntadas.push(question.topic);
+        // Opção 2: vale o critério como está.
+        return question.topic.startsWith("ensaio") ? "2" : "use as recomendações";
+      },
+    });
+
+    expect(perguntadas.some((topico) => topico.startsWith("ensaio ·"))).toBe(true);
+    expect(dito.join("\n")).toContain("mantidos por sua decisão");
+    expect(outcome.readiness.checks.find((check) => check.id === "ensaio")?.passed).toBe(true);
   });
 });

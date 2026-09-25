@@ -75,15 +75,19 @@ describe("o canal das omissões", () => {
   });
 
   /*
-   * O excedente é cortado, não recusado: um lote inteiro rejeitado custa uma
-   * volta de levantamento, e quem responde quarenta coisas para de responder
-   * com cuidado bem antes da quadragésima.
+   * O teto era quatro, e o excedente era cortado em silêncio.
+   *
+   * Cortar a quinta omissão é decidir por quota que aquela área fica fora do
+   * produto — sem perguntar a ninguém, que é exatamente o que este canal existe
+   * para não fazer. O filtro passou a ser a régua do prompt (quatro testes que
+   * uma omissão precisa passar), e não um número: num produto de vinte e cinco
+   * stories há legitimamente mais do que num de três.
    */
-  it("corta o que passa do teto em vez de reprovar o lote", () => {
+  it("não corta por quota: toda omissão chega a quem decide", () => {
     const cinco = [1, 2, 3, 4, 5].map((numero) => omissao({ id: `O-0${numero}` }));
     const resultado = parseQuestionBatch(lote(cinco));
     if (!resultado.ok) throw new Error("deveria aceitar");
-    expect(resultado.omissions).toHaveLength(4);
+    expect(resultado.omissions).toHaveLength(5);
   });
 
   it("a mesma régua das perguntas vale: sem evidência não chega à tela", () => {

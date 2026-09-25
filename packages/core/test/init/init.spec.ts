@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InitBlockedError, evaluateReadiness, inspectProject, resolveRequest, runInit, summarizeInventory } from "../../src/init/index.js";
 import { readEvents, runIdFor, runPaths } from "../../src/state/index.js";
-import { ID_DO_BANCO } from "../../src/interview/index.js";
+import { DELEGAR, FORA_DO_ESCOPO, ID_DO_BANCO } from "../../src/interview/index.js";
 import { assemblePhasesDocument } from "../../src/contract/index.js";
 import { SKELETON, PHASE_1, PHASE_2, approve, fakeAgent, happyPath, oneQuestion, reject, rehearsedAddresses } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
@@ -38,7 +38,17 @@ const PLANO = assemblePhasesDocument({
   openQuestions: [],
 });
 
-async function run(steps: ScriptStep[], answers: string[] = [], extras: { fresh?: boolean } = {}) {
+/**
+ * As respostas do roteiro.
+ *
+ * Uma lista quando a ordem importa, ou uma função quando o teste quer responder
+ * SEMPRE a mesma coisa — o caso de "não sei". A insistência repergunta cada
+ * decisão aberta em cada momento em que ela volta a importar, e contar quantas
+ * vezes isso dá faria o teste afirmar um número que não é sobre o que ele testa.
+ */
+type Respostas = string[] | ((question: { id: string }) => string);
+
+async function run(steps: ScriptStep[], answers: Respostas = [], extras: { fresh?: boolean } = {}) {
   const agent = fakeAgent(steps);
   const dito: string[] = [];
   let asked = 0;
@@ -54,7 +64,12 @@ async function run(steps: ScriptStep[], answers: string[] = [], extras: { fresh?
      * de tudo em toda entrevista. Respondê-la aqui mantém os `answers` de cada
      * teste alinhados com as perguntas que ELE escreveu.
      */
-    ask: async (question) => (question.id === ID_DO_BANCO ? "1" : (answers[asked++] ?? "use as recomendações")),
+    ask: async (question) =>
+      question.id === ID_DO_BANCO
+        ? "1"
+        : typeof answers === "function"
+          ? answers(question)
+          : (answers[asked++] ?? "use as recomendações"),
   });
   return { outcome, agent, anunciado: dito.join("\n") };
 }
@@ -249,12 +264,47 @@ describe("entrevista dentro do init", () => {
     expect(escrita?.prompt).toContain("Node + Vitest");
   });
 
-  it("'não sei' não vira decisão confirmada", async () => {
+  it("'não sei' não vira decisão confirmada, nem depois de insistir", async () => {
     const steps = happyPath();
     steps.unshift({ match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 }, respond: { stdout: oneQuestion() } });
-    const { outcome } = await run(steps, ["não sei"]);
+    /*
+     * "não sei" a cada vez que for perguntado. A insistência repergunta com
+     * saídas fechadas, e é justamente por isso que este teste precisa continuar
+     * existindo: o que ela NÃO pode fazer é tomar o silêncio por aceite da
+     * recomendação que estava na tela.
+     */
+    const { outcome } = await run(steps, () => "não sei");
     expect(doRoteiro(outcome.report.checkpoint.decisions)).toHaveLength(0);
     expect(outcome.report.checkpoint.deferrals).toHaveLength(1);
+  });
+
+  it("a decisão em aberto é reperguntada com saída que a fecha, e fecha", async () => {
+    /*
+     * O outro lado do teste acima. A entrevista termina com a decisão adiada e o
+     * run terminava ali, em NOT READY, sem nunca ter perguntado de novo. Agora a
+     * insistência devolve a pergunta com duas saídas novas — delegar e tirar do
+     * escopo — e o desenvolvedor delega.
+     */
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    const { outcome, anunciado } = await run(steps, ["não sei", "não sei", DELEGAR]);
+    expect(anunciado).toContain("não vou fechar o run sem perguntar de novo");
+    expect(outcome.report.checkpoint.deferrals).toHaveLength(0);
+    expect(doRoteiro(outcome.report.checkpoint.decisions)).toHaveLength(1);
+    // Delegar não é decidir: fica registrado como suposição, para ser lido e derrubado.
+    expect(outcome.report.checkpoint.assumptions.map((suposicao) => suposicao.basis).join(" ")).toContain(
+      "autorizou o harness a decidir",
+    );
+  });
+
+  it("e a saída de escopo escreve que o produto não faz aquilo", async () => {
+    const steps = happyPath();
+    steps.unshift({ match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 }, respond: { stdout: oneQuestion() } });
+    const { outcome } = await run(steps, ["não sei", "não sei", FORA_DO_ESCOPO]);
+    const decisao = doRoteiro(outcome.report.checkpoint.decisions)[0]?.decision ?? "";
+    expect(decisao).toContain("FORA DO ESCOPO");
+    // Nunca o rótulo do botão: o que fica gravado é lido pelo escritor e pelo auditor.
+    expect(decisao).not.toBe(FORA_DO_ESCOPO);
   });
 
   it("resposta em texto livre que não fecha volta para quem a escreveu", async () => {
@@ -290,7 +340,9 @@ describe("entrevista dentro do init", () => {
       repeat: true,
     });
 
-    const { outcome, anunciado } = await run(steps, ["sei lá, o que for melhor", ""]);
+    // Texto livre que não fecha, sempre: é o caso em que o classificador precisa
+    // ser consultado e o desenvolvedor precisa ouvir o que ainda falta.
+    const { outcome, anunciado } = await run(steps, () => "sei lá, o que for melhor");
     expect(anunciado).toContain("Segue em aberto");
     expect(doRoteiro(outcome.report.checkpoint.decisions)).toHaveLength(0);
   });
@@ -314,7 +366,7 @@ describe("entrevista dentro do init", () => {
   it("pergunta adiada bloqueia o RALPH READY com [NEEDS DECISION]", async () => {
     const steps = happyPath();
     steps.unshift({ match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 }, respond: { stdout: oneQuestion() } });
-    const { outcome } = await run(steps, ["não sei"]);
+    const { outcome } = await run(steps, () => "não sei");
     expect(outcome.readiness.ready).toBe(false);
     const entrevista = outcome.readiness.checks.find((check) => check.id === "entrevista");
     expect(entrevista?.passed).toBe(false);

@@ -34,14 +34,18 @@ const ID = /^Q-\d{2,}$/;
 const OMISSION_ID = /^O-\d{2,}$/;
 
 /**
- * Quantas omissões cabem numa entrevista.
+ * O teto de omissões foi removido, e aqui está o porquê.
  *
- * O teto existe pela mesma razão do teto de perguntas: o desenvolvedor que
- * responde quarenta coisas para documentar um produto pequeno para de responder
- * com cuidado lá pela décima quinta. Quatro é o que cabe depois das seis
- * perguntas sem transformar a entrevista em questionário.
+ * Eram quatro, cortadas em silêncio, "pela mesma razão do teto de perguntas".
+ * As duas razões caíram juntas: o que faz o desenvolvedor parar de responder com
+ * cuidado não é o número de perguntas, é a pergunta que não tem como ser
+ * respondida. E o preço do corte não era o silêncio — era um produto entregue
+ * sem a área que a quinta omissão teria trazido, descoberto no uso.
+ *
+ * O que sobra no lugar do teto é a régua: o prompt lista quatro testes que uma
+ * omissão precisa passar, e uma que não passa não é cortada por quota, é errada.
+ * Num produto de vinte e cinco stories há legitimamente mais do que num de três.
  */
-export const MAX_OMISSOES = 4;
 
 /**
  * A pergunta pede mais de uma decisão?
@@ -207,17 +211,19 @@ export function parseQuestionBatch(source: string): QuestionBatch {
   /*
    * As omissões: o que o pedido NÃO diz.
    *
-   * Elas vêm em lista própria porque a regra é outra — e porque disputar o teto
-   * de seis perguntas seria trocar uma pergunta sobre o que foi dito por uma
-   * sobre o que não foi. No MCP_teste as seis eram todas boas e todas
-   * necessárias; a edição de clientes não caberia em nenhuma delas.
+   * Elas vêm em lista própria porque a regra é outra: uma pergunta é sobre o que
+   * o pedido DISSE de forma ambígua, e uma omissão é sobre o que ele não disse.
+   * No MCP_teste as perguntas eram todas boas e todas necessárias, e a edição de
+   * clientes não caberia em nenhuma delas — ela não era ambiguidade de nada.
    *
-   * O excedente é cortado em silêncio, e não recusado: um lote inteiro
-   * rejeitado custa uma volta de levantamento, e o prompt já diz o teto.
+   * E elas vêm TODAS. O corte silencioso do excedente foi embora com o teto:
+   * cortar a quinta omissão é decidir, por quota, que aquela área fica fora do
+   * produto — sem perguntar a ninguém, que é exatamente o que este canal existe
+   * para não fazer.
    */
   const omissions: Omission[] = [];
   if (Array.isArray(root.omissions)) {
-    root.omissions.slice(0, MAX_OMISSOES).forEach((entry, index) => {
+    root.omissions.forEach((entry, index) => {
       const record = (entry ?? {}) as Record<string, unknown>;
       const question = ler(entry, index, OMISSION_ID, "use O-01, O-02, … para omissões");
       const include = text(record.include);

@@ -5119,3 +5119,151 @@ mudou de lugar —, o achado é sobre a task que MUDOU, que está sob auditoria.
 A auditoria de coerência continua lendo o documento inteiro a cada rodada, e deve
 mesmo: o trabalho dela é achar contradição ENTRE fases, e uma fase que muda pode
 quebrar outra que não mudou. Ela é uma chamada por rodada, não dezesseis.
+
+## §74 — O harness desistia por gaps de informação, com quem responde na frente
+
+Uma investigação pelos três estágios — `init`, `plan`, `build` — procurando duas
+coisas: regra escrita para um projeto específico, e caminho pelo qual o run morre
+sem ter perguntado.
+
+A primeira busca não achou nada. Todo módulo de `src/` que nomeia um projeto o
+nomeia em COMENTÁRIO, como evidência de onde a lição foi aprendida; o
+comportamento é sempre geral. O caso mais próximo de exceção é
+`interview/banco.ts`, e ele passa: a lista de servidores nomeados (`MySQL`,
+`PostgreSQL`, `Oracle`, `SQL Server`, `MongoDB`) não decide nada, só muda a
+EVIDÊNCIA e a RECOMENDAÇÃO da pergunta. Quem decide continua sendo quem responde.
+
+A segunda achou seis.
+
+### 74.1 Os tetos que fechavam a porta
+
+| onde | teto | o que acontecia ao passar dele |
+| --- | --- | --- |
+| lacunas | 6 rodadas × 5 perguntas | **30 decisões por run**; o resto virava `[NEEDS DECISION]` e NOT READY |
+| omissões | 4, cortadas em silêncio | a quinta área ficava fora do produto sem ninguém decidir isso |
+| perguntas | "at most SIX per round" no prompt | um produto de 25 stories tem mais de seis decisões abertas |
+| entrevista | 3 rodadas | `DEFERRED` nunca era reperguntado: `UNRESOLVED` não o inclui |
+| ensaio | 1 reescrita | crítério impossível sobrevivia e bloqueava o gate, sem pergunta |
+| lote torto | 2 tentativas → `InitBlockedError` | o `init` inteiro morria por erro de FORMATO de terceiro |
+
+Os seis têm a mesma forma: **o harness sabia o que faltava, tinha o desenvolvedor
+no terminal, e escolheu publicar NOT READY em vez de fazer uma pergunta.**
+
+O teto existia por um motivo real — quem responde quarenta coisas para documentar
+um produto pequeno para de responder com cuidado lá pela décima quinta. Mas o
+remédio estava errado, e a medição diz por quê: **o que cansa não é a quantidade
+de perguntas, é a pergunta que não tem como ser respondida.** Contra essa, o teto
+não faz nada; ele só garante que a última fique sem resposta nenhuma.
+
+### 74.2 A insistência, e as duas saídas fechadas
+
+`insistirNasDecisoes` repergunta toda decisão aberta, e a pergunta que ela faz
+acrescenta às opções originais duas que não existiam:
+
+- **delegar** — o harness decide pela recomendação, e isso é registrado como
+  SUPOSIÇÃO no relatório, onde pode ser derrubado depois;
+- **fora do escopo** — o produto não faz aquilo, e nenhuma fase o implementa.
+
+Com as duas, toda decisão converge para um de três estados: decidida, assumida
+com autorização, ou fora do escopo. Nenhum bloqueia o gate e **nenhum é
+silencioso** — que é a diferença entre isto e uma suposição por omissão, a coisa
+que o harness mais evita (§31).
+
+Ela roda em quatro lugares, porque a marca é o par decisão+lugar e não a decisão
+sozinha: antes de escrever o esqueleto, antes de detalhar as fases, quando o
+auditor esbarra nela, e antes do gate. Marcá-la só pelo id fazia a primeira
+insistência calar todas as outras — o mesmo defeito, um nível acima.
+
+E o que a insistência fecha depois de o esqueleto existir passa a chegar a quem
+escreve a fase: `phaseFromSlicePrompt` ganhou o bloco *"Decisions taken after the
+skeleton was written"*. Sem ele a decisão chegava só como achado de auditoria,
+uma reescrita depois — o escritor escrevia sem saber, e o auditor cobrava com
+razão.
+
+### 74.3 O auditor não tinha como perguntar nada
+
+Ele tinha dois canais e nenhum chega a tempo a quem decide: o **finding** vai ao
+escritor, e a **ressalva** só é lida no relatório, depois de o run terminar.
+Quando o que falta é uma DECISÃO — nenhuma fonte diz qual leitura vale —, mandar
+ao escritor é pedir que ele invente o que o eixo 1 o proíbe de inventar.
+
+O caminho até o desenvolvedor existia e era caro: o levantamento (§70) abre
+quando o MESMO achado volta pela segunda vez, e o impasse quando o teto estoura.
+Entre a primeira leitura do auditor e a primeira pergunta havia sempre um ciclo
+inteiro — escrever, auditar, reescrever, auditar — para chegar a uma pergunta de
+dez segundos que ele já sabia fazer na primeira passada.
+
+`CAPIVARA_DECISION: <onde> | <a decisão que falta> | <leitura> | <leitura>` é o
+terceiro canal. As duas leituras são obrigatórias, pela regra do §71: decisão sem
+alternativa é pergunta discursiva, e pergunta discursiva entra em laço. A rodada
+gasta com ela não conta contra o teto de devoluções — o escritor não errou,
+faltava uma decisão —, e cada uma é perguntada uma vez.
+
+Foi também o que resolveu o buraco que o próprio prompt do auditor abria: *"se o
+esqueleto estiver errado, diga isso numa RESSALVA, que chega ao desenvolvedor"*.
+Chegava depois do run.
+
+**E a primeira versão disto já nasceu pela metade**, no mesmo dia: o parser lia as
+decisões, o prompt as pedia, e `auditPlanInParts` — a auditoria que de fato roda,
+uma chamada por fase — montava o veredito à mão sem elas. Nenhuma decisão do
+auditor chegava a ninguém e nada no caminho reclamava. É a família do §34.6, e
+ela pega até quem a escreveu.
+
+### 74.4 O ensaio era a terceira mesa sem cadeira para quem decide
+
+O ensaio do verificador (§28) pergunta se um critério pode ser PROVADO. Quando
+dizia que não, o escritor tinha uma rodada; se o veredito se mantivesse, o run
+terminava em NOT READY com o plano publicado e uma lista de endereços na tela.
+
+É o desacordo do §70 com outro par — o escritor afirma que o critério é
+observável, o verificador afirma que não —, e a mesma pessoa capaz de encerrá-lo
+estava no terminal. Agora as duas leituras vão para a tela antes de bloquear. A
+opção de manter o critério diz o preço com todas as letras: *"se o verificador do
+BUILD mantiver a leitura dele, a fase volta com INCOMPLETE e a correção custa um
+ciclo — é esse o risco que você está aceitando."*
+
+### 74.5 O que substituiu os tetos
+
+Nada, e é de propósito: o filtro passou a ser a RÉGUA que já existia. O prompt
+lista quatro testes que uma pergunta precisa passar e quatro que uma omissão
+precisa passar; uma que não passa não é cortada por quota, é errada. E o canal de
+suposição continua absorvendo tudo o que não muda comportamento observável,
+escopo, contrato, segurança ou dado — é ali que o volume vai.
+
+A única exceção é uma parada de segurança de 200 lacunas por documento, que não é
+teto de entrevista: ela existe porque um escritor que inventasse um marcador novo
+a cada reescrita faria o laço perguntar para sempre, e perguntar para sempre é
+pior que o gate recusar, porque não termina. O maior run real produziu quatorze.
+
+### 74.6 Duas réguas para o mesmo conceito
+
+`change/orchestrator.ts` declarava `MAX_TASKS_PER_PHASE = 12` e
+`MAX_CRITERIA_PER_TASK = 6`, contra 15 e 4 do razão de autoria. Dois números para
+a mesma pergunta — "o que cabe numa sessão de agente" — e divergindo no pior
+lugar possível: uma fase de mudança com 6 critérios por task é construída pelo
+MESMO loop e verificada pelo MESMO verificador, e seria recusada pelo self-check
+do plano se passasse por ele. Quem escreve a fase é o mesmo prompt nas duas
+pontas; a régua agora é importada, não redigitada.
+
+### 74.7 O nome do teste era procurado, e a regra vivia só no leitor
+
+`featureTestNames` extrai o nome antes da seta e o procura na árvore: é a única
+parte do gate 3 que não depende da atenção de um modelo variar entre um ciclo e o
+seguinte. Só que ele aceita apenas o que PARECE nome — sem espaços, de três
+caracteres para cima — e **descarta o resto em silêncio**. Uma fase que escrevesse
+"cobertura dos três estados" em vez de `cobertura_dos_tres_estados` perdia a
+conferência mecânica inteira, e nada avisava.
+
+A regra passou a estar escrita onde o nome é escrito.
+
+### 74.8 O contrato entre init/plan e o ralph
+
+Conferido de ponta a ponta, e está de pé: `splitPhases` consome o MESMO
+`parsePhases` que valida o plano e lê `PhaseBlock.markdown`, o recorte que o
+parser já produziu — um teste de arquitetura falha se alguém escrever uma segunda
+expressão regular de fase. `Areas` é opcional no parser, então plano escrito antes
+do campo continua executável e a fase sem área recebe só as skills gerais. Os
+fluxos do gate 4 saem do esqueleto por `covers`, e as duas coberturas que o
+garantem são verificadas nos dois gates: PLAN READY exige que todo workflow
+apareça no `covers` de alguma fase, RALPH READY que ele seja citado no `Traces` de
+alguma task.

@@ -6,8 +6,11 @@
  * porque reabrir é como uma entrevista deixa de convergir e o desenvolvedor
  * passa a responder a mesma coisa de três formas diferentes.
  *
- * Esgotado o teto, o que restou vira `[NEEDS DECISION]`. Nunca uma suposição
- * silenciosa: o gate de prontidão precisa poder recusar o documento.
+ * O teto de rodadas é um orçamento de DESCOBERTA — quantas vezes vale pagar o
+ * modelo para procurar perguntas novas —, e não um teto de decisões. O que
+ * continuar aberto depois dele não é abandonado nem assumido em silêncio: a
+ * insistência do orquestrador repergunta cada decisão uma vez, com as duas saídas
+ * que a fecham, e o gate de prontidão continua podendo recusar o documento.
  */
 
 import { UNRESOLVED, type Answer, type Assumption, type Checkpoint, type Question } from "./types.js";

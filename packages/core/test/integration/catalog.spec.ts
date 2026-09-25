@@ -59,7 +59,12 @@ afterEach(async () => {
 
 const request = { text: "um sistema de reservas para uma pousada", origin: "text" as const, path: null, sha12: "abc123abc123" };
 
-async function init(steps: ScriptStep[], answers: string[] = [], options: { maxAuditReturns?: number } = {}) {
+async function init(
+  steps: ScriptStep[],
+  /** Lista quando a ordem importa; função quando o teste responde sempre o mesmo. */
+  answers: string[] | ((question: { id: string }) => string) = [],
+  options: { maxAuditReturns?: number } = {},
+) {
   const agent = fakeAgent(steps);
   let asked = 0;
   const outcome = await runInit({
@@ -72,7 +77,12 @@ async function init(steps: ScriptStep[], answers: string[] = [], options: { maxA
      * de tudo em toda entrevista. Respondê-la aqui mantém os `answers` de cada
      * teste alinhados com as perguntas que ELE escreveu.
      */
-    ask: async (question) => (question.id === ID_DO_BANCO ? "1" : (answers[asked++] ?? "use as recomendações")),
+    ask: async (question) =>
+      question.id === ID_DO_BANCO
+        ? "1"
+        : typeof answers === "function"
+          ? answers(question)
+          : (answers[asked++] ?? "use as recomendações"),
     ...(options.maxAuditReturns !== undefined ? { maxAuditReturns: options.maxAuditReturns } : {}),
   });
   return { outcome, agent };
@@ -296,7 +306,9 @@ describe("B-02 a B-04 · entrevista", () => {
   it("B-03 resposta adiada nunca confirma a recomendação", async () => {
     const steps = happyPath();
     steps.unshift({ match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 }, respond: { stdout: oneQuestion() } });
-    const { outcome } = await init(steps, ["não sei"]);
+    // "não sei" a cada repergunta: a insistência devolve a decisão em cada ponto
+    // em que ela volta a importar, e nenhuma dessas voltas pode confirmar nada.
+    const { outcome } = await init(steps, () => "não sei");
     expect(doRoteiro(outcome.report.checkpoint.decisions)).toHaveLength(0);
     expect(outcome.report.checkpoint.deferrals).toHaveLength(1);
   });
@@ -304,7 +316,7 @@ describe("B-02 a B-04 · entrevista", () => {
   it("B-04 gap aberto bloqueia o RALPH READY", async () => {
     const steps = happyPath();
     steps.unshift({ match: { role: "writer", stage: "interview", subject: "skeleton", attempt: 1 }, respond: { stdout: oneQuestion() } });
-    const { outcome } = await init(steps, ["não sei"]);
+    const { outcome } = await init(steps, () => "não sei");
     expect(outcome.readiness.ready).toBe(false);
     expect(outcome.readiness.checks.find((check) => check.id === "entrevista")?.passed).toBe(false);
   });
@@ -345,14 +357,38 @@ describe("B-31 · levantamento malformado", () => {
     expect(levantamentos[0]?.attempt).toBe(levantamentos[1]?.attempt);
   });
 
-  it("malformado duas vezes bloqueia nomeando qual pergunta", async () => {
+  it("malformado duas vezes NÃO mata o run: diz qual pergunta caiu e segue", async () => {
+    /*
+     * Aqui o run morria. Um lote torto duas vezes é falha de quem LEVANTA as
+     * perguntas, e tratá-la como fim de linha joga fora o estágio inteiro por um
+     * erro de formato de terceiro — a mesma regra do §34.8, que já vale para o
+     * auditor e para o verificador, e que faltava só aqui.
+     *
+     * O que o harness faz agora: diz qual pergunta caiu, segue sem ela, e conta
+     * com os três caminhos que existem para recuperar uma decisão perdida — as
+     * lacunas, a auditoria e a insistência.
+     */
     const steps = happyPath();
     steps.unshift({
       match: { role: "writer", stage: "interview", subject: "skeleton" },
       respond: { stdout: JSON.stringify({ contract: "capivara-questions/v1", questions: [{ id: "Q-07", topic: "t" }] }) },
       repeat: true,
     });
-    await expect(init(steps)).rejects.toThrow(/malformado duas vezes.*Q-07/s);
+
+    const dito: string[] = [];
+    const agent = fakeAgent(steps);
+    const outcome = await runInit({
+      projectRoot,
+      request,
+      language: "português do Brasil",
+      call: agent.call,
+      announce: (linha) => void dito.push(linha),
+      ask: async () => "use as recomendações",
+    });
+
+    expect(dito.join("\n")).toContain("veio malformado duas vezes");
+    expect(dito.join("\n")).toContain("Q-07");
+    expect(outcome.readiness.ready).toBe(true);
   });
 });
 

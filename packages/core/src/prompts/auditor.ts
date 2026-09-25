@@ -208,6 +208,11 @@ export function rewriteInstruction(findings: { where: string; problem: string; f
  * lado a lado em vez de a trinta páginas de distância.
  */
 export interface PhaseAuditContext extends AuditorContext {
+  /**
+   * As tasks desta fase que você já aprovou, com o mesmo texto e as mesmas
+   * decisões valendo. Elas não estão sob auditoria nesta passada.
+   */
+  tasksJaAprovadas?: string[];
   /** A fase sob auditoria, exatamente como o loop a entregaria ao executor. */
   phaseMarkdown: string;
   phaseNumber: number;
@@ -227,6 +232,23 @@ export function phaseAuditPrompt(context: PhaseAuditContext): string {
     "",
     DOUBT_RULE,
     "",
+    ...(context.tasksJaAprovadas && context.tasksJaAprovadas.length > 0
+      ? [
+          "## Already approved — NOT under audit now",
+          "You approved these tasks in an earlier pass. Their text has not changed since, and neither has",
+          "any decision they were judged against. They are here only so the phase reads whole:",
+          ...context.tasksJaAprovadas.map((titulo) => `- ${titulo}`),
+          "",
+          "Do not raise findings on them. Judging them again is not thoroughness — it is a second reading",
+          "of the same text, and a second reading always finds something a first one did not. That is how",
+          "a plan gets returned forever while everything anyone asked for is already fixed: nineteen",
+          "findings closed, nineteen new ones, five rounds, no progress.",
+          "",
+          "If one of them is genuinely broken BY a change in another task — a name that no longer matches,",
+          "a rule that moved — say it about the task that CHANGED, which is under audit.",
+          "",
+        ]
+      : []),
     "## What you are looking at",
     `This is ONE phase of a plan with ${context.totalPhases}. Judge this phase against the decisions and`,
     "the documents above it — nothing else. You are NOT looking for contradictions with other phases:",

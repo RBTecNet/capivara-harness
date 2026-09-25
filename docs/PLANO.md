@@ -5065,3 +5065,57 @@ errado:
   usa o fuso do computador.
 
 Converter na gravação estragaria o arquivo; deixar UTC na tela estraga a leitura.
+
+## §73 — Auditoria por task: o julgamento não se repete sobre o que não mudou
+
+O `assitencia` mediu, num run só, o custo de auditar na granularidade errada:
+
+```
+tentativa 1: 4 achados
+tentativa 2: fechou 4 de 4 →  6 novos
+tentativa 3: fechou 6 de 6 →  2 novos
+tentativa 4: fechou 2 de 2 →  7 novos
+tentativa 5: fechou 7 de 7 →  4 novos
+```
+
+**Dezenove fechados, dezenove novos.** O escritor nunca falhou em fechar; o
+auditor nunca ficou sem achar. E os achados eram sempre outros — *"exclusão
+lógica restrita a tipos e modelos"*, depois *"administradores adicionais sem
+exclusão lógica"*: mesma família, endereços novos, rodada após rodada.
+
+Não era o documento piorando. Era **amostragem**: o auditor relê 600 critérios a
+cada volta, e nenhuma leitura de modelo encontra tudo na primeira passada. Com
+seis fases isso converge por sorte; com dezesseis, nunca.
+
+### 73.1 A chave é o par
+
+A aprovação passa a ser guardada por TASK, e a chave é o par **texto + autoridade**:
+
+- o texto é canônico, reconstruído dos campos — espaço a mais, bullet trocado ou
+  linha reordenada pelo reparo determinístico não derrubam um julgamento;
+- a autoridade é o sha das decisões aceitas. **Decisão nova derruba todas as
+  aprovações de uma vez**, e isso é o certo: uma fase aprovada ontem pode
+  contradizer o que o desenvolvedor decidiu agora (§65).
+
+Uma task que muda volta sozinha. As catorze vizinhas seguem julgadas.
+
+### 73.2 O auditor precisa SABER
+
+Guardar não basta: a fase é enviada inteira, porque uma task não se julga fora do
+contexto dela. O prompt passa a dizer quais tasks estão ali só para a fase ler
+inteira:
+
+> You approved these tasks in an earlier pass. Their text has not changed since,
+> and neither has any decision they were judged against. […] Do not raise findings
+> on them. Judging them again is not thoroughness — it is a second reading of the
+> same text, and a second reading always finds something a first one did not.
+
+Com uma saída explícita, porque o caso existe: se uma task aprovada quebrou **por
+causa** de uma mudança em outra — um nome que não casa mais, uma regra que se
+mudou de lugar —, o achado é sobre a task que MUDOU, que está sob auditoria.
+
+### 73.3 O que isto não resolve
+
+A auditoria de coerência continua lendo o documento inteiro a cada rodada, e deve
+mesmo: o trabalho dela é achar contradição ENTRE fases, e uma fase que muda pode
+quebrar outra que não mudou. Ela é uma chamada por rodada, não dezesseis.

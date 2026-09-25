@@ -793,3 +793,40 @@ describe("as duas entrevistas seguem as mesmas regras de pergunta", () => {
     }
   });
 });
+
+describe("o auditor sabe o que NÃO está sob auditoria", () => {
+  const comAprovadas = phaseAuditPrompt({
+    language: "português do Brasil",
+    request: "um sistema",
+    decisions: [],
+    upstream: [],
+    upstreamRemarks: [],
+    document: "project-phases.md",
+    content: "",
+    executable: true,
+    dispositions: [],
+    phaseMarkdown: "## Phase 2",
+    phaseNumber: 2,
+    totalPhases: 16,
+    tasksJaAprovadas: ["Persistir usuários", "Persistir perfis"],
+  });
+
+  it("lista as tasks já aprovadas e proíbe achado nelas", () => {
+    expect(comAprovadas).toContain("Already approved — NOT under audit now");
+    expect(comAprovadas).toContain("Persistir usuários");
+    expect(comAprovadas).toContain("Do not raise findings on them");
+  });
+
+  it("diz por que reler não é zelo", () => {
+    expect(comAprovadas).toContain("a second reading always finds something a first one did not");
+    expect(comAprovadas).toContain("nineteen");
+  });
+
+  it("deixa a saída aberta para o defeito que a mudança CRIOU", () => {
+    expect(comAprovadas).toContain("say it about the task that CHANGED");
+  });
+
+  it("sem aprovadas, o prompt não menciona a seção", () => {
+    expect(fatia(2)).not.toContain("NOT under audit now");
+  });
+});

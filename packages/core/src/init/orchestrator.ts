@@ -32,7 +32,8 @@ import { inspectProject, summarizeInventory } from "./inventory.js";
 import { decisoesComoMemorias, renderLibraryBlock, type McpDocument, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { INIT_ARTIFACTS, evaluateReadiness } from "./readiness.js";
 import { comAutoridade, decisaoGravada, lerEscolha, perguntaDeLevantamento } from "../interview/index.js";
-import { ehRepetido, fingerprint } from "../audit/index.js";
+import { TasksJulgadas, ehRepetido, fingerprint, shaDaAutoridade } from "../audit/index.js";
+import type { TaskBlock } from "../contract/index.js";
 import { MemoriaDoPlano } from "./plan-cache.js";
 import type { PlanProgressListener } from "./progress.js";
 import { evaluatePlanReadiness, renderPlanReadiness } from "./plan-readiness.js";
@@ -496,6 +497,15 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   /** Os achados já arbitrados pelo desenvolvedor. Um levantamento por ponto. */
   const arbitrados = new Set<string>();
 
+  /**
+   * O que já foi julgado, por TASK.
+   *
+   * O `fasesAprovadas` acima é a mesma ideia na granularidade da fase, e continua
+   * valendo: fase inteira intacta não volta à fila. Isto é o degrau abaixo — uma
+   * task que mudou não arrasta as outras catorze de volta ao julgamento.
+   */
+  const tasksJulgadas = new TasksJulgadas();
+
   /*
    * O que este run já escreveu e já teve aprovado, guardado em disco.
    *
@@ -862,14 +872,25 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * mexemos no eixo do auditor, como no §49, o sha muda e toda aprovação velha
      * cai sozinha.
      */
-    const promptDaFase = (fase: { number: number; markdown: string }): string =>
-      phaseAuditPrompt({
+    const autoridade = shaDaAutoridade(base.decisions);
+
+    /** As tasks desta fase que já passaram, com este texto e estas decisões. */
+    const jaAprovadas = (fase: { number: number; markdown: string }): TaskBlock[] => {
+      const lido = parsePhaseFragment(fase.markdown);
+      return lido === null ? [] : tasksJulgadas.jaAprovadas(lido.tasks, autoridade);
+    };
+
+    const promptDaFase = (fase: { number: number; markdown: string }): string => {
+      const aprovadas = jaAprovadas(fase);
+      return phaseAuditPrompt({
         ...base,
         upstream: fatia(fase.number),
         phaseMarkdown: fase.markdown,
         phaseNumber: fase.number,
         totalPhases: fases.length,
+        ...(aprovadas.length > 0 ? { tasksJaAprovadas: aprovadas.map((task) => task.title) } : {}),
       });
+    };
 
     const reaproveitadas = aReauditar.filter((fase) => memoria.jaAprovada(promptDaFase(fase)));
     for (const fase of reaproveitadas) {
@@ -890,6 +911,10 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             if (veredicto.findings.length === 0) {
               fasesAprovadas.add(sha12(fase.markdown.trim()));
               memoria.guardarAprovacao(promptDaFase(fase));
+              // Fase aprovada é TASK aprovada, uma a uma: é o que sobrevive à
+              // próxima emenda, que vai mudar só uma delas.
+              const lido = parsePhaseFragment(fase.markdown);
+              if (lido !== null) tasksJulgadas.aprovar(lido.tasks, autoridade);
               relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
             } else {
               relatarFase({ kind: "audit", number: fase.number, state: "devolvida", findings: veredicto.findings.length });

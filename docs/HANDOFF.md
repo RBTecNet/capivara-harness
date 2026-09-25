@@ -90,6 +90,18 @@ de "todas as fases". É raro, porque `emendaInutil` recusa emenda que introduza 
 de defeito novo, e não mordeu em nenhum run. O conserto é o mesmo de
 `faseDoMarcador`: mapear a linha para a fase cujo cabeçalho a precede.
 
+**Candidato observado em campo, NÃO consertado (build em andamento):** os roteiros do
+gate 4 são escritos um por fluxo, cada um sozinho, e rodam em sequência contra a
+MESMA aplicação e o MESMO banco — o runner migra uma vez e não reinicia o estado entre
+roteiros, e o prompt de autoria (`prompts/flows.ts`) não diz uma palavra sobre
+independência. No P02 do `assistencia2` isso apareceu assim: o workflow 1 troca a
+senha inicial, e o workflow 4, que roda depois, tenta entrar com a senha que já não
+existe. O executor diagnosticou certo e contestou o roteiro
+(`CAPIVARA_ROTEIRO_ERRADO`), que é a saída desenhada para isto. Se a mesma família
+voltar nas fases seguintes — que têm mais fluxos dividindo o mesmo banco —, o conserto
+é de autoria (cada roteiro prepara o próprio estado e não depende do efeito de outro)
+ou de execução (banco descartável por roteiro). Decidir com a evidência, não antes.
+
 **E a regra de contexto, que vale para os dois lados:** compactar contexto é
 perder detalhe, e perder detalhe é exatamente o defeito acima. No harness isso tem
 um endereço concreto: o teto de 15 tasks por fase está sendo usado como ALVO pelo

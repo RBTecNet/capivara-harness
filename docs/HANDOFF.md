@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.3.0 (`capivara --ver`) |
-| suíte | 1142 testes em 53 arquivos, `npm run check` verde |
+| suíte | 1411 testes em 75 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
@@ -25,6 +25,51 @@ O ciclo de três estágios foi desenvolvido no branch `ciclo-unico` e fundido em
 uma linha reta e não há commit de merge. O branch foi apagado depois disso; a tag
 `checkpoint-2026-09-20` marca esse ponto, no commit `49d32e6`. Dois commits
 vieram depois dela; o que eles trouxeram está na seção seguinte.
+
+## 2026-09-25 — onde paramos, e o que está no meio do caminho
+
+O dia inteiro foi endurecimento do `init`/`plan`/`build` contra um projeto grande
+de verdade (`assistencia2`: 13 fases, 21 entidades, 17 stories, pedido de 16.752
+caracteres). As famílias de defeito estão em `docs/PLANO.md` §74 a §76, cada uma
+com a medição que a justificou. O que vale carregar daqui:
+
+**Fechado e medido em campo hoje:** entrevista sem teto (41 perguntas, 12
+omissões — o teto velho cortaria 8 em silêncio), insistência com saídas fechadas,
+`CAPIVARA_DECISION` (o auditor pergunta ao desenvolvedor na primeira leitura; 2
+decisões vieram por ele), levantamento com conteúdo (7 arbitragens gravadas),
+auditoria por fase de volta (13 assuntos em vez de 1), repositório Git como
+pré-requisito, memória de task no gate 3.
+
+**A causa que estava embaixo de tudo, e o que falta fazer:**
+
+O `phaseAuditPrompt` recebe o pedido do desenvolvedor verbatim. O
+`phaseFromSlicePrompt` **não** — ele vê só a fatia do esqueleto. Num pedido
+prescritivo (o do `assistencia2` fala de "rolagem"/"linhas" nove vezes, até o
+tamanho dos campos), o esqueleto comprime esse detalhe e ele deixa de existir para
+quem escreve a fase. O auditor cobra o que o pedido pede, o escritor não tem como
+saber, e o laço não converge — não por amostragem, por **ausência**. Dos 25
+achados da tentativa 3, 18 eram gaps reais dessa natureza e 7 eram "recopie o
+modelo de dados".
+
+Na fila, nesta ordem:
+
+1. o escritor da fase passa a receber o pedido, com a regra de que escreve só a
+   fase dele — o pedido está ali para não perder detalhe que ele exige sobre o que
+   ESTA fase cobre, nunca para trazer trabalho de outra;
+2. `fingerprint` sem o endereço: o auditor reescreve o rótulo a cada volta
+   ("Tarefa de geração manual de cobranças" → "Tarefa «Gerar manualmente
+   cobranças…»"), o hash muda, e o levantamento nunca reconhece a repetição;
+3. a fronteira: forma do dado é do esqueleto, comportamento é dos critérios;
+4. um teste com **auditor adversário** — que devolve um achado verdadeiro e NOVO a
+   cada passada — provando que o laço termina com um número limitado de perguntas
+   ao desenvolvedor. Sem ele, cada descoberta dessas custa duas horas de run.
+
+**E a regra de contexto, que vale para os dois lados:** compactar contexto é
+perder detalhe, e perder detalhe é exatamente o defeito acima. No harness isso tem
+um endereço concreto: o teto de 15 tasks por fase está sendo usado como ALVO pelo
+escritor do esqueleto (média de 12,2 no `assistencia2`, seis fases entre 12 e 14),
+e fase densa é sessão longa de executor — mais perto do limite de contexto dele,
+onde a compactação começa a inventar. O teto precisa voltar a ser teto.
 
 ## O que está pronto e medido
 

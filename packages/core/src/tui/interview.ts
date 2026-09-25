@@ -36,7 +36,7 @@ export function renderQuestion(screen: QuestionScreen): string {
   }
 
   lines.push(paint("Já descobri:", "gray", style));
-  for (const line of wrap(question.evidence, 76)) lines.push(`  ${line}`);
+  for (const line of wrapKeepingBreaks(question.evidence, 76)) lines.push(`  ${line}`);
   lines.push("");
   lines.push(paint(question.decision, "bold", style));
   lines.push("");
@@ -69,6 +69,18 @@ export function renderQuestion(screen: QuestionScreen): string {
   );
   lines.push("");
   return lines.join("\n");
+}
+
+/**
+ * Dobra respeitando as quebras que o texto já tem.
+ *
+ * `wrap` trata tudo como um parágrafo só, e isso apagava a estrutura de uma
+ * evidência com lista dentro: o levantamento de auditoria mostra o que o
+ * escritor entregou, item por item, e a tela devolvia tudo emendado numa frase —
+ * exatamente o que a pergunta existe para separar.
+ */
+export function wrapKeepingBreaks(value: string, width: number): string[] {
+  return value.split("\n").flatMap((linha) => (linha.trim() === "" ? [""] : wrap(linha, width)));
 }
 
 export function wrap(value: string, width: number): string[] {
@@ -112,7 +124,7 @@ export function questionBox(screen: QuestionScreen, width: number): { title: str
   const body: string[] = [];
 
   body.push(paint("Já descobri:", "gray", style));
-  for (const line of wrap(question.evidence, inner - 2)) body.push(`  ${line}`);
+  for (const line of wrapKeepingBreaks(question.evidence, inner - 2)) body.push(`  ${line}`);
   body.push("");
   for (const line of wrap(question.decision, inner)) body.push(paint(line, "bold", style));
   body.push("");

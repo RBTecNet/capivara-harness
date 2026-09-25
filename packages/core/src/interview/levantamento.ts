@@ -31,13 +31,28 @@ const DO_AUDITOR = "Vale a leitura do auditor";
  * `indice` vira o id — `Q-90`, `Q-91`… —, fora da faixa da entrevista para as
  * duas não colidirem no handoff.
  */
-export function perguntaDeLevantamento(finding: Finding, indice: number): Question {
+export function perguntaDeLevantamento(finding: Finding, indice: number, oQueOEscritorFez = ""): Question {
+  /*
+   * As DUAS versões, lado a lado.
+   *
+   * A primeira versão desta tela mostrava só a leitura do auditor, e oferecia
+   * "vale o que o escritor escreveu" sem dizer o que ele escreveu. Escolher no
+   * escuro entre uma opção argumentada e uma opção muda não é escolher.
+   */
+  const doEscritor =
+    oQueOEscritorFez === ""
+      ? ""
+      : `\n\n  O escritor entregou:\n${oQueOEscritorFez
+          .split("\n")
+          .map((linha) => `    ${linha}`)
+          .join("\n")}`;
+
   return {
     id: `${PREFIXO_DO_LEVANTAMENTO}${indice}`,
     topic: `auditoria · ${finding.where}`,
     evidence:
       `O auditor devolveu este ponto pela segunda vez, então não é falta de capricho do escritor: ` +
-      `é leitura divergente das mesmas fontes.\n\n  O auditor entendeu: ${finding.problem}\n` +
+      `é leitura divergente das mesmas fontes.${doEscritor}\n\n  O auditor entendeu: ${finding.problem}\n` +
       `  E pede: ${finding.fix}`,
     decision: `Em "${finding.where}", qual leitura vale?`,
     why:
@@ -46,7 +61,13 @@ export function perguntaDeLevantamento(finding: Finding, indice: number): Questi
       "passa a valer também para as auditorias seguintes.",
     options: [
       { label: DO_AUDITOR, consequence: `A fase é reescrita como o auditor pede: ${finding.fix}` },
-      { label: DO_ESCRITOR, consequence: "O ponto é encerrado como está, e o auditor não volta a levantá-lo." },
+      {
+        label: DO_ESCRITOR,
+        consequence:
+          oQueOEscritorFez === ""
+            ? "O ponto é encerrado como está, e o auditor não volta a levantá-lo."
+            : `A fase segue como está — ${resumoDeUmaLinha(oQueOEscritorFez)} — e o auditor não volta a levantar o ponto.`,
+      },
     ],
     recommended: DO_AUDITOR,
     recommendationBasis:
@@ -88,4 +109,15 @@ export function comAutoridade(finding: Finding, escolha: LeituraEscolhida): Find
     };
   }
   return finding;
+}
+
+/** O que o escritor entregou, em uma linha, para caber na consequência da opção. */
+function resumoDeUmaLinha(entrega: string): string {
+  const linhas = entrega
+    .split("\n")
+    .map((linha) => linha.replace(/^[-•\s]+/, "").trim())
+    .filter((linha) => linha !== "");
+  if (linhas.length === 0) return "sem tarefas declaradas";
+  const inteiro = linhas.join("; ");
+  return inteiro.length <= 160 ? inteiro : `${inteiro.slice(0, 157)}…`;
 }

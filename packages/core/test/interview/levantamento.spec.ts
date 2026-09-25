@@ -46,6 +46,22 @@ describe("a pergunta do levantamento", () => {
     ]);
   });
 
+  it("mostra o que o ESCRITOR entregou, senão a opção 2 é uma escolha no escuro", () => {
+    const comEntrega = perguntaDeLevantamento(finding, 1, "- Cadastrar dica\n- Alterar e consultar dicas");
+
+    expect(comEntrega.evidence).toContain("O escritor entregou:");
+    expect(comEntrega.evidence).toContain("Cadastrar dica");
+    // E a opção 2 diz o que fica valendo, em vez de "o ponto é encerrado".
+    const doEscritor = comEntrega.options.find((opcao) => opcao.label === "Vale o que o escritor escreveu");
+    expect(doEscritor?.consequence).toContain("Cadastrar dica");
+    expect(doEscritor?.consequence).toContain("Alterar e consultar dicas");
+  });
+
+  it("sem a entrega em mãos, não finge que mostrou", () => {
+    expect(pergunta.evidence).not.toContain("O escritor entregou:");
+    expect(pergunta.options[1]?.consequence).toBe("O ponto é encerrado como está, e o auditor não volta a levantá-lo.");
+  });
+
   it("diz por que a pergunta existe: o laço que ela evita", () => {
     expect(pergunta.why).toContain("o escritor reescreve e o auditor devolve");
     expect(pergunta.why).toContain("auditorias seguintes");

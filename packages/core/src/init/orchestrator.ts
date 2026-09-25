@@ -163,6 +163,30 @@ function temDecisaoPendente(markdown: string): boolean {
   return /\[NEEDS DECISION\]/.test(markdown);
 }
 
+/**
+ * O que o escritor entregou na fase que o achado nomeia.
+ *
+ * Os títulos das tasks, e só eles: é a resposta compacta para "o que a fase faz
+ * hoje", que é o que está em disputa num levantamento de auditoria. O texto
+ * inteiro da fase não caberia na tela, e a lista de títulos costuma mostrar a
+ * ausência que o auditor apontou — no `assitencia`, "cadastro, alteração,
+ * consulta e anexação" com exclusão faltando.
+ */
+function oQueOEscritorFez(documento: string, finding: Finding): string {
+  const lido = parsePhases(documento);
+  if (!lido.ok) return "";
+
+  const total = lido.document.phases.length;
+  const numeros = affectedPhases([finding], total);
+  // Sem referência utilizável, `affectedPhases` devolve TODAS: mostrar o plano
+  // inteiro não ajuda ninguém a escolher.
+  if (numeros.length !== 1) return "";
+
+  const fase = lido.document.phases.find((entry) => entry.number === numeros[0]);
+  if (!fase || fase.tasks.length === 0) return "";
+  return fase.tasks.map((task) => `- ${task.title}`).join("\n");
+}
+
 function contaTasks(markdown: string): number {
   return [...markdown.matchAll(/^\s*-\s*\[[ xX]\]\s*\*\*Task:\*\*/gm)].length;
 }
@@ -1560,6 +1584,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    */
   async function levantamentoDeAuditoria(
     document: string,
+    conteudo: string,
     findings: readonly Finding[],
     history: readonly AuditAttempt[],
     attempt: number,
@@ -1578,7 +1603,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }
 
       arbitrados.add(fingerprint(finding));
-      const pergunta = perguntaDeLevantamento(finding, arbitrados.size);
+      const pergunta = perguntaDeLevantamento(finding, arbitrados.size, oQueOEscritorFez(conteudo, finding));
       const raw = await options.ask(pergunta, resultado.length + 1, repetidos.length);
       const resposta = await settle(document, pergunta, raw, attempt, 1, repetidos.length);
 
@@ -2066,7 +2091,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
        * põe as duas versões na frente do desenvolvedor antes de gastar mais uma
        * reescrita nelas.
        */
-      const arbitrados = await levantamentoDeAuditoria(document, action.findings, history, attempt, writer);
+      const arbitrados = await levantamentoDeAuditoria(document, content, action.findings, history, attempt, writer);
       authored = await authored.rewrite([...decisoes, ...arbitrados], action.attempt);
 
       /*

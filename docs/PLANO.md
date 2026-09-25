@@ -4887,7 +4887,41 @@ Três desfechos, e o terceiro é o que a ideia tem de melhor:
 - **nem um nem outro** — texto livre, que **substitui** a correção pedida: o
   escritor recebe o que o desenvolvedor determinou, palavra por palavra.
 
-### 70.2 O que faz a decisão durar
+### 70.2 As duas versões, lado a lado
+
+A primeira versão desta tela mostrava só a leitura do AUDITOR — argumentada, com
+o que ele entendeu e o que ele pede — e oferecia, como alternativa:
+
+```
+2. Vale o que o escritor escreveu
+   O ponto é encerrado como está, e o auditor não volta a levantá-lo.
+```
+
+Sem dizer o que o escritor escreveu. **Escolher entre uma opção argumentada e uma
+opção muda não é escolher** — e a pergunta existe justamente para pôr as duas
+leituras em pé de igualdade.
+
+Agora a evidência traz o que a fase entrega hoje, título por título:
+
+```
+O escritor entregou:
+- Cadastrar dica de bancada com título e conteúdo
+- Alterar e consultar dicas do tenant
+- Anexar arquivos à dica
+- Listar dicas na tela de consulta
+
+O auditor entendeu: a decisão aceita acrescenta exclusão de dicas, mas esta
+fase contempla somente cadastro, alteração, consulta e anexação.
+```
+
+Os títulos das tasks, e só eles: o texto inteiro da fase não cabe na tela, e é a
+lista que mostra a ausência apontada — ali dá para ver, numa olhada, que não há
+exclusão.
+
+E a opção 2 passou a dizer o que fica valendo se ela for escolhida, em vez de "o
+ponto é encerrado".
+
+### 70.3 O que faz a decisão durar
 
 A resposta é gravada como qualquer outra da entrevista, e é isso que a torna
 útil: o auditor da rodada seguinte recebe as decisões junto do documento. Sem

@@ -35,13 +35,26 @@ export function renderQuestion(screen: QuestionScreen): string {
     lines.push("");
   }
 
-  lines.push(paint("Já descobri:", "gray", style));
-  for (const line of wrapKeepingBreaks(question.evidence, 76)) lines.push(`  ${line}`);
-  lines.push("");
+  /*
+   * Rótulo sem conteúdo não vai para a tela.
+   *
+   * Toda pergunta do MODELO tem evidência e motivo — o parser recusa sem eles. As
+   * do harness nem sempre: o levantamento de auditoria põe as duas leituras dentro
+   * das opções, onde a escolha é feita, e não tem o que dizer num bloco "por que
+   * importa" além de encher a tela. Um rótulo cinza seguido de nada é ruído, e a
+   * tela do levantamento tinha quatro linhas desse tipo antes da primeira opção.
+   */
+  if (question.evidence.trim() !== "") {
+    lines.push(paint("Já descobri:", "gray", style));
+    for (const line of wrapKeepingBreaks(question.evidence, 76)) lines.push(`  ${line}`);
+    lines.push("");
+  }
   lines.push(paint(question.decision, "bold", style));
-  lines.push("");
-  lines.push(paint("Por que importa:", "gray", style));
-  for (const line of wrap(question.why, 76)) lines.push(`  ${line}`);
+  if (question.why.trim() !== "") {
+    lines.push("");
+    lines.push(paint("Por que importa:", "gray", style));
+    for (const line of wrap(question.why, 76)) lines.push(`  ${line}`);
+  }
 
   if (question.options.length > 0) {
     lines.push("");
@@ -49,7 +62,7 @@ export function renderQuestion(screen: QuestionScreen): string {
       const recommended = option.label === question.recommended;
       const marker = recommended ? paint(" ← recomendada", "green", style) : "";
       lines.push(`  ${paint(String(position + 1), "cyan", style)}. ${option.label}${marker}`);
-      for (const line of wrap(option.consequence, 72)) lines.push(`     ${paint(line, "gray", style)}`);
+      for (const line of wrapKeepingBreaks(option.consequence, 72)) lines.push(`     ${paint(line, "gray", style)}`);
     });
     if (question.recommendationBasis) {
       lines.push("");
@@ -123,20 +136,25 @@ export function questionBox(screen: QuestionScreen, width: number): { title: str
   const inner = Math.max(20, width - 4);
   const body: string[] = [];
 
-  body.push(paint("Já descobri:", "gray", style));
-  for (const line of wrapKeepingBreaks(question.evidence, inner - 2)) body.push(`  ${line}`);
-  body.push("");
+  // O mesmo corte do renderizador acima: rótulo vazio não ocupa linha.
+  if (question.evidence.trim() !== "") {
+    body.push(paint("Já descobri:", "gray", style));
+    for (const line of wrapKeepingBreaks(question.evidence, inner - 2)) body.push(`  ${line}`);
+    body.push("");
+  }
   for (const line of wrap(question.decision, inner)) body.push(paint(line, "bold", style));
-  body.push("");
-  body.push(paint("Por que importa:", "gray", style));
-  for (const line of wrap(question.why, inner - 2)) body.push(`  ${line}`);
+  if (question.why.trim() !== "") {
+    body.push("");
+    body.push(paint("Por que importa:", "gray", style));
+    for (const line of wrap(question.why, inner - 2)) body.push(`  ${line}`);
+  }
 
   if (question.options.length > 0) {
     body.push("");
     question.options.forEach((option, position) => {
       const marcada = option.label === question.recommended ? paint(" ← recomendada", "green", style) : "";
       body.push(`  ${paint(String(position + 1), "cyan", style)}. ${option.label}${marcada}`);
-      for (const line of wrap(option.consequence, inner - 5)) body.push(`     ${paint(line, "gray", style)}`);
+      for (const line of wrapKeepingBreaks(option.consequence, inner - 5)) body.push(`     ${paint(line, "gray", style)}`);
     });
     if (question.recommendationBasis) {
       body.push("");

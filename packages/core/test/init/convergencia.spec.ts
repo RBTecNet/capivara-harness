@@ -82,7 +82,9 @@ describe("o laço de auditoria termina contra um auditor que nunca aprova", () =
       ...comum,
       call: agent.call,
       ask: async (question) => {
-        perguntas.push(question.decision);
+        // O tópico é o que distingue uma arbitragem da outra: a pergunta em si passou
+        // a ser sempre a mesma frase, com as duas leituras dentro das opções.
+        perguntas.push(question.topic);
         return "1";
       },
       decideStandoff: async () => {
@@ -155,7 +157,7 @@ describe("o laço de auditoria termina contra um auditor que nunca aprova", () =
       ...comum,
       call: agent.call,
       ask: async (question) => {
-        if (question.topic.startsWith("auditoria ·")) arbitragens.push(question.decision);
+        if (question.topic.startsWith("auditoria ·")) arbitragens.push(question.topic);
         return "1";
       },
       decideStandoff: async () => "publicar",
@@ -270,21 +272,24 @@ describe("o levantamento mostra o que o escritor entregou", () => {
       repeat: true,
     });
 
-    const evidencias: string[] = [];
+    const entregas: string[] = [];
     await runPlan({
       projectRoot,
       request,
       ...comum,
       call: fakeAgent(steps).call,
       ask: async (question) => {
-        if (question.topic.startsWith("auditoria ·")) evidencias.push(question.evidence);
+        if (question.topic.startsWith("auditoria ·")) {
+          // A entrega do escritor vive na opção dele, que é onde ela é escolhida.
+          entregas.push(question.options.find((opcao) => opcao.label.includes("escritor"))?.consequence ?? "");
+        }
         return "1";
       },
       decideStandoff: async () => "publicar",
     });
 
-    expect(evidencias.length).toBeGreaterThan(0);
-    expect(evidencias[0]).toContain("O escritor entregou:");
-    expect(evidencias[0]).toContain("Criar a migration de statuses");
+    expect(entregas.length).toBeGreaterThan(0);
+    expect(entregas[0]).toContain("A fase segue como está");
+    expect(entregas[0]).toContain("Criar a migration de statuses");
   }, 30000);
 });

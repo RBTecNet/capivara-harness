@@ -32,50 +32,43 @@ const DO_AUDITOR = "Vale a leitura do auditor";
  * duas não colidirem no handoff.
  */
 export function perguntaDeLevantamento(finding: Finding, indice: number, oQueOEscritorFez = ""): Question {
-  /*
-   * As DUAS versões, lado a lado.
-   *
-   * A primeira versão desta tela mostrava só a leitura do auditor, e oferecia
-   * "vale o que o escritor escreveu" sem dizer o que ele escreveu. Escolher no
-   * escuro entre uma opção argumentada e uma opção muda não é escolher.
-   */
-  const doEscritor =
+  const entrega =
     oQueOEscritorFez === ""
-      ? ""
-      : `\n\n  O escritor entregou:\n${oQueOEscritorFez
+      ? "A fase segue exatamente como está escrita hoje."
+      : `A fase segue como está:\n${oQueOEscritorFez
           .split("\n")
-          .map((linha) => `    ${linha}`)
+          .map((linha) => `  ${linha}`)
           .join("\n")}`;
 
   return {
     id: `${PREFIXO_DO_LEVANTAMENTO}${indice}`,
     topic: `auditoria · ${finding.where}`,
-    evidence:
-      `O auditor devolveu este ponto pela segunda vez, então não é falta de capricho do escritor: ` +
-      `é leitura divergente das mesmas fontes.${doEscritor}\n\n  O auditor entendeu: ${finding.problem}\n` +
-      `  E pede: ${finding.fix}`,
-    decision: `Em "${finding.where}", qual leitura vale?`,
-    why:
-      "Enquanto as duas leituras existirem, o escritor reescreve e o auditor devolve — foi assim que " +
-      "um único ponto consumiu quatro rodadas e três reinícios. A sua resposta encerra a discussão e " +
-      "passa a valer também para as auditorias seguintes.",
+    /*
+     * A primeira linha diz do que se trata e o que a escolha resolve. Nada mais.
+     *
+     * Ela dizia antes: "O auditor devolveu este ponto pela segunda vez, então não é
+     * falta de capricho do escritor: é leitura divergente das mesmas fontes" — uma
+     * explicação do mecanismo do harness, para quem só precisa decidir. Vinha
+     * seguida do que o auditor entendeu, do que ele pede e de um parágrafo sobre
+     * por que aquilo importa: quatro blocos antes da primeira opção.
+     */
+    evidence: `${finding.where}: o auditor e o escritor entenderam de formas diferentes o que esta parte deve garantir.`,
+    decision: "Qual dos dois entendimentos vale?",
+    /*
+     * Sem "por que importa". As duas leituras são a pergunta inteira, e cada uma
+     * está dentro da opção que a escolhe — que é onde se decide, e onde o texto
+     * ajuda. Os renderizadores não desenham bloco vazio.
+     */
+    why: "",
     options: [
-      { label: DO_AUDITOR, consequence: `A fase é reescrita como o auditor pede: ${finding.fix}` },
       {
-        label: DO_ESCRITOR,
-        consequence:
-          oQueOEscritorFez === ""
-            ? "O ponto é encerrado como está, e o auditor não volta a levantá-lo. (O endereço do achado não " +
-              "aponta uma fase única, então o texto do escritor não pôde ser mostrado aqui — o que ele fez está " +
-              "descrito no que o auditor entendeu, acima.)"
-            : `A fase segue como está — ${resumoDeUmaLinha(oQueOEscritorFez)} — e o auditor não volta a levantar o ponto.`,
+        label: DO_AUDITOR,
+        consequence: `${finding.problem}\n\nCorreção: ${finding.fix}`,
       },
+      { label: DO_ESCRITOR, consequence: entrega },
     ],
     recommended: DO_AUDITOR,
-    recommendationBasis:
-      "Quem devolve duas vezes costuma estar lendo uma decisão aceita, e decisão aceita vence documento " +
-      "derivado dela. Se não for o caso aqui, escolha a outra opção — ou escreva o que deve valer, se " +
-      "nenhuma das duas estiver certa.",
+    recommendationBasis: "",
   };
 }
 
@@ -111,17 +104,6 @@ export function comAutoridade(finding: Finding, escolha: LeituraEscolhida): Find
     };
   }
   return finding;
-}
-
-/** O que o escritor entregou, em uma linha, para caber na consequência da opção. */
-function resumoDeUmaLinha(entrega: string): string {
-  const linhas = entrega
-    .split("\n")
-    .map((linha) => linha.replace(/^[-•\s]+/, "").trim())
-    .filter((linha) => linha !== "");
-  if (linhas.length === 0) return "sem tarefas declaradas";
-  const inteiro = linhas.join("; ");
-  return inteiro.length <= 160 ? inteiro : `${inteiro.slice(0, 157)}…`;
 }
 
 /**

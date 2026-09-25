@@ -50,9 +50,14 @@ export function perguntaInsistente(pergunta: Question, aberto: string): Question
     ...pergunta,
     id: pergunta.id,
     ...(aberto.trim() !== "" ? { pending: aberto.trim() } : {}),
+    /*
+     * A pergunta original pode não ter "por que importa" — o levantamento de
+     * auditoria não tem, de propósito. Concatenar às cegas produzia duas linhas em
+     * branco e um bloco que começava do nada.
+     */
     why:
-      `${pergunta.why}\n\n` +
-      "  Esta decisão está em aberto e é a última coisa entre o plano e o build. " +
+      (pergunta.why.trim() === "" ? "" : `${pergunta.why}\n\n`) +
+      "Esta decisão está em aberto e é a última coisa entre o plano e o build. " +
       "Ela não vai ficar sem resposta: as duas últimas opções fecham a pergunta sem " +
       "você precisar saber a resposta.",
     options: [

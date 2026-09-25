@@ -12,8 +12,6 @@ import { describe, expect, it } from "vitest";
 
 import { comAutoridade, decisaoGravada, lerEscolha, perguntaDeLevantamento } from "../../src/interview/levantamento.js";
 import { ehRepetido, fingerprint } from "../../src/audit/index.js";
-import { parseQuestionBatch } from "../../src/interview/protocol.js";
-import { QUESTIONS_CONTRACT } from "../../src/interview/types.js";
 
 const finding = {
   where: "Phase 2 · usuários",
@@ -33,46 +31,71 @@ describe("quando um achado vira desacordo", () => {
   });
 });
 
+/*
+ * A forma da pergunta, pedida pelo desenvolvedor depois de ver a tela cheia:
+ * "a primeira linha explicando a que área aquela pergunta se trata e o que ela
+ * visa resolver, a questão do auditor e a questão do escritor, somente isso sem
+ * demais explicações".
+ *
+ * O que saiu: a frase que explicava o mecanismo do harness ("o auditor devolveu
+ * este ponto pela segunda vez…"), o bloco "por que importa", e a desculpa dentro
+ * da opção 2 quando a entrega do escritor não estava em mãos. O que o auditor
+ * entendeu e o que ele pede desceram para DENTRO da opção que os escolhe.
+ */
 describe("a pergunta do levantamento", () => {
   const pergunta = perguntaDeLevantamento(finding, 1);
 
-  it("põe as duas leituras na frente de quem decide", () => {
-    expect(pergunta.evidence).toContain("O auditor entendeu");
-    expect(pergunta.evidence).toContain(finding.problem);
-    expect(pergunta.evidence).toContain(finding.fix);
-    expect(pergunta.options.map((opcao) => opcao.label)).toEqual([
-      "Vale a leitura do auditor",
-      "Vale o que o escritor escreveu",
-    ]);
+  it("a primeira linha diz do que se trata e o que a escolha resolve", () => {
+    expect(pergunta.evidence).toContain(finding.where);
+    expect(pergunta.evidence).toContain("entenderam de formas diferentes");
+    // E nada do mecanismo do harness: quem decide não precisa saber como ele funciona.
+    expect(pergunta.evidence).not.toContain("segunda vez");
+    expect(pergunta.evidence).not.toContain("capricho");
   });
 
-  it("mostra o que o ESCRITOR entregou, senão a opção 2 é uma escolha no escuro", () => {
-    const comEntrega = perguntaDeLevantamento(finding, 1, "- Cadastrar dica\n- Alterar e consultar dicas");
+  it("a leitura do auditor vive DENTRO da opção que a escolhe", () => {
+    const doAuditor = pergunta.options.find((opcao) => opcao.label === "Vale a leitura do auditor");
+    expect(doAuditor?.consequence).toContain(finding.problem);
+    expect(doAuditor?.consequence).toContain(finding.fix);
+    // E não acima da pergunta, onde ela era lida antes de se saber para quê.
+    expect(pergunta.evidence).not.toContain(finding.problem);
+  });
 
-    expect(comEntrega.evidence).toContain("O escritor entregou:");
-    expect(comEntrega.evidence).toContain("Cadastrar dica");
-    // E a opção 2 diz o que fica valendo, em vez de "o ponto é encerrado".
+  it("a entrega do escritor vive dentro da opção dele", () => {
+    const comEntrega = perguntaDeLevantamento(finding, 1, "- Cadastrar dica\n- Alterar e consultar dicas");
     const doEscritor = comEntrega.options.find((opcao) => opcao.label === "Vale o que o escritor escreveu");
     expect(doEscritor?.consequence).toContain("Cadastrar dica");
     expect(doEscritor?.consequence).toContain("Alterar e consultar dicas");
   });
 
-  it("sem a entrega em mãos, não finge que mostrou", () => {
-    expect(pergunta.evidence).not.toContain("O escritor entregou:");
-    // E diz POR QUE não mostrou, em vez de deixar a opção muda.
-    expect(pergunta.options[1]?.consequence).toContain("não aponta uma fase única");
-    expect(pergunta.options[1]?.consequence).toContain("o que ele fez está descrito");
+  /*
+   * Sem a entrega em mãos — um achado da auditoria de coerência, que não aponta
+   * fase única —, a opção dizia um parágrafo pedindo desculpas por não poder
+   * mostrar. Quem lê quer saber o que acontece se escolher, não por que o harness
+   * não conseguiu.
+   */
+  it("sem a entrega em mãos, diz o que acontece e não pede desculpas", () => {
+    expect(pergunta.options[1]?.consequence).toBe("A fase segue exatamente como está escrita hoje.");
   });
 
-  it("diz por que a pergunta existe: o laço que ela evita", () => {
-    expect(pergunta.why).toContain("o escritor reescreve e o auditor devolve");
-    expect(pergunta.why).toContain("auditorias seguintes");
+  it("não tem bloco de explicação: as duas leituras são a pergunta inteira", () => {
+    expect(pergunta.why).toBe("");
+    expect(pergunta.recommendationBasis).toBe("");
+    expect(pergunta.decision).toBe("Qual dos dois entendimentos vale?");
   });
 
-  it("passa no mesmo protocolo das outras perguntas", () => {
-    const lote = JSON.stringify({ contract: QUESTIONS_CONTRACT, questions: [{ ...pergunta, id: "Q-91" }] });
-    const lido = parseQuestionBatch(lote);
-    expect(lido.ok, lido.ok ? "" : JSON.stringify(lido.defects)).toBe(true);
+  /*
+   * Ela não passa no `parseQuestionBatch`, e é de propósito: aquele parser guarda
+   * a régua das perguntas do MODELO, onde `why` existe para impedir pergunta
+   * cega. Aqui a substância está nas opções, que é onde a escolha é feita. O que
+   * precisa continuar valendo é o resto da régua.
+   */
+  it("mantém a régua que importa: duas opções concretas, com consequência, e uma recomendada", () => {
+    expect(pergunta.options).toHaveLength(2);
+    expect(pergunta.options.every((opcao) => opcao.label !== "" && opcao.consequence !== "")).toBe(true);
+    expect(pergunta.options.map((opcao) => opcao.label)).toContain(pergunta.recommended);
+    expect(pergunta.evidence).not.toBe("");
+    expect(pergunta.decision).not.toBe("");
   });
 
   it("usa id fora da faixa da entrevista, para não colidir no handoff", () => {

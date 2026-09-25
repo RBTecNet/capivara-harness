@@ -177,7 +177,7 @@ export function decisaoDoAuditorComoFinding(decisao: AuditDecision, decidido: st
 /** Fora das faixas do levantamento, da insistência e da decisão do auditor. */
 export const PREFIXO_DO_ENSAIO = "Q-6";
 
-const ENSAIO_VALE_O_VERIFICADOR = "Vale a leitura do verificador: reescrever o critério";
+const ENSAIO_VALE_O_VERIFICADOR = "Vale a leitura do verificador";
 const ENSAIO_VALE_O_CRITERIO = "Vale o critério como está escrito";
 
 /**
@@ -200,41 +200,34 @@ export function perguntaDoEnsaio(
   reason: string,
   indice: number,
 ): Question {
-  const impossivel = ruling === "UNSATISFIABLE";
+  /*
+   * A forma que o desenvolvedor definiu para o levantamento de auditoria — a área
+   * e o que a escolha resolve, a leitura de um, a leitura do outro, e nada mais —
+   * vale igual aqui. Esta era a irmã que tinha ficado para trás: ela ainda trazia
+   * o veredito acima da pergunta, um "por que importa" e um "recomendo porque", e
+   * foi colada de volta na conversa exatamente assim.
+   */
   return {
     id: `${PREFIXO_DO_ENSAIO}${indice}`,
     topic: `ensaio · ${criterio.address}`,
     evidence:
-      `O critério, na task "${criterio.taskTitle}":\n\n    ${criterio.text}\n\n` +
-      `  O verificador — o mesmo papel que vai dizer DONE ou INCOMPLETE no build — ensaiou provar isto e ` +
-      `disse ${ruling}: ${reason}\n\n  O escritor já reescreveu e o veredito se manteve.`,
-    decision: `Em ${criterio.address}, o critério fica como está ou é reescrito?`,
-    why: impossivel
-      ? "Um critério que afirma o que as decisões negam não pode ser provado por implementação nenhuma: " +
-        "no build, o verificador olha, não encontra, e reprova uma fase que estava certa."
-      : "Um critério que dois verificadores honestos leriam de formas diferentes não decide nada: no build " +
-        "ele vira sorteio, e um sorteio por ciclo é o que faz uma fase voltar três vezes.",
+      `${criterio.address}, na task "${criterio.taskTitle}": o verificador e o escritor entenderam de formas ` +
+      "diferentes se este critério pode ser provado.",
+    decision: "Qual dos dois entendimentos vale?",
+    why: "",
     options: [
       {
         label: ENSAIO_VALE_O_VERIFICADOR,
-        consequence: impossivel
-          ? "O critério é reescrito para afirmar o que é verdade segundo as decisões — inclusive a ausência, " +
-            "quando for o caso. Só ele muda; o resto da fase está aprovado."
-          : "O critério é reescrito como condição observável: um arquivo, um comando e sua saída, um teste " +
-            "nomeado, um campo presente. Só ele muda; o resto da fase está aprovado.",
+        consequence: `${reason}\n\nCorreção: o critério é reescrito ${
+          ruling === "UNSATISFIABLE"
+            ? "para afirmar o que é verdade segundo as decisões, inclusive a ausência"
+            : "como condição observável — um arquivo, um comando e sua saída, um teste nomeado"
+        }.`,
       },
-      {
-        label: ENSAIO_VALE_O_CRITERIO,
-        consequence:
-          "O plano segue com este critério e o gate deixa de bloquear por ele. Se o verificador do BUILD " +
-          "mantiver a leitura dele, a fase volta com INCOMPLETE e a correção custa um ciclo — é esse o risco " +
-          "que você está aceitando.",
-      },
+      { label: ENSAIO_VALE_O_CRITERIO, consequence: `O critério fica como está:\n  ${criterio.text}` },
     ],
     recommended: ENSAIO_VALE_O_VERIFICADOR,
-    recommendationBasis:
-      "Quem ensaia é quem vai julgar no build: a leitura dele é a que vale na hora que custa. Reescrever " +
-      "uma linha agora é mais barato que um ciclo de correção depois — ou escreva o critério que deve valer.",
+    recommendationBasis: "",
   };
 }
 

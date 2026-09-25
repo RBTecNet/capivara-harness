@@ -5849,3 +5849,31 @@ Havia o caminho de acrescentar um campo `subject` ao `ContractError`. A lei de i
 escolheu o outro: o orquestrador já tem o esqueleto e pode rotear sozinho, e o contrato
 fica como estava. O teste novo falha com o código antigo —
 `expected ['phase-p01','phase-p02'] to deeply equal ['phase-p02']`.
+
+## §81 — O ensaio julgava o critério sem a fase em volta
+
+Uma arbitragem chegou à tela do desenvolvedor pedindo que ele decidisse se este
+critério podia ser provado:
+
+> `npm run db:migrate` cria, em banco vazio, as 23 tabelas enumeradas nesta fase e
+> termina sem erro quando executado novamente.
+
+O ensaio disse UNOBSERVABLE: *"as 23 tabelas são mencionadas por quantidade, mas não
+enumeradas no material recebido"*. O escritor reescreveu e o veredito se manteve,
+porque não havia o que consertar — a fase 1 cobre exatamente 23 entidades, listadas
+no `Covers` dela.
+
+O ensaio nunca tinha visto a fase. Ele era chamado com contexto vazio —
+`rehearse(verdict.authored, writerDoPlano, [])` — e julgava cada critério como uma
+linha solta. Um critério que se refere a "esta fase" era, para ele, referência a algo
+que não existe.
+
+É a mesma assimetria do §77 em outro par: quem ensaia precisa ver o que quem vai
+julgar DE VERDADE vai ver. O verificador do build recebe a fase inteira e lê o
+esqueleto no repositório; o ensaio agora recebe as duas coisas, lote a lote. Os lotes
+nunca misturam fases, então cada um leva só a sua.
+
+E a pergunta de arbitragem do ensaio ganhou a forma que o desenvolvedor definiu para a
+do auditor no §78 — a área e o que a escolha resolve, uma leitura, a outra, e nada
+mais. Era a irmã que tinha ficado para trás, e foi colada de volta na conversa
+exatamente com o "por que importa" e o "recomendo porque" que a outra já não tinha.

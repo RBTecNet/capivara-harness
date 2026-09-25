@@ -406,3 +406,29 @@ describe("o achado de cobertura vai para a fase dona do item", () => {
     expect(emendas[0]?.prompt).toContain("O esqueleto põe este item na fase 2");
   });
 });
+
+/*
+ * O ensaio era chamado com contexto vazio e julgava cada critério sem a fase em
+ * volta. No `assistencia2`, "as 23 tabelas enumeradas nesta fase" voltou
+ * UNOBSERVABLE — as 23 estão no `Covers` da fase, que o ensaio nunca viu —,
+ * sobreviveu à reescrita e virou arbitragem na frente do desenvolvedor.
+ */
+describe("o ensaio vê a fase de onde o critério vem", () => {
+  it("cada lote recebe a fase e a fatia do esqueleto dela", async () => {
+    const agentInit = fakeAgent(skeletonPath());
+    await runInit({ projectRoot, request, ...comum, stage: "init", call: agentInit.call, ask: async () => "use as recomendações" });
+
+    const agent = fakeAgent(skeletonPath());
+    await runPlan({ projectRoot, request, ...comum, call: agent.call, ask: async () => "use as recomendações" });
+
+    const ensaios = agent.calls.filter((call) => call.role === "verifier" && call.stage === "verify");
+    expect(ensaios.length).toBeGreaterThan(0);
+    for (const ensaio of ensaios) {
+      expect(ensaio.prompt).toContain("a fase de onde estes critérios vêm");
+      expect(ensaio.prompt).toContain("**Covers:**");
+    }
+    // E cada lote leva SÓ a sua fase: o da fase 1 não carrega a fase 2.
+    const daFase1 = ensaios.find((ensaio) => ensaio.prompt.includes("P1.T1.C1"));
+    expect(daFase1?.prompt).not.toContain("## Phase 2:");
+  });
+});

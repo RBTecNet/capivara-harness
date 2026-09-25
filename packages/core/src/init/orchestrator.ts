@@ -2445,7 +2445,31 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }
 
       await event("verify", "project-phases.md", "started", `${criteria.length} critério(s)`, round);
-      const assessment = await judgeAll(criteria, writer, upstream, round);
+      /*
+       * Cada lote do ensaio vê a FASE de onde os critérios vieram.
+       *
+       * O ensaio era chamado com contexto vazio e julgava cada critério sozinho,
+       * sem a fase em volta. Um critério que diz "as 23 tabelas enumeradas nesta
+       * fase" era, para ele, referência a algo que não existe — e no
+       * `assistencia2` voltou UNOBSERVABLE, sobreviveu à reescrita (o escritor não
+       * tinha o que consertar: as 23 estão no `Covers` da fase) e foi parar numa
+       * arbitragem na frente do desenvolvedor.
+       *
+       * É a mesma assimetria do §77, noutro par: quem julga precisa ver o que
+       * quem vai julgar DE VERDADE vai ver. O verificador do build recebe a fase
+       * inteira e lê o esqueleto no repositório; o ensaio agora recebe as duas
+       * coisas. Os lotes nunca misturam fases (`agruparCriterios`), então cada um
+       * leva só a sua.
+       */
+      const contextoDaFase = (numero: number): { name: string; content: string }[] => {
+        const fase = parsed.document.phases.find((entrada) => entrada.number === numero);
+        return [
+          ...upstream,
+          ...(fase ? [{ name: "a fase de onde estes critérios vêm", content: fase.markdown }] : []),
+          ...(skeletonAtual ? [{ name: "fatia do esqueleto desta fase", content: sliceForPhase(skeletonAtual, numero) }] : []),
+        ];
+      };
+      const assessment = await judgeAll(criteria, writer, contextoDaFase, round);
 
       const blocked = [
         ...assessment.blocking.map(
@@ -2608,7 +2632,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   async function judgeAll(
     criteria: CriterionRef[],
     writer: WriterContext,
-    upstream: { name: string; content: string }[],
+    /** O contexto de cada lote, pela fase dele: um lote nunca mistura fases. */
+    contextoDaFase: (fase: number) => { name: string; content: string }[],
     round: number,
   ): Promise<{ blocking: RehearsalResult["blocking"]; unrehearsed: CriterionRef[] }> {
     const lotes = agruparCriterios(criteria);
@@ -2620,7 +2645,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       for (;;) {
         const proximo = fila.shift();
         if (!proximo) return;
-        resultados.push(await judge(proximo, writer, upstream, round));
+        resultados.push(await judge(proximo, writer, contextoDaFase(proximo[0]?.phase ?? 0), round));
       }
     });
     await Promise.all(trabalhadores);

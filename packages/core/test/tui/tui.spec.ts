@@ -601,3 +601,58 @@ describe("o painel ocupa a altura que tem", () => {
     expect(linhas.at(-1)).toContain("Ctrl-C");
   });
 });
+
+/*
+ * O painel é desenhado de dentro do `announce` e do `onProgress`, que rodam dentro
+ * do laço do orquestrador: uma exceção aqui sobe por ali e mata um run de horas por
+ * causa de uma linha de moldura. `renderDashboard` é função pura e precisa ser
+ * TOTAL — devolver texto para qualquer modelo, inclusive os que não deveriam
+ * existir.
+ */
+describe("o desenho nunca lança", () => {
+  const hostil = (extra: Partial<DashboardModel>): DashboardModel => ({
+    version: "0.3.1",
+    command: "plan",
+    subtitle: "s",
+    project: "p",
+    stage: "e",
+    status: { label: "x", state: "em andamento" },
+    durationSeconds: 0,
+    pipeline: [],
+    provider: { perfil: "", transporte: "", contabilidade: "" },
+    telemetry: [],
+    events: [],
+    activity: { kind: "modelo", detail: "", sinceSeconds: 0 },
+    style: plain,
+    ...extra,
+  });
+
+  const casos: [string, Partial<DashboardModel>][] = [
+    ["total zero", { progress: [{ label: "Fases", done: 0, total: 0 }] }],
+    ["feito maior que o total", { progress: [{ label: "Fases", done: 99, total: 3 }] }],
+    ["negativos", { progress: [{ label: "Fases", done: -4, total: -7 }] }],
+    ["NaN", { progress: [{ label: "Fases", done: Number.NaN, total: Number.NaN }] }],
+    ["largura mínima", { width: 1, height: 3, progress: [{ label: "Fases", done: 1, total: 2 }], work: [{ label: "x", value: "y" }] }],
+    ["altura mínima", { width: 100, height: 1, work: [{ label: "x", value: "y" }] }],
+    ["rótulo enorme", { width: 40, progress: [{ label: "x".repeat(400), done: 1, total: 2 }] }],
+    ["valor enorme", { width: 40, work: [{ label: "y".repeat(200), value: "z".repeat(900) }] }],
+  ];
+
+  for (const [nome, modelo] of casos) {
+    it(`sobrevive a ${nome}`, () => {
+      expect(() => renderDashboard(hostil(modelo))).not.toThrow();
+      expect(renderDashboard(hostil(modelo)).length).toBeGreaterThan(0);
+    });
+  }
+
+  it("e respeita a largura mesmo no caso absurdo", () => {
+    for (const [nome, modelo] of casos) {
+      const width = modelo.width ?? 100;
+      const linhas = renderDashboard(hostil({ ...modelo, width })).split("\n");
+      // O piso é 4: abaixo disso não cabe moldura nenhuma, e `dashboardWidth`
+      // trunca para lá em vez de desenhar linhas quebradas.
+      const teto = Math.max(4, width);
+      expect(linhas.every((linha) => visibleWidth(linha) <= teto), nome).toBe(true);
+    }
+  });
+});

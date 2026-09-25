@@ -5716,3 +5716,27 @@ perde é a ordem do que se pode perder: eventos passados, fases fora da janela, 
 desenho, o modo denso, as caixas (primeiro compactas, depois nenhuma), e por último
 a lista de fases até uma linha. O que sobra na tela mínima é o que responde "onde
 está e o que quebrou".
+
+### 78.3 O painel não pode derrubar o run
+
+A pergunta do desenvolvedor antes de rodar — *"não vai explodir?"* — obrigou a
+olhar o caminho que ninguém tinha olhado: `repaint()` chama `live.draw(desenhar())`
+**sem proteção nenhuma**, e `repaint` é chamado de dentro do `announce`, do
+`onProgress` e do `onPhaseProgress`, que rodam dentro do laço do orquestrador. Uma
+exceção no desenho sobe por ali e mata um run de horas por causa de uma linha de
+moldura.
+
+O risco existia antes, e eu tinha acabado de dobrar a complexidade do desenho —
+barras, duas caixas, crescimento, preenchimento, dados novos que podem vir
+ausentes. É exatamente o caso da lei de impacto: quem mais depende do que eu estou
+mudando? O laço do run inteiro.
+
+Duas defesas, e as duas fazem falta:
+
+- `renderDashboard` é **total**: oito modelos hostis no teste — total zero, feito
+  maior que o total, negativos, `NaN`, largura 1, altura 1, rótulo de 400
+  caracteres, valor de 900 — e nenhum lança nem estoura a largura;
+- e o desenho é envelopado **onde a tela encontra a execução**, não dentro do
+  renderizador: engolir a exceção lá esconderia o defeito de quem a escreveu. Aqui
+  ela vira uma linha visível na tela, o run continua, e quem lê sabe que o painel
+  falhou e que `--no-dashboard` existe.

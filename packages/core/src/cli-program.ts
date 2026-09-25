@@ -348,13 +348,16 @@ function estagioInterativo(options: {
     return escolhido && escolhido !== "" ? escolhido : UBUNTU_AUBERGINE;
   })();
 
-  const desenhar = (): string =>
-    renderDashboard({
-      ...progress.model(),
-      width: larguraAtual(),
-      height: stdout.rows ?? 40,
-      ...(fundo !== undefined ? { background: fundo } : {}),
-    });
+  const desenhar = semDerrubarORun(
+    () =>
+      renderDashboard({
+        ...progress.model(),
+        width: larguraAtual(),
+        height: stdout.rows ?? 40,
+        ...(fundo !== undefined ? { background: fundo } : {}),
+      }),
+    VERSION,
+  );
   const repaint = (): void => live.draw(desenhar());
 
   // O pulso é o que separa "trabalhando" de "morto" na tela.
@@ -527,6 +530,32 @@ function estagioInterativo(options: {
  * qual CLI tinha sido usada — e a resposta mudava o veredito, porque o acesso de
  * sistema que o executor recebe é escolhido pelo adaptador de cada uma.
  */
+/**
+ * O painel NUNCA pode derrubar o run.
+ *
+ * `repaint` é chamado de dentro do `announce` e do `onProgress`, que rodam dentro
+ * do laço do orquestrador: uma exceção no desenho sobe por ali e mata um run de
+ * horas por causa de uma linha de moldura. O desenho é a parte mais mexida do
+ * produto e a menos essencial dele — a execução não depende de haver tela.
+ *
+ * Então ele é envelopado aqui, no lugar onde a tela encontra a execução, e não
+ * dentro de `renderDashboard`: engolir a exceção lá esconderia o defeito de quem
+ * o escreveu. Aqui ela vira uma linha visível, o run continua, e o log guarda o
+ * que aconteceu.
+ */
+function semDerrubarORun(desenhar: () => string, versao: string): () => string {
+  let avisado = false;
+  return () => {
+    try {
+      return desenhar();
+    } catch (erro) {
+      const causa = erro instanceof Error ? erro.message : String(erro);
+      if (!avisado) avisado = true;
+      return `capivara v${versao} · o painel falhou ao desenhar (${causa}); a execução segue — use --no-dashboard para só as linhas de progresso`;
+    }
+  };
+}
+
 function snapshotDePapeis(roles: ReturnType<typeof rolesFromFlags>, usados: readonly string[]): Record<string, { provider: string; model: string; effort: string }> {
   const registro: Record<string, { provider: string; model: string; effort: string }> = {};
   for (const papel of usados) {
@@ -1305,7 +1334,7 @@ export function createProgram(): Command {
       return escolhido && escolhido !== "" ? escolhido : UBUNTU_AUBERGINE;
     })();
 
-    const desenharBuild = (): string => {
+    const desenharBuild = semDerrubarORun(() => {
       painelBuild.setPhases(fases.rows(), fases.summary(), MAX_LINHAS_DE_FASE);
       return renderDashboard({
         ...painelBuild.model(),
@@ -1313,7 +1342,7 @@ export function createProgram(): Command {
         height: stdout.rows ?? 40,
         ...(fundoBuild !== undefined ? { background: fundoBuild } : {}),
       });
-    };
+    }, VERSION);
     const repaintBuild = (): void => liveBuild.draw(desenharBuild());
     liveBuild.beat(() => {
       painelBuild.tick();

@@ -5740,3 +5740,62 @@ Duas defesas, e as duas fazem falta:
   renderizador: engolir a exceção lá esconderia o defeito de quem a escreveu. Aqui
   ela vira uma linha visível na tela, o run continua, e quem lê sabe que o painel
   falhou e que `--no-dashboard` existe.
+
+## §79 — As teclas que responderam por quem não estava lá
+
+O desenvolvedor rodou o `plan`, não conseguiu responder as perguntas, saiu, e voltou
+achando que **o harness tinha respondido sozinho**. Os artefatos dizem que quase:
+
+> 95 decisões gravadas como autoridade, todas com a resposta `1`, e **33 delas com
+> menos de meio segundo entre uma e outra** — rajadas de 0,26 segundos.
+
+Ninguém lê uma arbitragem e escolhe em 0,26s, oito vezes seguidas.
+
+### 79.1 A fila que salva o pipe e trai a pessoa
+
+`createLineIO` guarda toda linha que chega enquanto ninguém está perguntando, e a
+entrega à próxima pergunta. Isso existe por um motivo real e documentado: entrada
+vinda de arquivo ou pipe chega inteira antes da primeira pergunta, e sem a fila o
+readline fecha e o run morre em `ERR_USE_AFTER_CLOSE` — foi assim que o piloto 5
+morreu na pergunta 1 de 6.
+
+O que resolve o pipe é veneno na mão de uma pessoa. Num terminal, o que ela digita
+ENQUANTO o harness pensa — três minutos esperando um modelo — responde a pergunta
+SEGUINTE, que ela ainda não viu. A pergunta aparece e é respondida no mesmo instante,
+some da tela, e vira decisão gravada como autoridade: vai para o escritor, para o
+auditor, para o relatório e para a base documental.
+
+A regra passou a depender de quem está do outro lado. Em pipe, a fila entrega na
+ordem — é um roteiro escrito de propósito. Em terminal, **só conta o que for digitado
+depois de a pergunta estar na tela**, e o descarte é dito em voz alta, porque sumir
+com a tecla de alguém em silêncio é outra forma do mesmo defeito.
+
+### 79.2 E o conserto de ontem que não funcionava nunca
+
+O mesmo run mostrou o outro lado: a tentativa 3 da auditoria **aprovou 10 das 13
+fases**, e a tentativa 4 reauditou 12. As aprovações tinham caído.
+
+A culpada é `faseDoMarcador`, escrita no §77.7 para dizer em que fase vive um
+`[NEEDS DECISION]`:
+
+```ts
+const bruto = parsePhases(documento);          // recusa: o documento TEM marcador
+const cruas = bruto.ok ? bruto.document.phases : fases;   // cai nas fases já limpas
+return cruas.find((fase) => fase.markdown.includes(marcador))?.number;  // nunca acha
+```
+
+O parser recusa qualquer documento com marcador — que é o único caso em que a função
+é chamada. Ela caía no ramo das fases já limpas, cujo texto não contém o marcador, e
+devolvia `undefined` **em 100% das chamadas**. Sem fase, `affectedPhases` usa o
+fallback de "todas", a emenda reescreve as treze, o sha de cada uma muda, e toda
+aprovação cai.
+
+Agora a ESTRUTURA vem do documento sem marcadores e a POSIÇÃO vem do documento cru:
+vale a última fase que começa antes do marcador. E o fallback ganhou dono — quem
+chama declara. Para um achado de coerência "todas as fases" é a coisa certa, porque
+aquele auditor não nomeia fase por natureza; para uma decisão de lacuna é o oposto, e
+ela pede `somenteNomeadas`: sem saber qual fase, o harness não reescreve nada e diz
+que não soube.
+
+O teste novo falha com o código antigo — `expected [] to deeply equal ['phase-p02']`
+—, que é o que faltava na primeira vez.

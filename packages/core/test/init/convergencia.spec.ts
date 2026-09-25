@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runInit, runPlan } from "../../src/init/index.js";
-import { fakeAgent, skeletonPath } from "../support/fake-agent.js";
+import { PHASE_2, fakeAgent, skeletonPath } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
 
 let projectRoot = "";
@@ -291,5 +291,78 @@ describe("o levantamento mostra o que o escritor entregou", () => {
     expect(entregas.length).toBeGreaterThan(0);
     expect(entregas[0]).toContain("A fase segue como está");
     expect(entregas[0]).toContain("Criar a migration de statuses");
+  }, 30000);
+});
+
+/*
+ * `faseDoMarcador` não funcionava NUNCA, e o defeito é exemplar: ela usava
+ * `parsePhases(documento)` para achar a fase que contém o marcador, e o parser
+ * recusa qualquer documento COM marcador (I-13) — que é o único caso em que ela é
+ * chamada. Devolvia `undefined` sempre, `affectedPhases` caía no fallback de
+ * "todas", a emenda reescrevia as treze, e toda aprovação caía junto com o sha.
+ *
+ * Medido no `assistencia2`: a tentativa 3 aprovou 10 fases e a 4 reauditou 12.
+ */
+describe("a decisão de uma lacuna não derruba as fases aprovadas", () => {
+  it("a emenda do marcador toca só a fase dele", async () => {
+    const agentInit = fakeAgent(skeletonPath());
+    await runInit({ projectRoot, request, ...comum, stage: "init", call: agentInit.call, ask: async () => "use as recomendações" });
+
+    const marcador = "o status inicial de uma reserva importada";
+    const comMarcador = `## Phase 2: Criar reserva
+
+**Goal:** o hóspede cria uma reserva · **Depends on:** Phase 1 · **Covers:** US-1.1, workflow 1
+
+- [ ] **Task:** Implementar a criação de reserva com recusa de datas sobrepostas
+  - **Acceptance criteria:**
+    - Uma reserva nova nasce com status pendente
+    [NEEDS DECISION] ${marcador}
+  - **Feature tests:** reserva_sobreposta → a segunda reserva é recusada
+  - **Traces:** US-1.1, reservations, workflow 1
+`;
+
+    let escritas = 0;
+    const steps = skeletonPath();
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "phase-p02" },
+      respond: {
+        stdout: () => {
+          escritas += 1;
+          return escritas === 1 ? comMarcador : PHASE_2;
+        },
+      },
+      repeat: true,
+    });
+    steps.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-phases.md:gaps" },
+      respond: {
+        stdout: JSON.stringify({
+          contract: "capivara-questions/v1",
+          questions: [
+            {
+              id: "Q-01",
+              topic: "status inicial",
+              evidence: "a fase parou aqui",
+              decision: "Qual status uma reserva importada recebe?",
+              why: "muda o que a migration semeia",
+              options: [
+                { label: "pendente", consequence: "entra como pendente" },
+                { label: "confirmada", consequence: "entra como confirmada" },
+              ],
+              recommended: "pendente",
+              recommendationBasis: "é o de entrada",
+            },
+          ],
+        }),
+      },
+      repeat: true,
+    });
+
+    const agent = fakeAgent(steps);
+    await runPlan({ projectRoot, request, ...comum, call: agent.call, ask: async () => "1" });
+
+    // A fase 1 não foi tocada: o marcador estava na 2, e o harness soube dizer qual.
+    const emendas = agent.calls.filter((call) => call.stage === "authoring" && call.prompt.includes("amending a phase"));
+    expect(emendas.map((call) => call.subject)).toEqual(["phase-p02"]);
   }, 30000);
 });

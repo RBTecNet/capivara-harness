@@ -133,7 +133,7 @@ async function completarPapeis<T extends CliRoleFlags>(comando: string, faltando
   const terminal = createInterface({ input: stdin, output: stdout });
   try {
     const escolha = await runWizardDePapeis({
-      io: createLineIO(terminal, (texto) => void stdout.write(texto)),
+      io: createLineIO(terminal, (texto) => void stdout.write(texto), { interactive: stdin.isTTY === true }),
       cwd: process.cwd(),
       comando,
       faltando: faltando as RoleName[],
@@ -206,7 +206,7 @@ async function completarPedido(comando: string): Promise<{ prompt?: string; file
   const terminal = createInterface({ input: stdin, output: stdout });
   try {
     const escolhido = await runWizardDoPedido({
-      io: createLineIO(terminal, (texto) => void stdout.write(texto)),
+      io: createLineIO(terminal, (texto) => void stdout.write(texto), { interactive: stdin.isTTY === true }),
       cwd: process.cwd(),
       comando,
       ...mundoDoWizard(),
@@ -292,7 +292,7 @@ function estagioInterativo(options: {
    * pipe ou arquivo chega inteira antes da primeira pergunta, o readline fecha
    * no fim dela, e a pergunta seguinte estoura em ERR_USE_AFTER_CLOSE.
    */
-  const linhas = createLineIO(terminal, (text) => void stdout.write(text));
+  const linhas = createLineIO(terminal, (text) => void stdout.write(text), { interactive: stdin.isTTY === true });
   const perguntar = async (prompt: string, decision: string): Promise<string> => {
     try {
       return await linhas.ask(prompt);
@@ -763,7 +763,7 @@ export function createProgram(): Command {
 
     let parada: Parada | null = null;
     const terminalChange = stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
-    const linhasChange = terminalChange ? createLineIO(terminalChange, (texto) => void stdout.write(texto)) : null;
+    const linhasChange = terminalChange ? createLineIO(terminalChange, (texto) => void stdout.write(texto), { interactive: true }) : null;
 
     try {
       const resultado = await runChange({
@@ -857,7 +857,7 @@ export function createProgram(): Command {
      */
     let paradaDoSurvey: Parada | null = null;
     const terminalSurvey = stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
-    const linhasSurvey = terminalSurvey ? createLineIO(terminalSurvey, (texto) => void stdout.write(texto)) : null;
+    const linhasSurvey = terminalSurvey ? createLineIO(terminalSurvey, (texto) => void stdout.write(texto), { interactive: true }) : null;
 
     const base = flags.mcp
       ? await (async () => {
@@ -1353,7 +1353,7 @@ export function createProgram(): Command {
     // quando há um desenvolvedor para responder. Sem terminal, faltar
     // pré-requisito continua sendo erro de preflight, e não um palpite.
     const terminalBuild = stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
-    const linhasBuild = terminalBuild ? createLineIO(terminalBuild, (text) => void stdout.write(text)) : null;
+    const linhasBuild = terminalBuild ? createLineIO(terminalBuild, (text) => void stdout.write(text), { interactive: true }) : null;
 
     /*
      * O esqueleto do `init` é o que diz quais fluxos existem. Ele é carregado
@@ -1533,7 +1533,7 @@ export function createProgram(): Command {
     let resultado;
     try {
       resultado = await runWizard({
-        io: createLineIO(terminal, (text) => void stdout.write(text)),
+        io: createLineIO(terminal, (text) => void stdout.write(text), { interactive: stdin.isTTY === true }),
         cwd: process.cwd(),
         listModels: (providerId) => listarModelos(providerId),
         listEfforts: (providerId, model) => listarEfforts(providerId, model),

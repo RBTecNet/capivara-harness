@@ -72,3 +72,71 @@ describe("fila de linhas", () => {
     await pendente;
   });
 });
+
+/*
+ * O que resolve o pipe é veneno na mão de uma pessoa.
+ *
+ * Medido no `assistencia2`: 95 decisões gravadas como autoridade, todas com a
+ * resposta `1`, e 33 delas com menos de meio segundo entre uma e outra — rajadas
+ * de 0,26s. O desenvolvedor tinha saído do terminal; as teclas batidas antes
+ * responderam perguntas que ele nunca viu, e cada uma virou decisão gravada.
+ */
+describe("num terminal, só vale o que foi digitado DEPOIS da pergunta", () => {
+  function interativo() {
+    const escrito: string[] = [];
+    const ouvintes: Record<string, ((linha: string) => void)[]> = { line: [], close: [] };
+    const source = {
+      on: (evento: "line" | "close", ouvinte: (linha: string) => void) => {
+        ouvintes[evento]!.push(ouvinte);
+        return undefined;
+      },
+    };
+    const io = createLineIO(source as never, (texto) => void escrito.push(texto), { interactive: true });
+    return { io, escrito, digitar: (linha: string) => ouvintes.line!.forEach((ouvinte) => ouvinte(linha)) };
+  }
+
+  it("descarta o que chegou antes da pergunta, e diz que descartou", async () => {
+    const t = interativo();
+    // Três teclas batidas enquanto o harness pensava, sem pergunta na tela.
+    t.digitar("1");
+    t.digitar("1");
+    t.digitar("1");
+
+    const resposta = t.io.ask("> ");
+    expect(t.escrito.join("")).toContain("ignorei 3 linha(s)");
+
+    // A pergunta continua esperando: ela não foi respondida pelo passado.
+    let respondida = false;
+    void resposta.then(() => (respondida = true));
+    await Promise.resolve();
+    expect(respondida).toBe(false);
+
+    t.digitar("2");
+    expect(await resposta).toBe("2");
+  });
+
+  it("sem nada digitado antes, não avisa nada", async () => {
+    const t = interativo();
+    const resposta = t.io.ask("> ");
+    t.digitar("1");
+    expect(await resposta).toBe("1");
+    expect(t.escrito.join("")).not.toContain("ignorei");
+  });
+
+  /*
+   * E o pipe continua exatamente como era: ali a fila é a intenção de quem
+   * escreveu o roteiro, e a ordem é o que faz um run não interativo funcionar.
+   */
+  it("com entrada de pipe, a fila entrega na ordem como sempre", async () => {
+    const escrito: string[] = [];
+    const ouvintes: ((linha: string) => void)[] = [];
+    const source = { on: (evento: string, ouvinte: (linha: string) => void) => void (evento === "line" && ouvintes.push(ouvinte)) };
+    const io = createLineIO(source as never, (texto) => void escrito.push(texto));
+
+    ouvintes.forEach((ouvinte) => ouvinte("codex"));
+    ouvintes.forEach((ouvinte) => ouvinte("gpt-5"));
+    expect(await io.ask("provider> ")).toBe("codex");
+    expect(await io.ask("modelo> ")).toBe("gpt-5");
+    expect(escrito.join("")).not.toContain("ignorei");
+  });
+});

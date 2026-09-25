@@ -276,9 +276,22 @@ function scoped(document: string, questionId: string, stage = "interview"): stri
 }
 
 /** Um documento escrito, com a forma de reescrevê-lo quando o auditor devolve. */
+/** O que a reescrita pode saber sobre a natureza dos achados que recebeu. */
+interface OpcoesDaEmenda {
+  /**
+   * Só reescreve fase que algum achado NOMEIE.
+   *
+   * Para quem sabe que o achado é de uma fase só — uma decisão de lacuna, uma
+   * arbitragem — e prefere não reescrever nada a reescrever tudo. O padrão
+   * continua sendo o fallback conservador, que é o certo para a auditoria de
+   * coerência: ela não nomeia fase porque o defeito é ENTRE elas.
+   */
+  somenteNomeadas?: boolean;
+}
+
 interface Authored {
   content: string;
-  rewrite: (findings: Finding[], attempt: number) => Promise<Authored>;
+  rewrite: (findings: Finding[], attempt: number, opcoes?: OpcoesDaEmenda) => Promise<Authored>;
 }
 
 export class InitBlockedError extends Error {
@@ -1531,8 +1544,28 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
     const autorado = (partes: string[]): Authored => ({
       content: montar(partes),
-      rewrite: async (findings, attempt) => {
+      rewrite: async (findings, attempt, opcoes) => {
+        /*
+         * O fallback de "todas as fases" é certo para uns achados e destrutivo
+         * para outros.
+         *
+         * Para um achado de COERÊNCIA ele é a coisa certa: aquele auditor não
+         * nomeia fase porque o defeito é ENTRE elas, e quem pode consertar são as
+         * fases. Para uma decisão de LACUNA é o oposto — ela fala de um marcador
+         * que vive numa fase só, e reescrever as outras doze muda o texto de
+         * todas, muda o sha de cada uma, e derruba as aprovações já pagas. Medido
+         * no `assistencia2`: a tentativa 3 aprovou 10 fases e a 4 reauditou 12.
+         *
+         * Então quem chama declara. O padrão continua conservador; quem sabe que
+         * o achado é de UMA fase pede `somenteNomeadas` e, se ninguém souber dizer
+         * qual, o harness não reescreve nada — e diz que não soube.
+         */
         const alvos = affectedPhases(findings, partes.length);
+        const semReferencia = alvos.length === partes.length && !findings.some((finding) => finding.phase !== undefined);
+        if (opcoes?.somenteNomeadas === true && semReferencia) {
+          announce("  não consegui localizar a fase destes achados; não vou reescrever o plano inteiro por isso");
+          return autorado(partes);
+        }
         announce(`  emendando ${alvos.length} de ${partes.length} fase(s)`);
         const proximas = [...partes];
 
@@ -2022,12 +2055,36 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * ver de qual fase é o texto que contém o marcador.
    */
   function faseDoMarcador(documento: string, marcador: string): number | undefined {
+    /*
+     * A primeira versão disto não funcionava NUNCA, e o defeito é exemplar.
+     *
+     * Ela tentava `parsePhases(documento)` para achar a fase que contém o
+     * marcador — e o parser recusa qualquer documento COM marcador, que é
+     * justamente o único caso em que esta função é chamada (I-13). Caía no ramo
+     * das fases já limpas, cujo texto não contém o marcador, e devolvia
+     * `undefined` em todas as vezes. Sem fase, `affectedPhases` usa o fallback de
+     * "todas", a emenda reescreve as treze, o sha de cada uma muda e TODA
+     * aprovação cai. Medido no `assistencia2`: a tentativa 3 aprovou 10 fases e a
+     * tentativa 4 reauditou 12.
+     *
+     * A estrutura vem do documento sem marcadores; a POSIÇÃO vem do documento
+     * cru. O cabeçalho de cada fase é usado como texto literal — não há regex de
+     * fase aqui, ela continua sendo do contrato —, e vale a última fase que
+     * começa antes do marcador.
+     */
     const lido = parsePhases(stripAllMarkers(documento).content);
-    const fases = lido.ok ? lido.document.phases : [];
-    // O marcador não sobrevive ao `stripAllMarkers`, então a busca é no texto cru.
-    const bruto = parsePhases(documento);
-    const cruas = bruto.ok ? bruto.document.phases : fases;
-    return cruas.find((fase) => fase.markdown.includes(marcador))?.number;
+    if (!lido.ok) return undefined;
+
+    const ondeEstaOMarcador = documento.indexOf(marcador);
+    if (ondeEstaOMarcador < 0) return undefined;
+
+    let escolhida: number | undefined;
+    for (const fase of lido.document.phases) {
+      const cabecalho = fase.markdown.split("\n")[0] ?? "";
+      const inicio = cabecalho === "" ? -1 : documento.indexOf(cabecalho);
+      if (inicio >= 0 && inicio < ondeEstaOMarcador) escolhida = fase.number;
+    }
+    return escolhida;
   }
 
   /** Marca como fechados os marcadores cuja pergunta já tem resposta aceita. */
@@ -2280,6 +2337,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           };
         }),
         round,
+        // A decisão de uma lacuna vive numa fase só. Sem saber qual, é melhor não
+        // reescrever nada do que reescrever o plano inteiro e derrubar aprovações.
+        { somenteNomeadas: true },
       );
 
       // O escritor deveria ter apagado o marcador; quando não apaga, o marcador

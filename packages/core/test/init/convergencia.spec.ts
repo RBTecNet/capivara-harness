@@ -119,7 +119,7 @@ describe("o laço de auditoria termina contra um auditor que nunca aprova", () =
     expect(perguntas.length).toBeLessThan(15);
     expect(new Set(perguntas).size).toBe(perguntas.length);
     expect(impasses).toBeGreaterThan(0);
-  }, 30000);
+  });
 
   /*
    * O mesmo achado com o endereço reescrito é o MESMO ponto. Era isso que o
@@ -165,7 +165,7 @@ describe("o laço de auditoria termina contra um auditor que nunca aprova", () =
 
     // Uma arbitragem para o ponto, não uma por endereço reescrito.
     expect(arbitragens.length).toBe(1);
-  }, 30000);
+  });
 });
 
 /*
@@ -229,7 +229,7 @@ describe("a emenda vai para a fase do achado, e só para ela", () => {
      */
     const emendas = agent.calls.filter((call) => call.stage === "authoring" && call.prompt.includes("amending a phase"));
     expect(emendas.map((call) => call.subject)).toEqual(["phase-p02"]);
-  }, 30000);
+  });
 });
 
 /*
@@ -291,7 +291,7 @@ describe("o levantamento mostra o que o escritor entregou", () => {
     expect(entregas.length).toBeGreaterThan(0);
     expect(entregas[0]).toContain("A fase segue como está");
     expect(entregas[0]).toContain("Criar a migration de statuses");
-  }, 30000);
+  });
 });
 
 /*
@@ -364,5 +364,5 @@ describe("a decisão de uma lacuna não derruba as fases aprovadas", () => {
     // A fase 1 não foi tocada: o marcador estava na 2, e o harness soube dizer qual.
     const emendas = agent.calls.filter((call) => call.stage === "authoring" && call.prompt.includes("amending a phase"));
     expect(emendas.map((call) => call.subject)).toEqual(["phase-p02"]);
-  }, 30000);
+  });
 });

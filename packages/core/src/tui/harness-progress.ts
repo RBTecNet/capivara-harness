@@ -61,6 +61,21 @@ const STAGE_LABEL: Record<string, string> = {
   ready: "prontidão",
 };
 
+/**
+ * A hora que a pessoa vê é a do relógio DELA.
+ *
+ * O painel mostrava `toISOString()`, que é UTC: às nove da noite em Brasília a
+ * tela dizia meia-noite, e quem cruzasse a tela com o próprio relógio somava três
+ * horas na cabeça o run inteiro.
+ *
+ * O que vai para `events.tsv` continua em ISO com fuso zero, de propósito: ali o
+ * valor precisa ser ordenável, comparável entre máquinas e não ambíguo daqui a
+ * seis meses. Registro em UTC, tela no fuso de quem olha.
+ */
+function horaLocal(instante: Date): string {
+  return instante.toLocaleTimeString("pt-BR", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
 export class HarnessProgress {
   private readonly startedAt: number;
   private readonly options: HarnessProgressOptions;
@@ -160,7 +175,7 @@ export class HarnessProgress {
 
   /** Uma linha para o log visível. Mantém só as últimas; painel não é histórico. */
   note(text: string): void {
-    this.linhas.push({ time: this.now().toISOString().slice(11, 19), text });
+    this.linhas.push({ time: horaLocal(this.now()), text });
     if (this.linhas.length > 12) this.linhas.splice(0, this.linhas.length - 12);
   }
 

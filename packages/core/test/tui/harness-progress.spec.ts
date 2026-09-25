@@ -283,3 +283,28 @@ describe("o cabeçalho diz qual estágio está na tela", () => {
     expect(painel().command).toBe("init");
   });
 });
+
+/*
+ * O painel mostrava `toISOString()`, que é UTC. Às nove da noite em Brasília a
+ * tela dizia meia-noite, e quem cruzasse a tela com o próprio relógio somava três
+ * horas na cabeça o run inteiro.
+ */
+describe("a hora é a do relógio de quem olha", () => {
+  it("o log do painel usa o fuso local, não UTC", () => {
+    const meioDiaUtc = new Date("2026-09-25T15:00:00.000Z");
+    const painel = new HarnessProgress({
+      version: "0.2.0",
+      command: "plan",
+      project: "x",
+      roles: [],
+      provider: { perfil: "codex", transporte: "codex-cli", contabilidade: "por chamada" },
+      style: { enabled: false },
+      environment: {},
+      now: () => meioDiaUtc,
+    });
+
+    painel.note("qualquer coisa");
+    const esperado = meioDiaUtc.toLocaleTimeString("pt-BR", { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    expect(painel.model().events[0]?.time).toBe(esperado);
+  });
+});

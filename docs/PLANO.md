@@ -4984,3 +4984,26 @@ Agora a recusa carrega as perguntas sem defeito, e a rodada segue com elas
 anunciando quantas ficaram de fora. O lote inteiro só é perdido quando não sobra
 nada — resposta que não é JSON, contrato errado —, que é quando a recusa
 realmente significa "o modelo não entendeu o pedido".
+
+## §72 — Registro em UTC, tela no relógio de quem olha
+
+O painel mostrava `toISOString()`. Às nove da noite em Brasília a tela dizia
+meia-noite, e quem cruzasse o log do harness com o próprio relógio somava três
+horas na cabeça o run inteiro:
+
+```
+[03:01:45] não consegui transformar 4 decisão(ões) pendente(s) em pergunta
+```
+
+Eram 00:01.
+
+A separação é a de sempre, e vale escrever porque é fácil resolver para o lado
+errado:
+
+- **o que é gravado** — `events.tsv`, `run.json`, os handoffs — continua em ISO
+  com fuso zero. Ali o valor precisa ser ordenável, comparável entre máquinas e
+  não ambíguo daqui a seis meses;
+- **o que é mostrado** — o log do painel, a mensagem do lock, o visor de runs —
+  usa o fuso do computador.
+
+Converter na gravação estragaria o arquivo; deixar UTC na tela estraga a leitura.

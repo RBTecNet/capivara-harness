@@ -140,6 +140,18 @@ export interface BuildOutcome {
   acceptance: AcceptanceResult | null;
 }
 
+/**
+ * Um instante gravado, dito no relógio de quem lê.
+ *
+ * O arquivo guarda ISO em UTC — ordenável e não ambíguo —, e a mensagem mostra a
+ * hora local: "desde 2026-09-25T00:12:03.918Z" faz quem está às nove da noite
+ * fazer a conta de cabeça para saber se o processo é de agora ou de ontem.
+ */
+function quandoLocal(iso: string): string {
+  const instante = new Date(iso);
+  return Number.isNaN(instante.getTime()) ? iso : instante.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "medium" });
+}
+
 export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   const announce = options.announce ?? (() => undefined);
   const now = options.now ?? (() => new Date());
@@ -172,7 +184,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   const emExecucao = await liveLockOwner({ projectRoot: options.projectRoot, runId });
   if (emExecucao) {
     const razao =
-      `já há um build deste plano em execução no pid ${emExecucao.pid} (desde ${emExecucao.startedAt}), ` +
+      `já há um build deste plano em execução no pid ${emExecucao.pid} (desde ${quandoLocal(emExecucao.startedAt)}), ` +
       "e é ele que está escrevendo na árvore. Espere aquele processo terminar, ou encerre-o antes de rodar de novo.";
     announce(`erro: ${razao}`);
     return { runId, exitCode: 1, phases: [], warnings: [], errors: [razao], acceptance: null };

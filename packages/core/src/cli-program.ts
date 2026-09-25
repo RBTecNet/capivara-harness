@@ -22,7 +22,7 @@ import {
 import { createMcpClient, enviarLevantamento, projetoExiste, fetchProjectMaterial, listLibraryProjects, registrarMemorias, type MemoriaParaRegistrar } from "./mcp/index.js";
 import type { ProjectMaterial } from "./mcp/index.js";
 import type { InitOptions } from "./init/index.js";
-import { commitSpecification, relatorioDoBuild, runBuild } from "./loop/index.js";
+import { commitSpecification, iniciarRepositorio, relatorioDoBuild, runBuild } from "./loop/index.js";
 import {
   BACK,
   BuildPhaseTracker,
@@ -1036,6 +1036,24 @@ export function createProgram(): Command {
       comPainel,
       documento: "entrevista",
     });
+
+    /*
+     * O repositório nasce aqui, que é o único momento em que a pasta é
+     * garantidamente vazia.
+     *
+     * O build passou a exigir repositório (§75.5), e exigir no fim da cadeia
+     * significa exigir de quem já andou horas sem ele. O `init` roda antes de
+     * qualquer arquivo de produto existir: criar o repositório agora não tem
+     * dúvida de dono, e tem um segundo efeito que o relatório vinha cobrando —
+     * "sem repositório Git: a especificação não foi versionada". Com ele, a
+     * especificação é versionada no momento em que fecha o gate.
+     *
+     * `--no-commit` é a saída de quem não quer que o harness versione nada.
+     */
+    if (flags.commit !== false) {
+      const repositorio = await iniciarRepositorio(projectRoot);
+      if (repositorio.criado) stdout.write("repositório Git criado: a especificação e cada fase do build entram no histórico\n");
+    }
 
     let parada: Parada | null = null;
     try {

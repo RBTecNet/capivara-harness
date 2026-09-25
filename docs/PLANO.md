@@ -5388,3 +5388,11 @@ respeita de quem é o trabalho:
 `--no-git` continua existindo, para quem versiona por fora ou usa outro controle de
 versão. É escolha explícita de quem chamou, dita na mensagem de erro, e o aviso que
 sobrou existe só para esse caso.
+
+E a exigência fica mais barata porque o repositório passou a nascer ANTES: o `init`
+o cria, que é o único momento em que a pasta é garantidamente vazia — nenhum arquivo
+de produto existe ainda, e não há dúvida de dono. Exigir só no build seria exigir de
+quem já andou horas sem ele. Isso resolve de graça a outra reclamação que o relatório
+vinha fazendo há semanas — *"sem repositório Git: a especificação não foi
+versionada"* —, porque agora há onde versioná-la no instante em que o gate fecha.
+`--no-commit` é a saída de quem não quer que o harness versione nada.

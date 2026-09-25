@@ -38,7 +38,7 @@ import {
   runPaths,
   writeRunState,
 } from "../state/index.js";
-import { isClean, isRepository } from "./git.js";
+import { iniciarRepositorio, isClean, isRepository } from "./git.js";
 import { materializeSessions } from "./split.js";
 import { preflight, type PreflightWarning } from "./preflight.js";
 import { readPrerequisiteChoice, renderPrerequisiteChoice, resolvePrerequisites } from "./prerequisites.js";
@@ -48,6 +48,7 @@ import { runAcceptance, type AcceptanceResult, type CommandRunner } from "./acce
 import { acceptancePrompt, installPrompt } from "../prompts/index.js";
 import type { BuildProgressListener } from "./progress.js";
 import { lerFasesFechadas, registrarFaseFechada, shaDaFase } from "./ledger.js";
+import { TasksAprovadas } from "./veredictos.js";
 import type { TestRunner } from "./gates.js";
 
 export interface BuildOptions {
@@ -78,6 +79,13 @@ export interface BuildOptions {
   roles?: Record<string, { provider: string; model: string; effort: string }>;
   /** Refaz até o que já fechou em run anterior com o mesmo texto. */
   rebuildAll?: boolean;
+  /**
+   * Criar o repositório Git quando a pasta é nova. Ligado por padrão.
+   *
+   * Desligar é para quem versiona por fora ou não quer git nenhum: o loop roda
+   * igual, sem commit por fase — e sem ponto de retorno entre as fases.
+   */
+  gitInit?: boolean;
   /**
    * Recebe o que este build tem a devolver à base: o estado e o que o executor
    * anotou. Ausente significa build sem base — nada muda no resto.
@@ -188,6 +196,19 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       "e é ele que está escrevendo na árvore. Espere aquele processo terminar, ou encerre-o antes de rodar de novo.";
     announce(`erro: ${razao}`);
     return { runId, exitCode: 1, phases: [], warnings: [], errors: [razao], acceptance: null };
+  }
+
+  /*
+   * O repositório, criado por quem precisa dele.
+   *
+   * O build é quem commita por fase, então é ele quem garante haver onde commitar.
+   * Dezesseis fases sem repositório são dezesseis fases sem ponto de retorno — e,
+   * no `assitencia`, também uma task correta reprovada no gate 3 porque o
+   * verificador foi conferir "arquivos versionados" numa árvore sem versionamento.
+   */
+  if (options.gitInit !== false) {
+    const iniciado = await iniciarRepositorio(options.projectRoot);
+    if (iniciado.criado) announce("repositório Git criado: cada fase verde vira um commit, e há para onde voltar");
   }
 
   const repository = await isRepository(options.projectRoot);
@@ -440,6 +461,15 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
      * que é o certo quando alguém editou um critério.
      */
     const fechadasAntes = options.rebuildAll === true ? [] : await lerFasesFechadas(options.projectRoot);
+    /*
+     * A TERCEIRA memória, uma granularidade abaixo: a task já verificada.
+     *
+     * As duas de cima evitam refazer uma FASE. Esta evita repergunta dentro da
+     * fase que ainda não fechou — que é onde o run morria: catorze tasks relidas
+     * por ciclo, duas incompletas por vez, sempre outras duas. `--rebuild-all`
+     * limpa esta também, porque quem pede para refazer tudo pede isso mesmo.
+     */
+    const aprovadas = await TasksAprovadas.abrir(options.projectRoot, runId, options.rebuildAll === true);
     const shaFechado = new Map(fechadasAntes.map((fase) => [fase.sha, fase]));
 
     const phases: PhaseReport[] = [];
@@ -506,6 +536,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         ...(options.onMemorias ? { onMemorias: options.onMemorias } : {}),
         ...(fluxosDaFase ? { flows: fluxosDaFase(session.number) } : {}),
         ...(options.testRunner !== undefined ? { testRunner: options.testRunner } : {}),
+        aprovadas,
         systemInstall: options.systemInstall === true,
         ...(options.maxCycles !== undefined ? { maxCycles: options.maxCycles } : {}),
         commitsEnabled: checked.commitsEnabled,

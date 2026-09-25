@@ -5267,3 +5267,99 @@ fluxos do gate 4 saem do esqueleto por `covers`, e as duas coberturas que o
 garantem são verificadas nos dois gates: PLAN READY exige que todo workflow
 apareça no `covers` de alguma fase, RALPH READY que ele seja citado no `Traces` de
 alguma task.
+
+## §75 — O gate 3 não convergia: era amostragem, não regressão
+
+O `assitencia` rodou o build com o binário de antes e parou na fase 1, com doze
+das catorze tasks prontas. Os três ciclos foram estes:
+
+| ciclo | INCOMPLETE | o que aconteceu |
+| --- | --- | --- |
+| 1 | TASK 1, TASK 10 | o executor fechou as duas |
+| 2 | TASK 7, TASK 10 | a 7 estava **DONE** no ciclo 1 |
+| 3 | TASK 2, TASK 6 | as duas estavam **DONE** nos ciclos 1 e 2 |
+
+Seis tasks diferentes, nunca mais de duas por vez, e o executor fechou todas as
+que lhe foram apontadas. **A fase não estava piorando.** O verificador relê catorze
+tasks e umas quarenta condições a cada ciclo, e nenhuma leitura de modelo encontra
+tudo numa passada — cada nova leitura de um texto já lido acha algo que a anterior
+não achou. Com catorze tasks isso não converge: é o §73 outra vez, na outra ponta
+do harness.
+
+E é a **correção pela metade** no seu formato mais puro. Dois dias antes, o `plan`
+recebeu memória de julgamento por task exatamente por essa medição — "dezenove
+fechados, dezenove novos" — e o `build`, que tem a mesma forma e o mesmo custo por
+ciclo, não recebeu nada.
+
+### 75.1 Um DONE é fato do run
+
+`loop/veredictos.ts` guarda cada task aprovada por **fase + texto canônico da
+task**, em `.capivara/handoffs/tasks.json`, e o registro atravessa execuções — o
+caso que doeu foi justamente rodar `capivara build` de novo e a verificação
+recomeçar do zero nas catorze. A chave é o texto, não o número: editar um critério
+no plano faz a task voltar à fila, que é o que quem editou está pedindo.
+`--rebuild-all` abre o registro vazio.
+
+Como no §73, guardar não basta — quem julga precisa saber. O prompt do verificador
+lista as tasks já aprovadas e diz para não rejulgá-las, com a mesma saída
+explícita: se a correção DESTE ciclo quebrou uma delas, o achado é sobre a task que
+mudou. E quando ele rejulga mesmo assim, o gate desconsidera, mas **nunca em
+silêncio**: a linha sai na tela com o que ele disse, e o log da verificação tem o
+texto inteiro.
+
+O que protege contra um DONE que deixou de ser verdade não é reperguntar: são os
+gates 0, 1 e 2, que rodam a árvore inteira a cada ciclo e não dependem de atenção.
+
+### 75.2 O critério que nós mesmos escrevemos sem resposta possível
+
+> TASK 2: INCOMPLETE — a árvore não contém metadados de versionamento para
+> confirmar que os arquivos versionados não incluem credenciais reais.
+
+O verificador está certo, e o defeito é nosso: a regra transversal de banco — que o
+harness injeta em TODO projeto com banco, determinística, sem passar pelo modelo —
+dizia *"nenhum arquivo versionado, documento ou log contém credencial"*. O projeto
+não tinha repositório Git. Nenhuma implementação podia provar aquilo.
+
+A regra passou a falar de ARQUIVO, que se abre e se lê: o `.env` é o único que pode
+conter credencial, está no `.gitignore`, e nenhum outro arquivo da árvore tem senha,
+token ou string de conexão — *"e isso se confere abrindo os arquivos"*.
+
+### 75.3 O conjunto sem borda
+
+> TASK 6: INCOMPLETE — a criação genérica permite outros administradores
+> protegidos, e o teste compartilhado não cobre todas as exclusões lógicas.
+
+O critério dizia: *"a exclusão lógica é a regra compartilhada por **todos os
+serviços e operações de exclusão previstos no escopo**"*, na fase 1, onde a maior
+parte desses serviços ainda não existe. A observação individual é fácil; o que não
+se decide é quando a lista está COMPLETA. O verificador procura, acha um caso a
+mais, reprova — e no ciclo seguinte acha outro.
+
+É uma terceira forma de critério impossível, ao lado das duas que o ensaio já
+conhecia (§28), e ela passou pelo ensaio porque é observável em princípio e
+satisfazível em princípio. Agora:
+
+- o escritor de fase é proibido de quantificar sobre conjunto que a fatia não
+  ENUMERA, e recebe a medição junto com a proibição;
+- o ensaio ganhou a regra no `UNOBSERVABLE`: *"o critério cujo conjunto não tem
+  borda"*, com o pedido de nomear qual conjunto é;
+- e a mesma regra proíbe critério que dependa do que não está na árvore de
+  trabalho — metadado de versionamento, CI, servidor remoto —, que é o 75.2 dito
+  de forma geral.
+
+### 75.4 O repositório que o build precisa é o build que cria
+
+Sem repositório, `commitPhase` não fazia nada e ninguém dizia o que isso custava:
+dezesseis fases sem **nenhum ponto de retorno**, e todo critério que fale de
+versionamento impossível de provar. Em pasta nova — que é a pasta com que o ciclo
+normal começa, porque `init` e `plan` só escrevem dentro de `.capivara/` — o build
+agora roda `git init`. Sobre trabalho que já existe ele não inventa repositório: o
+commit inicial de uma árvore alheia é decisão de quem a escreveu, e o aviso passou
+a dizer as duas consequências e o comando.
+
+**E a suíte pegou o buraco na primeira execução**: máquina sem `user.email`
+configurado faz `git commit` sair com código 128, e isso derrubava o build com a
+fase verde e todos os gates passados. Duas correções: o repositório que o harness
+cria ganha identidade local própria quando não há nenhuma resolvível, e
+`commitPhase` não lança mais — commit é escrituração, e escrituração que falha não
+desfaz trabalho que passou.

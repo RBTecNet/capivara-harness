@@ -1225,11 +1225,12 @@ export function createProgram(): Command {
       .option("--no-acceptance", "pula a aceitação operacional final")
       .option("--no-flows", "pula o gate 4: não abre a aplicação para percorrer os fluxos do esqueleto")
       .option("--rebuild-all", "refaz todas as fases, inclusive as fechadas em runs anteriores")
+      .option("--no-git", "não cria repositório Git em pasta nova; sem ele não há commit por fase")
       .option("--mcp <url>", "base documental por MCP, de onde vêm as skills do projeto")
       .option("--mcp-project <nome>", "de qual projeto da base vêm as skills")
       .option("--no-dashboard", "não desenha o painel; só as linhas de progresso"),
     ["builder", "verifier"],
-  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean; flows?: boolean; rebuildAll?: boolean; mcp?: string; mcpProject?: string; dashboard?: boolean }) => {
+  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean; flows?: boolean; rebuildAll?: boolean; git?: boolean; mcp?: string; mcpProject?: string; dashboard?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     let escolhas = flags;
     let roles = rolesFromFlags(escolhas);
@@ -1365,6 +1366,7 @@ export function createProgram(): Command {
       skeleton: esqueletoDoBuild,
       skipFlows: flags.flows === false,
       ...(flags.rebuildAll === true ? { rebuildAll: true } : {}),
+      ...(flags.git === false ? { gitInit: false } : {}),
       ...(materialDoBuild && materialDoBuild !== "erro" ? { library: materialDoBuild.documents } : {}),
       ...(devolverMemorias ? { onMemorias: devolverMemorias } : {}),
       ...(terminalBuild

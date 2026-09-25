@@ -41,6 +41,91 @@ export async function isRepository(projectRoot: string): Promise<boolean> {
   }
 }
 
+/**
+ * Só o plano de controle existe nesta pasta?
+ *
+ * A pergunta é a do `git status`, feita sem git: existe algum arquivo fora de
+ * `.capivara/`? Nada mais é ignorado de propósito — nem `node_modules`, nem
+ * `dist`. É que o `git init` só é seguro quando a resposta é não: com qualquer
+ * arquivo na árvore, o repositório novo nasce sujo, e o preflight recusa o build
+ * por uma sujeira que fomos nós que criamos.
+ */
+async function apenasPlanoDeControle(projectRoot: string): Promise<boolean> {
+  const vazio = async (directory: string): Promise<boolean> => {
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      return true;
+    }
+    for (const entry of entries) {
+      if (entry.name === ".capivara" || entry.name === ".git") continue;
+      if (entry.isDirectory()) {
+        if (!(await vazio(join(directory, entry.name)))) return false;
+        continue;
+      }
+      return false;
+    }
+    return true;
+  };
+  return await vazio(projectRoot);
+}
+
+/**
+ * O repositório que o build precisa, criado por ele.
+ *
+ * Dezesseis fases, cada fase um commit: sem repositório, `commitPhase` não faz
+ * nada e **não existe ponto de retorno nenhum** — se a fase 12 estragar o que a 4
+ * construiu, não há para onde voltar. E há um segundo custo, que o `assitencia`
+ * mediu no gate 3: uma regra transversal fala de "arquivos versionados", o
+ * verificador vai conferir, não encontra metadado de versionamento e devolve
+ * `INCOMPLETE` — uma task correta reprovada por uma pergunta que o harness deixou
+ * sem resposta.
+ *
+ * Só em pasta vazia, e é a pasta com que o ciclo normal começa: `init` e `plan`
+ * escrevem apenas dentro de `.capivara/`. Sobre trabalho que já existe, o harness
+ * não inventa repositório — quem tem código sem git tem um motivo, e o commit
+ * inicial de uma árvore alheia é decisão de quem a escreveu.
+ */
+export async function iniciarRepositorio(projectRoot: string): Promise<{ criado: boolean; motivo: string }> {
+  if (await isRepository(projectRoot)) return { criado: false, motivo: "já é um repositório" };
+  if (!(await apenasPlanoDeControle(projectRoot))) {
+    return { criado: false, motivo: "a pasta já tem arquivos: criar o repositório aqui é decisão de quem os escreveu" };
+  }
+
+  try {
+    await run("git", ["init", "-q"], { cwd: projectRoot });
+    await garantirIdentidade(projectRoot);
+    return { criado: true, motivo: "" };
+  } catch (erro) {
+    return { criado: false, motivo: erro instanceof Error ? erro.message : String(erro) };
+  }
+}
+
+/**
+ * Quem assina os commits do repositório que nós criamos.
+ *
+ * Sem `user.email` configurado, `git commit` sai com código 128 e a mensagem
+ * "Author identity unknown" — e antes disso derrubava o build inteiro, com a fase
+ * verde e os gates todos passados. A suíte pegou na primeira execução: máquina de
+ * teste não tem identidade global, e o `git init` novo fez o caminho existir.
+ *
+ * A identidade é LOCAL, só neste repositório, e só quando não há nenhuma que o
+ * git consiga resolver — configuração de quem clonou nunca é sobrescrita. Quem
+ * quiser assinar com o próprio nome roda `git config user.name` e os commits
+ * seguintes já saem com ele.
+ */
+async function garantirIdentidade(projectRoot: string): Promise<void> {
+  try {
+    await run("git", ["var", "GIT_COMMITTER_IDENT"], { cwd: projectRoot });
+    return;
+  } catch {
+    // Não há identidade resolvível: este repositório ganha uma, dele.
+  }
+  await run("git", ["config", "user.name", "capivara"], { cwd: projectRoot }).catch(() => undefined);
+  await run("git", ["config", "user.email", "capivara@localhost"], { cwd: projectRoot }).catch(() => undefined);
+}
+
 export async function isClean(projectRoot: string): Promise<boolean> {
   try {
     const { stdout } = await run("git", ["status", "--porcelain", "--", ...CONTROL_PLANE_PATHSPEC], { cwd: projectRoot });
@@ -112,9 +197,23 @@ export async function commitPhase(projectRoot: string, phaseNumber: number, titl
     return { committed: false, message: "nada a commitar: a fase já estava implementada em HEAD" };
   }
   const message = `feat(phase-${phaseNumber}): ${title}`;
-  await run("git", ["add", "-A", "--", ...CONTROL_PLANE_PATHSPEC], { cwd: projectRoot });
-  await run("git", ["commit", "-q", "-m", message], { cwd: projectRoot });
-  return { committed: true, message };
+  /*
+   * Commit que falha não derruba fase verde.
+   *
+   * O commit é escrituração: a fase passou nos gates, o código está em disco, e o
+   * trabalho está feito com ou sem histórico. Enquanto isto lançava, um
+   * `git commit` recusado — identidade não configurada, hook do projeto, dono do
+   * arquivo — matava o build com a fase pronta e os gates todos verdes, e a
+   * mensagem que chegava ao desenvolvedor era o stack trace do git.
+   */
+  try {
+    await run("git", ["add", "-A", "--", ...CONTROL_PLANE_PATHSPEC], { cwd: projectRoot });
+    await run("git", ["commit", "-q", "-m", message], { cwd: projectRoot });
+    return { committed: true, message };
+  } catch (erro) {
+    const causa = (erro instanceof Error ? erro.message : String(erro)).split("\n").slice(0, 4).join(" ").trim();
+    return { committed: false, message: `a fase passou, mas o commit não foi criado: ${causa}` };
+  }
 }
 
 /**

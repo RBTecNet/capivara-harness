@@ -109,7 +109,13 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
   if (!options.git.repository) {
     warnings.push({
       code: "sem-git",
-      message: "o projeto não é um repositório Git: o loop roda e pula os commits por fase",
+      message:
+        "o projeto não é um repositório Git: o loop roda e pula os commits por fase. Duas consequências, " +
+        "porque nenhuma delas é óbvia: não existe ponto de retorno entre as fases — se a fase 12 quebrar o " +
+        "que a 4 construiu, não há para onde voltar —, e todo critério que fale de arquivo versionado fica " +
+        "impossível de provar: o verificador vai conferir, não encontra metadado de versionamento, e reprova " +
+        "uma task correta. Em pasta nova o build cria o repositório sozinho; aqui já havia arquivos, e sobre " +
+        "trabalho que existe quem decide é você: `git init && git add -A && git commit -m \"estado inicial\"`",
     });
   }
 

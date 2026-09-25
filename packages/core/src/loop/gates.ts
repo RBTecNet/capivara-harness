@@ -13,6 +13,7 @@
 
 import { execFile } from "node:child_process";
 import { BUILDER_COMPLETE_MARKER, parseVerification } from "../prompts/index.js";
+import type { TaskVerdict } from "../prompts/index.js";
 
 export type GateName =
   | "gate 0 — engine"
@@ -211,12 +212,40 @@ export function raizComum(output: string): string {
   );
 }
 
-/** G3 — o verificador cobriu todas as tasks e nenhuma ficou incompleta. */
-export function gate3(output: string, expectedTasks: number): GateResult {
+/**
+ * O veredito do gate 3, com o que o registro de tasks precisa saber.
+ *
+ * `GateResult` é uma união discriminada por `green`, então isto é uma interseção
+ * e não um `extends`: herdar de união não se declara em TypeScript.
+ */
+export type Gate3Result = GateResult & {
+  /** As tasks que este veredito declarou DONE — o que o registro vai guardar. */
+  done: number[];
+  /**
+   * Tasks já aprovadas que o verificador reabriu, e que o gate desconsiderou.
+   *
+   * Elas não somem: o runner as anuncia e o log da verificação tem o texto
+   * inteiro. Desconsiderar é uma decisão, e uma decisão que ninguém vê é um
+   * defeito escondido.
+   */
+  reabertas: TaskVerdict[];
+};
+
+/**
+ * G3 — o verificador cobriu todas as tasks e nenhuma ficou incompleta.
+ *
+ * `aprovadas` são as tasks que ele já declarou DONE num ciclo anterior, com o
+ * mesmo texto de plano. Um INCOMPLETE novo sobre uma delas não reprova a fase: é
+ * releitura, e releitura de texto já lido sempre acha algo. A medição que
+ * justifica isto está em `loop/veredictos.ts`.
+ */
+export function gate3(output: string, expectedTasks: number, aprovadas: ReadonlySet<number> = new Set()): Gate3Result {
   const verdicts = parseVerification(output);
+  const vazio = { done: [] as number[], reabertas: [] as TaskVerdict[] };
 
   if (verdicts.length === 0) {
     return {
+      ...vazio,
       green: false,
       gate: "gate 3 — verificação independente",
       cause: `O verificador independente não emitiu nenhuma linha 'TASK <n>: DONE|INCOMPLETE' — não foi possível confirmar que a fase está completa. Últimas linhas:\n${tail(output)}`,
@@ -225,22 +254,28 @@ export function gate3(output: string, expectedTasks: number): GateResult {
 
   if (verdicts.length !== expectedTasks) {
     return {
+      ...vazio,
       green: false,
       gate: "gate 3 — verificação independente",
       cause: `O verificador cobriu ${verdicts.length} de ${expectedTasks} tasks — cobertura incompleta. Linhas emitidas:\n${verdicts.map((verdict) => `TASK ${verdict.index}: ${verdict.done ? "DONE" : "INCOMPLETE"}`).join("\n")}`,
     };
   }
 
-  const incomplete = verdicts.filter((verdict) => !verdict.done);
+  const reabertas = verdicts.filter((verdict) => !verdict.done && aprovadas.has(verdict.index));
+  const incomplete = verdicts.filter((verdict) => !verdict.done && !aprovadas.has(verdict.index));
+  const done = verdicts.filter((verdict) => verdict.done || aprovadas.has(verdict.index)).map((verdict) => verdict.index);
+
   if (incomplete.length > 0) {
     return {
+      done,
+      reabertas,
       green: false,
       gate: "gate 3 — verificação independente",
       cause: `O verificador independente encontrou tasks incompletas:\n${incomplete.map((verdict) => `TASK ${verdict.index}: INCOMPLETE — ${verdict.missing}`).join("\n")}`,
     };
   }
 
-  return green;
+  return { ...green, done, reabertas };
 }
 
 function tail(value: string, lines = 40): string {

@@ -19,6 +19,46 @@ export interface VerifierContext {
   taskCount: number;
   /** O inventário mecânico: os testes que a fase nomeia e se o nome existe na árvore. */
   featureTests?: readonly { task: number; name: string; found: boolean }[];
+  /**
+   * As tasks que ele já declarou DONE em ciclo anterior, com o mesmo texto.
+   *
+   * Elas vão na tela porque uma task não se julga fora do contexto da fase — e
+   * vão marcadas porque relê-las é o que impede a fase de fechar: seis tasks
+   * diferentes em três ciclos, nunca mais de duas por vez, todas fechadas pelo
+   * executor e substituídas por outras duas que ele mesmo tinha aprovado antes.
+   */
+  tasksJaAprovadas?: readonly { index: number; title: string }[];
+}
+
+/**
+ * O bloco do que já passou.
+ *
+ * Simétrico ao `tasksJaAprovadas` do auditor de fases (§73), e pela mesma razão:
+ * guardar o veredito não basta se quem julga não souber que ele existe — ele
+ * julgaria de novo, acharia algo novo, e o harness teria de descartar um veredito
+ * que acabou de pagar.
+ */
+function aprovadasBlock(tasks: readonly { index: number; title: string }[]): string[] {
+  if (tasks.length === 0) return [];
+  return [
+    "",
+    "## Already DONE — not under verification now",
+    "",
+    "You judged these tasks DONE in an earlier cycle of this same phase, and their text in the plan",
+    "has not changed since. They are here only so the phase reads whole:",
+    ...tasks.map((task) => `- task ${task.index}: ${task.title}`),
+    "",
+    "Emit `TASK <n>: DONE` for each of them and move on. Re-reading them is not thoroughness — a",
+    "second reading of the same code always finds something the first did not, and that is how a",
+    "phase never closes: three cycles, six different tasks, two at a time, every one of them fixed",
+    "and replaced by two others that had already been approved.",
+    "",
+    "The one exception: if the correction made in THIS cycle broke one of them — a function that",
+    "moved, a column that was renamed, a test that stopped covering what it covered — say it, and",
+    "say it about the task that was CORRECTED, which is under verification. What protects the rest",
+    "is not your reading: the build, the linter and the whole test suite ran over the entire tree",
+    "before you were called, and they do not depend on attention.",
+  ];
 }
 
 /**
@@ -87,6 +127,7 @@ export function verifyPrompt(context: VerifierContext): string {
     "- When in doubt, INCOMPLETE.",
     "",
     ...featureTestBlock(context.featureTests ?? []),
+    ...aprovadasBlock(context.tasksJaAprovadas ?? []),
     "",
     "## The phase to verify",
     context.phaseMarkdown,

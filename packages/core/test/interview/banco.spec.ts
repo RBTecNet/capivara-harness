@@ -57,10 +57,20 @@ describe("as regras que a escolha implica", () => {
     expect(testes?.statement).toContain("nenhum teste");
   });
 
-  it("proíbe credencial em arquivo versionado", () => {
+  /*
+   * A regra dizia "nenhum arquivo VERSIONADO contém credencial", e isso não se
+   * verifica sem git. No `assitencia` o verificador do gate 3 devolveu exatamente
+   * isso — "a árvore não contém metadados de versionamento para confirmar…" — e
+   * reprovou uma task correta por uma pergunta que nós escrevemos sem resposta
+   * possível. A proibição continua; o que mudou é que agora se confere abrindo
+   * arquivo.
+   */
+  it("proíbe credencial em qualquer arquivo menos o .env, e isso se confere sem git", () => {
     const config = regrasDeBanco("informado").find((regra) => regra.subject === "configuração do banco");
     expect(config?.statement).toContain(".gitignore");
-    expect(config?.statement).toContain("nenhum arquivo versionado");
+    expect(config?.statement).toContain("ÚNICO arquivo do projeto que pode");
+    expect(config?.statement).toContain("abrindo os arquivos");
+    expect(config?.statement).not.toContain("arquivo versionado");
   });
 
   it("exige migração que cria o esquema do zero", () => {

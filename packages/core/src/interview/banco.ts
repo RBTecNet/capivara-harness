@@ -167,10 +167,30 @@ export function regrasDeBanco(decisao: DecisaoDeBanco): SkeletonRule[] {
   const comuns: SkeletonRule[] = [
     {
       subject: "configuração do banco",
+      /*
+       * "Arquivo versionado" era impossível de verificar, e cobrou a conta.
+       *
+       * Esta regra vira critério de aceite em toda fase de dados, e no `assitencia`
+       * o verificador do gate 3 devolveu, com toda a razão: *"a árvore não contém
+       * metadados de versionamento para confirmar que os arquivos versionados não
+       * incluem credenciais reais"*. O projeto não tinha repositório Git, e nenhuma
+       * implementação podia provar aquilo — uma task correta reprovada por uma
+       * pergunta que nós escrevemos sem resposta possível.
+       *
+       * O conserto é dizer a mesma coisa em termos de ARQUIVO, que se abre e se lê:
+       * o `.env` é o único lugar com credencial, e ele está no `.gitignore`. Isso é
+       * verificável com ou sem git, o que importa porque a regra não pode depender
+       * de o desenvolvedor ter versionado o projeto. O build passou a criar o
+       * repositório em pasta nova (§75), e mesmo assim esta regra não volta a
+       * depender disso: o custo de errar é alto e o ganho de citar versionamento era
+       * zero.
+       */
       statement:
         "toda a conexão do banco — host, porta, usuário, senha e nome da base — é lida de variáveis de " +
-        "ambiente, carregadas de um arquivo `.env` na raiz; nenhum arquivo versionado, documento ou log " +
-        "contém credencial, e `.env` está no `.gitignore` desde a primeira fase",
+        "ambiente, carregadas de um arquivo `.env` na raiz; o `.env` é o ÚNICO arquivo do projeto que pode " +
+        "conter credencial e está listado no `.gitignore` desde a primeira fase. Nenhum outro arquivo da " +
+        "árvore — código, configuração, documento, exemplo, script, teste ou log — contém senha, token ou " +
+        "string de conexão real, e isso se confere abrindo os arquivos",
     },
     {
       subject: ".env.example",

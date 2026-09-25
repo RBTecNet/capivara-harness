@@ -19,6 +19,7 @@ import { declaredComplete, defaultTestRunner, gate0, gate1, gate2, gate3, type G
 import { detectRateLimit, planWait } from "./ratelimit.js";
 import { gate4, type FlowRunner } from "./flows.js";
 import { procurarTestesNomeados } from "./feature-tests.js";
+import { TasksAprovadas, tasksDaFase } from "./veredictos.js";
 import { prepararAmbiente } from "./ambiente.js";
 import { faltaOPacoteDoRunner } from "./dependencias.js";
 import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mcp/index.js";
@@ -91,6 +92,14 @@ export interface PhaseRunOptions {
     port?: number;
   };
   testRunner?: TestRunner;
+  /**
+   * O que o verificador já declarou DONE nesta fase, em ciclo anterior.
+   *
+   * Ausente significa verificar tudo a cada ciclo, que é o comportamento de antes
+   * do §75 — e o que fez o `assitencia` gastar os três ciclos de P01 em seis tasks
+   * diferentes, duas por vez, sem nunca fechar.
+   */
+  aprovadas?: TasksAprovadas;
   /**
    * As skills desta fase, prontas para o prompt.
    *
@@ -403,6 +412,25 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
           announce(`[${session.id}] testes nomeados que não existem na árvore: ${semNome.map((teste) => teste.name).join(", ")}`);
         }
 
+        /*
+         * O que já passou não volta à fila.
+         *
+         * O verificador é sem memória, e é o que o torna independente. Mas
+         * reperguntar sobre um código que ninguém tocou não é independência: é
+         * pagar por um sorteio. Medido em P01 do `assitencia`: três ciclos, seis
+         * tasks diferentes, nunca mais de duas por vez, todas fechadas — e duas
+         * novas em cada volta, entre as que ele mesmo havia aprovado.
+         */
+        const tasksDestaFase = tasksDaFase(session.markdown);
+        const jaAprovadas = options.aprovadas?.jaAprovadas(session.id, tasksDestaFase) ?? [];
+        const indicesAprovados = new Set(jaAprovadas.map((task) => task.index));
+        if (jaAprovadas.length > 0) {
+          announce(
+            `[${session.id}] ${jaAprovadas.length} de ${session.taskCount} task(s) já verificadas com este texto; ` +
+              "não vou reperguntar sobre elas",
+          );
+        }
+
         const verification = await options.call({
           role: "verifier",
           phase: session,
@@ -412,11 +440,26 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
             phaseMarkdown: session.markdown,
             taskCount: session.taskCount,
             featureTests: nomeados,
+            ...(jaAprovadas.length > 0
+              ? { tasksJaAprovadas: jaAprovadas.map((task) => ({ index: task.index, title: task.title })) }
+              : {}),
           }),
         });
         await writeAtomic(`${paths.logs}/${session.id}.verify-${cycle}.log`, verification.stdout);
 
-        const g3 = gate3(verification.stdout, session.taskCount);
+        const g3 = gate3(verification.stdout, session.taskCount, indicesAprovados);
+        /*
+         * Desconsiderar não pode ser calado: o texto fica no log da verificação e
+         * a linha sai na tela. Se o veredito velho estiver errado, é aqui que o
+         * desenvolvedor vê o rastro.
+         */
+        for (const reaberta of g3.reabertas) {
+          announce(
+            `[${session.id}] TASK ${reaberta.index} já estava verificada e foi reaberta pelo verificador; ` +
+              `mantenho o veredito anterior — o que ele disse está no log: ${reaberta.missing}`,
+          );
+        }
+        if (g3.done.length > 0) await options.aprovadas?.aprovar(session.id, tasksDestaFase, g3.done, cycle, now);
         gate("G3", g3.green ? "verde" : "vermelho", cycle);
         if (!g3.green) {
           lastGate = g3.gate;

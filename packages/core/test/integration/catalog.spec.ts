@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InitBlockedError, runInit } from "../../src/init/index.js";
-import { runBuild, splitPhases } from "../../src/loop/index.js";
+import { isRepository, runBuild, splitPhases } from "../../src/loop/index.js";
 import type { FlowRunner } from "../../src/loop/index.js";
 import type { BuildProgress } from "../../src/loop/index.js";
 import { readEvents, runIdFor, runPaths } from "../../src/state/index.js";
@@ -168,14 +168,36 @@ describe("B-01 · caminho feliz completo", () => {
     expect(outcome.readiness.ready).toBe(true);
 
     const { tasks } = await publishPlan();
+    /*
+     * Cada fase escreve o SEU arquivo. Quando as duas escreviam o mesmo conteúdo,
+     * a segunda não mudava a árvore — e, com repositório, "nada a commitar" é o
+     * veredito verdadeiro: a fase já estava implementada em HEAD. O roteiro é que
+     * não representava duas fases.
+     */
     const { outcome: built } = await build([
-      { match: { role: "builder" }, writes: [{ path: "src/app.ts", content: "export const app = 1;" }], respond: { stdout: "feito" }, repeat: true },
+      {
+        match: { role: "builder", phase: "P01" },
+        writes: [{ path: "src/app.ts", content: "export const app = 1;" }],
+        respond: { stdout: "feito" },
+      },
+      {
+        match: { role: "builder", phase: "P02" },
+        writes: [{ path: "src/reserva.ts", content: "export const reserva = 2;" }],
+        respond: { stdout: "feito" },
+      },
       { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) } },
       { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) } },
     ]);
 
     expect(built.exitCode).toBe(0);
-    expect(built.phases.every((phase) => phase.outcome.status === "complete")).toBe(true);
+    expect(
+      built.phases.every((phase) => phase.outcome.status === "complete"),
+      built.phases.map((phase) => `${phase.id}: ${phase.outcome.status}`).join("; "),
+    ).toBe(true);
+
+    // O build criou o repositório e cada fase verde virou um commit.
+    const historico = await readFile(join(projectRoot, ".git/COMMIT_EDITMSG"), "utf8").catch(() => "");
+    expect(historico).toContain("feat(phase-2)");
   });
 });
 
@@ -1037,7 +1059,16 @@ describe("B-27 a B-30 · contenção, interrupção e retomada", () => {
     expect(segunda.exitCode).toBe(0);
   });
 
-  it("B-30 projeto sem git roda e apenas registra", async () => {
+  /*
+   * B-30 dizia "projeto sem git roda e apenas registra", e era verdade: o build
+   * avisava e seguia sem commit nenhum. Em dezesseis fases isso é dezesseis fases
+   * sem ponto de retorno — e no `assitencia` custou também uma task correta
+   * reprovada no gate 3, porque o verificador foi conferir "arquivos versionados"
+   * numa árvore sem versionamento.
+   *
+   * Agora são dois casos, e a fronteira é de quem é o trabalho que já está lá.
+   */
+  it("B-30 pasta nova: o build cria o repositório em vez de avisar que não há", async () => {
     const { tasks } = await publishPlan();
     const { outcome } = await build([
       { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
@@ -1045,7 +1076,24 @@ describe("B-27 a B-30 · contenção, interrupção e retomada", () => {
       { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) } },
     ]);
     expect(outcome.exitCode).toBe(0);
-    expect(outcome.warnings.map((warning) => warning.code)).toContain("sem-git");
+    expect(outcome.warnings.map((warning) => warning.code)).not.toContain("sem-git");
+    expect(await isRepository(projectRoot)).toBe(true);
+  });
+
+  it("B-30 pasta que já tem trabalho: o harness não inventa repositório, e diz o que custa", async () => {
+    await writeFile(join(projectRoot, "README.md"), "escrito à mão antes do harness", "utf8");
+    const { tasks } = await publishPlan();
+    const { outcome } = await build([
+      { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
+      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) } },
+      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) } },
+    ]);
+    expect(outcome.exitCode).toBe(0);
+    expect(await isRepository(projectRoot)).toBe(false);
+
+    const aviso = outcome.warnings.find((warning) => warning.code === "sem-git");
+    expect(aviso?.message).toContain("ponto de retorno");
+    expect(aviso?.message).toContain("arquivo versionado");
   });
 });
 

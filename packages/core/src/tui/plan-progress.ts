@@ -34,6 +34,7 @@ export class PlanPhaseTracker {
           state: "aguardando",
           gates: emptyPlanColumns(),
           detail: "aguardando",
+          ...(fase.tasks !== undefined ? { tasks: fase.tasks } : {}),
         });
       }
       return;

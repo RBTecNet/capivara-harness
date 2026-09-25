@@ -13,7 +13,7 @@
 
 export type PlanPhaseEvent =
   /** O plano inteiro, antes de a primeira fase começar. */
-  | { kind: "planned"; phases: { number: number; title: string }[] }
+  | { kind: "planned"; phases: { number: number; title: string; tasks?: number }[] }
   /** A escrita da fase. `reused` quando ela veio do cache e não custou chamada. */
   | { kind: "authoring"; number: number; state: "corrente" | "pronta" | "reused" }
   /** A auditoria da fase. `devolvida` traz quantos achados vieram. */

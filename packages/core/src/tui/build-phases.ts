@@ -40,6 +40,14 @@ export interface BuildPhaseRow {
   gates: Record<string, GateState>;
   /** Uma palavra sobre a fase: `ciclo 2/3`, `commitada`, `gate 2 reprovou`. */
   detail: string;
+  /**
+   * Quantas tasks a fase carrega, quando quem planejou disse.
+   *
+   * É o que permite a barra de tasks: o `plan` sabe pelo esqueleto e o `build`
+   * sabe pela sessão, e nenhum dos dois contava isso à tela. Ausente some da
+   * barra em vez de virar zero — zero seria mentira.
+   */
+  tasks?: number;
 }
 
 const GATE_MARK: Record<GateState, string> = {

@@ -15,7 +15,7 @@ export class BuildPhaseTracker {
   private cicloPorFase = new Map<string, number>();
 
   /** O plano inteiro, antes de a primeira fase começar. */
-  plan(phases: readonly { id: string; title: string }[]): void {
+  plan(phases: readonly { id: string; title: string; taskCount?: number }[]): void {
     for (const phase of phases) {
       if (this.linhas.has(phase.id)) continue;
       this.ordem.push(phase.id);
@@ -25,6 +25,7 @@ export class BuildPhaseTracker {
         state: "aguardando",
         gates: emptyGates(),
         detail: "aguardando",
+        ...(phase.taskCount !== undefined ? { tasks: phase.taskCount } : {}),
       });
     }
   }

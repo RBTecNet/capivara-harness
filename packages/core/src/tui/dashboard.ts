@@ -27,6 +27,26 @@ export interface Metric {
   value: string;
 }
 
+/**
+ * Uma contagem do estágio, desenhada como barra.
+ *
+ * Todo estágio tem o que contar e nenhum contava na tela: o `init` tem as etapas
+ * do pipeline, o `plan` tem fases escritas e aprovadas, o `build` tem fases
+ * fechadas e as tasks que elas carregam. O painel mostrava a fase corrente e uma
+ * lista; quanto falta era uma conta que quem olha tinha de fazer de cabeça.
+ */
+export interface ProgressBar {
+  label: string;
+  done: number;
+  total: number;
+}
+
+/** Um campo da caixa de trabalho corrente: `Fase`, `Ciclo`, `Gate`, `Último erro`. */
+export interface WorkField {
+  label: string;
+  value: string;
+}
+
 export interface DashboardEvent {
   time: string;
   text: string;
@@ -65,6 +85,12 @@ export interface DashboardModel {
    * no seu lado do ciclo.
    */
   phases?: { rows: BuildPhaseRow[]; summary: string; maxRows: number; columns?: readonly string[]; legend?: readonly string[]; anchorId?: string };
+  /** As contagens do estágio. Vazio esconde a caixa. */
+  progress?: ProgressBar[];
+  /** Uma linha final da caixa de progresso — o comando de teste, por exemplo. */
+  progressNote?: string;
+  /** O trabalho corrente, campo a campo. Vazio esconde a caixa. */
+  work?: WorkField[];
   provider: { perfil: string; transporte: string; contabilidade: string };
   telemetry: Metric[];
   events: DashboardEvent[];
@@ -145,6 +171,43 @@ function box(title: string, body: string[], width: number, style: Style): string
   return lines;
 }
 
+/**
+ * `Fases  2/7  [████░░░░░░]  28%`
+ *
+ * A barra é o que se lê sem ler: a fração diz o fato e o preenchimento diz o
+ * quanto, de relance. Total zero desenha a barra vazia em vez de dividir por zero.
+ */
+function progressLine(bar: ProgressBar, width: number, style: Style): string {
+  const rotulo = padVisible(truncateVisible(bar.label, 12), 13);
+  const fracao = padVisible(`${bar.done}/${bar.total}`, 8);
+  const porcento = bar.total <= 0 ? 0 : Math.min(100, Math.round((bar.done / bar.total) * 100));
+  const sufixo = padVisible(`${porcento}%`, 5);
+  const espaco = Math.max(4, width - visibleWidth(rotulo) - visibleWidth(fracao) - visibleWidth(sufixo) - 3);
+  const cheio = bar.total <= 0 ? 0 : Math.round((bar.done / bar.total) * espaco);
+  const barra = `${"█".repeat(Math.min(espaco, cheio))}${"░".repeat(Math.max(0, espaco - cheio))}`;
+  return `${paint(rotulo, "cyan", style)}${fracao}${paint(barra, porcento === 100 ? "green" : "yellow", style)} ${sufixo}`;
+}
+
+/**
+ * Duas caixas na mesma linha, cada uma com metade da largura.
+ *
+ * Empilhar as duas gastaria o dobro da altura para dizer coisas que se leem
+ * juntas — quanto já andou e o que está acontecendo agora. Num terminal estreito
+ * elas voltam a empilhar, porque metade de 60 colunas não cabe nem o rótulo.
+ */
+function ladoALado(esquerda: string[], direita: string[], larguraEsquerda: number, larguraDireita: number): string[] {
+  if (esquerda.length === 0) return direita;
+  if (direita.length === 0) return esquerda;
+  const altura = Math.max(esquerda.length, direita.length);
+  const linhas: string[] = [];
+  for (let indice = 0; indice < altura; indice += 1) {
+    const a = padVisible(esquerda[indice] ?? "", larguraEsquerda);
+    const b = padVisible(direita[indice] ?? "", larguraDireita);
+    linhas.push(`${a} ${b}`.trimEnd());
+  }
+  return linhas;
+}
+
 /** Campos lado a lado, separados por barra pontilhada. */
 function columns(fields: { label: string; value: string; path?: boolean }[], width: number, style: Style): string[] {
   const inner = width - 2;
@@ -196,6 +259,16 @@ interface Layout {
   dense: boolean;
   events: number;
   phases: number;
+  /**
+   * Quanto das duas caixas cabe.
+   *
+   * `cheias` é o desenho do pedido; `compactas` guarda só o que responde as duas
+   * perguntas (quanto falta, o que deu errado); `nenhuma` devolve o espaço para a
+   * lista de fases, que num terminal apertado é a informação mais densa que existe.
+   * Sem esse degrau, acrescentar as caixas empurrava um terminal de 24 linhas para
+   * o desenho de emergência — o painel inteiro virava lista de texto.
+   */
+  boxes: "cheias" | "compactas" | "nenhuma";
 }
 
 /** A capivara fica no centro do painel, independentemente da largura do título. */
@@ -259,6 +332,53 @@ function dashboardLines(model: DashboardModel, layout: Layout): string[] {
       style,
     ),
   );
+
+  /*
+   * PROGRESSO e TRABALHO ATUAL, lado a lado, em TODO estágio.
+   *
+   * O painel dizia a etapa e listava eventos; quanto falta e onde o trabalho
+   * está parado eram contas de cabeça. As duas caixas respondem as duas
+   * perguntas que quem olha sempre faz, e ficam na mesma linha porque se leem
+   * juntas.
+   */
+  const barras = layout.boxes === "nenhuma" ? [] : (model.progress ?? []);
+  /*
+   * Compacto guarda o fim da lista: o último erro e a atividade estão no fim de
+   * `trabalho()`, e são o que não se descobre olhando o resto do painel.
+   */
+  const trabalho = layout.boxes === "nenhuma" ? [] : layout.boxes === "compactas" ? (model.work ?? []).slice(-2) : (model.work ?? []);
+  if (barras.length > 0 || trabalho.length > 0) {
+    /*
+     * Duas caixas e um espaço entre elas somam a largura EXATA do painel.
+     *
+     * Dar a mesma largura às duas deixava uma coluna sobrando à direita quando a
+     * largura era par — um degrau de um caractere na moldura, que é o tipo de
+     * coisa que só se vê depois de pronto e não sai mais da vista.
+     */
+    const ladoAlado = barras.length > 0 && trabalho.length > 0 && width >= NARROW;
+    const esquerdaLarga = ladoAlado ? Math.floor((width - 1) / 2) : width;
+    const direitaLarga = ladoAlado ? width - 1 - esquerdaLarga : width;
+    const larguraDaCaixa = esquerdaLarga;
+
+    const corpoDoProgresso = [
+      ...barras.map((barra) => progressLine(barra, larguraDaCaixa - 4, style)),
+      ...(model.progressNote && !layout.dense && layout.boxes === "cheias"
+        ? ["", paint(truncateVisible(model.progressNote, larguraDaCaixa - 4), "gray", style)]
+        : []),
+    ];
+    const corpoDoTrabalho = trabalho.map(
+      (campo) => `${paint(padVisible(truncateVisible(campo.label, 12), 13), "cyan", style)}${truncateVisible(campo.value, Math.max(4, larguraDaCaixa - 17))}`,
+    );
+
+    const caixaDoProgresso = corpoDoProgresso.length > 0 ? box("PROGRESSO", corpoDoProgresso, esquerdaLarga, style) : [];
+    const caixaDoTrabalho = corpoDoTrabalho.length > 0 ? box("TRABALHO ATUAL", corpoDoTrabalho, direitaLarga, style) : [];
+
+    lines.push(
+      ...(ladoAlado
+        ? ladoALado(caixaDoProgresso, caixaDoTrabalho, esquerdaLarga, direitaLarga)
+        : [...caixaDoProgresso, ...caixaDoTrabalho]),
+    );
+  }
 
   if (model.phases) {
     const lista = renderPhaseRows(model.phases.rows, layout.phases, width - 2, style, {
@@ -343,20 +463,61 @@ function dashboardLines(model: DashboardModel, layout: Layout): string[] {
 export function renderDashboard(model: DashboardModel): string {
   const width = dashboardWidth(model);
   const budget = model.height === undefined ? Infinity : Math.max(1, model.height - 1);
-  const layout: Layout = {
+  let layout: Layout = {
     artwork: budget >= 35,
     dense: budget < 27,
     events: Math.min(6, model.events.length),
     phases: model.phases?.maxRows ?? 0,
+    boxes: "cheias",
   };
   let lines = dashboardLines(model, layout);
+  /*
+   * A ordem do encolhimento é a ordem do que se pode perder.
+   *
+   * Eventos passados primeiro, depois fases fora da janela, depois o desenho,
+   * depois o modo denso; as caixas só depois disso, e por último a lista de fases
+   * até uma linha. O que sobra na tela mínima é o que responde "onde está e o que
+   * quebrou".
+   */
   while (lines.length > budget) {
     if (layout.events > 1) layout.events -= 1;
     else if (layout.phases > 1) layout.phases -= 1;
     else if (layout.artwork) layout.artwork = false;
     else if (!layout.dense) layout.dense = true;
+    else if (layout.boxes === "cheias") layout.boxes = "compactas";
+    else if (layout.boxes === "compactas") layout.boxes = "nenhuma";
     else break;
     lines = dashboardLines(model, layout);
+  }
+
+  /*
+   * E cresce, que é a metade que faltava.
+   *
+   * O painel só sabia encolher: num terminal alto ele desenhava o mesmo tamanho
+   * de sempre e deixava metade da tela vazia embaixo, enquanto cortava eventos e
+   * fases que caberiam folgadas. Aqui ele devolve espaço a quem tem o que mostrar
+   * — primeiro as fases, que são a informação mais densa, depois os eventos — e só
+   * então preenche o que sobrar.
+   */
+  if (Number.isFinite(budget) && lines.length <= budget) {
+    for (;;) {
+      const fasesDisponiveis = model.phases?.rows.length ?? 0;
+      const podeCaixa = layout.boxes !== "cheias";
+      const podeFase = layout.phases < fasesDisponiveis;
+      const podeEvento = layout.events < Math.min(12, model.events.length);
+      if (!podeCaixa && !podeFase && !podeEvento) break;
+
+      const tentativa: Layout = {
+        ...layout,
+        boxes: podeCaixa ? (layout.boxes === "nenhuma" ? "compactas" : "cheias") : layout.boxes,
+        phases: !podeCaixa && podeFase ? layout.phases + 1 : layout.phases,
+        events: !podeCaixa && !podeFase ? layout.events + 1 : layout.events,
+      };
+      const candidato = dashboardLines(model, tentativa);
+      if (candidato.length > budget) break;
+      layout = tentativa;
+      lines = candidato;
+    }
   }
   // Perguntas são liberadas da região viva antes da resposta; nunca cortar opções.
   if (lines.length > budget && !model.question) {
@@ -371,6 +532,20 @@ export function renderDashboard(model: DashboardModel): string {
       ...model.events.slice(-1).map((event) => `[${event.time}] ${event.text}`),
     ].slice(0, budget);
   }
+  /*
+   * O que sobrar vira espaço ANTES do rodapé, não depois.
+   *
+   * "Ocupar a tela toda" não é escrever até o fim: é a moldura chegar embaixo. O
+   * rodapé desce junto, e o painel deixa de flutuar no meio de um terminal alto
+   * com o prompt colado nele.
+   */
+  const emergencia = lines.length > budget;
+  if (!emergencia && Number.isFinite(budget) && lines.length < budget && lines.length > 0) {
+    const rodape = lines.pop()!;
+    while (lines.length < budget - 1) lines.push("");
+    lines.push(rodape);
+  }
+
   const rendered = lines.map((line) => truncateVisible(line, width)).join("\n");
   return model.background === undefined || !model.style.enabled ? rendered : tint(rendered, model.background, width);
 }

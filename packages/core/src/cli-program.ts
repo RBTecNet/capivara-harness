@@ -1435,9 +1435,10 @@ export function createProgram(): Command {
         if (liveBuild.enabled) repaintBuild();
         else stdout.write(`${message}\n`);
       },
-      onPlanned: (planejadas) => {
+      onPlanned: (planejadas, contexto) => {
         totalDeFases = planejadas.length;
         fases.plan(planejadas);
+        if (contexto?.testCommand) painelBuild.setNote(`Teste: ${contexto.testCommand}`);
         repaintBuild();
       },
       onProgress: (evento) => {

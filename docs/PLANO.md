@@ -5668,3 +5668,51 @@ E o invariante entrou no teste de convergência: **achado da fase 2 não reescre
 fase 1, mesmo sem citar número nenhum.** Desligando o campo, o teste falha com
 `['phase-p01', 'phase-p02']` — a fase aprovada sendo reescrita, que é exatamente o
 que o desenvolvedor viu na tela.
+
+## §78 — O painel diz quanto falta, o que está acontecendo, e ocupa a tela
+
+Dois pedidos do desenvolvedor, com um desenho de referência junto: as caixas
+**PROGRESSO** e **TRABALHO ATUAL** lado a lado, em TODO estágio; e o painel
+ocupando a área disponível do terminal, expandindo numa tela grande e compactando
+numa pequena.
+
+### 78.1 As duas perguntas que o painel não respondia
+
+Ele mostrava a etapa corrente e uma janela de log que rola. Quanto falta e o que
+deu errado da última vez eram contas de cabeça — e a segunda nem isso: o painel via
+toda devolução passar e **não guardava nenhuma**. Quem chegava na frente da tela
+depois de dez minutos via "em andamento" e a fase corrente, sem nada sobre o que
+tinha feito o ciclo anterior voltar.
+
+Cada estágio conta o que ele tem, e todos têm alguma coisa — é por isso que a caixa
+pode ser a mesma em todos:
+
+| estágio | barras |
+| --- | --- |
+| `init` | etapas do pipeline concluídas |
+| `plan` | fases escritas · fases aprovadas · tasks das fases aprovadas |
+| `build` | fases fechadas · tasks que elas carregam |
+
+A contagem de tasks exigiu um campo novo que já existia dos dois lados e não chegava
+à tela: o esqueleto aloca `taskCount` por fase, e a sessão do build sabe quantas
+tasks a fase tem. Ausente, a barra some em vez de mostrar zero — zero seria mentira.
+
+### 78.2 Ocupar a tela é crescer, não só encolher
+
+`renderDashboard` tinha um laço que encolhia enquanto não coubesse — eventos, fases,
+desenho, modo denso — e nada que fizesse o contrário. Num terminal de 60 linhas ele
+desenhava o mesmo tamanho de sempre e deixava metade da tela vazia, **enquanto
+cortava eventos e fases que caberiam folgadas**.
+
+Agora ele cresce na ordem inversa do encolhimento — primeiro reabre as caixas,
+depois a lista de fases, depois os eventos — e só então preenche o que sobrar, com o
+rodapé descendo junto. Ocupar a tela não é escrever até o fim: é a moldura chegar
+embaixo.
+
+E as caixas entraram no laço de encolhimento, o que era a parte perigosa: sem esse
+degrau, acrescentá-las empurrava um terminal de 24 linhas para o desenho de
+emergência — o painel inteiro virava lista de texto sem moldura. A ordem do que se
+perde é a ordem do que se pode perder: eventos passados, fases fora da janela, o
+desenho, o modo denso, as caixas (primeiro compactas, depois nenhuma), e por último
+a lista de fases até uma linha. O que sobra na tela mínima é o que responde "onde
+está e o que quebrou".

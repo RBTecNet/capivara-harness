@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { DashboardModel } from "../../src/tui/dashboard.js";
 import {
   BLOCK_FONT_ROWS,
   CAPYBARA_ASCII,
@@ -445,5 +446,158 @@ describe("wizard", () => {
     expect(wizardSteps("build").map((step) => step.id)).toContain("test-cmd");
     expect(wizardSteps("init").map((step) => step.id)).toContain("request");
     expect(wizardSteps("build").map((step) => step.id)).not.toContain("request");
+  });
+});
+
+/*
+ * As duas caixas do pedido do desenvolvedor: quanto já andou e o que está
+ * acontecendo agora, lado a lado, em TODO estágio. O painel dizia a etapa e
+ * listava eventos; quanto falta e onde parou eram contas de cabeça.
+ */
+describe("PROGRESSO e TRABALHO ATUAL", () => {
+  const base = {
+    version: "0.3.1",
+    command: "build",
+    subtitle: "build · implementação",
+    project: "/home/bruno/pilotos/piloto-1",
+    stage: "implement",
+    status: { label: "em andamento", state: "em andamento" as const },
+    durationSeconds: 754,
+    pipeline: [],
+    provider: { perfil: "codex", transporte: "codex-cli", contabilidade: "por chamada" },
+    telemetry: [{ label: "CHAMADAS", value: "12" }],
+    events: [{ time: "10:21:05", text: "fase P01 concluída" }],
+    activity: { kind: "modelo" as const, detail: "escrevendo", sinceSeconds: 42 },
+    style: plain,
+    environment: {} as NodeJS.ProcessEnv,
+  };
+
+  const comCaixas = (extra: Partial<DashboardModel> = {}): string =>
+    renderDashboard({
+      ...base,
+      width: 100,
+      height: 40,
+      progress: [
+        { label: "Fases", done: 2, total: 7 },
+        { label: "Tasks", done: 6, total: 13 },
+      ],
+      progressNote: "Teste: vendor/bin/sail test",
+      work: [
+        { label: "Fase", value: "P03 · Assets da marca" },
+        { label: "Último erro", value: "gate 2 — a suíte reprovou" },
+      ],
+      ...extra,
+    });
+
+  it("desenha a fração, a barra e a porcentagem de cada contagem", () => {
+    const view = comCaixas();
+    expect(view).toContain("PROGRESSO");
+    expect(view).toContain("2/7");
+    expect(view).toContain("29%");
+    expect(view).toContain("6/13");
+    expect(view).toContain("46%");
+    expect(view).toContain("█");
+  });
+
+  it("põe as duas caixas na mesma linha quando a largura permite", () => {
+    const linhas = comCaixas().split("\n");
+    const cabecalho = linhas.find((linha) => linha.includes("PROGRESSO"));
+    expect(cabecalho).toContain("TRABALHO ATUAL");
+  });
+
+  it("empilha num terminal estreito, em vez de espremer as duas", () => {
+    const linhas = renderDashboard({
+      ...base,
+      width: 60,
+      height: 40,
+      progress: [{ label: "Fases", done: 2, total: 7 }],
+      work: [{ label: "Último erro", value: "gate 2 reprovou" }],
+    }).split("\n");
+    const cabecalho = linhas.find((linha) => linha.includes("PROGRESSO"));
+    expect(cabecalho).not.toContain("TRABALHO ATUAL");
+    expect(linhas.some((linha) => linha.includes("TRABALHO ATUAL"))).toBe(true);
+  });
+
+  it("o último erro chega à tela: é a pergunta que mais se faz olhando um build", () => {
+    expect(comCaixas()).toContain("gate 2 — a suíte reprovou");
+  });
+
+  /*
+   * Elas não podem empurrar o painel para o desenho de emergência: num terminal
+   * apertado, o que some primeiro são elas, e a lista de fases fica.
+   */
+  it("somem antes de o painel virar lista de texto", () => {
+    const apertado = renderDashboard({
+      ...base,
+      width: 100,
+      height: 22,
+      phases: {
+        summary: "1/3", maxRows: 3,
+        rows: [{ id: "P01", title: "Fundação", state: "em andamento" as const, detail: "ciclo 1/3", gates: { G0: "verde" as const } }],
+      },
+      progress: [{ label: "Fases", done: 1, total: 3 }],
+      work: [{ label: "Último erro", value: "x" }],
+    });
+    expect(apertado).not.toContain("PROGRESSO");
+    expect(apertado).toContain("P01");
+  });
+});
+
+/*
+ * "A dashboard deve ocupar toda a área disponível do terminal e não deixar espaço
+ * sobrando": ela só sabia encolher, e num terminal alto desenhava o tamanho de
+ * sempre com metade da tela vazia embaixo.
+ */
+describe("o painel ocupa a altura que tem", () => {
+  const base = {
+    version: "0.3.1",
+    command: "plan",
+    subtitle: "plan · detalhamento",
+    project: "/home/bruno/pilotos/piloto-1",
+    stage: "authoring",
+    status: { label: "em andamento", state: "em andamento" as const },
+    durationSeconds: 754,
+    pipeline: [],
+    provider: { perfil: "codex", transporte: "codex-cli", contabilidade: "por chamada" },
+    telemetry: [{ label: "CHAMADAS", value: "12" }],
+    events: [] as { time: string; text: string }[],
+    activity: { kind: "modelo" as const, detail: "escrevendo", sinceSeconds: 42 },
+    style: plain,
+    environment: {} as NodeJS.ProcessEnv,
+  };
+
+  const alto = (height: number): string[] =>
+    renderDashboard({
+      ...base,
+      width: 100,
+      height,
+      phases: {
+        summary: "2/20", maxRows: 4,
+        rows: Array.from({ length: 20 }, (_, i) => ({
+          id: `P${String(i + 1).padStart(2, "0")}`, title: `Fase ${i + 1}`,
+          state: i < 2 ? ("concluído" as const) : ("aguardando" as const),
+          detail: "aguardando", gates: { G0: "verde" as const },
+        })),
+      },
+      events: Array.from({ length: 12 }, (_, i) => ({ time: "12:00:00", text: `evento ${i}` })),
+    }).split("\n");
+
+  it("preenche exatamente o orçamento, deixando uma linha para o cursor", () => {
+    for (const height of [24, 30, 40, 60]) {
+      expect(alto(height).length, `altura ${height}`).toBe(height - 1);
+    }
+  });
+
+  it("devolve o espaço a quem tem o que mostrar: mais fases e mais eventos", () => {
+    const curto = alto(26).join("\n");
+    const comprido = alto(60).join("\n");
+    const fases = (texto: string): number => texto.split("\n").filter((linha) => /\bP\d\d\b/.test(linha)).length;
+    expect(fases(comprido)).toBeGreaterThan(fases(curto));
+    expect(comprido).toContain("evento 11");
+  });
+
+  it("o rodapé continua embaixo: o preenchimento vai antes dele", () => {
+    const linhas = alto(50);
+    expect(linhas.at(-1)).toContain("Ctrl-C");
   });
 });

@@ -119,7 +119,7 @@ export interface BuildOptions {
    * fases existem antes de a primeira começar, senão a lista cresce por baixo e
    * ninguém sabe quanto falta. `onProgress` chega a cada gate.
    */
-  onPlanned?: (phases: { id: string; title: string }[]) => void;
+  onPlanned?: (phases: { id: string; title: string; taskCount: number }[], contexto?: { testCommand?: string }) => void;
   onProgress?: BuildProgressListener;
   sleep?: (seconds: number) => Promise<void>;
   now?: () => Date;
@@ -508,7 +508,12 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       return renderSkillBlock(selecao, pastaPorUri);
     };
 
-    options.onPlanned?.(checked.sessions.map((session) => ({ id: session.id, title: session.title })));
+    options.onPlanned?.(
+      checked.sessions.map((session) => ({ id: session.id, title: session.title, taskCount: session.taskCount })),
+      // O comando do gate 2 é a única coisa do preflight que quem olha a tela
+      // precisa saber de cor: é ele que decide se a suíte roda de verdade.
+      checked.testCommand ? { testCommand: checked.testCommand.command } : {},
+    );
 
     /*
      * `rebuildAll` ignora as DUAS memórias: a do próprio run, que é a retomada

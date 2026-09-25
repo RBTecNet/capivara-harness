@@ -1329,7 +1329,11 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     // projeto inteiro em toda chamada.
     const fases = new Array<string>(esqueleto.phases.length).fill("");
     const fila = esqueleto.phases.map((fase, posicao) => ({ fase, posicao }));
-    relatarFase({ kind: "planned", phases: esqueleto.phases.map((fase) => ({ number: fase.number, title: fase.title })) });
+    // O esqueleto sabe quantas tasks cada fase aloca; a tela passa a saber também.
+    relatarFase({
+      kind: "planned",
+      phases: esqueleto.phases.map((fase) => ({ number: fase.number, title: fase.title, tasks: fase.taskCount })),
+    });
     await Promise.all(
       Array.from({ length: Math.min(maxParallelParts, fila.length) }, async () => {
         for (;;) {

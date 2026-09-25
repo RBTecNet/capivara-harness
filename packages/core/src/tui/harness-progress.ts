@@ -12,7 +12,7 @@
 
 import { PIPELINE_STEPS } from "./labels.js";
 import type { BuildPhaseRow } from "./build-phases.js";
-import type { Activity, DashboardModel, DashboardEvent, PipelineStep, StepState } from "./dashboard.js";
+import type { Activity, DashboardModel, DashboardEvent, PipelineStep, ProgressBar, StepState, WorkField } from "./dashboard.js";
 import type { Style } from "./ansi.js";
 
 export interface ProgressEvent {
@@ -99,6 +99,17 @@ export class HarnessProgress {
   private custo: number | null = null;
   private correcoes = 0;
   private fases: { rows: BuildPhaseRow[]; summary: string; maxRows: number; columns?: readonly string[]; legend?: readonly string[]; anchorId?: string } | null = null;
+  /**
+   * A última coisa que deu errado, guardada.
+   *
+   * O painel via toda devolução passar e não guardava nenhuma: quem chegava na
+   * frente da tela depois de dez minutos via "em andamento" e a fase corrente,
+   * sem nada sobre o que tinha feito o ciclo anterior voltar. É a pergunta que
+   * mais se faz olhando um build, e a resposta estava a um campo de distância.
+   */
+  private ultimoErro = "";
+  /** Uma linha de contexto para a caixa de progresso — o comando de teste, por exemplo. */
+  private nota = "";
 
   constructor(options: HarnessProgressOptions) {
     this.options = options;
@@ -123,6 +134,11 @@ export class HarnessProgress {
     }
 
     if (event.status === "retry") this.correcoes += 1;
+    if ((event.status === "retry" || event.status === "blocked") && event.detail.trim() !== "") {
+      // A primeira linha basta: o detalhe de uma devolução costuma ser um
+      // parágrafo, e a caixa tem uma linha.
+      this.ultimoErro = event.detail.split("\n")[0]?.trim() ?? "";
+    }
     if (event.status === "blocked") this.situacao = { label: "bloqueado", state: "falhou" };
     else if (event.stage === "ready" && event.status === "complete") this.situacao = { label: "RALPH READY", state: "concluído" };
     else this.situacao = { label: "em andamento", state: "em andamento" };
@@ -206,6 +222,74 @@ export class HarnessProgress {
     this.fases = { rows, summary, maxRows, ...(columns ? { columns } : {}), ...(legend ? { legend } : {}), ...(anchorId ? { anchorId } : {}) };
   }
 
+  /** Uma linha de contexto para a caixa de progresso. O build usa para o comando de teste. */
+  setNote(nota: string): void {
+    this.nota = nota.trim();
+  }
+
+  /**
+   * As contagens do estágio, para as barras.
+   *
+   * Cada estágio conta o que ele tem, e todos têm alguma coisa — era por isso que
+   * a caixa podia ser a mesma em todos. Com fases na tela, contam-se fases e as
+   * tasks que elas carregam; sem fases, contam-se as etapas do pipeline, que é o
+   * que o `init` tem antes de existir uma fase.
+   */
+  private progresso(): ProgressBar[] {
+    const linhas = this.fases?.rows ?? [];
+    if (linhas.length > 0) {
+      const colunas = this.fases?.columns ?? [];
+      // No `plan` a primeira coluna é a escrita; no `build` o que fecha é o estado.
+      const escritas = colunas.includes("E")
+        ? linhas.filter((linha) => linha.gates.E === "verde").length
+        : linhas.filter((linha) => linha.state === "concluído").length;
+      const fechadas = linhas.filter((linha) => linha.state === "concluído").length;
+      const comTasks = linhas.filter((linha) => linha.tasks !== undefined);
+
+      return [
+        { label: colunas.includes("E") ? "Escritas" : "Fases", done: escritas, total: linhas.length },
+        ...(colunas.includes("E") ? [{ label: "Aprovadas", done: fechadas, total: linhas.length }] : []),
+        ...(comTasks.length > 0
+          ? [
+              {
+                label: "Tasks",
+                done: comTasks.filter((linha) => linha.state === "concluído").reduce((total, linha) => total + (linha.tasks ?? 0), 0),
+                total: comTasks.reduce((total, linha) => total + (linha.tasks ?? 0), 0),
+              },
+            ]
+          : []),
+      ];
+    }
+
+    const passos = this.pipeline();
+    return passos.length === 0
+      ? []
+      : [{ label: "Etapas", done: passos.filter((passo) => passo.state === "concluído").length, total: passos.length }];
+  }
+
+  /**
+   * O trabalho corrente, campo a campo.
+   *
+   * O que quem olha pergunta, nesta ordem: em que ponto está, há quanto tempo, e
+   * o que deu errado da última vez. Os três estavam no painel — espalhados entre
+   * a linha de etapa, a de atividade e a janela de log, que rola.
+   */
+  private trabalho(): WorkField[] {
+    const corrente = (this.fases?.rows ?? []).find((linha) => linha.state === "em andamento");
+    const gateCorrente = corrente
+      ? Object.entries(corrente.gates).find(([, estado]) => estado === "corrente")?.[0]
+      : undefined;
+
+    return [
+      ...(corrente ? [{ label: "Fase", value: `${corrente.id} · ${corrente.title}` }] : []),
+      ...(corrente && corrente.detail !== "" ? [{ label: "Situação", value: corrente.detail }] : []),
+      ...(gateCorrente ? [{ label: "Gate", value: gateCorrente }] : []),
+      { label: "Etapa", value: this.etapa },
+      { label: "Atividade", value: this.atividade.detail },
+      { label: "Último erro", value: this.ultimoErro === "" ? "—" : this.ultimoErro },
+    ];
+  }
+
   model(): DashboardModel {
     return {
       version: this.options.version,
@@ -217,6 +301,9 @@ export class HarnessProgress {
       durationSeconds: Math.max(0, Math.round((this.now().getTime() - this.startedAt) / 1000)),
       pipeline: this.pipeline(),
       ...(this.fases ? { phases: this.fases } : {}),
+      progress: this.progresso(),
+      ...(this.nota === "" ? {} : { progressNote: this.nota }),
+      work: this.trabalho(),
       provider: this.options.provider,
       telemetry: [
         { label: "CHAMADAS", value: String(this.chamadas) },

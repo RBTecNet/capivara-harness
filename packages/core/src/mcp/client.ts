@@ -15,6 +15,8 @@
  * até hoje, e é parte do que o torna auditável.
  */
 
+import { VERSION } from "../version.js";
+
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
 
 export interface McpEndpoint {
@@ -198,7 +200,10 @@ export function createMcpClient(endpoint: McpEndpoint, options: McpClientOptions
       const resultado = (await enviar("initialize", {
         protocolVersion: MCP_PROTOCOL_VERSION,
         capabilities: {},
-        clientInfo: { name: "capivara", version: "0.2.0" },
+        // A versão vem de onde ela é decidida. Escrita à mão aqui, ela ficou em
+        // 0.2.0 enquanto o resto do harness andou — e quem lê o log do servidor
+        // não tem como saber que a fonte era outra.
+        clientInfo: { name: "capivara", version: VERSION },
       })) as { protocolVersion?: string; serverInfo?: { name?: string; version?: string } } | null;
 
       servidor = {

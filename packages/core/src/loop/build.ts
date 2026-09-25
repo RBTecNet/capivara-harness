@@ -38,7 +38,7 @@ import {
   runPaths,
   writeRunState,
 } from "../state/index.js";
-import { iniciarRepositorio, isClean, isRepository } from "./git.js";
+import { iniciarRepositorio, isClean, isRepository, lerEscolhaDeRepositorio, renderSemRepositorio } from "./git.js";
 import { materializeSessions } from "./split.js";
 import { preflight, type PreflightWarning } from "./preflight.js";
 import { readPrerequisiteChoice, renderPrerequisiteChoice, resolvePrerequisites } from "./prerequisites.js";
@@ -86,6 +86,14 @@ export interface BuildOptions {
    * igual, sem commit por fase — e sem ponto de retorno entre as fases.
    */
   gitInit?: boolean;
+  /**
+   * Como perguntar ao desenvolvedor o que fazer com a falta de repositório.
+   *
+   * Sem isto, árvore com trabalho e sem Git é erro de preflight: um build não
+   * interativo não tem a quem perguntar, e criar repositório sobre trabalho alheio
+   * não é coisa que se faça por palpite.
+   */
+  askGit?: (rendered: string) => Promise<string>;
   /**
    * Recebe o que este build tem a devolver à base: o estado e o que o executor
    * anotou. Ausente significa build sem base — nada muda no resto.
@@ -199,19 +207,77 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   }
 
   /*
-   * O repositório, criado por quem precisa dele.
+   * O repositório é PRÉ-REQUISITO do build, não uma conveniência.
    *
-   * O build é quem commita por fase, então é ele quem garante haver onde commitar.
-   * Dezesseis fases sem repositório são dezesseis fases sem ponto de retorno — e,
-   * no `assitencia`, também uma task correta reprovada no gate 3 porque o
-   * verificador foi conferir "arquivos versionados" numa árvore sem versionamento.
+   * Antes era um aviso, e avisar não resolveu nada: o `assitencia` rodou três
+   * ciclos sem repositório, sem ponto de retorno entre as fases, e com uma task
+   * correta reprovada no gate 3 porque o verificador foi conferir "arquivos
+   * versionados" numa árvore que não tinha versionamento nenhum.
+   *
+   * Então o build garante o repositório, na ordem que respeita de quem é o
+   * trabalho: em pasta nova ele cria sem perguntar, porque não há nada de ninguém
+   * ali; sobre árvore que já tem trabalho ele PERGUNTA, com as mesmas três saídas
+   * do pré-requisito de sistema ausente; e sem resposta possível ele para, em vez
+   * de seguir para um build que não sabe voltar atrás.
+   *
+   * `--no-git` continua existindo para quem versiona por fora ou usa outro
+   * controle de versão. É escolha explícita de quem chamou, e a mensagem diz isso.
    */
-  if (options.gitInit !== false) {
+  let repository = await isRepository(options.projectRoot);
+
+  if (!repository && options.gitInit !== false) {
     const iniciado = await iniciarRepositorio(options.projectRoot);
-    if (iniciado.criado) announce("repositório Git criado: cada fase verde vira um commit, e há para onde voltar");
+    if (iniciado.criado) {
+      announce("repositório Git criado: cada fase verde vira um commit, e há para onde voltar");
+      repository = true;
+    }
   }
 
-  const repository = await isRepository(options.projectRoot);
+  if (!repository && options.gitInit !== false) {
+    if (options.askGit) {
+      for (;;) {
+        const escolha = lerEscolhaDeRepositorio(await options.askGit(renderSemRepositorio()));
+        if (escolha === null) {
+          announce("  responda com 1, 2 ou 3.");
+          continue;
+        }
+        if (escolha === "abortar") break;
+        if (escolha === "criar") {
+          const criado = await iniciarRepositorio(options.projectRoot, { comTrabalhoExistente: true });
+          if (!criado.criado) {
+            announce(`não consegui criar o repositório: ${criado.motivo}`);
+            break;
+          }
+          announce(
+            criado.commitInicial
+              ? "repositório Git criado, com o que já estava aqui no commit inicial"
+              : "repositório Git criado",
+          );
+        }
+        repository = await isRepository(options.projectRoot);
+        if (repository) break;
+        announce("ainda não é um repositório Git aqui.");
+      }
+    }
+
+    if (!repository) {
+      const razao = [
+        "este projeto não é um repositório Git, e o build precisa de um.",
+        "",
+        "Cada fase verde vira um commit, e é o único ponto de retorno que existe: sem ele, uma fase que",
+        "quebre o que outra construiu não tem para onde voltar. E critério que fale de arquivo versionado",
+        "fica impossível de provar — o verificador confere, não encontra versionamento, e reprova uma task",
+        "correta.",
+        "",
+        "  git init && git add -A && git commit -m \"estado inicial\"",
+        "",
+        "Se você versiona este projeto por fora, ou usa outro controle de versão, rode com --no-git: o",
+        "loop roda igual, sem commit por fase.",
+      ].join("\n");
+      announce(`erro: ${razao}`);
+      return { runId, exitCode: 1, phases: [], warnings: [], errors: [razao], acceptance: null };
+    }
+  }
 
   const checked = await preflight({
     projectRoot: options.projectRoot,

@@ -1371,6 +1371,18 @@ export function createProgram(): Command {
       ...(devolverMemorias ? { onMemorias: devolverMemorias } : {}),
       ...(terminalBuild
         ? {
+            /*
+             * A falta de repositório é perguntada pelo mesmo caminho do
+             * pré-requisito ausente, porque é a mesma categoria de coisa: algo
+             * que o build precisa e não está lá. Entrada esgotada é abortar.
+             */
+            askGit: async (rendered: string) => {
+              stdout.write(`\n${rendered}\n`);
+              return await linhasBuild!.ask("> ").catch((error: unknown) => {
+                if (error instanceof InputEndedError) return "3";
+                throw error;
+              });
+            },
             askPrerequisite: async (rendered: string) => {
               stdout.write(`\n${rendered}\n`);
               // Entrada esgotada é "abortar": faltando pré-requisito e sem quem

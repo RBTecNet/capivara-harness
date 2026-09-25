@@ -134,6 +134,8 @@ async function build(
     rebuildAll?: boolean;
     roles?: Record<string, { provider: string; model: string; effort: string }>;
     onProgress?: (evento: BuildProgress) => void;
+    askGit?: (rendered: string) => Promise<string>;
+    gitInit?: boolean;
   } = {},
 ) {
   const engine = fakeEngine(projectRoot, steps);
@@ -151,6 +153,8 @@ async function build(
     ...(options.flowRunner !== undefined ? { flowRunner: options.flowRunner } : {}),
     ...(options.skipAcceptance !== undefined ? { skipAcceptance: options.skipAcceptance } : {}),
     ...(options.rebuildAll !== undefined ? { rebuildAll: options.rebuildAll } : {}),
+    ...(options.askGit !== undefined ? { askGit: options.askGit } : {}),
+    ...(options.gitInit !== undefined ? { gitInit: options.gitInit } : {}),
     ...(options.roles !== undefined ? { roles: options.roles } : {}),
     ...(options.onProgress !== undefined ? { onProgress: options.onProgress } : {}),
     testRunner: async () => {
@@ -1080,14 +1084,65 @@ describe("B-27 a B-30 · contenção, interrupção e retomada", () => {
     expect(await isRepository(projectRoot)).toBe(true);
   });
 
-  it("B-30 pasta que já tem trabalho: o harness não inventa repositório, e diz o que custa", async () => {
+  /*
+   * Árvore que já tem trabalho e não tem Git: o build PARA. Avisar não resolveu
+   * nada — o `assitencia` rodou três ciclos sem repositório, sem ponto de retorno
+   * entre as fases, e com uma task correta reprovada porque o verificador foi
+   * conferir "arquivos versionados" numa árvore sem versionamento.
+   */
+  it("B-30 sem repositório e sem quem perguntar, o build não começa", async () => {
+    await writeFile(join(projectRoot, "README.md"), "escrito à mão antes do harness", "utf8");
+    await publishPlan();
+    const { outcome, engine } = await build([]);
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.errors.join("\n")).toContain("precisa de um");
+    expect(outcome.errors.join("\n")).toContain("--no-git");
+    // Parou ANTES de gastar modelo: descobrir isso na terceira fase custa três sessões.
+    expect(engine.calls).toEqual([]);
+  });
+
+  it("B-30 com terminal, ele oferece criar o repositório e commita o que já existe", async () => {
     await writeFile(join(projectRoot, "README.md"), "escrito à mão antes do harness", "utf8");
     const { tasks } = await publishPlan();
-    const { outcome } = await build([
-      { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
-      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) } },
-      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) } },
-    ]);
+
+    const perguntado: string[] = [];
+    const { outcome } = await build(
+      [
+        { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
+        { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) } },
+        { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) } },
+      ],
+      {
+        askGit: async (rendered) => {
+          perguntado.push(rendered);
+          return "1";
+        },
+      },
+    );
+
+    expect(perguntado.join("\n")).toContain("ponto de retorno");
+    expect(perguntado.join("\n")).toContain("arquivo versionado");
+    expect(outcome.exitCode).toBe(0);
+    expect(await isRepository(projectRoot)).toBe(true);
+
+    // O trabalho que já estava lá entrou no commit inicial, e não no da fase 1.
+    const { stdout: historico } = await run("git", ["log", "--format=%s", "--reverse"], { cwd: projectRoot });
+    expect(historico.split("\n")[0]).toContain("estado inicial");
+  });
+
+  it("B-30 quem versiona por fora roda com --no-git, e o aviso diz o que custa", async () => {
+    await writeFile(join(projectRoot, "README.md"), "escrito à mão antes do harness", "utf8");
+    const { tasks } = await publishPlan();
+    const { outcome } = await build(
+      [
+        { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
+        { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) } },
+        { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) } },
+      ],
+      { gitInit: false },
+    );
+
     expect(outcome.exitCode).toBe(0);
     expect(await isRepository(projectRoot)).toBe(false);
 

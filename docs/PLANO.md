@@ -5347,7 +5347,7 @@ satisfazível em princípio. Agora:
   trabalho — metadado de versionamento, CI, servidor remoto —, que é o 75.2 dito
   de forma geral.
 
-### 75.4 O repositório que o build precisa é o build que cria
+### 75.4 O repositório que o build precisa é pré-requisito, não conveniência
 
 Sem repositório, `commitPhase` não fazia nada e ninguém dizia o que isso custava:
 dezesseis fases sem **nenhum ponto de retorno**, e todo critério que fale de
@@ -5363,3 +5363,28 @@ fase verde e todos os gates passados. Duas correções: o repositório que o har
 cria ganha identidade local própria quando não há nenhuma resolvível, e
 `commitPhase` não lança mais — commit é escrituração, e escrituração que falha não
 desfaz trabalho que passou.
+
+### 75.5 Avisar não é garantir
+
+A primeira versão do 75.4 criava o repositório em pasta nova e, sobre árvore que já
+tinha trabalho, **avisava**. O desenvolvedor leu isso e fez a pergunta certa: se o
+repositório é importante para o build, por que o build começa sem ele?
+
+Não há resposta boa. Um aviso no meio do preflight é lido por quem já sabe e
+ignorado por quem não sabe, e as duas consequências — não ter ponto de retorno em
+dezesseis fases, e ter critério que ninguém consegue provar — só aparecem horas
+depois, no gate. Repositório é **pré-requisito**, da mesma categoria de `sqlite3`
+ausente ou navegador não instalado: algo de que o build depende e que não está lá.
+
+Então ele entra na gramática que o harness já tem para isso, com a ordem que
+respeita de quem é o trabalho:
+
+1. pasta nova — cria sem perguntar, porque não há nada de ninguém ali;
+2. árvore com trabalho — **pergunta**, com as três saídas de sempre: crio agora e
+   commito o que já existe, já criei em outro terminal, abortar;
+3. ninguém para responder — **para**, antes de gastar a primeira chamada de modelo,
+   com o comando na tela.
+
+`--no-git` continua existindo, para quem versiona por fora ou usa outro controle de
+versão. É escolha explícita de quem chamou, dita na mensagem de erro, e o aviso que
+sobrou existe só para esse caso.

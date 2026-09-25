@@ -87,19 +87,80 @@ async function apenasPlanoDeControle(projectRoot: string): Promise<boolean> {
  * não inventa repositório — quem tem código sem git tem um motivo, e o commit
  * inicial de uma árvore alheia é decisão de quem a escreveu.
  */
-export async function iniciarRepositorio(projectRoot: string): Promise<{ criado: boolean; motivo: string }> {
-  if (await isRepository(projectRoot)) return { criado: false, motivo: "já é um repositório" };
-  if (!(await apenasPlanoDeControle(projectRoot))) {
-    return { criado: false, motivo: "a pasta já tem arquivos: criar o repositório aqui é decisão de quem os escreveu" };
+export async function iniciarRepositorio(
+  projectRoot: string,
+  opcoes: { comTrabalhoExistente?: boolean } = {},
+): Promise<{ criado: boolean; motivo: string; commitInicial: boolean }> {
+  if (await isRepository(projectRoot)) return { criado: false, motivo: "já é um repositório", commitInicial: false };
+
+  const vazia = await apenasPlanoDeControle(projectRoot);
+  if (!vazia && opcoes.comTrabalhoExistente !== true) {
+    return {
+      criado: false,
+      commitInicial: false,
+      motivo: "a pasta já tem arquivos: criar o repositório aqui é decisão de quem os escreveu",
+    };
   }
 
   try {
     await run("git", ["init", "-q"], { cwd: projectRoot });
     await garantirIdentidade(projectRoot);
-    return { criado: true, motivo: "" };
+
+    /*
+     * Árvore que já tem trabalho precisa do commit inicial, e não por capricho: o
+     * preflight recusa build com alteração não commitada, para poder distinguir o
+     * que cada fase escreveu. Sem este commit, criar o repositório deixaria o
+     * projeto pior do que estava — bloqueado por uma sujeira que fomos nós que
+     * criamos.
+     *
+     * O `.capivara/` fica fora, como fica de todo commit de fase: o plano de
+     * controle não é trabalho do produto.
+     */
+    if (!vazia) {
+      await run("git", ["add", "-A", "--", ...CONTROL_PLANE_PATHSPEC], { cwd: projectRoot });
+      if (!(await isClean(projectRoot))) {
+        await run("git", ["commit", "-q", "-m", "chore: estado inicial, antes do primeiro build"], { cwd: projectRoot });
+      }
+      return { criado: true, motivo: "", commitInicial: true };
+    }
+
+    return { criado: true, motivo: "", commitInicial: false };
   } catch (erro) {
-    return { criado: false, motivo: erro instanceof Error ? erro.message : String(erro) };
+    return { criado: false, commitInicial: false, motivo: erro instanceof Error ? erro.message : String(erro) };
   }
+}
+
+export type EscolhaDeRepositorio = "criar" | "verificar" | "abortar";
+
+/**
+ * O que se pergunta quando falta o repositório numa árvore que já tem trabalho.
+ *
+ * Mesma gramática do pré-requisito de sistema ausente, porque é a mesma coisa:
+ * algo que o build precisa e não está lá. Três saídas, e só uma segue em frente.
+ */
+export function renderSemRepositorio(): string {
+  return [
+    "Este projeto não é um repositório Git, e o build precisa de um.",
+    "",
+    "Duas razões, e nenhuma delas é gosto:",
+    "  · cada fase verde vira um commit, e é o único ponto de retorno que existe — sem ele, uma",
+    "    fase que quebre o que outra construiu não tem para onde voltar;",
+    "  · critério que fale de arquivo versionado fica impossível de provar: o verificador vai",
+    "    conferir, não encontra versionamento, e reprova uma task correta.",
+    "",
+    "  1) criar o repositório agora e commitar o que já está aqui (respeitando o .gitignore)",
+    "  2) já criei em outro terminal; verifique de novo",
+    "  3) abortar",
+  ].join("\n");
+}
+
+/** Lê a escolha numérica; qualquer outra coisa é recusada, nunca adivinhada. */
+export function lerEscolhaDeRepositorio(resposta: string): EscolhaDeRepositorio | null {
+  const texto = resposta.trim();
+  if (texto === "1") return "criar";
+  if (texto === "2") return "verificar";
+  if (texto === "3") return "abortar";
+  return null;
 }
 
 /**

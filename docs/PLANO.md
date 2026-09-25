@@ -5526,3 +5526,106 @@ E elas entram como decididas **depois do esqueleto**, que é o que são: o bloco
 `Decisions taken after the skeleton was written` do prompt da fase passou a ser
 calculado só contra as decisões do `init`, e não contra tudo o que já está na
 memória.
+
+## §77 — O escritor era julgado contra um pedido que ele não podia ler
+
+A pergunta do desenvolvedor — *"estamos correndo atrás do rabo?"* — obrigou a medir
+antes de consertar, e o que apareceu foi a causa por baixo de §73, §75 e §76.
+
+### 77.1 A assimetria
+
+```
+phaseAuditPrompt      → "## The developer's original request (verbatim)"   ✓
+phaseFromSlicePrompt  → …não tinha essa seção.
+```
+
+O auditor de uma fase recebe o pedido inteiro. O escritor da fase recebia só a
+fatia do esqueleto. O pedido do `assistencia2` tem **16.752 caracteres** e fala de
+"rolagem" ou "linhas" **nove vezes** — ele prescreve até o tamanho dos campos —, e
+nada disso sobrevive à compressão em stack, entidades e regras.
+
+Dos 25 achados de uma tentativa de auditoria, **18 eram detalhes que o pedido exige
+e a fase não podia conhecer**, e 7 eram "recopie o modelo de dados". O escritor
+fechava o que era apontado, o auditor achava o próximo, e o laço não convergia — não
+por amostragem, por **ausência**: a informação que fecharia o ponto não estava na mão
+de quem escreve.
+
+O escritor da fase e a emenda passaram a receber o pedido, com o limite dito: *você
+escreve SÓ esta fase; o pedido está aqui para você acertar o detalhe do seu próprio
+trabalho, nunca para trazer trabalho de outra*. Custa 16 KB em 13 chamadas; uma
+rodada de auditoria custava 13 chamadas de auditor mais 13 de emenda.
+
+Um teste que comparava o tamanho dos dois prompts caiu com isso, e era um proxy
+ruim desde sempre: a tese nunca foi "o prompt da fase é menor", é "a fase não
+carrega o que as outras cobrem". Passou a ser isso que ele mede.
+
+### 77.2 O endereço escondia a repetição
+
+`fingerprint` era `where::problem`, e o `where` é a parte que o auditor reescreve:
+ele cita o título da task, a emenda mexe no título. Medido na mesma fase, tentativas
+2 e 3:
+
+```
+t2: Tarefa de geração manual de cobranças | Os critérios definem o primeiro…
+t3: Tarefa «Gerar manualmente cobranças da recorrência de tenants ativos» | Os critérios definem o primeiro…
+```
+
+Mesmo problema, endereço novo, hash novo. São duas perguntas diferentes e agora são
+duas marcas: `fingerprint` (endereço + problema) continua contando defeitos — "fechou
+1 de 2" precisa distinguir o mesmo defeito em dois lugares —, e `marcaDoProblema`
+(problema normalizado) decide se é o mesmo ponto de novo.
+
+### 77.3 O levantamento arbitrava tudo, sempre
+
+E aqui estava o defeito que o desenvolvedor sentiu como *"o auditor está barrando
+tudo"*: `history.push` acontece antes de `nextAuditAction`, então a história já
+contém o veredito que está sendo tratado — e `ehRepetido`, que procura o achado
+nela, **encontrava o achado nele mesmo**. Todo achado parecia repetido na primeira
+aparição.
+
+O §70 diz o contrário com todas as letras: *"um achado que aparece uma vez é defeito
+— o escritor conserta e segue; um achado que sobrevive a uma reescrita é desacordo"*.
+O escritor nunca ganhou a primeira chance, e no `assistencia2` isso apareceu como
+sete arbitragens numa auditoria de nove achados: o desenvolvedor decidindo o que o
+escritor teria fechado sozinho.
+
+### 77.4 O teste adversário, que é o que faz isso parar de custar horas
+
+Os defeitos de convergência deste harness foram todos descobertos em produção, a
+duas horas de run por descoberta, porque **os roteiros de teste sempre aprovavam na
+segunda volta**. `test/init/convergencia.spec.ts` roteiriza o comportamento
+adversário: um auditor que devolve um achado verdadeiro e NOVO a cada leitura, para
+sempre, com o endereço reescrito. Ele não é injusto — é o que um modelo faz quando a
+pergunta que lhe foi feita não tem borda.
+
+O que o teste afirma não é que o plano fica bom: é que o harness **termina**, e que o
+preço em atenção do desenvolvedor é limitado. Ele achou três defeitos na primeira
+execução:
+
+1. **sessenta perguntas** — o teto de arbitragem era contado em pontos; passou a ser
+   contado em rodadas, que é o que custa uma auditoria inteira depois de cada uma;
+2. **três perguntas para o mesmo ponto** — a auditoria do plano são N chamadas, o
+   mesmo defeito aparece em várias com endereços diferentes, e o filtro era calculado
+   uma vez antes do laço. A decisão é do PONTO: tomada uma vez, vale para todos os
+   achados que dizem o mesmo;
+3. **§77.3**, indiretamente: a contagem de perguntas só fechou depois que
+   `ehRepetido` parou de se encontrar.
+
+### 77.5 A fronteira entre os critérios e o esqueleto
+
+Os 7 achados restantes eram *"os critérios não exigem todos os dados do cadastro: e-mail
+opcional, endereço, número, bairro, cidade e UF"*. Os campos estão no esqueleto, que o
+executor é mandado ler e o verificador também lê. A regra nova separa **forma** —
+quais colunas existem, tipos, o conjunto de valores de um campo enumerado, que é do
+esqueleto — de **comportamento** — o que acontece, o que é recusado, o que é exibido,
+que é dos critérios. Reprovar por não reenumerar o modelo não tem fim, e inflar a task
+para caber a enumeração estoura o teto que mantém a fase dentro de uma sessão.
+
+### 77.6 E a regra de contexto, que é a mesma lição
+
+Compactar contexto é perder detalhe, e perder detalhe é o defeito deste capítulo
+inteiro. No harness isso tem um endereço concreto que ainda está aberto: o teto de 15
+tasks por fase está sendo usado como ALVO pelo escritor do esqueleto — média de 12,2
+no `assistencia2`, seis fases entre 12 e 14 —, e fase densa é sessão longa de
+executor, mais perto do limite de contexto dele, onde a compactação começa a
+inventar. O teto precisa voltar a ser teto.

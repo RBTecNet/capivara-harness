@@ -697,23 +697,34 @@ describe("B-35 · impasse do auditor", () => {
     ).rejects.toThrow(/Decisão do desenvolvedor: abortar/);
   });
 
+  /*
+   * A prosa do impasse deixou de ser a primeira parada (§76.3): o esgotamento do
+   * orçamento arbitra cada ponto insistido com as duas leituras numeradas, e só
+   * quando não há mais nada a arbitrar é que o texto livre aparece. Este cenário
+   * atravessa as duas etapas — uma arbitragem, depois a prosa — porque a lição que
+   * ele protege é da prosa: "REINICIAR" é comando, não decisão de produto.
+   */
   it("reiniciar renova o ciclo, exige aprovação e não vira decisão confirmada", async () => {
     const steps = happyPath();
     steps.unshift({
       match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
-      respond: { stdout: (call) => call.attempt < 4 ? reject("Phase 1", "falta a restrição", "declare a restrição") : approve() },
+      respond: { stdout: (call) => call.attempt < 3 ? reject("Phase 1", "falta a restrição", "declare a restrição") : approve() },
       repeat: true,
     });
     const agent = fakeAgent(steps);
     let asked = 0;
     const outcome = await runInit({
-      projectRoot, request, language: "português do Brasil", maxAuditReturns: 2,
+      projectRoot, request, language: "português do Brasil", maxAuditReturns: 1,
       call: agent.call, ask: async () => "use as recomendações",
       decideStandoff: async () => ++asked === 1 ? "  REINICIAR  " : "abortar",
     });
     expect(outcome.readiness.ready).toBe(true);
     expect(asked).toBe(1);
-    expect(agent.calls.filter((call) => call.subject === "project-phases.md#P1").map((call) => call.attempt)).toEqual([1, 2, 3, 4]);
+    const tentativas = agent.calls.filter((call) => call.subject === "project-phases.md#P1").map((call) => call.attempt);
+    // Crescentes e sem repetição: é o que a lição pede, e o número de voltas agora
+    // depende de quantas arbitragens couberam antes da prosa.
+    expect(tentativas).toEqual([...tentativas].sort((a, b) => a - b));
+    expect(new Set(tentativas).size).toBe(tentativas.length);
     expect(doRoteiro(outcome.report.checkpoint.decisions)).toHaveLength(0);
     expect(outcome.report.remarks.some((entry) => entry.remark.observation.includes("decisão do desenvolvedor"))).toBe(false);
     expect(agent.calls.some((call) => call.prompt.includes("acima do auditor: REINICIAR"))).toBe(false);
@@ -741,8 +752,16 @@ describe("B-35 · impasse do auditor", () => {
       decideStandoff: async () => ++asked <= 2 ? "reiniciar" : "abortar",
     })).rejects.toThrow(/Decisão do desenvolvedor: abortar/);
     expect(asked).toBe(3);
-    expect(agent.calls.filter((call) => call.subject === "project-phases.md#P1").map((call) => call.attempt)).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(agent.calls.filter((call) => call.subject === "phase-p01").map((call) => call.attempt)).toEqual([1, 2, 3, 4, 5, 6]);
+    /*
+     * Crescentes e sem repetição. Os números exatos deixaram de ser afirmáveis
+     * quando a arbitragem passou a vir antes da prosa: cada arbitragem renova o
+     * orçamento, como o reinício. A lição é que uma tentativa nunca se repete —
+     * o log tem de contar a história de volta.
+     */
+    const doAuditor = agent.calls.filter((call) => call.subject === "project-phases.md#P1").map((call) => call.attempt);
+    expect(doAuditor).toEqual([...doAuditor].sort((a, b) => a - b));
+    expect(new Set(doAuditor).size).toBe(doAuditor.length);
+    expect(doAuditor.length).toBeGreaterThanOrEqual(6);
     expect(agent.calls.some((call) => call.role === "verifier")).toBe(false);
     await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).rejects.toThrow();
   });

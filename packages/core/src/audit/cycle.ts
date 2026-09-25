@@ -48,8 +48,47 @@ export interface Standoff {
   question: string;
 }
 
+/**
+ * A identidade de um achado, para CONTAR: endereço mais problema.
+ *
+ * "Critério vago" em duas tasks diferentes são dois defeitos, e o resumo que o
+ * desenvolvedor lê no impasse — "fechou 1 de 2, 1 seguiu aberto" — depende de
+ * distingui-los. Aqui o endereço faz parte da identidade, e deve fazer.
+ */
 export function fingerprint(finding: Finding): string {
   return `${finding.where}::${finding.problem}`.toLowerCase();
+}
+
+/**
+ * A marca do PROBLEMA, para saber se é o mesmo ponto de novo.
+ *
+ * Pergunta diferente, marca diferente. Contar defeitos quer o endereço; reconhecer
+ * insistência não pode querer, porque o endereço é justamente a parte que o auditor
+ * reescreve. Medido no `assistencia2`, tentativas 2 e 3 da mesma fase:
+ *
+ *     t2: Tarefa de geração manual de cobranças | Os critérios definem o primeiro
+ *         vencimento e o ajuste para o último dia do período, mas não exigem…
+ *     t3: Tarefa «Gerar manualmente cobranças da recorrência de tenants ativos» |
+ *         Os critérios definem o primeiro vencimento e o ajuste para o último dia…
+ *
+ * O problema é o mesmo texto; o endereço virou outro porque a emenda mexeu no
+ * título da task que ele cita. Com o endereço na identidade, `ehRepetido` dizia
+ * não, e o levantamento — a pergunta que existe para o desacordo que sobrevive a
+ * uma reescrita — ficava fechado. O run caminhava para o impasse com pontos que
+ * tinham voltado três vezes sem serem reconhecidos como repetidos.
+ *
+ * O preço é conhecido e aceito: dois achados com a MESMA frase de problema em
+ * lugares diferentes contam como um só ponto para a arbitragem. Numa auditoria de
+ * verdade a frase é longa e específica; a colisão é rara, e arbitrar duas vezes o
+ * que o desenvolvedor já decidiu é pior.
+ */
+export function marcaDoProblema(finding: Finding): string {
+  return finding.problem
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 /**
@@ -61,8 +100,8 @@ export function fingerprint(finding: Finding): string {
  * Mandá-lo de volta uma terceira vez é pagar para reencenar a mesma discussão.
  */
 export function ehRepetido(finding: Finding, history: readonly AuditAttempt[]): boolean {
-  const marca = fingerprint(finding);
-  return history.some((tentativa) => tentativa.verdict.findings.some((anterior) => fingerprint(anterior) === marca));
+  const marca = marcaDoProblema(finding);
+  return history.some((tentativa) => tentativa.verdict.findings.some((anterior) => marcaDoProblema(anterior) === marca));
 }
 
 /** Findings que sobreviveram a todas as devoluções, sem repetir o equivalente. */
@@ -94,7 +133,7 @@ export function persistentFindings(history: readonly AuditAttempt[]): Finding[] 
 export function repeatedFindings(history: readonly AuditAttempt[]): Set<string> {
   const contagem = new Map<string, number>();
   for (const attempt of history) {
-    for (const marca of new Set(attempt.verdict.findings.map(fingerprint))) {
+    for (const marca of new Set(attempt.verdict.findings.map(marcaDoProblema))) {
       contagem.set(marca, (contagem.get(marca) ?? 0) + 1);
     }
   }
@@ -200,7 +239,7 @@ export function renderStandoff(standoff: Standoff): string {
   for (const finding of standoff.auditorInsists) {
     // O ponto que sobreviveu a reescritas é o que provavelmente não se resolve
     // escrevendo melhor, e é nele que a decisão do desenvolvedor costuma morar.
-    const insistente = standoff.repeated.has(fingerprint(finding)) ? " (repetido em mais de uma tentativa)" : "";
+    const insistente = standoff.repeated.has(marcaDoProblema(finding)) ? " (repetido em mais de uma tentativa)" : "";
     lines.push(`  · ${finding.where}: ${finding.problem}${insistente}`);
     lines.push(`    correção pedida: ${finding.fix}`);
   }

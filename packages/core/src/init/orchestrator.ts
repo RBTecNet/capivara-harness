@@ -31,8 +31,9 @@ import { detectRateLimit, planWait } from "../loop/ratelimit.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
 import { decisoesComoMemorias, renderLibraryBlock, type McpDocument, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { INIT_ARTIFACTS, evaluateReadiness } from "./readiness.js";
+import type { LeituraEscolhida } from "../interview/index.js";
 import { comAutoridade, decisaoDoAuditorComoFinding, decisaoDoEnsaio, decisaoGravada, lerEscolha, lerEscolhaDoEnsaio, perguntaDeLevantamento, perguntaDoAuditor, perguntaDoEnsaio } from "../interview/index.js";
-import { TasksJulgadas, ehRepetido, fingerprint, shaDaAutoridade } from "../audit/index.js";
+import { TasksJulgadas, ehRepetido, marcaDoProblema, shaDaAutoridade } from "../audit/index.js";
 import type { TaskBlock } from "../contract/index.js";
 import { MemoriaDoPlano } from "./plan-cache.js";
 import type { PlanProgressListener } from "./progress.js";
@@ -1353,6 +1354,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
            */
           const promptDaFase = phaseFromSlicePrompt({
             language: options.language,
+            request: options.request.text,
             slice: sliceForPhase(esqueleto, fase.number),
             phaseNumber: fase.number,
             totalPhases: esqueleto.phases.length,
@@ -1538,7 +1540,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
                 stage: "authoring",
                 subject: `phase-p${String(numero).padStart(2, "0")}`,
                 attempt,
-                prompt: amendPhasePrompt({ language: options.language, current: anterior, findings }),
+                prompt: amendPhasePrompt({ language: options.language, request: options.request.text, current: anterior, findings }),
               });
 
               const limpa = stripDeadDesignRefs(repairDeterministically(saida).content, designExiste);
@@ -1829,7 +1831,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       (finding) =>
         finding.mechanical !== true &&
         (todos || ehRepetido(finding, history)) &&
-        !arbitrados.has(fingerprint(finding)),
+        !arbitrados.has(marcaDoProblema(finding)),
     );
     if (repetidos.length === 0) return [...findings];
 
@@ -1839,6 +1841,19 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         : `  ${repetidos.length} ponto(s) voltaram pela segunda vez: isso é desacordo de leitura, não descuido — perguntando a você`,
     );
     const resultado: Finding[] = [];
+    /*
+     * O mesmo ponto em três lugares é UMA pergunta.
+     *
+     * A auditoria do plano são N chamadas — uma por fase, mais a coerência — e o
+     * mesmo defeito aparece em várias delas com endereços diferentes. O filtro
+     * acima é calculado uma vez, antes do laço, então os irmãos passavam todos por
+     * ele e o desenvolvedor respondia três vezes a mesma coisa. O teste adversário
+     * pegou isso na primeira execução: três arbitragens para um ponto só.
+     *
+     * A decisão é do PONTO, não do endereço: tomada uma vez, ela vale para todos
+     * os achados que dizem o mesmo.
+     */
+    const decididoAgora = new Map<string, LeituraEscolhida>();
 
     for (const finding of findings) {
       if (!repetidos.includes(finding)) {
@@ -1846,12 +1861,24 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         continue;
       }
 
-      arbitrados.add(fingerprint(finding));
+      const marca = marcaDoProblema(finding);
+      const jaDecidido = decididoAgora.get(marca);
+      if (jaDecidido) {
+        if (jaDecidido.tipo === "escritor") {
+          announce(`    ${finding.where}: encerrado pela mesma decisão`);
+          continue;
+        }
+        resultado.push(comAutoridade(finding, jaDecidido));
+        continue;
+      }
+
+      arbitrados.add(marca);
       const pergunta = perguntaDeLevantamento(finding, arbitrados.size, oQueOEscritorFez(conteudo, finding));
       const raw = await options.ask(pergunta, resultado.length + 1, repetidos.length);
       const resposta = await settle(document, pergunta, raw, attempt, 1, repetidos.length);
 
       const escolha = lerEscolha(resposta.decision, raw);
+      decididoAgora.set(marca, escolha);
 
       /*
        * O que se grava é a DECISÃO, não o botão.
@@ -2535,14 +2562,18 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * sem pergunta, sem documento. Foi assim que a medição de 95 minutos terminou.
      */
     /**
-     * Quantos pontos se arbitram num documento antes de a prosa assumir.
+     * Quantas RODADAS de arbitragem, e não quantos pontos.
      *
-     * Cada ponto é arbitrado UMA vez — `arbitrados` garante isso —, então o laço
-     * só continua enquanto o auditor traz pontos novos. O número existe para o
-     * caso patológico em que ele traz pontos novos para sempre: aí o problema não
-     * é a arbitragem, e o impasse em prosa é a mensagem certa.
+     * Era um teto de 60 pontos, e o teste adversário mostrou o que isso significa
+     * na prática: sessenta perguntas ao desenvolvedor num run em que o auditor
+     * inventa um ponto novo a cada leitura. Cada rodada de arbitragem custa uma
+     * auditoria inteira depois dela, então o que precisa ser limitado é o número de
+     * voltas — o mesmo orçamento que já governa as devoluções.
+     *
+     * Dentro de uma rodada, todos os pontos insistidos são arbitrados: eles são
+     * distintos, e calar um deles seria jogar informação fora.
      */
-    const PARADA_DE_ARBITRAGEM = 60;
+    let rodadasDeArbitragem = 0;
     const cycleBudget = maxAuditReturns + maxMechanicalRounds + 1;
     let attemptLimit = cycleBudget;
     /** Rodadas gastas com decisão do auditor — não são devolução de escrita. */
@@ -2614,7 +2645,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
          * ao auditor da rodada seguinte. A prosa continua existindo para o que não
          * se arbitra — defeito mecânico, ou ponto já arbitrado antes.
          */
-        if (verdict.mechanical !== true && arbitrados.size < PARADA_DE_ARBITRAGEM) {
+        if (verdict.mechanical !== true && rodadasDeArbitragem < maxAuditReturns) {
           /*
            * O que decide se houve arbitragem é o CONJUNTO ter crescido.
            *
@@ -2636,6 +2667,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             true,
           );
           if (arbitrados.size > antes) {
+            rodadasDeArbitragem += 1;
             attemptLimit = attempt + cycleBudget;
             history.length = 0;
             await event("audit", document, "retry", `${action.standoff.auditorInsists.length} ponto(s) arbitrados por você`, attempt);
@@ -2748,7 +2780,22 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
        * põe as duas versões na frente do desenvolvedor antes de gastar mais uma
        * reescrita nelas.
        */
-      const arbitradosDaVolta = await levantamentoDeAuditoria(document, content, action.findings, history, attempt, writer, verdict.mechanical === true);
+      /*
+       * A história SEM esta tentativa.
+       *
+       * `history.push` acontece antes de `nextAuditAction`, então a história já
+       * contém o veredito que está sendo tratado — e `ehRepetido`, que procura o
+       * achado nela, encontrava o achado nele mesmo. Resultado: TODO achado parecia
+       * repetido na primeira aparição, e o levantamento arbitrava tudo, sempre. O
+       * §70 diz o contrário com todas as letras: "um achado que aparece uma vez é
+       * defeito — o escritor conserta e segue; um achado que sobrevive a uma
+       * reescrita é desacordo". O escritor nunca ganhou a primeira chance.
+       *
+       * No `assistencia2` isso apareceu como sete arbitragens numa auditoria de
+       * nove achados: o desenvolvedor decidindo o que o escritor teria fechado.
+       */
+      const anteriores = history.slice(0, -1);
+      const arbitradosDaVolta = await levantamentoDeAuditoria(document, content, action.findings, anteriores, attempt, writer, verdict.mechanical === true);
       authored = await authored.rewrite([...decisoes, ...arbitradosDaVolta], action.attempt);
 
       /*

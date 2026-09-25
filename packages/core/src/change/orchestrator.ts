@@ -258,6 +258,8 @@ export async function runChange(options: ChangeOptions): Promise<ChangeOutcome> 
         attempt: tentativa,
         prompt: phaseFromSlicePrompt({
           language: options.language,
+          // O pedido da mudança é o que vale para as fases que ela cria.
+          request: options.request,
           slice: sliceForPhase(aplicada.skeleton, fase.number),
           phaseNumber: fase.number,
           totalPhases: aplicada.skeleton.phases.length,

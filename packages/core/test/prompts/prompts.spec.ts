@@ -25,6 +25,7 @@ const esqueleto = skeletonPrompt({
 const fatia = (phaseNumber = 1): string =>
   phaseFromSlicePrompt({
     language: context.language,
+    request: "um sistema de reservas para uma pousada, com observações em campo de quatro linhas e rolagem",
     slice: "## Stack\n- Linguagem: Node 22",
     phaseNumber,
     totalPhases: 3,
@@ -594,6 +595,7 @@ describe("critério se prova lendo o repositório", () => {
   it("a fase não escreve critério que depende de documento fora do repositório", () => {
     const fase = phaseFromSlicePrompt({
       language: "português do Brasil",
+      request: "um sistema de reservas",
       slice: "stack: Next.js",
       phaseNumber: 5,
       totalPhases: 18,
@@ -612,6 +614,7 @@ describe("critério se prova lendo o repositório", () => {
   it("a proibição alcança a regra transversal que já veio escrita assim", () => {
     const fase = phaseFromSlicePrompt({
       language: "português do Brasil",
+      request: "um sistema de reservas",
       slice: "regra: conforme a base documental frontend-design fornecida",
       phaseNumber: 1,
       totalPhases: 18,

@@ -84,11 +84,37 @@ describe("caminho por esqueleto", () => {
     }
   });
 
-  it("a fatia de uma fase é menor que o produto inteiro", async () => {
+  /*
+   * O que a fatia economiza, medido pelo CONTEÚDO e não por bytes.
+   *
+   * Havia aqui uma comparação de tamanho — o prompt da fase menor que o do
+   * esqueleto — e ela era um proxy que deixou de funcionar: o escritor da fase
+   * passou a receber o pedido verbatim (§77), e num pedido de 16 KB ele domina os
+   * dois lados. O proxy nunca foi a tese. A tese é que uma fase não carrega o que
+   * as outras cobrem, e é isso que se afirma aqui, nas duas direções: a fase 1 não
+   * vê a story nem o fluxo da fase 2, e a 2 não vê a entidade da 1.
+   */
+  it("a fatia não carrega o que outra fase cobre — nas duas direções", async () => {
     const { agent } = await run(skeletonPath());
-    const esqueleto = agent.calls.find((call) => call.subject === "skeleton");
+    const fase1 = agent.calls.find((call) => call.subject === "phase-p01");
+
+    expect(fase1?.prompt).toContain("statuses");
+    expect(fase1?.prompt).not.toContain("US-1.1");
+    expect(fase1?.prompt).not.toContain("Criar reserva");
+  });
+
+  it("e o pedido chega a quem escreve a fase: era o auditor que o tinha, e ela não", async () => {
+    /*
+     * A assimetria custava o run: o auditor da fase recebia o pedido verbatim e
+     * cobrava o que ele exige — tamanho de campo, rolagem, lista exata de valores
+     * —, e o escritor via só a fatia. Dos 25 achados de uma auditoria do
+     * `assistencia2`, 18 eram detalhes que a fase não podia conhecer.
+     */
+    const { agent } = await run(skeletonPath());
     const fase = agent.calls.find((call) => call.subject === "phase-p01");
-    expect(fase?.prompt.length).toBeLessThan(esqueleto?.prompt.length ?? 0);
+    expect(fase?.prompt).toContain(request.text);
+    // E com o limite dito: ver o pedido inteiro não autoriza escrever a fase do vizinho.
+    expect(fase?.prompt).toContain("you write ONLY this phase");
   });
 
   it("a cobertura sai do esqueleto, não de documento em prosa", async () => {

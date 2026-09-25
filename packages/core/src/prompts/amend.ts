@@ -24,6 +24,8 @@ export interface AmendContext {
   /** O texto exato que precisa voltar, com as correções aplicadas. */
   current: string;
   findings: { where: string; problem: string; fix: string }[];
+  /** O pedido do desenvolvedor, verbatim. Ausente mantém o comportamento antigo. */
+  request?: string;
   /** O que a tentativa anterior mudou sem ter sido pedido, quando houve. */
   drift?: string[];
 }
@@ -33,6 +35,24 @@ export function amendPhasePrompt(context: AmendContext): string {
     languageBlock(context.language),
     "",
     "You are amending a phase of an execution plan. You are not writing one.",
+    ...(context.request
+      ? [
+          "",
+          /*
+           * A emenda tem a mesma assimetria que a escrita tinha: ela fecha achados
+           * que citam o pedido — "o campo não tem as quatro linhas exigidas no
+           * pedido" — sem nunca ter visto o pedido. Fechar isso às cegas é
+           * adivinhar qual era a exigência.
+           */
+          "## The developer's original request (verbatim)",
+          "",
+          "Authority above everything. The findings below often cite a demand from it — a field's size,",
+          "an exact list of values, what a screen shows. Read it to close the finding with what the",
+          "request actually says, instead of guessing. You still change ONLY what the findings name.",
+          "",
+          context.request,
+        ]
+      : []),
     "",
     "## What you must return",
     "The phase below, complete, with the corrections applied and NOTHING else changed.",

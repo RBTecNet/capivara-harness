@@ -120,8 +120,44 @@ export function skeletonPrompt(context: SkeletonContext): string {
   ].join("\n");
 }
 
+/**
+ * O pedido do desenvolvedor, para quem escreve a fase.
+ *
+ * O auditor da fase recebe o pedido verbatim desde sempre. O escritor da fase
+ * nunca recebeu — ele vê a fatia do esqueleto, e mais nada. Num pedido
+ * prescritivo isso é uma assimetria que garante retrabalho: o do `assistencia2`
+ * tem 16.752 caracteres e fala de "rolagem" ou "linhas" nove vezes, até o tamanho
+ * dos campos, e nada disso sobrevive à compressão do esqueleto em stack,
+ * entidades e regras.
+ *
+ * O resultado, medido: dos 25 achados de uma tentativa de auditoria, 18 eram
+ * detalhes que o pedido exige e que a fase não podia conhecer. O escritor fechava
+ * o que era apontado, o auditor achava o próximo, e o laço não convergia — não por
+ * amostragem, por AUSÊNCIA. A informação que fecharia o ponto não estava na mão de
+ * quem escreve.
+ *
+ * O risco do outro lado é real e está dito com todas as letras abaixo: com o
+ * pedido inteiro na frente, a tentação é escrever a fase do vizinho.
+ */
+const PEDIDO_NA_FASE = [
+  "## The developer's original request (verbatim)",
+  "",
+  "This is the authority above everything, including the slice below. It is here for ONE reason: the",
+  "slice is a compression of it, and a compression loses detail. When the request demands something",
+  "specific about what THIS phase covers — a field's size, a scrollbar, an exact list of values, what",
+  "a screen shows after an action — that demand is real even when the slice does not repeat it, and",
+  "the phase that omits it will be returned by an auditor who DOES read the request.",
+  "",
+  "And the hard limit, which matters more now that you can see everything: you write ONLY this phase.",
+  "The request describes the whole product; most of it belongs to phases you are not writing. Never",
+  "bring work from another phase into this one because you read about it here. What this phase covers",
+  "is stated in the slice, and only there. Use the request to get the DETAIL of your own work right.",
+].join("\n");
+
 export interface PhaseFromSliceContext {
   language: string;
+  /** O pedido do desenvolvedor, verbatim. O auditor da fase sempre o teve. */
+  request: string;
   /** A fatia: só o que esta fase cobre, mais stack e regras transversais. */
   slice: string;
   phaseNumber: number;
@@ -269,6 +305,10 @@ export function phaseFromSlicePrompt(context: PhaseFromSliceContext): string {
     "",
     "Emit the raw bytes of the tasks and nothing else: no phase heading, no Goal line, no document",
     "header, no other phase, no preamble, no fence.",
+    "",
+    PEDIDO_NA_FASE,
+    "",
+    context.request,
     "",
     ...(context.decisions && context.decisions.length > 0
       ? [

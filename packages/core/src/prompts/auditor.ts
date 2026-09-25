@@ -94,6 +94,46 @@ const AXIS_EXECUTABILITY = [
   "   is still going, instead of a finding that reaches someone who cannot act on it.",
 ].join("\n");
 
+/**
+ * A fronteira entre o que os critérios devem e o que o esqueleto já tem.
+ *
+ * Medido no `assistencia2`: de 25 achados de uma tentativa, 7 eram desta família —
+ * *"os critérios não exigem todos os dados do cadastro definidos no pedido: e-mail
+ * opcional, endereço, número, bairro, cidade e UF"*. Os campos estão no esqueleto,
+ * que o executor é mandado ler e o verificador também lê. Exigir que os critérios
+ * recopiem o modelo é uma cobrança sem fim: o escritor acrescenta seis campos, o
+ * auditor responde "não identificam TODOS os dados", e a próxima volta acha outro.
+ *
+ * Os outros 18 eram gaps reais de COMPORTAMENTO, e é por isso que a regra separa as
+ * duas coisas em vez de mandar o auditor pegar leve.
+ */
+const FRONTEIRA_DO_CRITERIO = [
+  "## What a criterion owes, and what the skeleton already owns",
+  "The acceptance criteria are not a copy of the skeleton. The entities and their fields, the stories",
+  "and the cross-cutting rules are written there; the agent that implements the phase is told to read",
+  "that file, and so does the verifier. A criterion that does not repeat a field list is not",
+  "incomplete — repeating it was never its job.",
+  "",
+  "So the line is between SHAPE and BEHAVIOUR:",
+  "- shape — which columns exist, their types, which are optional, the exact set of values an",
+  "  enumerated field accepts — belongs to the skeleton. Never reject because the criteria do not",
+  "  enumerate it.",
+  "- behaviour — what must happen and when, what is refused, what is shown, what is recorded, what",
+  "  survives a deletion — belongs to the criteria. Reject when the phase does not assert it, or",
+  "  asserts it in a way nobody can check.",
+  "",
+  "Concretely: \"the criteria do not require e-mail, address, number, district, city and state\" is",
+  "not a finding. \"Nothing refuses a second client with the same document\" is. The first has no end —",
+  "for any phase you can name one more detail of the request that the criteria do not repeat, the",
+  "writer adds it, and you find the next one. Measured on a real plan: 22 findings in one pass, 25 in",
+  "the next, on a document the writer had closed completely each time.",
+  "",
+  "And the same applies to a criterion that summarizes correctly. \"Persists the client's registration",
+  "data as defined in the data model\" is verifiable — the model is in the repository. Demanding that",
+  "it be spelled out inflates the task past the criteria ceiling, and the ceiling is what keeps a",
+  "phase inside one agent session.",
+].join("\n");
+
 const SCOPE_RULE = [
   "## Scope boundary",
   "A specification document DECLARES what must be true. It does not implement it. Seed migrations,",
@@ -188,6 +228,8 @@ export function auditorPrompt(context: AuditorContext): string {
     "",
     axes,
     "",
+    FRONTEIRA_DO_CRITERIO,
+    "",
     SCOPE_RULE,
     "",
     DOUBT_RULE,
@@ -272,6 +314,8 @@ export function phaseAuditPrompt(context: PhaseAuditContext): string {
     FRAME,
     "",
     `${AXES_COMMON}\n${AXIS_EXECUTABILITY}`,
+    "",
+    FRONTEIRA_DO_CRITERIO,
     "",
     SCOPE_RULE,
     "",

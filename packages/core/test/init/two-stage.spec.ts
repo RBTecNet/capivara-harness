@@ -1119,3 +1119,75 @@ describe("o impasse arbitra com opções antes de virar prosa", () => {
     expect(impasseEmProsa).toBe(0);
   });
 });
+
+/*
+ * `persistAnswers` dizia, em comentário, que grava "para o run seguinte não
+ * perguntar a mesma coisa" — e nada lia aquele arquivo. Um `plan` que recomeçava
+ * perdia tudo o que tinha sido decidido nele: as lacunas, os pontos que o auditor
+ * devolveu, as arbitragens. No `assistencia2` eram dezessete decisões, várias delas
+ * parágrafos escritos à mão.
+ */
+describe("o plan retomado não perde o que foi decidido nele", () => {
+  it("as decisões do plano anterior voltam como autoridade, e chegam a quem escreve", async () => {
+    await init(skeletonPath());
+
+    // Primeiro plan: o escritor deixa um marcador, o desenvolvedor decide.
+    const marcador = "o status inicial de uma reserva importada";
+    const comMarcador = `## Phase 1: Fundação de dados
+
+**Goal:** migrations e seeds existem · **Depends on:** none · **Covers:** reservations, statuses
+
+- [ ] **Task:** Criar a migration de statuses e semear as três linhas
+  - **Acceptance criteria:**
+    - A tabela statuses existe e contém exatamente pendente, confirmada e cancelada
+    [NEEDS DECISION] ${marcador}
+  - **Feature tests:** statuses_seed → as três linhas existem após o seed
+  - **Traces:** statuses, reservations
+`;
+    const primeiro = skeletonPath();
+    let escritas = 0;
+    primeiro.unshift({
+      match: { role: "writer", stage: "authoring", subject: "phase-p01" },
+      respond: {
+        stdout: () => {
+          escritas += 1;
+          return escritas === 1 ? comMarcador : PHASE_1;
+        },
+      },
+      repeat: true,
+    });
+    primeiro.unshift({
+      match: { role: "writer", stage: "interview", subject: "project-phases.md:gaps" },
+      respond: {
+        stdout: JSON.stringify({
+          contract: "capivara-questions/v1",
+          questions: [
+            {
+              id: "Q-01",
+              topic: "status inicial",
+              evidence: "a fase parou aqui",
+              decision: "Qual status uma reserva importada recebe?",
+              why: "muda o que a migration semeia",
+              options: [
+                { label: "pendente", consequence: "entra como pendente" },
+                { label: "confirmada", consequence: "entra como confirmada" },
+              ],
+              recommended: "pendente",
+              recommendationBasis: "é o status de entrada das outras reservas",
+            },
+          ],
+        }),
+      },
+      repeat: true,
+    });
+    await plan(primeiro, async () => "2");
+
+    // Segundo plan, do zero: a decisão de lá tem de chegar ao prompt da fase.
+    const { agent, anunciado } = await planComAnuncioEResposta(skeletonPath(), async () => "use as recomendações");
+
+    expect(anunciado).toContain("decisão(ões) do plano anterior carregada(s)");
+    const escrita = agent.calls.find((call) => call.stage === "authoring" && call.subject === "phase-p01");
+    expect(escrita?.prompt).toContain("Decisions taken after the skeleton was written");
+    expect(escrita?.prompt).toContain("confirmada");
+  });
+});

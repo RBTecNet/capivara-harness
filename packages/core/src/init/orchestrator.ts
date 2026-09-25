@@ -1068,6 +1068,51 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         announce(`  ${doInit.answers.length} decisão(ões) do init carregada(s); não vou perguntar de novo`);
       }
 
+      /*
+       * E as decisões do PLANO anterior, que eram gravadas e nunca lidas.
+       *
+       * `persistAnswers` diz, em comentário, que grava "para o run seguinte não
+       * perguntar a mesma coisa" — e nada lia aquele arquivo. Um `plan` que
+       * recomeça perdia tudo o que tinha sido decidido nele: as lacunas, os pontos
+       * que o auditor devolveu ao desenvolvedor, as arbitragens. No `assistencia2`
+       * eram dezessete decisões, várias delas parágrafos inteiros escritos à mão.
+       *
+       * O que volta são as ACEITAS, deduplicadas pelo texto. Não tento
+       * reconstruir o par pergunta-resposta: os ids das rodadas de lacuna colidem
+       * no handoff por construção (cada rodada recomeça em `Q-01`), e o que a
+       * autoridade precisa é do TEXTO da decisão, que é o que o escritor e o
+       * auditor leem. O que ficou em aberto não volta: se o marcador reaparecer, a
+       * insistência o pega de novo, e com as saídas que a fecham.
+       */
+      const doPlano = await readHandoff(options.projectRoot, runId, "project-phases.md");
+      if (doPlano) {
+        const vistas = new Set<string>();
+        let retomadas = 0;
+        for (const answer of doPlano.answers) {
+          if (answer.disposition !== "ACCEPTED" || answer.decision.trim() === "") continue;
+          if (vistas.has(answer.decision)) continue;
+          vistas.add(answer.decision);
+          retomadas += 1;
+
+          const original = doPlano.questions.find((question) => question.id === answer.questionId);
+          const id = scoped("project-phases.md", `R-${String(retomadas).padStart(2, "0")}`, "retomado");
+          allQuestions.push({
+            id,
+            topic: original?.topic ?? "decisão do plano anterior",
+            evidence: "",
+            decision: original?.decision ?? answer.decision,
+            why: "",
+            options: [],
+            recommended: "",
+            recommendationBasis: "",
+          });
+          allAnswers.push({ ...answer, questionId: id });
+        }
+        if (retomadas > 0) {
+          announce(`  ${retomadas} decisão(ões) do plano anterior carregada(s); elas continuam valendo como autoridade`);
+        }
+      }
+
       announce(`— esqueleto lido: ${guardado.phases.length} fases, ${guardado.rules.length} regra(s) transversal(is)`);
       return await detalharFases(guardado);
     }
@@ -1256,7 +1301,12 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * é só o que foi decidido DEPOIS — a insistência a seguir é justamente isso.
      */
     const antesDaInsistencia = new Set(
-      allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision),
+      allAnswers
+        // Só as do esqueleto: a fatia de cada fase já as reflete. Tudo o mais foi
+        // decidido DEPOIS de o esqueleto existir — inclusive o que um `plan`
+        // anterior fechou —, e é disso que o escritor da fase precisa saber.
+        .filter((answer) => answer.disposition === "ACCEPTED" && answer.questionId.startsWith("skeleton#"))
+        .map((answer) => answer.decision),
     );
     await insistirNasDecisoes("project-phases.md", maxInterviewRounds + 1, "antes de detalhar as fases");
     const depoisDoEsqueleto = (): string[] =>

@@ -5501,3 +5501,28 @@ tamanho da lista devolvida, e `levantamentoDeAuditoria` devolve os achados intac
 quando não há nada novo a arbitrar. "Nada a arbitrar" virou "tudo arbitrado", o laço
 reescrevia e reauditava para sempre, e os testes pegaram na primeira execução, com
 timeout. O que decide é o conjunto de arbitrados ter CRESCIDO.
+
+### 76.4 As decisões do plano eram gravadas e nunca lidas
+
+`persistAnswers` carrega um comentário que diz, com todas as letras: *"decisão
+tomada aqui precisa sobreviver ao processo: sem isto, o run seguinte pergunta a mesma
+coisa porque a retomada não a encontra"*. O arquivo era escrito a cada resposta — e
+**nada o lia**. O `plan` só carregava o handoff do `skeleton`.
+
+Um `plan` que recomeçasse perdia tudo o que tinha sido decidido NELE: as lacunas, os
+pontos que o auditor devolveu ao desenvolvedor pelo canal novo, as arbitragens. No
+`assistencia2` eram dezessete decisões, várias delas parágrafos inteiros escritos à
+mão — *"Considerar qualquer técnico registrado em `intervencoes_os`; uma ordem
+aparece uma vez no relatório"*.
+
+Voltam as ACEITAS, deduplicadas pelo texto. O par pergunta-resposta não é
+reconstruído de propósito: os ids das rodadas de lacuna colidem no handoff por
+construção, porque cada rodada recomeça em `Q-01`. O que a autoridade precisa é do
+TEXTO da decisão, que é o que o escritor e o auditor leem. O que ficou em aberto não
+volta: se o marcador reaparecer, a insistência o pega de novo, com as saídas que a
+fecham.
+
+E elas entram como decididas **depois do esqueleto**, que é o que são: o bloco
+`Decisions taken after the skeleton was written` do prompt da fase passou a ser
+calculado só contra as decisões do `init`, e não contra tudo o que já está na
+memória.

@@ -4897,3 +4897,56 @@ do mundo**, porque para ele nada teria mudado.
 A recomendação padrão é a leitura do auditor, e a base diz por quê: quem devolve
 duas vezes costuma estar lendo uma decisão aceita, e decisão aceita vence
 documento derivado dela. É uma tecla para discordar.
+
+## §71 — Contar palavra não é contar decisão
+
+Madrugada do `assitencia`:
+
+```
+[03:01:45] não consegui transformar 4 decisão(ões) pendente(s) em pergunta;
+           elas seguem abertas e o plano não fecha com elas
+```
+
+O lote trazia **onze** perguntas. Três foram acusadas de *"3 decisões na mesma
+frase"* e **as onze foram jogadas fora**. As três acusadas:
+
+> Qual indicação inicial deve aparecer quando faltar uma ou ambas as datas de garantia?
+> Quando a entrega não informar garantia, o que deve acontecer com o período já registrado?
+> O que deve acontecer quando a quantidade utilizada superar o saldo disponível?
+
+São perguntas perfeitas — uma decisão cada, respondível numa frase. A regra
+contava palavras:
+
+```
+"Qual indicação inicial deve aparecer quando faltar uma das datas?"
+  ↑qual              ↑deve        ↑quando   → "3 decisões na mesma frase"
+```
+
+`deve` é modal. `quando`, ali, é subordinativo. A oração condicional é a forma
+mais natural de perguntar uma regra de negócio — *"o que acontece quando X?"* — e
+era exatamente a forma que a regra matava.
+
+### 71.1 Prova, não indício
+
+A regra do ≥3 saiu. Ficaram as duas que são prova:
+
+- **mais de um `?`** na mesma linha;
+- **`e` seguido de interrogativo** — *"…e o que acontece se o prazo passar?"* —,
+  que é conjunção emendando outra pergunta. Um `e` simples, *"terá login e
+  senha?"*, continua passando, porque liga duas coisas de uma decisão só.
+
+O comentário antigo dizia que a conferência era "deliberadamente conservadora,
+porque reprovar pergunta boa custa uma volta". Ela não era conservadora — era o
+oposto —, e o custo real era maior do que o texto imaginava: **o lote é recusado
+junto**, então uma pergunta boa reprovada leva as outras dez com ela.
+
+### 71.2 O lote recusado entrega o que se salvou
+
+E essa é a segunda metade. Na rodada de lacunas, cada pergunta corresponde a uma
+decisão específica: jogar oito fora porque três vieram tortas é perder oito
+decisões que o desenvolvedor responderia em um minuto.
+
+Agora a recusa carrega as perguntas sem defeito, e a rodada segue com elas
+anunciando quantas ficaram de fora. O lote inteiro só é perdido quando não sobra
+nada — resposta que não é JSON, contrato errado —, que é quando a recusa
+realmente significa "o modelo não entendeu o pedido".

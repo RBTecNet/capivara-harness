@@ -1654,7 +1654,19 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         );
       }
 
-      if (!batch.ok || batch.questions.length === 0) {
+      /*
+       * Lote recusado ainda pode ter pergunta boa dentro, e na rodada de lacunas
+       * cada pergunta é uma decisão específica. No `assitencia`, oito perguntas
+       * perfeitas foram jogadas fora porque três vieram tortas — e as oito
+       * decisões ficaram sem ser feitas.
+       */
+      if (!batch.ok && batch.questions.length > 0) {
+        announce(
+          `  ${batch.defects.length} pergunta(s) vieram malformadas e ficaram de fora; sigo com as ${batch.questions.length} que estão boas`,
+        );
+      }
+
+      if (batch.questions.length === 0) {
         announce(
           `  não consegui transformar ${markers.length} decisão(ões) pendente(s) em pergunta; elas seguem abertas e o plano não fecha com elas`,
         );

@@ -177,3 +177,61 @@ describe("uma decisão por pergunta", () => {
     }
   });
 });
+
+/*
+ * O `assitencia`, madrugada: "não consegui transformar 4 decisão(ões)
+ * pendente(s) em pergunta". O lote trazia onze perguntas; três foram acusadas de
+ * "3 decisões na mesma frase" e as onze foram jogadas fora.
+ *
+ * As três acusadas eram perfeitas:
+ *   "Qual indicação inicial deve aparecer quando faltar uma das datas?"
+ * Uma decisão só, com oração condicional — e a regra contava `qual`, `deve` e
+ * `quando` como três decisões.
+ */
+describe("contar palavra não é contar decisão", () => {
+  const umaDecisao = (decision: string) => parseQuestionBatch(batch([question({ decision })]));
+
+  it("aceita a pergunta condicional, que é a forma natural de regra de negócio", () => {
+    for (const decision of [
+      "Qual indicação inicial deve aparecer quando faltar uma ou ambas as datas de garantia?",
+      "Quando a entrega não informar garantia, o que deve acontecer com o período já registrado?",
+      "O que deve acontecer quando a quantidade utilizada superar o saldo disponível?",
+    ]) {
+      const lido = umaDecisao(decision);
+      expect(lido.ok, lido.ok ? "" : JSON.stringify(lido.defects)).toBe(true);
+    }
+  });
+
+  it("continua recusando o que é prova de duas decisões", () => {
+    expect(umaDecisao("O valor cobre a peça? Existe prazo?").ok).toBe(false);
+    expect(umaDecisao("O que o valor cobre e o que acontece se o prazo passar?").ok).toBe(false);
+  });
+
+  it("um `e` que liga duas coisas da MESMA decisão continua passando", () => {
+    expect(umaDecisao("O cadastro terá login e senha?").ok).toBe(true);
+  });
+});
+
+describe("o lote recusado entrega o que se salvou", () => {
+  it("as perguntas sem defeito vêm junto da recusa", () => {
+    const lido = parseQuestionBatch(
+      batch([
+        question({ id: "Q-01" }),
+        question({ id: "Q-02", decision: "O valor cobre a peça? Existe prazo?" }),
+        question({ id: "Q-03" }),
+      ]),
+    );
+
+    expect(lido.ok).toBe(false);
+    if (lido.ok) return;
+    expect(lido.questions.map((pergunta) => pergunta.id)).toEqual(["Q-01", "Q-03"]);
+    expect(lido.defects).toHaveLength(1);
+  });
+
+  it("resposta que não é JSON não salva nada, e não finge que salvou", () => {
+    const lido = parseQuestionBatch("isto não é json");
+    expect(lido.ok).toBe(false);
+    if (lido.ok) return;
+    expect(lido.questions).toEqual([]);
+  });
+});

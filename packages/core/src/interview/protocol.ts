@@ -18,7 +18,17 @@ export interface QuestionDefect {
 
 export type QuestionBatch =
   | { ok: true; questions: Question[]; assumptions: Assumption[]; omissions: Omission[] }
-  | { ok: false; defects: QuestionDefect[] };
+  /**
+   * Recusado — e as que se salvaram.
+   *
+   * O lote é recusado inteiro porque um lote torto costuma significar que o
+   * modelo entendeu errado o pedido, e perguntar metade de um mal-entendido é
+   * pior que repetir. Mas as perguntas SEM defeito seguem aqui: na rodada de
+   * lacunas, cada pergunta corresponde a uma decisão específica, e jogar oito
+   * boas fora porque três vieram tortas é perder oito decisões que o
+   * desenvolvedor responderia em um minuto.
+   */
+  | { ok: false; defects: QuestionDefect[]; questions: Question[] };
 
 const ID = /^Q-\d{2,}$/;
 const OMISSION_ID = /^O-\d{2,}$/;
@@ -42,13 +52,21 @@ export const MAX_OMISSOES = 4;
  * e uma delas voltou três vezes — "o que o valor cobre, existe prazo e o que
  * acontece se passar?".
  *
- * A conferência é deliberadamente conservadora, porque reprovar pergunta boa
- * custa uma volta de levantamento. Dois interrogatórios numa frase é prova
- * suficiente; um "e" ligando duas frases interrogativas também. Um "e" simples
- * — "terá login e senha?" — passa, porque é uma decisão só.
+ * A conferência precisa de PROVA, não de indício. Reprovar pergunta boa custa
+ * uma volta de levantamento inteira — e, como o lote é recusado junto, custa
+ * também as perguntas boas que vieram com ela.
+ *
+ * Houve aqui uma terceira regra que contava palavras interrogativas e reprovava
+ * a partir de três. Ela derrubou, no `assitencia`, as três melhores perguntas de
+ * um lote de onze:
+ *
+ *   "Qual indicação inicial deve aparecer quando faltar uma das datas?"
+ *    ↑qual                 ↑deve        ↑quando  → "3 decisões na mesma frase"
+ *
+ * É uma pergunta só, com uma oração condicional — a forma mais natural de
+ * perguntar uma regra de negócio, e justamente a que a regra matava. `deve` é
+ * modal, `quando` ali é subordinativo, e contar palavra não é contar decisão.
  */
-const INTERROGATIVO = /\b(o que|que|qual|quais|como|quando|onde|quanto|quantos|existe|existem|haver[áa]|deve|devem|precisa)\b/gi;
-
 export function decisoesJuntas(decision: string): string | null {
   const texto = decision.trim();
 
@@ -65,9 +83,6 @@ export function decisoesJuntas(decision: string): string | null {
    */
   const emenda = /\be,?\s*(o que|qual|quais|como|quando|quanto|onde|se)\b/i.exec(texto);
   if (emenda) return `duas decisões ligadas por "${emenda[0].trim()}"`;
-
-  const marcadores = [...texto.matchAll(INTERROGATIVO)];
-  if (marcadores.length >= 3) return `${marcadores.length} decisões na mesma frase`;
 
   return null;
 }
@@ -94,6 +109,7 @@ export function parseQuestionBatch(source: string): QuestionBatch {
   } catch {
     return {
       ok: false,
+      questions: [],
       defects: [{ index: 0, questionId: "-", problem: "a resposta não é JSON válido", hint: `devolva um objeto { "contract": "${QUESTIONS_CONTRACT}", "questions": [...] } sem cerca de código` }],
     };
   }
@@ -102,11 +118,12 @@ export function parseQuestionBatch(source: string): QuestionBatch {
   if (root.contract !== QUESTIONS_CONTRACT) {
     return {
       ok: false,
+      questions: [],
       defects: [{ index: 0, questionId: "-", problem: `contrato ausente ou diferente de ${QUESTIONS_CONTRACT}`, hint: `declare "contract": "${QUESTIONS_CONTRACT}" na raiz` }],
     };
   }
   if (!Array.isArray(root.questions)) {
-    return { ok: false, defects: [{ index: 0, questionId: "-", problem: "questions não é uma lista", hint: "devolva uma lista, mesmo que vazia quando não há gap material" }] };
+    return { ok: false, questions: [], defects: [{ index: 0, questionId: "-", problem: "questions não é uma lista", hint: "devolva uma lista, mesmo que vazia quando não há gap material" }] };
   }
 
   const defects: QuestionDefect[] = [];
@@ -245,7 +262,9 @@ export function parseQuestionBatch(source: string): QuestionBatch {
         .filter((assumption) => assumption.statement !== "")
     : [];
 
-  return defects.length > 0 ? { ok: false, defects } : { ok: true, questions, assumptions, omissions };
+  return defects.length > 0
+    ? { ok: false, defects, questions: questions.filter((_, indice) => !defects.some((defeito) => defeito.index === indice)) }
+    : { ok: true, questions, assumptions, omissions };
 }
 
 function stripFence(source: string): string {

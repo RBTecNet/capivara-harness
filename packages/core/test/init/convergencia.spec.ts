@@ -165,3 +165,67 @@ describe("o laço de auditoria termina contra um auditor que nunca aprova", () =
     expect(arbitragens.length).toBe(1);
   }, 30000);
 });
+
+/*
+ * O invariante que faltava, e que custou um run inteiro: fase aprovada não é
+ * reescrita, e achado de uma fase vai para ELA.
+ *
+ * A auditoria por fase devolve achados cujo endereço é o título da task — medido
+ * no `assistencia2`, 24 de 25 não citavam a fase, porque a chamada já sabia qual
+ * era. `affectedPhases` então enxergava só o único achado que a citava: reescrevia
+ * uma fase e os outros 24 defeitos não chegavam a ninguém, voltando para sempre. E
+ * a fase que ele reescrevia perdia a aprovação, porque a marca dela é o sha do
+ * texto.
+ */
+describe("a emenda vai para a fase do achado, e só para ela", () => {
+  it("achado da fase 2 não reescreve a fase 1, mesmo sem citar número nenhum", async () => {
+    const agentInit = fakeAgent(skeletonPath());
+    await runInit({ projectRoot, request, ...comum, stage: "init", call: agentInit.call, ask: async () => "use as recomendações" });
+
+    // A fase 1 é aprovada; a 2 é devolvida com um achado que NÃO diz "Phase 2".
+    let voltas = 0;
+    const steps = skeletonPath().filter((step) => step.match.role !== "auditor");
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
+      respond: { stdout: "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: fiel" },
+      repeat: true,
+    });
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2" },
+      respond: {
+        stdout: () => {
+          voltas += 1;
+          return voltas === 1
+            ? [
+                "CAPIVARA_AUDIT_STATUS: REJECTED",
+                "CAPIVARA_FINDING: Tarefa «Implementar a criação de reserva» | o critério não diz o que acontece na recusa | descreva o efeito observável",
+                "CAPIVARA_REASON: falta o efeito",
+              ].join("\n")
+            : "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: fiel";
+        },
+      },
+      repeat: true,
+    });
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#coerência" },
+      respond: { stdout: "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: coerente" },
+      repeat: true,
+    });
+
+    const agent = fakeAgent(steps);
+    const { outcome } = await (async () => {
+      const resultado = await runPlan({ projectRoot, request, ...comum, call: agent.call, ask: async () => "use as recomendações" });
+      return { outcome: resultado };
+    })();
+
+    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+
+    /*
+     * A emenda tocou a fase 2 e NÃO tocou a 1. Antes, o achado sem número fazia
+     * `affectedPhases` devolver todas — e a fase 1, já aprovada, era reescrita,
+     * mudava de sha e voltava à fila.
+     */
+    const emendas = agent.calls.filter((call) => call.stage === "authoring" && call.prompt.includes("amending a phase"));
+    expect(emendas.map((call) => call.subject)).toEqual(["phase-p02"]);
+  }, 30000);
+});

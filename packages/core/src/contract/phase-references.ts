@@ -1,10 +1,22 @@
-/** Fases citadas pelo auditor, inclusive nos endereços dos critérios. */
+/**
+ * Fases citadas pelo auditor — ou declaradas por quem o chamou.
+ *
+ * `phase` vem do harness e vence a prosa: a auditoria por fase sabe de qual fase
+ * se trata, e o auditor, que já sabe disso, escreve o endereço como título de
+ * task. Medido no `assistencia2`: 24 de 25 achados não citavam a fase, e o
+ * fallback de "todas as fases" nunca era alcançado porque UM achado a citava —
+ * então uma fase era reescrita e os outros 24 defeitos não chegavam a ninguém.
+ */
 export function affectedPhases(
-  findings: readonly { where: string; problem: string; fix: string }[],
+  findings: readonly { where: string; problem: string; fix: string; phase?: number }[],
   total: number,
 ): number[] {
   const named = new Set<number>();
   for (const finding of findings) {
+    if (finding.phase !== undefined && finding.phase >= 1 && finding.phase <= total) {
+      named.add(finding.phase);
+      continue;
+    }
     const text = `${finding.where} ${finding.problem} ${finding.fix}`;
     // O auditor de coerência usa P2.T2.C1; o auditor local também usa Phase 2
     // ou Fase 2. Ignorar o primeiro formato mandou a correção do cron5 só para

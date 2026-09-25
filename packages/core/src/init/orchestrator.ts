@@ -942,7 +942,17 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         .filter((fase) => !fasesAprovadas.has(sha12(fase.markdown.trim())))
         .map((fase) => () => {
           relatarFase({ kind: "audit", number: fase.number, state: "corrente" });
-          return auditCall(`project-phases.md#P${fase.number}`, attempt, () => promptDaFase(fase)).then((veredicto) => {
+          return auditCall(`project-phases.md#P${fase.number}`, attempt, () => promptDaFase(fase)).then((bruto) => {
+            /*
+             * Quem chamou sabe a fase; o auditor não precisa dizê-la.
+             *
+             * Sem isto, o achado desta chamada chegava à emenda sem endereço
+             * utilizável e a reescrita ia para a fase errada — ou para nenhuma.
+             */
+            const veredicto: AuditVerdict = {
+              ...bruto,
+              findings: bruto.findings.map((finding) => ({ ...finding, phase: fase.number })),
+            };
             // Aprovada é fato do run: o texto exato que passou não volta à fila.
             if (veredicto.findings.length === 0) {
               fasesAprovadas.add(sha12(fase.markdown.trim()));
@@ -1999,6 +2009,23 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     return decididas;
   }
 
+  /**
+   * Em que fase vive este marcador.
+   *
+   * A decisão de uma lacuna volta ao escritor como achado, e um achado sem fase
+   * manda a emenda para o lugar errado — ou, quando nenhum achado tem fase, para
+   * TODAS elas, derrubando as aprovações já pagas. O harness sabe a resposta: basta
+   * ver de qual fase é o texto que contém o marcador.
+   */
+  function faseDoMarcador(documento: string, marcador: string): number | undefined {
+    const lido = parsePhases(stripAllMarkers(documento).content);
+    const fases = lido.ok ? lido.document.phases : [];
+    // O marcador não sobrevive ao `stripAllMarkers`, então a busca é no texto cru.
+    const bruto = parsePhases(documento);
+    const cruas = bruto.ok ? bruto.document.phases : fases;
+    return cruas.find((fase) => fase.markdown.includes(marcador))?.number;
+  }
+
   /** Marca como fechados os marcadores cuja pergunta já tem resposta aceita. */
   function registrarLacunasFechadas(): void {
     const aceitas = new Set(
@@ -2237,11 +2264,15 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
       authored = await authored.rewrite(
         accepted.map((answer) => {
-          const question = perguntas.find((entry) => entry.id === answer.questionId);
+          const posicao = perguntas.findIndex((entry) => entry.id === answer.questionId);
+          const question = perguntas[posicao];
+          const marcador = markers[posicao];
+          const fase = marcador === undefined ? undefined : faseDoMarcador(authored.content, marcador);
           return {
             where: question?.topic ?? document,
             problem: `a decisão "${question?.decision ?? answer.questionId}" estava marcada como pendente`,
             fix: `o desenvolvedor decidiu: ${answer.decision}. Escreva isso e remova o marcador [NEEDS DECISION] correspondente`,
+            ...(fase !== undefined ? { phase: fase } : {}),
           };
         }),
         round,

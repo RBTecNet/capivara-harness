@@ -29,6 +29,22 @@ export interface Finding {
    * decisão aceita exige exclusividade global" é leitura — e é dele.
    */
   mechanical?: boolean;
+  /**
+   * A fase a que o achado pertence, quando QUEM CHAMOU sabe.
+   *
+   * Não é o auditor que informa: ele escreve prosa, e medido no `assistencia2`
+   * **24 de 25 achados não citavam a fase** — não por descuido, mas porque a
+   * auditoria por fase já sabe de qual fase se trata e o endereço que ele escreve
+   * é o título da task.
+   *
+   * Sem este campo, `affectedPhases` caía no seu fallback — "sem referência
+   * utilizável, todas as fases" — e o resultado era o pior dos dois mundos: os 24
+   * achados sem fase não eram entregues a ninguém, porque o único achado COM fase
+   * definia sozinho o que reescrever; e a fase que ele nomeava era reescrita mesmo
+   * já aprovada, perdendo a aprovação. O auditor reprovava tudo, para sempre, e as
+   * fases aprovadas voltavam à fila.
+   */
+  phase?: number;
 }
 
 export interface Remark {

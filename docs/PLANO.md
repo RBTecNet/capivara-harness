@@ -5629,3 +5629,42 @@ tasks por fase está sendo usado como ALVO pelo escritor do esqueleto — média
 no `assistencia2`, seis fases entre 12 e 14 —, e fase densa é sessão longa de
 executor, mais perto do limite de contexto dele, onde a compactação começa a
 inventar. O teto precisa voltar a ser teto.
+
+### 77.7 A emenda ia para a fase errada — ou para nenhuma
+
+O run seguinte ao §77 foi PIOR, e o desenvolvedor o descreveu com precisão: *"o
+auditor tinha validado 3 das 13, abriu uma série de perguntas, eu selecionei tudo
+que foi recomendado e ele reprovou até as que já estavam aprovadas"*.
+
+A causa é minha e é do §76: ligar a auditoria por fase mudou a FORMA dos achados.
+Uma chamada que audita a fase 4 já sabe qual fase é, então o auditor escreve o
+endereço como título de task — `Tarefa «Gerar manualmente cobranças…»`. Medido nos
+logs:
+
+| tentativa | achados que NÃO citam a fase |
+| --- | --- |
+| 2 | 19 de 22 |
+| 3 | **24 de 25** |
+| 4 | 20 de 21 |
+
+E `affectedPhases` decide o que reescrever lendo a prosa do achado, com um fallback
+de "todas as fases" para quando nada é derivável. O fallback nunca era alcançado,
+porque UM achado — o da auditoria de coerência, que usa `P1.T9.C2` — citava uma
+fase. Então:
+
+- os 24 achados sem fase **não eram entregues a ninguém**: o auditor os reportava,
+  a emenda não os recebia, e eles voltavam em toda leitura seguinte, reescritos com
+  outras palavras;
+- a única fase nomeada era reescrita mesmo já aprovada; a marca de uma aprovação é o
+  sha do texto da fase, então ela mudava e a fase voltava à fila.
+
+O conserto é o harness dizer o que ele sabe em vez de deixar alguém adivinhar pela
+prosa: `Finding` ganhou `phase`, a auditoria por fase o preenche com o número da
+chamada, a rodada de lacunas o preenche com a fase onde o marcador vive, e
+`affectedPhases` prefere esse campo. O fallback de "todas as fases" continua, para
+o achado que legitimamente não tem fase — o da coerência sem endereço.
+
+E o invariante entrou no teste de convergência: **achado da fase 2 não reescreve a
+fase 1, mesmo sem citar número nenhum.** Desligando o campo, o teste falha com
+`['phase-p01', 'phase-p02']` — a fase aprovada sendo reescrita, que é exatamente o
+que o desenvolvedor viu na tela.

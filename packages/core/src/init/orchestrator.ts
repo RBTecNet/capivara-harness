@@ -31,6 +31,8 @@ import { detectRateLimit, planWait } from "../loop/ratelimit.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
 import { decisoesComoMemorias, renderLibraryBlock, type McpDocument, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { INIT_ARTIFACTS, evaluateReadiness } from "./readiness.js";
+import { comAutoridade, lerEscolha, perguntaDeLevantamento } from "../interview/index.js";
+import { ehRepetido, fingerprint } from "../audit/index.js";
 import { MemoriaDoPlano } from "./plan-cache.js";
 import type { PlanProgressListener } from "./progress.js";
 import { evaluatePlanReadiness, renderPlanReadiness } from "./plan-readiness.js";
@@ -466,6 +468,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * trocar um laço por outro.
    */
   const decisoesReabertas = new Set<string>();
+
+  /** Os achados já arbitrados pelo desenvolvedor. Um levantamento por ponto. */
+  const arbitrados = new Set<string>();
 
   /*
    * O que este run já escreveu e já teve aprovado, guardado em disco.
@@ -1544,6 +1549,55 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     return decididas;
   }
 
+  /**
+   * O levantamento de auditoria.
+   *
+   * Devolve os achados que devem seguir para o escritor — já com a decisão do
+   * desenvolvedor embutida —, e tira da lista os que ele encerrou dando razão ao
+   * escritor. A decisão fica gravada em `allAnswers`, e é por ali que ela chega
+   * ao auditor da rodada seguinte: sem isso ele levanta o mesmo ponto de novo,
+   * com toda a razão do mundo.
+   */
+  async function levantamentoDeAuditoria(
+    document: string,
+    findings: readonly Finding[],
+    history: readonly AuditAttempt[],
+    attempt: number,
+    writer: WriterContext,
+  ): Promise<Finding[]> {
+    const repetidos = findings.filter((finding) => ehRepetido(finding, history) && !arbitrados.has(fingerprint(finding)));
+    if (repetidos.length === 0) return [...findings];
+
+    announce(`  ${repetidos.length} ponto(s) voltaram pela segunda vez: isso é desacordo de leitura, não descuido — perguntando a você`);
+    const resultado: Finding[] = [];
+
+    for (const finding of findings) {
+      if (!repetidos.includes(finding)) {
+        resultado.push(finding);
+        continue;
+      }
+
+      arbitrados.add(fingerprint(finding));
+      const pergunta = perguntaDeLevantamento(finding, arbitrados.size);
+      const raw = await options.ask(pergunta, resultado.length + 1, repetidos.length);
+      const resposta = await settle(document, pergunta, raw, attempt, 1, repetidos.length);
+
+      allQuestions.push(pergunta);
+      allAnswers.push(resposta);
+      await persistAnswers(document, [pergunta], [resposta]);
+
+      const escolha = lerEscolha(resposta.decision, raw);
+      if (escolha.tipo === "escritor") {
+        announce(`    ${finding.where}: você deu razão ao escritor; o ponto está encerrado`);
+        continue;
+      }
+      resultado.push(comAutoridade(finding, escolha));
+    }
+
+    writer.decisions = allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision);
+    return resultado;
+  }
+
   async function closeGaps(document: string, initial: Authored, writer: WriterContext): Promise<Authored> {
     let authored = initial;
     const asked = lacunasPerguntadas;
@@ -1994,7 +2048,14 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
        * ficou PARTIAL, AMBIGUOUS ou adiado —, e uma vez por decisão no run.
        */
       const decisoes = await reabrirDecisoes(document, attempt, writer);
-      authored = await authored.rewrite([...decisoes, ...action.findings], action.attempt);
+      /*
+       * Achado que volta pela segunda vez não é defeito de escrita: é desacordo
+       * de leitura, e quem decide não está na mesa. O levantamento de auditoria
+       * põe as duas versões na frente do desenvolvedor antes de gastar mais uma
+       * reescrita nelas.
+       */
+      const arbitrados = await levantamentoDeAuditoria(document, action.findings, history, attempt, writer);
+      authored = await authored.rewrite([...decisoes, ...arbitrados], action.attempt);
 
       /*
        * Decisão que aparece NA REESCRITA também vai ao desenvolvedor.

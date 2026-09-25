@@ -20,8 +20,16 @@ import type { BuildProgress } from "../../src/loop/index.js";
 import { readEvents, runIdFor, runPaths } from "../../src/state/index.js";
 import { ID_DO_BANCO } from "../../src/interview/index.js";
 
-/** As decisões do roteiro do cenário, sem a pergunta de banco que o harness faz sempre. */
-const doRoteiro = <T extends { questionId: string }>(decisions: T[]): T[] => decisions.filter((decision) => !decision.questionId.endsWith(ID_DO_BANCO));
+/**
+ * As decisões do roteiro do cenário.
+ *
+ * Fora as que o HARNESS faz por conta própria: a de banco, em toda entrevista, e
+ * as do levantamento de auditoria (`Q-9N`), quando um achado volta pela segunda
+ * vez. Contá-las junto faria cada teste afirmar um número que não é sobre o que
+ * ele está testando.
+ */
+const doRoteiro = <T extends { questionId: string }>(decisions: T[]): T[] =>
+  decisions.filter((decision) => !decision.questionId.endsWith(ID_DO_BANCO) && !/Q-9\d/.test(decision.questionId));
 import { sha12 } from "../../src/contract/index.js";
 import type { Skeleton } from "../../src/contract/index.js";
 import {
@@ -648,8 +656,15 @@ describe("B-35 · impasse do auditor", () => {
     expect(outcome.report.remarks.some((entry) => entry.remark.observation.includes("decisão do desenvolvedor"))).toBe(false);
     expect(agent.calls.some((call) => call.prompt.includes("acima do auditor: REINICIAR"))).toBe(false);
     const { readHandoff } = await import("../../src/interview/index.js");
+    /*
+     * O handoff guarda o levantamento de auditoria — o achado voltou pela segunda
+     * vez e o desenvolvedor arbitrou —, e não pode guardar a palavra "REINICIAR"
+     * como decisão. É a distinção que este cenário existe para proteger.
+     */
     const handoff = await readHandoff(projectRoot, outcome.runId, "project-phases.md");
-    expect(handoff?.answers ?? []).toEqual([]);
+    const respostas = handoff?.answers ?? [];
+    expect(respostas.every((resposta) => /^Q-9\d/.test(resposta.questionId))).toBe(true);
+    expect(respostas.some((resposta) => resposta.decision.toLowerCase().includes("reiniciar"))).toBe(false);
     const events = await readEvents(runPaths(projectRoot, outcome.runId).events);
     expect(events.some((event) => event.detail.includes("reinício da auditoria"))).toBe(true);
     expect(events.some((event) => event.detail.includes("sob decisão do desenvolvedor"))).toBe(false);

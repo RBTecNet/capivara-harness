@@ -27,3 +27,5 @@ export type { RoundPlan, RoundState, UnresolvedItem } from "./rounds.js";
 export { HANDOFF_CONTRACT, handoffPath, readHandoff, writeHandoff } from "./handoff.js";
 export { ID_DO_BANCO, PERGUNTA_DO_BANCO, bancoNoPedido, decisaoDeBanco, perguntaDoBanco, regrasDeBanco } from "./banco.js";
 export type { DecisaoDeBanco } from "./banco.js";
+export { PREFIXO_DO_LEVANTAMENTO, comAutoridade, lerEscolha, perguntaDeLevantamento } from "./levantamento.js";
+export type { LeituraEscolhida } from "./levantamento.js";

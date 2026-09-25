@@ -48,8 +48,21 @@ export interface Standoff {
   question: string;
 }
 
-function fingerprint(finding: Finding): string {
+export function fingerprint(finding: Finding): string {
   return `${finding.where}::${finding.problem}`.toLowerCase();
+}
+
+/**
+ * O achado que já voltou antes — e é aí que a conversa deixa de ser sobre escrita.
+ *
+ * Um achado que aparece uma vez é defeito: o escritor conserta e segue. Um achado
+ * que sobrevive a uma reescrita é DESACORDO — o escritor leu as fontes de um
+ * jeito, o auditor de outro, e nenhum dos dois pode decidir quem tem razão.
+ * Mandá-lo de volta uma terceira vez é pagar para reencenar a mesma discussão.
+ */
+export function ehRepetido(finding: Finding, history: readonly AuditAttempt[]): boolean {
+  const marca = fingerprint(finding);
+  return history.some((tentativa) => tentativa.verdict.findings.some((anterior) => fingerprint(anterior) === marca));
 }
 
 /** Findings que sobreviveram a todas as devoluções, sem repetir o equivalente. */

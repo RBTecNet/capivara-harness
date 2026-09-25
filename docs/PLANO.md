@@ -4838,3 +4838,62 @@ aberta, e a proibição da opção que é adiamento disfarçado.
 É o §58.3 outra vez, no mesmo dia: extrair a pergunta e deixar as regras
 espalhadas resolve metade do problema e esconde a outra. Aqui a lição ganhou o
 teste que faltava — um que roda os DOIS prompts contra as mesmas asserções.
+
+## §70 — Levantamento de auditoria: o desacordo vai a quem decide
+
+A ideia é do desenvolvedor, e ela nomeia uma coisa que o harness tratava como
+duas.
+
+Um achado que aparece **uma vez** é defeito: o escritor conserta e segue. Um
+achado que **sobrevive a uma reescrita** é outra coisa — o escritor leu as fontes
+de um jeito, o auditor leu de outro, e nenhum dos dois pode decidir quem tem
+razão. O harness mandava a discussão de volta ao escritor mais duas vezes e
+depois abortava o run.
+
+No `assitencia` isso teve nome e horário. A exclusividade do e-mail voltou em
+quatro rodadas seguidas e sobreviveu a três reinícios:
+
+| quem | o que lia |
+|---|---|
+| escritor | a regra transversal do esqueleto: *"exclusividade entre usuários **operacionais**"* |
+| auditor | a decisão aceita: *"e-mail exclusivo **em todo o sistema**"* |
+
+Os dois certos, sobre fontes diferentes. Uma noite inteira.
+
+### 70.1 A pergunta
+
+Na segunda aparição do mesmo achado, o laço para e pergunta — com as duas
+leituras lado a lado:
+
+```
+auditoria · Phase 2 · usuários
+
+Já descobri:
+  O auditor devolveu este ponto pela segunda vez, então não é falta de capricho
+  do escritor: é leitura divergente das mesmas fontes.
+
+    O auditor entendeu: a exclusividade do e-mail foi limitada aos operacionais
+    E pede: exigir exclusividade em todo o sistema, incluindo o painel global
+
+Em "Phase 2 · usuários", qual leitura vale?
+  1. Vale a leitura do auditor  ← recomendada
+  2. Vale o que o escritor escreveu
+```
+
+Três desfechos, e o terceiro é o que a ideia tem de melhor:
+
+- **auditor** — a fase é reescrita como ele pede, agora com respaldo explícito;
+- **escritor** — o ponto é encerrado, e o achado sai da lista;
+- **nem um nem outro** — texto livre, que **substitui** a correção pedida: o
+  escritor recebe o que o desenvolvedor determinou, palavra por palavra.
+
+### 70.2 O que faz a decisão durar
+
+A resposta é gravada como qualquer outra da entrevista, e é isso que a torna
+útil: o auditor da rodada seguinte recebe as decisões junto do documento. Sem
+esse registro ele levantaria o mesmo ponto na volta seguinte — **com toda a razão
+do mundo**, porque para ele nada teria mudado.
+
+A recomendação padrão é a leitura do auditor, e a base diz por quê: quem devolve
+duas vezes costuma estar lendo uma decisão aceita, e decisão aceita vence
+documento derivado dela. É uma tecla para discordar.

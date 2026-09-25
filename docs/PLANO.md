@@ -4921,7 +4921,28 @@ exclusão.
 E a opção 2 passou a dizer o que fica valendo se ela for escolhida, em vez de "o
 ponto é encerrado".
 
-### 70.3 O que faz a decisão durar
+### 70.3 Arbitragem é para julgamento, nunca para contagem
+
+O levantamento estreou perguntando isto:
+
+```
+O auditor entendeu: a task declara 5 critérios de aceite
+E pede: uma task com mais de 4 critérios está fazendo mais de uma coisa…
+
+Em "Phase 1 · Persistir usuários, perfis e permissões", qual leitura vale?
+```
+
+Não há duas leituras: **5 é maior que 4**. Esse achado vem da conferência
+mecânica, não do julgamento do auditor, e repetir ali significa que o escritor
+não cumpriu — não que alguém discorde dele. Pedir arbitragem de uma contagem é
+gastar a atenção do desenvolvedor com aritmética, e ainda por cima mostrando as
+doze tasks da fase para decidir sobre uma.
+
+O levantamento passa a valer só para achado do AUDITOR. A distinção já existia no
+veredito (`mechanical`) e agora está também em cada achado, porque é ela que
+decide **quem resolve**: contagem volta ao escritor, leitura vai a quem decide.
+
+### 70.4 O que faz a decisão durar
 
 A resposta é gravada como qualquer outra da entrevista, e é isso que a torna
 útil: o auditor da rodada seguinte recebe as decisões junto do documento. Sem

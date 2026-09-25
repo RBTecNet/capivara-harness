@@ -20,6 +20,15 @@ export interface Finding {
   problem: string;
   /** Como corrigir. Sem isso, a devolução não ajuda quem escreve. */
   fix: string;
+  /**
+   * Veio da conferência MECÂNICA, não do julgamento do auditor.
+   *
+   * A diferença decide quem resolve. "A task declara 5 critérios de aceite" é
+   * aritmética: 5 é maior que 4, não há duas leituras possíveis, e perguntar ao
+   * desenvolvedor qual delas vale é pedir que ele arbitre uma contagem. Já "a
+   * decisão aceita exige exclusividade global" é leitura — e é dele.
+   */
+  mechanical?: boolean;
 }
 
 export interface Remark {

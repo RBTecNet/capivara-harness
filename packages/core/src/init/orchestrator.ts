@@ -1589,8 +1589,24 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     history: readonly AuditAttempt[],
     attempt: number,
     writer: WriterContext,
+    doSelfCheck: boolean,
   ): Promise<Finding[]> {
-    const repetidos = findings.filter((finding) => ehRepetido(finding, history) && !arbitrados.has(fingerprint(finding)));
+    /*
+     * Achado mecânico não vai a arbitragem.
+     *
+     * "A task declara 5 critérios de aceite" é contagem: 5 é maior que 4, não há
+     * duas leituras possíveis, e perguntar qual vale é pedir ao desenvolvedor
+     * que arbitre uma conta. Repetir, aqui, significa que o escritor não cumpriu
+     * — não que alguém discorde dele.
+     *
+     * O levantamento existe para o outro caso: quando o escritor leu as fontes
+     * de um jeito e o auditor de outro, e nenhum dos dois pode decidir.
+     */
+    if (doSelfCheck) return [...findings];
+
+    const repetidos = findings.filter(
+      (finding) => finding.mechanical !== true && ehRepetido(finding, history) && !arbitrados.has(fingerprint(finding)),
+    );
     if (repetidos.length === 0) return [...findings];
 
     announce(`  ${repetidos.length} ponto(s) voltaram pela segunda vez: isso é desacordo de leitura, não descuido — perguntando a você`);
@@ -2091,7 +2107,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
        * põe as duas versões na frente do desenvolvedor antes de gastar mais uma
        * reescrita nelas.
        */
-      const arbitrados = await levantamentoDeAuditoria(document, content, action.findings, history, attempt, writer);
+      const arbitrados = await levantamentoDeAuditoria(document, content, action.findings, history, attempt, writer, verdict.mechanical === true);
       authored = await authored.rewrite([...decisoes, ...arbitrados], action.attempt);
 
       /*
@@ -2186,6 +2202,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             status: "REJECTED",
             findings: inchadas.map(({ phase, task, tasksNaFase }) => ({
               where: `Phase ${phase} · ${task.title}`,
+              mechanical: true,
               problem: `a task declara ${task.acceptanceCriteria.length} critérios de aceite`,
               /*
                * Os dois tetos, sempre juntos.
@@ -2225,6 +2242,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             status: "REJECTED",
             findings: grandes.map((phase) => ({
               where: `Phase ${phase.number}`,
+              mechanical: true,
               problem:
                 phase.tasks.length > MAX_TASKS_PER_PHASE
                   ? `a fase declara ${phase.tasks.length} tasks e uma fase é uma sessão de agente`
@@ -2287,6 +2305,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             status: "REJECTED",
             findings: doEscritor.map((error) => ({
               where: `linha ${error.line}`,
+              mechanical: true,
               problem: `${error.code}: ${error.message}`,
               fix: error.hint,
             })),

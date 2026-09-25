@@ -584,3 +584,49 @@ describe("decisão em aberto volta a quem decide, não ao escritor", () => {
     expect(reaberturas).toBe(1);
   });
 });
+
+/*
+ * O levantamento de auditoria disparou para um achado MECÂNICO — "a task declara
+ * 5 critérios de aceite" — e perguntou ao desenvolvedor qual leitura valia. Não
+ * há duas leituras: 5 é maior que 4. Pedir arbitragem de uma contagem é gastar a
+ * atenção dele com aritmética.
+ */
+describe("achado mecânico não vai a arbitragem", () => {
+  it("a conferência de forma devolve ao escritor sem perguntar nada", async () => {
+    await init(skeletonPath());
+
+    // Uma fase com tasks acima do teto de critérios: defeito mecânico, contado.
+    const densa = [
+      "## Phase 1: Fundação",
+      "",
+      "**Goal:** base · **Depends on:** none · **Covers:** statuses",
+      "",
+      ...Array.from({ length: 3 }, (_unused, indice) => [
+        `- [ ] **Task:** Tarefa ${indice + 1}`,
+        "  - **Acceptance criteria:**",
+        ...Array.from({ length: 7 }, (_ignora, posicao) => `    - condição observável ${posicao + 1}`),
+        "  - **Feature tests:** t → t",
+        "  - **Traces:** statuses",
+        "",
+      ].join("\n")),
+    ].join("\n");
+
+    const steps = skeletonPath();
+    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "phase-p01", attempt: 1 }, respond: { stdout: densa } });
+
+    let perguntou = 0;
+    const agent = fakeAgent(steps);
+    await runPlan({
+      projectRoot,
+      request,
+      ...comum,
+      call: agent.call,
+      ask: async (question) => {
+        if (question.topic.startsWith("auditoria ·")) perguntou += 1;
+        return "1";
+      },
+    }).catch(() => undefined);
+
+    expect(perguntou).toBe(0);
+  });
+});

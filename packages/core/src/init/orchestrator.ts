@@ -2081,17 +2081,30 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         const inchadas = parsed.document.phases.flatMap((phase) =>
           phase.tasks
             .filter((task) => task.acceptanceCriteria.length > MAX_CRITERIA_PER_TASK)
-            .map((task) => ({ phase: phase.number, task })),
+            .map((task) => ({ phase: phase.number, task, tasksNaFase: phase.tasks.length })),
         );
         if (inchadas.length > 0) {
           return {
             status: "REJECTED",
-            findings: inchadas.map(({ phase, task }) => ({
+            findings: inchadas.map(({ phase, task, tasksNaFase }) => ({
               where: `Phase ${phase} · ${task.title}`,
               problem: `a task declara ${task.acceptanceCriteria.length} critérios de aceite`,
+              /*
+               * Os dois tetos, sempre juntos.
+               *
+               * Este texto mandava só dividir, e o do tamanho da fase mandava só
+               * consolidar. No `assitencia` isso virou um pêndulo com nome e
+               * horário: 00:01 "a task declara 5 critérios" → divide → 00:26 "a
+               * fase declara 16 tasks" → consolida → 00:23 "a task declara 5
+               * critérios". Cada correção obedecia a um teto e quebrava o outro,
+               * porque cada uma só sabia do seu.
+               */
               fix:
                 `uma task com mais de ${MAX_CRITERIA_PER_TASK} critérios está fazendo mais de uma coisa: divida-a em tasks` +
-                ` que façam uma coisa cada, com dois ou três critérios. Nenhuma condição verificável pode desaparecer no corte`,
+                ` que façam uma coisa cada, com dois ou três critérios. Nenhuma condição verificável pode desaparecer no corte.` +
+                ` E a fase inteira não pode passar de ${MAX_TASKS_PER_PHASE} tasks — ela tem ${tasksNaFase} agora: se a divisão` +
+                ` estourar esse teto, consolide outras tasks desta fase NA MESMA REESCRITA, até a fase caber nos dois limites` +
+                ` ao mesmo tempo. Uma correção que respeita um teto e quebra o outro volta para cá`,
             })),
             remarks: [],
             reason: "há task fazendo mais de uma coisa",
@@ -2138,7 +2151,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
                     `consolide as tasks desta fase até ela caber em ${MAX_TASKS_PER_PHASE}: duas tasks que entregam a mesma` +
                     ` capacidade viram uma. Nada verificável pode desaparecer — se depois de consolidar ainda não couber, diga` +
                     ` isso em vez de apagar trabalho. Reescreva apenas esta fase: criar fases novas é decisão do esqueleto, não` +
-                    ` desta reescrita`
+                    ` desta reescrita. E nenhuma task pode ficar com mais de ${MAX_CRITERIA_PER_TASK} critérios: a consolidação` +
+                    ` que empurra critério para cima do teto volta para cá pelo outro lado`
                   : `consolide critérios redundantes desta fase até ela caber em ${MAX_CRITERIA_PER_PHASE}: dois critérios que` +
                     ` verificam a mesma condição com palavras diferentes viram um só. Nenhuma condição verificável pode desaparecer —` +
                     ` se depois de consolidar ainda não couber, diga isso em vez de apagar critério. Reescreva apenas esta fase:` +

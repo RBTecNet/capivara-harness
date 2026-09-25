@@ -357,9 +357,8 @@ describe("referência de design", () => {
 });
 
 describe("dimensionamento de fase", () => {
-  it("fase densa demais volta ao escritor mesmo cabendo em tasks", async () => {
-    // Mesmo número de tasks, o dobro do trabalho: é a medida que faltava.
-    const densa = [
+  // Mesmo número de tasks, o dobro do trabalho: é a medida que faltava.
+  const densa = [
       "## Phase 1: Fundação",
       "",
       "**Goal:** base · **Depends on:** none · **Covers:** statuses",
@@ -374,15 +373,34 @@ describe("dimensionamento de fase", () => {
       ].join("\n")),
     ].join("\n");
 
+  const comFaseDensa = () => {
     const steps = happyPath();
     steps.unshift({ match: { role: "writer", stage: "authoring", subject: "phase-p01", attempt: 1 }, respond: { stdout: densa } });
     steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: PHASE_1 }, repeat: true });
     steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 }, repeat: true });
+    return steps;
+  };
 
-    const { agent, anunciado } = await run(steps);
+  it("fase densa demais volta ao escritor mesmo cabendo em tasks", async () => {
+    const { agent, anunciado } = await run(comFaseDensa());
     expect(anunciado).toContain("auditor devolveu project-phases.md");
     const reescrita = agent.calls.find((call) => call.subject === "phase-p01" && call.attempt > 1);
     expect(reescrita?.prompt).toContain("critérios de aceite");
+  });
+
+  /*
+   * O `assitencia` virou um pêndulo com horário marcado: 00:01 "a task declara 5
+   * critérios" → divide → 00:26 "a fase declara 16 tasks" → consolida → 00:23 "a
+   * task declara 5 critérios". Cada correção obedecia a um teto e quebrava o
+   * outro, porque cada uma só sabia do seu.
+   */
+  it("a correção de critério também diz o teto de tasks, e vice-versa", async () => {
+    const { agent } = await run(comFaseDensa());
+    const reescrita = agent.calls.find((call) => call.subject === "phase-p01" && call.attempt > 1);
+
+    expect(reescrita?.prompt).toContain("a fase inteira não pode passar de 15 tasks");
+    expect(reescrita?.prompt).toContain("NA MESMA REESCRITA");
+    expect(reescrita?.prompt).toContain("respeita um teto e quebra o outro volta para cá");
   });
 });
 

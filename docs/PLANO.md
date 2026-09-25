@@ -4758,3 +4758,49 @@ ninguém tentar o impossível. O prompt passa a apontá-la:
 > If neither fits — if the skeleton itself is wrong — say that in a REMARK, which
 > reaches the developer, instead of a finding that reaches someone who cannot act
 > on it.
+
+## §68 — O pêndulo entre dois tetos
+
+O `assitencia` entrou num laço com horário marcado. Do `events.tsv`:
+
+```
+00:01  a task declara 5 critérios de aceite      → divide a task
+00:07  a task declara 6 critérios de aceite      → divide de novo
+00:23  a task declara 5 critérios de aceite      → divide de novo
+00:26  a fase declara 16 tasks                   → consolida
+```
+
+Cada correção obedecia a um teto e quebrava o outro. Dividir a task por ter 5
+critérios acrescenta tasks, e a fase passa de 15; consolidar para caber em 15
+junta critérios, e a task passa de 4. **Duas correções corretas, uma
+oscilação.**
+
+O motivo era simples: cada texto de correção só conhecia o próprio teto. O
+escritor recebia "divida-a em tasks que façam uma coisa cada" sem nunca ouvir
+falar do limite de tasks da fase, e recebia "consolide as tasks" sem ouvir falar
+do limite de critérios por task.
+
+### 68.1 Os dois limites, sempre juntos
+
+Agora cada correção de dimensionamento diz os dois, e exige um arranjo que
+satisfaça ambos **na mesma reescrita**:
+
+> divida-a em tasks que façam uma coisa cada […] E a fase inteira não pode passar
+> de 15 tasks — ela tem 16 agora: se a divisão estourar esse teto, consolide
+> outras tasks desta fase NA MESMA REESCRITA, até a fase caber nos dois limites
+> ao mesmo tempo. **Uma correção que respeita um teto e quebra o outro volta para
+> cá.**
+
+E a recíproca, na correção de tamanho da fase.
+
+### 68.2 Quando não existe arranjo
+
+Os tetos são 15 tasks × 4 critérios = 60 condições por fase, e há um terceiro
+teto exatamente nesse número. Acima dele não existe arranjo: nenhuma divisão e
+nenhuma consolidação fazem a fase caber, porque o conteúdo é maior que a sessão.
+Esse teto já existia e já tem a saída certa — *"se depois de consolidar ainda não
+couber, diga isso em vez de apagar trabalho"* —, que leva o problema ao
+desenvolvedor em vez de a mais uma reescrita.
+
+O pêndulo acontecia ABAIXO de 60, onde o arranjo existe e ninguém tinha as duas
+medidas na mão ao mesmo tempo.

@@ -134,3 +134,35 @@ describe("relatório do build", () => {
     expect(relatorio.conclusao.custou).toContain("2 fase(s)");
   });
 });
+
+/*
+ * Sem tratamento próprio, a credencial recusada caía em "produto" — e a tela
+ * mandava ler a evidência e corrigir o código de uma fase que ninguém julgou.
+ */
+describe("parada por credencial recusada", () => {
+  const relatorio = relatorioDoBuild({
+    runId: "build-x",
+    exitCode: 2,
+    phases: [
+      { id: "P01", title: "P01", outcome: { status: "complete", committed: true, message: "feat(phase-1)", cycles: 2 } },
+      { id: "P02", title: "P02", outcome: { status: "credential-rejected", engine: "codex", evidence: "401 Unauthorized: Incorrect API key provided: sk-…", cycles: 3 } },
+    ],
+    warnings: [],
+    errors: ["o provider codex recusou a credencial"],
+    acceptance: null,
+  });
+
+  it("é do ambiente, não do produto", () => {
+    if (relatorio.tipo !== "parada") throw new Error("deveria parar");
+    expect(relatorio.parada.natureza).toBe("ambiente");
+    expect(relatorio.parada.deQuem).toContain("não chegou a ser julgado");
+  });
+
+  it("diz o comando que resolve e o caminho de volta", () => {
+    if (relatorio.tipo !== "parada") throw new Error("deveria parar");
+    const passos = relatorio.parada.paraSeguir.join("\n");
+    expect(passos).toContain("codex login");
+    expect(passos).toContain("git add -A");
+    expect(passos).toContain("retoma de P02");
+  });
+});

@@ -5914,3 +5914,57 @@ O conserto de `f9ede43` conhecia um prefixo só — `auditoria` — e **saiu sem
 A arbitragem do ensaio nasceu depois, com tópico `ensaio · …`, e ninguém viu a linha
 irmã. Agora qualquer `<origem> · <endereço>` é tratado, e o teste que faltou existe e
 cobre as duas.
+
+## §83 — O build cobrou da fase a credencial que o provider recusou
+
+O `P02` do `assistencia2` caiu no terceiro ciclo, e o terminal mostrava o motivo:
+
+```
+unexpected status 401 Unauthorized: Incorrect API key provided: sk-…
+```
+
+A sequência, nos artefatos:
+
+| ciclo | onde parou | de quem era |
+| --- | --- | --- |
+| 1 | gate 4 — os roteiros rodando na ordem errada | real, dos roteiros |
+| 2 | o executor contestou os roteiros, certo; o **verificador levou 401**, não emitiu linha nenhuma, e o gate 3 contou como reprovação | da credencial |
+| 3 | o **executor levou 401** em trinta segundos, e o build parou | da credencial |
+
+O produto não reprovou duas vezes. A credencial caiu duas vezes, e a fase pagou. De
+quebra, a reescrita dos roteiros que o executor pediu no ciclo 2 nunca aconteceu,
+porque o gate 4 não chegou a rodar.
+
+### 83.1 Uma chamada protegida em três
+
+O runner fala com o provider em três lugares — o executor, o verificador e o autor
+dos roteiros —, e só o executor tinha proteção, e só contra limite de uso. Os outros
+dois recebiam a falha do ambiente como texto, e o gate lia esse texto como se fosse
+trabalho. É a correção pela metade na forma mais direta: a mesma chamada, ao mesmo
+provider, protegida num lugar e crua nos outros dois.
+
+Agora as três passam pela mesma proteção. Credencial recusada **pára na hora**: não se
+espera nem se repete — o limite de uso volta sozinho, a credencial não —, não consome
+ciclo, e a parada diz que é do ambiente, com o comando que resolve. Limite de uso no
+verificador e no autor agora espera e repete a MESMA chamada, como já acontecia no
+executor. `--keep-going` não vale para credencial recusada: a próxima fase bate no
+mesmo provider com a mesma credencial.
+
+Sem tratamento próprio, a parada classificava o caso como "produto" e mandava ler a
+evidência e corrigir o código — de uma fase que ninguém julgou.
+
+A detecção olha só o fim do log e só as frases com que as CLIs falam da credencial
+DELAS. "401 Unauthorized" sozinho não basta: o produto testando a própria rota
+protegida não pode parar o build. E a chave nunca entra na evidência, nem mascarada.
+
+### 83.2 O `git add -A` que o harness mandava rodar
+
+Parado no meio de uma fase, o harness instrui: `git add -A && git commit -m "wip"`. Isso
+levaria `.capivara/flows/` e `.capivara/.gitignore` para o repositório do produto — os
+commits de fase excluem `.capivara/` por pathspec, a instrução ao desenvolvedor não, e
+as duas regras discordavam em silêncio.
+
+O harness escreve cinco pastas em `.capivara/` e o `.gitignore` conhecia duas.
+`flows/`, `skills/` e `memorias/` nasceram depois da lista e ninguém voltou a ela — a
+mesma família do piloto 6, quando foi `handoffs/`. O teste novo pergunta ao **git**, e
+não à lista: se uma pasta nova do plano de controle ficar de fora, ele falha.

@@ -6,7 +6,7 @@ export { preflight } from "./preflight.js";
 export type { PreflightOptions, PreflightResult, PreflightWarning } from "./preflight.js";
 export { commitPhase, commitSpecification, hasPendingChanges, iniciarRepositorio, isClean, isRepository, treeSignature } from "./git.js";
 export type { CommitResult } from "./git.js";
-export { DEFAULT_WAIT_SECONDS, RESET_BUFFER_SECONDS, detectRateLimit, planWait } from "./ratelimit.js";
+export { DEFAULT_WAIT_SECONDS, RESET_BUFFER_SECONDS, detectCredentialRejection, detectRateLimit, planWait } from "./ratelimit.js";
 export type { RateLimit, WaitPlan } from "./ratelimit.js";
 export { declaredComplete, defaultTestRunner, gate0, gate1, gate2, gate3 } from "./gates.js";
 export type { Gate3Result, GateName, GateResult, TestRun, TestRunner } from "./gates.js";

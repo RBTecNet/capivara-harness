@@ -16,7 +16,7 @@ import { declarouRoteiroErrado, fixPrompt, flowPrompt, implementPrompt, verifyPr
 import type { BuildProgressListener, LoopGate, LoopGateState } from "./progress.js";
 import { commitPhase, hasPendingChanges, treeSignature } from "./git.js";
 import { declaredComplete, defaultTestRunner, gate0, gate1, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
-import { detectRateLimit, planWait } from "./ratelimit.js";
+import { detectCredentialRejection, detectRateLimit, planWait } from "./ratelimit.js";
 import { gate4, type FlowRunner } from "./flows.js";
 import { procurarTestesNomeados } from "./feature-tests.js";
 import { TasksAprovadas, tasksDaFase } from "./veredictos.js";
@@ -130,7 +130,14 @@ export type PhaseOutcome =
   | { status: "complete"; committed: boolean; message: string; cycles: number }
   | { status: "already-implemented"; cycles: number }
   | { status: "failed"; gate: GateName; cause: string; cycles: number }
-  | { status: "rate-limit-exhausted"; waits: number };
+  | { status: "rate-limit-exhausted"; waits: number }
+  /**
+   * O provider recusou a credencial.
+   *
+   * Não consome ciclo e não é culpa da fase: o código nem chegou a ser julgado. E
+   * não se espera nem se repete — o limite de uso volta sozinho, a credencial não.
+   */
+  | { status: "credential-rejected"; engine: string; evidence: string; cycles: number };
 
 export const DEFAULT_MAX_CYCLES = 3;
 export const DEFAULT_MAX_LIMIT_WAITS = 20;
@@ -179,7 +186,46 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     await options.onMemorias(memorias);
   };
 
+  /*
+   * Toda chamada ao provider é protegida, e não só a do executor.
+   *
+   * O executor sempre teve a proteção do limite de uso. O verificador e o autor dos
+   * roteiros — que falam com o MESMO provider — não tinham nenhuma: uma resposta
+   * de "credencial recusada" ou "limite atingido" voltava como texto, o gate 3 a
+   * lia como "o verificador não emitiu linha nenhuma", e a fase pagava um ciclo por
+   * um defeito do ambiente. No P02 do `assistencia2` foram dois ciclos assim, e o
+   * build parou com o produto correto e uma contestação do executor que nunca
+   * chegou a ser atendida.
+   */
+  class CredencialRecusada extends Error {
+    constructor(readonly evidencia: string) {
+      super(evidencia);
+    }
+  }
+  class LimiteEsgotado extends Error {}
+
+  const chamarLeitor = async (chamada: Parameters<EngineCaller>[0]): Promise<EngineResult> => {
+    for (;;) {
+      const resposta = await options.call(chamada);
+      const saida = `${resposta.stdout}\n${resposta.stderr}`;
+      const recusa = detectCredentialRejection(saida);
+      if (recusa !== null) throw new CredencialRecusada(recusa);
+
+      const limite = detectRateLimit(saida, options.engine);
+      if (!limite) return resposta;
+      waits += 1;
+      if (waits > maxLimitWaits) throw new LimiteEsgotado();
+      const plano = planWait(limite);
+      announce(`[${session.id}] ${plano.reason}; aguardando ${plano.seconds}s e repetindo a mesma chamada, sem consumir ciclo`);
+      await event("retry", `limite de uso: ${plano.reason}`, chamada.attempt);
+      await sleep(plano.seconds);
+    }
+  };
+
+  let cicloCorrente = 1;
+  try {
   for (let cycle = 1; cycle <= maxCycles; ) {
+    cicloCorrente = cycle;
     await event("started", cycle === 1 ? "implementação" : `ciclo de correção ${cycle}`, cycle);
     announce(cycle === 1 ? `[${session.id}] ${session.title}` : `[${session.id}] ciclo de correção ${cycle}/${maxCycles}`);
     relatar({
@@ -224,6 +270,9 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     const signatureBefore = await treeSignature(options.projectRoot);
     const result = await options.call({ role: "builder", phase: session, attempt: cycle, prompt });
     await writeAtomic(`${paths.logs}/${session.id}.cycle-${cycle}.log`, `${result.stdout}\n${result.stderr}`);
+
+    const recusa = detectCredentialRejection(`${result.stdout}\n${result.stderr}`);
+    if (recusa !== null) throw new CredencialRecusada(recusa);
 
     // Limite de uso não é defeito da implementação: espera e repete a MESMA
     // fase, sem consumir ciclo de correção.
@@ -270,7 +319,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         ...(fluxos.regressao ? { regressao: fluxos.regressao } : {}),
         startCommand: await fluxos.resolveStart(),
         author: async (workflow, rejected, baseUrl) => {
-          const resposta = await options.call({
+          const resposta = await chamarLeitor({
             role: "verifier",
             phase: session,
             attempt: cycleAtual,
@@ -431,7 +480,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
           );
         }
 
-        const verification = await options.call({
+        const verification = await chamarLeitor({
           role: "verifier",
           phase: session,
           attempt: cycle,
@@ -493,6 +542,29 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     }
     await event("retry", `${lastGate}: ${lastCause.split("\n")[0] ?? ""}`, cycle);
     cycle += 1;
+  }
+  } catch (erro) {
+    if (erro instanceof LimiteEsgotado) return { status: "rate-limit-exhausted", waits };
+    if (!(erro instanceof CredencialRecusada)) throw erro;
+
+    /*
+     * Pára aqui, diz o que fazer, e não culpa a fase.
+     *
+     * O trabalho que a fase já fez fica na árvore e é bom — nenhum gate o
+     * reprovou por mérito. O caminho de volta é renovar a credencial e commitar
+     * o parcial, porque o preflight da próxima execução exige árvore limpa e o
+     * loop revalida a fase a partir do que estiver commitado.
+     */
+    await event("blocked", `credencial recusada pelo provider ${options.engine}: ${erro.evidencia}`, cicloCorrente);
+    relatar({ kind: "phase", id: session.id, state: "falhou", cycle: cicloCorrente, detail: "credencial recusada" });
+    announce(`[${session.id}] o provider ${options.engine} recusou a credencial — isto não é defeito da fase:`);
+    announce(`           ${erro.evidencia}`);
+    announce(`           renove com \`${options.engine} login\` e rode \`capivara build\` de novo`);
+    if (await hasPendingChanges(options.projectRoot)) {
+      announce("           o trabalho desta fase ficou na árvore; antes de rodar de novo:");
+      announce("           git add -A && git commit -m \"wip: trabalho parcial\"   → o loop revalida a fase e segue");
+    }
+    return { status: "credential-rejected", engine: options.engine, evidence: erro.evidencia, cycles: cicloCorrente };
   }
 
   await recolher(maxCycles);

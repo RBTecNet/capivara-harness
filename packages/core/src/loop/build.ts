@@ -637,14 +637,24 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         }
       }
 
-      if (outcome.status === "failed" || outcome.status === "rate-limit-exhausted") {
-        const detail = outcome.status === "failed" ? `${outcome.gate}: ${outcome.cause}` : "limite de uso esgotado";
+      if (outcome.status === "failed" || outcome.status === "rate-limit-exhausted" || outcome.status === "credential-rejected") {
+        const detail =
+          outcome.status === "failed"
+            ? `${outcome.gate}: ${outcome.cause}`
+            : outcome.status === "credential-rejected"
+              ? `o provider ${outcome.engine} recusou a credencial: ${outcome.evidence}`
+              : "limite de uso esgotado";
         const [primeira, ...resto] = detail.split("\n");
         announce(`[${session.id}] PAROU — ${primeira ?? ""}`);
         // A causa inteira sai aqui, e só aqui: quem chama recebe o mesmo texto
         // em `errors` para uso programático, não para reimprimir.
         for (const linha of resto) announce(`           ${linha}`);
-        if (!options.keepGoing) {
+        /*
+         * `--keep-going` não vale para credencial recusada: a próxima fase bate no
+         * mesmo provider com a mesma credencial, e seguir seria marcar as onze
+         * restantes como falhas por um motivo que não é delas.
+         */
+        if (!options.keepGoing || outcome.status === "credential-rejected") {
           await appendEvent(paths.events, {
             timestamp: now().toISOString(),
             stage: "implement",

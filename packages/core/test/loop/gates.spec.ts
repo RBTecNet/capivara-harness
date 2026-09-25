@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   commitPhase,
+  detectCredentialRejection,
   detectRateLimit,
   gate0,
   gate1,
@@ -313,5 +314,28 @@ describe("o que o gate 1 responde", () => {
   it("árvore igual antes e depois significa que a sessão não escreveu", () => {
     expect(gate1("abc", "abc")).toBe(false);
     expect(gate1("abc", "def")).toBe(true);
+  });
+});
+
+describe("detectCredentialRejection", () => {
+  it("reconhece as frases com que as CLIs falam da credencial delas", () => {
+    for (const linha of [
+      "unexpected status 401 Unauthorized: Incorrect API key provided: sk-xxxx",
+      'Invalid API key · Please run /login',
+      '{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}',
+      "Error: Not logged in. Run `codex login` to authenticate.",
+      "OAuth token has expired",
+    ]) {
+      expect(detectCredentialRejection(`trabalhando…\n${linha}`), linha).not.toBeNull();
+    }
+  });
+
+  it("401 sozinho não basta: o produto testa a própria autenticação", () => {
+    expect(detectCredentialRejection("GET /admin → 401 Unauthorized (esperado)\n12 passed")).toBeNull();
+  });
+
+  it("olha só o fim: uma menção antiga, no meio do log, não pára o build", () => {
+    const antigo = ["Incorrect API key provided (fixture de teste)", ...Array.from({ length: 40 }, (_, i) => `linha ${i}`)].join("\n");
+    expect(detectCredentialRejection(antigo)).toBeNull();
   });
 });

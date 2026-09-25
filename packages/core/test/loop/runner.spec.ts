@@ -416,3 +416,55 @@ describe("o runner de fluxos é dito antes, não depois", () => {
     expect(chamadas.find((chamada) => chamada.role === "builder")?.prompt).not.toContain("saves a whole cycle");
   });
 });
+
+/*
+ * O P02 do `assistencia2`: o codex começou a responder `401 Unauthorized:
+ * Incorrect API key` no meio do build. O verificador do ciclo 2 recebeu isso, não
+ * emitiu linha nenhuma, e o gate 3 contou como reprovação; o executor do ciclo 3
+ * recebeu o mesmo, e o build parou. O produto não reprovou nenhuma das duas vezes.
+ */
+describe("credencial recusada pelo provider", () => {
+  // O envelope exato que o codex escreveu, com a chave mascarada como ele mascara.
+  const recusa = [
+    '{"type":"thread.started","thread_id":"01a0"}',
+    '{"type":"error","message":"Reconnecting... 5/5 (stream disconnected before completion: websocket closed by server before response.completed)"}',
+    '{"type":"error","message":"unexpected status 401 Unauthorized: Incorrect API key provided: sk-svcac**********fvMA. You can find your API key at https://platform.openai.com/account/api-keys."}',
+  ].join("\n");
+  const recusada = (): EngineResult => ({ exitCode: 1, stdout: recusa, stderr: "", timedOut: null });
+
+  it("no executor: pára na hora, sem gastar ciclo e sem culpar a fase", async () => {
+    const { outcome, calls } = await phase({ builder: async () => recusada() });
+    expect(outcome.status).toBe("credential-rejected");
+    if (outcome.status !== "credential-rejected") return;
+    expect(outcome.engine).toBe("codex");
+    expect(outcome.cycles).toBe(1);
+    expect(outcome.evidence).toContain("Incorrect API key");
+    // Nenhuma segunda chamada: repetir com a mesma credencial só queima a fase.
+    expect(calls.filter((call) => call.role === "builder")).toHaveLength(1);
+  });
+
+  it("no verificador: não vira 'o verificador não emitiu linha nenhuma'", async () => {
+    const { outcome } = await phase({ verifier: async () => recusada() });
+    expect(outcome.status).toBe("credential-rejected");
+  });
+
+  it("a chave nunca entra na evidência, nem mascarada", async () => {
+    const { outcome } = await phase({ builder: async () => recusada() });
+    if (outcome.status !== "credential-rejected") throw new Error("deveria recusar");
+    expect(outcome.evidence).not.toContain("svcac");
+    expect(outcome.evidence).not.toContain("fvMA");
+  });
+
+  /*
+   * O falso positivo que mais importa: o PRODUTO testando a própria
+   * autenticação. Um asserto que espera 401 numa rota protegida não é o provider
+   * recusando nada, e parar o build por isso seria o defeito inverso.
+   */
+  it("o produto testando a própria rota protegida não é credencial recusada", async () => {
+    const { outcome } = await phase({
+      builder: async () =>
+        ok(["implementei a rota de anexos", "✓ GET /anexos sem sessão responde 401 Unauthorized", "✓ 38 passed", "feito"].join("\n")),
+    });
+    expect(outcome.status).toBe("complete");
+  });
+});

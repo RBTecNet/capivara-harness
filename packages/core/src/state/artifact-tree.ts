@@ -22,10 +22,26 @@ import { artifactPaths } from "./paths.js";
  * recusava começar porque a árvore não estava limpa. O desenvolvedor que
  * seguisse os dois estágios na ordem certa era barrado no terceiro.
  */
+/*
+ * E `flows/`, `skills/` e `memorias/`, pela mesma razão — e pelo mesmo caminho.
+ *
+ * As três nasceram depois desta lista e ninguém voltou a ela. O efeito apareceu
+ * no `assistencia2`: o build parou no meio de uma fase, e o próprio harness
+ * mandou rodar `git add -A && git commit -m "wip"` — que teria levado os roteiros
+ * do gate 4 e o `.gitignore` para o repositório do produto. Os commits de fase
+ * excluem `.capivara/` por pathspec; a instrução que o harness dá ao
+ * desenvolvedor não excluía, e as duas regras discordavam em silêncio.
+ *
+ * `init/` fica de FORA desta lista de propósito: é a especificação, e ela entra no
+ * histórico pelo `commitSpecification`. `design/` também: é do desenvolvedor.
+ */
 export const CONTROL_PLANE_IGNORE = [
   "# Estado dos runs: plano de controle, não pertence ao histórico.",
   "runs/",
   "handoffs/",
+  "flows/",
+  "skills/",
+  "memorias/",
   "",
 ].join("\n");
 

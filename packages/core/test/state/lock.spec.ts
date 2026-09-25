@@ -129,4 +129,34 @@ describe("o plano de controle fica fora do histórico", () => {
     // Sem esta linha o `plan` deixa a árvore suja e o `build` recusa começar.
     expect(escrito).toContain("handoffs/");
   });
+
+  /*
+   * O teste acima conferia duas pastas, e o harness escreve cinco. As três que
+   * nasceram depois da lista — roteiros, skills, memórias — vazavam para o
+   * repositório do produto no `git add -A` que o PRÓPRIO harness manda rodar
+   * quando uma fase pára no meio. Este teste pergunta ao git, não à lista: se uma
+   * pasta nova entrar no plano de controle e ficar de fora do `.gitignore`, ele
+   * falha.
+   */
+  it("o git não enxerga nenhuma pasta interna — e enxerga a especificação", async () => {
+    const { ensureArtifactTree } = await import("../../src/state/index.js");
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const git = promisify(execFile);
+
+    await git("git", ["init", "-q"], { cwd: projectRoot });
+    await ensureArtifactTree(projectRoot);
+    for (const pasta of ["runs", "handoffs", "flows", "skills", "memorias", "init"]) {
+      await mkdir(join(projectRoot, ".capivara", pasta), { recursive: true });
+      await writeFile(join(projectRoot, ".capivara", pasta, "arquivo.txt"), "x", "utf8");
+    }
+
+    const { stdout } = await git("git", ["add", "-A", "--dry-run"], { cwd: projectRoot });
+    for (const interna of ["runs", "handoffs", "flows", "skills", "memorias"]) {
+      expect(stdout, interna).not.toContain(`.capivara/${interna}/`);
+    }
+    // A especificação É do histórico: é o que `commitSpecification` versiona.
+    expect(stdout).toContain(".capivara/init/");
+  });
 });

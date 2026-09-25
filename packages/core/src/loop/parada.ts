@@ -42,7 +42,9 @@ export interface ContextoDaParada {
 function ultimaFalha(phases: PhaseReport[]): PhaseReport | null {
   for (let indice = phases.length - 1; indice >= 0; indice -= 1) {
     const fase = phases[indice]!;
-    if (fase.outcome.status === "failed" || fase.outcome.status === "rate-limit-exhausted") return fase;
+    if (fase.outcome.status === "failed" || fase.outcome.status === "rate-limit-exhausted" || fase.outcome.status === "credential-rejected") {
+      return fase;
+    }
   }
   return null;
 }
@@ -73,6 +75,9 @@ function ehDoAmbiente(causa: string): boolean {
  */
 function naturezaDaFase(fase: PhaseReport): NaturezaDaParada {
   if (fase.outcome.status === "rate-limit-exhausted") return "ambiente";
+  // Sem isto caía em "produto", e a tela mandava corrigir o código de uma fase
+  // cujo código ninguém chegou a julgar.
+  if (fase.outcome.status === "credential-rejected") return "ambiente";
   if (fase.outcome.status !== "failed") return "produto";
   if (ehDoAmbiente(fase.outcome.cause)) return "ambiente";
   return fase.outcome.gate.startsWith("gate 0") ? "modelo" : "produto";
@@ -195,6 +200,26 @@ export function relatorioDoBuild(outcome: BuildOutcome, contexto: ContextoDaPara
   const natureza = naturezaDaFase(fase);
   const ciclos = fase.outcome.status === "failed" ? fase.outcome.cycles : 0;
   const gasto = contarCusto(outcome, contexto);
+
+  if (fase.outcome.status === "credential-rejected") {
+    const provider = fase.outcome.engine;
+    return {
+      tipo: "parada",
+      parada: {
+        natureza: "ambiente",
+        oQue: `${fase.id} parou porque o provider ${provider} recusou a credencial`,
+        deQuem: "da credencial do provider — o código desta fase não chegou a ser julgado por ela",
+        custou: gasto,
+        evidencia: evidenciaDaFase(outcome.runId, fase),
+        paraSeguir: [
+          `renove a credencial: \`${provider} login\``,
+          "se a fase deixou trabalho na árvore: `git add -A && git commit -m \"wip: trabalho parcial\"` — o loop revalida e segue",
+          `rode \`capivara build\` — retoma de ${fase.id}, sem refazer as fases já fechadas`,
+        ],
+        detalhe: fase.outcome.evidence,
+      },
+    };
+  }
 
   return {
     tipo: "parada",

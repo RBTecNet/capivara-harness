@@ -65,7 +65,9 @@ export function perguntaDeLevantamento(finding: Finding, indice: number, oQueOEs
         label: DO_ESCRITOR,
         consequence:
           oQueOEscritorFez === ""
-            ? "O ponto é encerrado como está, e o auditor não volta a levantá-lo."
+            ? "O ponto é encerrado como está, e o auditor não volta a levantá-lo. (O endereço do achado não " +
+              "aponta uma fase única, então o texto do escritor não pôde ser mostrado aqui — o que ele fez está " +
+              "descrito no que o auditor entendeu, acima.)"
             : `A fase segue como está — ${resumoDeUmaLinha(oQueOEscritorFez)} — e o auditor não volta a levantar o ponto.`,
       },
     ],

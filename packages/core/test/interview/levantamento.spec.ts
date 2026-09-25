@@ -59,7 +59,9 @@ describe("a pergunta do levantamento", () => {
 
   it("sem a entrega em mãos, não finge que mostrou", () => {
     expect(pergunta.evidence).not.toContain("O escritor entregou:");
-    expect(pergunta.options[1]?.consequence).toBe("O ponto é encerrado como está, e o auditor não volta a levantá-lo.");
+    // E diz POR QUE não mostrou, em vez de deixar a opção muda.
+    expect(pergunta.options[1]?.consequence).toContain("não aponta uma fase única");
+    expect(pergunta.options[1]?.consequence).toContain("o que ele fez está descrito");
   });
 
   it("diz por que a pergunta existe: o laço que ela evita", () => {

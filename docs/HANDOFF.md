@@ -15,7 +15,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 | | |
 |---|---|
 | branch | `main` — é onde tudo está |
-| versão | 0.3.1 (`capivara --ver`) |
+| versão | 0.3.2 (`capivara --ver`) |
 | suíte | 1467 testes em 77 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |

@@ -503,6 +503,11 @@ describe("o gate", () => {
     // O que é do produto continua sendo do produto.
     expect(ehFalhaDoRoteiro("1) passo 2: clica em Interpretar\n   botão não encontrado")).toBe(false);
     expect(ehFalhaDoRoteiro("Timed out waiting 180000ms from config.webServer")).toBe(false);
+    // O roteirista errou o nome de uma variável: o roteiro morre antes do primeiro passo.
+    expect(ehFalhaDoRoteiro("    ReferenceError: sufo is not defined\n    > 10 |   const email = `operador-${sufo}@x`;")).toBe(true);
+    // O mesmo tipo de erro, vindo da APLICAÇÃO, é defeito do produto.
+    expect(ehFalhaDoRoteiro("[WebServer] ⨯ ReferenceError: tenant is not defined\n  1) passo 2: salva\n   timeout")).toBe(false);
+    expect(ehFalhaDoRoteiro("[WebServer] TypeError: db.query is not a function\n  1) passo 1\n   timeout")).toBe(false);
   });
 
   it("roteiro com defeito próprio é reescrito e rodado de novo, sem custar ciclo do executor", async () => {

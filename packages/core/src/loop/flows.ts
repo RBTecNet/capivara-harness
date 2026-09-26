@@ -335,8 +335,22 @@ export type FlowRunner = (projectRoot: string, scripts: string[], env?: Record<s
  * produto. Quando é do roteiro, quem reescreve é quem o escreveu.
  */
 export function ehFalhaDoRoteiro(output: string): boolean {
-  return /strict mode violation|resolved to \d+ elements|Cannot find name|SyntaxError|Unexpected token|is not a function|Cannot read propert/i.test(
-    output,
+  /*
+   * Só as linhas do RUNNER. As que começam com `[WebServer]` são da aplicação, e
+   * um `TypeError: x is not a function` dela é defeito do produto — lido junto,
+   * mandava reescrever um roteiro que estava certo.
+   */
+  const doRunner = output
+    .split("\n")
+    .filter((linha) => !/^\s*\[WebServer\]/.test(linha))
+    .join("\n");
+  /*
+   * `ReferenceError`: na P04 do `assistencia2` o roteirista escreveu `${sufo}`
+   * por `${sufixo}`, e o roteiro morreu antes do primeiro passo — cobrado do
+   * produto.
+   */
+  return /strict mode violation|resolved to \d+ elements|Cannot find name|SyntaxError|Unexpected token|is not a function|Cannot read propert|ReferenceError|is not defined/i.test(
+    doRunner,
   );
 }
 

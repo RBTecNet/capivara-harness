@@ -6080,3 +6080,15 @@ roteiro 2 foi escrito sabendo que o 1 roda antes dele e prepara o banco. Sem o 1
 roda primeiro, num banco vazio. Agora o segundo ramo faz o mesmo que o primeiro, e o
 build retomado percorre a mesma regressão que o build sem interrupção.
 
+### 84.6 O erro de digitação do roteirista cobrado do produto
+
+Um roteiro reescrito da P04 trazia `${sufo}` por `${sufixo}` e morria antes do
+primeiro passo com `ReferenceError: sufo is not defined`. O classificador de "falha do
+roteiro" não conhecia o `ReferenceError`, e o gate cobraria do produto — com a
+contestação da fase já gasta.
+
+E o classificador lia a saída INTEIRA, inclusive as linhas `[WebServer]` da
+aplicação: um `TypeError: x is not a function` do próprio produto mandava reescrever
+um roteiro certo. Agora ele lê só as linhas do runner, e `ReferenceError` / `is not
+defined` contam como erro do roteiro.
+

@@ -6184,3 +6184,53 @@ Continua aberto, e esta P05 é a evidência: quando o executor não muda nada e 
 falha IGUAL ao ciclo anterior, o próximo ciclo é determinístico — vai falhar de novo.
 O harness poderia parar ali em vez de queimar ciclos.
 
+## §87 — A triagem do gate 4
+
+Na P04 e na P05 do `assistencia2`, o gate 4 reprovou mais de uma dúzia de vezes, e
+três delas eram defeito do produto (a edição do tenant com 400, o termo invisível a
+quem só consulta, o termo que não volta ao recarregar). O resto foi instrumento:
+rótulo que não existia, título que muda depois de excluir, recarregar sem esperar o
+salvamento, conferir `true` onde a API manda `1`. Em todos, o gate mandava ao
+executor o rastro do Playwright, e o executor era a única parte do ciclo que via o
+produto e o erro juntos — e gastava um ciclo inteiro para dizer "o roteiro está
+errado".
+
+### 87.1 O que entra antes do executor
+
+Quando um passo falha, uma sessão independente, que só lê, decide de quem é a falha.
+Ela recebe os critérios da fase, os passos do fluxo, o roteiro, a saída do runner, os
+erros do servidor — e o RETRATO da página no instante da falha: a árvore de
+acessibilidade que o Playwright grava em `error-context.md` e que ninguém lia. Na P05,
+ele mostrava o botão "Salvar" ao lado do "Salvar registro" procurado.
+
+O veredito tem formato fixo (`CAPIVARA_TRIAGEM`, `_EVIDENCIA`, `_ONDE`, `_CRITERIO`,
+`_CORRECAO`) e três destinos:
+
+- **PRODUTO** — o executor recebe a correção estruturada: evidência, onde, critério,
+  o que mudar. O rastro vai junto, no fim, para conferir;
+- **ROTEIRO** — o harness reescreve o roteiro na hora, com o motivo e o retrato, e roda
+  a passagem de novo, sem gastar ciclo do executor. Uma vez por chamada do gate: se
+  falhar de novo, a nova triagem vai ao executor;
+- **CRITERIO** — o critério não decide o caso. Decisão do desenvolvedor: o build segue
+  com a leitura recomendada e o caso fica em `.capivara/decisoes-do-build.md`.
+
+Sem veredito legível, o gate faz o que fazia antes. A triagem nunca bloqueia.
+
+### 87.2 O que mudou em volta
+
+- O Playwright grava em `.capivara/flows/resultados/` (`outputDir`). O padrão dele é a
+  pasta do `package.json` — a raiz do produto —, e no `assistencia2` o
+  `test-results/.last-run.json` foi parar no histórico da aplicação.
+- A reescrita de roteiro virou uma função só, usada pela falha do próprio roteiro e
+  pela triagem, com as mesmas tentativas e a mesma conferência de nomes não definidos.
+- A triagem passa pela mesma proteção dos outros leitores: credencial recusada e
+  limite de uso param o build pela mesma via do roteirista (§83). Um `catch` que eu
+  tinha escrito em volta dela engoliria isso, e saiu antes do commit.
+- `.capivara/decisoes-do-build.md` fica fora do gate 1, do preflight e do commit da
+  fase, como tudo em `.capivara/`; não é ignorado pelo git, para o desenvolvedor
+  poder versioná-lo.
+
+Provado com um Playwright de verdade num projeto de rascunho: roteiro procurando
+"Salvar registro" numa página com "Salvar"; a triagem recebeu o retrato real, o
+roteiro foi reescrito e a mesma chamada do gate saiu verde.
+

@@ -8,6 +8,8 @@ export type { BuilderContext, FixContext, InstallContext } from "./builder.js";
 export { VERIFY_HEADER, parseVerification, verifyPrompt } from "./verifier.js";
 export type { TaskVerdict, VerifierContext } from "./verifier.js";
 export { FLOW_HEADER, extractFlowScript, flowPrompt, stepLabel } from "./flows.js";
+export { TRIAGE_HEADER, lerTriagem, triagePrompt } from "./triagem.js";
+export type { TipoDaTriagem, TriageContext, Triagem } from "./triagem.js";
 export type { FlowAuthorContext, FlowWorkflowContext } from "./flows.js";
 export { REHEARSAL_HEADER, assessRehearsal, enumerateCriteria, parseRehearsal, rehearsalPrompt } from "./rehearsal.js";
 export type { CriterionRef, CriterionRuling, CriterionVerdict, RehearsalContext, RehearsalResult } from "./rehearsal.js";

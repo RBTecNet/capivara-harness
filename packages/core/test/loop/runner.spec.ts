@@ -612,3 +612,61 @@ describe("a contestação vale uma vez por VERSÃO do roteiro", () => {
     expect(outcome.status).not.toBe("complete");
   });
 });
+
+/*
+ * Decisão do desenvolvedor: quando a triagem diz que o critério não decide o
+ * caso, o build segue com a leitura recomendada e deixa o caso escrito.
+ */
+describe("o caso que o critério não decidia fica registrado", () => {
+  it("CRITERIO vira entrada em .capivara/decisoes-do-build.md", async () => {
+    const pasta = join(projectRoot, ".capivara", "flows");
+    await mkdir(pasta, { recursive: true });
+    const { FLOW_MARK } = await import("../../src/loop/flows.js");
+    const fluxo = { number: "5", name: "Permissões", steps: ["edita sem consultar"] };
+    await writeFile(
+      join(pasta, "workflow-5.spec.ts"),
+      `${FLOW_MARK}\nimport { expect, test } from '@playwright/test';\ntest('workflow 5', async ({ page }) => {\n` +
+        "  await test.step('passo 1: edita sem consultar', async () => { await page.goto('/'); expect(1).toBeTruthy(); });\n});\n",
+      "utf8",
+    );
+    const target = session();
+    await runPhase({
+      projectRoot,
+      runId: RUN,
+      language: "pt-BR",
+      engine: "codex",
+      session: target,
+      testCommand: null,
+      commitsEnabled: false,
+      maxCycles: 1,
+      sleep: async () => undefined,
+      flows: {
+        workflows: [fluxo],
+        resolveStart: async () => "npm start",
+        runner: async () => ({
+          exitCode: 1,
+          output: "  ✘  1 [workflow-5] › workflow-5.spec.ts:6:5 › workflow 5\n  1) [workflow-5] › workflow-5.spec.ts:6:5 › passo 1\n  1 failed",
+        }),
+      },
+      call: async (call) => {
+        if (call.role === "verifier" && call.prompt.includes("CAPIVARA_TRIAGE")) {
+          return ok(
+            "CAPIVARA_TRIAGEM: CRITERIO\nCAPIVARA_EVIDENCIA: editar sem consultar\nCAPIVARA_ONDE: -\n" +
+              "CAPIVARA_CRITERIO: conforme a permissão de cada operação\nCAPIVARA_CORRECAO: editar implica consultar",
+          );
+        }
+        if (call.role === "verifier") {
+          return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
+        }
+        return ok("feito");
+      },
+      testRunner: async () => ({ exitCode: 0, output: "" }),
+    });
+
+    const registro = await readFile(join(projectRoot, ".capivara", "decisoes-do-build.md"), "utf8");
+    expect(registro).toContain("# Decisões tomadas pelo build");
+    expect(registro).toContain("- leitura seguida: editar implica consultar");
+    expect(registro).toContain("conforme a permissão de cada operação");
+  });
+});
+

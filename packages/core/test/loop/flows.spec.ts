@@ -23,7 +23,8 @@ import {
   portaLivre,
   renderFlowConfig,
 } from "../../src/loop/index.js";
-import { FLOW_MARK, nomesNaoDefinidos } from "../../src/loop/flows.js";
+import { FLOW_MARK, FLOW_RESULTS, nomesNaoDefinidos, retratosDaFalha } from "../../src/loop/flows.js";
+import { lerTriagem } from "../../src/prompts/index.js";
 import { FLOW_HELPER, bancosDeclarados, ferramentasDaMaquina } from "../../src/loop/passagem.js";
 import { flowPrompt } from "../../src/prompts/index.js";
 import type { FlowRun } from "../../src/loop/index.js";
@@ -979,6 +980,163 @@ describe("a reescrita não repete o nome que o erro apontou", () => {
     expect(recebidos).toHaveLength(2);
     expect(recebidos[1]?.join("\n")).toContain("`sufo`, que não existe");
     expect(await readFile(arquivo, "utf8")).not.toContain("${sufo}");
+  });
+});
+
+/*
+ * A triagem do gate 4. Na P05 do `assistencia2` seis ciclos do executor foram
+ * gastos dizendo que o roteiro estava errado — e o retrato da página, que o
+ * Playwright grava e ninguém lia, mostrava o botão "Salvar" ao lado do
+ * "Salvar registro" que o roteiro procurava.
+ */
+describe("a triagem decide de quem é a falha, antes do executor", () => {
+  const CONTEXTO = [
+    "# Test info",
+    "",
+    "- Name: workflow-2.spec.ts >> workflow 2",
+    "- Location: workflow-2.spec.ts:8:5",
+    "",
+    "# Page snapshot",
+    "",
+    "```yaml",
+    "- main [ref=e1]:",
+    '  - button "Salvar" [ref=e2]',
+    "```",
+    "",
+  ].join("\n");
+  const FALHOU: FlowRun = {
+    exitCode: 1,
+    output:
+      "  ✘  1 [workflow-2] › workflow-2.spec.ts:8:5 › workflow 2 (1.0m)\n" +
+      "  1) [workflow-2] › workflow-2.spec.ts:8:5 › passo 1\n" +
+      "    waiting for getByRole('button', { name: 'Salvar registro' })\n  1 failed",
+  };
+  const bloco = (): string => `\`\`\`ts\n${roteiroBom()}\n\`\`\``;
+  const veredito = (tipo: string): string =>
+    [
+      `CAPIVARA_TRIAGEM: ${tipo}`,
+      "CAPIVARA_EVIDENCIA: o retrato mostra o botão Salvar",
+      "CAPIVARA_ONDE: src/app/tipos/page.jsx",
+      "CAPIVARA_CRITERIO: task 6",
+      "CAPIVARA_CORRECAO: procurar o botão Salvar",
+    ].join("\n");
+
+  async function comRoteiro(): Promise<void> {
+    await mkdir(join(projectRoot, FLOWS_DIR), { recursive: true });
+    await writeFile(join(projectRoot, FLOWS_DIR, flowScriptName(WORKFLOW.number)), `${FLOW_MARK}\n${roteiroBom()}\n`, "utf8");
+  }
+  async function gravarRetrato(): Promise<void> {
+    const pasta = join(projectRoot, FLOWS_DIR, FLOW_RESULTS, "workflow-2-workflow-2-chromium");
+    await mkdir(pasta, { recursive: true });
+    await writeFile(join(pasta, "error-context.md"), CONTEXTO, "utf8");
+  }
+
+  it("o Playwright grava o que viu na pasta do harness, não na raiz do produto", () => {
+    expect(renderFlowConfig({ startCommand: "npm start", port: 1 })).toContain(`outputDir: './${FLOW_RESULTS}',`);
+  });
+
+  it("lê o retrato da página pelo roteiro que falhou", async () => {
+    await gravarRetrato();
+    const retratos = await retratosDaFalha(projectRoot);
+    expect(retratos.get("workflow-2.spec.ts")).toContain('button "Salvar"');
+  });
+
+  it("lê o veredito, e recusa o que não está no formato", () => {
+    expect(lerTriagem(veredito("ROTEIRO"))?.tipo).toBe("ROTEIRO");
+    expect(lerTriagem("**CAPIVARA_TRIAGEM:** PRODUTO\nCAPIVARA_CORRECAO: gravar o termo")?.tipo).toBe("PRODUTO");
+    expect(lerTriagem("CAPIVARA_TRIAGEM: TALVEZ\nCAPIVARA_CORRECAO: x")).toBeNull();
+    expect(lerTriagem("CAPIVARA_TRIAGEM: PRODUTO")).toBeNull();
+  });
+
+  it("PRODUTO chega ao executor como correção, não como rastro", async () => {
+    await comRoteiro();
+    let reescritas = 0;
+    const resultado = await gate4({
+      projectRoot,
+      workflows: [WORKFLOW],
+      startCommand: "npm start",
+      author: async () => {
+        reescritas += 1;
+        return bloco();
+      },
+      triagem: async () => veredito("PRODUTO"),
+      runner: async () => FALHOU,
+    });
+    if (resultado.green) throw new Error("deveria reprovar");
+    expect(reescritas).toBe(0);
+    expect(resultado.triagem?.tipo).toBe("PRODUTO");
+    expect(resultado.cause.startsWith("O gate 4 reprovou e a triagem diz que o defeito é do PRODUTO")).toBe(true);
+    expect(resultado.cause).toContain("- correção: procurar o botão Salvar");
+    // O rastro continua lá, para conferir.
+    expect(resultado.cause).toContain("Salvar registro");
+  });
+
+  it("ROTEIRO é reescrito com o retrato da página e roda de novo, sem o executor", async () => {
+    await comRoteiro();
+    const motivos: string[][] = [];
+    let passagem = 0;
+    const resultado = await gate4({
+      projectRoot,
+      workflows: [WORKFLOW],
+      startCommand: "npm start",
+      author: async (_workflow, rejeitado) => {
+        motivos.push(rejeitado);
+        return bloco();
+      },
+      triagem: async () => veredito("ROTEIRO"),
+      runner: async () => {
+        passagem += 1;
+        if (passagem === 1) {
+          await gravarRetrato();
+          return FALHOU;
+        }
+        return { exitCode: 0, output: "1 passed" };
+      },
+    });
+    expect(resultado.green).toBe(true);
+    expect(passagem).toBe(2);
+    expect(motivos).toHaveLength(1);
+    expect(motivos[0]?.join("\n")).toContain("procurar o botão Salvar");
+    expect(motivos[0]?.join("\n")).toContain('button "Salvar"');
+  });
+
+  it("reescreve uma vez por chamada: a segunda falha vai ao executor com a nova triagem", async () => {
+    await comRoteiro();
+    let reescritas = 0;
+    let triagens = 0;
+    const resultado = await gate4({
+      projectRoot,
+      workflows: [WORKFLOW],
+      startCommand: "npm start",
+      author: async () => {
+        reescritas += 1;
+        return bloco();
+      },
+      triagem: async () => {
+        triagens += 1;
+        return veredito(triagens === 1 ? "ROTEIRO" : "PRODUTO");
+      },
+      runner: async () => FALHOU,
+    });
+    if (resultado.green) throw new Error("deveria reprovar");
+    expect(reescritas).toBe(1);
+    expect(triagens).toBe(2);
+    expect(resultado.triagem?.tipo).toBe("PRODUTO");
+  });
+
+  it("sem veredito legível, o gate faz o que fazia antes", async () => {
+    await comRoteiro();
+    const resultado = await gate4({
+      projectRoot,
+      workflows: [WORKFLOW],
+      startCommand: "npm start",
+      author: async () => bloco(),
+      triagem: async () => "acho que é o roteiro",
+      runner: async () => FALHOU,
+    });
+    if (resultado.green) throw new Error("deveria reprovar");
+    expect(resultado.triagem).toBeUndefined();
+    expect(resultado.cause.startsWith("a aplicação não cumpriu um fluxo declarado")).toBe(true);
   });
 });
 

@@ -23,7 +23,7 @@ import { createServer } from "node:net";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { SkeletonWorkflow } from "../contract/index.js";
-import { extractFlowScript, stepLabel } from "../prompts/index.js";
+import { extractFlowScript, lerTriagem, stepLabel, type Triagem } from "../prompts/index.js";
 import { comandoDeMigracao } from "./ambiente.js";
 import { FLOW_HELPER, bancosDeclarados, criarAmbienteDaPassagem, renderFlowHelper } from "./passagem.js";
 
@@ -31,6 +31,16 @@ import { FLOW_HELPER, bancosDeclarados, criarAmbienteDaPassagem, renderFlowHelpe
 export const FLOWS_DIR = join(".capivara", "flows");
 
 export const FLOW_CONFIG = "playwright.config.mjs";
+
+/**
+ * Onde o Playwright grava o que viu, relativo à pasta dos roteiros.
+ *
+ * O padrão dele é a pasta do `package.json` — a raiz do PRODUTO. No
+ * `assistencia2` o `test-results/.last-run.json` foi parar no histórico da
+ * aplicação. E é aqui que fica o retrato da página no instante da falha, que a
+ * triagem lê: precisa de um lugar fixo, e do harness.
+ */
+export const FLOW_RESULTS = "resultados";
 
 /**
  * A primeira linha de todo roteiro que o harness grava.
@@ -301,6 +311,7 @@ export function renderFlowConfig(options: {
      */
     "  workers: 1,",
     "  forbidOnly: true,",
+    `  outputDir: './${FLOW_RESULTS}',`,
     ...(scripts.length > 0
       ? [
           "  projects: [",
@@ -495,10 +506,69 @@ export interface FlowGateOptions {
    * Sem esta lista, vale o comportamento antigo.
    */
   roteirosQueFalharam?: string[];
+  /**
+   * A triagem: devolve o texto cru da sessão que decide de quem é a falha.
+   *
+   * Sem ela, o gate faz o que fazia antes — o rastro vai ao executor.
+   */
+  triagem?: (entrada: EntradaDaTriagem) => Promise<string>;
   port?: number;
   /** Tentativas de redação por fluxo, contando a primeira. */
   maxDrafts?: number;
   announce?: (message: string) => void;
+}
+
+/** O que a triagem recebe de UM roteiro que falhou. */
+export interface EntradaDaTriagem {
+  workflow: SkeletonWorkflow;
+  script: string;
+  failure: string;
+  snapshot: string;
+  serverErrors: string[];
+}
+
+/**
+ * O retrato da página no instante de cada falha, por roteiro.
+ *
+ * O Playwright grava um `error-context.md` por teste que falhou, com a árvore de
+ * acessibilidade da página. O roteiro é identificado pela linha `Location`, e não
+ * pelo nome da pasta, que o Playwright encurta e sanitiza.
+ */
+export async function retratosDaFalha(projectRoot: string): Promise<Map<string, string>> {
+  const base = join(projectRoot, FLOWS_DIR, FLOW_RESULTS);
+  const retratos = new Map<string, string>();
+  const pastas = await readdir(base).catch(() => [] as string[]);
+  for (const pasta of pastas) {
+    const contexto = await readFile(join(base, pasta, "error-context.md"), "utf8").catch(() => null);
+    if (contexto === null) continue;
+    const roteiro = /Location:\s*([^\s:]+\.spec\.ts)/.exec(contexto)?.[1];
+    const retrato = /#\s*Page snapshot\s*```(?:yaml)?\n([\s\S]*?)```/.exec(contexto)?.[1];
+    if (roteiro && retrato && !retratos.has(roteiro)) retratos.set(roteiro, retrato.trim());
+  }
+  return retratos;
+}
+
+/** O que a triagem disse, como o executor precisa ler. */
+export function causaDaTriagem(triagem: Triagem, rastro: string): string {
+  const titulo =
+    triagem.tipo === "PRODUTO"
+      ? "O gate 4 reprovou e a triagem diz que o defeito é do PRODUTO. Corrija isto:"
+      : triagem.tipo === "CRITERIO"
+        ? "O gate 4 reprovou e a triagem diz que o CRITÉRIO não decide o caso. Vale esta leitura, que ficou " +
+          "registrada em .capivara/decisoes-do-build.md para o desenvolvedor revisar:"
+        : "O gate 4 reprovou e a triagem diz que o defeito é do ROTEIRO, que o harness já reescreveu uma vez " +
+          "nesta passagem. Se você concorda, responda com CAPIVARA_ROTEIRO_ERRADO e o motivo:";
+  return [
+    titulo,
+    "",
+    `- evidência: ${triagem.evidencia || "—"}`,
+    `- onde: ${triagem.onde || "—"}`,
+    `- critério: ${triagem.criterio || "—"}`,
+    `- correção: ${triagem.correcao}`,
+    "",
+    "O rastro do runner, para conferir:",
+    rastro,
+  ].join("\n");
 }
 
 /** O que o roteirista precisa saber sobre a passagem em que o roteiro dele vai rodar. */
@@ -558,6 +628,8 @@ export type FlowGateResult =
       green: false;
       cause: string;
       output?: string;
+      /** O veredito da triagem, quando ela correu e foi legível. */
+      triagem?: Triagem;
       toolMissing?: boolean;
       startupFailed?: boolean;
       scriptFailed?: boolean;
@@ -782,6 +854,34 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
     return escolhidos.length > 0 ? escolhidos : options.workflows;
   };
 
+  /*
+   * Reescreve os roteiros indicados, com as mesmas tentativas da primeira
+   * redação, conferindo cada tentativa — inclusive contra os nomes que o erro
+   * apontou. Uma tentativa só, sem conferência, deixou o mesmo `${sufo}` voltar e
+   * a fase pagar um ciclo.
+   */
+  const reescrever = async (
+    workflows: readonly SkeletonWorkflow[],
+    motivo: string[],
+    naoDefinidos: readonly string[] = [],
+  ): Promise<void> => {
+    const tentativas = options.maxDrafts ?? 2;
+    for (const workflow of workflows) {
+      const arquivo = join(pasta, flowScriptName(workflow.number));
+      let rejeitado = [...motivo];
+      for (let tentativa = 1; tentativa <= tentativas; tentativa += 1) {
+        const script = extractFlowScript(await options.author(workflow, rejeitado, baseUrl, passagemDe(workflow)));
+        const defeitos = checkFlowScript(script, workflow, naoDefinidos);
+        if (defeitos.length === 0) {
+          await writeFile(arquivo, comMarca(script), "utf8");
+          break;
+        }
+        rejeitado = [...rejeitado, ...defeitos.map((defect) => `${defect.problem} — ${defect.hint}`)];
+        announce(`  a reescrita do roteiro do fluxo ${workflow.number} voltou com defeito: ${defeitos[0]?.problem ?? ""}`);
+      }
+    }
+  };
+
   if (options.roteiroContestado) {
     announce(`o executor contestou o roteiro: ${options.roteiroContestado}`);
     for (const workflow of alvos(options.roteirosQueFalharam)) {
@@ -817,27 +917,7 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   if (run.exitCode !== 0 && run.toolMissing !== true && ehFalhaDoRoteiro(run.output)) {
     announce("o roteiro falhou por conta própria (seletor ambíguo ou erro de escrita); reescrevendo");
 
-    /*
-     * Com as mesmas tentativas da primeira redação, e conferindo que a reescrita
-     * não repete o nome que o erro acabou de apontar. Uma tentativa só, sem
-     * conferência, deixou o mesmo `${sufo}` voltar e a fase pagar um ciclo.
-     */
-    const naoDefinidos = nomesNaoDefinidos(run.output);
-    const tentativas = options.maxDrafts ?? 2;
-    for (const workflow of alvos(fluxosQueFalharam(run.output, ordem))) {
-      const arquivo = join(pasta, flowScriptName(workflow.number));
-      let rejeitado = [`o roteiro anterior falhou assim:\n${tail(run.output, 25)}`];
-      for (let tentativa = 1; tentativa <= tentativas; tentativa += 1) {
-        const script = extractFlowScript(await options.author(workflow, rejeitado, baseUrl, passagemDe(workflow)));
-        const defeitos = checkFlowScript(script, workflow, naoDefinidos);
-        if (defeitos.length === 0) {
-          await writeFile(arquivo, comMarca(script), "utf8");
-          break;
-        }
-        rejeitado = [...rejeitado, ...defeitos.map((defect) => `${defect.problem} — ${defect.hint}`)];
-        announce(`  a reescrita do roteiro do fluxo ${workflow.number} voltou com defeito: ${defeitos[0]?.problem ?? ""}`);
-      }
-    }
+    await reescrever(alvos(fluxosQueFalharam(run.output, ordem)), [`o roteiro anterior falhou assim:\n${tail(run.output, 25)}`], nomesNaoDefinidos(run.output));
 
     run = await rodar();
     if (run.exitCode !== 0 && ehFalhaDoRoteiro(run.output)) {
@@ -900,6 +980,56 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
 
   if (run.exitCode !== 0) {
     /*
+     * Antes do executor, a triagem: de quem é esta falha?
+     *
+     * ROTEIRO é resolvido aqui, sem gastar ciclo: o roteiro é reescrito com o
+     * retrato da página e o motivo, e a passagem roda de novo — UMA vez por
+     * chamada do gate. PRODUTO e CRITERIO chegam ao executor como correção, não
+     * como rastro.
+     */
+    const triar = async (corrida: FlowRun): Promise<{ triagem: Triagem; workflow: SkeletonWorkflow } | null> => {
+      if (!options.triagem) return null;
+      const numero = fluxosQueFalharam(corrida.output, ordem)[0];
+      const workflow = ordem.find((candidato) => candidato.number === numero);
+      if (!workflow) return null;
+      const nome = flowScriptName(workflow.number);
+      const entrada: EntradaDaTriagem = {
+        workflow,
+        script: await readFile(join(pasta, nome), "utf8").catch(() => ""),
+        failure: tail(corrida.output, 60),
+        snapshot: (await retratosDaFalha(options.projectRoot)).get(nome) ?? "",
+        serverErrors: errosDoServidor(corrida.output),
+      };
+      // Sem `catch`: credencial recusada e limite de uso param o build pela mesma
+      // via do roteirista (§83). Engolir aqui transformaria a parada em rastro.
+      const triagem = lerTriagem(await options.triagem(entrada));
+      if (triagem === null) {
+        announce("a triagem não devolveu um veredito legível; o rastro vai ao executor como antes");
+        return null;
+      }
+      announce(`triagem do fluxo ${workflow.number}: ${triagem.tipo} — ${triagem.correcao}`);
+      return { triagem, workflow };
+    };
+
+    let triada = await triar(run);
+    if (triada?.triagem.tipo === "ROTEIRO") {
+      const retrato = (await retratosDaFalha(options.projectRoot)).get(flowScriptName(triada.workflow.number)) ?? "";
+      announce(`o roteiro do fluxo ${triada.workflow.number} é que está errado; reescrevendo sem gastar ciclo do executor`);
+      await reescrever(
+        [triada.workflow],
+        [
+          `a triagem leu a falha e diz que o ROTEIRO está errado, não o produto: ${triada.triagem.correcao}`,
+          ...(triada.triagem.evidencia !== "" ? [`evidência: ${triada.triagem.evidencia}`] : []),
+          ...(retrato !== "" ? [`a página, no instante da falha, era esta — escreva contra ela:\n${retrato}`] : []),
+        ],
+        nomesNaoDefinidos(run.output),
+      );
+      run = await rodar();
+      if (run.exitCode === 0) return { green: true, skipped: "", scripts, output: run.output };
+      triada = await triar(run);
+    }
+
+    /*
      * Quando o servidor registrou erro, ELE vem primeiro na causa.
      *
      * A ordem é o conserto: o executor lê o começo da mensagem e age. Deixar o
@@ -919,14 +1049,17 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
           "\n"
         : "";
 
+    const rastro =
+      `${cabecalho}a aplicação não cumpriu um fluxo declarado — o roteiro rodou contra o produto de pé em ` +
+      `http://127.0.0.1:${port} e reprovou. Isto não é teste de unidade: um passo falhou onde o ` +
+      `usuário passaria.\n${tail(run.output)}`;
+
     return {
       green: false,
       output: run.output,
       falharam: fluxosQueFalharam(run.output, ordem),
-      cause:
-        `${cabecalho}a aplicação não cumpriu um fluxo declarado — o roteiro rodou contra o produto de pé em ` +
-        `http://127.0.0.1:${port} e reprovou. Isto não é teste de unidade: um passo falhou onde o ` +
-        `usuário passaria.\n${tail(run.output)}`,
+      ...(triada ? { triagem: triada.triagem } : {}),
+      cause: triada ? causaDaTriagem(triada.triagem, rastro) : rastro,
     };
   }
 

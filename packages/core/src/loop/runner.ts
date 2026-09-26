@@ -9,12 +9,12 @@
  * uma fase vermelha faz a próxima construir sobre chão que não existe.
  */
 
-import { readFile } from "node:fs/promises";
+import { appendFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { appendEvent } from "../state/events.js";
 import { runPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
-import { declarouRoteiroErrado, fixPrompt, flowPrompt, implementPrompt, verifyPrompt } from "../prompts/index.js";
+import { declarouRoteiroErrado, fixPrompt, flowPrompt, implementPrompt, triagePrompt, verifyPrompt, type Triagem } from "../prompts/index.js";
 import type { BuildProgressListener, LoopGate, LoopGateState } from "./progress.js";
 import { commitPhase, hasPendingChanges, treeSignature } from "./git.js";
 import { declaredComplete, defaultTestRunner, gate0, gate1, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
@@ -168,6 +168,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
    * ninguém contestou, vale.
    */
   const versoesContestadas = new Set<string>();
+  /** Quantas triagens o gate 4 pediu neste ciclo — nomeia o log de cada uma. */
+  let triagensNoCiclo = 0;
   /*
    * O que o gate 4 reprovou por último. A contestação do executor fala DESSA
    * passagem, e é o roteiro que falhou nela que precisa ser reescrito.
@@ -354,10 +356,37 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
           );
           return resposta.stdout;
         },
+        /*
+         * A triagem é um leitor independente, como o verificador e o roteirista:
+         * só lê, e passa pela mesma proteção contra credencial e limite de uso.
+         */
+        triagem: async (entrada) => {
+          triagensNoCiclo += 1;
+          const resposta = await chamarLeitor({
+            role: "verifier",
+            phase: session,
+            attempt: cycleAtual,
+            prompt: triagePrompt({
+              language: options.language,
+              phaseMarkdown: session.markdown,
+              workflow: { number: entrada.workflow.number, name: entrada.workflow.name, steps: entrada.workflow.steps },
+              script: entrada.script,
+              failure: entrada.failure,
+              snapshot: entrada.snapshot,
+              serverErrors: entrada.serverErrors,
+            }),
+          });
+          await writeAtomic(`${paths.logs}/${session.id}.triagem-${cycleAtual}-${triagensNoCiclo}.log`, resposta.stdout);
+          return resposta.stdout;
+        },
         ...(fluxos.runner !== undefined ? { runner: fluxos.runner } : {}),
         ...(fluxos.port !== undefined ? { port: fluxos.port } : {}),
         announce: (message) => announce(`[${session.id}] ${message}`),
       });
+      triagensNoCiclo = 0;
+      if (g4.green === false && g4.triagem?.tipo === "CRITERIO") {
+        await registrarDecisaoDoBuild(options.projectRoot, session.id, cycleAtual, g4.triagem);
+      }
 
       /*
        * A saída do Playwright vira arquivo SEMPRE, verde ou vermelho.
@@ -628,3 +657,29 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
 
   return { status: "failed", gate: lastGate ?? "gate 0 — engine", cause: lastCause, cycles: maxCycles };
 }
+
+/**
+ * O caso que o critério não decidia, e a leitura que o build seguiu.
+ *
+ * Decisão do desenvolvedor: nesta versão o build não para para perguntar — segue
+ * com a leitura que a triagem recomendou e deixa o caso escrito onde ele o
+ * encontra. `.capivara/` fica fora do gate 1, do preflight e do commit da fase:
+ * o arquivo não passa por trabalho do executor nem suja a árvore.
+ */
+async function registrarDecisaoDoBuild(projectRoot: string, fase: string, ciclo: number, triagem: Triagem): Promise<void> {
+  const arquivo = join(projectRoot, ".capivara", "decisoes-do-build.md");
+  const existe = await readFile(arquivo, "utf8").then(() => true).catch(() => false);
+  const cabecalho = existe
+    ? ""
+    : "# Decisões tomadas pelo build\n\nCasos em que o critério da fase não decidia, e a leitura que o build seguiu. " +
+      "Revise: uma leitura errada se corrige com `capivara change`.\n\n";
+  await appendFile(
+    arquivo,
+    `${cabecalho}## ${fase} · ciclo ${ciclo}\n\n` +
+      `- critério: ${triagem.criterio || "—"}\n` +
+      `- evidência: ${triagem.evidencia || "—"}\n` +
+      `- leitura seguida: ${triagem.correcao}\n\n`,
+    "utf8",
+  );
+}
+

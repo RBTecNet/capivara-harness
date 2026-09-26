@@ -6064,3 +6064,19 @@ um roteiro de uma fase anterior. É a mesma saída que já existia para os rotei
 fase, com a mesma trava — quem reescreve é outra sessão, lendo o produto, presa aos
 passos do esqueleto, e a contestação vale uma vez por fase.
 
+### 84.5 O build retomado perdia a regressão
+
+Com a contestação já certa, a P04 retomada reprovou de outro jeito: a passagem rodou
+só os roteiros 2 e 3, da própria fase, e o 2 caiu em `no such table: usuarios`. Os
+roteiros 1 e 4, da P02, sumiram da regressão.
+
+O `runBuild` pula as fases prontas por dois ramos: a fase fechada num run ANTERIOR
+(por sha do texto) e a fase fechada NESTE run (o id do run é o hash do plano, então
+retomar o mesmo plano é o mesmo run). O primeiro ramo punha os fluxos da fase na
+regressão; o segundo, não. Correção pela metade, de novo entre irmãos.
+
+Com a passagem isolada, perder a regressão deixou de ser só perder cobertura: o
+roteiro 2 foi escrito sabendo que o 1 roda antes dele e prepara o banco. Sem o 1, ele
+roda primeiro, num banco vazio. Agora o segundo ramo faz o mesmo que o primeiro, e o
+build retomado percorre a mesma regressão que o build sem interrupção.
+

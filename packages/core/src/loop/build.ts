@@ -585,6 +585,17 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         }
         options.onProgress?.({ kind: "phase", id: session.id, state: "concluído", cycle: 0, detail: "concluída antes" });
         phases.push({ id: session.id, title: session.title, outcome: { status: "already-implemented", cycles: 0 } });
+        /*
+         * E o fluxo dela continua sendo regressão das seguintes — como no ramo de
+         * cima, o da fase fechada em run anterior. Faltava aqui: no `assistencia2`
+         * retomado, a P04 rodou só os próprios fluxos, e o fluxo 2, escrito para
+         * rodar depois do 1, rodou primeiro num banco sem tabela.
+         */
+        if (esqueleto !== null) {
+          for (const workflow of workflowsForPhase(esqueleto, session.number)) {
+            if (!fluxosCumpridos.some((cumprido) => cumprido.number === workflow.number)) fluxosCumpridos.push(workflow);
+          }
+        }
         continue;
       }
 

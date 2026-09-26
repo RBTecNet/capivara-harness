@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.3.2 (`capivara --ver`) |
-| suíte | 1467 testes em 77 arquivos, `npm run check` verde |
+| suíte | 1468 testes em 77 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
@@ -229,6 +229,11 @@ Em ordem de importância, não de esforço:
    `live.suspend()`, que cede e retoma. Trocar no init mexe no desenho da
    pergunta dentro do painel — é mudança de outra natureza, fica para um run
    próprio.
+7. **A migração só é reconhecida pelo nome `migrate`.** O `assistencia2` declara
+   `db:migrate`, então o banco novo de cada passagem do gate 4 começa sem tabelas e
+   quem migra é o primeiro roteiro, pelo ajudante. Funciona enquanto a ordem da
+   passagem é a certa (§84.5); reconhecer a migração por outros nomes tornaria isso
+   independente do roteiro. Decidir com evidência.
 6. **O preflight exige o PROGRAMA `sqlite3` quando a stack usa o PACOTE.** No
    `assistencia2` o SQLite entra pelo pacote npm `sqlite3`, que traz a biblioteca
    embutida; nada chama o binário, e o build parou pedindo para instalá-lo.

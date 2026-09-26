@@ -1398,6 +1398,53 @@ describe("B-41 · o gate que abre a aplicação", () => {
     expect(percorridos).toEqual([["workflow-1.spec.ts"], ["workflow-1.spec.ts"]]);
   });
 
+  /*
+   * A P04 do `assistencia2`, retomada: P01 a P03 tinham fechado NESTE run, e o
+   * ramo que as pula não as punha na regressão — o ramo irmão, o das fases
+   * fechadas em runs anteriores, punha. A passagem perdeu os fluxos 1 e 4, e o
+   * fluxo 2, escrito para rodar depois do 1, rodou primeiro num banco sem tabela.
+   */
+  it("retomado, o fluxo da fase que fechou neste run continua sendo regressão", async () => {
+    const { tasks } = await publishPlan();
+    const passosDaPrimeira: EngineStep[] = [
+      { match: { role: "builder", phase: "P01" }, writes: [MANIFESTO, { path: "src/a.ts", content: "export const a = 1;" }], respond: { stdout: "fiz" }, repeat: true },
+      { match: { role: "builder", phase: "P02" }, writes: [{ path: "src/b.ts", content: "export const b = 2;" }], respond: { stdout: "fiz" }, repeat: true },
+      { match: { role: "verifier", prompt: "CAPIVARA_FLOW" }, respond: { stdout: ROTEIRO }, repeat: true },
+      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0] ?? 2) }, repeat: true },
+      { match: { role: "verifier", phase: "P02" }, respond: { stdout: someIncomplete(tasks[1] ?? 2, 1, "falta a rota") }, repeat: true },
+    ];
+    const primeira = await build(passosDaPrimeira, {
+      skeleton: ESQUELETO,
+      skipAcceptance: true,
+      maxCycles: 1,
+      flowRunner: async () => ({ exitCode: 0, output: "3 passed" }),
+    });
+    expect(primeira.outcome.exitCode).not.toBe(0);
+    // O que o desenvolvedor faz com o trabalho parcial antes de retomar.
+    await run("git", ["add", "-A"], { cwd: projectRoot });
+    await run("git", ["commit", "-q", "-m", "wip: P02 parcial"], { cwd: projectRoot });
+
+    const percorridos: string[][] = [];
+    const segunda = await build(
+      [
+        { match: { role: "builder", phase: "P02" }, writes: [{ path: "src/b.ts", content: "export const b = 3;" }], respond: { stdout: "fiz" }, repeat: true },
+        { match: { role: "verifier", prompt: "CAPIVARA_FLOW" }, respond: { stdout: ROTEIRO }, repeat: true },
+        { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1] ?? 2) }, repeat: true },
+      ],
+      {
+        skeleton: ESQUELETO,
+        skipAcceptance: true,
+        flowRunner: async (_root, scripts) => {
+          percorridos.push(scripts);
+          return { exitCode: 0, output: "3 passed" };
+        },
+      },
+    );
+
+    expect(segunda.outcome.errors).toEqual([]);
+    expect(percorridos).toEqual([["workflow-1.spec.ts"]]);
+  }, 20_000);
+
   it("sem esqueleto, o build avisa e roda como antes — nunca para por causa do gate novo", async () => {
     const { tasks } = await publishPlan();
     const avisos: string[] = [];

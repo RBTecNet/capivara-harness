@@ -1,0 +1,121 @@
+// capivara-flow: v2 — passagem isolada, em sequência
+import { expect, test } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
+import { createDatabase } from '../../src/db/config';
+import { iniciar } from '../../src/instrumentation-node';
+
+test('workflow 3 — Cobrança recorrente', async ({ page }) => {
+  const sufixo = randomUUID().slice(0, 8);
+  const nomeTenant = `Oficina cobrança ${sufixo}`;
+  const vencimento = new Date(Date.now() - 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  const valor = 187.35;
+  let uuidTenant = '';
+
+  await test.step('passo 1: Ler tipo de recorrência, próximo vencimento e valor do tenant.', async () => {
+    const banco = createDatabase();
+    let operador;
+    try {
+      operador = await banco('usuarios')
+        .where('email', 'like', 'operador-%@teste.invalid')
+        .orderBy('id', 'desc')
+        .first('email');
+    } finally {
+      await banco.destroy();
+    }
+    expect(operador?.email, 'O fluxo anterior deve ter criado o operador do painel.').toBeTruthy();
+
+    await page.goto('/login');
+    const entrada = page.getByRole('main').locator('form');
+    await entrada.getByLabel('E-mail').fill(operador!.email);
+    await entrada.getByLabel('Senha', { exact: true }).fill('Senha do operador 123!');
+    await entrada.getByRole('button', { name: 'Entrar' }).click();
+    await expect(page).toHaveURL(/\/painel$/);
+    await expect(
+      page.getByRole('main').getByRole('heading', { name: /Olá,/ }),
+    ).toBeVisible();
+
+    await page.goto('/painel/tenants/novo');
+    const formulario = page.getByRole('main').locator('form');
+    await formulario.getByLabel('Documento').fill(`COB-${sufo}`);
+    await formulario.getByLabel('Nome ou razão social').fill(nomeTenant);
+    await formulario.getByLabel('E-mail do tenant').fill(`cobranca-${sufixo}@teste.invalid`);
+    await formulario.getByLabel('Telefone').fill('91999999999');
+    await formulario.getByLabel('Endereço completo').fill('Rua das Oficinas, 100');
+    await formulario.getByLabel('CEP').fill('66000000');
+    await formulario.getByLabel('Data da contratação').fill(vencimento);
+    await formulario.getByLabel('Vencimento original').fill(vencimento);
+    await formulario.getByLabel('Valor da recorrência').fill(String(valor));
+    await formulario.getByRole('combobox', { name: 'Recorrência', exact: true })
+      .selectOption('mensal');
+
+    const administrador = formulario.getByRole('group', { name: 'Primeiro administrador' });
+    await administrador.getByLabel('Nome', { exact: true }).fill('Administrador de cobrança');
+    await administrador.getByLabel('E-mail', { exact: true })
+      .fill(`admin-cobranca-${sufixo}@teste.invalid`);
+    await administrador.getByLabel('Senha', { exact: true }).fill('Senha do tenant 123!');
+
+    await Promise.all([
+      page.waitForURL(/\/painel\/tenants\/[0-9a-f-]{36}$/),
+      formulario.getByRole('button', { name: 'Salvar tenant' }).click(),
+    ]);
+    uuidTenant = new URL(page.url()).pathname.split('/').pop()!;
+
+    const edicao = page.getByRole('main').locator('form');
+    await expect(
+      edicao.getByRole('combobox', { name: 'Recorrência', exact: true }),
+    ).toHaveValue('mensal');
+    await expect(edicao.getByLabel('Valor da recorrência')).toHaveValue(String(valor));
+
+    const resposta = await page.request.get(`/api/painel/tenants/${uuidTenant}`);
+    expect(resposta.status()).toBe(200);
+    const { tenant } = await resposta.json();
+    expect(tenant.status).toBe('ativo');
+    expect(tenant.tipo_recorrencia).toBe('mensal');
+    expect(String(tenant.proximo_vencimento).slice(0, 10)).toBe(vencimento);
+    expect(Number(tenant.valor_recorrencia)).toBe(valor);
+  });
+
+  await test.step('passo 2: Gerar automaticamente a cobrança correspondente.', async () => {
+    await iniciar();
+
+    await page.goto('/painel/cobrancas');
+    const principal = page.getByRole('main');
+    await principal.getByLabel('Selecionar tenant').selectOption(uuidTenant);
+
+    const linha = principal.getByRole('table').getByRole('row')
+      .filter({ hasText: nomeTenant });
+    await expect(linha).toHaveCount(1);
+    await expect(linha).toContainText(vencimento);
+    await expect(linha).toContainText('R$ 187,35');
+
+    const resposta = await page.request.get(
+      `/api/painel/cobrancas?tenant_uuid=${uuidTenant}`,
+    );
+    expect(resposta.status()).toBe(200);
+    const { cobrancas } = await resposta.json();
+    expect(cobrancas).toHaveLength(1);
+    expect(String(cobrancas[0].vencimento).slice(0, 10)).toBe(vencimento);
+    expect(Number(cobrancas[0].valor)).toBe(valor);
+  });
+
+  await test.step('passo 3: Atualizar o próximo vencimento.', async () => {
+    const [ano, mes, dia] = vencimento.split('-').map(Number);
+    const primeiroDiaDoMesSeguinte = new Date(Date.UTC(ano, mes, 1));
+    const anoSeguinte = primeiroDiaDoMesSeguinte.getUTCFullYear();
+    const mesSeguinte = primeiroDiaDoMesSeguinte.getUTCMonth() + 1;
+    const ultimoDia = new Date(Date.UTC(anoSeguinte, mesSeguinte, 0)).getUTCDate();
+    const proximoVencimento = [
+      anoSeguinte,
+      String(mesSeguinte).padStart(2, '0'),
+      String(Math.min(dia, ultimoDia)).padStart(2, '0'),
+    ].join('-');
+
+    const resposta = await page.request.get(`/api/painel/tenants/${uuidTenant}`);
+    expect(resposta.status()).toBe(200);
+    const { tenant } = await resposta.json();
+    expect(String(tenant.proximo_vencimento).slice(0, 10)).toBe(proximoVencimento);
+    expect(String(tenant.vencimento_original).slice(0, 10)).toBe(vencimento);
+  });
+});

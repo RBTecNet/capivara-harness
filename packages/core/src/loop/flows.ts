@@ -122,7 +122,16 @@ function normalizar(texto: string): string {
  * mecanicamente — se a asserção é forte — continua sendo julgamento; o que dá,
  * é conferido aqui antes de qualquer navegador abrir.
  */
-export function checkFlowScript(script: string, workflow: SkeletonWorkflow): FlowDefect[] {
+export function checkFlowScript(
+  script: string,
+  workflow: SkeletonWorkflow,
+  /**
+   * Os nomes que a passagem anterior disse não existirem (`ReferenceError: x is
+   * not defined`). Na P04 do `assistencia2` o roteirista recebeu o erro com a
+   * linha, reescreveu, e devolveu o mesmo `${sufo}` — três vezes no mesmo run.
+   */
+  naoDefinidos: readonly string[] = [],
+): FlowDefect[] {
   const defects: FlowDefect[] = [];
   const corpo = normalizar(script);
 
@@ -218,7 +227,43 @@ export function checkFlowScript(script: string, workflow: SkeletonWorkflow): Flo
     });
   }
 
+  for (const nome of naoDefinidos) {
+    if (usaSemDeclarar(script, nome)) {
+      defects.push({
+        problem: `o roteiro usa \`${nome}\`, que não existe — a passagem anterior morreu em \`ReferenceError: ${nome} is not defined\``,
+        hint: `declare \`${nome}\` antes de usá-lo, ou use o nome que o roteiro de fato declara`,
+      });
+    }
+  }
+
   return defects;
+}
+
+/** Os nomes que o runner disse não existirem. */
+export function nomesNaoDefinidos(output: string): string[] {
+  return [...new Set([...output.matchAll(/ReferenceError: ([A-Za-z_$][\w$]*) is not defined/g)].map((casou) => casou[1] ?? ""))].filter(
+    (nome) => nome !== "",
+  );
+}
+
+/**
+ * O nome aparece e nenhuma declaração o introduz.
+ *
+ * Deliberadamente conservador: qualquer forma de declaração — variável, função,
+ * classe, import, parâmetro, desestruturação — absolve o nome. Recusar um roteiro
+ * certo custaria uma sessão; deixar passar um errado custa o que já custava.
+ */
+function usaSemDeclarar(script: string, nome: string): boolean {
+  const n = nome.replace(/\$/g, "\\$");
+  if (!new RegExp(`(?<![\\w$.])${n}(?![\\w$])`).test(script)) return false;
+  const declaracoes = [
+    new RegExp(`\\b(?:const|let|var|function|class)\\s+${n}(?![\\w$])`),
+    new RegExp(`\\b(?:const|let|var)\\s*[\\[{][^=]*(?<![\\w$])${n}(?![\\w$])[^=]*[\\]}]\\s*=`),
+    new RegExp(`\\bimport\\b[^;]*(?<![\\w$])${n}(?![\\w$])[^;]*\\bfrom\\b`),
+    new RegExp(`\\(([^()]*[,\\s{(])?${n}(?![\\w$])[^()]*\\)\\s*(?:=>|\\{)`),
+    new RegExp(`(?<![\\w$.])${n}\\s*=>`),
+  ];
+  return !declaracoes.some((padrao) => padrao.test(script));
 }
 
 /**
@@ -772,13 +817,26 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   if (run.exitCode !== 0 && run.toolMissing !== true && ehFalhaDoRoteiro(run.output)) {
     announce("o roteiro falhou por conta própria (seletor ambíguo ou erro de escrita); reescrevendo");
 
+    /*
+     * Com as mesmas tentativas da primeira redação, e conferindo que a reescrita
+     * não repete o nome que o erro acabou de apontar. Uma tentativa só, sem
+     * conferência, deixou o mesmo `${sufo}` voltar e a fase pagar um ciclo.
+     */
+    const naoDefinidos = nomesNaoDefinidos(run.output);
+    const tentativas = options.maxDrafts ?? 2;
     for (const workflow of alvos(fluxosQueFalharam(run.output, ordem))) {
       const arquivo = join(pasta, flowScriptName(workflow.number));
-      const script = extractFlowScript(
-        await options.author(workflow, [`o roteiro anterior falhou assim:\n${tail(run.output, 25)}`], baseUrl, passagemDe(workflow)),
-      );
-      const defeitos = checkFlowScript(script, workflow);
-      if (defeitos.length === 0) await writeFile(arquivo, comMarca(script), "utf8");
+      let rejeitado = [`o roteiro anterior falhou assim:\n${tail(run.output, 25)}`];
+      for (let tentativa = 1; tentativa <= tentativas; tentativa += 1) {
+        const script = extractFlowScript(await options.author(workflow, rejeitado, baseUrl, passagemDe(workflow)));
+        const defeitos = checkFlowScript(script, workflow, naoDefinidos);
+        if (defeitos.length === 0) {
+          await writeFile(arquivo, comMarca(script), "utf8");
+          break;
+        }
+        rejeitado = [...rejeitado, ...defeitos.map((defect) => `${defect.problem} — ${defect.hint}`)];
+        announce(`  a reescrita do roteiro do fluxo ${workflow.number} voltou com defeito: ${defeitos[0]?.problem ?? ""}`);
+      }
     }
 
     run = await rodar();

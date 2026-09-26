@@ -23,7 +23,7 @@ import {
   portaLivre,
   renderFlowConfig,
 } from "../../src/loop/index.js";
-import { FLOW_MARK } from "../../src/loop/flows.js";
+import { FLOW_MARK, nomesNaoDefinidos } from "../../src/loop/flows.js";
 import { FLOW_HELPER, bancosDeclarados, ferramentasDaMaquina } from "../../src/loop/passagem.js";
 import { flowPrompt } from "../../src/prompts/index.js";
 import type { FlowRun } from "../../src/loop/index.js";
@@ -903,3 +903,82 @@ describe("a passagem isolada, em sequência", () => {
     expect(prompt).toContain("import { comandoDoProjeto } from './capivara-comando';");
   });
 });
+
+/*
+ * A P04 do `assistencia2`: o roteirista recebeu `ReferenceError: sufo is not
+ * defined` com a linha, reescreveu, e devolveu o mesmo `${sufo}`. A reescrita
+ * era gravada sem conferência, e a fase pagou um ciclo por um erro de digitação.
+ */
+describe("a reescrita não repete o nome que o erro apontou", () => {
+  const SAIDA = [
+    "  ✘  4 [workflow-2] › workflow-2.spec.ts:7:5 › workflow 2 (1.6s)",
+    "  1) [workflow-2] › workflow-2.spec.ts:7:5 › workflow 2 › passo 1",
+    "    ReferenceError: sufo is not defined",
+    "    > 41 |     await formulario.getByLabel('Documento').fill(`COB-${sufo}`);",
+  ].join("\n");
+
+  it("lê o nome do erro", () => {
+    expect(nomesNaoDefinidos(SAIDA)).toEqual(["sufo"]);
+    expect(nomesNaoDefinidos("1 passed")).toEqual([]);
+  });
+
+  it("recusa o roteiro real que repetiu o nome, e aceita o corrigido", async () => {
+    const real = await readFile(join(__dirname, "fixtures-roteiro-sufo.txt"), "utf8");
+    const passos = [...real.matchAll(/test\.step\('passo \d+: ([^']+)'/g)].map((casou) => casou[1] ?? "");
+    const fluxo = { number: "3", name: "Cobrança recorrente", steps: passos };
+    expect(checkFlowScript(real, fluxo)).toEqual([]);
+    expect(checkFlowScript(real, fluxo, ["sufo"]).map((d) => d.problem).join(" ")).toContain("`sufo`");
+    expect(checkFlowScript(real.replaceAll("${sufo}", "${sufixo}"), fluxo, ["sufo"])).toEqual([]);
+  });
+
+  it("não acusa nome declarado, em nenhuma das formas", () => {
+    const comCorpo = (corpo: string): string => roteiroBom().replace("await page.goto('/');", `${corpo} await page.goto('/');`);
+    for (const corpo of [
+      "const sufo = '1'; use(sufo);",
+      "let sufo; use(sufo);",
+      "const { a, sufo } = x; use(sufo);",
+      "const [sufo] = x; use(sufo);",
+      "function sufo() {} sufo();",
+      "[1].map((sufo) => use(sufo));",
+      "[1].map(sufo => use(sufo));",
+      "[1].forEach(function (a, sufo) { use(sufo); });",
+    ]) {
+      expect(checkFlowScript(comCorpo(corpo), WORKFLOW, ["sufo"]), corpo).toEqual([]);
+    }
+    const importado = `import { sufo } from './x';\n${roteiroBom().replace("await page.goto('/');", "use(sufo); await page.goto('/');")}`;
+    expect(checkFlowScript(importado, WORKFLOW, ["sufo"])).toEqual([]);
+    // Propriedade com o mesmo nome não é uso da variável.
+    expect(checkFlowScript(comCorpo("use(x.sufo);"), WORKFLOW, ["sufo"])).toEqual([]);
+  });
+
+  it("a reescrita que repete o nome volta ao roteirista, e a segunda é a gravada", async () => {
+    await mkdir(join(projectRoot, FLOWS_DIR), { recursive: true });
+    const arquivo = join(projectRoot, FLOWS_DIR, flowScriptName(WORKFLOW.number));
+    const comSufo = roteiroBom().replace("await page.goto('/');", "use(`${sufo}`); await page.goto('/');");
+    await writeFile(arquivo, `${FLOW_MARK}\n${comSufo}\n`, "utf8");
+
+    const recebidos: string[][] = [];
+    let passagem = 0;
+    const resultado = await gate4({
+      projectRoot,
+      workflows: [WORKFLOW],
+      startCommand: "npm start",
+      author: async (_workflow, rejeitado) => {
+        recebidos.push(rejeitado);
+        return "```ts\n" + (recebidos.length === 1 ? comSufo : roteiroBom()) + "\n```";
+      },
+      runner: async () => {
+        passagem += 1;
+        return passagem === 1
+          ? { exitCode: 1, output: SAIDA.replaceAll("workflow-2", "workflow-2") }
+          : { exitCode: 0, output: "1 passed" };
+      },
+    });
+
+    expect(resultado.green).toBe(true);
+    expect(recebidos).toHaveLength(2);
+    expect(recebidos[1]?.join("\n")).toContain("`sufo`, que não existe");
+    expect(await readFile(arquivo, "utf8")).not.toContain("${sufo}");
+  });
+});
+

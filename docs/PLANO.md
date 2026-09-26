@@ -6092,3 +6092,22 @@ aplicação: um `TypeError: x is not a function` do próprio produto mandava ree
 um roteiro certo. Agora ele lê só as linhas do runner, e `ReferenceError` / `is not
 defined` contam como erro do roteiro.
 
+### 84.7 A reescrita que repetia o erro
+
+O roteirista do workflow 3 recebeu `ReferenceError: sufo is not defined`, com a linha
+do erro, e devolveu o mesmo `${sufo}` — o terceiro no mesmo run, sempre no lugar de
+`${sufixo}`. A reescrita depois de falha do roteiro tinha UMA tentativa e era gravada
+sem conferência além da estrutural; a segunda passagem falhou igual, e a fase pagou um
+ciclo do executor por um erro de digitação do instrumento.
+
+Agora a reescrita tem as mesmas tentativas da primeira redação, e cada uma é
+conferida contra os nomes que o erro apontou: se o roteiro usa o nome e nenhuma
+declaração o introduz, volta ao roteirista com isso dito. A conferência é
+conservadora — qualquer forma de declaração absolve o nome —, porque recusar um
+roteiro certo custa uma sessão, e deixar passar um errado custa o que já custava.
+
+Continua aberto, e é o item 3 do HANDOFF com evidência nova: quando o roteiro falha
+por si mesmo duas vezes, o gate devolve `scriptFailed` e o ciclo do EXECUTOR é
+consumido — ele recebe "isto é do harness, não da sua implementação" e não tem o que
+fazer. Deveria custar sessão de roteirista, não ciclo de fase.
+

@@ -157,6 +157,11 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   let previousWroteNothing = false;
   /** A contestação do roteiro vale uma vez por fase. */
   let roteiroJaContestado = false;
+  /*
+   * O que o gate 4 reprovou por último. A contestação do executor fala DESSA
+   * passagem, e é o roteiro que falhou nela que precisa ser reescrito.
+   */
+  let fluxosQueFalharamPorUltimo: string[] = [];
 
   const relatar = options.onProgress ?? (() => undefined);
   const gate = (nome: LoopGate, estado: LoopGateState, cycle: number): void =>
@@ -315,7 +320,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       const g4 = await gate4({
         projectRoot: options.projectRoot,
         workflows: fluxos.workflows,
-        ...(contestacao ? { roteiroContestado: contestacao } : {}),
+        ...(contestacao ? { roteiroContestado: contestacao, roteirosQueFalharam: fluxosQueFalharamPorUltimo } : {}),
         ...(fluxos.regressao ? { regressao: fluxos.regressao } : {}),
         startCommand: await fluxos.resolveStart(),
         author: async (workflow, rejected, baseUrl, passagem) => {
@@ -357,11 +362,13 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
 
       gate("G4", g4.green ? "verde" : "vermelho", cycleAtual);
       if (g4.green) {
+        fluxosQueFalharamPorUltimo = [];
         if (g4.skipped !== "") announce(`[${session.id}] gate 4 pulado: ${g4.skipped}`);
         else announce(`[${session.id}] gate 4: ${g4.scripts.length} fluxo(s) percorrido(s) na aplicação de pé`);
         return true;
       }
 
+      fluxosQueFalharamPorUltimo = g4.falharam ?? [];
       lastGate = "gate 4 — fluxos na aplicação";
       lastCause = g4.toolMissing === true ? g4.cause : `${noChangeNote}${g4.cause}`;
       if (g4.toolMissing === true) {

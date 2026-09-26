@@ -468,3 +468,76 @@ describe("credencial recusada pelo provider", () => {
     expect(outcome.status).toBe("complete");
   });
 });
+
+/*
+ * A P04 do `assistencia2`: quem reprovava era o roteiro de REGRESSÃO da P02, o
+ * executor contestou certo, e a reescrita foi para os roteiros da fase — que
+ * nem tinham rodado, porque o de regressão falhou antes deles.
+ */
+describe("a contestação reescreve o roteiro que falhou", () => {
+  const regressao = { number: "4", name: "Entrada e senha", steps: ["entra no painel"] };
+  const daFase = { number: "2", name: "Cadastro de tenant", steps: ["cadastra"] };
+  const roteiro = (fluxo: { number: string; steps: string[] }, texto: string): string =>
+    "import { expect, test } from '@playwright/test';\n" +
+    `test('workflow ${fluxo.number}', async ({ page }) => {\n` +
+    fluxo.steps
+      .map((passo, i) => `  await test.step('passo ${i + 1}: ${passo}', async () => { await page.goto('/'); expect('${texto}').toBeTruthy(); });`)
+      .join("\n") +
+    "\n});";
+
+  it("o roteiro de regressão reprovado é o que vai para o roteirista", async () => {
+    const pasta = join(projectRoot, ".capivara", "flows");
+    await mkdir(pasta, { recursive: true });
+    const { FLOW_MARK } = await import("../../src/loop/flows.js");
+    await writeFile(join(pasta, "workflow-4.spec.ts"), `${FLOW_MARK}\n${roteiro(regressao, "frase antiga")}\n`, "utf8");
+    await writeFile(join(pasta, "workflow-2.spec.ts"), `${FLOW_MARK}\n${roteiro(daFase, "ok")}\n`, "utf8");
+
+    const target = session();
+    const reescritos: string[] = [];
+    let passagem = 0;
+
+    await runPhase({
+      projectRoot,
+      runId: RUN,
+      language: "pt-BR",
+      engine: "codex",
+      session: target,
+      testCommand: null,
+      commitsEnabled: false,
+      maxCycles: 3,
+      sleep: async () => undefined,
+      flows: {
+        workflows: [daFase],
+        regressao: [regressao],
+        resolveStart: async () => "npm start",
+        runner: async () => {
+          passagem += 1;
+          return passagem === 1
+            ? {
+                exitCode: 1,
+                output:
+                  "  ✘  1 [workflow-4] › workflow-4.spec.ts:7:5 › workflow 4 — Entrada e senha (9.0s)\n" +
+                  "  1) [workflow-4] › workflow-4.spec.ts:7:5 › workflow 4 — Entrada e senha › passo 1\n" +
+                  "  1 failed\n  1 did not run",
+              }
+            : { exitCode: 0, output: "2 passed" };
+        },
+      },
+      call: async (call) => {
+        if (call.role === "verifier" && call.prompt.includes("CAPIVARA_FLOW")) {
+          const fluxo = call.prompt.includes("workflow 4:") ? regressao : daFase;
+          reescritos.push(fluxo.number);
+          return ok("```ts\n" + roteiro(fluxo, "novo") + "\n```");
+        }
+        if (call.role === "verifier") {
+          return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
+        }
+        await writeFile(join(projectRoot, `fase-${call.attempt}.ts`), `export const x = ${call.attempt};`, "utf8");
+        return ok(call.attempt === 1 ? "feito" : "CAPIVARA_ROTEIRO_ERRADO: a frase saiu do painel e nenhum critério a pede");
+      },
+      testRunner: async () => ({ exitCode: 0, output: "" }),
+    });
+
+    expect(reescritos).toEqual(["4"]);
+  });
+});

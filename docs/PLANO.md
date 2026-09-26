@@ -6045,3 +6045,22 @@ roteiros, o primeiro rodando o instalador pelo ajudante, o segundo lendo o que e
 deixou; ordem respeitada, navegador encontrado, e nada escrito no `~/` real nem no
 banco do projeto.
 
+### 84.4 A contestação reescrevia o roteiro errado
+
+Na P04 do `assistencia2`, com a passagem já isolada, quem reprovou foi o roteiro de
+REGRESSÃO da P02: ele afirmava uma frase do painel que a P04 trocou pela navegação,
+e que nenhum critério pede. O executor contestou certo, duas vezes. A contestação
+reescrevia só os roteiros DA FASE — que nem tinham rodado, porque o de regressão
+falhou antes deles. A mesma coisa valia para a reescrita automática de roteiro que
+falha por conta própria.
+
+Agora o gate devolve quais fluxos falharam (`falharam`, lido das linhas `✘` e `N)` do
+Playwright; "não rodou" não conta), o runner guarda isso, e a contestação seguinte
+reescreve ESSES roteiros, da fase ou da regressão. Sem a informação — contestação
+num run retomado, antes de qualquer passagem do gate —, vale o comportamento antigo.
+
+O custo, dito: o executor de uma fase posterior passa a poder pedir a reescrita de
+um roteiro de uma fase anterior. É a mesma saída que já existia para os roteiros da
+fase, com a mesma trava — quem reescreve é outra sessão, lendo o produto, presa aos
+passos do esqueleto, e a contestação vale uma vez por fase.
+

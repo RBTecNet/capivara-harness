@@ -427,6 +427,15 @@ export interface FlowGateOptions {
    * mesmo errado, o roteiro novo reprova igual.
    */
   roteiroContestado?: string;
+  /**
+   * Os fluxos cujos roteiros falharam na passagem que o executor contestou.
+   *
+   * A contestação reescrevia só os roteiros DA FASE. Na P04 do `assistencia2`
+   * quem falhava era o roteiro de regressão da P02, o executor contestou certo
+   * duas vezes, e as duas reescritas foram para os roteiros que nem tinham rodado.
+   * Sem esta lista, vale o comportamento antigo.
+   */
+  roteirosQueFalharam?: string[];
   port?: number;
   /** Tentativas de redação por fluxo, contando a primeira. */
   maxDrafts?: number;
@@ -458,6 +467,24 @@ const executarNoShell = async (
     child.stdin?.end();
   });
 
+/**
+ * Os fluxos cujos roteiros FALHARAM, lidos da saída do Playwright.
+ *
+ * Só os que falharam: um roteiro que "não rodou" porque o anterior falhou não
+ * tem defeito nenhum conhecido. Devolve números de workflow.
+ */
+export function fluxosQueFalharam(output: string, workflows: readonly SkeletonWorkflow[]): string[] {
+  const falhos = new Set<string>();
+  for (const linha of output.split("\n")) {
+    if (!/^\s*(?:✘|×|\d+\))\s/.test(linha)) continue;
+    const casou = /\b(workflow-[^\s/\\›]+?\.spec\.ts):\d+/.exec(linha);
+    if (!casou) continue;
+    const dono = workflows.find((workflow) => flowScriptName(workflow.number) === casou[1]);
+    if (dono) falhos.add(dono.number);
+  }
+  return workflows.filter((workflow) => falhos.has(workflow.number)).map((workflow) => workflow.number);
+}
+
 export type FlowGateResult =
   /**
    * `output` é a saída crua do runner, quando ele chegou a correr.
@@ -468,7 +495,16 @@ export type FlowGateResult =
    * dito — e sem isso o diagnóstico vira adivinhação.
    */
   | { green: true; skipped: string; scripts: string[]; output?: string }
-  | { green: false; cause: string; output?: string; toolMissing?: boolean; startupFailed?: boolean; scriptFailed?: boolean };
+  | {
+      green: false;
+      cause: string;
+      output?: string;
+      toolMissing?: boolean;
+      startupFailed?: boolean;
+      scriptFailed?: boolean;
+      /** Os fluxos cujos roteiros falharam — é o que uma contestação vai reescrever. */
+      falharam?: string[];
+    };
 
 /**
  * A aplicação nem chegou a subir.
@@ -678,9 +714,18 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
    * então a contestação não vira licença para ignorar o fluxo, só troca quem é
    * corrigido primeiro.
    */
+  /*
+   * Quem reescrever: o roteiro que falhou — seja da fase, seja da regressão —, e
+   * só na falta dessa informação os da fase, como antes.
+   */
+  const alvos = (numeros: readonly string[] | undefined): SkeletonWorkflow[] => {
+    const escolhidos = ordem.filter((workflow) => (numeros ?? []).includes(workflow.number));
+    return escolhidos.length > 0 ? escolhidos : options.workflows;
+  };
+
   if (options.roteiroContestado) {
     announce(`o executor contestou o roteiro: ${options.roteiroContestado}`);
-    for (const workflow of options.workflows) {
+    for (const workflow of alvos(options.roteirosQueFalharam)) {
       const arquivo = join(pasta, flowScriptName(workflow.number));
       const script = extractFlowScript(
         await options.author(
@@ -713,7 +758,7 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   if (run.exitCode !== 0 && run.toolMissing !== true && ehFalhaDoRoteiro(run.output)) {
     announce("o roteiro falhou por conta própria (seletor ambíguo ou erro de escrita); reescrevendo");
 
-    for (const workflow of options.workflows) {
+    for (const workflow of alvos(fluxosQueFalharam(run.output, ordem))) {
       const arquivo = join(pasta, flowScriptName(workflow.number));
       const script = extractFlowScript(
         await options.author(workflow, [`o roteiro anterior falhou assim:\n${tail(run.output, 25)}`], baseUrl, passagemDe(workflow)),
@@ -728,6 +773,7 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
         green: false,
         scriptFailed: true,
         output: run.output,
+        falharam: fluxosQueFalharam(run.output, ordem),
         cause:
           "o roteiro do fluxo falhou por si mesmo duas vezes — seletor ambíguo ou erro de escrita, não defeito do " +
           `produto. Isto é do harness, não da sua implementação; o roteiro está em ${FLOWS_DIR}/.\n${tail(run.output)}`,
@@ -804,6 +850,7 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
     return {
       green: false,
       output: run.output,
+      falharam: fluxosQueFalharam(run.output, ordem),
       cause:
         `${cabecalho}a aplicação não cumpriu um fluxo declarado — o roteiro rodou contra o produto de pé em ` +
         `http://127.0.0.1:${port} e reprovou. Isto não é teste de unidade: um passo falhou onde o ` +

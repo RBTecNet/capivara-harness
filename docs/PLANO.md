@@ -6156,3 +6156,31 @@ into, not what you hunted".
 O risco aceito, dito: o vai-e-vem da P01 pode voltar se o verificador reabrir por
 amostragem. A instrução contra rejulgar continua sendo a contenção.
 
+## §86 — A contestação valia uma vez por fase, e a fase pagou quatro ciclos
+
+A P05 do `assistencia2`, retomada com mais ciclos:
+
+| ciclo | o que o executor disse | o que o harness fez |
+| --- | --- | --- |
+| 2 | o roteiro procura "Salvar registro"; a tela diz "Salvar" | reescreveu o workflow 6 |
+| 3 | o roteiro novo procura a mensagem sob "Editar registro", título que vira "Novo registro" depois de excluir | **ignorou** — a cota da fase já tinha ido |
+| 4 | nada a mudar | rodou o mesmo roteiro |
+| 5, 6 | o mesmo diagnóstico do ciclo 3 | ignorou |
+
+O diagnóstico do ciclo 3 estava certo: a reescrita do ciclo 2 consertou o rótulo e
+nasceu com outro defeito. A trava "uma vez por fase" existia para o executor não
+fugir de defeito real contestando sempre — mas ela não distinguia contestar a MESMA
+versão do roteiro de contestar uma versão NOVA, que ninguém tinha contestado. Quatro
+ciclos rodaram um roteiro determinístico contra um produto que ninguém mudou.
+
+Agora a contestação vale uma vez por VERSÃO: o harness guarda o sha dos roteiros que
+falharam quando uma contestação é aceita, e aceita a próxima se algum dos roteiros
+que falharam é uma versão que ainda não foi contestada. A mesma versão, contestada de
+novo, é ignorada — e isso agora é dito na tela, em vez de sumir. A fuga continua
+fechada: cada reescrita é de outra sessão, que lê o produto de novo; se o produto
+estiver errado, o roteiro novo reprova igual, e tudo segue limitado pelos ciclos.
+
+Continua aberto, e esta P05 é a evidência: quando o executor não muda nada e o gate 4
+falha IGUAL ao ciclo anterior, o próximo ciclo é determinístico — vai falhar de novo.
+O harness poderia parar ali em vez de queimar ciclos.
+

@@ -541,3 +541,74 @@ describe("a contestação reescreve o roteiro que falhou", () => {
     expect(reescritos).toEqual(["4"]);
   });
 });
+
+/*
+ * A P05 do `assistencia2`: a contestação do ciclo 2 reescreveu o roteiro, o
+ * roteiro novo nasceu com OUTRO defeito, e o executor o diagnosticou certo nos
+ * ciclos seguintes — ignorado, porque a contestação valia uma vez por fase.
+ * Quatro ciclos rodaram o mesmo roteiro contra o mesmo produto.
+ */
+describe("a contestação vale uma vez por VERSÃO do roteiro", () => {
+  const fluxo = { number: "6", name: "Catálogos", steps: ["exclui o registro"] };
+  const roteiro = (marca: string): string =>
+    "import { expect, test } from '@playwright/test';\n" +
+    `test('workflow 6', async ({ page }) => {\n` +
+    `  await test.step('passo 1: exclui o registro', async () => { await page.goto('/'); expect('${marca}').toBeTruthy(); });\n` +
+    "});";
+  const FALHOU = {
+    exitCode: 1,
+    output: "  ✘  1 [workflow-6] › workflow-6.spec.ts:8:5 › workflow 6 (1s)\n  1) [workflow-6] › workflow-6.spec.ts:8:5 › passo 1\n  1 failed",
+  };
+
+  async function fase(autor: (vez: number) => string, passagens: Array<{ exitCode: number; output: string }>) {
+    const pasta = join(projectRoot, ".capivara", "flows");
+    await mkdir(pasta, { recursive: true });
+    const { FLOW_MARK } = await import("../../src/loop/flows.js");
+    await writeFile(join(pasta, "workflow-6.spec.ts"), `${FLOW_MARK}\n${roteiro("v1")}\n`, "utf8");
+
+    const target = session();
+    let reescritas = 0;
+    let passagem = 0;
+    const outcome = await runPhase({
+      projectRoot,
+      runId: RUN,
+      language: "pt-BR",
+      engine: "codex",
+      session: target,
+      testCommand: null,
+      commitsEnabled: false,
+      maxCycles: 4,
+      sleep: async () => undefined,
+      flows: {
+        workflows: [fluxo],
+        resolveStart: async () => "npm start",
+        runner: async () => passagens[passagem++] ?? { exitCode: 0, output: "1 passed" },
+      },
+      call: async (call) => {
+        if (call.role === "verifier" && call.prompt.includes("CAPIVARA_FLOW")) {
+          reescritas += 1;
+          return ok("```ts\n" + autor(reescritas) + "\n```");
+        }
+        if (call.role === "verifier") {
+          return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
+        }
+        return ok(call.attempt === 1 ? "feito" : "CAPIVARA_ROTEIRO_ERRADO: o roteiro procura o que a tela não tem");
+      },
+      testRunner: async () => ({ exitCode: 0, output: "" }),
+    });
+    return { outcome, reescritas };
+  }
+
+  it("o roteiro reescrito que falha por outro motivo pode ser contestado de novo", async () => {
+    const { outcome, reescritas } = await fase((vez) => roteiro(`v${vez + 1}`), [FALHOU, FALHOU]);
+    expect(reescritas).toBe(2);
+    expect(outcome.status).toBe("complete");
+  });
+
+  it("a mesma versão não é contestada duas vezes", async () => {
+    // A reescrita volta com defeito estrutural: o roteiro gravado continua o mesmo.
+    const { outcome, reescritas } = await fase(() => "não é um roteiro", [FALHOU, FALHOU, FALHOU, FALHOU]);
+    expect(reescritas).toBe(1);
+    expect(outcome.status).not.toBe("complete");
+  });
+});

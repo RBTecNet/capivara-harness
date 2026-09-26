@@ -9,6 +9,8 @@
  * uma fase vermelha faz a próxima construir sobre chão que não existe.
  */
 
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { appendEvent } from "../state/events.js";
 import { runPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
@@ -17,13 +19,13 @@ import type { BuildProgressListener, LoopGate, LoopGateState } from "./progress.
 import { commitPhase, hasPendingChanges, treeSignature } from "./git.js";
 import { declaredComplete, defaultTestRunner, gate0, gate1, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
 import { detectCredentialRejection, detectRateLimit, planWait } from "./ratelimit.js";
-import { gate4, type FlowRunner } from "./flows.js";
+import { FLOWS_DIR, flowScriptName, gate4, type FlowRunner } from "./flows.js";
 import { procurarTestesNomeados } from "./feature-tests.js";
 import { TasksAprovadas, tasksDaFase } from "./veredictos.js";
 import { prepararAmbiente } from "./ambiente.js";
 import { faltaOPacoteDoRunner } from "./dependencias.js";
 import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mcp/index.js";
-import { featureTestNames } from "../contract/index.js";
+import { featureTestNames, sha12 } from "../contract/index.js";
 import type { SkeletonWorkflow } from "../contract/index.js";
 import type { PhaseSession } from "./split.js";
 import type { TestCommand } from "./testcmd.js";
@@ -155,8 +157,17 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   let lastGate: GateName | null = null;
   let lastCause = "";
   let previousWroteNothing = false;
-  /** A contestação do roteiro vale uma vez por fase. */
-  let roteiroJaContestado = false;
+  /*
+   * As VERSÕES de roteiro já contestadas, pelo sha do conteúdo.
+   *
+   * Era "uma contestação por fase". Na P05 do `assistencia2` a contestação do
+   * ciclo 2 reescreveu o roteiro, o roteiro novo nasceu com OUTRO defeito, e o
+   * executor o diagnosticou certo nos ciclos 3, 5 e 6 — ignorado, porque a cota
+   * já tinha ido. Quatro ciclos rodaram o mesmo roteiro contra o mesmo produto.
+   * Contestar de novo a MESMA versão continua não valendo; uma versão nova, que
+   * ninguém contestou, vale.
+   */
+  const versoesContestadas = new Set<string>();
   /*
    * O que o gate 4 reprovou por último. A contestação do executor fala DESSA
    * passagem, e é o roteiro que falhou nela que precisa ser reescrito.
@@ -394,12 +405,32 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
      * Uma vez por fase: a contestação manda reescrever o roteiro antes de rodar,
      * e se o produto estiver mesmo errado o roteiro novo reprova igual.
      */
-    const contestacao = roteiroJaContestado ? null : declarouRoteiroErrado(result.stdout);
-    const contestacaoDoRoteiro = contestacao ?? undefined;
-    if (contestacao) {
-      roteiroJaContestado = true;
-      announce(`[${session.id}] o executor contestou o roteiro em vez de mexer no produto: ${contestacao}`);
+    const declarada = declarouRoteiroErrado(result.stdout);
+    let contestacao: string | null = null;
+    if (declarada) {
+      /*
+       * Quais versões esta contestação atinge: as dos roteiros que falharam na
+       * última passagem. Sem essa informação — a primeira passagem de um run
+       * retomado —, vale uma vez, como antes.
+       */
+      const versoes =
+        fluxosQueFalharamPorUltimo.length > 0
+          ? await Promise.all(
+              fluxosQueFalharamPorUltimo.map(async (numero) => {
+                const conteudo = await readFile(join(options.projectRoot, FLOWS_DIR, flowScriptName(numero)), "utf8").catch(() => "");
+                return `${numero}:${sha12(conteudo)}`;
+              }),
+            )
+          : ["sem-falha-conhecida"];
+      if (versoes.some((versao) => !versoesContestadas.has(versao))) {
+        for (const versao of versoes) versoesContestadas.add(versao);
+        contestacao = declarada;
+        announce(`[${session.id}] o executor contestou o roteiro em vez de mexer no produto: ${declarada}`);
+      } else {
+        announce(`[${session.id}] contestação ignorada: este mesmo roteiro já foi contestado e reescrito nesta fase`);
+      }
     }
+    const contestacaoDoRoteiro = contestacao ?? undefined;
 
     const g0 = gate0(result, options.engine);
     gate("G0", g0.green ? "verde" : "vermelho", cycle);

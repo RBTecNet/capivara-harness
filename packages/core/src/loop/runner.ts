@@ -511,10 +511,14 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
          * desenvolvedor vê o rastro.
          */
         for (const reaberta of g3.reabertas) {
-          announce(
-            `[${session.id}] TASK ${reaberta.index} já estava verificada e foi reaberta pelo verificador; ` +
-              `mantenho o veredito anterior — o que ele disse está no log: ${reaberta.missing}`,
-          );
+          announce(`[${session.id}] TASK ${reaberta.index} já estava aprovada e foi reaberta pelo verificador: ${reaberta.missing}`);
+        }
+        /*
+         * A reaberta sai do registro: no ciclo seguinte ela volta a ser verificada,
+         * em vez de aparecer na lista do que o verificador não precisa olhar.
+         */
+        if (g3.reabertas.length > 0) {
+          await options.aprovadas?.revogar(session.id, tasksDestaFase, g3.reabertas.map((task) => task.index));
         }
         if (g3.done.length > 0) await options.aprovadas?.aprovar(session.id, tasksDestaFase, g3.done, cycle, now);
         gate("G3", g3.green ? "verde" : "vermelho", cycle);

@@ -53,11 +53,10 @@ function aprovadasBlock(tasks: readonly { index: number; title: string }[]): str
     "phase never closes: three cycles, six different tasks, two at a time, every one of them fixed",
     "and replaced by two others that had already been approved.",
     "",
-    "The one exception: if the correction made in THIS cycle broke one of them — a function that",
-    "moved, a column that was renamed, a test that stopped covering what it covered — say it, and",
-    "say it about the task that was CORRECTED, which is under verification. What protects the rest",
-    "is not your reading: the build, the linter and the whole test suite ran over the entire tree",
-    "before you were called, and they do not depend on attention.",
+    "The one exception: if you SEE that one of them is not delivered — the correction made in this",
+    "cycle broke it, or it was never really there — mark THAT task `TASK <n>: INCOMPLETE — <what is",
+    "missing>`. It goes back to the builder. Do not go looking for it: re-reading approved work to",
+    "find something new is the loop described above. Report what you ran into, not what you hunted.",
   ];
 }
 

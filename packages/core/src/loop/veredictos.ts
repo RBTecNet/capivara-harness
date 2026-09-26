@@ -120,6 +120,18 @@ export class TasksAprovadas {
     const juntos = [...emDisco.filter((entrada) => !novas.some((nova) => nova.phase === entrada.phase && nova.sha === entrada.sha)), ...novas];
     await writeAtomic(caminho(this.projectRoot), `${JSON.stringify(juntos, null, 2)}\n`);
   }
+
+  async revogar(phaseId: string, tasks: readonly TaskBlock[], indices: readonly number[]): Promise<void> {
+    const shas = new Set(tasks.filter((task) => indices.includes(task.index)).map((task) => shaDaTask(task)));
+    if (shas.size === 0) return;
+    const fica = (entrada: TaskAprovada): boolean => !(entrada.phase === phaseId && shas.has(entrada.sha));
+    const antes = this.registro.length;
+    const mantidas = this.registro.filter(fica);
+    this.registro.splice(0, this.registro.length, ...mantidas);
+    const emDisco = await ler(this.projectRoot);
+    if (antes === mantidas.length && emDisco.every(fica)) return;
+    await writeAtomic(caminho(this.projectRoot), `${JSON.stringify(emDisco.filter(fica), null, 2)}\n`);
+  }
 }
 
 async function ler(projectRoot: string): Promise<TaskAprovada[]> {

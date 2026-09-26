@@ -22,9 +22,29 @@ import type { PhaseBlock, TaskBlock } from "./phases.js";
  * gramática fora de casa — exatamente o que o teste de arquitetura impede.
  */
 export function parsePhaseFragment(phaseMarkdown: string): PhaseBlock | null {
-  const envelope = ["# X — Project Phases", "", "<!-- inputs: a.md@sha256:000000000000 -->", "", phaseMarkdown, ""].join("\n");
+  /*
+   * O documento exige fases numeradas a partir de 1, e uma fase solta é UMA fase:
+   * sem isto, só a primeira do plano era legível. Do assistencia2 em diante as
+   * duas memórias de tasks — a do auditor no `plan` e a do verificador no `build`
+   * — ficaram mudas da fase 2 à 12: nada foi guardado, e task aprovada voltou a
+   * ser julgada. A fase é lida como 1 e devolvida com o número dela.
+   */
+  const numero = /^##\s+Phase\s+(\d+)\s*:/m.exec(phaseMarkdown);
+  const original = numero ? Number(numero[1]) : null;
+  const dependencia = /\*\*Depends on:\*\*\s*([^·\n]*?)\s*(?:·|$)/m.exec(phaseMarkdown)?.[1]?.trim();
+  const comoPrimeira =
+    original !== null && original !== 1
+      ? phaseMarkdown
+          .replace(/^(##\s+Phase\s+)\d+(\s*:)/m, "$11$2")
+          // Numa fase solta não há fase anterior a que se referir.
+          .replace(/(\*\*Depends on:\*\*\s*)[^·\n]*?(\s*(?:·|$))/m, "$1none$2")
+      : phaseMarkdown;
+  const envelope = ["# X — Project Phases", "", "<!-- inputs: a.md@sha256:000000000000 -->", "", comoPrimeira, ""].join("\n");
   const lido = parsePhases(envelope);
-  return lido.ok ? (lido.document.phases[0] ?? null) : null;
+  const fase = lido.ok ? (lido.document.phases[0] ?? null) : null;
+  return fase !== null && original !== null && original !== 1
+    ? { ...fase, number: original, ...(dependencia !== undefined ? { dependsOn: dependencia } : {}) }
+    : fase;
 }
 
 export interface DriftInput {

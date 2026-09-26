@@ -43,6 +43,30 @@ const FASE = `## Phase 1: Fundação
 `;
 
 describe("o registro de tasks verificadas", () => {
+  /*
+   * O teste acima só tinha uma "Phase 1", e foi assim que o defeito passou: o
+   * parser exige a numeração a partir de 1, e toda fase depois da primeira saía
+   * sem tasks. No `assistencia2` as memórias ficaram mudas da P02 à P12, e a
+   * task 9 da P05, aprovada num ciclo, foi julgada de novo no seguinte.
+   */
+  it("lê as tasks de QUALQUER fase, não só da primeira", async () => {
+    const { parsePhaseFragment } = await import("../../src/contract/index.js");
+    const quinta = FASE.replace("## Phase 1: Fundação", "## Phase 5: Configurações").replace(
+      "**Depends on:** none",
+      "**Depends on:** Phase 4",
+    );
+    expect(tasksDaFase(quinta).map((task) => task.index)).toEqual([1, 2]);
+    // A fase volta com o número e a dependência DELA, não com os do envelope.
+    const lida = parsePhaseFragment(quinta);
+    expect(lida?.number).toBe(5);
+    expect(lida?.dependsOn).toBe("Phase 4");
+
+    const registro = await TasksAprovadas.abrir(projectRoot, "build-1");
+    await registro.aprovar("P05", tasksDaFase(quinta), [1, 2], 2);
+    const retomado = await TasksAprovadas.abrir(projectRoot, "build-1");
+    expect([...retomado.indicesAprovados("P05", tasksDaFase(quinta))]).toEqual([1, 2]);
+  });
+
   it("lê as tasks da fase pelo contrato, sem regex própria", () => {
     const tasks = tasksDaFase(FASE);
     expect(tasks.map((task) => task.index)).toEqual([1, 2]);
@@ -91,17 +115,35 @@ describe("o registro de tasks verificadas", () => {
 describe("o gate 3 honra o que já foi verificado", () => {
   const veredito = (linhas: string[]): string => linhas.join("\n");
 
-  it("INCOMPLETE sobre task já aprovada não reprova a fase, e não desaparece", () => {
+  /*
+   * Decisão do desenvolvedor depois da P05 do `assistencia2`: o termo invisível a
+   * quem só consulta foi reaberto com razão. A memória evita PERGUNTAR de novo;
+   * ela não cala o verificador que achou algo.
+   */
+  it("INCOMPLETE sobre task já aprovada reprova a fase, e a causa diz que foi reaberta", () => {
     const resultado = gate3(
       veredito(["TASK 1: INCOMPLETE — falta o índice", "TASK 2: DONE"]),
       2,
       new Set([1]),
     );
-    expect(resultado.green).toBe(true);
+    expect(resultado.green).toBe(false);
     expect(resultado.reabertas.map((task) => task.index)).toEqual([1]);
-    expect(resultado.reabertas[0]?.missing).toBe("falta o índice");
-    // A task volta ao registro como aprovada: o veredito anterior é o que vale.
-    expect(resultado.done).toEqual([1, 2]);
+    expect(resultado.done).toEqual([2]);
+    if (!resultado.green) {
+      expect(resultado.cause).toContain("TASK 1: INCOMPLETE — falta o índice");
+      expect(resultado.cause).toContain("o verificador a reabriu");
+    }
+  });
+
+  it("a task reaberta sai do registro e volta a ser verificada", async () => {
+    const tasks = tasksDaFase(FASE);
+    const registro = await TasksAprovadas.abrir(projectRoot, "build-1");
+    await registro.aprovar("P01", tasks, [1, 2], 1);
+    await registro.revogar("P01", tasks, [1]);
+    expect([...registro.indicesAprovados("P01", tasks)]).toEqual([2]);
+    // E fica assim na próxima execução.
+    const outra = await TasksAprovadas.abrir(projectRoot, "build-2");
+    expect([...outra.indicesAprovados("P01", tasks)]).toEqual([2]);
   });
 
   it("INCOMPLETE sobre task ainda não aprovada reprova, como sempre", () => {
@@ -138,8 +180,9 @@ describe("o verificador SABE o que já aprovou", () => {
     expect(prompt).toContain("Already DONE — not under verification now");
     expect(prompt).toContain("task 1: Criar a migration de statuses");
     expect(prompt).toContain("Re-reading them is not thoroughness");
-    // Com a saída explícita: regressão causada por ESTE ciclo se fala da task que mudou.
-    expect(prompt).toContain("say it about the task that was CORRECTED");
+    // A saída explícita: o que ele VIU quebrado se marca na própria task, e volta ao executor.
+    expect(prompt).toContain("mark THAT task `TASK <n>: INCOMPLETE");
+    expect(prompt).toContain("Report what you ran into, not what you hunted.");
   });
 
   it("sem task aprovada, o prompt é o de antes", () => {

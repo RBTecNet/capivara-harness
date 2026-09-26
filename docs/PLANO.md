@@ -6111,3 +6111,48 @@ por si mesmo duas vezes, o gate devolve `scriptFailed` e o ciclo do EXECUTOR é
 consumido — ele recebe "isto é do harness, não da sua implementação" e não tem o que
 fazer. Deveria custar sessão de roteirista, não ciclo de fase.
 
+## §85 — As memórias de tasks eram mudas da fase 2 em diante
+
+A P05 do `assistencia2` parou no gate 3 do ciclo 3 com a task 9 INCOMPLETE — a mesma
+task que o verificador tinha aprovado no ciclo 2. A memória de tasks aprovadas devia
+ter impedido a repergunta, e o arquivo dela tinha 12 entradas, todas da P01.
+
+### 85.1 A causa
+
+`parsePhaseFragment` lê uma fase solta embrulhando-a num documento de plano e
+validando o documento. O validador exige fases numeradas a partir de 1: para toda
+fase que não fosse a primeira, "esperava Phase 1 e encontrou Phase 2", e a lista de
+tasks saía vazia. Duas memórias dependiam disso e ficaram mudas da P02 à P12:
+
+- a do verificador no `build` (`.capivara/handoffs/tasks.json`): nada gravado, toda
+  verificação reperguntava tudo;
+- a do auditor no `plan` (`TasksJulgadas`): a fase emendada era reauditada inteira.
+
+O teste da memória só usava uma "Phase 1". Agora a fase solta é lida como 1 e
+devolvida com o número e a dependência DELA.
+
+Uma troca que eu fiz junto e desfiz: registrar as tasks julgadas antes de guardar a
+aprovação da fase no `plan`. A `TasksJulgadas` vive só na execução; na seguinte ela
+começa vazia e o prompt não lista task nenhuma — a aprovação precisa estar guardada
+SEM a lista, que é o que a ordem original faz. A troca teria feito toda fase aprovada
+ser reauditada na execução seguinte.
+
+### 85.2 A reabertura agora vale
+
+Com a memória funcionando em todas as fases, a regra antiga passava a valer em todas:
+reabrir uma task já aprovada NÃO reprovava — o veredito antigo prevalecia, para conter
+a amostragem da P01 do `assitencia`. Na P05 ela teria deixado passar um defeito real:
+o termo de responsabilidade só aparece dentro do formulário, que só aparece para quem
+pode editar — quem só consulta não o vê, e o critério diz "consulta e edição
+condicionadas à permissão".
+
+Decisão do desenvolvedor: **a reabertura sempre vale.** A memória evita PERGUNTAR de
+novo; ela não cala o verificador que achou algo. A task reaberta reprova a fase, sai
+do registro e volta a ser verificada. O prompt do verificador mudou junto: antes ele
+mandava falar da regressão "na task que foi corrigida"; agora manda marcar a própria
+task quebrada, e continua dizendo para não rejulgar por zelo — "report what you ran
+into, not what you hunted".
+
+O risco aceito, dito: o vai-e-vem da P01 pode voltar se o verificador reabrir por
+amostragem. A instrução contra rejulgar continua sendo a contenção.
+

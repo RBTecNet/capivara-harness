@@ -261,9 +261,18 @@ export function gate3(output: string, expectedTasks: number, aprovadas: Readonly
     };
   }
 
+  /*
+   * Reabrir uma task já aprovada VALE, como qualquer INCOMPLETE.
+   *
+   * O veredito antigo prevalecia, para conter a amostragem da P01 do
+   * `assitencia`. Na P05 do `assistencia2` isso teria deixado passar um defeito
+   * real: o termo de responsabilidade invisível a quem só tem permissão de
+   * consultar, reaberto com razão no ciclo 3. Decisão do desenvolvedor: a memória
+   * evita PERGUNTAR de novo; ela não cala o verificador que achou algo.
+   */
   const reabertas = verdicts.filter((verdict) => !verdict.done && aprovadas.has(verdict.index));
-  const incomplete = verdicts.filter((verdict) => !verdict.done && !aprovadas.has(verdict.index));
-  const done = verdicts.filter((verdict) => verdict.done || aprovadas.has(verdict.index)).map((verdict) => verdict.index);
+  const incomplete = verdicts.filter((verdict) => !verdict.done);
+  const done = verdicts.filter((verdict) => verdict.done).map((verdict) => verdict.index);
 
   if (incomplete.length > 0) {
     return {
@@ -271,7 +280,13 @@ export function gate3(output: string, expectedTasks: number, aprovadas: Readonly
       reabertas,
       green: false,
       gate: "gate 3 — verificação independente",
-      cause: `O verificador independente encontrou tasks incompletas:\n${incomplete.map((verdict) => `TASK ${verdict.index}: INCOMPLETE — ${verdict.missing}`).join("\n")}`,
+      cause: `O verificador independente encontrou tasks incompletas:\n${incomplete
+        .map(
+          (verdict) =>
+            `TASK ${verdict.index}: INCOMPLETE — ${verdict.missing}` +
+            (aprovadas.has(verdict.index) ? " (já tinha sido aprovada; o verificador a reabriu)" : ""),
+        )
+        .join("\n")}`,
     };
   }
 

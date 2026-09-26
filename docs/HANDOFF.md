@@ -229,16 +229,63 @@ Em ordem de importância, não de esforço:
    `live.suspend()`, que cede e retoma. Trocar no init mexe no desenho da
    pergunta dentro do painel — é mudança de outra natureza, fica para um run
    próprio.
-7. **A migração só é reconhecida pelo nome `migrate`.** O `assistencia2` declara
-   `db:migrate`, então o banco novo de cada passagem do gate 4 começa sem tabelas e
-   quem migra é o primeiro roteiro, pelo ajudante. Funciona enquanto a ordem da
-   passagem é a certa (§84.5); reconhecer a migração por outros nomes tornaria isso
-   independente do roteiro. Decidir com evidência.
 6. **O preflight exige o PROGRAMA `sqlite3` quando a stack usa o PACOTE.** No
    `assistencia2` o SQLite entra pelo pacote npm `sqlite3`, que traz a biblioteca
    embutida; nada chama o binário, e o build parou pedindo para instalá-lo.
    `detectPrerequisites` confunde "a stack usa SQLite" com "precisa do cliente de
    linha de comando".
+7. **A migração só é reconhecida pelo nome `migrate`.** O `assistencia2` declara
+   `db:migrate`, então o banco novo de cada passagem do gate 4 começa sem tabelas e
+   quem migra é o primeiro roteiro, pelo ajudante. Funciona enquanto a ordem da
+   passagem é a certa (§84.5); reconhecer a migração por outros nomes tornaria isso
+   independente do roteiro. Decidir com evidência.
+8. **Gate 4 — parar no ciclo determinístico.** Quando o executor não muda nada e
+   o gate 4 falha IGUAL ao ciclo anterior, o próximo ciclo vai falhar de novo. Na
+   P05 do `assistencia2` foram quatro ciclos assim (§86). Parar, ou escalar, em vez
+   de queimar ciclo.
+9. **Gate 4 — a triagem reescreve uma vez por ROTEIRO, não por passagem.** Na P08
+   a primeira triagem reescreveu o workflow 15 e a segunda, sobre o workflow 9 —
+   outro roteiro, nunca reescrito —, foi ao executor e custou um ciclo (§87). O
+   limite existe contra laço no mesmo roteiro; roteiro diferente é seguro.
+10. **Gate 4 — o roteirista escreve vendo a página.** Subir a aplicação e entregar
+    o retrato de acessibilidade das telas do fluxo antes da redação, em vez de
+    deixá-lo adivinhar pelo código. Junto, as regras que faltam no prompt: esperar
+    a confirmação visível antes de navegar ou recarregar; não conferir rótulo,
+    título ou contêiner que a fase não especifica; não conferir o FORMATO da
+    resposta da API (`true` × `1`), só o que o usuário vê.
+11. **Esqueleto e plano — especificação que o build não consegue fechar.**
+    (a) passos de fluxo com o resultado observável de cada um ("o tipo aparece na
+    lista"), porque é isso que o roteiro confere e hoje ele inventa; (b) critério
+    "conforme a permissão de cada operação" sem dizer se editar implica consultar
+    — na P05 cada ciclo achou uma combinação nova; o auditor deveria cobrar a
+    implicação no init; (c) fase de uma task só (a P06 tem uma, o esqueleto previa
+    dez). Vale para projeto novo: muda init e plan.
+12. **Entrega sem instrução de implantação.** O `assistencia2` chegou à P11 sem
+    README: nada diz ao operador como pôr o produto no ar com a stack DECLARADA
+    (preencher o `.env` para MySQL, qual comando rodar, onde fica o arquivo de
+    credenciais do usuário inicial). A aceitação operacional sobe o produto numa
+    cópia limpa, mas não confere se alguém de fora saberia fazer o mesmo. E houve
+    um desvio de interpretação que um documento assim teria exposto: o pedido era
+    criar o usuário inicial "no momento de instalação", o esqueleto diz que o
+    comando de migração "é o que o desenvolvedor roda depois de preencher o
+    `.env`", e o produto entregou DOIS comandos (`db:migrate` e
+    `install:initial`) — quem segue o esqueleto fica com banco sem usuário.
+13. **Banco de produção diferente do banco de teste, e ninguém diz.** O pedido
+    declara MySQL remoto e manda testar em SQLite. Migração e instalador só rodaram
+    contra SQLite; o knex esconde parte das diferenças, não todas (o MySQL recusa
+    índice único em coluna `TEXT` sem tamanho, o SQLite aceita). Sem MySQL o
+    harness não prova nada — mas o relatório final deveria dizer, com todas as
+    letras, "a migração nunca rodou contra o banco de produção declarado", em vez
+    de silêncio. E quando o engine estiver disponível (um contêiner, por exemplo),
+    exercitá-lo.
+14. **Gate 2 — teste instável sem nome.** Quando o executor diz que a suíte passou
+    e o gate 2 a vê falhar no mesmo teste, isso é sinal de instabilidade (P07,
+    `cliente_criado_no_modal_disponivel`). A causa poderia dizer isso, em vez de
+    deixar o executor descobrir. E a suíte do `assistencia2` já leva cinco minutos
+    por passagem.
+15. **Gate 4 — a resposta da API na causa.** Quando um passo falha por status HTTP
+    (o 400 da edição do tenant, na P04), o corpo da resposta — a mensagem de erro
+    do produto — não chega a ninguém; o executor reproduz para descobrir.
 
 ## As armadilhas, em uma linha cada
 

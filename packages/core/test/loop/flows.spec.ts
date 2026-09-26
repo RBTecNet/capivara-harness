@@ -7,9 +7,9 @@
  * escreveu.
  */
 
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   FLOWS_DIR,
@@ -23,6 +23,9 @@ import {
   portaLivre,
   renderFlowConfig,
 } from "../../src/loop/index.js";
+import { FLOW_MARK } from "../../src/loop/flows.js";
+import { FLOW_HELPER, bancosDeclarados, ferramentasDaMaquina } from "../../src/loop/passagem.js";
+import { flowPrompt } from "../../src/prompts/index.js";
 import type { FlowRun } from "../../src/loop/index.js";
 import type { SkeletonWorkflow } from "../../src/contract/index.js";
 
@@ -217,7 +220,7 @@ describe("o gate", () => {
 
   it("não reescreve o roteiro que já existe e está íntegro", async () => {
     await mkdir(join(projectRoot, FLOWS_DIR), { recursive: true });
-    await writeFile(join(projectRoot, FLOWS_DIR, "workflow-2.spec.ts"), roteiroBom(), "utf8");
+    await writeFile(join(projectRoot, FLOWS_DIR, "workflow-2.spec.ts"), `${FLOW_MARK}\n${roteiroBom()}\n`, "utf8");
 
     let pedidos = 0;
     const resultado = await gate4({
@@ -712,5 +715,186 @@ describe("o roteiro contestado pelo executor", () => {
 
     if (resultado.green) throw new Error("deveria reprovar");
     expect(resultado.cause).toContain("não cumpriu um fluxo declarado");
+  });
+});
+
+/*
+ * A P02 do `assistencia2` reprovou duas vezes com o produto certo. O fluxo
+ * "Instalação inicial" lia o arquivo de credenciais que o instalador grava em
+ * `~/` — ninguém rodava o instalador —, e o fluxo 4 dependia da senha que o 1
+ * trocaria, com os dois rodando ao mesmo tempo. E se o instalador tivesse
+ * rodado, teria escrito no diretório pessoal do desenvolvedor.
+ */
+describe("a passagem isolada, em sequência", () => {
+  const PRIMEIRO: SkeletonWorkflow = { number: "1", name: "Instalação inicial", steps: ["instalar", "entrar"] };
+  const QUARTO: SkeletonWorkflow = { number: "4", name: "Entrada e senha", steps: ["entrar com a senha"] };
+  const bloco = (workflow: SkeletonWorkflow): string => `\`\`\`ts\n${roteiroBom(workflow)}\n\`\`\``;
+
+  it("roteiro escrito para o ambiente antigo é reescrito uma vez, e sai marcado", async () => {
+    await mkdir(join(projectRoot, FLOWS_DIR), { recursive: true });
+    const arquivo = join(projectRoot, FLOWS_DIR, flowScriptName(WORKFLOW.number));
+    await writeFile(arquivo, `${roteiroBom()}\n`, "utf8");
+
+    let pedidos = 0;
+    const resultado = await gate4({
+      projectRoot,
+      workflows: [WORKFLOW],
+      startCommand: "npm start",
+      author: async () => {
+        pedidos += 1;
+        return bloco(WORKFLOW);
+      },
+      runner: async () => verde,
+    });
+
+    expect(resultado.green).toBe(true);
+    expect(pedidos).toBe(1);
+    expect((await readFile(arquivo, "utf8")).startsWith(FLOW_MARK)).toBe(true);
+  });
+
+  it("a regressão escrita para o ambiente antigo também é reescrita; a ausente continua de fora", async () => {
+    await mkdir(join(projectRoot, FLOWS_DIR), { recursive: true });
+    await writeFile(join(projectRoot, FLOWS_DIR, flowScriptName("1")), `${roteiroBom(PRIMEIRO)}\n`, "utf8");
+
+    const escritos: string[] = [];
+    await gate4({
+      projectRoot,
+      workflows: [WORKFLOW],
+      regressao: [PRIMEIRO, { ...QUARTO, number: "3" }],
+      startCommand: "npm start",
+      author: async (workflow) => {
+        escritos.push(workflow.number);
+        return bloco(workflow);
+      },
+      runner: async () => verde,
+    });
+
+    expect(escritos).toEqual(["1", "2"]);
+  });
+
+  it("os roteiros rodam um de cada vez, cada um depois do anterior", async () => {
+    const config = renderFlowConfig({ startCommand: "npm start", port: 1, scripts: ["workflow-1.spec.ts", "workflow-4.spec.ts"] });
+    expect(config).toContain("workers: 1,");
+    expect(config).toContain(`{ name: "workflow-1", testMatch: "**/workflow-1.spec.ts" },`);
+    expect(config).toContain(`{ name: "workflow-4", testMatch: "**/workflow-4.spec.ts", dependencies: ["workflow-1"] },`);
+  });
+
+  it("quem escreve o segundo fluxo sabe qual roda antes dele e onde está o roteiro", async () => {
+    const recebidas: Array<{ numero: string; anteriores: string[] }> = [];
+    await gate4({
+      projectRoot,
+      workflows: [PRIMEIRO, QUARTO],
+      startCommand: "npm start",
+      author: async (workflow, _rejeitado, _url, passagem) => {
+        recebidas.push({ numero: workflow.number, anteriores: passagem.anteriores.map((anterior) => anterior.arquivo) });
+        return bloco(workflow);
+      },
+      runner: async () => verde,
+    });
+
+    expect(recebidas).toEqual([
+      { numero: "1", anteriores: [] },
+      { numero: "4", anteriores: [join(FLOWS_DIR, "workflow-1.spec.ts")] },
+    ]);
+  });
+
+  it("cada passagem tem diretório pessoal e banco próprios, migrados, e apagados ao fim", async () => {
+    await writeFile(join(projectRoot, ".env.example"), "DATABASE_SOURCE=sqlite\nSQLITE_PATH=./dados.sqlite\n", "utf8");
+    await writeFile(join(projectRoot, "package.json"), JSON.stringify({ scripts: { migrate: "node m.js", start: "node s.js" } }), "utf8");
+
+    const ambientes: Array<Record<string, string>> = [];
+    const migracoes: Array<{ comando: string; env: Record<string, string> }> = [];
+    const resultado = await gate4({
+      projectRoot,
+      workflows: [WORKFLOW],
+      startCommand: "npm start",
+      author: async () => bloco(WORKFLOW),
+      executar: async (comando, _cwd, env) => {
+        migracoes.push({ comando, env });
+        return { exitCode: 0, output: "" };
+      },
+      runner: async (_root, _scripts, env) => {
+        ambientes.push(env ?? {});
+        return verde;
+      },
+    });
+
+    expect(resultado.green).toBe(true);
+    const env = ambientes[0] ?? {};
+    expect(env.HOME).toBeDefined();
+    expect(env.HOME?.startsWith(tmpdir())).toBe(true);
+    expect(env.SQLITE_PATH?.endsWith("dados.sqlite")).toBe(true);
+    expect(env.SQLITE_PATH?.startsWith(projectRoot)).toBe(false);
+    expect(env.CAPIVARA_RAIZ).toBe(projectRoot);
+    // A migração roda no banco da passagem — o mesmo ambiente que a aplicação recebe.
+    expect(migracoes).toEqual([{ comando: "npm run migrate", env }]);
+    // Nada sobrevive à passagem.
+    await expect(stat(dirname(env.HOME ?? ""))).rejects.toThrow();
+    // O ajudante do roteiro está ao lado dele.
+    expect(await readFile(join(projectRoot, FLOWS_DIR, FLOW_HELPER), "utf8")).toContain("export async function comandoDoProjeto");
+  });
+
+  it("sem banco em arquivo, nada é migrado: o banco do .env continua sendo do desenvolvedor", async () => {
+    await writeFile(join(projectRoot, ".env.example"), "DATABASE_URL=mysql://exemplo.invalid/app\n", "utf8");
+    await writeFile(join(projectRoot, "package.json"), JSON.stringify({ scripts: { migrate: "node m.js" } }), "utf8");
+
+    let migrou = false;
+    await gate4({
+      projectRoot,
+      workflows: [WORKFLOW],
+      startCommand: "npm start",
+      author: async () => bloco(WORKFLOW),
+      executar: async () => {
+        migrou = true;
+        return { exitCode: 0, output: "" };
+      },
+      runner: async () => verde,
+    });
+
+    expect(migrou).toBe(false);
+    expect(await bancosDeclarados(projectRoot)).toEqual({});
+  });
+
+  it("o banco declarado em arquivo é reconhecido pelo valor, não pelo nome da chave", async () => {
+    await writeFile(join(projectRoot, ".env.example"), "DB_FILE='./var/app.db'\nPORTA=3000\n# X=./y.sqlite\n", "utf8");
+    expect(await bancosDeclarados(projectRoot)).toEqual({ DB_FILE: "./var/app.db" });
+  });
+
+  it("trocar o diretório pessoal não esconde o navegador que a máquina já tem", () => {
+    const linux = ferramentasDaMaquina({}, "/home/dev", "linux");
+    expect(linux.PLAYWRIGHT_BROWSERS_PATH).toBe("/home/dev/.cache/ms-playwright");
+    expect(linux.XDG_CACHE_HOME).toBe("/home/dev/.cache");
+    expect(ferramentasDaMaquina({}, "/Users/dev", "darwin").PLAYWRIGHT_BROWSERS_PATH).toBe("/Users/dev/Library/Caches/ms-playwright");
+    // O que o desenvolvedor já definiu é dele.
+    expect(ferramentasDaMaquina({ PLAYWRIGHT_BROWSERS_PATH: "/opt/pw" }, "/home/dev", "linux").PLAYWRIGHT_BROWSERS_PATH).toBeUndefined();
+  });
+
+  it("o ajudante não serve para construir nem subir a aplicação", () => {
+    const roteiro = roteiroBom().replace(
+      "await page.goto('/');",
+      "await comandoDoProjeto('npm', ['run', 'build']); await page.goto('/');",
+    );
+    expect(checkFlowScript(roteiro, WORKFLOW).map((defeito) => defeito.problem).join(" ")).toContain("construir ou subir");
+    const instalar = roteiroBom().replace("await page.goto('/');", "await comandoDoProjeto('npm', ['run', 'install:initial']);");
+    expect(checkFlowScript(instalar, WORKFLOW)).toEqual([]);
+  });
+
+  it("o roteirista sabe que a passagem começa do zero, quem roda antes e como chegar ao terminal", () => {
+    const prompt = flowPrompt({
+      language: "português do Brasil",
+      workflow: QUARTO,
+      baseUrl: "http://127.0.0.1:1",
+      passagem: {
+        anteriores: [{ number: "1", name: "Instalação inicial", arquivo: ".capivara/flows/workflow-1.spec.ts" }],
+        bancoNovo: ["SQLITE_PATH"],
+        migracao: null,
+        ajudante: FLOW_HELPER,
+      },
+    });
+    expect(prompt).toContain("starts from ZERO");
+    expect(prompt).toContain("`SQLITE_PATH`");
+    expect(prompt).toContain("No migration is applied for you");
+    expect(prompt).toContain("workflow 1 — Instalação inicial (`.capivara/flows/workflow-1.spec.ts`)");
+    expect(prompt).toContain("import { comandoDoProjeto } from './capivara-comando';");
   });
 });

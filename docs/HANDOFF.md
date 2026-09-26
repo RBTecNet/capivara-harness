@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.3.1 (`capivara --ver`) |
-| suíte | 1456 testes em 77 arquivos, `npm run check` verde |
+| suíte | 1466 testes em 77 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
@@ -90,17 +90,12 @@ de "todas as fases". É raro, porque `emendaInutil` recusa emenda que introduza 
 de defeito novo, e não mordeu em nenhum run. O conserto é o mesmo de
 `faseDoMarcador`: mapear a linha para a fase cujo cabeçalho a precede.
 
-**Candidato observado em campo, NÃO consertado (build em andamento):** os roteiros do
-gate 4 são escritos um por fluxo, cada um sozinho, e rodam em sequência contra a
-MESMA aplicação e o MESMO banco — o runner migra uma vez e não reinicia o estado entre
-roteiros, e o prompt de autoria (`prompts/flows.ts`) não diz uma palavra sobre
-independência. No P02 do `assistencia2` isso apareceu assim: o workflow 1 troca a
-senha inicial, e o workflow 4, que roda depois, tenta entrar com a senha que já não
-existe. O executor diagnosticou certo e contestou o roteiro
-(`CAPIVARA_ROTEIRO_ERRADO`), que é a saída desenhada para isto. Se a mesma família
-voltar nas fases seguintes — que têm mais fluxos dividindo o mesmo banco —, o conserto
-é de autoria (cada roteiro prepara o próprio estado e não depende do efeito de outro)
-ou de execução (banco descartável por roteiro). Decidir com a evidência, não antes.
+**Roteiros do gate 4 dividindo estado — CONSERTADO no §84.** A evidência veio na
+segunda passagem da P02 do `assistencia2`: o fluxo "Instalação inicial" lia um arquivo
+que só o instalador cria, e ninguém rodava o instalador. Cada passagem do gate 4 agora
+roda num ambiente próprio (diretório pessoal e banco em arquivo descartáveis), os
+roteiros rodam em sequência na ordem do plano, e o roteirista tem um ajudante para o
+que é terminal. Roteiros gravados antes da v2 são reescritos uma vez.
 
 **E a regra de contexto, que vale para os dois lados:** compactar contexto é
 perder detalhe, e perder detalhe é exatamente o defeito acima. No harness isso tem

@@ -5968,3 +5968,80 @@ O harness escreve cinco pastas em `.capivara/` e o `.gitignore` conhecia duas.
 `flows/`, `skills/` e `memorias/` nasceram depois da lista e ninguém voltou a ela — a
 mesma família do piloto 6, quando foi `handoffs/`. O teste novo pergunta ao **git**, e
 não à lista: se uma pasta nova do plano de controle ficar de fora, ele falha.
+
+## §84 — O gate 4 cobrava do produto o que ninguém tinha feito
+
+A P02 do `assistencia2` foi devolvida pelo gate 4 duas vezes com o produto certo. Os
+dois roteiros da fase:
+
+| roteiro | o que fez | por que reprovou |
+| --- | --- | --- |
+| workflow 1 — Instalação inicial | abriu `~/.assistencia2/credenciais-iniciais.txt` | o arquivo não existia: quem o cria é o instalador (`npm run install:initial`), e nada o rodava |
+| workflow 4 — Entrada e senha | leu a senha inicial do mesmo arquivo | rodou ao MESMO TEMPO que o 1, de quem dependia |
+
+O executor diagnosticou certo nas duas vezes (`CAPIVARA_ROTEIRO_ERRADO`), mas a
+contestação só troca o roteirista — e o novo roteirista estava sob as mesmas regras.
+
+### 84.1 Três defeitos do instrumento, uma família
+
+1. **O roteiro só sabia clicar.** O prompt proíbe `child_process` — com razão: foi
+   assim que um roteirista subiu um segundo servidor. Mas um passo de fluxo pode ser
+   o que um operador faz no terminal: instalar, migrar, semear. Sem porta para o
+   terminal, o roteirista FINGIU que o passo já tinha acontecido.
+2. **Os roteiros rodavam em paralelo** (dois workers), dividindo aplicação e banco,
+   e um fluxo pode depender do estado que o anterior deixa.
+3. **A passagem rodava na máquina de quem roda o harness.** O banco era o do `.env`
+   do projeto e o diretório pessoal era o do desenvolvedor: se o instalador tivesse
+   rodado, teria escrito no `~/` dele. E o estado sobrevivia de uma passagem à
+   seguinte — um fluxo que troca uma senha passaria na fase 2 e reprovaria na
+   regressão da fase 3, com a senha já trocada.
+
+### 84.2 O que mudou
+
+- **Cada passagem começa do zero** (`loop/passagem.ts`): um diretório pessoal
+  temporário (`HOME`, `USERPROFILE`, `XDG_CONFIG/DATA/STATE_HOME`) e, quando o projeto
+  declara o banco como ARQUIVO no `.env.example` ou no `.env` — reconhecido pelo valor
+  (`.sqlite`, `.sqlite3`, `.db`, `.db3`), não pelo nome da chave —, um arquivo novo no
+  mesmo diretório, apontado pela mesma chave. O `dotenv` e o Next não sobrescrevem o
+  que já está no ambiente, então a aplicação e o roteiro enxergam o mesmo banco novo.
+  Tudo é apagado ao fim da passagem, inclusive entre a primeira passagem e a que
+  segue uma reescrita de roteiro.
+- **A migração declarada (`migrate`) roda no banco novo**, com o mesmo ambiente, antes
+  de a aplicação subir. Só quando o banco é nosso: com banco em servidor, nada é
+  migrado, e o banco do `.env` continua sendo do desenvolvedor.
+- **Os caches da máquina continuam onde estão.** Trocar o `HOME` trocaria, junto, o
+  lugar onde o Playwright procura o navegador, o npm o cache, o cargo o registro. O
+  harness passa os PADRÕES de cada ferramenta, calculados a partir do diretório
+  pessoal real, e só quando a variável não existe — para a ferramenta, é o mesmo
+  lugar de sempre.
+- **Em sequência, na ordem do plano.** `workers: 1`, e cada roteiro vira um projeto do
+  Playwright que depende do anterior — é o jeito dele garantir ordem entre arquivos.
+  Quando um falha, os seguintes não rodam sobre um estado que não se formou.
+- **O ajudante** (`.capivara/flows/capivara-comando.ts`, escrito pelo harness a cada
+  passagem como a configuração): `comandoDoProjeto(comando, args)` roda UM comando na
+  raiz, com o ambiente da passagem e com prazo. `child_process` continua proibido no
+  roteiro, e a conferência mecânica recusa o ajudante chamado com `start`, `dev`,
+  `serve`, `preview` ou `build`.
+- **O roteirista sabe onde está**: que a passagem começa do zero, qual banco é novo, se
+  a migração foi aplicada, quais fluxos rodam antes do dele e onde estão os roteiros
+  deles — para ler o estado que deixam.
+- **Roteiros antigos são reescritos uma vez.** Todo roteiro gravado leva
+  `// capivara-flow: v2` na primeira linha. Sem ela, o roteiro foi escrito para o
+  ambiente antigo e é reescrito — os da fase e os da regressão que existem no disco.
+  Um roteiro de regressão AUSENTE continua não sendo escrito, como antes.
+
+### 84.3 Quem lia o que mudou
+
+- `FlowRunner` ganhou um terceiro parâmetro opcional (`env`); os runners de teste de
+  dois parâmetros continuam valendo.
+- O `author` do gate ganhou a passagem; o único chamador é o `runner.ts`.
+- `renderFlowConfig` sem `scripts` continua gerando a configuração antiga, mais
+  `workers: 1`.
+- `prepararAmbiente` (o `.env` semeado e a migração no banco do `.env` descartável)
+  não mudou: ele serve o gate 2 e continua servindo.
+
+Provado com um Playwright de verdade num projeto de rascunho, CommonJS e ESM: dois
+roteiros, o primeiro rodando o instalador pelo ajudante, o segundo lendo o que ele
+deixou; ordem respeitada, navegador encontrado, e nada escrito no `~/` real nem no
+banco do projeto.
+

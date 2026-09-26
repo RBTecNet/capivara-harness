@@ -318,7 +318,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         ...(contestacao ? { roteiroContestado: contestacao } : {}),
         ...(fluxos.regressao ? { regressao: fluxos.regressao } : {}),
         startCommand: await fluxos.resolveStart(),
-        author: async (workflow, rejected, baseUrl) => {
+        author: async (workflow, rejected, baseUrl, passagem) => {
           const resposta = await chamarLeitor({
             role: "verifier",
             phase: session,
@@ -329,6 +329,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
               // A porta é do gate: ele escolhe uma livre a cada passagem.
               baseUrl,
               ...(rejected.length > 0 ? { rejected } : {}),
+              passagem,
             }),
           });
           await writeAtomic(

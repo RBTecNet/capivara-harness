@@ -24,11 +24,34 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { SkeletonWorkflow } from "../contract/index.js";
 import { extractFlowScript, stepLabel } from "../prompts/index.js";
+import { comandoDeMigracao } from "./ambiente.js";
+import { FLOW_HELPER, bancosDeclarados, criarAmbienteDaPassagem, renderFlowHelper } from "./passagem.js";
 
 /** Onde os roteiros moram, relativo à raiz do projeto. */
 export const FLOWS_DIR = join(".capivara", "flows");
 
 export const FLOW_CONFIG = "playwright.config.mjs";
+
+/**
+ * A primeira linha de todo roteiro que o harness grava.
+ *
+ * Ela diz sob qual AMBIENTE o roteiro foi escrito. Até a v2 a passagem rodava
+ * contra o banco e o diretório pessoal da máquina, os roteiros em paralelo, e o
+ * roteirista não tinha como rodar um comando do projeto. Um roteiro escrito para
+ * aquilo — que lê um arquivo que ninguém criou, ou conta com um estado que não
+ * existe mais — reprova um produto certo. Sem a marca, o roteiro é reescrito uma
+ * vez, e custa uma sessão de roteirista em vez de um ciclo do executor.
+ */
+export const FLOW_MARK = "// capivara-flow: v2 — passagem isolada, em sequência";
+
+/** O roteiro gravado foi escrito para o ambiente de hoje? */
+export function roteiroAtual(conteudo: string): boolean {
+  return conteudo.startsWith(FLOW_MARK);
+}
+
+function comMarca(script: string): string {
+  return `${FLOW_MARK}\n${script.startsWith(FLOW_MARK) ? script.slice(FLOW_MARK.length).replace(/^\n/, "") : script}\n`;
+}
 
 /** A porta em que o gate sobe o produto. Alta e fixa: nada disputa com ela. */
 /**
@@ -163,6 +186,20 @@ export function checkFlowScript(script: string, workflow: SkeletonWorkflow): Flo
     });
   }
 
+  /*
+   * O ajudante roda o que um operador rodaria — instalar, migrar, semear. Nunca
+   * construir nem subir: a aplicação já está de pé, e um `build` no meio da
+   * passagem reescreve o que o servidor está servindo.
+   */
+  if (/comandoDoProjeto\s*\([^)]*['"`](?:start|dev|serve|preview|build)['"`]/.test(script)) {
+    defects.push({
+      problem: "o roteiro usa o ajudante para construir ou subir a aplicação",
+      hint:
+        "a aplicação JÁ ESTÁ DE PÉ: o harness a constrói e sobe antes do primeiro passo. Use `comandoDoProjeto` " +
+        "só para o que o operador faria no terminal — instalar, migrar, semear",
+    });
+  }
+
   if (/(?:goto|fetch|request\s*\.\s*\w+)\s*\(\s*[`'"]https?:\/\/(?:127\.0\.0\.1|localhost)/.test(script)) {
     defects.push({
       problem: "o roteiro escolhe onde a aplicação está",
@@ -191,8 +228,15 @@ export function checkFlowScript(script: string, workflow: SkeletonWorkflow): Flo
  * pudesse escolher, um roteiro poderia apontar para outro lugar e passar sem
  * nunca tocar no produto construído.
  */
-export function renderFlowConfig(options: { startCommand: string; port: number; timeoutSeconds?: number }): string {
+export function renderFlowConfig(options: {
+  startCommand: string;
+  port: number;
+  timeoutSeconds?: number;
+  /** Os roteiros NA ORDEM em que rodam. Cada um depende do anterior. */
+  scripts?: readonly string[];
+}): string {
   const url = `http://127.0.0.1:${options.port}`;
+  const scripts = options.scripts ?? [];
   return [
     "// Gerado pelo capivara a cada passagem do gate 4. Não edite: será sobrescrito.",
     "export default {",
@@ -200,7 +244,30 @@ export function renderFlowConfig(options: { startCommand: string; port: number; 
     "  timeout: 60_000,",
     "  reporter: [['list']],",
     "  fullyParallel: false,",
+    /*
+     * Um de cada vez, na ordem do plano.
+     *
+     * Os roteiros compartilham a aplicação e o banco da passagem, e um fluxo pode
+     * depender do que o anterior deixou — a senha trocada, o cadastro feito. Com
+     * dois workers, o fluxo 4 do `assistencia2` rodou antes do fluxo 1 que ele
+     * pressupunha. Cada roteiro vira um projeto que depende do anterior: é o jeito
+     * do Playwright garantir ordem entre arquivos, e quando um falha os seguintes
+     * não rodam sobre um estado que não se formou.
+     */
+    "  workers: 1,",
     "  forbidOnly: true,",
+    ...(scripts.length > 0
+      ? [
+          "  projects: [",
+          ...scripts.map((script, indice) => {
+            const nome = JSON.stringify(script.replace(/\.spec\.ts$/, ""));
+            const padrao = JSON.stringify(`**/${script}`);
+            const anterior = indice > 0 ? `, dependencies: [${JSON.stringify((scripts[indice - 1] ?? "").replace(/\.spec\.ts$/, ""))}]` : "";
+            return `    { name: ${nome}, testMatch: ${padrao}${anterior} },`;
+          }),
+          "  ],",
+        ]
+      : []),
     "  use: {",
     `    baseURL: '${url}',`,
     "    screenshot: 'only-on-failure',",
@@ -237,7 +304,11 @@ export interface FlowRun {
   toolMissing?: boolean;
 }
 
-export type FlowRunner = (projectRoot: string, scripts: string[]) => Promise<FlowRun>;
+/**
+ * `env` é o ambiente da passagem — diretório pessoal e banco descartáveis. Ele vai
+ * para o processo do runner e, dele, para a aplicação e para o roteiro.
+ */
+export type FlowRunner = (projectRoot: string, scripts: string[], env?: Record<string, string>) => Promise<FlowRun>;
 
 /**
  * A saída diz que o runner não está instalado?
@@ -293,12 +364,12 @@ export function faltaORunner(output: string, exitCode: number): boolean {
  * gate, esconderia do operador que o projeto não declarou a dependência. Sem o
  * runner, o gate diz o que falta e quem instala é o executor, como no gate 2.
  */
-export const defaultFlowRunner: FlowRunner = async (projectRoot, scripts) =>
+export const defaultFlowRunner: FlowRunner = async (projectRoot, scripts, env = {}) =>
   new Promise((resolve) => {
     const child = execFile(
       "npx",
       ["--no-install", "playwright", "test", "--config", FLOW_CONFIG, ...scripts],
-      { cwd: join(projectRoot, FLOWS_DIR), maxBuffer: 32 * 1024 * 1024, env: { ...process.env, CI: "1" } },
+      { cwd: join(projectRoot, FLOWS_DIR), maxBuffer: 32 * 1024 * 1024, env: { ...process.env, ...env, CI: "1" } },
       (error, stdout, stderr) => {
         const saida = `${stdout}${stderr}`;
         const code = error && typeof (error as { code?: number }).code === "number" ? (error as { code: number }).code : error ? 1 : 0;
@@ -337,8 +408,16 @@ export interface FlowGateOptions {
    * O `baseUrl` vem do gate porque é o gate quem escolhe a porta — quem monta o
    * prompt não tem como saber qual delas sobrou livre nesta passagem.
    */
-  author: (workflow: SkeletonWorkflow, rejected: string[], baseUrl: string) => Promise<string>;
+  author: (workflow: SkeletonWorkflow, rejected: string[], baseUrl: string, passagem: PassagemDoFluxo) => Promise<string>;
   runner?: FlowRunner;
+  /**
+   * Roda a migração declarada no banco NOVO da passagem.
+   *
+   * Só roda quando o banco da passagem é nosso — um arquivo que acabou de ser
+   * criado. Migrar o banco do `.env` do desenvolvedor é o que o §46 promete que
+   * nunca acontece.
+   */
+  executar?: (comando: string, cwd: string, env: Record<string, string>) => Promise<{ exitCode: number; output: string }>;
   /**
    * O executor declarou que o roteiro é que está errado, e por quê.
    *
@@ -353,6 +432,31 @@ export interface FlowGateOptions {
   maxDrafts?: number;
   announce?: (message: string) => void;
 }
+
+/** O que o roteirista precisa saber sobre a passagem em que o roteiro dele vai rodar. */
+export interface PassagemDoFluxo {
+  /** Os fluxos que rodam ANTES deste, na mesma passagem, e onde estão os roteiros deles. */
+  anteriores: Array<{ number: string; name: string; arquivo: string }>;
+  /** As chaves de ambiente cujo banco começa vazio a cada passagem. */
+  bancoNovo: string[];
+  /** A migração que o harness aplica nesse banco antes de a aplicação subir. */
+  migracao: string | null;
+  /** O arquivo do ajudante, relativo à pasta dos roteiros. */
+  ajudante: string;
+}
+
+const executarNoShell = async (
+  comando: string,
+  cwd: string,
+  env: Record<string, string>,
+): Promise<{ exitCode: number; output: string }> =>
+  new Promise((resolve) => {
+    const child = execFile("bash", ["-c", comando], { cwd, env: { ...process.env, ...env }, maxBuffer: 32 * 1024 * 1024 }, (error, stdout, stderr) => {
+      const code = error && typeof (error as { code?: number }).code === "number" ? (error as { code: number }).code : error ? 1 : 0;
+      resolve({ exitCode: code, output: `${stdout}${stderr}` });
+    });
+    child.stdin?.end();
+  });
 
 export type FlowGateResult =
   /**
@@ -451,11 +555,50 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
 
   await mkdir(pasta, { recursive: true });
 
-  for (const workflow of options.workflows) {
-    const arquivo = join(pasta, flowScriptName(workflow.number));
-    const existente = await readFile(arquivo, "utf8").catch(() => null);
-    if (existente !== null && checkFlowScript(existente, workflow).length === 0) continue;
+  /*
+   * A ordem da passagem: a regressão primeiro, na ordem em que as fases a
+   * cumpriram, e depois os fluxos desta fase. É a ordem em que os roteiros rodam
+   * e, por isso, a ordem em que um pode contar com o estado do outro.
+   */
+  const ordem = [...regressao, ...options.workflows].filter(
+    (workflow, indice, todos) => todos.findIndex((outro) => outro.number === workflow.number) === indice,
+  );
+  const bancos = await bancosDeclarados(options.projectRoot);
+  const migracao = Object.keys(bancos).length > 0 ? await comandoDeMigracao(options.projectRoot) : null;
+  const passagemDe = (workflow: SkeletonWorkflow): PassagemDoFluxo => {
+    const posicao = ordem.findIndex((outro) => outro.number === workflow.number);
+    return {
+      anteriores: ordem
+        .slice(0, Math.max(0, posicao))
+        .map((anterior) => ({ number: anterior.number, name: anterior.name, arquivo: join(FLOWS_DIR, flowScriptName(anterior.number)) })),
+      bancoNovo: Object.keys(bancos).sort(),
+      migracao,
+      ajudante: FLOW_HELPER,
+    };
+  };
 
+  /*
+   * Quem precisa de roteiro: os fluxos desta fase sem roteiro válido, e os da
+   * regressão cujo roteiro foi escrito para o ambiente antigo. Um roteiro de
+   * regressão AUSENTE continua não sendo escrito aqui — ver o filtro `noDisco`.
+   */
+  const aEscrever: SkeletonWorkflow[] = [];
+  for (const workflow of ordem) {
+    const daFase = options.workflows.some((atual) => atual.number === workflow.number);
+    const existente = await readFile(join(pasta, flowScriptName(workflow.number)), "utf8").catch(() => null);
+    if (existente === null) {
+      if (daFase) aEscrever.push(workflow);
+      continue;
+    }
+    if (!roteiroAtual(existente)) {
+      aEscrever.push(workflow);
+      continue;
+    }
+    if (daFase && checkFlowScript(existente, workflow).length > 0) aEscrever.push(workflow);
+  }
+
+  for (const workflow of aEscrever) {
+    const arquivo = join(pasta, flowScriptName(workflow.number));
     let rejeitado: string[] = [];
     let gravado = false;
     const tentativas = options.maxDrafts ?? 2;
@@ -463,10 +606,10 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
       announce(
         `roteiro do workflow ${workflow.number} (${workflow.name})` + (tentativa > 1 ? ` — tentativa ${tentativa}` : ""),
       );
-      const script = extractFlowScript(await options.author(workflow, rejeitado, baseUrl));
+      const script = extractFlowScript(await options.author(workflow, rejeitado, baseUrl, passagemDe(workflow)));
       const defeitos = checkFlowScript(script, workflow);
       if (defeitos.length === 0) {
-        await writeFile(arquivo, `${script}\n`, "utf8");
+        await writeFile(arquivo, comMarca(script), "utf8");
         gravado = true;
         break;
       }
@@ -483,8 +626,6 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
     }
   }
 
-  await writeFile(join(pasta, FLOW_CONFIG), renderFlowConfig({ startCommand: options.startCommand, port }), "utf8");
-
   /*
    * Só os roteiros dos fluxos desta fase e das anteriores. O que estiver na
    * pasta e não pertencer a nenhum deles é resto de outro plano — rodá-lo
@@ -497,7 +638,37 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
 
   if (scripts.length === 0) return { green: true, skipped: "nenhum fluxo a percorrer", scripts: [] };
 
+  await writeFile(join(pasta, FLOW_CONFIG), renderFlowConfig({ startCommand: options.startCommand, port, scripts }), "utf8");
+  await writeFile(join(pasta, FLOW_HELPER), renderFlowHelper(), "utf8");
+
   const runner = options.runner ?? defaultFlowRunner;
+  const executar = options.executar ?? executarNoShell;
+
+  /*
+   * Cada passagem num ambiente próprio, criado agora e apagado ao fim — inclusive
+   * a segunda passagem depois de um roteiro reescrito, que não pode herdar o que a
+   * primeira deixou.
+   */
+  const rodar = async (): Promise<FlowRun> => {
+    const ambiente = await criarAmbienteDaPassagem(options.projectRoot, bancos);
+    try {
+      if (migracao !== null) {
+        const migrou = await executar(migracao, options.projectRoot, ambiente.env);
+        if (migrou.exitCode !== 0) {
+          announce(`\`${migracao}\` falhou no banco novo da passagem (código ${migrou.exitCode}):\n${tail(migrou.output, 15)}`);
+        }
+      }
+      return await runner(options.projectRoot, scripts, ambiente.env);
+    } finally {
+      await ambiente.limpar();
+    }
+  };
+
+  announce(
+    "passagem isolada: diretório pessoal descartável" +
+      (Object.keys(bancos).length > 0 ? `, banco novo em ${Object.keys(bancos).sort().join(", ")}` : "") +
+      (scripts.length > 1 ? `; ${scripts.length} roteiros em sequência` : ""),
+  );
 
   /*
    * O executor contestou o roteiro: reescreve antes de rodar.
@@ -516,11 +687,12 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
           workflow,
           [`o executor diz que este roteiro está errado, e não o produto: ${options.roteiroContestado}`],
           baseUrl,
+          passagemDe(workflow),
         ),
       );
       const defeitos = checkFlowScript(script, workflow);
       if (defeitos.length === 0) {
-        await writeFile(arquivo, `${script}\n`, "utf8");
+        await writeFile(arquivo, comMarca(script), "utf8");
         announce(`  roteiro do fluxo ${workflow.number} reescrito`);
       } else {
         announce(`  o roteiro reescrito do fluxo ${workflow.number} veio com defeito; mantive o anterior`);
@@ -528,7 +700,7 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
     }
   }
 
-  let run = await runner(options.projectRoot, scripts);
+  let run = await rodar();
 
   /*
    * Falhou por culpa do roteiro? Reescreve e roda de novo, UMA vez.
@@ -544,13 +716,13 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
     for (const workflow of options.workflows) {
       const arquivo = join(pasta, flowScriptName(workflow.number));
       const script = extractFlowScript(
-        await options.author(workflow, [`o roteiro anterior falhou assim:\n${tail(run.output, 25)}`], baseUrl),
+        await options.author(workflow, [`o roteiro anterior falhou assim:\n${tail(run.output, 25)}`], baseUrl, passagemDe(workflow)),
       );
       const defeitos = checkFlowScript(script, workflow);
-      if (defeitos.length === 0) await writeFile(arquivo, `${script}\n`, "utf8");
+      if (defeitos.length === 0) await writeFile(arquivo, comMarca(script), "utf8");
     }
 
-    run = await runner(options.projectRoot, scripts);
+    run = await rodar();
     if (run.exitCode !== 0 && ehFalhaDoRoteiro(run.output)) {
       return {
         green: false,

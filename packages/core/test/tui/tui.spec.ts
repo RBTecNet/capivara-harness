@@ -456,7 +456,7 @@ describe("wizard", () => {
  */
 describe("PROGRESSO e TRABALHO ATUAL", () => {
   const base = {
-    version: "0.3.4",
+    version: "0.3.5",
     command: "build",
     subtitle: "build · implementação",
     project: "/home/bruno/pilotos/piloto-1",
@@ -550,7 +550,7 @@ describe("PROGRESSO e TRABALHO ATUAL", () => {
  */
 describe("o painel ocupa a altura que tem", () => {
   const base = {
-    version: "0.3.4",
+    version: "0.3.5",
     command: "plan",
     subtitle: "plan · detalhamento",
     project: "/home/bruno/pilotos/piloto-1",
@@ -611,7 +611,7 @@ describe("o painel ocupa a altura que tem", () => {
  */
 describe("o desenho nunca lança", () => {
   const hostil = (extra: Partial<DashboardModel>): DashboardModel => ({
-    version: "0.3.4",
+    version: "0.3.5",
     command: "plan",
     subtitle: "s",
     project: "p",

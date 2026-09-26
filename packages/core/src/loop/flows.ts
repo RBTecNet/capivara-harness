@@ -228,9 +228,22 @@ export function checkFlowScript(
     });
   }
 
-  // Interceptar a própria API transforma o gate em teatro: a tela passa a ser
-  // exercitada contra respostas inventadas pelo roteiro.
-  if (/page\s*\.\s*route\s*\(\s*['"`][^'"`]*(\/api\/|localhost)/.test(script)) {
+  /*
+   * Interceptar a própria API transforma o gate em teatro: a tela passa a ser
+   * exercitada contra respostas inventadas pelo roteiro.
+   *
+   * Mas o serviço de TERCEIRO pode ser substituído — o prompt diz isso. A regra
+   * olhava só se a URL continha `/api/`, e `https://brasilapi.com.br/api/cep/...`
+   * contém: na P06 do `assistencia2` o roteirista substituiu a consulta de CEP,
+   * certo, e foi recusado em todas as tentativas de todos os ciclos. URL absoluta
+   * para outro host é de terceiro; relativa, glob ou local é do produto.
+   */
+  const interceptaOProduto = [...script.matchAll(/page\s*\.\s*route\s*\(\s*['"`]([^'"`]*)['"`]/g)].some(([, alvo = ""]) => {
+    const absoluta = /^https?:\/\/([^/:]+)/i.exec(alvo);
+    if (absoluta) return /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/i.test(absoluta[1] ?? "");
+    return /\/api\/|localhost|127\.0\.0\.1/i.test(alvo);
+  });
+  if (interceptaOProduto) {
     defects.push({
       problem: "o roteiro intercepta o backend do próprio produto",
       hint: "o gate existe para exercitar o produto de verdade; só um serviço de terceiro pode ser substituído",

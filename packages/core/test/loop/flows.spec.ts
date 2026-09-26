@@ -120,6 +120,22 @@ describe("a conferência do roteiro, antes de abrir navegador nenhum", () => {
     expect(checkFlowScript(mockado, WORKFLOW).map((d) => d.problem).join(" ")).toContain("intercepta o backend");
   });
 
+  /*
+   * A P06 do `assistencia2`: a consulta de CEP à BrasilAPI substituída, como o
+   * prompt permite, recusada em todas as tentativas porque a URL tem `/api/`.
+   */
+  it("aceita substituir um serviço de TERCEIRO, mesmo com /api/ na URL", () => {
+    const comTerceiro = roteiroBom().replace(
+      "await page.goto('/');",
+      "await page.route('https://brasilapi.com.br/api/cep/v1/66001000', (r) => r.fulfill({ body: '{}' }));\n    await page.goto('/');",
+    );
+    expect(checkFlowScript(comTerceiro, WORKFLOW)).toEqual([]);
+    for (const proprio of ["http://127.0.0.1:3000/api/x", "http://localhost/api/x", "/api/clientes", "**/api/**"]) {
+      const roteiro = roteiroBom().replace("await page.goto('/');", `await page.route('${proprio}', (r) => r.abort());\n    await page.goto('/');`);
+      expect(checkFlowScript(roteiro, WORKFLOW).map((d) => d.problem).join(" "), proprio).toContain("intercepta o backend");
+    }
+  });
+
   it("tolera acento, caixa e pontuação no texto do passo", () => {
     const comVariacao = roteiroBom().replace("passo 2: clica em Interpretar", "Passo 2 — Clica em interpretar.");
     expect(checkFlowScript(comVariacao, WORKFLOW)).toEqual([]);

@@ -6234,3 +6234,20 @@ Provado com um Playwright de verdade num projeto de rascunho: roteiro procurando
 "Salvar registro" numa página com "Salvar"; a triagem recebeu o retrato real, o
 roteiro foi reescrito e a mesma chamada do gate saiu verde.
 
+## §88 — O serviço de terceiro que a conferência recusava
+
+A P06 do `assistencia2` não chegou a abrir a aplicação no gate 4: o roteiro do
+workflow 7 "não passou na conferência estrutural em 2 tentativas", ciclo após ciclo,
+com o executor sem nada a mudar. O roteirista substituía a consulta de CEP à BrasilAPI
+com `page.route('https://brasilapi.com.br/api/cep/...')` — o que o prompt dele
+autoriza: "um serviço de terceiro pode ser substituído". A regra mecânica recusava
+qualquer `page.route` cuja URL contivesse `/api/`, e a da BrasilAPI contém.
+
+Agora URL absoluta para outro host é de terceiro e passa; o que continua recusado é
+relativo, glob e local (`/api/clientes`, `**/api/**`, `localhost`, `127.0.0.1`). Os
+dois rascunhos recusados na P06 passam na conferência nova.
+
+O evento do run guarda só a primeira linha da causa, e a lista de defeitos da
+conferência ficava nas linhas seguintes: o diagnóstico precisou reproduzir a
+conferência sobre o log do roteirista.
+

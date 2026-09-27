@@ -41,6 +41,8 @@
  * símbolo, e o que o levantamento não conseguiu sustentar vira pergunta.
  */
 
+import { jsonDaResposta } from "./resposta.js";
+
 export const SURVEY_CONTRACT = "capivara-survey/v1" as const;
 
 /** A que camada um achado pertence. Fechada dos dois lados. */
@@ -162,10 +164,6 @@ function list(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.map((item) => (item ?? {}) as Record<string, unknown>) : [];
 }
 
-function stripFence(source: string): string {
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(source);
-  return (fenced?.[1] ?? source).trim();
-}
 
 /** O sistema chama, é chamado, ou os dois. Fora da lista, "saida" é o caso comum. */
 function direcao(value: unknown): SurveyIntegration["direction"] {
@@ -207,7 +205,7 @@ export interface SurveyParseOptions {
 export function parseSurvey(source: string, options: SurveyParseOptions = {}): SurveyResult {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(stripFence(source));
+    parsed = jsonDaResposta(source);
   } catch {
     return {
       ok: false,

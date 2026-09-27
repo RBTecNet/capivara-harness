@@ -22,6 +22,7 @@
  */
 
 import type { CoverageSources } from "./coverage.js";
+import { jsonDaResposta } from "./resposta.js";
 
 export const SKELETON_CONTRACT = "capivara-skeleton/v1" as const;
 
@@ -132,10 +133,6 @@ function strings(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => text(item)).filter((item) => item !== "") : [];
 }
 
-function stripFence(source: string): string {
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(source);
-  return (fenced?.[1] ?? source).trim();
-}
 
 /**
  * Lê o esqueleto, nunca lança, e recusa o que o loop não conseguiria executar.
@@ -147,7 +144,7 @@ function stripFence(source: string): string {
 export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number }): SkeletonResult {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(stripFence(source));
+    parsed = jsonDaResposta(source);
   } catch {
     return {
       ok: false,

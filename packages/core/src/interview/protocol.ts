@@ -8,6 +8,7 @@
  */
 
 import { QUESTIONS_CONTRACT, type Assumption, type Omission, type Question, type QuestionOption } from "./types.js";
+import { jsonDaResposta } from "../contract/resposta.js";
 
 export interface QuestionDefect {
   index: number;
@@ -109,7 +110,7 @@ function options(value: unknown): QuestionOption[] {
 export function parseQuestionBatch(source: string): QuestionBatch {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(stripFence(source));
+    parsed = jsonDaResposta(source);
   } catch {
     return {
       ok: false,
@@ -273,8 +274,3 @@ export function parseQuestionBatch(source: string): QuestionBatch {
     : { ok: true, questions, assumptions, omissions };
 }
 
-function stripFence(source: string): string {
-  const trimmed = source.trim();
-  const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
-  return fenced?.[1] ?? trimmed;
-}

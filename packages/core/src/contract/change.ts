@@ -19,6 +19,7 @@
  */
 
 import type { Skeleton, SkeletonEntity, SkeletonPhase, SkeletonRule, SkeletonWorkflow } from "./skeleton.js";
+import { jsonDaResposta } from "./resposta.js";
 
 export const CHANGE_CONTRACT = "capivara-change/v1" as const;
 
@@ -80,10 +81,6 @@ function list(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.map((item) => (item ?? {}) as Record<string, unknown>) : [];
 }
 
-function stripFence(source: string): string {
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(source);
-  return (fenced?.[1] ?? source).trim();
-}
 
 /** Quantas fases uma mudança pode trazer. Acima disso não é mudança, é projeto. */
 export const MAX_FASES_DA_MUDANCA = 3;
@@ -91,7 +88,7 @@ export const MAX_FASES_DA_MUDANCA = 3;
 export function parseChange(source: string, limits: { maxTasksPerPhase: number }): ChangeResult {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(stripFence(source));
+    parsed = jsonDaResposta(source);
   } catch {
     return { ok: false, defects: [{ problem: "a resposta não é JSON válido", hint: `devolva um objeto { "contract": "${CHANGE_CONTRACT}", … } sem cerca de código` }] };
   }

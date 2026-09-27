@@ -6264,3 +6264,22 @@ normal de quem está trabalhando matavam a chamada. Correção pela metade.
 Agora quem não transmite (claude, agy, cursor) fica só sob o limite de PAREDE; codex
 e opencode, que transmitem, continuam sob os três.
 
+## §90 — Quatro leitores de JSON, dois comportamentos
+
+O `survey` do cronus3 com o codex parou no mapa: "a resposta não é JSON válido",
+três vezes. A resposta do modelo não ficou no disco desta máquina, mas o leitor
+tinha dois jeitos de recusar JSON certo, e um levantamento de código cai nos dois:
+
+- uma frase antes do objeto ("Segue o mapa: {…}") — nenhum leitor tolerava;
+- um trecho de código com crases dentro de uma string do JSON — três dos leitores
+  pegavam a PRIMEIRA cerca que aparecesse e cortavam o objeto no meio.
+
+E eram quatro cópias: survey, esqueleto e change com um comportamento, a entrevista
+com outro. Agora há um leitor só (`contract/resposta.ts`), que tenta a resposta
+inteira, depois as cercas — as marcadas `json` primeiro —, e por fim do primeiro `{`
+ao último `}`; o primeiro objeto que sair vence, e quem chama continua conferindo o
+contrato. Resposta cortada continua recusada.
+
+O teto de bytes por resposta é 8 MB; a hipótese de o harness ter truncado o mapa
+não se sustenta.
+

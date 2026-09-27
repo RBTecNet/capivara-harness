@@ -70,3 +70,4 @@ export type { SurveyCoverage } from "./survey-render.js";
 export { CHANGE_CONTRACT, MAX_FASES_DA_MUDANCA, applyChange, parseChange } from "./change.js";
 export type { Change, ChangeApplied, ChangeDefect, ChangePhase, ChangeQuestion, ChangeResult, ChangeRule } from "./change.js";
 export { desgrudarChaves } from "./protocolo.js";
+export { jsonDaResposta } from "./resposta.js";

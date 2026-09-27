@@ -50,7 +50,7 @@ function natureza(mensagem: string): NaturezaDaParada {
 }
 
 const DE_QUEM_EXTRA: Partial<Record<NaturezaDaParada, string>> = {
-  ambiente: "do provider, da CLI ou da rede: a chamada não produziu uma resposta do modelo",
+  ambiente: "do provider ou da rede, ou da CLI que os chama: a chamada não produziu uma resposta do modelo",
   modelo: "da sessão do modelo: o texto que ele devolveu não serve",
 };
 

@@ -6283,3 +6283,24 @@ contrato. Resposta cortada continua recusada.
 O teto de bytes por resposta é 8 MB; a hipótese de o harness ter truncado o mapa
 não se sustenta.
 
+## §91 — O codex que nunca rodou, lido como JSON inválido
+
+Depois do §90, o `survey` do cronus3 com o codex falhou igual: "o levantamento de
+mapa veio inválido 3 vezes: a resposta não é JSON válido". A causa não era o JSON.
+
+- O codex recebe `--cd <raiz>`, e a raiz do survey é a pasta de SAÍDA
+  (`./levantamento`), que o orquestrador só criava DEPOIS do mapa. Com uma pasta que
+  não existe, `codex exec` responde `Error: No such file or directory (os error 2)` e
+  sai com código ZERO. O claude escapava porque não recebe `--cd`.
+- O survey não olhava se a chamada tinha falhado: pedia ao modelo que "corrigisse o
+  JSON" de uma mensagem de erro, três vezes, e a parada dizia "da sessão do modelo".
+  O build separa isso desde sempre (gate 0); o survey não.
+- A parada apontava a evidência em `.capivara/runs/survey-…`, que não existia: a
+  ponte não grava as respostas, e o run do survey mora sob a pasta de saída.
+
+Agora a ponte cria a raiz antes de qualquer chamada — em todo estágio; para init,
+plan e build ela já existe —, e o survey pára na primeira chamada que volta sem
+resultado legível, com código diferente de zero ou com erro reportado, dizendo que
+é do ambiente e mostrando o que a CLI disse. Provado com o codex de verdade e a
+pasta inexistente: a chamada respondeu.
+

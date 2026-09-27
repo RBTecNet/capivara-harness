@@ -16,7 +16,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.3.5 (`capivara --ver`) |
-| suíte | 1494 testes em 77 arquivos, `npm run check` verde |
+| suíte | 1496 testes em 77 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
@@ -283,6 +283,15 @@ Em ordem de importância, não de esforço:
     `cliente_criado_no_modal_disponivel`). A causa poderia dizer isso, em vez de
     deixar o executor descobrir. E a suíte do `assistencia2` já leva cinco minutos
     por passagem.
+16. **Init, plan e change não separam motor que falhou de resposta ruim.** Só o
+    build (gate 0) e, desde o §91, o survey olham `exitCode`, `resultRead` e
+    `engineError`. Nos outros, uma CLI que falha antes de responder vira "o modelo
+    devolveu texto inválido" e gasta tentativas pedindo correção de forma. Mesma
+    família do §91; ficou de fora para não misturar com o conserto do survey.
+17. **O survey não guarda o que o modelo respondeu.** A ponte não grava respostas, e
+    a parada do survey aponta `.capivara/runs/survey-…` relativo à pasta atual,
+    quando o run mora sob a pasta de saída — e lá também não há nada. No cronus3 o
+    diagnóstico teve de ser feito reproduzindo a chamada.
 15. **Gate 4 — a resposta da API na causa.** Quando um passo falha por status HTTP
     (o 400 da edição do tenant, na P04), o corpo da resposta — a mensagem de erro
     do produto — não chega a ninguém; o executor reproduz para descobrir.

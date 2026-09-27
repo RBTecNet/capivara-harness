@@ -6,6 +6,7 @@
  * sem tocar em provider real, e o que mantém o custo do desenvolvimento honesto.
  */
 
+import { mkdir } from "node:fs/promises";
 import {
   buildInvocation,
   createLineSplitter,
@@ -85,6 +86,18 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
             if (resumo) request.onActivity?.(resumo);
           })
         : null;
+
+    /*
+     * A pasta de trabalho existe ANTES da chamada.
+     *
+     * O codex recebe `--cd <raiz>`, e com uma pasta que não existe ele responde
+     * "Error: No such file or directory" e sai com código ZERO. O survey passa a
+     * pasta de SAÍDA como raiz, e ela só era criada depois do mapa: o survey do
+     * cronus3 com o codex foi recusado três vezes como "JSON inválido" sem que
+     * o modelo tivesse chegado a rodar. Para init, plan e build a pasta já existe
+     * e isto não faz nada.
+     */
+    await mkdir(options.projectRoot, { recursive: true });
 
     const result = await runProvider({
       invocation,

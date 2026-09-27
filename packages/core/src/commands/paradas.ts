@@ -45,12 +45,12 @@ function natureza(mensagem: string): NaturezaDaParada {
   if (/Decisão do desenvolvedor: abortar/i.test(mensagem)) return "decisão";
   if (/não há esqueleto publicado|não há o que levantar|rode `capivara/i.test(mensagem)) return "decisão";
   if (/não passa no parser|inalcançável/i.test(mensagem)) return "harness";
-  if (/estourou o tempo|não respondeu|limite do harness/i.test(mensagem)) return "ambiente";
+  if (/estourou o tempo|não respondeu|limite do harness|falhou antes de o modelo responder/i.test(mensagem)) return "ambiente";
   return "modelo";
 }
 
 const DE_QUEM_EXTRA: Partial<Record<NaturezaDaParada, string>> = {
-  ambiente: "do provider ou da rede: a chamada não voltou a tempo",
+  ambiente: "do provider, da CLI ou da rede: a chamada não produziu uma resposta do modelo",
   modelo: "da sessão do modelo: o texto que ele devolveu não serve",
 };
 

@@ -44,6 +44,10 @@ export interface SurveyCall {
     stdout: string;
     stderr: string;
     timedOut: string | null;
+    /** A CLI emitiu um resultado legível? Ausente quando ela não tem envelope. */
+    resultRead?: boolean;
+    /** A CLI reportou a volta como erro. */
+    engineError?: boolean;
   }>;
 }
 
@@ -160,6 +164,22 @@ async function pedir(
     // Defeito de ambiente não vira defeito de conteúdo: o modelo não tem como
     // corrigir um timeout reescrevendo o JSON (§34.8).
     if (resposta.timedOut) throw new SurveyBlockedError(`a leitura de ${subject} foi encerrada por limite do harness (${resposta.timedOut})`);
+
+    /*
+     * O motor que falhou não respondeu mal: não respondeu. Pedir a ele que
+     * "corrija o JSON" de uma mensagem de erro é gastar três chamadas e contar a
+     * história errada — no cronus3, o codex nem chegou a rodar e o survey disse
+     * três vezes que a resposta não era JSON. É o gate 0 do build, que aqui
+     * faltava.
+     */
+    if (resposta.engineError === true || resposta.resultRead === false || resposta.exitCode !== 0) {
+      const fim = (resposta.stdout.trim() || resposta.stderr.trim()).split("\n").slice(-12).join("\n");
+      throw new SurveyBlockedError(
+        `a chamada do levantamento de ${subject} falhou antes de o modelo responder` +
+          (resposta.exitCode !== 0 ? ` (código ${resposta.exitCode})` : "") +
+          `. É do ambiente ou da CLI, não do texto:\n${fim}`,
+      );
+    }
 
     const lido = parseSurvey(resposta.stdout, conhecidos ? { domains: conhecidos } : {});
     if (lido.ok) return lido.survey;

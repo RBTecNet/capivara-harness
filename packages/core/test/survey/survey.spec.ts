@@ -325,3 +325,43 @@ describe("o destino do levantamento", () => {
     expect(await readFile(join(saida, "levantamento.md"), "utf8")).toContain("Levantamento");
   });
 });
+
+/*
+ * O survey do cronus3 com o codex: a CLI recebeu `--cd` numa pasta de saída que
+ * ainda não existia, respondeu "Error: No such file or directory" com código
+ * zero, e o survey pediu três vezes ao modelo que corrigisse um JSON que ele
+ * nunca escreveu.
+ */
+describe("o motor que falhou não respondeu mal", () => {
+  it("resposta sem resultado legível para o survey como ambiente, na primeira chamada", async () => {
+    let chamadas = 0;
+    const erro = await runSurvey({
+      projectRoot: legado,
+      outputRoot: saida,
+      language: "português do Brasil",
+      call: async () => {
+        chamadas += 1;
+        return { exitCode: 0, stdout: "Error: No such file or directory (os error 2)", stderr: "", timedOut: null, resultRead: false };
+      },
+    }).catch((falha: unknown) => falha);
+
+    expect(erro).toBeInstanceOf(SurveyBlockedError);
+    expect(chamadas).toBe(1);
+    expect((erro as Error).message).toContain("falhou antes de o modelo responder");
+    expect((erro as Error).message).toContain("No such file or directory");
+
+    const { paradaDoEstagio } = await import("../../src/commands/paradas.js");
+    expect(paradaDoEstagio(erro as Error, "survey").deQuem).toContain("da CLI");
+  });
+
+  it("código de saída diferente de zero também", async () => {
+    const erro = await runSurvey({
+      projectRoot: legado,
+      outputRoot: saida,
+      language: "português do Brasil",
+      call: async () => ({ exitCode: 2, stdout: "", stderr: "unknown model", timedOut: null }),
+    }).catch((falha: unknown) => falha);
+    expect((erro as Error).message).toContain("(código 2)");
+    expect((erro as Error).message).toContain("unknown model");
+  });
+});

@@ -6251,3 +6251,16 @@ O evento do run guarda só a primeira linha da causa, e a lista de defeitos da
 conferência ficava nas linhas seguintes: o diagnóstico precisou reproduzir a
 conferência sobre o log do roteirista.
 
+## §89 — O relógio de ocioso numa CLI que só responde no fim
+
+O `survey` do cronus3, com o claude como escritor, parou na leitura do domínio D-03
+(56 arquivos): "encerrada por limite do harness (idle)". O `claude -p
+--output-format json` não escreve nada até terminar; o harness já sabia disso e,
+para CLIs assim, desligava o limite de PRIMEIRA SAÍDA desde a fase 3 do MCP_teste.
+O de OCIOSO continuava ligado: ele começa a contar na primeira coisa que o processo
+escreve — um aviso no stderr basta —, e dali em diante dez minutos do silêncio
+normal de quem está trabalhando matavam a chamada. Correção pela metade.
+
+Agora quem não transmite (claude, agy, cursor) fica só sob o limite de PAREDE; codex
+e opencode, que transmitem, continuam sob os três.
+

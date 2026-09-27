@@ -211,4 +211,33 @@ describe("o limite de primeira saída e quem não transmite", () => {
     expect(result.timedOut).toBeNull();
     expect(result.stdout).toBe("pronto");
   });
+  /*
+   * O survey do cronus3 com o claude: um aviso no stderr logo no começo armou o
+   * relógio de ocioso, e o silêncio de quem só responde no fim foi lido como
+   * travamento.
+   */
+  it("para quem não transmite, um aviso no começo não arma o relógio de ocioso", async () => {
+    const avisaECala = "process.stderr.write('aviso'); setTimeout(() => process.stdout.write('pronto'), 400)";
+    const invocation = { ...node(avisaECala), streams: false };
+    const result = await runProvider({
+      invocation,
+      prompt: "",
+      limits: limitsFor(invocation, { ...limits, idleSeconds: 0.2 }),
+    });
+
+    expect(result.timedOut).toBeNull();
+    expect(result.stdout).toBe("pronto");
+  });
+
+  it("quem transmite continua sob o relógio de ocioso", async () => {
+    const avisaECala = "process.stderr.write('aviso'); setTimeout(() => process.stdout.write('pronto'), 400)";
+    const invocation = { ...node(avisaECala), streams: true };
+    const result = await runProvider({
+      invocation,
+      prompt: "",
+      limits: limitsFor(invocation, { ...limits, idleSeconds: 0.2 }),
+    });
+
+    expect(result.timedOut).toBe("idle");
+  });
 });

@@ -58,7 +58,15 @@ export interface Invocation {
  * importa nesse caso: a chamada inteira passou do tempo aceitável.
  */
 export function limitsFor(invocation: Invocation, limits: SupervisorLimits): SupervisorLimits {
-  return invocation.streams ? limits : { ...limits, firstOutputSeconds: 0 };
+  /*
+   * E o de OCIOSO também, pelo mesmo motivo. Ele começa a contar na primeira
+   * coisa que o processo escreve — um aviso no stderr basta —, e numa CLI que só
+   * responde no fim o silêncio depois disso é o trabalho acontecendo. O survey do
+   * cronus3 morreu assim com o claude, lendo um domínio de 56 arquivos: "encerrada
+   * por limite do harness (idle)". Tirar só o de primeira saída foi a correção
+   * pela metade.
+   */
+  return invocation.streams ? limits : { ...limits, firstOutputSeconds: 0, idleSeconds: 0 };
 }
 
 function safe(value: string, field: string): string {

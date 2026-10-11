@@ -19,8 +19,8 @@ import {
   runInit,
   runPlan,
 } from "./init/index.js";
-import { createMcpClient, enviarLevantamento, projetoExiste, fetchProjectMaterial, listLibraryProjects, registrarMemorias, type MemoriaParaRegistrar } from "./mcp/index.js";
-import type { ProjectMaterial } from "./mcp/index.js";
+import { configuredMcpUrl, resolveMcpEndpoint, resolveMcpProject, createMcpClient, enviarLevantamento, projetoExiste, fetchProjectMaterial, listLibraryProjects, registrarMemorias, type MemoriaParaRegistrar } from "./mcp/index.js";
+import type { McpClient, ProjectMaterial } from "./mcp/index.js";
 import type { InitOptions } from "./init/index.js";
 import { commitSpecification, iniciarRepositorio, relatorioDoBuild, runBuild } from "./loop/index.js";
 import {
@@ -55,6 +55,7 @@ import { MAX_DOMINIOS, SurveyBlockedError, runSurvey } from "./survey/index.js";
 import { ChangeBlockedError, renderQuestion as renderPerguntaDaMudanca, runChange } from "./change/index.js";
 import type { DecisaoDeColisao } from "./survey/index.js";
 import { VERSION } from "./version.js";
+import { registerConfigCommand } from "./commands/config.js";
 
 interface CommonFlags extends CliRoleFlags {
   project?: string;
@@ -164,7 +165,8 @@ async function completarPapeis<T extends CliRoleFlags>(comando: string, faltando
  * e as duas origens que dependem dela sumiam da lista sem nenhum aviso.
  */
 function mundoDoWizard() {
-  const cliente = (url: string) => createMcpClient({ url }, { timeoutSeconds: 15 });
+  const cliente = (url: string) => createMcpClient(resolveMcpEndpoint(url)!, { timeoutSeconds: 15 });
+  const defaultMcpUrl = configuredMcpUrl();
   return {
     /*
      * O wizard conecta de verdade para listar os projetos. Perguntar o nome do
@@ -186,7 +188,7 @@ function mundoDoWizard() {
       await client.initialize();
       return await client.prompt(name);
     },
-    ...(process.env.CAPIVARA_MCP_URL ? { defaultMcpUrl: process.env.CAPIVARA_MCP_URL } : {}),
+    ...(defaultMcpUrl ? { defaultMcpUrl } : {}),
     fileExists: (path: string) => stat(path).then((info) => info.isFile()).catch(() => false),
     directoryExists: (path: string) => stat(path).then((info) => info.isDirectory()).catch(() => false),
   };
@@ -577,12 +579,18 @@ async function lerPromptDaBase(
   escrever: (linha: string) => void,
 ): Promise<{ texto: string; nome: string } | "erro"> {
   const nome = (flags.prompt ?? "").trim();
-  if (!flags.mcp) {
-    escrever("erro: --prompt precisa de --mcp: é na base que os prompts estão guardados.");
+  let endpoint;
+  try { endpoint = resolveMcpEndpoint(flags.mcp); }
+  catch (error) {
+    escrever(`erro: ${error instanceof Error ? error.message : "configuração MCP inválida"}`);
     return "erro";
   }
-
-  const client = createMcpClient({ url: flags.mcp }, { timeoutSeconds: 20 });
+  if (!endpoint) {
+    escrever("erro: --prompt precisa de uma base MCP; adicione em capivara config ou informe --mcp.");
+    return "erro";
+  }
+  flags.mcp = endpoint.url;
+  const client = createMcpClient(endpoint, { timeoutSeconds: 20 });
 
   /*
    * Nome errado ensina os certos.
@@ -630,6 +638,7 @@ async function lerDaBase(
   escrever: (mensagem: string) => void,
   modo: { tolerante?: boolean } = {},
 ): Promise<ProjectMaterial | null | "erro"> {
+  Object.assign(flags, resolveMcpProject(flags));
   const url = flags.mcp?.trim();
   const projeto = flags.mcpProject?.trim();
   if (!url && !projeto) return null;
@@ -640,7 +649,9 @@ async function lerDaBase(
   }
 
   try {
-    const client = createMcpClient({ url });
+    const endpoint = resolveMcpEndpoint(url)!;
+    flags.mcp = endpoint.url;
+    const client = createMcpClient(endpoint);
     await client.initialize();
     const material = await fetchProjectMaterial(client, projeto);
     escrever(
@@ -672,6 +683,8 @@ export function createProgram(): Command {
     .description("Harness documental e loop de execução: do prompt à aplicação final")
     .version(VERSION, "-v, --version", "mostra a versão")
     .helpOption("-h, --help", "mostra esta ajuda");
+
+  registerConfigCommand(program);
 
   const providers = program.command("providers").description("Inspeciona os modelos disponíveis");
   providers
@@ -859,9 +872,18 @@ export function createProgram(): Command {
     const terminalSurvey = stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
     const linhasSurvey = terminalSurvey ? createLineIO(terminalSurvey, (texto) => void stdout.write(texto), { interactive: true }) : null;
 
-    const base = flags.mcp
+    const mcpUrl = configuredMcpUrl(flags.mcp);
+    const base = mcpUrl
       ? await (async () => {
-          const client = createMcpClient({ url: flags.mcp! }, { timeoutSeconds: 30 });
+          let client: McpClient;
+          try {
+            const endpoint = resolveMcpEndpoint(mcpUrl)!;
+            flags.mcp = endpoint.url;
+            client = createMcpClient(endpoint, { timeoutSeconds: 30 });
+          } catch (error) {
+            stdout.write(`aviso: ${error instanceof Error ? error.message : "configuração MCP inválida"}; o levantamento fica somente nos arquivos locais\n`);
+            return null;
+          }
           const conectado = await client
             .initialize()
             .then(() => true)
@@ -925,7 +947,7 @@ export function createProgram(): Command {
           "Para reescrever, diga o que muda — a stack de destino e o que fica de fora — e rode o init:",
           ...(resultado.destino?.enviado === true
             ? [
-                `  o pedido já está rascunhado em ${(flags.mcp ?? "").replace(/\/mcp$/, "")}/projeto/${resultado.destino.slug}`,
+                `  o pedido já está rascunhado no projeto "${resultado.destino.slug}"; abra-o na interface do doc-center`,
                 `  capivara init --mcp ${flags.mcp} --mcp-project ${resultado.destino.slug}`,
               ]
             : [`  capivara init --file ${join(saida, "levantamento.md")}`]),
@@ -1094,7 +1116,7 @@ export function createProgram(): Command {
         ...(material && flags.mcp && flags.mcpProject
           ? {
               onMemorias: async (memorias) => {
-                const client = createMcpClient({ url: flags.mcp! }, { timeoutSeconds: 20 });
+                const client = createMcpClient(resolveMcpEndpoint(flags.mcp)!, { timeoutSeconds: 20 });
                 await client.initialize();
                 await registrarMemorias(client, flags.mcpProject!, memorias, (mensagem) => stdout.write(`${mensagem}\n`));
               },
@@ -1372,10 +1394,9 @@ export function createProgram(): Command {
      * dependência (§34).
      */
     const herdada = baseRegistrada(pedidoRegistrado);
-    if (herdada && (flags.mcp ?? "").trim() === "") {
-      flags.mcp = herdada.url;
-      flags.mcpProject = herdada.projeto;
-      stdout.write(`base do projeto: ${herdada.projeto} em ${herdada.url} (registrada pelo init)\n`);
+    Object.assign(flags, resolveMcpProject(flags, herdada));
+    if (herdada && flags.mcpProject) {
+      stdout.write(`base do projeto: ${flags.mcpProject} (registrada pelo init; flags, ambiente e configuração global definem o endpoint atual)\n`);
     }
 
     const materialDoBuild = await lerDaBase(flags, (mensagem) => stdout.write(`${mensagem}\n`), { tolerante: true });
@@ -1389,7 +1410,7 @@ export function createProgram(): Command {
       flags.mcp && flags.mcpProject
         ? async (memorias: MemoriaParaRegistrar[]): Promise<void> => {
             try {
-              const client = createMcpClient({ url: flags.mcp! }, { timeoutSeconds: 20 });
+              const client = createMcpClient(resolveMcpEndpoint(flags.mcp)!, { timeoutSeconds: 20 });
               await client.initialize();
               const resultado = await registrarMemorias(client, flags.mcpProject!, memorias, (mensagem) =>
                 stdout.write(`${mensagem}\n`),

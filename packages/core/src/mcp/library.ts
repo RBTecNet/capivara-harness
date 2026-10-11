@@ -17,6 +17,11 @@ import type { McpClient, McpDocument, McpFile, McpResource } from "./client.js";
 
 export const PEDIDO_SUFIXO = "/pedido";
 
+/** Conversas anteriores são consultáveis, mas não são decisões selecionadas. */
+function ehHistorico(uri: string): boolean {
+  return /^capivara:\/\/[^/]+\/historico(?:\/|$)/.test(uri);
+}
+
 /** `capivara://biblioteca/docs/memoria/estilo` → `memoria`. */
 export function tipoDoDocumento(uri: string): string {
   const partes = uri.split("/docs/")[1]?.split("/") ?? [];
@@ -64,7 +69,7 @@ export async function fetchProjectMaterial(client: McpClient, projeto: string): 
    * sob o mesmo URI. Remontá-lo aqui é o que permite materializar a skill com os
    * caminhos relativos que o próprio SKILL.md cita.
    */
-  const bases = doProjeto.filter((recurso) => !recurso.uri.endsWith(PEDIDO_SUFIXO) && !ehArquivoDePacote(recurso.uri, doProjeto));
+  const bases = doProjeto.filter((recurso) => !ehHistorico(recurso.uri) && !recurso.uri.endsWith(PEDIDO_SUFIXO) && !ehArquivoDePacote(recurso.uri, doProjeto));
 
   const documents: McpDocument[] = [];
   for (const recurso of bases) {
@@ -243,7 +248,7 @@ export async function listLibraryProjects(client: McpClient): Promise<LibraryPro
 
     const atual = contagem.get(slug) ?? { slug, hasRequest: false, documents: 0 };
     if (recurso.uri.endsWith(PEDIDO_SUFIXO)) atual.hasRequest = true;
-    else atual.documents += 1;
+    else if (!ehHistorico(recurso.uri)) atual.documents += 1;
     contagem.set(slug, atual);
   }
 

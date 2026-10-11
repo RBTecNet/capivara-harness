@@ -16,6 +16,7 @@
  */
 
 import { VERSION } from "../version.js";
+import { redact } from "../provider/redact.js";
 
 export const MCP_PROTOCOL_VERSION = "2025-06-18";
 
@@ -89,12 +90,12 @@ export interface McpClientOptions {
  * o primeiro funcionaria contra metade dos servidores — e falharia com uma
  * mensagem sobre JSON inválido, que manda quem lê procurar no lugar errado.
  */
-function lerEnvelope(corpo: string, tipo: string): RpcResponse {
+function lerEnvelope(corpo: string, tipo: string, protegerMensagem: (mensagem: string) => string): RpcResponse {
   if (!tipo.includes("text/event-stream")) {
     try {
       return JSON.parse(corpo) as RpcResponse;
     } catch {
-      throw new McpError(`o servidor MCP respondeu algo que não é JSON: ${corpo.slice(0, 200)}`);
+      throw new McpError(`o servidor MCP respondeu algo que não é JSON: ${protegerMensagem(corpo).slice(0, 200)}`);
     }
   }
 
@@ -141,6 +142,49 @@ export interface McpClient {
 }
 
 export function createMcpClient(endpoint: McpEndpoint, options: McpClientOptions = {}): McpClient {
+  let endereco: URL;
+  try {
+    endereco = new URL(endpoint.url);
+  } catch {
+    throw new McpError("a URL do servidor MCP precisa ser HTTP ou HTTPS, sem credenciais, consulta ou fragmento");
+  }
+  if (
+    !["http:", "https:"].includes(endereco.protocol) || endereco.username || endereco.password ||
+    endpoint.url.includes("?") || endpoint.url.includes("#")
+  ) {
+    throw new McpError("a URL do servidor MCP precisa ser HTTP ou HTTPS, sem credenciais, consulta ou fragmento");
+  }
+
+  // Alterações posteriores no objeto recebido não mudam o destino nem as
+  // credenciais destas chamadas.
+  const url = endereco.href;
+  const extras = { ...(endpoint.headers ?? {}) };
+  const nomeSensivel = /(?:authorization|authentication|cookie|api[-_]?key|token|secret|password|credential|(?:^|[-_])auth(?:$|[-_]))/i;
+  const credenciais = Object.entries(extras).filter(([nome, valor]) => nomeSensivel.test(nome) && valor.trim() !== "");
+
+  const segredos = new Set<string>();
+  for (const [nome, valor] of credenciais) {
+    segredos.add(valor);
+    segredos.add(valor.trim());
+    if (/authorization|authentication|(?:^|[-_])auth(?:$|[-_])/i.test(nome)) {
+      const semEsquema = valor.trim().replace(/^\S+\s+/, "");
+      if (semEsquema) segredos.add(semEsquema);
+    }
+    if (/cookie/i.test(nome)) {
+      for (const parte of valor.split(";")) {
+        const igual = parte.indexOf("=");
+        if (igual >= 0 && parte.slice(igual + 1).trim()) segredos.add(parte.slice(igual + 1).trim());
+      }
+    }
+  }
+  const valoresSensiveis = [...segredos].filter(Boolean).sort((a, b) => b.length - a.length);
+  function protegerMensagem(mensagem: string): string {
+    let protegida = mensagem;
+    for (const segredo of valoresSensiveis) protegida = protegida.split(segredo).join("[REDACTED]");
+    protegida = protegida.replace(/\bBearer[ \t]+[A-Za-z0-9._~+/=-]+/gi, "Bearer [REDACTED]");
+    return redact(protegida);
+  }
+
   const janela = (options.timeoutSeconds ?? 30) * 1000;
   const chamar = options.fetchImpl ?? fetch;
   let sessao: string | null = null;
@@ -158,37 +202,53 @@ export function createMcpClient(endpoint: McpEndpoint, options: McpClientOptions
       // Depois do aperto de mão, a versão vai em toda chamada: é assim que o
       // servidor sabe conversar com um cliente mais velho que ele.
       ...(servidor ? { "mcp-protocol-version": servidor.protocolVersion } : {}),
-      ...(endpoint.headers ?? {}),
+      ...extras,
     };
 
     const controle = new AbortController();
     const relogio = setTimeout(() => controle.abort(), janela);
-    let resposta: Response;
     try {
-      resposta = await chamar(endpoint.url, { method: "POST", headers: cabecalhos, body: corpo, signal: controle.signal });
+      const resposta = await chamar(url, {
+        method: "POST", headers: cabecalhos, body: corpo, signal: controle.signal, redirect: "error",
+      });
+      // Erros de autenticação nunca incluem o corpo remoto: proxies podem
+      // devolver HTML com informações da requisição e suas credenciais.
+      if (resposta.status === 401 || resposta.status === 403) {
+        void resposta.body?.cancel().catch(() => undefined);
+        throw new McpError(
+          resposta.status === 401
+            ? "o servidor MCP respondeu 401: token ausente, inválido ou expirado; confira o token configurado"
+            : "o servidor MCP respondeu 403: confira a permissão do token e a configuração da URL pública/Host/Origin do servidor",
+          resposta.status,
+        );
+      }
+      if (!resposta.ok) {
+        const texto = protegerMensagem(await resposta.text());
+        throw new McpError(`o servidor MCP respondeu ${resposta.status} em ${method}: ${texto.slice(0, 200)}`, resposta.status);
+      }
+
+      const novaSessao = resposta.headers.get("mcp-session-id");
+      if (novaSessao) sessao = novaSessao;
+
+      // Notificação não tem resposta; o status HTTP ainda valida sua entrega.
+      if (notificacao) {
+        void resposta.body?.cancel().catch(() => undefined);
+        return null;
+      }
+
+      const texto = await resposta.text();
+      const envelope = lerEnvelope(texto, resposta.headers.get("content-type") ?? "", protegerMensagem);
+      if (envelope.error) {
+        throw new McpError(`o servidor MCP recusou ${method}: ${envelope.error.message}`, envelope.error.code);
+      }
+      return envelope.result ?? null;
     } catch (erro) {
+      if (erro instanceof McpError) throw new McpError(protegerMensagem(erro.message), erro.code);
       const causa = erro instanceof Error && erro.name === "AbortError" ? `sem resposta em ${janela / 1000}s` : String(erro);
-      throw new McpError(`não consegui falar com o servidor MCP em ${endpoint.url}: ${causa}`);
+      throw new McpError(protegerMensagem(`não consegui falar com o servidor MCP em ${url}: ${causa}`));
     } finally {
       clearTimeout(relogio);
     }
-
-    const novaSessao = resposta.headers.get("mcp-session-id");
-    if (novaSessao) sessao = novaSessao;
-
-    // Notificação não tem resposta: 202 sem corpo é o caso normal.
-    if (notificacao) return null;
-
-    const texto = await resposta.text();
-    if (!resposta.ok) {
-      throw new McpError(`o servidor MCP respondeu ${resposta.status} em ${method}: ${texto.slice(0, 200)}`, resposta.status);
-    }
-
-    const envelope = lerEnvelope(texto, resposta.headers.get("content-type") ?? "");
-    if (envelope.error) {
-      throw new McpError(`o servidor MCP recusou ${method}: ${envelope.error.message}`, envelope.error.code);
-    }
-    return envelope.result ?? null;
   }
 
   return {
@@ -229,7 +289,10 @@ export function createMcpClient(endpoint: McpEndpoint, options: McpClientOptions
      * vazia: não ter prompt guardado não é falha de ninguém.
      */
     listPrompts: async () => {
-      const resultado = (await enviar("prompts/list").catch(() => null)) as {
+      const resultado = (await enviar("prompts/list").catch((erro: unknown) => {
+        if (erro instanceof McpError && (erro.code === 401 || erro.code === 403)) throw erro;
+        return null;
+      })) as {
         prompts?: { name?: string; title?: string; description?: string }[];
       } | null;
 
@@ -303,7 +366,7 @@ export function createMcpClient(endpoint: McpEndpoint, options: McpClientOptions
 
       // A ferramenta que falha responde 200 com `isError`: sem esta leitura, o
       // erro viraria conteúdo e seguiria run adentro como se fosse resposta.
-      if (resultado?.isError === true) throw new McpError(`a ferramenta ${name} falhou: ${texto || "sem detalhe"}`);
+      if (resultado?.isError === true) throw new McpError(protegerMensagem(`a ferramenta ${name} falhou: ${texto || "sem detalhe"}`));
       return texto;
     },
   };

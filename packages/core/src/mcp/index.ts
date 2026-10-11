@@ -1,4 +1,6 @@
 export { MCP_PROTOCOL_VERSION, McpError, createMcpClient } from "./client.js";
+export { configuredMcpUrl, resolveMcpEndpoint, resolveMcpProject } from "./endpoint.js";
+export type { McpProjectFlags } from "./endpoint.js";
 export type { McpClient, McpClientOptions, McpDocument, McpEndpoint, McpFile, McpPrompt, McpResource } from "./client.js";
 export { PEDIDO_SUFIXO, areaDe, asInputs, fetchProjectMaterial, listLibraryProjects, nomeDeInput, projetoDoUri, renderLibraryBlock, tipoDoDocumento, uriDoPedido } from "./library.js";
 export type { LibraryProject, ProjectMaterial } from "./library.js";

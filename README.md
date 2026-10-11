@@ -40,6 +40,95 @@ npm run build
 npm run install:user     # instala o binário em ~/.local
 ```
 
+### Conectar ao doc-center autenticado
+
+Crie um token na página **Minha conta** do doc-center. Um token de
+`leitura` permite carregar o pedido e os documentos aprovados. Para
+enviar levantamentos e memórias, use a permissão `workflow`. Para usar a
+mesma conexão em vários projetos, escolha um token com acesso a todos os
+seus projetos. Um token de projeto funciona somente com aquele slug em
+`--mcp-project`.
+As memórias enviadas entram como rascunho para aprovação na interface.
+
+Configure a conexão uma vez:
+
+```bash
+capivara config
+```
+
+Escolha **Adicionar MCP** e informe o endereço, a porta e o token. O token
+fica oculto durante a digitação. O atalho faz as mesmas três perguntas:
+
+```bash
+capivara config add mcp
+```
+
+Para o MCP HTTP na porta `7777`, informe
+`http://doc-center.rbtecnologia.net.br/mcp` e porta `7777`.
+Inclua `http://` quando o endpoint não usa TLS. Para um endpoint publicado
+por HTTPS, use `https://doc-center.rbtecnologia.net.br/mcp` e porta `443`,
+com o proxy encaminhando `/mcp` ao listener MCP na porta 7777.
+O site e o MCP têm endereços independentes. No host do doc-center, use
+`http://127.0.0.1/mcp` e porta `7777`.
+A porta informada prevalece sobre uma porta existente no endereço.
+Sem caminho, o configurador acrescenta `/mcp`.
+
+A conexão é salva como padrão em `~/.capybara/config.json`, com diretório
+privado (`0700`) e arquivo privado (`0600`). Ela fica disponível em todos
+os diretórios de projetos, em novos terminais e depois de reiniciar a
+máquina. Não é necessário exportar o token a cada sessão. O menu também
+permite **Listar MCPs**, **Definir MCP padrão** e **Remover MCP**, mostrando
+o status da credencial sem exibir seu valor. A configuração pode ser salva
+mesmo quando o servidor está fora do ar.
+
+Depois, execute normalmente:
+
+```bash
+capivara init --mcp-project biblioteca --provider codex
+capivara plan --provider codex
+capivara build --provider codex
+```
+
+Quando houver mais de uma instalação do harness, verifique qual binário
+está no `PATH`. Para testar diretamente o construído neste repositório:
+
+```bash
+npm run build
+node "$PWD/packages/core/dist/cli.js" config
+```
+
+Flags e variáveis continuam disponíveis para substituir a configuração:
+
+| Configuração | Precedência |
+| --- | --- |
+| URL MCP | `--mcp`, `CAPIVARA_MCP_URL`, `DOC_CENTER_URL`, conexão global padrão |
+| Token Bearer | `CAPIVARA_MCP_TOKEN`, `DOC_CENTER_TOKEN`, token salvo para a URL escolhida |
+| Projeto | `--mcp-project`; o build herda o slug do init quando não recebe a flag |
+| Pasta de configuração | `CAPIVARA_CONFIG_DIR`; padrão `~/.capybara` |
+
+Evite colocar tokens em argumentos, URLs ou arquivos do projeto. Tokens
+salvos só acompanham a URL da respectiva conexão. Quando o ambiente também
+define uma URL correspondente ao token, ela precisa coincidir com o
+endpoint escolhido; divergência é recusada antes do envio da credencial.
+URLs usam HTTP ou HTTPS, sem credenciais, query ou fragmento. Ambos
+aceitam token, inclusive em servidores remotos. Em HTTP, o token trafega
+sem criptografia.
+Bases MCP genéricas continuam funcionando sem token.
+
+`init --mcp-project biblioteca` usa a conexão padrão.
+`init --prompt nome` também pode ler um prompt dessa base.
+Um pedido literal como `init "um sistema de reservas"` continua local,
+mesmo quando há uma conexão configurada. O build retoma o projeto do init
+e usa a URL atual do ambiente ou da configuração global para substituir
+um endereço local antigo; flags explícitas continuam tendo precedência.
+
+Para enviar um levantamento com token de projeto:
+
+```bash
+capivara survey --project /caminho/da/aplicacao \
+  --saida ./levantamento --mcp-project biblioteca --provider codex
+```
+
 ### O que os gates precisam da máquina
 
 O harness tem uma dependência de runtime só (`commander`) e não precisa de mais

@@ -2,7 +2,7 @@ export { UBUNTU_AUBERGINE, cursor, padVisible, paint, supportsColor, tint, trunc
 export type { Color, Style } from "./ansi.js";
 export { renderSplash } from "./splash.js";
 export type { SplashOptions } from "./splash.js";
-export { BACK, renderQuestion, wrap } from "./interview.js";
+export { BACK, renderAnswerContext, renderQuestion, wrap } from "./interview.js";
 export type { QuestionScreen } from "./interview.js";
 export { PHASE_GATES, dashboardWidth, renderDashboard } from "./dashboard.js";
 export type { DashboardEvent, DashboardModel, Metric, PipelineStep, StepState } from "./dashboard.js";

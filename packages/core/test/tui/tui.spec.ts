@@ -12,6 +12,7 @@ import {
   detectLanguage,
   padVisible,
   paint,
+  questionBox,
   renderCommand,
   renderDashboard,
   renderQuestion,
@@ -151,6 +152,19 @@ describe("tela da entrevista", () => {
   it("wrap quebra sem cortar palavra", () => {
     expect(wrap("uma frase razoavelmente longa para quebrar", 12).every((line) => line.length <= 12)).toBe(true);
   });
+
+  it("a pergunta no painel mostra a lacuna da resposta anterior e dobra rótulos longos", () => {
+    const label = "Node com uma suíte de testes de integração e testes de interface";
+    const screen = questionBox({
+      question: { ...question, pending: "falta definir o prazo de devolução", options: [{ label, consequence: "Reutilizar a stack existente." }], recommended: label },
+      index: 1, total: 1, document: "Prompt Engineer", style: plain,
+    }, 40);
+    expect(screen.body.every((line) => visibleWidth(line) <= 36)).toBe(true);
+    const content = screen.body.join(" ").replace(/\s+/g, " ");
+    expect(content).toContain("falta definir o prazo de devolução");
+    expect(content).toContain(label);
+    expect(content).toContain('"não sei" ou "voltar"');
+  });
 });
 
 describe("dashboard", () => {
@@ -238,6 +252,63 @@ describe("dashboard", () => {
 
   it("aguenta um modelo sem pipeline, telemetria nem eventos", () => {
     expect(() => renderDashboard({ ...model, pipeline: [], telemetry: [], events: [] })).not.toThrow();
+  });
+
+  it("em 24 linhas, cede os metadados à pergunta inteira e suas quatro opções", () => {
+    const body = [
+      "Já descobri:", "O pedido descreve uma ferramenta para organizar tarefas.", "",
+      "Qual plataforma deve receber a ferramenta?", "",
+      "Por que importa:", "A escolha define como publicar e usar o resultado.", "",
+      "  1. Web", "     Acesso pelo navegador.",
+      "  2. CLI", "     Uso no terminal.",
+      "  3. Desktop", "     Instalação no computador.",
+      "  4. Outra", "     Descreva a plataforma desejada.", "",
+      "  Recomendo Web para facilitar o acesso.", "",
+      "Responda com o número ou descreva sua escolha.",
+    ];
+    const lines = renderDashboard({
+      ...model,
+      command: "prompt-engineer",
+      subtitle: "prompt engineer · do pedido cru ao prompt estruturado em inglês",
+      status: { label: "aguardando sua resposta", state: "aguardando" },
+      activity: { kind: "você", detail: "", sinceSeconds: 3 },
+      width: 80,
+      height: 24,
+      roles: Array.from({ length: 8 }, (_, index) => ({ role: `papel ${index}`, provider: "codex", model: "modelo" })),
+      progress: [{ label: "Etapas", done: 2, total: 5 }],
+      work: [{ label: "Etapa", value: "entrevista" }, { label: "Atividade", value: "aguardando sua resposta" }],
+      question: { title: "PERGUNTA 1/1 · Prompt Engineer", body },
+    }).split("\n");
+    const view = lines.join("\n");
+    expect(lines).toHaveLength(23);
+    expect(view).toContain("CAPIVARA");
+    expect(view).toContain("aguardando sua resposta");
+    expect(view).toContain("PERGUNTA 1/1");
+    for (const line of body.filter((line) => line.trim() !== "")) expect(view).toContain(line);
+    expect(view).not.toContain("PROVEDOR ATUAL");
+    expect(view).not.toContain("TELEMETRIA");
+    expect(view).not.toContain("PIPELINE");
+    expect(lines.at(-1)).toContain("Ctrl-C interrompe; arquivo anterior preservado");
+    expect(view).not.toContain("retomável");
+  });
+
+  it("perguntas maiores que a tela preservam todas as escolhas", () => {
+    const body = Array.from({ length: 30 }, (_, index) => `${index + 1}. Escolha ${index + 1}`);
+    const view = renderDashboard({
+      ...model,
+      width: 80,
+      height: 24,
+      question: { title: "PERGUNTA 1/1", body: ["Qual escolha deve ser usada?", ...body] },
+      activity: { kind: "você", detail: "", sinceSeconds: 0 },
+    });
+    expect(view).toContain("Qual escolha deve ser usada?");
+    for (const line of body) expect(view).toContain(line);
+  });
+
+  it("o rodapé do Prompt Engineer informa a preservação do arquivo em tela ampla", () => {
+    const view = renderDashboard({ ...model, command: "prompt-engineer" });
+    expect(view).toContain("Ctrl-C interrompe; arquivo anterior preservado");
+    expect(view).not.toContain("retomável");
   });
 
   it("centraliza o mascote inteiro e reduz o topo em terminal com cor verdadeira", () => {

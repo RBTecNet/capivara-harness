@@ -162,6 +162,13 @@ capivara prompt-engineer --mcp-project pousada --provider codex
 capivara prompt-engineer --prompt nome-do-prompt --provider codex
 ```
 
+No terminal, o dashboard mostra a etapa atual, o modelo em atividade, o tempo
+de espera e o consumo por chamada. Quando precisa de uma decisão, apresenta
+a pergunta e as alternativas, com um campo que aceita número ou texto;
+Enter deixa a questão em aberto. O painel pausa enquanto você digita e volta
+quando a LLM continua. Use `--no-dashboard` para acompanhar só as linhas de
+progresso e as perguntas.
+
 O escritor identifica dúvidas de objetivo, contexto, escopo, restrições e
 critérios de aceite, pergunta uma decisão por vez e considera as respostas nas
 rodadas seguintes. As perguntas são em português; o prompt final é em inglês

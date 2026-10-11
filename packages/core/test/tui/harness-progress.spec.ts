@@ -330,6 +330,123 @@ describe("o cabeçalho diz qual estágio está na tela", () => {
   });
 });
 
+describe("Prompt Engineer usa o dashboard com suas próprias etapas", () => {
+  const painel = () =>
+    new HarnessProgress({
+      version: "0.3.5",
+      command: "prompt-engineer",
+      project: "pedido.md",
+      provider: { perfil: "codex", transporte: "codex-cli", contabilidade: "por chamada" },
+      style: plain,
+      environment: {},
+      now: () => new Date("2026-10-11T15:00:00Z"),
+    });
+
+  it("apresenta o destino e o pipeline do prompt, sem etapas documentais", () => {
+    const model = painel().model();
+    expect(model.command).toBe("prompt-engineer");
+    expect(model.subtitle).toContain("prompt estruturado");
+    expect(model.pipeline.map((step) => step.label)).toEqual([
+      "recebimento do prompt", "análise de lacunas", "entrevista", "organização do prompt", "gravação do prompt",
+    ]);
+    expect(model.stage).toBe("recebimento do prompt");
+    expect(model.progress).toEqual([{ label: "Etapas", done: 0, total: 5 }]);
+    const view = renderDashboard(model);
+    expect(view).not.toContain("esqueleto");
+    expect(view).not.toContain("RALPH READY");
+  });
+
+  it("mostra a etapa corrente e conclui as anteriores ao avançar", () => {
+    const p = painel();
+    for (const [index, stage, label] of [
+      [1, "analysis", "análise de lacunas"],
+      [2, "interview", "entrevista · esclarecimento de dúvidas"],
+      [3, "authoring", "organização do prompt"],
+      [4, "publish", "gravação do prompt"],
+    ] as const) {
+      p.setStage(stage);
+      const model = p.model();
+      expect(model.stage).toBe(label);
+      expect(model.pipeline[index]?.state).toBe("em andamento");
+      expect(model.pipeline.slice(0, index).every((step) => step.state === "concluído")).toBe(true);
+      expect(model.pipeline.slice(index + 1).every((step) => step.state === "aguardando")).toBe(true);
+      expect(model.progress).toEqual([{ label: "Etapas", done: index, total: 5 }]);
+    }
+  });
+
+  it("distingue a análise do modelo, a pergunta e a retomada da organização", () => {
+    const p = painel();
+    p.setStage("analysis");
+    p.beginCall("levantando dúvidas sobre o pedido");
+    expect(p.model().status.label).toBe("modelo trabalhando");
+    expect(renderDashboard(p.model())).toContain("modelo trabalhando");
+
+    p.setStage("interview");
+    p.waitingForDeveloper();
+    p.asking({ title: "PERGUNTA 1/1 · Prompt Engineer", body: ["Qual é o público do resultado?"] });
+    const pergunta = p.model();
+    expect(pergunta.activity.kind).toBe("você");
+    expect(pergunta.status).toEqual({ label: "aguardando sua resposta", state: "aguardando" });
+    const view = renderDashboard(pergunta);
+    expect(view).toContain("Qual é o público do resultado?");
+    expect(view).toContain("aguardando sua resposta");
+
+    p.asking(null);
+    p.setStage("authoring");
+    p.beginCall("organizando as decisões e o prompt em inglês");
+    p.charge({ inputTokens: 100, outputTokens: 50, costUsd: 0.01 });
+    const retomado = p.model();
+    expect(retomado.question).toBeUndefined();
+    expect(retomado.activity.kind).toBe("modelo");
+    expect(retomado.status.label).toBe("modelo trabalhando");
+    expect(retomado.telemetry.find((metric) => metric.label === "CHAMADAS")?.value).toBe("1");
+    expect(renderDashboard(retomado)).not.toContain("aguardando sua resposta");
+  });
+
+  it("depois da gravação exibe o resultado completo sem continuar o pulso de trabalho", () => {
+    const p = painel();
+    p.asking({ title: "PERGUNTA", body: ["Qual é o público?"] });
+    p.setStage("publish");
+    p.completed("prompt salvo em prompt-engineered.md");
+    const model = p.model();
+    expect(model.question).toBeUndefined();
+    expect(model.status).toEqual({ label: "prompt pronto", state: "concluído" });
+    expect(model.pipeline.every((step) => step.state === "concluído")).toBe(true);
+    expect(model.progress).toEqual([{ label: "Etapas", done: 5, total: 5 }]);
+    const antes = renderDashboard(model);
+    expect(antes).toContain("✓ concluído — prompt salvo em prompt-engineered.md");
+    expect(antes).not.toContain("nesta chamada");
+    p.tick();
+    expect(renderDashboard(p.model())).toBe(antes);
+  });
+
+  it("uma falha identifica a etapa interrompida e o motivo", () => {
+    const p = painel();
+    p.setStage("authoring");
+    p.halted("provider encerrou sem gerar o prompt");
+    expect(p.model().status.state).toBe("falhou");
+    expect(p.model().pipeline[3]?.state).toBe("falhou");
+    expect(renderDashboard(p.model())).toContain("provider encerrou sem gerar o prompt");
+  });
+
+  it("o evento de prontidão encerra o prompt sem anunciar RALPH READY", () => {
+    const p = painel();
+    p.apply(evento({ stage: "ready", subject: "-", status: "complete" }));
+    expect(p.model().status.label).toBe("prompt pronto");
+    expect(p.model().pipeline.every((step) => step.state === "concluído")).toBe(true);
+    expect(renderDashboard(p.model())).not.toContain("RALPH READY");
+  });
+
+  it("a conclusão dos outros comandos também encerra a atividade na tela", () => {
+    const p = progresso();
+    p.beginCall("verificando o plano");
+    p.apply(evento({ stage: "ready", subject: "-", status: "complete" }));
+    const view = renderDashboard(p.model());
+    expect(view).toContain("✓ concluído");
+    expect(view).not.toContain("nesta chamada");
+  });
+});
+
 /*
  * O painel mostrava `toISOString()`, que é UTC. Às nove da noite em Brasília a
  * tela dizia meia-noite, e quem cruzasse a tela com o próprio relógio somava três

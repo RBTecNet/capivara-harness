@@ -136,15 +136,15 @@ describe("os dois estágios do ciclo mostram a mesma coisa", () => {
     expect(fonte.split("createLiveRegion(").length - 1).toBe(2);
   });
 
-  it("init e plan usam esse lugar", async () => {
+  it("init, plan e prompt-engineer usam esse lugar", async () => {
     const fonte = await cliProgram();
-    for (const estagio of ["init", "plan"]) {
-      expect(fonte).toContain(`estagioInterativo({\n      estagio: "${estagio}",`);
+    for (const estagio of ["init", "plan", "prompt-engineer"]) {
+      expect(fonte).toMatch(new RegExp(`estagioInterativo\\(\\{\\s+estagio: "${estagio}",`));
     }
   });
 
   it("todo comando que desenha aceita desligar o painel, para pipe, arquivo e CI", async () => {
     const fonte = await cliProgram();
-    expect(fonte.split('"--no-dashboard"').length - 1).toBe(3);
+    expect(fonte.split('"--no-dashboard"').length - 1).toBe(4);
   });
 });

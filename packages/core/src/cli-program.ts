@@ -37,6 +37,7 @@ import {
   UBUNTU_AUBERGINE,
   paint,
   questionBox,
+  renderAnswerContext,
   renderDashboard,
   renderQuestion,
   renderSplash,
@@ -47,6 +48,7 @@ import type { EntradaDeTeclado, Janela, Parada, SaidaDeTela } from "./tui/index.
 import { paradaDeProntidao, paradaDoEstagio, type Estagio } from "./commands/paradas.js";
 import { runWizard, runWizardDePapeis, runWizardDoPedido } from "./commands/wizard.js";
 import { InputEndedError, createLineIO } from "./commands/line-io.js";
+import type { LineIO } from "./commands/line-io.js";
 import { listarEfforts, listarModelos } from "./provider/index.js";
 import type { RoleName } from "./provider/index.js";
 import { runIdFor, safeProjectPath, writeAtomic } from "./state/index.js";
@@ -265,7 +267,7 @@ export function withVersionAlias(argv: readonly string[]): string[] {
 }
 
 /**
- * O painel e as perguntas dos dois estágios do ciclo.
+ * O painel e as perguntas dos estágios documentais e do Prompt Engineer.
  *
  * `init` e `plan` são o mesmo orquestrador com estágios diferentes, e por isso
  * têm exatamente a mesma superfície interativa: o mesmo painel, a mesma janela
@@ -280,30 +282,36 @@ export function withVersionAlias(argv: readonly string[]): string[] {
  * nos dois: duas cópias divergem na primeira correção aplicada a uma só.
  */
 function estagioInterativo(options: {
-  estagio: "init" | "plan";
+  estagio: "init" | "plan" | "prompt-engineer";
   projectRoot: string;
   runId: string;
   language: string;
   roles: ReturnType<typeof rolesFromFlags>;
   comPainel: boolean;
-  /** Como a caixa de pergunta se apresenta: o init entrevista, o plan detalha fase. */
+  /** O documento ou ferramenta apresentado na caixa da pergunta. */
   documento: string;
+  /** O wizard já abriu a entrada; manter a fila preserva as respostas por pipe. */
+  entrada?: LineIO;
 }) {
   const { projectRoot, runId, roles, comPainel } = options;
+  const engenharia = options.estagio === "prompt-engineer";
   const bridge = createAgentBridge({ projectRoot, runId, language: options.language, roles, limits: DEFAULT_LIMITS });
-  const terminal = createInterface({ input: stdin, output: stdout });
+  const terminal = options.entrada ? null : createInterface({ input: stdin, output: stdout });
 
   /*
    * A leitura é enfileirada, não `terminal.question()` direto: entrada vinda de
    * pipe ou arquivo chega inteira antes da primeira pergunta, o readline fecha
    * no fim dela, e a pergunta seguinte estoura em ERR_USE_AFTER_CLOSE.
    */
-  const linhas = createLineIO(terminal, (text) => void stdout.write(text), { interactive: stdin.isTTY === true });
+  const linhas = options.entrada ?? createLineIO(terminal!, (text) => void stdout.write(text), { interactive: stdin.isTTY === true });
   const perguntar = async (prompt: string, decision: string): Promise<string> => {
     try {
       return await linhas.ask(prompt);
     } catch (error) {
       if (!(error instanceof InputEndedError)) throw error;
+      if (engenharia) {
+        throw new PromptEngineerError(`A entrada terminou antes de responder: ${decision}\nRode o mesmo comando num terminal ou forneça as respostas por pipe.`);
+      }
       throw new InitBlockedError(
         [
           "A entrada terminou e ainda falta uma decisão:",
@@ -326,7 +334,7 @@ function estagioInterativo(options: {
     version: VERSION,
     command: options.estagio,
     project: basename(resolve(projectRoot)),
-    roles: describeRoles(roles).filter((role) => (INIT_ROLES as readonly string[]).includes(role.role)),
+    roles: describeRoles(roles).filter((role) => engenharia ? role.role === "writer" : (INIT_ROLES as readonly string[]).includes(role.role)),
     provider: {
       perfil: `${roles.writer.provider}${roles.writer.model ? `:${roles.writer.model}` : ""}`,
       transporte: `${roles.writer.provider}-cli`,
@@ -418,12 +426,17 @@ function estagioInterativo(options: {
   };
 
   const call: InitOptions["call"] = async (chamada) => {
-    const quem = `${chamada.role} · ${chamada.subject.replace(/\.md$/, "")}`;
+    const quem = engenharia
+      ? chamada.stage === "authoring"
+        ? "organizando o prompt estruturado"
+        : chamada.subject === "prompt-engineer" ? "analisando lacunas do pedido" : "interpretando sua resposta"
+      : `${chamada.role} · ${chamada.subject.replace(/\.md$/, "")}`;
+    if (engenharia) progress.setStage(chamada.stage === "authoring" ? "authoring" : chamada.subject === "prompt-engineer" ? "analysis" : "interview");
     progress.beginCall(quem);
     repaint();
     const response = await bridge({
       role: chamada.role,
-      stage: chamada.stage,
+      stage: engenharia ? `prompt-engineer:${chamada.stage}` : chamada.stage,
       prompt: chamada.prompt,
       // A janela de log recebe o que a CLI conta enquanto trabalha; sem isso o
       // terminal fica com cara de travado durante minutos.
@@ -434,6 +447,9 @@ function estagioInterativo(options: {
     });
     progress.charge(response.usage);
     repaint();
+    if (engenharia && (response.timedOut || response.engineError || response.exitCode !== 0)) {
+      throw new PromptEngineerError(`O escritor falhou em ${chamada.stage}${response.timedOut ? ` (${response.timedOut})` : ` (código ${response.exitCode})`}.`);
+    }
     return {
       stdout: response.stdout,
       exitCode: response.exitCode,
@@ -456,7 +472,7 @@ function estagioInterativo(options: {
      * lugar de diagnóstico, no fim de horas de trabalho. Foi o que derrubou um
      * run inteiro do piloto 3 numa única pergunta.
      */
-    if (stdin.isTTY !== true) {
+    if (stdin.isTTY !== true && !engenharia) {
       throw new InitBlockedError(
         [
           "O escritor precisa de uma decisão para seguir e não há terminal para perguntar:",
@@ -480,18 +496,33 @@ function estagioInterativo(options: {
      * propósito: um painel que se repinta por cima de um prompt de leitura come
      * o que a pessoa está digitando.
      */
+    if (engenharia) progress.setStage("interview");
     progress.waitingForDeveloper();
     if (live.enabled) {
-      progress.asking(questionBox({ question, index, total, document: options.documento, style: style() }, larguraAtual()));
-      repaint();
-      live.release();
-      progress.asking(null);
-      const answer = await perguntar(paint("  ▸ sua resposta: ", "cyan", style()), question.decision);
-      return answer.trim().toLowerCase() === BACK ? "" : answer;
+      const screen = { question, index, total, document: options.documento, style: style() };
+      progress.asking(questionBox(screen, larguraAtual()));
+      const painel = desenhar();
+      live.draw(painel);
+      try {
+        const answer = await live.suspend(() => {
+          // Uma pergunta longa fica completa no histórico. Repetir a decisão e
+          // os números perto do campo evita responder sem saber qual é a dúvida.
+          if (engenharia && painel.split("\n").length > (stdout.rows ?? 40)) {
+            stdout.write(renderAnswerContext(screen, larguraAtual()));
+          }
+          return perguntar(paint(
+            engenharia ? "  ▸ sua resposta (número ou texto; Enter deixa em aberto): " : "  ▸ sua resposta: ",
+            "cyan", style(),
+          ), question.decision);
+        });
+        return answer.trim().toLowerCase() === BACK ? "" : answer;
+      } finally {
+        progress.asking(null);
+      }
     }
 
     stdout.write(renderQuestion({ question, index, total, document: options.documento, style: style() }));
-    const answer = await perguntar("> ", question.decision);
+    const answer = await perguntar(engenharia ? "Sua resposta (número ou texto; Enter deixa em aberto): " : "> ", question.decision);
     return answer.trim().toLowerCase() === BACK ? "" : answer;
   };
 
@@ -525,7 +556,7 @@ function estagioInterativo(options: {
       ask,
       ...(stdin.isTTY === true ? { decideStandoff } : {}),
     },
-    close: () => terminal.close(),
+    close: () => { live.release(); terminal?.close(); },
   };
 }
 
@@ -722,13 +753,14 @@ export function createProgram(): Command {
       .option("--mcp <url>", "base documental por MCP")
       .option("--mcp-project <nome>", "projeto da base que fornece o pedido e o contexto")
       .option("--saida <caminho>", "arquivo do prompt, relativo ao projeto", "prompt-engineered.md")
+      .option("--no-dashboard", "não desenha o painel; só as linhas de progresso")
       .option("--max-interview-rounds <n>", "rodadas de descoberta de lacunas", "3"),
     ["writer"],
     "idioma do prompt final: en ou pt (padrão en); perguntas em português",
-  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; prompt?: string; mcp?: string; mcpProject?: string; saida: string; maxInterviewRounds: string }) => {
+  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; prompt?: string; mcp?: string; mcpProject?: string; saida: string; maxInterviewRounds: string; dashboard?: boolean }) => {
     const projectRoot = resolve(flags.project ?? ".");
     const announce = (message: string): void => { stdout.write(`${message}\n`); };
-    let terminal: ReturnType<typeof createInterface> | undefined;
+    let ui: ReturnType<typeof estagioInterativo> | undefined;
     try {
       const language = promptLanguage(flags.language);
       const maxRounds = Number(flags.maxInterviewRounds);
@@ -778,45 +810,39 @@ export function createProgram(): Command {
       if (request.origin === "file" && request.path && safeProjectPath(projectRoot, request.path) === output) {
         throw new Error("--saida deve ser diferente do arquivo do prompt cru; escolha outro destino.");
       }
-      if (flags.splash !== false) {
+      const comPainel = flags.dashboard !== false && stdout.isTTY === true;
+      if (flags.splash !== false && !comPainel) {
         stdout.write(renderSplash({ version: VERSION, roles: describeRoles(roles).filter((role) => role.role === "writer"), style: style() }));
       }
 
-      const bridge = createAgentBridge({ projectRoot, runId: `prompt-engineer-${request.sha12}`, language: "português do Brasil", roles, limits: DEFAULT_LIMITS });
-      // A fila nasce antes da primeira chamada para preservar respostas enviadas por pipe.
-      let linhas = entradaDoWizard;
-      if (!linhas) {
-        terminal = createInterface({ input: stdin, output: stdout });
-        linhas = createLineIO(terminal, (text) => void stdout.write(text), { interactive: stdin.isTTY === true });
-      }
-      const entrada = linhas;
+      ui = estagioInterativo({
+        estagio: "prompt-engineer",
+        projectRoot,
+        runId: `prompt-engineer-${request.sha12}`,
+        language: "português do Brasil",
+        roles,
+        comPainel,
+        documento: "Prompt Engineer",
+        ...(entradaDoWizard ? { entrada: entradaDoWizard } : {}),
+      });
+      ui.progress.setStage("receiving");
+      ui.hooks.announce(`Prompt recebido${request.path ? ` de ${request.path}` : " por texto"}. Vou analisar as lacunas; aguarde o modelo. As perguntas aparecerão aqui para você responder.`);
       const result = await engineerPrompt({
         projectRoot,
         request,
         language,
         maxRounds,
         ...(material ? { library: material.documents } : {}),
-        announce,
-        writer: async (call) => {
-          const response = await bridge({ role: "writer", stage: `prompt-engineer:${call.stage}`, prompt: call.prompt });
-          if (response.timedOut || response.engineError || response.exitCode !== 0) {
-            throw new PromptEngineerError(`O escritor falhou em ${call.stage}${response.timedOut ? ` (${response.timedOut})` : ` (código ${response.exitCode})`}.`);
-          }
-          return response;
-        },
-        askQuestion: async (question, index, total) => {
-          stdout.write(renderQuestion({ question, index, total, document: "Prompt Engineer", style: style() }));
-          try {
-            const answer = await entrada.ask("> ");
-            return answer.trim().toLowerCase() === BACK ? "" : answer;
-          }
-          catch (error) {
-            if (!(error instanceof InputEndedError)) throw error;
-            throw new PromptEngineerError(`A entrada terminou antes de responder: ${question.decision}\nRode o mesmo comando num terminal ou forneça as respostas por pipe.`);
-          }
-        },
+        announce: ui.hooks.announce,
+        writer: ui.hooks.call,
+        askQuestion: ui.hooks.ask,
       });
+      ui.progress.setStage("publish");
+      ui.hooks.announce(`Gravando o prompt em ${output}.`);
       await writeAtomic(output, result.prompt);
+      ui.progress.completed("prompt salvo; pronto para reutilizar");
+      ui.repaint();
+      ui.live.release();
       stdout.write(`\n${result.prompt}\n`);
       announce(`Prompt salvo em ${output}`);
       if (result.coverage === "open" || result.limitReached) {
@@ -825,10 +851,13 @@ export function createProgram(): Command {
       announce(`Para usar na Capivara:\n  ${renderCommand({ command: "init", requestFile: flags.saida, projectRoot, global: {}, roles: {} })}`);
       process.exitCode = 0;
     } catch (error) {
+      ui?.progress.halted(error instanceof Error ? error.message.split("\n")[0] ?? "" : String(error));
+      ui?.repaint();
+      ui?.live.release();
       announce(`erro: ${error instanceof Error ? error.message : String(error)}`);
       process.exitCode = 2;
     } finally {
-      terminal?.close();
+      ui?.close();
     }
   });
 

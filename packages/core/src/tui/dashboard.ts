@@ -68,7 +68,7 @@ export interface Activity {
 
 export interface DashboardModel {
   version: string;
-  /** `init` ou `build`; nomeia a linha de subtítulo e o workflow. */
+  /** Comando corrente; nomeia a linha de subtítulo e o workflow. */
   command: string;
   subtitle: string;
   project: string;
@@ -242,6 +242,10 @@ function activityLine(model: DashboardModel): string {
   const { activity, style } = model;
   const tempo = duration(activity.sinceSeconds);
 
+  if (model.status.state === "concluído") {
+    return paint(`✓ concluído${activity.detail === "" ? "" : ` — ${activity.detail}`}`, "green", style);
+  }
+
   if (activity.kind === "você") {
     return paint(`▸ aguardando sua resposta — há ${tempo}`, "cyan", style);
   }
@@ -297,6 +301,15 @@ function header(model: DashboardModel, width: number, artwork: boolean): string[
   }
   lines.push(paint("─".repeat(width), "gray", style));
   return lines;
+}
+
+function footer(model: DashboardModel, width: number): string {
+  const text = model.command === "prompt-engineer"
+    ? "Ctrl-C interrompe; arquivo anterior preservado"
+    : width < NARROW
+      ? "Ctrl-C interrompe com estado retomável"
+      : "Ctrl-C interrompe com estado retomável · segredos nunca entram neste painel";
+  return paint(text, "gray", model.style);
 }
 
 function dashboardLines(model: DashboardModel, layout: Layout): string[] {
@@ -449,13 +462,7 @@ function dashboardLines(model: DashboardModel, layout: Layout): string[] {
   }
 
   // O rodapé também cabe: num terminal estreito ele vira a metade que importa.
-  lines.push(
-    paint(
-      width < NARROW ? "Ctrl-C interrompe com estado retomável" : "Ctrl-C interrompe com estado retomável · segredos nunca entram neste painel",
-      "gray",
-      style,
-    ),
-  );
+  lines.push(footer(model, width));
 
   return lines;
 }
@@ -488,6 +495,21 @@ export function renderDashboard(model: DashboardModel): string {
     else if (layout.boxes === "compactas") layout.boxes = "nenhuma";
     else break;
     lines = dashboardLines(model, layout);
+  }
+
+  /*
+   * A decisão precisa continuar visível enquanto a pessoa responde. Em uma tela
+   * curta, os metadados do run cedem espaço à pergunta inteira e suas opções;
+   * só as margens vazias saem. Perguntas maiores que a própria tela permanecem
+   * completas, para que nenhuma escolha desapareça.
+   */
+  if (lines.length > budget && model.question) {
+    lines = [
+      ...header(model, width, false),
+      activityLine(model),
+      ...box(model.question.title, model.question.body.filter((line) => line.trim() !== ""), width, model.style),
+      footer(model, width),
+    ];
   }
 
   /*

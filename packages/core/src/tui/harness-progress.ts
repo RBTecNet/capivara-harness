@@ -1,5 +1,5 @@
 /**
- * O que o painel do `init` mostra, derivado dos eventos do run.
+ * O que o painel dos comandos mostra, derivado dos eventos do run.
  *
  * Projeção pura: entra evento, sai modelo. O painel nunca pergunta nada ao
  * orquestrador e nunca altera o que quer que seja — ele observa, e é por isso
@@ -32,12 +32,9 @@ export interface HarnessProgressOptions {
   /**
    * Qual estágio do ciclo está na tela.
    *
-   * Os dois compartilham o painel, e por um tempo o `plan` desenhou o cabeçalho
-   * do `init`: "INIT · do prompt ao RALPH READY" numa execução que começa com o
-   * esqueleto pronto e termina exatamente no RALPH READY. O rótulo é a única
-   * coisa que distingue as duas telas.
+   * Cada comando anuncia seu destino e suas próprias etapas no mesmo painel.
    */
-  command?: "init" | "plan" | "build";
+  command?: "init" | "plan" | "build" | "prompt-engineer";
   width?: number;
   environment?: NodeJS.ProcessEnv;
   now?: () => Date;
@@ -45,10 +42,27 @@ export interface HarnessProgressOptions {
 
 /** Quanto do trabalho de um documento já passou, para o rótulo da etapa. */
 /** O que cada comando anuncia como destino, no cabeçalho do painel. */
-const SUBTITLE: Record<"init" | "plan" | "build", string> = {
+const SUBTITLE: Record<NonNullable<HarnessProgressOptions["command"]>, string> = {
   init: "init · esqueleto · do pedido ao PLAN READY",
   plan: "plan · detalhamento · do esqueleto ao RALPH READY",
   build: "build · ralph · do plano executável à aplicação",
+  "prompt-engineer": "prompt engineer · do pedido cru ao prompt estruturado",
+};
+
+const PROMPT_PIPELINE_STEPS = [
+  { id: "receiving", label: "recebimento do prompt" },
+  { id: "analysis", label: "análise de lacunas" },
+  { id: "interview", label: "entrevista" },
+  { id: "authoring", label: "organização do prompt" },
+  { id: "publish", label: "gravação do prompt" },
+] as const;
+
+const PROMPT_STAGE_LABEL: Record<string, string> = {
+  receiving: "recebimento do prompt",
+  analysis: "análise de lacunas",
+  interview: "entrevista · esclarecimento de dúvidas",
+  authoring: "organização do prompt",
+  publish: "gravação do prompt",
 };
 
 const STAGE_LABEL: Record<string, string> = {
@@ -116,7 +130,9 @@ export class HarnessProgress {
     this.now = options.now ?? (() => new Date());
     this.startedAt = this.now().getTime();
     this.projeto = options.project;
-    for (const passo of PIPELINE_STEPS) this.estados.set(passo.id, "aguardando");
+    const passos = options.command === "prompt-engineer" ? PROMPT_PIPELINE_STEPS : PIPELINE_STEPS;
+    for (const passo of passos) this.estados.set(passo.id, "aguardando");
+    if (options.command === "prompt-engineer") this.setStage("receiving");
   }
 
   /** Um evento do run. Documento publicado fecha o passo; devolução marca correção. */
@@ -125,7 +141,8 @@ export class HarnessProgress {
     // Sem a extensão: o nome do arquivo já é longo e a extensão não informa nada
     // que a linha inteira não diga.
     const curto = documento.replace(/\.md$/, "");
-    this.etapa = `${STAGE_LABEL[event.stage] ?? event.stage}${curto && curto !== "-" ? ` · ${curto}` : ""}`;
+    if (this.options.command === "prompt-engineer") this.setStage(event.stage);
+    else this.etapa = `${STAGE_LABEL[event.stage] ?? event.stage}${curto && curto !== "-" ? ` · ${curto}` : ""}`;
 
     if (this.estados.has(documento)) {
       if (event.stage === "publish" && event.status === "complete") this.estados.set(documento, "concluído");
@@ -139,9 +156,15 @@ export class HarnessProgress {
       // parágrafo, e a caixa tem uma linha.
       this.ultimoErro = event.detail.split("\n")[0]?.trim() ?? "";
     }
-    if (event.status === "blocked") this.situacao = { label: "bloqueado", state: "falhou" };
-    else if (event.stage === "ready" && event.status === "complete") this.situacao = { label: "RALPH READY", state: "concluído" };
-    else this.situacao = { label: "em andamento", state: "em andamento" };
+    if (event.status === "blocked") {
+      this.situacao = { label: "bloqueado", state: "falhou" };
+      if (this.options.command === "prompt-engineer") {
+        for (const [id, estado] of this.estados) if (estado === "em andamento") this.estados.set(id, "falhou");
+      }
+    } else if (event.stage === "ready" && event.status === "complete") {
+      if (this.options.command === "prompt-engineer") this.completed();
+      else this.situacao = { label: "RALPH READY", state: "concluído" };
+    } else this.situacao = { label: "em andamento", state: "em andamento" };
   }
 
   /**
@@ -161,7 +184,22 @@ export class HarnessProgress {
    * loop — a fase e o ciclo em que ela está.
    */
   setStage(etapa: string): void {
-    if (etapa.trim() !== "") this.etapa = etapa.trim();
+    const nome = etapa.trim();
+    if (nome === "") return;
+    if (this.options.command !== "prompt-engineer") {
+      this.etapa = nome;
+      return;
+    }
+
+    this.etapa = PROMPT_STAGE_LABEL[nome] ?? nome;
+    const indice = PROMPT_PIPELINE_STEPS.findIndex((passo) => passo.id === nome);
+    if (indice < 0) return;
+    for (const [posicao, passo] of PROMPT_PIPELINE_STEPS.entries()) {
+      if (posicao < indice) this.estados.set(passo.id, "concluído");
+      else if (posicao === indice) this.estados.set(passo.id, "em andamento");
+      else this.estados.set(passo.id, "aguardando");
+    }
+    this.situacao = { label: this.etapa, state: "em andamento" };
   }
 
   /** A pergunta da vez ocupa o corpo do painel; `null` devolve a janela de log. */
@@ -171,17 +209,33 @@ export class HarnessProgress {
 
   /** Chamando o provider: é a espera mais longa e a que mais parece travamento. */
   beginCall(detail: string): void {
-    this.atividade = { kind: "modelo", detail, desde: this.now().getTime() };
+    const trabalhando = this.options.command === "prompt-engineer";
+    this.atividade = { kind: "modelo", detail: trabalhando ? `modelo trabalhando · ${detail}` : detail, desde: this.now().getTime() };
+    if (trabalhando) this.situacao = { label: "modelo trabalhando", state: "em andamento" };
   }
 
   /** A vez é do desenvolvedor: a tela precisa dizer isso com todas as letras. */
   waitingForDeveloper(): void {
     this.atividade = { kind: "você", detail: "", desde: this.now().getTime() };
+    if (this.options.command === "prompt-engineer") this.situacao = { label: "aguardando sua resposta", state: "aguardando" };
   }
 
   /** Parou, e por quê. */
   halted(detail: string): void {
     this.atividade = { kind: "parado", detail, desde: this.now().getTime() };
+    if (this.options.command === "prompt-engineer") {
+      this.situacao = { label: "interrompido", state: "falhou" };
+      for (const [id, estado] of this.estados) if (estado === "em andamento") this.estados.set(id, "falhou");
+    }
+  }
+
+  /** O resultado foi gravado; encerra as etapas e a pergunta corrente. */
+  completed(detail = this.options.command === "prompt-engineer" ? "prompt estruturado pronto" : "concluído"): void {
+    for (const id of this.estados.keys()) this.estados.set(id, "concluído");
+    this.etapa = detail;
+    this.situacao = { label: this.options.command === "prompt-engineer" ? "prompt pronto" : "concluído", state: "concluído" };
+    this.pergunta = null;
+    this.atividade = { kind: "modelo", detail, desde: this.now().getTime() };
   }
 
   /** Avança o pulso. Quadro que muda é prova de vida; número parado não é. */
@@ -205,7 +259,8 @@ export class HarnessProgress {
   }
 
   private pipeline(): PipelineStep[] {
-    return PIPELINE_STEPS.map((passo) => ({
+    const passos = this.options.command === "prompt-engineer" ? PROMPT_PIPELINE_STEPS : PIPELINE_STEPS;
+    return passos.map((passo) => ({
       label: passo.label,
       state: this.estados.get(passo.id) ?? "aguardando",
     }));

@@ -136,6 +136,12 @@ export function questionBox(screen: QuestionScreen, width: number): { title: str
   const inner = Math.max(20, width - 4);
   const body: string[] = [];
 
+  if (question.pending?.trim()) {
+    body.push(...wrap("Sua resposta foi registrada, mas ficou faltando:", inner).map((line) => paint(line, "yellow", style)));
+    for (const line of wrap(question.pending, inner - 2)) body.push(paint(`  ${line}`, "yellow", style));
+    body.push("");
+  }
+
   // O mesmo corte do renderizador acima: rótulo vazio não ocupa linha.
   if (question.evidence.trim() !== "") {
     body.push(paint("Já descobri:", "gray", style));
@@ -152,8 +158,7 @@ export function questionBox(screen: QuestionScreen, width: number): { title: str
   if (question.options.length > 0) {
     body.push("");
     question.options.forEach((option, position) => {
-      const marcada = option.label === question.recommended ? paint(" ← recomendada", "green", style) : "";
-      body.push(`  ${paint(String(position + 1), "cyan", style)}. ${option.label}${marcada}`);
+      body.push(...optionLabelLines(question, position, inner, style));
       for (const line of wrapKeepingBreaks(option.consequence, inner - 5)) body.push(`     ${paint(line, "gray", style)}`);
     });
     if (question.recommendationBasis) {
@@ -165,15 +170,31 @@ export function questionBox(screen: QuestionScreen, width: number): { title: str
   }
 
   body.push("");
-  body.push(
-    paint(
-      question.options.length > 0
-        ? `responda com o número, com texto livre, "use as recomendações", "não sei" ou "${BACK}"`
-        : `responda com texto livre, "não sei" ou "${BACK}"`,
-      "gray",
-      style,
-    ),
-  );
+  const instruction = question.options.length > 0
+    ? `responda com o número, com texto livre, "use as recomendações", "não sei" ou "${BACK}"`
+    : `responda com texto livre, "não sei" ou "${BACK}"`;
+  body.push(...wrap(instruction, inner).map((line) => paint(line, "gray", style)));
 
   return { title: `PERGUNTA ${screen.index}/${screen.total} · ${screen.document.replace(/\.md$/, "")}`, body };
+}
+
+function optionLabelLines(question: Question, position: number, width: number, style: Style): string[] {
+  const option = question.options[position]!;
+  const recommended = option.label === question.recommended;
+  const prefix = `  ${position + 1}. `;
+  const lines = wrapKeepingBreaks(`${option.label}${recommended ? " ← recomendada" : ""}`, Math.max(1, width - prefix.length));
+  return lines.map((line, index) => `${index === 0 ? paint(prefix, "cyan", style) : " ".repeat(prefix.length)}${recommended ? paint(line, "green", style) : line}`);
+}
+
+/** Repete a decisão perto da entrada quando a pergunta ultrapassa a tela. */
+export function renderAnswerContext(screen: QuestionScreen, width: number): string {
+  const { question, style } = screen;
+  const inner = Math.max(20, width - 4);
+  return [
+    "",
+    paint(`Para responder · pergunta ${screen.index}/${screen.total}:`, "cyan", style),
+    ...wrap(question.decision, inner).map((line) => paint(line, "bold", style)),
+    ...question.options.flatMap((_, index) => optionLabelLines(question, index, inner, style)),
+    "",
+  ].join("\n");
 }

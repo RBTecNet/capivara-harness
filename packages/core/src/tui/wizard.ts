@@ -10,7 +10,7 @@ import { ROLE_NAMES, ROLES } from "../provider/roles.js";
 import type { RoleName } from "../provider/roles.js";
 
 export interface WizardAnswers {
-  command: "survey" | "init" | "plan" | "build" | "change";
+  command: "survey" | "init" | "plan" | "build" | "change" | "prompt-engineer";
   request?: string;
   global: { provider?: string; model?: string; effort?: string };
   roles: Partial<Record<RoleName, { provider?: string; model?: string; effort?: string }>>;
@@ -23,12 +23,14 @@ export interface WizardAnswers {
   testCommand?: string;
   maxCycles?: number;
   noSplash?: boolean;
-  /** Onde o `survey` grava o levantamento. */
+  /** Onde gravar o levantamento do `survey` ou o prompt do `prompt-engineer`. */
   saida?: string;
+  /** Idioma do prompt reutilizável; o `prompt-engineer` usa inglês por padrão. */
+  language?: "en" | "pt";
 }
 
 function quote(value: string): string {
-  return /^[A-Za-z0-9._:/-]+$/.test(value) ? value : `"${value.replace(/([\\"])/g, "\\$1")}"`;
+  return /^[A-Za-z0-9._:/-]+$/.test(value) ? value : `"${value.replace(/([\\"$`])/g, "\\$1")}"`;
 }
 
 /**
@@ -42,8 +44,8 @@ function quote(value: string): string {
 export function toArgv(answers: WizardAnswers): string[] {
   const argv: string[] = [answers.command];
 
-  // O `change` recebe o pedido como argumento, igual ao `init`: é o que mudar.
-  if ((answers.command === "init" || answers.command === "change") && answers.request) argv.push(answers.request);
+  // Os comandos com pedido recebem o texto como argumento, ou uma das origens abaixo.
+  if ((answers.command === "init" || answers.command === "change" || answers.command === "prompt-engineer") && answers.request) argv.push(answers.request);
 
   if (answers.global.provider) argv.push("--provider", answers.global.provider);
   if (answers.global.model) argv.push("--model", answers.global.model);
@@ -66,6 +68,7 @@ export function toArgv(answers: WizardAnswers): string[] {
   if (answers.mcpUrl && answers.mcpProject) argv.push("--mcp", answers.mcpUrl, "--mcp-project", answers.mcpProject);
   else if (answers.mcpUrl && answers.command === "survey") argv.push("--mcp", answers.mcpUrl);
   if (answers.saida) argv.push("--saida", answers.saida);
+  if (answers.command === "prompt-engineer" && answers.language) argv.push("--language", answers.language);
   if (answers.projectRoot) argv.push("--project", answers.projectRoot);
   if (answers.testCommand) argv.push("--test-cmd", answers.testCommand);
   if (answers.maxCycles !== undefined) argv.push("--max-cycles", String(answers.maxCycles));
@@ -78,7 +81,7 @@ export function toArgv(answers: WizardAnswers): string[] {
 export function renderCommand(answers: WizardAnswers): string {
   const parts = ["capivara", answers.command];
 
-  if ((answers.command === "init" || answers.command === "change") && answers.request) parts.push(quote(answers.request));
+  if ((answers.command === "init" || answers.command === "change" || answers.command === "prompt-engineer") && answers.request) parts.push(quote(answers.request));
 
   if (answers.global.provider) parts.push("--provider", answers.global.provider);
   if (answers.global.model) parts.push("--model", quote(answers.global.model));
@@ -96,6 +99,7 @@ export function renderCommand(answers: WizardAnswers): string {
   if (answers.mcpUrl && answers.mcpProject) parts.push("--mcp", quote(answers.mcpUrl), "--mcp-project", quote(answers.mcpProject));
   else if (answers.mcpUrl && answers.command === "survey") parts.push("--mcp", quote(answers.mcpUrl));
   if (answers.saida) parts.push("--saida", quote(answers.saida));
+  if (answers.command === "prompt-engineer" && answers.language) parts.push("--language", answers.language);
   if (answers.projectRoot) parts.push("--project", quote(answers.projectRoot));
   if (answers.testCommand) parts.push("--test-cmd", quote(answers.testCommand));
   if (answers.maxCycles !== undefined) parts.push("--max-cycles", String(answers.maxCycles));
@@ -124,11 +128,14 @@ export function roleHint(role: RoleName, requiresCli: boolean): string {
 }
 
 /** Os passos, como dados: a TUI apenas os apresenta. */
-export function wizardSteps(command: "init" | "build"): WizardStep[] {
+export function wizardSteps(command: "init" | "build" | "prompt-engineer"): WizardStep[] {
   const steps: WizardStep[] = [];
 
   if (command === "init") {
     steps.push({ id: "request", prompt: "O que você quer construir?", hint: "uma frase basta; a entrevista cuida do resto" });
+  } else if (command === "prompt-engineer") {
+    steps.push({ id: "request", prompt: "Qual prompt cru você quer organizar?", hint: "digite, aponte um arquivo ou escolha na base MCP; a entrevista esclarece as lacunas" });
+    steps.push({ id: "saida", prompt: "Onde gravar o prompt?", hint: "padrão prompt-engineered.md no projeto; formato Ponytail, em inglês, para outra LLM ou para a capivara" });
   }
 
   steps.push({
@@ -138,7 +145,8 @@ export function wizardSteps(command: "init" | "build"): WizardStep[] {
   });
   steps.push({ id: "model", prompt: "Qual modelo?", hint: "deixe vazio para o padrão do provider" });
 
-  for (const role of ROLE_NAMES) {
+  const roles: readonly RoleName[] = command === "prompt-engineer" ? ["writer"] : ROLE_NAMES;
+  for (const role of roles) {
     const definition = ROLES[role];
     steps.push({
       id: `${role}-override`,

@@ -9,7 +9,7 @@ import { Readable } from "node:stream";
 import { createInterface } from "node:readline/promises";
 import { describe, expect, it } from "vitest";
 import { createLineIO, filtrarModelos, runWizard, runWizardDePapeis, runWizardDoPedido } from "../../src/commands/wizard.js";
-import { readChoice, renderChoices, renderCommand, toArgv } from "../../src/tui/index.js";
+import { readChoice, renderChoices, renderCommand, toArgv, wizardSteps } from "../../src/tui/index.js";
 
 function roteiro(respostas: string[]) {
   const escrito: string[] = [];
@@ -133,10 +133,10 @@ describe("wizard", () => {
   });
 
   it("número inválido é recusado sem derrubar o wizard", async () => {
-    // Quatro comandos desde que o `survey` entrou na lista.
+    // O `prompt-engineer` foi acrescentado sem mudar os números anteriores.
     const { deps, tela } = roteiro(["", "9", "1", "1", "x", ".", "1", "", "1", "n", "n"]);
     const resultado = await runWizard(deps);
-    expect(tela()).toContain("entre 1 e 5");
+    expect(tela()).toContain("entre 1 e 6");
     expect(resultado?.argv[0]).toBe("init");
   });
 
@@ -154,6 +154,131 @@ describe("wizard", () => {
     };
     expect(toArgv(answers).join(" ")).toContain("--verifier-provider anthropic");
     expect(renderCommand(answers)).toContain("--verifier-provider anthropic");
+  });
+});
+
+describe("wizard do prompt engineer", () => {
+  it("acrescenta a opção no fim e lê o prompt multiline, com saída em inglês por padrão", async () => {
+    const { deps, tela } = roteiro([
+      "", "6", "1", "quero revisar um contrato", "liste cláusulas que merecem atenção", ".",
+      "", "1", "", "1", "n", "n",
+    ]);
+    const resultado = await runWizard(deps);
+
+    expect(tela()).toContain("5) survey");
+    expect(tela()).toContain("6) prompt-engineer");
+    expect(tela()).toContain("Qual prompt cru você quer organizar?");
+    expect(tela()).toContain("prompt Ponytail em inglês");
+    expect(tela()).toContain("outra LLM ou para a própria capivara");
+    expect(resultado?.argv).toEqual([
+      "prompt-engineer", "quero revisar um contrato\nliste cláusulas que merecem atenção",
+      "--provider", "codex", "--saida", "prompt-engineered.md",
+    ]);
+    expect(resultado?.execute).toBe(false);
+  });
+
+  it("reutiliza a origem de arquivo e permite escolher o destino do prompt", async () => {
+    const { deps } = roteiro(["", "6", "2", "pedido.md", "docs/prompt pronto.md", "1", "", "1", "n", "n"]);
+    const resultado = await runWizard(deps);
+
+    expect(resultado?.argv).toEqual([
+      "prompt-engineer", "--provider", "codex", "--file", "pedido.md", "--saida", "docs/prompt pronto.md",
+    ]);
+    expect(resultado?.command).toBe('capivara prompt-engineer --provider codex --file pedido.md --saida "docs/prompt pronto.md"');
+  });
+
+  it("reutiliza o pedido e os documentos do projeto MCP escolhido", async () => {
+    const { deps } = roteiro(["/outro-projeto", "6", "3", "", "2", "", "1", "", "1", "n", "n"]);
+    const resultado = await runWizard({
+      ...deps,
+      listMcpProjects: async () => [
+        { slug: "primeiro", hasRequest: true, documents: 2 },
+        { slug: "segundo", hasRequest: true, documents: 4 },
+      ],
+    });
+
+    expect(resultado?.argv).toEqual([
+      "prompt-engineer", "--provider", "codex", "--mcp", "http://localhost:7777/mcp", "--mcp-project", "segundo",
+      "--saida", "prompt-engineered.md", "--project", "/outro-projeto",
+    ]);
+  });
+
+  it("reutiliza os prompts MCP, inclusive sem a opção de projeto da base", async () => {
+    const { deps, tela } = roteiro(["", "6", "3", "", "1", "", "1", "", "1", "n", "n"]);
+    const resultado = await runWizard({
+      ...deps,
+      listMcpPrompts: async () => [{ name: "analise", title: "Análise de contratos", description: "revise o documento" }],
+      readMcpPrompt: async (_url: string, name: string) => `Analise o contrato: ${name}`,
+    });
+
+    expect(tela()).toContain("Análise de contratos");
+    expect(resultado?.argv).toEqual([
+      "prompt-engineer", "Analise o contrato: analise", "--provider", "codex", "--saida", "prompt-engineered.md",
+    ]);
+  });
+
+  it("configura somente o writer e não pergunta testes ou ciclos de construção", async () => {
+    const { deps, tela } = roteiro([
+      "", "6", "1", "organize um roteiro", ".", "", "1", "", "1", "s", "2", "sonnet", "n",
+    ]);
+    const resultado = await runWizard(deps);
+
+    expect(resultado?.answers.roles).toEqual({ writer: { provider: "claude", model: "sonnet" } });
+    expect(tela()).toContain("escritor documental");
+    expect(tela()).not.toContain("auditor documental");
+    expect(tela()).not.toContain("verificador documental");
+    expect(tela()).not.toContain("Comando de teste do projeto");
+    expect(tela()).not.toContain("Ciclos de correção");
+  });
+
+  it("prompt cru vazio encerra sem montar uma execução", async () => {
+    const { deps, tela } = roteiro(["", "6", "1", "."]);
+    expect(await runWizard(deps)).toBeNull();
+    expect(tela()).toContain("Sem prompt não há o que organizar");
+  });
+
+  it("o wizard curto pede somente o prompt cru que faltou", async () => {
+    const { deps, tela } = roteiro(["1", "gere um relatório mensal", "."]);
+    const resultado = await runWizardDoPedido({ ...deps, comando: "prompt-engineer" });
+
+    expect(resultado?.request).toBe("gere um relatório mensal");
+    expect(tela()).toContain("falta informar o prompt cru");
+    expect(tela()).toContain("Qual prompt cru você quer organizar?");
+    expect(tela()).not.toContain("O que você quer fazer?");
+  });
+
+  it("serializa texto, destino e idioma da mesma maneira no argv e no comando impresso", () => {
+    const answers = {
+      command: "prompt-engineer" as const,
+      request: "revise o documento",
+      global: { provider: "codex" },
+      roles: {},
+      saida: "docs/prompt final.md",
+      language: "pt" as const,
+      projectRoot: "/projeto",
+    };
+    expect(toArgv(answers)).toEqual([
+      "prompt-engineer", "revise o documento", "--provider", "codex", "--saida", "docs/prompt final.md",
+      "--language", "pt", "--project", "/projeto",
+    ]);
+    expect(renderCommand(answers)).toBe(
+      'capivara prompt-engineer "revise o documento" --provider codex --saida "docs/prompt final.md" --language pt --project /projeto',
+    );
+  });
+
+  it("os passos da TUI descrevem pedido, saída e apenas o papel writer", () => {
+    const steps = wizardSteps("prompt-engineer");
+    expect(steps.map((step) => step.id)).toEqual(["request", "saida", "provider", "model", "writer-override"]);
+    expect(steps.find((step) => step.id === "request")?.hint).toContain("base MCP");
+    expect(steps.find((step) => step.id === "saida")?.hint).toContain("Ponytail, em inglês");
+  });
+
+  it("o comando impresso preserva variáveis e comandos literais que aparecem no prompt cru", () => {
+    const request = '$HOME, $(pwd), `date`, "texto" e \\arquivo';
+    const answers = { command: "prompt-engineer" as const, request, global: {}, roles: {} };
+
+    expect(toArgv(answers)).toEqual(["prompt-engineer", request]);
+    expect(renderCommand(answers)).toBe('capivara prompt-engineer "\\$HOME, \\$(pwd), \\`date\\`, \\"texto\\" e \\\\arquivo"');
   });
 });
 
@@ -385,7 +510,7 @@ describe("conectar à base documental", () => {
  * O `survey` no wizard.
  *
  * Ele não faz parte da esteira init → plan → build: é a porta de entrada de quem
- * tem código e não tem documento. Por isso fica por último na lista e nunca é
+ * tem código e não tem documento. Por isso mantém sua posição na lista e nunca é
  * sugerido — sugerir por ausência de `.capivara/` confundiria com o greenfield,
  * que também não tem.
  */

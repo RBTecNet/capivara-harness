@@ -445,8 +445,9 @@ async function arquivoDoPedido(deps: WizardDeps, io: WizardIO, projectRoot: stri
  * disse o estágio e a pasta, e esqueceu só o pedido. Mandá-lo ao começo do
  * wizard é fazê-lo repetir o que já disse.
  */
-async function perguntarPedido(deps: WizardDeps, projectRoot: string): Promise<PedidoDoWizard | null> {
+async function perguntarPedido(deps: WizardDeps, projectRoot: string, comando = "init"): Promise<PedidoDoWizard | null> {
   const { io } = deps;
+  const engenharia = comando === "prompt-engineer";
   const escolhido_: PedidoDoWizard = {};
     /*
      * As origens são mapeadas por CHAVE, nunca por posição.
@@ -482,9 +483,9 @@ async function perguntarPedido(deps: WizardDeps, projectRoot: string): Promise<P
     } else if (escolha === "arquivo") {
       escolhido_.requestFile = await arquivoDoPedido(deps, io, projectRoot);
     } else {
-      const pedido = await multiline(io, "O que você quer construir?");
+      const pedido = await multiline(io, engenharia ? "Qual prompt cru você quer organizar?" : "O que você quer construir?");
       if (pedido === "") {
-        io.write("Sem pedido não há o que documentar.\n");
+        io.write(engenharia ? "Sem prompt não há o que organizar.\n" : "Sem pedido não há o que documentar.\n");
         return null;
       }
       escolhido_.request = pedido;
@@ -586,10 +587,10 @@ async function perguntarPapeis(deps: WizardDeps, usados: readonly RoleName[]): P
  */
 /** O wizard curto do pedido: quem esqueceu só ele. */
 export async function runWizardDoPedido(deps: WizardDeps & { comando: string }): Promise<PedidoDoWizard | null> {
-  deps.io.write(`\ncapivara ${deps.comando}: falta dizer o que construir.\n`);
+  deps.io.write(`\ncapivara ${deps.comando}: ${deps.comando === "prompt-engineer" ? "falta informar o prompt cru" : "falta dizer o que construir"}.\n`);
   deps.io.write("O resto do comando está mantido; responda só isto.\n");
   try {
-    return await perguntarPedido(deps, deps.cwd);
+    return await perguntarPedido(deps, deps.cwd, deps.comando);
   } catch (error) {
     if (error instanceof InputEnded) return null;
     throw error;
@@ -636,17 +637,18 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
     { label: "build", hint: "constrói a aplicação a partir do plano pronto" },
     { label: "change", hint: "acrescenta ou altera funcionalidade numa aplicação que a capivara já construiu" },
     { label: "survey", hint: "lê uma aplicação que já existe e escreve o que ela faz, para reescrever depois" },
+    { label: "prompt-engineer", hint: "esclarece lacunas de um prompt cru e gera um prompt Ponytail reutilizável, em inglês" },
   ];
   /*
-   * O `survey` fica por último e nunca é sugerido.
+   * `survey` e `prompt-engineer` nunca são sugeridos.
    *
-   * Ele não faz parte da esteira: é a porta de entrada de quem tem código e não
-   * tem documento. Sugerir por ausência de `.capivara/` confundiria com o
-   * greenfield, que também não tem — e o wizard sugerindo errado custa mais caro
-   * que o wizard não sugerindo.
+   * O `survey` é a porta de entrada de quem tem código e não tem documento.
+   * Sugerir por ausência de `.capivara/` confundiria com o greenfield, que também
+   * não tem. O `prompt-engineer` prepara um prompt para uso posterior e também
+   * não depende do estágio da pasta.
    */
   const sugerido = temPlano ? 2 : temEsqueleto ? 1 : 0;
-  const command = (["init", "plan", "build", "change", "survey"] as const)[await choose(io, "O que você quer fazer?", comandos, sugerido)] ?? "init";
+  const command = (["init", "plan", "build", "change", "survey", "prompt-engineer"] as const)[await choose(io, "O que você quer fazer?", comandos, sugerido)] ?? "init";
 
   const answers: WizardAnswers = { command, global: {}, roles: {} };
   if (projectRoot !== deps.cwd) answers.projectRoot = projectRoot;
@@ -737,10 +739,16 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
     }
   }
 
-  if (command === "init") {
-    const pedido = await perguntarPedido(deps, projectRoot);
+  if (command === "init" || command === "prompt-engineer") {
+    if (command === "prompt-engineer") {
+      io.write("\nA capivara vai perguntar sobre as dúvidas e lacunas do pedido e gerar um prompt Ponytail em inglês, pronto para outra LLM ou para a própria capivara.\n");
+    }
+    const pedido = await perguntarPedido(deps, projectRoot, command);
     if (pedido === null) return null;
     Object.assign(answers, pedido);
+    if (command === "prompt-engineer") {
+      answers.saida = await text(io, `\nOnde gravar o prompt [prompt-engineered.md, caminho relativo a ${projectRoot}]: `, "prompt-engineered.md");
+    }
   }
 
   // Papéis: só os que ESTE comando chama. Perguntar pelo executor num init é
@@ -748,7 +756,7 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
   const usados: RoleName[] =
     command === "build"
       ? ["builder", "verifier"]
-      : command === "survey" || command === "change"
+      : command === "survey" || command === "change" || command === "prompt-engineer"
         ? ["writer"]
         : ["writer", "auditor", "verifier"];
 

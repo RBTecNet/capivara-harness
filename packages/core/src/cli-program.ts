@@ -49,13 +49,15 @@ import { runWizard, runWizardDePapeis, runWizardDoPedido } from "./commands/wiza
 import { InputEndedError, createLineIO } from "./commands/line-io.js";
 import { listarEfforts, listarModelos } from "./provider/index.js";
 import type { RoleName } from "./provider/index.js";
-import { runIdFor } from "./state/index.js";
+import { runIdFor, safeProjectPath, writeAtomic } from "./state/index.js";
 import { sha12 } from "./contract/index.js";
 import { MAX_DOMINIOS, SurveyBlockedError, runSurvey } from "./survey/index.js";
 import { ChangeBlockedError, renderQuestion as renderPerguntaDaMudanca, runChange } from "./change/index.js";
 import type { DecisaoDeColisao } from "./survey/index.js";
 import { VERSION } from "./version.js";
 import { registerConfigCommand } from "./commands/config.js";
+import { PromptEngineerError, engineerPrompt, promptLanguage } from "./prompt-engineer/index.js";
+import { renderCommand } from "./tui/wizard.js";
 
 interface CommonFlags extends CliRoleFlags {
   project?: string;
@@ -202,14 +204,14 @@ function mundoDoWizard() {
  * — o pior desfecho possível, porque parece defeito do harness e não pergunta
  * nada. Agora ele pergunta, com as mesmas origens do wizard.
  */
-async function completarPedido(comando: string): Promise<{ prompt?: string; file?: string } | null> {
+async function completarPedido(comando: string, projectRoot = process.cwd()): Promise<{ prompt?: string; file?: string; mcp?: string; mcpProject?: string } | null> {
   if (stdin.isTTY !== true) return null;
 
   const terminal = createInterface({ input: stdin, output: stdout });
   try {
     const escolhido = await runWizardDoPedido({
       io: createLineIO(terminal, (texto) => void stdout.write(texto), { interactive: stdin.isTTY === true }),
-      cwd: process.cwd(),
+      cwd: projectRoot,
       comando,
       ...mundoDoWizard(),
     });
@@ -217,6 +219,8 @@ async function completarPedido(comando: string): Promise<{ prompt?: string; file
     return {
       ...(escolhido.request !== undefined ? { prompt: escolhido.request } : {}),
       ...(escolhido.requestFile !== undefined ? { file: escolhido.requestFile } : {}),
+      ...(escolhido.mcpUrl !== undefined ? { mcp: escolhido.mcpUrl } : {}),
+      ...(escolhido.mcpProject !== undefined ? { mcpProject: escolhido.mcpProject } : {}),
     };
   } finally {
     terminal.close();
@@ -228,7 +232,7 @@ async function mostrarParada(parada: Parada, projectRoot: string, flags: { modal
   await apresentarParada(parada, await lerEvidencia(projectRoot, parada.evidencia), janela(flags));
 }
 
-function roleFlags(command: Command, roles = ["writer", "auditor", "builder", "verifier"]): Command {
+function roleFlags(command: Command, roles = ["writer", "auditor", "builder", "verifier"], languageDescription = "idioma da interface e dos documentos"): Command {
   command
     .option("--provider <id>", "provider padrão de todos os papéis")
     .option("--model <id>", "modelo padrão de todos os papéis")
@@ -243,7 +247,7 @@ function roleFlags(command: Command, roles = ["writer", "auditor", "builder", "v
   }
   return command
     .option("--project <caminho>", "raiz do projeto", ".")
-    .option("--language <idioma>", "idioma da interface e dos documentos")
+    .option("--language <idioma>", languageDescription)
     .option("--no-splash", "não mostra a abertura")
     .option("--no-modal", "não abre a telinha de parada; só o texto");
 }
@@ -678,6 +682,7 @@ async function lerDaBase(
 
 export function createProgram(): Command {
   const program = new Command();
+  let entradaDoWizard: ReturnType<typeof createLineIO> | undefined;
   program
     .name("capivara")
     .description("Harness documental e loop de execução: do prompt à aplicação final")
@@ -706,6 +711,126 @@ export function createProgram(): Command {
       stdout.write(options.json ? `${JSON.stringify(diagnoses, null, 2)}\n` : `${renderDiagnosis(diagnoses)}\n`);
       process.exitCode = diagnoses.some((diagnosis) => diagnosis.health === "ausente") ? 1 : 0;
     });
+
+  roleFlags(
+    program
+      .command("prompt-engineer")
+      .description("Esclarece lacunas de um prompt cru e gera um prompt Ponytail reutilizável, em inglês por padrão")
+      .argument("[pedido]", "o prompt cru; aceita @arquivo")
+      .option("--file <caminho>", "lê o prompt cru de um arquivo")
+      .option("--prompt <nome>", "usa um prompt guardado na base, pelo nome")
+      .option("--mcp <url>", "base documental por MCP")
+      .option("--mcp-project <nome>", "projeto da base que fornece o pedido e o contexto")
+      .option("--saida <caminho>", "arquivo do prompt, relativo ao projeto", "prompt-engineered.md")
+      .option("--max-interview-rounds <n>", "rodadas de descoberta de lacunas", "3"),
+    ["writer"],
+    "idioma do prompt final: en ou pt (padrão en); perguntas em português",
+  ).action(async (pedido: string | undefined, flags: CommonFlags & { file?: string; prompt?: string; mcp?: string; mcpProject?: string; saida: string; maxInterviewRounds: string }) => {
+    const projectRoot = resolve(flags.project ?? ".");
+    const announce = (message: string): void => { stdout.write(`${message}\n`); };
+    let terminal: ReturnType<typeof createInterface> | undefined;
+    try {
+      const language = promptLanguage(flags.language);
+      const maxRounds = Number(flags.maxInterviewRounds);
+      if (!Number.isSafeInteger(maxRounds) || maxRounds < 1 || maxRounds > 20) {
+        throw new Error("--max-interview-rounds deve ser um inteiro entre 1 e 20.");
+      }
+      const output = safeProjectPath(projectRoot, flags.saida);
+      let escolhas = flags;
+      let roles = rolesFromFlags(escolhas);
+      const missing = unresolvedRoles(roles, ["writer"]);
+      if (missing.length > 0) {
+        const completo = await completarPapeis("prompt-engineer", missing, escolhas);
+        if (completo === null) {
+          announce(renderUnresolved("prompt-engineer", missing));
+          process.exitCode = 2;
+          return;
+        }
+        escolhas = completo;
+        roles = rolesFromFlags(escolhas);
+      }
+
+      let sources = {
+        ...(pedido !== undefined ? { prompt: pedido } : {}),
+        ...(flags.file !== undefined ? { file: flags.file } : {}),
+      };
+      if (!sources.prompt && !sources.file && !flags.mcpProject && !flags.prompt && !flags.mcp) {
+        const escolhido = await completarPedido("prompt-engineer", projectRoot);
+        if (escolhido) {
+          sources = escolhido;
+          if (escolhido.mcp) flags.mcp = escolhido.mcp;
+          if (escolhido.mcpProject) flags.mcpProject = escolhido.mcpProject;
+        }
+      }
+
+      const material = flags.mcpProject ? await lerDaBase(flags, announce) : null;
+      if (material === "erro") { process.exitCode = 2; return; }
+      const guardado = !material && flags.prompt ? await lerPromptDaBase(flags, announce) : null;
+      if (guardado === "erro") { process.exitCode = 2; return; }
+      if (!material && !guardado && flags.mcp && !sources.prompt && !sources.file) {
+        throw new Error("Informe --mcp-project <nome> ou --prompt <nome> para escolher o prompt da base.");
+      }
+      const request = material
+        ? requestFromLibrary(flags.mcpProject!, material.request, flags.mcp)
+        : guardado
+          ? requestFromPrompt(guardado.nome, guardado.texto, flags.mcp)
+          : await resolveRequest(projectRoot, sources);
+      if (request.origin === "file" && request.path && safeProjectPath(projectRoot, request.path) === output) {
+        throw new Error("--saida deve ser diferente do arquivo do prompt cru; escolha outro destino.");
+      }
+      if (flags.splash !== false) {
+        stdout.write(renderSplash({ version: VERSION, roles: describeRoles(roles).filter((role) => role.role === "writer"), style: style() }));
+      }
+
+      const bridge = createAgentBridge({ projectRoot, runId: `prompt-engineer-${request.sha12}`, language: "português do Brasil", roles, limits: DEFAULT_LIMITS });
+      // A fila nasce antes da primeira chamada para preservar respostas enviadas por pipe.
+      let linhas = entradaDoWizard;
+      if (!linhas) {
+        terminal = createInterface({ input: stdin, output: stdout });
+        linhas = createLineIO(terminal, (text) => void stdout.write(text), { interactive: stdin.isTTY === true });
+      }
+      const entrada = linhas;
+      const result = await engineerPrompt({
+        projectRoot,
+        request,
+        language,
+        maxRounds,
+        ...(material ? { library: material.documents } : {}),
+        announce,
+        writer: async (call) => {
+          const response = await bridge({ role: "writer", stage: `prompt-engineer:${call.stage}`, prompt: call.prompt });
+          if (response.timedOut || response.engineError || response.exitCode !== 0) {
+            throw new PromptEngineerError(`O escritor falhou em ${call.stage}${response.timedOut ? ` (${response.timedOut})` : ` (código ${response.exitCode})`}.`);
+          }
+          return response;
+        },
+        askQuestion: async (question, index, total) => {
+          stdout.write(renderQuestion({ question, index, total, document: "Prompt Engineer", style: style() }));
+          try {
+            const answer = await entrada.ask("> ");
+            return answer.trim().toLowerCase() === BACK ? "" : answer;
+          }
+          catch (error) {
+            if (!(error instanceof InputEndedError)) throw error;
+            throw new PromptEngineerError(`A entrada terminou antes de responder: ${question.decision}\nRode o mesmo comando num terminal ou forneça as respostas por pipe.`);
+          }
+        },
+      });
+      await writeAtomic(output, result.prompt);
+      stdout.write(`\n${result.prompt}\n`);
+      announce(`Prompt salvo em ${output}`);
+      if (result.coverage === "open" || result.limitReached) {
+        announce(`O prompt registra ${result.openQuestions.length} lacuna(s) ainda aberta(s)${result.limitReached ? "; o limite de descoberta foi atingido" : ""}.`);
+      }
+      announce(`Para usar na Capivara:\n  ${renderCommand({ command: "init", requestFile: flags.saida, projectRoot, global: {}, roles: {} })}`);
+      process.exitCode = 0;
+    } catch (error) {
+      announce(`erro: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 2;
+    } finally {
+      terminal?.close();
+    }
+  });
 
   roleFlags(
     program
@@ -1555,10 +1680,11 @@ export function createProgram(): Command {
    */
   const wizard = async (): Promise<void> => {
     const terminal = createInterface({ input: stdin, output: stdout });
+    const linhas = createLineIO(terminal, (text) => void stdout.write(text), { interactive: stdin.isTTY === true });
     let resultado;
     try {
       resultado = await runWizard({
-        io: createLineIO(terminal, (text) => void stdout.write(text), { interactive: stdin.isTTY === true }),
+        io: linhas,
         cwd: process.cwd(),
         listModels: (providerId) => listarModelos(providerId),
         listEfforts: (providerId, model) => listarEfforts(providerId, model),
@@ -1571,7 +1697,7 @@ export function createProgram(): Command {
         requestRecorded: async (root) => (await readRequestState(root)) !== null,
       });
     } finally {
-      terminal.close();
+      if (!resultado?.execute || resultado.answers.command !== "prompt-engineer") terminal.close();
     }
 
     if (!resultado) {
@@ -1582,7 +1708,14 @@ export function createProgram(): Command {
       stdout.write("Nada foi executado. O comando acima faz o mesmo quando você quiser.\n");
       return;
     }
-    await program.parseAsync(resultado.argv, { from: "user" });
+    if (resultado.answers.command === "prompt-engineer") {
+      // O pipe pode conter a entrevista depois do wizard; a fila continua sendo a mesma.
+      entradaDoWizard = linhas;
+      try { await program.parseAsync(resultado.argv, { from: "user" }); }
+      finally { entradaDoWizard = undefined; terminal.close(); }
+    } else {
+      await program.parseAsync(resultado.argv, { from: "user" });
+    }
   };
 
   program.command("wizard").description("Monta o comando interativamente e executa").action(wizard);

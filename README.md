@@ -148,6 +148,48 @@ Confira o ambiente antes de gastar a primeira chamada:
 capivara doctor
 ```
 
+## Prompt Engineer
+
+No wizard (`capivara` ou `capivara wizard`), escolha **6) Prompt Engineer**
+para transformar um pedido cru em um prompt reutilizável. As origens são as
+mesmas do `init`: texto digitado ou colado, arquivo, pedido de um projeto MCP
+ou prompt guardado na base. Pela CLI:
+
+```bash
+capivara prompt-engineer "quero organizar as reservas da pousada" --provider codex
+capivara prompt-engineer --file pedido.md --provider claude --saida prompts/reservas.md
+capivara prompt-engineer --mcp-project pousada --provider codex
+capivara prompt-engineer --prompt nome-do-prompt --provider codex
+```
+
+O escritor identifica dúvidas de objetivo, contexto, escopo, restrições e
+critérios de aceite, pergunta uma decisão por vez e considera as respostas nas
+rodadas seguintes. As perguntas são em português; o prompt final é em inglês
+por padrão (`--language pt` gera em português). Respostas como `não sei`
+permanecem como questões abertas; decisões delegadas ficam identificadas como
+suposições. O limite de descoberta (`--max-interview-rounds`, padrão 3) é
+informado quando ainda há lacunas.
+
+O resultado organiza objetivo, contexto, requisitos, restrições, etapas,
+critérios de aceite e entregáveis, com as decisões, suposições e questões
+abertas da entrevista. As orientações seguem os princípios do
+[Ponytail](https://github.com/DietrichGebert/ponytail): resolver o pedido
+completo com a menor mudança necessária, reutilizar recursos existentes e
+verificar o resultado.
+
+O comando mostra o prompt e salva `prompt-engineered.md` na pasta do projeto
+(`--project`); `--saida` escolhe outro caminho relativo a essa pasta. Ele usa
+somente o papel `writer`. Para continuar na Capivara:
+
+```bash
+capivara init --file prompt-engineered.md --provider codex
+```
+
+Para outra LLM, use o arquivo conforme a entrada de prompt suportada pela CLI
+dela. Respostas da entrevista também podem ser fornecidas por pipe; se a
+entrada acabar antes de uma resposta, o comando informa a pergunta pendente
+e preserva o arquivo de saída anterior.
+
 ## Os três comandos
 
 ### `capivara init`

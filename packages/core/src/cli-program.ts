@@ -53,6 +53,8 @@ import { paradaDeProntidao, paradaDoEstagio, type Estagio } from "./commands/par
 import { runWizard, runWizardDePapeis, runWizardDoPedido } from "./commands/wizard.js";
 import { InputEndedError, createLineIO } from "./commands/line-io.js";
 import { chooseInBox, createKeyPrompter, createKeySession } from "./commands/key-io.js";
+import type { KeySession } from "./commands/key-io.js";
+import { escolhaDaMudanca, escolhaDeColisao, respostaDaMudanca } from "./commands/escolhas-sem-painel.js";
 import { PauseGate, modalDaFase, teclasDoBuild, textoDaFase } from "./commands/build-controls.js";
 import { box } from "./tui/dashboard.js";
 import { renderSelect, type SelectSpec } from "./tui/select.js";
@@ -79,6 +81,32 @@ interface CommonFlags extends CliRoleFlags {
 
 function style() {
   return { enabled: supportsColor() };
+}
+
+/**
+ * A sessão de teclas de um comando sem painel (`change`, `survey`).
+ *
+ * Abre no começo do comando, como a do build: tecla batida enquanto o modelo
+ * trabalha ficaria no buffer do terminal e responderia a pergunta no instante em
+ * que ela abrisse. Sem TTY ou com `CAPIVARA_LINE_INPUT=1`, nenhuma — e quem
+ * pergunta usa a leitura de linha de sempre.
+ */
+function abrirTeclas(): KeySession | null {
+  if (stdin.isTTY !== true || stdout.isTTY !== true || process.env.CAPIVARA_LINE_INPUT === "1") return null;
+  return createKeySession({ input: stdin, write: (texto) => void stdout.write(texto), columns: () => stdout.columns ?? 100 });
+}
+
+/** A escolha embaixo do que já está na tela, com as medidas do terminal deste processo. */
+function escolherEmbaixo(teclas: KeySession, title: string, text: readonly string[], choices: readonly Choice[], defaultIndex = 0): Promise<number> {
+  return chooseInBox(teclas, {
+    title,
+    text,
+    choices,
+    defaultIndex,
+    write: (texto) => void stdout.write(texto),
+    dimensions: () => ({ columns: stdout.columns ?? 100, rows: stdout.rows ?? 40 }),
+    style: style(),
+  });
 }
 
 /**
@@ -1057,7 +1085,8 @@ export function createProgram(): Command {
     const bridge = createAgentBridge({ projectRoot, runId, language, roles, limits: DEFAULT_LIMITS });
 
     let parada: Parada | null = null;
-    const terminalChange = stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
+    const teclasChange = abrirTeclas();
+    const terminalChange = !teclasChange && stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
     const linhasChange = terminalChange ? createLineIO(terminalChange, (texto) => void stdout.write(texto), { interactive: true }) : null;
 
     try {
@@ -1067,7 +1096,30 @@ export function createProgram(): Command {
         request: request.text,
         announce: (linha) => void stdout.write(`${linha}\n`),
         call: async (chamada) => await bridge({ role: "writer", stage: `change:${chamada.subject}`, prompt: chamada.prompt }),
-        ...(linhasChange
+        ...(teclasChange
+          ? {
+              /*
+               * Por lista (§96): cada linha devolve o que `lerResposta` já lê —
+               * o número da opção —, e o texto livre segue como texto.
+               */
+              ask: async (question, indice, total) => {
+                const escolha = escolhaDaMudanca(question, indice, total);
+                try {
+                  for (;;) {
+                    const escolhida = await escolherEmbaixo(teclasChange, escolha.title, escolha.text, escolha.choices, escolha.defaultIndex);
+                    const resposta = respostaDaMudanca(question, escolhida);
+                    if (resposta !== null) return resposta;
+                    const livre = await teclasChange.line.ask(paint("  ▸ sua resposta (Enter vazio volta às opções): ", "cyan", style()));
+                    if (livre.trim() !== "") return livre;
+                  }
+                } catch (error) {
+                  // Entrada esgotada é Enter: a recomendada, como na leitura de linha.
+                  if (error instanceof InputEndedError) return "";
+                  throw error;
+                }
+              },
+            }
+          : linhasChange
           ? {
               ask: async (question, indice, total) => {
                 stdout.write(renderPerguntaDaMudanca(question, indice, total));
@@ -1099,6 +1151,7 @@ export function createProgram(): Command {
       } else throw error;
     } finally {
       terminalChange?.close();
+      teclasChange?.close();
     }
 
     // Depois do `finally`: a telinha põe o terminal em modo raw, e o readline
@@ -1151,7 +1204,8 @@ export function createProgram(): Command {
      * MCP, e não precisa saber.
      */
     let paradaDoSurvey: Parada | null = null;
-    const terminalSurvey = stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
+    const teclasSurvey = abrirTeclas();
+    const terminalSurvey = !teclasSurvey && stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
     const linhasSurvey = terminalSurvey ? createLineIO(terminalSurvey, (texto) => void stdout.write(texto), { interactive: true }) : null;
 
     const mcpUrl = configuredMcpUrl(flags.mcp);
@@ -1179,7 +1233,16 @@ export function createProgram(): Command {
             enviar: async (slug: string, markdown: string) =>
               await enviarLevantamento(client, { projeto: slug, nome: "", conteudo: markdown, procedencia: runId }),
             ...(flags.mcpProject ? { projeto: flags.mcpProject } : {}),
-            ...(linhasSurvey
+            ...(teclasSurvey
+              ? {
+                  decidir: async (slug: string): Promise<DecisaoDeColisao> => {
+                    const escolha = escolhaDeColisao(slug);
+                    // Entrada esgotada não mexe na base, como na leitura de linha.
+                    const escolhida = await escolherEmbaixo(teclasSurvey, escolha.title, escolha.text, escolha.choices, escolha.defaultIndex).catch(() => 2);
+                    return escolha.decisoes[escolhida] ?? "local";
+                  },
+                }
+              : linhasSurvey
               ? {
                   decidir: async (slug: string): Promise<DecisaoDeColisao> => {
                     stdout.write(
@@ -1244,6 +1307,7 @@ export function createProgram(): Command {
       } else throw error;
     } finally {
       terminalSurvey?.close();
+      teclasSurvey?.close();
     }
 
     if (paradaDoSurvey) await mostrarParada(paradaDoSurvey, saida, flags);

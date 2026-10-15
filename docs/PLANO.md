@@ -6435,3 +6435,27 @@ atalho que não aparece na tela não existe.
 
 Provado num PTY real, com o plano do `cron7` e um codex falso: lista, fase,
 volta, pausa pedida, pausado antes do ciclo seguinte, retomada.
+
+## §96 — O change e o survey por lista
+
+Os dois últimos comandos que pediam número numa linha. Nenhum deles desenha
+painel, então a pergunta abre embaixo do que já está na tela, no mesmo formato
+das decisões do build (§94): o texto sai uma vez, com as consequências de cada
+opção, e só a lista se redesenha.
+
+- **change**: as perguntas do planejador. As linhas são as opções — o cursor na
+  recomendada, marcada — e "responder com texto livre", que abre a pergunta em
+  linha (Enter vazio volta às opções). Cada linha devolve o número da opção, que
+  o `lerResposta` de sempre traduz; um teste confere cada linha contra ele.
+  Entrada esgotada continua sendo a recomendada.
+- **survey**: o projeto que já existe na base — atualizar, criar ao lado, não
+  mexer. Entrada esgotada continua não mexendo na base.
+
+A tradução entre linha e resposta mora em `commands/escolhas-sem-painel.ts`,
+fora do CLI, para ter teste: é onde uma opção trocaria de lugar sem ninguém ver.
+A sessão de teclas de cada comando abre no começo dele, como a do build, para
+tecla batida durante a chamada do modelo não responder a pergunta seguinte. Sem
+TTY ou com `CAPIVARA_LINE_INPUT=1`, a leitura numerada de sempre.
+
+Com isto, nenhuma pergunta fechada do harness se responde mais digitando número
+quando há uma pessoa no terminal.

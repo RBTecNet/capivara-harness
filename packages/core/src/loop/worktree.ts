@@ -25,6 +25,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { sha12 } from "../contract/stamps.js";
+import { adicionarExatamente, admitirArvore, alteracoesParaCommit, lerStatus, type Bloqueio } from "./admissao.js";
 import { FLOW_RESULTS, FLOWS_DIR } from "./flows.js";
 
 const run = promisify(execFile);
@@ -143,11 +144,46 @@ export async function abrirWorktree(
  * Tira o worktree do disco. O branch só fica quando ainda guarda trabalho que
  * não chegou à árvore principal — o da fase que falhou, para quem quiser ler.
  */
-export async function fecharWorktree(projectRoot: string, worktree: Worktree, opcoes: { manterBranch?: boolean } = {}): Promise<void> {
+export async function fecharWorktree(
+  projectRoot: string,
+  worktree: Worktree,
+  opcoes: { manterBranch?: boolean; manterArvore?: boolean } = {},
+): Promise<void> {
+  // A guarda do parcial não pôde ser comprovada (§100): a pasta é a única cópia, e fica.
+  if (opcoes.manterArvore === true) return;
   await git(projectRoot, ["worktree", "remove", "--force", worktree.dir]).catch(() => undefined);
   await rm(worktree.dir, { recursive: true, force: true });
   await git(projectRoot, ["worktree", "prune"]).catch(() => undefined);
   if (opcoes.manterBranch !== true) await git(projectRoot, ["branch", "-D", worktree.branch]).catch(() => undefined);
+}
+
+/**
+ * Copia arquivos para fora do Git e COMPROVA a cópia: o sha256 de cada destino
+ * tem de ser o da origem. Lança no primeiro que não confere — quem chama não
+ * pode tratar como guardado o que não foi.
+ */
+async function copiarComProva(raiz: string, caminhos: readonly string[], destino: string): Promise<void> {
+  for (const caminho of caminhos) {
+    const origem = join(raiz, caminho);
+    const alvo = join(destino, caminho);
+    await mkdir(dirname(alvo), { recursive: true });
+    await cp(origem, alvo, { preserveTimestamps: true });
+    if ((await hashDoArquivo(origem)) !== (await hashDoArquivo(alvo))) throw new Error(`a cópia de ${caminho} difere do original`);
+  }
+}
+
+export interface ParcialGuardado {
+  /** Há um commit novo no branch da fase. */
+  guardado: boolean;
+  /** Ficaram FORA do commit por serem sensíveis (§100) — copiados para `recuperacao`. */
+  bloqueados: Bloqueio[];
+  recuperacao: string | null;
+  /**
+   * A guarda não pôde ser comprovada: o worktree é a única cópia do trabalho e
+   * não pode ser removido.
+   */
+  preservarArvore: boolean;
+  motivo?: string;
 }
 
 /**
@@ -157,15 +193,39 @@ export async function fecharWorktree(projectRoot: string, worktree: Worktree, op
  * árvore, com a instrução de commitar ou descartar. Aqui a árvore some, e o que
  * ela tinha vai para o branch da fase — fora da árvore principal, que não recebe
  * nada que um gate não aprovou.
+ *
+ * É commit de RECUPERAÇÃO, e passa pela política de admissão (§100): o que for
+ * sensível não entra no branch — é copiado, com prova, para a pasta de
+ * recuperação do run, que o Git ignora; o resto é commitado. Qualquer passo que
+ * falhe deixa o worktree no disco, em vez de o trabalho sumir com ele.
  */
-export async function guardarParcial(worktree: Worktree, mensagem: string): Promise<boolean> {
+export async function guardarParcial(worktree: Worktree, mensagem: string, pastaDeRecuperacao: string): Promise<ParcialGuardado> {
+  const nada: ParcialGuardado = { guardado: false, bloqueados: [], recuperacao: null, preservarArvore: false };
   try {
-    await git(worktree.dir, ["add", "-A", "--", ".", ":(exclude).capivara"]);
-    if ((await git(worktree.dir, ["diff", "--cached", "--name-only"])) === "") return false;
+    const entradas = await alteracoesParaCommit(worktree.dir);
+    if (entradas.length === 0) return nada;
+    const bloqueados = await admitirArvore(worktree.dir, entradas.map((entrada) => entrada.caminho));
+    const fora = new Set(bloqueados.map((bloqueio) => bloqueio.caminho));
+    const presentes: string[] = [];
+    for (const caminho of fora) if (await existe(join(worktree.dir, caminho))) presentes.push(caminho);
+    const recuperacao = presentes.length > 0 ? pastaDeRecuperacao : null;
+    if (recuperacao) await copiarComProva(worktree.dir, presentes, recuperacao);
+
+    const admitidos = entradas.map((entrada) => entrada.caminho).filter((caminho) => !fora.has(caminho));
+    const literal = { cwd: worktree.dir, env: { ...process.env, GIT_LITERAL_PATHSPECS: "1" }, ...GRANDE };
+    await adicionarExatamente(worktree.dir, admitidos, "-A");
+    const noIndice = (await run("git", ["diff", "--cached", "--name-only", "-z"], literal)).stdout.split("\0").filter(Boolean);
+    // O índice é conferido de novo: o que o agente tenha deixado preparado também passa pela política.
+    const escapou = await admitirArvore(worktree.dir, noIndice);
+    if (escapou.length > 0) {
+      await git(worktree.dir, ["reset", "-q"]);
+      return { guardado: false, bloqueados: [...bloqueados, ...escapou], recuperacao, preservarArvore: true, motivo: "havia arquivo sensível preparado no índice" };
+    }
+    if (noIndice.length === 0) return { ...nada, bloqueados, recuperacao };
     await git(worktree.dir, ["commit", "-q", "--no-verify", "-m", mensagem]);
-    return true;
-  } catch {
-    return false;
+    return { guardado: true, bloqueados, recuperacao, preservarArvore: false };
+  } catch (erro) {
+    return { ...nada, preservarArvore: true, motivo: erro instanceof Error ? (erro.message.split("\n")[0] ?? "") : String(erro) };
   }
 }
 
@@ -250,27 +310,13 @@ export async function desfazerIntegracao(projectRoot: string, antes: string): Pr
   await git(projectRoot, ["reset", "-q", "--keep", antes]);
 }
 
-/** Os caminhos de um `git status --porcelain -z`, sem o plano de controle; `alterados` são os versionados. */
+/** Os caminhos do `git status`, sem o plano de controle; `alterados` são os versionados. */
 async function situacaoDaPrincipal(projectRoot: string): Promise<{ alterados: string[]; naoVersionados: string[] }> {
-  // Sem `trim`: o status começa com espaço quando só a árvore mudou (" M arquivo").
-  const { stdout } = await run("git", ["status", "--porcelain", "-z", "--untracked-files=all", "--", ".", ":(exclude).capivara"], {
-    cwd: projectRoot,
-    ...GRANDE,
-  });
-  const alterados: string[] = [];
-  const naoVersionados: string[] = [];
-  const entradas = stdout.split("\0");
-  for (let indice = 0; indice < entradas.length; indice += 1) {
-    const entrada = entradas[indice] ?? "";
-    if (entrada.length < 4) continue;
-    const codigo = entrada.slice(0, 2);
-    const caminho = entrada.slice(3);
-    if (codigo === "??") naoVersionados.push(caminho);
-    else alterados.push(caminho);
-    // Renomeação e cópia trazem o caminho de origem na entrada seguinte.
-    if (codigo.includes("R") || codigo.includes("C")) indice += 1;
-  }
-  return { alterados, naoVersionados };
+  const entradas = await lerStatus(projectRoot);
+  return {
+    alterados: entradas.filter((entrada) => !entrada.naoVersionado).map((entrada) => entrada.caminho),
+    naoVersionados: entradas.filter((entrada) => entrada.naoVersionado).map((entrada) => entrada.caminho),
+  };
 }
 
 /**
@@ -299,18 +345,6 @@ export async function impedimentosDaPrincipal(
   return { impedimentos: [...alterados, ...naoVersionados.filter((caminho) => daFase.has(caminho))].sort(), naoVersionados };
 }
 
-/**
- * Arquivo que pode guardar segredo, e que por isso nunca vai para um commit de recuperação.
- *
- * Regra fechada, por nome: `.env` e `.env.<qualquer>` (menos os exemplos
- * versionáveis por regra, §46), chaves `*.pem` e `*.key`, e as chaves de SSH.
- */
-export function arquivoSensivel(caminho: string): boolean {
-  const nome = caminho.split("/").pop() ?? caminho;
-  if (/^\.env\.(?:example|sample|template|dist)$/.test(nome)) return false;
-  return /^\.env(?:\..+)?$/.test(nome) || /\.(?:pem|key)$/.test(nome) || /^id_(?:rsa|dsa|ecdsa|ed25519)$/.test(nome);
-}
-
 async function hashDoArquivo(caminho: string): Promise<string> {
   return createHash("sha256").update(await readFile(caminho)).digest("hex");
 }
@@ -330,9 +364,10 @@ async function hashDoArquivo(caminho: string): Promise<string> {
  *   montado com um índice temporário (o índice e a árvore da principal não são
  *   tocados). Só versionados: `add -u`, nunca `add -A` — um não versionado
  *   qualquer, como um `.env` que ninguém ignorou, viraria objeto do repositório.
- * - **Não versionados que a integração criou**, e versionados com nome de
- *   segredo (`arquivoSensivel`), são COPIADOS para a pasta de recuperação do
- *   run, que o Git ignora — fora de qualquer commit.
+ * - **Não versionados que a integração criou**, e versionados que a política
+ *   de admissão bloqueia (§100: nome de segredo ou chave privada no conteúdo),
+ *   são COPIADOS para a pasta de recuperação do run, que o Git ignora — fora de
+ *   qualquer commit.
  * - **Não versionados que já estavam** não são copiados, commitados nem removidos.
  *
  * A guarda é comprovada antes de qualquer limpeza: cada cópia com o mesmo
@@ -354,9 +389,10 @@ export async function desfazerSemApagar(
   const { alterados, naoVersionados } = await situacaoDaPrincipal(projectRoot);
   const jaEstavam = new Set(opcoes.naoVersionadosAntes);
   const novos = naoVersionados.filter((caminho) => !jaEstavam.has(caminho));
-  const noCommit = alterados.filter((caminho) => !arquivoSensivel(caminho));
+  const sensiveis = new Set((await admitirArvore(projectRoot, alterados)).map((bloqueio) => bloqueio.caminho));
+  const noCommit = alterados.filter((caminho) => !sensiveis.has(caminho));
   const paraCopiar: string[] = [];
-  for (const caminho of [...novos, ...alterados.filter(arquivoSensivel)]) {
+  for (const caminho of [...novos, ...alterados.filter((caminho) => sensiveis.has(caminho))]) {
     if (await existe(join(projectRoot, caminho))) paraCopiar.push(caminho);
   }
   const semProva = (oQue: string, erro?: unknown): Error =>
@@ -368,16 +404,10 @@ export async function desfazerSemApagar(
 
   // 1. A cópia local do que não pode ir para o Git, conferida byte a byte.
   const recuperacao = paraCopiar.length > 0 ? opcoes.pastaDeRecuperacao : null;
-  for (const caminho of paraCopiar) {
-    const origem = join(projectRoot, caminho);
-    const destino = join(opcoes.pastaDeRecuperacao, caminho);
-    try {
-      await mkdir(dirname(destino), { recursive: true });
-      await cp(origem, destino, { preserveTimestamps: true });
-      if ((await hashDoArquivo(origem)) !== (await hashDoArquivo(destino))) throw new Error("a cópia difere do original");
-    } catch (erro) {
-      throw semProva(caminho, erro);
-    }
+  try {
+    if (recuperacao) await copiarComProva(projectRoot, paraCopiar, recuperacao);
+  } catch (erro) {
+    throw semProva(paraCopiar.join(", "), erro);
   }
 
   // 2. O commit de recuperação, só com versionados que não são segredo.
@@ -390,7 +420,7 @@ export async function desfazerSemApagar(
       ...GRANDE,
     };
     await run("git", ["read-tree", "HEAD"], comIndice);
-    if (noCommit.length > 0) await run("git", ["add", "-u", "--", ...noCommit], comIndice);
+    await adicionarExatamente(projectRoot, noCommit, "-u", comIndice.env);
     const arvore = (await run("git", ["write-tree"], comIndice)).stdout.trim();
     const commit = await git(projectRoot, ["commit-tree", arvore, "-p", "HEAD", "-m", opcoes.mensagem]);
     guardado = `${opcoes.guardarEm}-${commit.slice(0, 8)}`;

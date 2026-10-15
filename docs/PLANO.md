@@ -6718,3 +6718,62 @@ dependências na árvore principal), m1 a m3. E o irmão serial do B2: a
 instrução "descarta e a fase recomeça do zero" do runner também deixa as
 aprovações de um código descartado — não corrigido aqui por estar fora do
 escopo pedido.
+
+## §100 — Nenhum commit automático leva segredo para o histórico
+
+O `git add -A` estava em todo commit que a Capivara faz sozinha: o da fase
+(serial e worktree), o do parcial, o inicial do repositório que o build cria.
+Um `.env` que ninguém pôs no `.gitignore` entrava como qualquer arquivo — e no
+histórico um segredo está em todo clone e em todo push. O `.gitignore` não é
+proteção: é convenção de quem escreve o projeto.
+
+**A política de admissão** (`loop/admissao.ts`) é determinística e fechada:
+- *pelo nome*: `.env` e `.env.<qualquer>` (menos `.example`, `.sample`,
+  `.template`, `.dist`, `.defaults`, que o §46 manda versionar), `*.key`,
+  chaves de SSH (`id_rsa`, `id_ed25519`…), repositórios de chaves (`.p12`,
+  `.pfx`, `.jks`, `.keystore`), `.netrc`, `.pgpass`, `.git-credentials`;
+- *pelo conteúdo*: qualquer arquivo com bloco PEM de chave PRIVADA, seja qual
+  for o nome; e o `.pem` sem certificado nem chave pública reconhecível, ou
+  grande demais para ler, é suspeito. Certificado público passa.
+
+Ela não promete achar uma senha literal num `config.ts`: segredo arbitrário em
+arquivo de nome comum não tem detecção garantida.
+
+**Onde ela vale**, e o que cada consumidor faz com o bloqueio — sempre sem
+apagar nada, sem `reset --hard`, sem `git clean`, e dizendo só caminho e
+motivo, nunca o conteúdo:
+
+| ponto | tipo | bloqueado |
+|---|---|---|
+| `commitPhase` (serial e worktree) | publicação | não commita; a fase sai `commit-blocked` |
+| `iniciarRepositorio` (commit inicial) | publicação | o repositório nasce sem o commit; o preflight orienta |
+| `commitSpecification` | publicação | não commita |
+| `integrar` (cherry-pick) | publicação | `admitirIntervalo` lê os objetos dos commits da fase ANTES do cherry-pick; nada entra; o branch fica, com aviso para não publicá-lo |
+| `guardarParcial` | recuperação | commita o resto; o sensível é copiado, com sha256 conferido, para `.capivara/runs/<run>/recuperacao/`; sem prova, o worktree fica no disco |
+| `desfazerSemApagar` | recuperação | idem (§99) |
+
+Os dois de publicação fazem a conferência ANTES de tocar no índice, e de novo
+DEPOIS do `add` sobre o que o índice tem de fato; se algo escapou, só o
+índice volta ao HEAD. O `add` é de exatamente os caminhos admitidos, por
+`--pathspec-from-file`.
+
+**`commit-blocked` é um desfecho de fase**, e não "completa sem commit". No
+serial, completa sem commit deixaria a fase seguinte construir sobre trabalho
+fora do histórico; no paralelo, seria integrar nada e apagar o worktree com o
+trabalho dentro. O build para — mesmo com `--keep-going`, porque o commit da
+fase seguinte levaria o mesmo arquivo —, a fase não é registrada como
+concluída, e a retomada a revalida. A parada (`loop/parada.ts`) orienta:
+ignorar o arquivo (ou `git rm --cached` se já for rastreado — o arquivo fica
+em disco e o histórico antigo não é reescrito), só então commitar o parcial. O
+preflight, diante de árvore suja com arquivo sensível, diz qual é ANTES de
+sugerir `git add -A`.
+
+**O `.env` que o próprio harness semeia** do `.env.example` (§46, marcado na
+primeira linha) não entra em commit nenhum, mas também não bloqueia e não
+conta como árvore suja: bloquear o próprio artefato faria todo projeto sem
+`.env` no `.gitignore` parar em toda fase. Sem a marca, o arquivo é de quem o
+escreveu e volta a ser sensível.
+
+Os gates G0–G4 e a gramática do plano não mudaram. Testes em
+`test/loop/admissao.spec.ts`, com Git de verdade: treze falhavam antes da
+política, e o de arquivos legítimos passava antes e depois.

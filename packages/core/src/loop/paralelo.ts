@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { writeAtomic } from "../state/atomic.js";
 import { appendEvent } from "../state/events.js";
 import { runPaths } from "../state/paths.js";
+import { admitirIntervalo, descreverBloqueios } from "./admissao.js";
 import { prepararAmbiente } from "./ambiente.js";
 import { bloqueadas, dependenciasEfetivas, proximas, type EstadoNaAgenda } from "./escalonador.js";
 import { gate2, type TestRunner } from "./gates.js";
@@ -43,6 +44,7 @@ import {
   integrar,
   mexeuNasDependencias,
   trazerRoteiros,
+  type ParcialGuardado,
   type Worktree,
 } from "./worktree.js";
 
@@ -109,6 +111,7 @@ function descreverFalha(outcome: PhaseOutcome): string {
   if (outcome.status === "failed") return `${outcome.gate}: ${outcome.cause}`;
   if (outcome.status === "credential-rejected") return `o provider ${outcome.engine} recusou a credencial: ${outcome.evidence}`;
   if (outcome.status === "rate-limit-exhausted") return "limite de uso esgotado";
+  if (outcome.status === "commit-blocked") return outcome.cause;
   return outcome.status;
 }
 
@@ -146,6 +149,9 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
   const evento = async (subject: string, status: "complete" | "retry" | "blocked", detail: string): Promise<void> => {
     await appendEvent(paths.events, { timestamp: options.now().toISOString(), stage: "implement", subject, attempt: 1, status, detail });
   };
+  /** Onde o que não pode ir para o Git é guardado, por fase e instante (§99, §100). */
+  const pastaDeRecuperacao = (session: PhaseSession): string =>
+    join(paths.root, "recuperacao", `${session.id}-${options.now().toISOString().replace(/[:.]/g, "-")}`);
   const agente = (slot: number, estado: "livre" | "preparando" | "trabalhando" | "integrando", phaseId: string | null, detail = ""): void =>
     options.onWorker?.({ slot, state: estado, phaseId, detail });
 
@@ -221,7 +227,7 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
         naoVersionadosAntes: naoVersionados,
         guardarEm: `${worktree.branch}-reprovada`,
         mensagem: `capivara: árvore principal quando a integração da ${session.id} foi reprovada (${motivo.split("\n")[0] ?? ""})`,
-        pastaDeRecuperacao: join(paths.root, "recuperacao", `${session.id}-${options.now().toISOString().replace(/[:.]/g, "-")}`),
+        pastaDeRecuperacao: pastaDeRecuperacao(session),
       });
       if (desfeita.limpo) return { desfecho: "refazer", motivo };
       /*
@@ -237,6 +243,29 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
           `o trabalho da fase está no branch ${worktree.branch}`,
       );
     };
+
+    /*
+     * O que os commits da fase TRAZEM passa pela política de admissão antes do
+     * cherry-pick (§100) — lido dos objetos do Git, não da palavra do worker:
+     * o agente pode ter commitado por conta própria. Bloqueado, nada entra; o
+     * branch fica, porque apagá-lo seria perder o trabalho, e a mensagem diz
+     * que ele não deve ser publicado.
+     */
+    const sensiveis = await admitirIntervalo(projectRoot, worktree.base, worktree.branch);
+    if (sensiveis.length > 0) {
+      return {
+        desfecho: "falhou",
+        outcome: {
+          status: "commit-blocked",
+          bloqueios: sensiveis,
+          cause:
+            `a integração recusou a fase: os commits dela trazem arquivo sensível — ${descreverBloqueios(sensiveis)}. ` +
+            `Nada entrou na árvore principal. O branch ${worktree.branch} foi mantido com esse conteúdo: não o publique; ` +
+            `para descartá-lo, \`git branch -D ${worktree.branch}\``,
+          cycles: 0,
+        },
+      };
+    }
 
     const { impedimentos, naoVersionados } = await impedimentosDaPrincipal(projectRoot, worktree);
     if (impedimentos.length > 0) {
@@ -307,6 +336,8 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
     const pool = options.agentes[slot]!;
     let worktree: Worktree | null = null;
     let manterBranch = false;
+    /** A guarda do parcial não foi comprovada: o worktree não sai do disco (§100). */
+    let manterArvore = false;
     try {
       agente(slot, "preparando", session.id);
       try {
@@ -368,11 +399,15 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
         return;
       }
 
-      // Parou num gate: o parcial vai para o branch da fase, fora do produto.
-      manterBranch = await guardarParcial(worktree, `wip(${session.id}): trabalho parcial, gates não fecharam`);
-      if (manterBranch) {
-        announce(`[${session.id}] o trabalho parcial ficou no branch ${worktree.branch}, fora da árvore principal (git log ${worktree.branch})`);
-      }
+      // Parou num gate (ou o commit foi bloqueado): o parcial vai para o branch da fase, fora do produto.
+      const parcial = await guardarParcial(
+        worktree,
+        `wip(${session.id}): trabalho parcial, ${outcome.status === "commit-blocked" ? "commit bloqueado pela política de admissão" : "gates não fecharam"}`,
+        pastaDeRecuperacao(session),
+      );
+      manterBranch = parcial.guardado || parcial.preservarArvore;
+      manterArvore = parcial.preservarArvore;
+      anunciarParcial(session, worktree, parcial);
       /*
        * E as tasks que o verificador aprovou nesta tentativa foram aprovadas
        * sobre esse parcial. A retomada abre um worktree do HEAD, sem ele: se as
@@ -392,9 +427,10 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
       fatal = true;
       const causa = erro instanceof Error ? erro.message.split("\n")[0] ?? "" : String(erro);
       if (worktree) {
-        await guardarParcial(worktree, `wip(${session.id}): trabalho parcial, a fase parou num erro inesperado`);
+        const parcial = await guardarParcial(worktree, `wip(${session.id}): trabalho parcial, a fase parou num erro inesperado`, pastaDeRecuperacao(session));
         manterBranch = true;
-        announce(`[${session.id}] o trabalho da fase ficou no branch ${worktree.branch}, fora da árvore principal`);
+        manterArvore = parcial.preservarArvore;
+        anunciarParcial(session, worktree, parcial);
       }
       if (estados.get(session.id) !== "integrada") {
         await options.esquecer(session).catch(() => undefined);
@@ -404,9 +440,28 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
         agente(slot, "livre", null, `${session.id} erro inesperado`);
       }
     } finally {
-      if (worktree) await fecharWorktree(projectRoot, worktree, { manterBranch }).catch(() => undefined);
+      if (worktree) await fecharWorktree(projectRoot, worktree, { manterBranch, manterArvore }).catch(() => undefined);
       livres.push(slot);
       livres.sort((a, b) => a - b);
+    }
+  };
+
+  /** O que aconteceu com o parcial, dito com caminhos e nunca com conteúdo. */
+  const anunciarParcial = (session: PhaseSession, worktree: Worktree, parcial: ParcialGuardado): void => {
+    if (parcial.guardado) {
+      announce(`[${session.id}] o trabalho parcial ficou no branch ${worktree.branch}, fora da árvore principal (git log ${worktree.branch})`);
+    }
+    if (parcial.bloqueados.length > 0) {
+      announce(
+        `[${session.id}] fora do branch, por serem sensíveis: ${descreverBloqueios(parcial.bloqueados)}` +
+          `${parcial.recuperacao ? ` — copiados, fora do Git, para ${parcial.recuperacao}` : ""}`,
+      );
+    }
+    if (parcial.preservarArvore) {
+      announce(
+        `[${session.id}] não consegui comprovar a guarda do parcial${parcial.motivo ? ` (${parcial.motivo})` : ""}: ` +
+          `o worktree ficou no disco, intacto, em ${worktree.dir}`,
+      );
     }
   };
 

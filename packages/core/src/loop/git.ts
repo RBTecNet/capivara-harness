@@ -14,6 +14,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
+import { adicionarExatamente, admitirArvore, alteracoesParaCommit, descreverBloqueios, lerStatus, orientacaoDeBloqueio, type Bloqueio } from "./admissao.js";
 import { renderEscolhaNumerada, type EscolhaNumerada } from "./escolha.js";
 import { promisify } from "node:util";
 
@@ -118,6 +119,20 @@ export async function iniciarRepositorio(
      * controle não é trabalho do produto.
      */
     if (!vazia) {
+      /*
+       * O commit inicial leva o trabalho que já estava na pasta — e um `.env`
+       * de quem a escreveu iria junto (§100). Com arquivo sensível, o
+       * repositório nasce sem o commit: nada é apagado, e o preflight diz o que
+       * ignorar antes de commitar.
+       */
+      const bloqueios = await admitirArvore(projectRoot, (await lerStatus(projectRoot)).map((entrada) => entrada.caminho));
+      if (bloqueios.length > 0) {
+        return {
+          criado: true,
+          commitInicial: false,
+          motivo: `o commit inicial não foi feito: ${descreverBloqueios(bloqueios)}. ${orientacaoDeBloqueio(bloqueios, new Set())}`,
+        };
+      }
       await run("git", ["add", "-A", "--", ...CONTROL_PLANE_PATHSPEC], { cwd: projectRoot });
       if (!(await isClean(projectRoot))) {
         await run("git", ["commit", "-q", "-m", "chore: estado inicial, antes do primeiro build"], { cwd: projectRoot });
@@ -198,7 +213,9 @@ async function garantirIdentidade(projectRoot: string): Promise<void> {
 export async function isClean(projectRoot: string): Promise<boolean> {
   try {
     const { stdout } = await run("git", ["status", "--porcelain", "--", ...CONTROL_PLANE_PATHSPEC], { cwd: projectRoot });
-    return stdout.trim() === "";
+    if (stdout.trim() === "") return true;
+    // O `.env` que o harness semeou não é trabalho de ninguém, e nunca vai para commit (§100).
+    return (await alteracoesParaCommit(projectRoot, CONTROL_PLANE_PATHSPEC)).length === 0;
   } catch {
     return true;
   }
@@ -257,6 +274,41 @@ export async function hasPendingChanges(projectRoot: string): Promise<boolean> {
 export interface CommitResult {
   committed: boolean;
   message: string;
+  /** O commit não foi feito por causa destes arquivos (§100). Ausente quando nada foi bloqueado. */
+  bloqueios?: Bloqueio[];
+}
+
+/**
+ * A admissão do que um commit automático levaria (§100): o mesmo conjunto do
+ * `git add -A`, conferido ANTES de tocar no índice.
+ */
+async function bloqueioDoCommit(projectRoot: string, pathspec: readonly string[]): Promise<CommitResult | null> {
+  const entradas = await alteracoesParaCommit(projectRoot, pathspec);
+  const bloqueios = await admitirArvore(projectRoot, entradas.map((entrada) => entrada.caminho));
+  if (bloqueios.length === 0) return null;
+  const rastreados = new Set(entradas.filter((entrada) => !entrada.naoVersionado).map((entrada) => entrada.caminho));
+  return {
+    committed: false,
+    bloqueios,
+    message: `commit bloqueado — arquivo sensível não entra no histórico: ${descreverBloqueios(bloqueios)}. ${orientacaoDeBloqueio(bloqueios, rastreados)}`,
+  };
+}
+
+/**
+ * Depois do `git add`, o que de fato está no índice passa pela mesma admissão.
+ * Se algo escapou entre a conferência e o `add`, o índice volta a ser o HEAD —
+ * só o índice: nenhum arquivo em disco é tocado.
+ */
+async function conferirIndice(projectRoot: string, pathspec: readonly string[]): Promise<CommitResult | null> {
+  const { stdout } = await run("git", ["diff", "--cached", "--name-only", "-z", "--", ...pathspec], { cwd: projectRoot });
+  const bloqueios = await admitirArvore(projectRoot, stdout.split("\0").filter(Boolean));
+  if (bloqueios.length === 0) return null;
+  await run("git", ["reset", "-q", "--", ...pathspec], { cwd: projectRoot });
+  return {
+    committed: false,
+    bloqueios,
+    message: `commit bloqueado — arquivo sensível não entra no histórico: ${descreverBloqueios(bloqueios)}. ${orientacaoDeBloqueio(bloqueios, new Set())}`,
+  };
 }
 
 /** Um commit por fase verde. Nunca muda de branch, nunca faz push. */
@@ -275,8 +327,19 @@ export async function commitPhase(projectRoot: string, phaseNumber: number, titl
    * arquivo — matava o build com a fase pronta e os gates todos verdes, e a
    * mensagem que chegava ao desenvolvedor era o stack trace do git.
    */
+  /*
+   * A política de admissão vem ANTES do `add`, e vale no serial e no worktree
+   * do paralelo (§100). Bloqueado, o commit não acontece e nada é apagado: o
+   * runner para a fase, e o trabalho fica onde está.
+   */
+  const bloqueado = await bloqueioDoCommit(projectRoot, CONTROL_PLANE_PATHSPEC);
+  if (bloqueado) return bloqueado;
   try {
-    await run("git", ["add", "-A", "--", ...CONTROL_PLANE_PATHSPEC], { cwd: projectRoot });
+    // Só o que a admissão viu, pelo nome exato: o `.env` do harness fica de fora.
+    const admitidos = (await alteracoesParaCommit(projectRoot, CONTROL_PLANE_PATHSPEC)).map((entrada) => entrada.caminho);
+    await adicionarExatamente(projectRoot, admitidos, "-A");
+    const escapou = await conferirIndice(projectRoot, CONTROL_PLANE_PATHSPEC);
+    if (escapou) return escapou;
     await run("git", ["commit", "-q", "-m", message], { cwd: projectRoot });
     return { committed: true, message };
   } catch (erro) {
@@ -308,7 +371,11 @@ export async function commitSpecification(projectRoot: string, gate: "PLAN READY
   if (!(await isRepository(projectRoot))) return { committed: false, message: "sem repositório Git: a especificação não foi versionada" };
 
   // Pathspec explícito: nada do trabalho em andamento de quem chamou entra junto.
+  const bloqueado = await bloqueioDoCommit(projectRoot, [".capivara/init"]);
+  if (bloqueado) return { ...bloqueado, message: bloqueado.message.replace("rode `capivara build` de novo", "rode o estágio de novo") };
   await run("git", ["add", "--", ".capivara/init"], { cwd: projectRoot });
+  const escapou = await conferirIndice(projectRoot, [".capivara/init"]);
+  if (escapou) return escapou;
   const staged = await run("git", ["diff", "--cached", "--name-only", "--", ".capivara/init"], { cwd: projectRoot });
   if (staged.stdout.trim() === "") return { committed: false, message: "a especificação versionada já é esta" };
 

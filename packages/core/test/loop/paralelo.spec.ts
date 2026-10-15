@@ -16,7 +16,7 @@ import { MARCA_DO_HARNESS, runBuild, type EngineCall, type EngineResult } from "
 import type { BuildOptions } from "../../src/loop/index.js";
 import { artifactPaths, readEvents, replayEvents, runIdFor, runPaths } from "../../src/state/index.js";
 import { sha12 } from "../../src/contract/index.js";
-import { arquivoSensivel } from "../../src/loop/worktree.js";
+import { arquivoSensivel } from "../../src/loop/admissao.js";
 
 const run = promisify(execFile);
 
@@ -524,11 +524,12 @@ describe("build paralelo — auditoria (§99)", () => {
     expect(await git(["branch", "--list", "--format=%(refname:short)", `capivara/${RUN()}/P03-reprovada-*`])).toBe(guardado);
   });
 
-  it("rollback: a regra do que pode ter segredo é por nome, fechada, e deixa passar os exemplos", () => {
-    for (const caminho of [".env", ".env.local", "config/.env.production", "certs/servidor.pem", "chave.key", "deploy/id_ed25519"]) {
+  it("rollback: a regra do que pode ter segredo pelo nome é fechada, e deixa passar os exemplos", () => {
+    // O .pem é julgado pelo conteúdo (§100): um certificado público passa.
+    for (const caminho of [".env", ".env.local", "config/.env.production", "chave.key", "deploy/id_ed25519"]) {
       expect(arquivoSensivel(caminho), caminho).toBe(true);
     }
-    for (const caminho of [".env.example", ".env.sample", "api/.env.template", "environment.ts", "id_ed25519.pub", "keys.json"]) {
+    for (const caminho of [".env.example", ".env.sample", "api/.env.template", "environment.ts", "id_ed25519.pub", "keys.json", "certs/ca.pem"]) {
       expect(arquivoSensivel(caminho), caminho).toBe(false);
     }
   });

@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { checkStamp, parsePhases } from "../contract/index.js";
 import type { ContractError, StampInput } from "../contract/index.js";
 import { artifactPaths } from "../state/paths.js";
+import type { Bloqueio } from "./admissao.js";
 import { AVISO_DO_RUNNER, dependenciasAusentes, descreverDependencias, faltaORunnerDeFluxos } from "./dependencias.js";
 import { resolveTestCommand, type TestCommand } from "./testcmd.js";
 import { splitPhases, type PhaseSession } from "./split.js";
@@ -21,7 +22,7 @@ export interface PreflightOptions {
   runId: string;
   explicitTestCommand?: string;
   /** Estado do repositório, injetado para o preflight continuar testável. */
-  git: { repository: boolean; clean: boolean };
+  git: { repository: boolean; clean: boolean; sensiveis?: readonly Bloqueio[] };
   /** Quando ligado, faltar um pré-requisito é aviso: o executor vai instalar. */
   systemInstall?: boolean;
   environment?: NodeJS.ProcessEnv;
@@ -97,6 +98,15 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
       [
         "a árvore de trabalho tem alterações não commitadas, e o loop precisa distinguir o que cada fase escreveu.",
         "",
+        ...(options.git.sensiveis && options.git.sensiveis.length > 0
+          ? [
+              "ANTES de qualquer `git add -A`: entre as alterações há arquivo sensível, que não pode ir para o histórico:",
+              ...options.git.sensiveis.map((bloqueio) => `  ${bloqueio.caminho} — ${bloqueio.motivo}`),
+              "adicione-o(s) ao .gitignore (ou mova para fora do projeto); se já é rastreado, `git rm --cached <arquivo>` —",
+              "o arquivo fica em disco. Só depois escolha uma das saídas abaixo.",
+              "",
+            ]
+          : []),
         "Se isto é trabalho parcial de uma fase que parou, escolha uma saída:",
         '  git add -A && git commit -m "wip: trabalho parcial"   → o loop revalida a fase e segue de onde parou',
         "  git checkout -- . && git clean -fd                    → descarta e a fase recomeça do zero",

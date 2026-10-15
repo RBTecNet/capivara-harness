@@ -16,6 +16,7 @@ import { runPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
 import { declarouRoteiroErrado, fixPrompt, flowPrompt, implementPrompt, triagePrompt, verifyPrompt, type Triagem } from "../prompts/index.js";
 import type { BuildProgressListener, LoopGate, LoopGateState } from "./progress.js";
+import type { Bloqueio } from "./admissao.js";
 import { commitPhase, hasPendingChanges, treeSignature } from "./git.js";
 import { declaredComplete, defaultTestRunner, gate0, gate1, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
 import { detectCredentialRejection, detectRateLimit, planWait } from "./ratelimit.js";
@@ -165,7 +166,15 @@ export type PhaseOutcome =
    * Não consome ciclo e não é culpa da fase: o código nem chegou a ser julgado. E
    * não se espera nem se repete — o limite de uso volta sozinho, a credencial não.
    */
-  | { status: "credential-rejected"; engine: string; evidence: string; cycles: number };
+  | { status: "credential-rejected"; engine: string; evidence: string; cycles: number }
+  /**
+   * Os gates fecharam, mas o commit da fase levaria arquivo sensível (§100).
+   *
+   * Não é "completa sem commit": a fase não entrou no histórico, e no paralelo
+   * "completa" seria integrar nada e apagar o worktree. O trabalho fica onde
+   * está; a retomada revalida a fase depois de o arquivo ser ignorado.
+   */
+  | { status: "commit-blocked"; bloqueios: Bloqueio[]; cause: string; cycles: number };
 
 export const DEFAULT_MAX_CYCLES = 3;
 export const DEFAULT_MAX_LIMIT_WAITS = 20;
@@ -632,6 +641,14 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
           const commit = options.commitsEnabled
             ? await commitPhase(arvore, session.number, session.title)
             : { committed: false, message: "commits desabilitados: nenhum repositório Git" };
+
+          if (commit.bloqueios && commit.bloqueios.length > 0) {
+            await recolher(cycle);
+            await event("blocked", `commit bloqueado: ${commit.bloqueios.map((bloqueio) => bloqueio.caminho).join(", ")}`, cycle);
+            relatar({ kind: "phase", id: session.id, state: "falhou", cycle, detail: "commit bloqueado" });
+            announce(`[${session.id}] gates verdes, mas o commit foi BLOQUEADO — ${commit.message}`);
+            return { status: "commit-blocked", bloqueios: commit.bloqueios, cause: commit.message, cycles: cycle };
+          }
 
           if (!commit.committed && commit.message.includes("já estava implementada")) {
             await concluir("já implementada em HEAD", cycle);

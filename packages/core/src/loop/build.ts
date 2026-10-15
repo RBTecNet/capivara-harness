@@ -51,6 +51,7 @@ import type { BuildProgressListener } from "./progress.js";
 import { lerFasesFechadas, registrarFaseFechada, shaDaFase } from "./ledger.js";
 import { TasksAprovadas, tasksDaFase } from "./veredictos.js";
 import { defaultTestRunner, type TestRunner } from "./gates.js";
+import { admitirArvore, alteracoesParaCommit } from "./admissao.js";
 import { conferirIsolamento } from "./isolamento.js";
 import { larguraDoPlano } from "./escalonador.js";
 import { executarEmParalelo, type AgenteDoPool, type ExecucaoDaFase } from "./paralelo.js";
@@ -274,7 +275,9 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
           announce(
             criado.commitInicial
               ? "repositório Git criado, com o que já estava aqui no commit inicial"
-              : "repositório Git criado",
+              : criado.motivo !== ""
+                ? `repositório Git criado; ${criado.motivo}`
+                : "repositório Git criado",
           );
         }
         repository = await isRepository(options.projectRoot);
@@ -306,7 +309,16 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     projectRoot: options.projectRoot,
     runId,
     ...(options.explicitTestCommand !== undefined ? { explicitTestCommand: options.explicitTestCommand } : {}),
-    git: { repository, clean: repository ? await isClean(options.projectRoot) : true },
+    git: await (async () => {
+      const clean = repository ? await isClean(options.projectRoot) : true;
+      /*
+       * Árvore suja com arquivo sensível: o preflight diz qual é ANTES de
+       * sugerir `git add -A` — seguida às cegas, a sugestão levaria o segredo
+       * para o histórico (§100).
+       */
+      const sensiveis = clean ? [] : await admitirArvore(options.projectRoot, (await alteracoesParaCommit(options.projectRoot)).map((entrada) => entrada.caminho));
+      return { repository, clean, ...(sensiveis.length > 0 ? { sensiveis } : {}) };
+    })(),
     ...(options.systemInstall !== undefined ? { systemInstall: options.systemInstall } : {}),
     ...(options.environment !== undefined ? { environment: options.environment } : {}),
   });
@@ -733,7 +745,9 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
           ? `${outcome.gate}: ${outcome.cause}`
           : outcome.status === "credential-rejected"
             ? `o provider ${outcome.engine} recusou a credencial: ${outcome.evidence}`
-            : "limite de uso esgotado";
+            : outcome.status === "commit-blocked"
+              ? outcome.cause
+              : "limite de uso esgotado";
       await appendEvent(paths.events, {
         timestamp: now().toISOString(),
         stage: "implement",
@@ -801,13 +815,20 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       // defeito introduzido na fase 5 aparecer na fase 5.
       if (outcome.status === "complete" || outcome.status === "already-implemented") await aposVerde(session);
 
-      if (outcome.status === "failed" || outcome.status === "rate-limit-exhausted" || outcome.status === "credential-rejected") {
+      if (
+        outcome.status === "failed" ||
+        outcome.status === "rate-limit-exhausted" ||
+        outcome.status === "credential-rejected" ||
+        outcome.status === "commit-blocked"
+      ) {
         const detail =
           outcome.status === "failed"
             ? `${outcome.gate}: ${outcome.cause}`
             : outcome.status === "credential-rejected"
               ? `o provider ${outcome.engine} recusou a credencial: ${outcome.evidence}`
-              : "limite de uso esgotado";
+              : outcome.status === "commit-blocked"
+                ? outcome.cause
+                : "limite de uso esgotado";
         const [primeira, ...resto] = detail.split("\n");
         announce(`[${session.id}] PAROU — ${primeira ?? ""}`);
         // A causa inteira sai aqui, e só aqui: quem chama recebe o mesmo texto
@@ -818,7 +839,11 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
          * mesmo provider com a mesma credencial, e seguir seria marcar as onze
          * restantes como falhas por um motivo que não é delas.
          */
-        if (!options.keepGoing || outcome.status === "credential-rejected") return await parar(outcome);
+        /*
+         * Nem o commit bloqueado (§100): a fase seguinte construiria sobre um
+         * trabalho fora do histórico, e o commit dela levaria o mesmo arquivo.
+         */
+        if (!options.keepGoing || outcome.status === "credential-rejected" || outcome.status === "commit-blocked") return await parar(outcome);
       }
     }
 

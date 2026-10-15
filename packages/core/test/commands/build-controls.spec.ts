@@ -150,7 +150,7 @@ describe("atalhos da sessão de teclas", () => {
 describe("painel com pausa", () => {
   it("a atividade pausada diz há quanto tempo e como retomar, e o rodapé mostra as teclas", () => {
     const view = renderDashboard({
-      version: "0.3.5",
+      version: "0.4.0",
       command: "build",
       subtitle: "build",
       project: "x",

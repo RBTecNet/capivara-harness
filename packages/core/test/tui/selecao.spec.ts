@@ -174,7 +174,7 @@ describe("campo de texto", () => {
 
 describe("tela do wizard", () => {
   const base = {
-    version: "0.3.5",
+    version: "0.4.0",
     subtitle: "wizard · monta o comando com você",
     history: [{ question: "\nPasta do projeto [/projeto]: ", answer: "/projeto" }],
     notes: ["capivara · monta o comando com você e imprime o equivalente no fim\n"],

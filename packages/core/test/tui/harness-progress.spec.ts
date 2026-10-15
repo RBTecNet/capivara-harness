@@ -333,7 +333,7 @@ describe("o cabeçalho diz qual estágio está na tela", () => {
 describe("Prompt Engineer usa o dashboard com suas próprias etapas", () => {
   const painel = () =>
     new HarnessProgress({
-      version: "0.3.5",
+      version: "0.4.0",
       command: "prompt-engineer",
       project: "pedido.md",
       provider: { perfil: "codex", transporte: "codex-cli", contabilidade: "por chamada" },

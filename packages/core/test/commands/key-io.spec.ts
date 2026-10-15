@@ -26,7 +26,7 @@ function fakeTerminal() {
     write: (text) => void escrito.push(text),
     dimensions: () => ({ columns: 100, rows: 40 }),
     style: { enabled: false },
-    version: "0.3.5",
+    version: "0.4.0",
     subtitle: "wizard",
     environment: {},
     interrupt: () => void (interrompido += 1),

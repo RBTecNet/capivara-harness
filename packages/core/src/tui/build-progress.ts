@@ -50,6 +50,11 @@ export class BuildPhaseTracker {
        * os gates: eles são a explicação do resultado, e apagar o gate vermelho
        * de uma fase que falhou joga fora exatamente o que quem olha procura.
        */
+      // De volta à fila: a próxima vez que ela rodar recomeça do ciclo 1, com os gates apagados.
+      if (event.state === "aguardando") {
+        this.cicloPorFase.delete(event.id);
+        linha.gates = emptyGates();
+      }
       if (event.state === "em andamento" && event.cycle > 0 && this.cicloPorFase.get(event.id) !== event.cycle) {
         this.cicloPorFase.set(event.id, event.cycle);
         linha.gates = emptyGates();

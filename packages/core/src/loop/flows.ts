@@ -526,6 +526,14 @@ export interface FlowGateOptions {
    */
   triagem?: (entrada: EntradaDaTriagem) => Promise<string>;
   port?: number;
+  /**
+   * A porta tentada primeiro, quando não é a de sempre.
+   *
+   * No build paralelo (§97) cada agente prefere uma porta diferente: dois gates
+   * 4 que testassem a mesma porta livre ao mesmo tempo achariam-na livre os dois,
+   * e o segundo servidor a subir encontraria a porta tomada.
+   */
+  preferredPort?: number;
   /** Tentativas de redação por fluxo, contando a primeira. */
   maxDrafts?: number;
   announce?: (message: string) => void;
@@ -714,8 +722,9 @@ export function ehEsquemaAusente(erros: readonly string[]): boolean {
  */
 export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   const announce = options.announce ?? ((): void => {});
-  const port = options.port ?? (await portaLivre());
-  if (port !== FLOW_PORT) announce(`porta ${port} para subir a aplicação; a preferida estava ocupada`);
+  const preferida = options.preferredPort ?? FLOW_PORT;
+  const port = options.port ?? (await portaLivre(preferida));
+  if (port !== preferida) announce(`porta ${port} para subir a aplicação; a preferida estava ocupada`);
   const baseUrl = `http://127.0.0.1:${port}`;
   const pasta = join(options.projectRoot, FLOWS_DIR);
 

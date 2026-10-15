@@ -8,7 +8,7 @@
  */
 
 import { join } from "node:path";
-import { parsePhases } from "../contract/index.js";
+import { parsePhases, phaseDependencies } from "../contract/index.js";
 import type { ContractError, PhaseBlock } from "../contract/index.js";
 import { writeAtomic } from "../state/atomic.js";
 import { runPaths } from "../state/paths.js";
@@ -29,6 +29,14 @@ export interface PhaseSession {
    * continua chegando.
    */
   areas: string;
+  /**
+   * As fases de que esta depende, pelo `Depends on` do plano.
+   *
+   * Só o build paralelo lê (§97): no serial, a ordem do documento já satisfaz
+   * toda dependência. Ausente em sessões montadas à mão, que o escalonador trata
+   * como dependentes de todas as anteriores.
+   */
+  dependsOn?: number[];
 }
 
 export type SplitResult =
@@ -52,6 +60,7 @@ export function splitPhases(source: string, projectRoot: string, runId: string):
     markdown: phase.markdown,
     file: join(directory, `${phaseId(phase.number)}.md`),
     areas: phase.areas,
+    dependsOn: phaseDependencies(phase.dependsOn),
   }));
 
   return { ok: true, sessions };

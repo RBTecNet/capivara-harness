@@ -49,8 +49,14 @@ import { runAcceptance, type AcceptanceResult, type CommandRunner } from "./acce
 import { acceptancePrompt, installPrompt } from "../prompts/index.js";
 import type { BuildProgressListener } from "./progress.js";
 import { lerFasesFechadas, registrarFaseFechada, shaDaFase } from "./ledger.js";
-import { TasksAprovadas } from "./veredictos.js";
-import type { TestRunner } from "./gates.js";
+import { TasksAprovadas, tasksDaFase } from "./veredictos.js";
+import { defaultTestRunner, type TestRunner } from "./gates.js";
+import { conferirIsolamento } from "./isolamento.js";
+import { executarEmParalelo, type AgenteDoPool, type ExecucaoDaFase } from "./paralelo.js";
+import { FLOW_PORT } from "./flows.js";
+import { garantirBase } from "./worktree.js";
+import type { PhaseSession } from "./split.js";
+import type { WorkerProgressListener } from "./progress.js";
 
 export interface BuildOptions {
   projectRoot: string;
@@ -139,6 +145,21 @@ export interface BuildOptions {
   skipAcceptance?: boolean;
   acceptanceRunner?: CommandRunner;
   acceptanceService?: CommandRunner;
+  /**
+   * Execução paralela (§97): até `maxConcurrency` fases ao mesmo tempo, cada
+   * uma no seu worktree, com o agente do pool que o escalonador der a ela.
+   *
+   * Ausente é o build serial de sempre, inalterado. Presente, ou o paralelo
+   * roda de verdade, ou o build não começa — nunca serial com nome de paralelo.
+   */
+  parallel?: {
+    maxConcurrency: number;
+    agentes: AgenteDoPool[];
+    /** O que o CLI resolveu e quer na tela antes de começar: modo, agentes, limitações. */
+    resumo: string[];
+  };
+  /** O estado de cada agente do pool, para quem desenha. */
+  onWorker?: WorkerProgressListener;
 }
 
 export interface PhaseReport {
@@ -343,6 +364,42 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   }
   for (const warning of checked.warnings) announce(`aviso: ${warning.message}`);
 
+  /*
+   * O resumo da execução paralela, antes de qualquer chamada de modelo: quem
+   * pediu quatro agentes precisa ver com que modelos, o que não vai funcionar
+   * como esperado, e se o isolamento está garantido — e o build só segue se o
+   * paralelo for de fato possível aqui.
+   */
+  if (options.parallel) {
+    const isolamento = await conferirIsolamento(options.projectRoot, {
+      commitsEnabled: checked.commitsEnabled,
+      containerized: checked.testCommand?.containerized ?? false,
+    });
+    for (const linha of options.parallel.resumo) announce(linha);
+    if (isolamento.impedimentos.length > 0) {
+      const razao = [
+        "a execução paralela foi pedida, mas não pode rodar aqui:",
+        ...isolamento.impedimentos.map((motivo) => `  · ${motivo}`),
+        "",
+        "Rode com --serial para construir uma fase por vez.",
+      ].join("\n");
+      announce(`erro: ${razao}`);
+      return { runId, exitCode: 1, phases: [], warnings: checked.warnings, errors: [razao], acceptance: null };
+    }
+    announce(
+      isolamento.motivos.length === 0
+        ? "isolamento: cada agente num worktree próprio; nenhum recurso compartilhado declarado até aqui (reavaliado antes de cada fase)"
+        : `isolamento: ${isolamento.motivos.join("; ")} — um agente por vez enquanto valer`,
+    );
+    for (const limitacao of isolamento.limitacoes) announce(`limitação: ${limitacao}`);
+    /*
+     * O worktree parte de um commit. Repositório recém-criado numa pasta
+     * vazia ainda não tem nenhum: um commit vazio dá a base, e não muda nada
+     * na árvore.
+     */
+    if (await garantirBase(options.projectRoot)) announce("repositório sem commit nenhum: criado um commit vazio, base dos worktrees");
+  }
+
   const lock = await acquireLock({ projectRoot: options.projectRoot, runId, command: "build", now });
   const paths = runPaths(options.projectRoot, runId);
 
@@ -546,7 +603,68 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
 
     const phases: PhaseReport[] = [];
 
-    for (const session of checked.sessions) {
+    /** As opções de uma fase — no serial, na raiz; no paralelo, no worktree dela. */
+    const opcoesDaFase = (session: PhaseSession, execucao?: ExecucaoDaFase): Parameters<typeof runPhase>[0] => {
+      const arvore = execucao?.workRoot ?? options.projectRoot;
+      const fluxos = fluxosDaFase ? fluxosDaFase(session.number) : null;
+      return {
+        projectRoot: options.projectRoot,
+        runId,
+        language: options.language,
+        engine: execucao?.engine ?? options.engine,
+        session,
+        testCommand: checked.testCommand,
+        resolveTest: () =>
+          resolveTestCommand(arvore, {
+            ...(options.explicitTestCommand !== undefined ? { explicit: options.explicitTestCommand } : {}),
+            ...(options.environment !== undefined ? { environment: options.environment } : {}),
+          }),
+        call: options.call,
+        ...(skills.length > 0 ? { skills: skillsDaFase(session.id, session.areas) } : {}),
+        ...(options.onMemorias ? { onMemorias: options.onMemorias } : {}),
+        ...(fluxos
+          ? {
+              flows: {
+                ...fluxos,
+                ...(execucao ? { resolveStart: () => startCommandFor(arvore), preferredPort: execucao.preferredPort } : {}),
+              },
+            }
+          : {}),
+        ...(options.testRunner !== undefined ? { testRunner: options.testRunner } : {}),
+        aprovadas,
+        systemInstall: execucao?.systemInstall ?? options.systemInstall === true,
+        ...(options.maxCycles !== undefined ? { maxCycles: options.maxCycles } : {}),
+        commitsEnabled: checked.commitsEnabled,
+        announce,
+        ...(options.onProgress !== undefined ? { onProgress: options.onProgress } : {}),
+        ...(options.sleep !== undefined ? { sleep: options.sleep } : {}),
+        now,
+        ...(execucao ? { workRoot: execucao.workRoot, worker: execucao.worker, integracaoPendente: true } : {}),
+      };
+    };
+
+    /** O que toda fase verde deixa: o registro no ledger e os fluxos como regressão das seguintes. */
+    const aposVerde = async (session: PhaseSession): Promise<void> => {
+      await registrarFaseFechada(options.projectRoot, {
+        id: session.id,
+        title: session.title,
+        sha: shaDaFase(session.markdown),
+        runId,
+        closedAt: now().toISOString(),
+      });
+      if (esqueleto !== null) {
+        for (const workflow of workflowsForPhase(esqueleto, session.number)) {
+          if (!fluxosCumpridos.some((cumprido) => cumprido.number === workflow.number)) fluxosCumpridos.push(workflow);
+        }
+      }
+    };
+
+    /*
+     * A fase que já fechou não roda de novo: em run anterior com o mesmo texto,
+     * ou neste mesmo run antes de uma queda. O serial e o paralelo pulam pelo
+     * mesmo caminho — duas cópias desta regra divergiriam na primeira correção.
+     */
+    const pularSeFechada = (session: PhaseSession): boolean => {
       const fechadaAntes = shaFechado.get(shaDaFase(session.markdown));
       if (!done.has(session.id) && fechadaAntes) {
         announce(`[${session.id}] já fechada no run ${fechadaAntes.runId}, com este mesmo texto; não vou refazer`);
@@ -556,14 +674,13 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         }
         if (fluxosDaFase !== null) options.onProgress?.({ kind: "gate", id: session.id, gate: "G4", state: "verde", cycle: 0 });
 
-        phases.push({ id: session.id, title: session.title, outcome: { status: "already-implemented", cycles: 0 } });
         // O fluxo de uma fase fechada continua sendo regressão das seguintes.
         if (esqueleto !== null) {
           for (const workflow of workflowsForPhase(esqueleto, session.number)) {
             if (!fluxosCumpridos.some((cumprido) => cumprido.number === workflow.number)) fluxosCumpridos.push(workflow);
           }
         }
-        continue;
+        return true;
       }
 
       if (done.has(session.id)) {
@@ -585,7 +702,6 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
           options.onProgress?.({ kind: "gate", id: session.id, gate: "G4", state: "verde", cycle: 0 });
         }
         options.onProgress?.({ kind: "phase", id: session.id, state: "concluído", cycle: 0, detail: "concluída antes" });
-        phases.push({ id: session.id, title: session.title, outcome: { status: "already-implemented", cycles: 0 } });
         /*
          * E o fluxo dela continua sendo regressão das seguintes — como no ramo de
          * cima, o da fase fechada em run anterior. Faltava aqui: no `assistencia2`
@@ -597,57 +713,85 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
             if (!fluxosCumpridos.some((cumprido) => cumprido.number === workflow.number)) fluxosCumpridos.push(workflow);
           }
         }
+        return true;
+      }
+      return false;
+    };
+
+    /** A parada do build, igual no serial e no paralelo: evento, estado na base, código 2. */
+    const parar = async (outcome: PhaseOutcome): Promise<BuildOutcome> => {
+      const detail =
+        outcome.status === "failed"
+          ? `${outcome.gate}: ${outcome.cause}`
+          : outcome.status === "credential-rejected"
+            ? `o provider ${outcome.engine} recusou a credencial: ${outcome.evidence}`
+            : "limite de uso esgotado";
+      await appendEvent(paths.events, {
+        timestamp: now().toISOString(),
+        stage: "implement",
+        subject: "-",
+        attempt: 1,
+        status: "paused",
+        detail,
+      });
+      await registrarEstado(phases, checked.sessions, outcome);
+      return { runId, exitCode: 2, phases, warnings: checked.warnings, errors: [detail], acceptance: null };
+    };
+
+    if (options.parallel) {
+      const resultado = await executarEmParalelo({
+        projectRoot: options.projectRoot,
+        runId,
+        sessions: checked.sessions,
+        agentes: options.parallel.agentes,
+        maxConcurrency: options.parallel.maxConcurrency,
+        keepGoing: options.keepGoing === true,
+        jaFechada: pularSeFechada,
+        rodar: (session, execucao) => runPhase(opcoesDaFase(session, execucao)),
+        aposIntegrar: (session) => aposVerde(session),
+        esquecer: async (session) => {
+          const tasks = tasksDaFase(session.markdown);
+          await aprovadas.revogar(session.id, tasks, tasks.map((task) => task.index));
+        },
+        isolamento: () =>
+          conferirIsolamento(options.projectRoot, {
+            commitsEnabled: checked.commitsEnabled,
+            containerized: checked.testCommand?.containerized ?? false,
+          }),
+        comandoDeTeste: async () =>
+          (
+            await resolveTestCommand(options.projectRoot, {
+              ...(options.explicitTestCommand !== undefined ? { explicit: options.explicitTestCommand } : {}),
+              ...(options.environment !== undefined ? { environment: options.environment } : {}),
+            })
+          )?.command ?? null,
+        ...(options.testRunner !== undefined ? { testRunner: options.testRunner } : {}),
+        instalar: options.testRunner ?? defaultTestRunner,
+        systemInstall: options.systemInstall === true,
+        portaBase: FLOW_PORT,
+        announce,
+        ...(options.onProgress !== undefined ? { onProgress: options.onProgress } : {}),
+        ...(options.onWorker !== undefined ? { onWorker: options.onWorker } : {}),
+        ...(options.environment !== undefined ? { environment: options.environment } : {}),
+        now,
+      });
+      for (const { session, outcome } of resultado.relatorios) phases.push({ id: session.id, title: session.title, outcome });
+      if (resultado.parada) return await parar(resultado.parada.outcome);
+    }
+
+    for (const session of options.parallel ? [] : checked.sessions) {
+      if (pularSeFechada(session)) {
+        phases.push({ id: session.id, title: session.title, outcome: { status: "already-implemented", cycles: 0 } });
         continue;
       }
 
-      const fluxosDestaFase = esqueleto !== null ? workflowsForPhase(esqueleto, session.number) : [];
-
-      const outcome = await runPhase({
-        projectRoot: options.projectRoot,
-        runId,
-        language: options.language,
-        engine: options.engine,
-        session,
-        testCommand: checked.testCommand,
-        resolveTest: () =>
-          resolveTestCommand(options.projectRoot, {
-            ...(options.explicitTestCommand !== undefined ? { explicit: options.explicitTestCommand } : {}),
-            ...(options.environment !== undefined ? { environment: options.environment } : {}),
-          }),
-        call: options.call,
-        ...(skills.length > 0 ? { skills: skillsDaFase(session.id, session.areas) } : {}),
-        ...(options.onMemorias ? { onMemorias: options.onMemorias } : {}),
-        ...(fluxosDaFase ? { flows: fluxosDaFase(session.number) } : {}),
-        ...(options.testRunner !== undefined ? { testRunner: options.testRunner } : {}),
-        aprovadas,
-        systemInstall: options.systemInstall === true,
-        ...(options.maxCycles !== undefined ? { maxCycles: options.maxCycles } : {}),
-        commitsEnabled: checked.commitsEnabled,
-        announce,
-        ...(options.onProgress !== undefined ? { onProgress: options.onProgress } : {}),
-        ...(options.sleep !== undefined ? { sleep: options.sleep } : {}),
-        now,
-      });
+      const outcome = await runPhase(opcoesDaFase(session));
 
       phases.push({ id: session.id, title: session.title, outcome });
 
-      if (outcome.status === "complete" || outcome.status === "already-implemented") {
-        await registrarFaseFechada(options.projectRoot, {
-          id: session.id,
-          title: session.title,
-          sha: shaDaFase(session.markdown),
-          runId,
-          closedAt: now().toISOString(),
-        });
-      }
-
       // Fluxo que passou vira regressão das fases seguintes: é o que faz um
       // defeito introduzido na fase 5 aparecer na fase 5.
-      if (outcome.status === "complete" || outcome.status === "already-implemented") {
-        for (const workflow of fluxosDestaFase) {
-          if (!fluxosCumpridos.some((cumprido) => cumprido.number === workflow.number)) fluxosCumpridos.push(workflow);
-        }
-      }
+      if (outcome.status === "complete" || outcome.status === "already-implemented") await aposVerde(session);
 
       if (outcome.status === "failed" || outcome.status === "rate-limit-exhausted" || outcome.status === "credential-rejected") {
         const detail =
@@ -666,18 +810,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
          * mesmo provider com a mesma credencial, e seguir seria marcar as onze
          * restantes como falhas por um motivo que não é delas.
          */
-        if (!options.keepGoing || outcome.status === "credential-rejected") {
-          await appendEvent(paths.events, {
-            timestamp: now().toISOString(),
-            stage: "implement",
-            subject: "-",
-            attempt: 1,
-            status: "paused",
-            detail,
-          });
-          await registrarEstado(phases, checked.sessions, outcome);
-          return { runId, exitCode: 2, phases, warnings: checked.warnings, errors: [detail], acceptance: null };
-        }
+        if (!options.keepGoing || outcome.status === "credential-rejected") return await parar(outcome);
       }
     }
 

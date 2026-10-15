@@ -66,6 +66,20 @@ export function shaDaTask(task: TaskBlock): string {
  * zero nas catorze tasks para achar outras duas.
  */
 export class TasksAprovadas {
+  /*
+   * As gravações entram em fila. No build paralelo (§97) duas fases aprovam
+   * tasks ao mesmo tempo, e cada gravação relê o disco antes de escrever: sem a
+   * fila, as duas leriam o mesmo arquivo velho e a segunda apagaria o que a
+   * primeira gravou.
+   */
+  private fila: Promise<void> = Promise.resolve();
+
+  private emFila(trabalho: () => Promise<void>): Promise<void> {
+    const vez = this.fila.then(trabalho);
+    this.fila = vez.catch(() => undefined);
+    return vez;
+  }
+
   private constructor(
     private readonly projectRoot: string,
     private readonly runId: string,
@@ -96,6 +110,16 @@ export class TasksAprovadas {
     cycle: number,
     now = () => new Date(),
   ): Promise<void> {
+    return this.emFila(() => this.gravarAprovacao(phaseId, tasks, indices, cycle, now));
+  }
+
+  private async gravarAprovacao(
+    phaseId: string,
+    tasks: readonly TaskBlock[],
+    indices: readonly number[],
+    cycle: number,
+    now: () => Date,
+  ): Promise<void> {
     const novas = tasks
       .filter((task) => indices.includes(task.index))
       .filter((task) => !this.registro.some((entrada) => entrada.phase === phaseId && entrada.sha === shaDaTask(task)))
@@ -112,9 +136,8 @@ export class TasksAprovadas {
 
     this.registro.push(...novas);
     /*
-     * Relê antes de gravar: duas fases correndo ao mesmo tempo não existem hoje,
-     * mas o arquivo é do projeto e não do run, e sobrescrever o que outro
-     * processo escreveu apagaria julgamento pago.
+     * Relê antes de gravar: o arquivo é do projeto e não do run, e sobrescrever
+     * o que outro processo escreveu apagaria julgamento pago.
      */
     const emDisco = await ler(this.projectRoot);
     const juntos = [...emDisco.filter((entrada) => !novas.some((nova) => nova.phase === entrada.phase && nova.sha === entrada.sha)), ...novas];
@@ -122,6 +145,10 @@ export class TasksAprovadas {
   }
 
   async revogar(phaseId: string, tasks: readonly TaskBlock[], indices: readonly number[]): Promise<void> {
+    return this.emFila(() => this.gravarRevogacao(phaseId, tasks, indices));
+  }
+
+  private async gravarRevogacao(phaseId: string, tasks: readonly TaskBlock[], indices: readonly number[]): Promise<void> {
     const shas = new Set(tasks.filter((task) => indices.includes(task.index)).map((task) => shaDaTask(task)));
     if (shas.size === 0) return;
     const fica = (entrada: TaskAprovada): boolean => !(entrada.phase === phaseId && shas.has(entrada.sha));

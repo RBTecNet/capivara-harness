@@ -88,6 +88,20 @@ export function canonicalDependsOn(value: string): string {
   return [...new Set(phases)].sort((left, right) => left - right).map((phase) => `Phase ${phase}`).join(", ");
 }
 
+/**
+ * As fases de que esta depende, em números — a leitura que o escalonador do
+ * build paralelo consome (§97).
+ *
+ * Sai do MESMO tokenizador da forma canônica: o que o documento publica como
+ * `Phase 2, Phase 3` e o que o build entende como dependência não podem ler o
+ * campo de dois jeitos.
+ */
+export function phaseDependencies(value: string): number[] {
+  const canonica = canonicalDependsOn(value);
+  if (canonica === "none") return [];
+  return [...canonica.matchAll(DEPENDS_TOKEN)].map((match) => Number(match[1]));
+}
+
 export function normalizePhasePart(markdown: string, expectation: PhasePartExpectation): NormalizedPart {
   const applied: string[] = [];
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");

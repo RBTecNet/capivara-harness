@@ -48,12 +48,37 @@ export interface EngineCall {
   phase: PhaseSession;
   attempt: number;
   prompt: string;
+  /**
+   * Onde a sessão trabalha, quando não é a raiz do projeto: o worktree da fase
+   * no build paralelo. O verificador lê a MESMA árvore que o executor escreveu.
+   */
+  root?: string;
+  /** Qual agente do pool atende, a partir de 0. Ausente é o builder de sempre. */
+  worker?: number;
 }
 
 export type EngineCaller = (call: EngineCall) => Promise<EngineResult>;
 
 export interface PhaseRunOptions {
   projectRoot: string;
+  /**
+   * Onde o agente trabalha e os gates rodam, quando não é a raiz do projeto.
+   *
+   * É o worktree da fase no build paralelo (§97). O estado do run — eventos,
+   * prompts, logs, decisões — continua na raiz: é lá que a retomada e quem
+   * investiga procuram. Ausente é a raiz, que é o build serial de sempre.
+   */
+  workRoot?: string;
+  /**
+   * Fase verde num worktree ainda não está no produto: falta integrar.
+   *
+   * Com isto, o evento de conclusão não é gravado aqui — quem o grava é o
+   * integrador, depois de a fase entrar na árvore principal. Uma queda entre os
+   * dois faria a retomada pular uma fase que nunca chegou ao produto.
+   */
+  integracaoPendente?: boolean;
+  /** O agente do pool que roda esta fase; vai em cada chamada, para o CLI escolher o modelo. */
+  worker?: number;
   runId: string;
   language: string;
   engine: string;
@@ -92,6 +117,7 @@ export interface PhaseRunOptions {
     resolveStart: () => Promise<string | null>;
     runner?: FlowRunner;
     port?: number;
+    preferredPort?: number;
   };
   testRunner?: TestRunner;
   /**
@@ -152,6 +178,20 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   const now = options.now ?? (() => new Date());
   const paths = runPaths(options.projectRoot, options.runId);
   const session = options.session;
+  const arvore = options.workRoot ?? options.projectRoot;
+  const noWorktree = arvore !== options.projectRoot;
+  /** Toda chamada desta fase leva a árvore e o agente: quem atende precisa dos dois. */
+  const chamar: EngineCaller = (chamada) =>
+    options.call({
+      ...chamada,
+      ...(noWorktree ? { root: arvore } : {}),
+      ...(options.worker !== undefined ? { worker: options.worker } : {}),
+    });
+  /** A conclusão vai ao log do run só quando a fase já está no produto. */
+  const concluir = async (detalhe: string, cycle: number): Promise<void> => {
+    if (options.integracaoPendente === true) await event("started", `verde no worktree, aguardando integração: ${detalhe}`, cycle);
+    else await event("complete", detalhe, cycle);
+  };
 
   let waits = 0;
   let lastGate: GateName | null = null;
@@ -198,7 +238,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
    */
   const recolher = async (cycle: number): Promise<void> => {
     if (!options.onMemorias) return;
-    const memorias = await recolherMemorias(options.projectRoot, `${options.runId} · ${session.id} ciclo ${cycle}`);
+    const memorias = await recolherMemorias(arvore, `${options.runId} · ${session.id} ciclo ${cycle}`);
     if (memorias.length === 0) return;
     announce(`[${session.id}] ${memorias.length} memória(s) anotada(s) pelo executor`);
     await options.onMemorias(memorias);
@@ -224,7 +264,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
 
   const chamarLeitor = async (chamada: Parameters<EngineCaller>[0]): Promise<EngineResult> => {
     for (;;) {
-      const resposta = await options.call(chamada);
+      const resposta = await chamar(chamada);
       const saida = `${resposta.stdout}\n${resposta.stderr}`;
       const recusa = detectCredentialRejection(saida);
       if (recusa !== null) throw new CredencialRecusada(recusa);
@@ -266,7 +306,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
      * ser percorrido no navegador é ruído.
      */
     const precisaDoRunner =
-      cycle === 1 && (options.flows?.workflows.length ?? 0) > 0 && (await faltaOPacoteDoRunner(options.projectRoot));
+      cycle === 1 && (options.flows?.workflows.length ?? 0) > 0 && (await faltaOPacoteDoRunner(arvore));
 
     const context = {
       language: options.language,
@@ -285,8 +325,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
 
     await writeAtomic(`${paths.prompts}/${session.id}.cycle-${cycle}.txt`, prompt);
 
-    const signatureBefore = await treeSignature(options.projectRoot);
-    const result = await options.call({ role: "builder", phase: session, attempt: cycle, prompt });
+    const signatureBefore = await treeSignature(arvore);
+    const result = await chamar({ role: "builder", phase: session, attempt: cycle, prompt });
     await writeAtomic(`${paths.logs}/${session.id}.cycle-${cycle}.log`, `${result.stdout}\n${result.stderr}`);
 
     const recusa = detectCredentialRejection(`${result.stdout}\n${result.stderr}`);
@@ -312,7 +352,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       announce(`[${session.id}] comando de teste detectado: ${testeAgora.command} (${testeAgora.source})`);
     }
 
-    const wrote = gate1(signatureBefore, await treeSignature(options.projectRoot));
+    const wrote = gate1(signatureBefore, await treeSignature(arvore));
     previousWroteNothing = !wrote;
     if (!wrote) announce(`[${session.id}] a sessão não escreveu nada; validando o código existente`);
 
@@ -331,7 +371,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
 
       gate("G4", "corrente", cycleAtual);
       const g4 = await gate4({
-        projectRoot: options.projectRoot,
+        projectRoot: arvore,
         workflows: fluxos.workflows,
         ...(contestacao ? { roteiroContestado: contestacao, roteirosQueFalharam: fluxosQueFalharamPorUltimo } : {}),
         ...(fluxos.regressao ? { regressao: fluxos.regressao } : {}),
@@ -381,6 +421,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         },
         ...(fluxos.runner !== undefined ? { runner: fluxos.runner } : {}),
         ...(fluxos.port !== undefined ? { port: fluxos.port } : {}),
+        ...(fluxos.preferredPort !== undefined ? { preferredPort: fluxos.preferredPort } : {}),
         announce: (message) => announce(`[${session.id}] ${message}`),
       });
       triagensNoCiclo = 0;
@@ -446,7 +487,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         fluxosQueFalharamPorUltimo.length > 0
           ? await Promise.all(
               fluxosQueFalharamPorUltimo.map(async (numero) => {
-                const conteudo = await readFile(join(options.projectRoot, FLOWS_DIR, flowScriptName(numero)), "utf8").catch(() => "");
+                const conteudo = await readFile(join(arvore, FLOWS_DIR, flowScriptName(numero)), "utf8").catch(() => "");
                 return `${numero}:${sha12(conteudo)}`;
               }),
             )
@@ -485,7 +526,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
        * migração é o executor, e ele os entrega no meio da fase. A cada ciclo
        * porque cada fase acrescenta tabela.
        */
-      const ambiente = await prepararAmbiente(options.projectRoot, options.testRunner ?? defaultTestRunner);
+      const ambiente = await prepararAmbiente(arvore, options.testRunner ?? defaultTestRunner);
       for (const aviso of ambiente.anuncios) announce(`[${session.id}] ${aviso}`);
       /*
        * A saída da migração vai ao disco SEMPRE que ela roda.
@@ -500,7 +541,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       }
 
       gate("G2", "corrente", cycle);
-      const g2 = await gate2(options.projectRoot, testeAgora?.command ?? null, options.testRunner, options.systemInstall === true);
+      const g2 = await gate2(arvore, testeAgora?.command ?? null, options.testRunner, options.systemInstall === true);
       gate("G2", g2.green ? "verde" : "vermelho", cycle);
       if (!g2.green) {
         lastGate = g2.gate;
@@ -523,7 +564,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
          * verificador. Ele não decide nada — decide quem lê o código —, mas
          * entrega todos os buracos de uma vez, em vez de um por ciclo.
          */
-        const nomeados = await procurarTestesNomeados(options.projectRoot, featureTestNames(session.markdown));
+        const nomeados = await procurarTestesNomeados(arvore, featureTestNames(session.markdown));
         const semNome = nomeados.filter((teste) => !teste.found);
         if (semNome.length > 0) {
           announce(`[${session.id}] testes nomeados que não existem na árvore: ${semNome.map((teste) => teste.name).join(", ")}`);
@@ -589,18 +630,18 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
           // A causa já foi registrada por `passouNosFluxos`; o ciclo segue.
         } else {
           const commit = options.commitsEnabled
-            ? await commitPhase(options.projectRoot, session.number, session.title)
+            ? await commitPhase(arvore, session.number, session.title)
             : { committed: false, message: "commits desabilitados: nenhum repositório Git" };
 
           if (!commit.committed && commit.message.includes("já estava implementada")) {
-            await event("complete", "já implementada em HEAD", cycle);
+            await concluir("já implementada em HEAD", cycle);
             relatar({ kind: "phase", id: session.id, state: "concluído", cycle, detail: "já implementada" });
             announce(`[${session.id}] JÁ IMPLEMENTADA — gates verdes, nada a commitar`);
             return { status: "already-implemented", cycles: cycle };
           }
 
           await recolher(cycle);
-          await event("complete", commit.message, cycle);
+          await concluir(commit.message, cycle);
           relatar({ kind: "phase", id: session.id, state: "concluído", cycle, detail: commit.committed ? "commitada" : "completa" });
           announce(`[${session.id}] COMPLETA${commit.committed ? ` — ${commit.message}` : ""}`);
           return { status: "complete", committed: commit.committed, message: commit.message, cycles: cycle };
@@ -632,7 +673,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     announce(`[${session.id}] o provider ${options.engine} recusou a credencial — isto não é defeito da fase:`);
     announce(`           ${erro.evidencia}`);
     announce(`           renove com \`${options.engine} login\` e rode \`capivara build\` de novo`);
-    if (await hasPendingChanges(options.projectRoot)) {
+    // No worktree, quem guarda o parcial é o build paralelo, num branch da fase.
+    if (!noWorktree && (await hasPendingChanges(options.projectRoot))) {
       announce("           o trabalho desta fase ficou na árvore; antes de rodar de novo:");
       announce("           git add -A && git commit -m \"wip: trabalho parcial\"   → o loop revalida a fase e segue");
     }
@@ -649,7 +691,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
    * para por causa do trabalho parcial e depois se recusa a retomar por causa do
    * mesmo trabalho parcial.
    */
-  if (await hasPendingChanges(options.projectRoot)) {
+  if (!noWorktree && (await hasPendingChanges(options.projectRoot))) {
     announce(`[${session.id}] o trabalho parcial desta fase ficou na árvore. Antes de rodar de novo, escolha uma:`);
     announce("           git add -A && git commit -m \"wip: trabalho parcial\"   → o loop revalida a fase e segue");
     announce("           git checkout -- . && git clean -fd                      → descarta e a fase recomeça do zero");

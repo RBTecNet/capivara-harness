@@ -6459,3 +6459,69 @@ TTY ou com `CAPIVARA_LINE_INPUT=1`, a leitura numerada de sempre.
 
 Com isto, nenhuma pergunta fechada do harness se responde mais digitando número
 quando há uma pessoa no terminal.
+
+## §97 — O build paralelo: várias fases ao mesmo tempo, cada uma no seu worktree
+
+O build sempre rodou uma fase por vez, e o §5.3 tirou do contrato o
+`Parallel safe` e o `Depends on` por task porque "não há paralelismo". Os
+planos reais, porém, já declaram um grafo entre FASES no `**Depends on:**` da
+linha de metadados — no `erp_teste`, P2 e P3 dependem só da P1; no
+`MCP_teste2`, P4 e P5 só da P3. Esta seção usa esse grafo, sem campo novo no
+contrato e sem segundo parser.
+
+**A unidade é a fase.** As tasks de uma fase continuam numa sessão só, em
+ordem (§5.3 continua valendo): é a fase que tem gates, commit e verificação
+própria. `phaseDependencies` lê o `Depends on` com o mesmo tokenizador da
+forma canônica (`contract/phase-part.ts`), e `PhaseSession.dependsOn` leva os
+números ao build.
+
+**O escalonador é determinístico e conservador** (`loop/escalonador.ts`, função
+pura): uma fase só sai quando todas as de que depende estão INTEGRADAS — verde
+num worktree não basta; a primeira fase é fundação de todas, mesmo quando o
+plano diz `none`; dependência ilegível (fase que não existe, ou que vem depois)
+vira "todas as anteriores". Empate é resolvido pela ordem do plano, e o agente
+é o de menor número livre. A concorrência configurada é TETO: com o grafo em
+fila, o paralelo roda uma fase por vez.
+
+**Cada fase roda num `git worktree` próprio** (`loop/worktree.ts`), num branch
+`capivara/<run>/<fase>`, a partir do HEAD integrado, em
+`~/.cache/capivara/worktrees/` — fora do projeto, porque a suíte da raiz
+acharia os testes de dentro dele. O que o checkout não traz vai copiado (nunca
+ligado): skills, roteiros do gate 4, `.env` e `node_modules`. O `runPhase`
+ganhou `workRoot`: o agente escreve e os gates rodam no worktree; eventos,
+prompts e logs continuam na raiz. Cada chamada leva `root` e `worker`, e o
+verificador lê a mesma árvore que o executor escreveu.
+
+**A integração é serial e tem juiz** (`loop/paralelo.ts`): os commits da fase
+entram na árvore principal por `cherry-pick` (o histórico continua um
+`feat(phase-N)` por fase), o `npm install` roda se a fase mexeu no manifesto, e
+a SUÍTE roda na árvore integrada. Conflito ou suíte vermelha desfazem a
+integração (`reset --keep`, que recusa apagar o que alguém tenha escrito) e a
+fase volta à fila como EXCLUSIVA: roda sozinha sobre a árvore nova, com as
+aprovações de task dela revogadas, e por construção não tem com quem
+conflitar. Se nem sozinha fecha, falhou como falharia no serial. A conclusão
+da fase só vai ao log do run depois da integração (`integracaoPendente`): uma
+queda entre o verde no worktree e a integração não faz a retomada pular a fase.
+
+**Falha:** nenhuma fase nova sai; as que estão rodando terminam, e o que fechar
+verde ainda é integrado. O parcial da que falhou vai para o branch dela, fora
+do produto. Com `--keep-going`, só as que dependem dela são puladas.
+
+**Isolamento** (`loop/isolamento.ts`), perguntado de novo antes de cada leva,
+porque num greenfield o `.env.example` só nasce na fase 1:
+- *impedimentos* — sem Git, ou git sem worktree — fazem o build NÃO COMEÇAR:
+  rodar serial com o nome de paralelo seria mentir na tela;
+- *motivos* — banco declarado em servidor, suíte em contêiner — fazem a
+  concorrência cair para um agente enquanto valerem, e a tela diz por quê.
+
+Limitações conhecidas, ditas no resumo: só o `node_modules` é copiado (`.venv`
+e `vendor` são reinstalados pelo executor em cada worktree); uma suíte que
+suba servidor em porta fixa não é detectável; a regressão do gate 4 da árvore
+combinada roda na fase seguinte e na aceitação final, não na integração. Cada
+agente prefere uma porta do gate 4 diferente (`preferredPort`), para dois
+gates não testarem a mesma porta livre ao mesmo tempo. As aprovações de task
+(`TasksAprovadas`) passaram a gravar em fila.
+
+O caminho serial não mudou: sem `parallel` no `runBuild`, o laço é o de
+sempre, agora com o pulo de fase fechada, as opções da fase e o registro do
+verde em funções que os dois caminhos usam.

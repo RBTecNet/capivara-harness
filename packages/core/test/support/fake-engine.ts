@@ -49,8 +49,9 @@ export function fakeEngine(projectRoot: string, steps: EngineStep[]): FakeEngine
       const step = steps[index]!;
       if (step.match.attempt === undefined && step.repeat !== true) used.add(index);
 
+      // No build paralelo a sessão escreve no worktree da fase, não na raiz.
       for (const file of step.writes ?? []) {
-        const absolute = join(projectRoot, file.path);
+        const absolute = join(call.root ?? projectRoot, file.path);
         await mkdir(dirname(absolute), { recursive: true });
         await writeFile(absolute, file.content, "utf8");
       }

@@ -6643,3 +6643,202 @@ stderr e tenta limpar a tela e trocar o título da janela: escolha pela seta,
 Enter, PgUp parando a leitura, F voltando a seguir, Tab para os eventos, ←
 para o outro agente, Esc de volta ao painel; nenhum byte da injeção chegou ao
 terminal, e o build fechou as quatro fases enquanto isso.
+
+## §99 — O que a auditoria do paralelo achou, e o que foi corrigido
+
+A auditoria adversarial do §97 (`docs/AUDITORIA-PARALELO.md`) achou dois
+BLOCKERs e três MAJORs na integração. Os cinco foram corrigidos sem mudar a
+arquitetura: o escalonador, o worktree por fase e a fila de integração são os
+mesmos. O serial não foi tocado — só `loop/paralelo.ts` e `loop/worktree.ts`
+mudaram.
+
+**B1 — a árvore integrada passa pelo mesmo preparo do worktree.** O runner
+chama `prepararAmbiente` antes do gate 2; a integração não chamava, e a
+árvore principal nunca ganhava o `.env` nem a migração. Agora chama, com o
+mesmo executor do `npm install`, e grava a saída da migração em
+`<fase>.migrate-integracao.log`. É a correção pela metade de sempre: o
+preparo estava no irmão.
+
+**B2 — aprovação de task acompanha o código.** Em todo desfecho em que o
+trabalho da fase fica fora do produto — parou num gate, não fechou nem
+sozinha na árvore integrada, não pôde ser integrada, erro inesperado — as
+aprovações dela são revogadas (`esquecer`). Antes, a retomada abria um
+worktree do HEAD, sem o parcial, e o verificador era instruído a carimbar
+DONE no que não estava lá. O worktree que nem chegou a abrir não revoga: nada
+foi aprovado nem saiu da árvore. O custo é reverificar, na retomada, tasks que
+já tinham passado em runs anteriores.
+
+**M1 — a árvore principal é conferida antes de integrar, e nada é apagado.**
+`impedimentosDaPrincipal` recusa integrar quando há arquivo versionado
+alterado (a suíte julgaria uma árvore que não é o HEAD) ou arquivo não
+versionado no caminho da fase (o cherry-pick o sobrescreveria). Não
+versionado fora do caminho — o `.env` semeado — não impede. O `integrar` só
+chama de conflito o que deixou arquivo em conflito; o resto é `recusada`, que
+não se resolve refazendo. Suíte vermelha com a árvore alterada no meio da
+integração: o `reset --keep` recusa e o HEAD voltava com os commits
+reprovados. A primeira correção voltava o HEAD com `--soft` e deixava os
+arquivos como alteração não commitada — e a execução seguinte achava a árvore
+suja, e o preflight mandava `git add -A && git commit`, que promovia o código
+reprovado a commit. Agora `desfazerSemApagar` primeiro GUARDA, confere a
+guarda, e só então limpa:
+- os versionados alterados vão para um commit no branch
+  `capivara/<run>/<fase>-reprovada-<sha>`, montado com um índice temporário e
+  `add -u` — nunca `add -A`, que levaria para o repositório qualquer não
+  versionado, inclusive um `.env` que ninguém ignorou;
+- os não versionados que a integração criou, e os versionados com nome de
+  segredo (`arquivoSensivel`: `.env` e `.env.*` menos os exemplos, `*.pem`,
+  `*.key`, chaves de SSH), são copiados para
+  `.capivara/runs/<run>/recuperacao/<fase>-<instante>/`, que o Git ignora;
+- os não versionados que já estavam não são copiados, commitados nem
+  removidos;
+- a guarda é comprovada (mesmo sha256 em cada cópia, mesmo blob no branch
+  para cada versionado) antes do `reset --hard` e da remoção dos não
+  versionados criados pela integração. Sem prova, nada é limpo e o erro diz
+  onde a árvore ficou.
+
+O preflight não foi tocado: a árvore que ele encontra é a de antes da
+integração, sem nada dela para mandar commitar. Os três casos param o build
+como falha fatal, dizendo os arquivos, o branch guardado e o branch da fase.
+
+**M2 — depois da fatal, nada entra.** A fila de integração pergunta pela
+falha fatal DENTRO da vez de cada fase: a que ainda rodava termina, fica
+verde no branch dela, e não é integrada.
+
+**M3 — erro inesperado não deixa órfão.** A exceção de uma fase não sai mais
+do laço na hora — saía, o lock era liberado e os outros agentes seguiam
+integrando depois de o build ter devolvido o erro. Agora o parcial vai para o
+branch, nada mais sai nem entra, os agentes em andamento terminam, e só então
+o erro sobe, como no serial.
+
+Cada achado tem teste em `test/loop/paralelo.spec.ts` (bloco "auditoria
+(§99)"), com Git de verdade, e os sete falhavam antes da correção.
+
+Fica para depois, registrado na auditoria: M4 (stacks sem npm não têm
+dependências na árvore principal), m1 a m3. E o irmão serial do B2: a
+instrução "descarta e a fase recomeça do zero" do runner também deixa as
+aprovações de um código descartado — não corrigido aqui por estar fora do
+escopo pedido.
+
+## §100 — Nenhum commit automático leva segredo para o histórico
+
+O `git add -A` estava em todo commit que a Capivara faz sozinha: o da fase
+(serial e worktree), o do parcial, o inicial do repositório que o build cria.
+Um `.env` que ninguém pôs no `.gitignore` entrava como qualquer arquivo — e no
+histórico um segredo está em todo clone e em todo push. O `.gitignore` não é
+proteção: é convenção de quem escreve o projeto.
+
+**A política de admissão** (`loop/admissao.ts`) é determinística e fechada:
+- *pelo nome*: `.env` e `.env.<qualquer>` (menos `.example`, `.sample`,
+  `.template`, `.dist`, `.defaults`, que o §46 manda versionar), `*.key`,
+  chaves de SSH (`id_rsa`, `id_ed25519`…), repositórios de chaves (`.p12`,
+  `.pfx`, `.jks`, `.keystore`), `.netrc`, `.pgpass`, `.git-credentials`;
+- *pelo conteúdo*: qualquer arquivo com bloco PEM de chave PRIVADA, seja qual
+  for o nome; e o `.pem` sem certificado nem chave pública reconhecível, ou
+  grande demais para ler, é suspeito. Certificado público passa.
+
+Ela não promete achar uma senha literal num `config.ts`: segredo arbitrário em
+arquivo de nome comum não tem detecção garantida.
+
+**Onde ela vale**, e o que cada consumidor faz com o bloqueio — sempre sem
+apagar nada, sem `reset --hard`, sem `git clean`, e dizendo só caminho e
+motivo, nunca o conteúdo:
+
+| ponto | tipo | bloqueado |
+|---|---|---|
+| `commitPhase` (serial e worktree) | publicação | não commita; a fase sai `commit-blocked` |
+| `iniciarRepositorio` (commit inicial) | publicação | o repositório nasce sem o commit; o preflight orienta |
+| `commitSpecification` | publicação | não commita |
+| `integrar` (cherry-pick) | publicação | `admitirIntervalo` lê os objetos dos commits da fase ANTES do cherry-pick; nada entra; o branch fica, com aviso para não publicá-lo |
+| `guardarParcial` | recuperação | commita o resto; o sensível é copiado, com sha256 conferido, para `.capivara/runs/<run>/recuperacao/`; sem prova, o worktree fica no disco |
+| `desfazerSemApagar` | recuperação | idem (§99) |
+
+Os dois de publicação fazem a conferência ANTES de tocar no índice, e de novo
+DEPOIS do `add` sobre o que o índice tem de fato; se algo escapou, só o
+índice volta ao HEAD. O `add` é de exatamente os caminhos admitidos, por
+`--pathspec-from-file`.
+
+**`commit-blocked` é um desfecho de fase**, e não "completa sem commit". No
+serial, completa sem commit deixaria a fase seguinte construir sobre trabalho
+fora do histórico; no paralelo, seria integrar nada e apagar o worktree com o
+trabalho dentro. O build para — mesmo com `--keep-going`, porque o commit da
+fase seguinte levaria o mesmo arquivo —, a fase não é registrada como
+concluída, e a retomada a revalida. A parada (`loop/parada.ts`) orienta:
+ignorar o arquivo (ou `git rm --cached` se já for rastreado — o arquivo fica
+em disco e o histórico antigo não é reescrito), só então commitar o parcial. O
+preflight, diante de árvore suja com arquivo sensível, diz qual é ANTES de
+sugerir `git add -A`.
+
+**O `.env` que o próprio harness semeia** do `.env.example` (§46, marcado na
+primeira linha) não entra em commit nenhum, mas também não bloqueia e não
+conta como árvore suja: bloquear o próprio artefato faria todo projeto sem
+`.env` no `.gitignore` parar em toda fase. Sem a marca, o arquivo é de quem o
+escreveu e volta a ser sensível.
+
+Os gates G0–G4 e a gramática do plano não mudaram. Testes em
+`test/loop/admissao.spec.ts`, com Git de verdade: treze falhavam antes da
+política, e o de arquivos legítimos passava antes e depois.
+
+## §101 — Só o Core registra no Git, e publica a árvore que conferiu
+
+O §100 conferia os arquivos e depois rodava `git add` e `git commit`. Duas
+fronteiras ficavam abertas.
+
+**A janela entre conferir e commitar.** O que vai para o commit é o que está
+no disco no instante do `add`, e o `git commit` roda os hooks do projeto: um
+`pre-commit` que faça `git add` põe no commit o que nenhuma conferência viu. A
+segunda conferência do §100 relia o DISCO, não o que foi preparado. Agora todo
+commit automático passa por `commitAdmitido` (`loop/admissao.ts`): índice
+temporário a partir do HEAD (o índice de quem chamou não é usado) →
+`write-tree`, que congela a árvore → admissão sobre os OBJETOS dessa árvore →
+`commit-tree` com ela, sem hooks → `update-ref` com o valor antigo esperado
+(HEAD que mudou no meio não é sobrescrito) → só os caminhos commitados são
+sincronizados no índice de quem chamou. Vale para o commit da fase, o inicial,
+o da especificação e o do parcial; o de recuperação (§99) confere os objetos
+da árvore dele antes do branch. Consequência dita: os commits automáticos não
+rodam mais os hooks `pre-commit`/`commit-msg` do projeto, e o
+`.git/COMMIT_EDITMSG` não é mais gravado por eles.
+
+**O agente que roda git.** O executor tem um shell; instrução no prompt não o
+impede de commitar ou de fazer push. O que impede depende do provider, e foi
+MEDIDO, não suposto (codex-cli 0.162.1, `codex sandbox -P :workspace`): no
+`workspace-write` do codex, o `.git` é somente leitura — inclusive o do
+worktree, que mora no repositório principal —, a rede é cortada e a escrita
+fora do projeto é recusada (exceto `/tmp`). Com acesso de SISTEMA — o padrão
+do build —, nada impede, em provider nenhum. claude, opencode, agy, cursor e
+custom em workspace não têm sandbox de sistema verificado sobre o `.git`.
+
+O que o Core impõe em todo caso é DETECÇÃO e CONTENÇÃO, determinísticas
+(`loop/autoridade.ts`): as referências são fotografadas antes e depois de
+TODA chamada de agente; referência movida — commit, reset, stash, tag, ou o
+rastreio remoto que um `push -u` atualiza — faz a fase sair `commit-blocked`
+sem nada registrado nem integrado, e a parada diz quais refs mudaram e se
+houve publicação provável. No worktree, o integrador e os outros agentes movem
+a principal e os branches no meio da chamada: ali se confere o HEAD do
+worktree (que cobre o branch da fase), as tags e o rastreio remoto. E o
+integrador guarda o HEAD que ele mesmo deixou: principal noutro commit na
+próxima integração, ou no fim do build, é commit de fora — nada mais entra. O
+branch de fase com commits além da base nunca é apagado numa falha. Nada é
+desfeito: mover a ref de volta seria reescrever o que a pessoa pode já ter
+visto, ou publicado. Antes da primeira chamada, o build diz, por executor, o
+que está impedido e o que é só detectado.
+
+O que fica sem garantia, dito: o `push` sem rastreio (`git push <url>`) não
+é detectável daqui; um commit de fora não é desfeito; com acesso de sistema, o
+executor pode até alterar o próprio repositório da Capivara.
+
+**A menor mudança de arquitetura para impedir de fato**, não feita aqui:
+(1) um modo protegido que só aceite executor em workspace num provider cujo
+sandbox comprovadamente torne o `.git` somente leitura — hoje, só o codex — e
+recuse o build nos outros; (2) para os outros providers, separar o diretório
+Git da árvore do executor: o worktree sem o arquivo `.git`, e o Core operando
+com `--git-dir`/`--work-tree` explícitos — com o sandbox do provider recusando
+a escrita fora da árvore, o executor não alcança o repositório. Sem sandbox
+de sistema operacional, nenhuma das duas é garantia: o processo com acesso ao
+sistema inteiro alcança tudo.
+
+Testes: `test/loop/autoridade.spec.ts` (hooks que preparam segredo depois da
+conferência; commit, stash e push do executor no serial; commit no worktree e
+na principal a partir do worktree no paralelo; e o sandbox real do codex,
+pulado onde o codex não está instalado) e `test/loop/commit-admitido.spec.ts`
+(disco que muda depois do `add`, HEAD que muda no meio, índice de quem chamou,
+segunda barreira da integração).

@@ -42,7 +42,12 @@ export interface ContextoDaParada {
 function ultimaFalha(phases: PhaseReport[]): PhaseReport | null {
   for (let indice = phases.length - 1; indice >= 0; indice -= 1) {
     const fase = phases[indice]!;
-    if (fase.outcome.status === "failed" || fase.outcome.status === "rate-limit-exhausted" || fase.outcome.status === "credential-rejected") {
+    if (
+      fase.outcome.status === "failed" ||
+      fase.outcome.status === "rate-limit-exhausted" ||
+      fase.outcome.status === "credential-rejected" ||
+      fase.outcome.status === "commit-blocked"
+    ) {
       return fase;
     }
   }
@@ -200,6 +205,51 @@ export function relatorioDoBuild(outcome: BuildOutcome, contexto: ContextoDaPara
   const natureza = naturezaDaFase(fase);
   const ciclos = fase.outcome.status === "failed" ? fase.outcome.cycles : 0;
   const gasto = contarCusto(outcome, contexto);
+
+  /*
+   * O commit bloqueado pela política de admissão (§100). A saída é uma decisão
+   * de quem tem o arquivo — ignorá-lo ou tirá-lo do índice —, e a orientação
+   * NÃO é o `git add -A` genérico das outras paradas: seguido às cegas, ele
+   * levaria o segredo para o histórico.
+   */
+  if (fase.outcome.status === "commit-blocked") {
+    const caminhos = fase.outcome.bloqueios.map((bloqueio) => bloqueio.caminho);
+    // Referência movida pelo agente (§101): não há arquivo a ignorar — há um commit de fora a examinar.
+    if (fase.outcome.bloqueios.some((bloqueio) => bloqueio.motivo.includes("movid"))) {
+      return {
+        tipo: "parada",
+        parada: {
+          natureza: "decisão",
+          oQue: `${fase.id} parou: o Git foi mexido por fora do Core (${caminhos.join(", ")})`,
+          deQuem: "do agente, que commitou ou mexeu em referências por conta própria — nada desta fase foi registrado nem integrado pelo Core",
+          custou: gasto,
+          evidencia: evidenciaDaFase(outcome.runId, fase),
+          paraSeguir: [
+            "confira o que o agente fez: `git log --all --oneline -10` e `git reflog` — nada foi desfeito",
+            "se ele fez push, confira o remoto antes de qualquer outra coisa",
+            "decida o que manter e rode `capivara build` — com --no-system-install, o codex não consegue commitar",
+          ],
+          detalhe: fase.outcome.cause,
+        },
+      };
+    }
+    return {
+      tipo: "parada",
+      parada: {
+        natureza: "decisão",
+        oQue: `${fase.id} passou nos gates, mas o commit foi bloqueado: ${caminhos.join(", ")} não pode ir para o histórico`,
+        deQuem: "do arquivo sensível na árvore — nada foi commitado nem apagado, e o código da fase continua onde está",
+        custou: gasto,
+        evidencia: evidenciaDaFase(outcome.runId, fase),
+        paraSeguir: [
+          `adicione ${caminhos.join(", ")} ao .gitignore (ou mova para fora do projeto); se já é rastreado, \`git rm --cached <arquivo>\` — o arquivo fica em disco`,
+          "só então commite o parcial: `git add -A && git commit -m \"wip: trabalho parcial\"` — o loop revalida a fase e segue",
+          `rode \`capivara build\` — retoma de ${fase.id}, sem refazer as fases já fechadas`,
+        ],
+        detalhe: fase.outcome.cause,
+      },
+    };
+  }
 
   if (fase.outcome.status === "credential-rejected") {
     const provider = fase.outcome.engine;

@@ -19,11 +19,13 @@
  */
 
 import { execFile } from "node:child_process";
-import { cp, mkdir, readdir, rm, stat } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { sha12 } from "../contract/stamps.js";
+import { adicionarExatamente, admitirArvore, admitirIntervalo, alteracoesParaCommit, commitAdmitido, lerStatus, type Bloqueio } from "./admissao.js";
 import { FLOW_RESULTS, FLOWS_DIR } from "./flows.js";
 
 const run = promisify(execFile);
@@ -142,11 +144,56 @@ export async function abrirWorktree(
  * Tira o worktree do disco. O branch só fica quando ainda guarda trabalho que
  * não chegou à árvore principal — o da fase que falhou, para quem quiser ler.
  */
-export async function fecharWorktree(projectRoot: string, worktree: Worktree, opcoes: { manterBranch?: boolean } = {}): Promise<void> {
+export async function fecharWorktree(
+  projectRoot: string,
+  worktree: Worktree,
+  opcoes: { manterBranch?: boolean; manterArvore?: boolean } = {},
+): Promise<void> {
+  // A guarda do parcial não pôde ser comprovada (§100): a pasta é a única cópia, e fica.
+  if (opcoes.manterArvore === true) return;
   await git(projectRoot, ["worktree", "remove", "--force", worktree.dir]).catch(() => undefined);
   await rm(worktree.dir, { recursive: true, force: true });
   await git(projectRoot, ["worktree", "prune"]).catch(() => undefined);
   if (opcoes.manterBranch !== true) await git(projectRoot, ["branch", "-D", worktree.branch]).catch(() => undefined);
+}
+
+/**
+ * Copia arquivos para fora do Git e COMPROVA a cópia: o sha256 de cada destino
+ * tem de ser o da origem. Lança no primeiro que não confere — quem chama não
+ * pode tratar como guardado o que não foi.
+ */
+async function copiarComProva(raiz: string, caminhos: readonly string[], destino: string): Promise<void> {
+  for (const caminho of caminhos) {
+    const origem = join(raiz, caminho);
+    const alvo = join(destino, caminho);
+    await mkdir(dirname(alvo), { recursive: true });
+    await cp(origem, alvo, { preserveTimestamps: true });
+    if ((await hashDoArquivo(origem)) !== (await hashDoArquivo(alvo))) throw new Error(`a cópia de ${caminho} difere do original`);
+  }
+}
+
+/**
+ * O branch da fase tem commits que a base não tem? Um agente que commitou por
+ * conta própria (§101) deixa o worktree limpo e o trabalho só no branch: apagar
+ * o branch seria perdê-lo.
+ */
+export async function branchTemTrabalho(projectRoot: string, worktree: Worktree): Promise<boolean> {
+  const quantos = await git(projectRoot, ["rev-list", "--count", `${worktree.base}..${worktree.branch}`]).catch(() => "1");
+  return quantos !== "0";
+}
+
+export interface ParcialGuardado {
+  /** Há um commit novo no branch da fase. */
+  guardado: boolean;
+  /** Ficaram FORA do commit por serem sensíveis (§100) — copiados para `recuperacao`. */
+  bloqueados: Bloqueio[];
+  recuperacao: string | null;
+  /**
+   * A guarda não pôde ser comprovada: o worktree é a única cópia do trabalho e
+   * não pode ser removido.
+   */
+  preservarArvore: boolean;
+  motivo?: string;
 }
 
 /**
@@ -156,22 +203,52 @@ export async function fecharWorktree(projectRoot: string, worktree: Worktree, op
  * árvore, com a instrução de commitar ou descartar. Aqui a árvore some, e o que
  * ela tinha vai para o branch da fase — fora da árvore principal, que não recebe
  * nada que um gate não aprovou.
+ *
+ * É commit de RECUPERAÇÃO, e passa pela política de admissão (§100): o que for
+ * sensível não entra no branch — é copiado, com prova, para a pasta de
+ * recuperação do run, que o Git ignora; o resto é commitado. Qualquer passo que
+ * falhe deixa o worktree no disco, em vez de o trabalho sumir com ele.
  */
-export async function guardarParcial(worktree: Worktree, mensagem: string): Promise<boolean> {
+export async function guardarParcial(worktree: Worktree, mensagem: string, pastaDeRecuperacao: string): Promise<ParcialGuardado> {
+  const nada: ParcialGuardado = { guardado: false, bloqueados: [], recuperacao: null, preservarArvore: false };
   try {
-    await git(worktree.dir, ["add", "-A", "--", ".", ":(exclude).capivara"]);
-    if ((await git(worktree.dir, ["diff", "--cached", "--name-only"])) === "") return false;
-    await git(worktree.dir, ["commit", "-q", "--no-verify", "-m", mensagem]);
-    return true;
-  } catch {
-    return false;
+    const entradas = await alteracoesParaCommit(worktree.dir);
+    if (entradas.length === 0) return nada;
+    const bloqueados = await admitirArvore(worktree.dir, entradas.map((entrada) => entrada.caminho));
+    const fora = new Set(bloqueados.map((bloqueio) => bloqueio.caminho));
+    const presentes: string[] = [];
+    for (const caminho of fora) if (await existe(join(worktree.dir, caminho))) presentes.push(caminho);
+    const recuperacao = presentes.length > 0 ? pastaDeRecuperacao : null;
+    if (recuperacao) await copiarComProva(worktree.dir, presentes, recuperacao);
+
+    const admitidos = entradas.map((entrada) => entrada.caminho).filter((caminho) => !fora.has(caminho));
+    // Conferido de novo nos objetos que vão para o branch (§101): o que mudou depois da conferência não entra.
+    const publicado = await commitAdmitido(worktree.dir, { caminhos: admitidos, mensagem });
+    if (publicado.status === "bloqueado") {
+      return {
+        guardado: false,
+        bloqueados: [...bloqueados, ...publicado.bloqueios],
+        recuperacao,
+        preservarArvore: true,
+        motivo: "o conteúdo mudou depois da conferência e trouxe arquivo sensível",
+      };
+    }
+    if (publicado.status === "vazio") return { ...nada, bloqueados, recuperacao };
+    return { guardado: true, bloqueados, recuperacao, preservarArvore: false };
+  } catch (erro) {
+    return { ...nada, preservarArvore: true, motivo: erro instanceof Error ? (erro.message.split("\n")[0] ?? "") : String(erro) };
   }
 }
 
 export type Integracao =
   | { status: "integrada"; commits: number; arquivos: string[] }
   | { status: "nada a integrar" }
-  | { status: "conflito"; arquivos: string[] };
+  | { status: "conflito"; arquivos: string[] }
+  /**
+   * O git recusou o cherry-pick sem conflito de conteúdo — a árvore principal
+   * tinha algo no caminho. Não é da fase: refazê-la daria o mesmo (§99).
+   */
+  | { status: "recusada"; motivo: string };
 
 /**
  * Os commits da fase, aplicados um a um sobre a árvore principal.
@@ -190,14 +267,21 @@ export async function integrar(projectRoot: string, worktree: Worktree): Promise
   const antes = await git(projectRoot, ["rev-parse", "HEAD"]);
   try {
     await git(projectRoot, ["cherry-pick", "--allow-empty", "--keep-redundant-commits", ...commits]);
-  } catch {
+  } catch (erro) {
     const arquivos = (await git(projectRoot, ["diff", "--name-only", "--diff-filter=U"]).catch(() => ""))
       .split("\n")
       .filter(Boolean);
     await git(projectRoot, ["cherry-pick", "--abort"]).catch(() => undefined);
     // `--abort` volta ao commit de antes da sequência; se não voltou, voltar à mão.
     if ((await git(projectRoot, ["rev-parse", "HEAD"]).catch(() => antes)) !== antes) await desfazerIntegracao(projectRoot, antes);
-    return { status: "conflito", arquivos };
+    /*
+     * Conflito é só o que deixou arquivo em conflito. O resto — "seus arquivos
+     * locais seriam sobrescritos", um não versionado no caminho — era chamado de
+     * conflito, a fase era refeita, e recusava igual (§99).
+     */
+    if (arquivos.length > 0) return { status: "conflito", arquivos };
+    const saida = erro instanceof Error && "stderr" in erro ? String((erro as { stderr: unknown }).stderr) : String(erro);
+    return { status: "recusada", motivo: saida.split("\n").map((linha) => linha.trim()).filter(Boolean).slice(0, 4).join(" ") };
   }
   const arquivos = (await git(projectRoot, ["diff", "--name-only", antes, "HEAD"])).split("\n").filter(Boolean);
   return { status: "integrada", commits: commits.length, arquivos };
@@ -235,6 +319,144 @@ export async function cabeca(projectRoot: string): Promise<string> {
  */
 export async function desfazerIntegracao(projectRoot: string, antes: string): Promise<void> {
   await git(projectRoot, ["reset", "-q", "--keep", antes]);
+}
+
+/** Os caminhos do `git status`, sem o plano de controle; `alterados` são os versionados. */
+async function situacaoDaPrincipal(projectRoot: string): Promise<{ alterados: string[]; naoVersionados: string[] }> {
+  const entradas = await lerStatus(projectRoot);
+  return {
+    alterados: entradas.filter((entrada) => !entrada.naoVersionado).map((entrada) => entrada.caminho),
+    naoVersionados: entradas.filter((entrada) => entrada.naoVersionado).map((entrada) => entrada.caminho),
+  };
+}
+
+/**
+ * O que, na árvore principal, impede de integrar esta fase sem mexer no que não é do integrador (§99).
+ *
+ * A árvore principal do build paralelo só é escrita pelo integrador — mas a
+ * suíte integrada e o `npm install` rodam nela, e o desenvolvedor pode ter
+ * editado algo. Integrar por cima disso faria a suíte julgar uma árvore que não é
+ * o HEAD, ou o git recusaria no meio. Então, ANTES do cherry-pick:
+ *
+ * - arquivo versionado alterado, qualquer um: a árvore não é mais o HEAD;
+ * - arquivo não versionado que a fase traz: o cherry-pick o sobrescreveria.
+ *
+ * Não versionado fora do caminho da fase — o `.env` semeado, um relatório
+ * ignorado — não impede: não muda o que a fase entrega nem é tocado por ela.
+ *
+ * Devolve também os não versionados que JÁ estavam: se a integração for
+ * reprovada, é por eles que o desfazer sabe o que ela deixou (`desfazerSemApagar`).
+ */
+export async function impedimentosDaPrincipal(
+  projectRoot: string,
+  worktree: Worktree,
+): Promise<{ impedimentos: string[]; naoVersionados: string[] }> {
+  const { alterados, naoVersionados } = await situacaoDaPrincipal(projectRoot);
+  const daFase = new Set((await git(projectRoot, ["diff", "--name-only", worktree.base, worktree.branch])).split("\n").filter(Boolean));
+  return { impedimentos: [...alterados, ...naoVersionados.filter((caminho) => daFase.has(caminho))].sort(), naoVersionados };
+}
+
+async function hashDoArquivo(caminho: string): Promise<string> {
+  return createHash("sha256").update(await readFile(caminho)).digest("hex");
+}
+
+/**
+ * Desfaz a integração reprovada sem apagar nada e sem deixar nada dela na árvore (§99).
+ *
+ * O `reset --keep` recusa quando um arquivo que a integração trouxe foi
+ * alterado depois — pela suíte, por exemplo. Duas saídas erradas foram
+ * descartadas: deixar os commits reprovados no HEAD; e voltar o HEAD com
+ * `--soft`, que deixava o código reprovado na árvore para o preflight seguinte
+ * mandar commitar.
+ *
+ * Então: primeiro GUARDA, confere a guarda, e só então limpa.
+ *
+ * - **Versionados alterados** vão para um commit num branch de recuperação,
+ *   montado com um índice temporário (o índice e a árvore da principal não são
+ *   tocados). Só versionados: `add -u`, nunca `add -A` — um não versionado
+ *   qualquer, como um `.env` que ninguém ignorou, viraria objeto do repositório.
+ * - **Não versionados que a integração criou**, e versionados que a política
+ *   de admissão bloqueia (§100: nome de segredo ou chave privada no conteúdo),
+ *   são COPIADOS para a pasta de recuperação do run, que o Git ignora — fora de
+ *   qualquer commit.
+ * - **Não versionados que já estavam** não são copiados, commitados nem removidos.
+ *
+ * A guarda é comprovada antes de qualquer limpeza: cada cópia com o mesmo
+ * sha256 do original, cada versionado com o mesmo blob no branch. Sem a prova,
+ * nada é limpo — nenhum `reset --hard` — e o erro diz onde a árvore ficou.
+ */
+export async function desfazerSemApagar(
+  projectRoot: string,
+  antes: string,
+  opcoes: { naoVersionadosAntes: readonly string[]; guardarEm: string; mensagem: string; pastaDeRecuperacao: string },
+): Promise<{ limpo: true } | { limpo: false; arquivos: string[]; guardado: string; recuperacao: string | null }> {
+  try {
+    await desfazerIntegracao(projectRoot, antes);
+    return { limpo: true };
+  } catch {
+    // O `--keep` recusou: há alteração no caminho. Segue para guardar e limpar.
+  }
+
+  const { alterados, naoVersionados } = await situacaoDaPrincipal(projectRoot);
+  const jaEstavam = new Set(opcoes.naoVersionadosAntes);
+  const novos = naoVersionados.filter((caminho) => !jaEstavam.has(caminho));
+  const sensiveis = new Set((await admitirArvore(projectRoot, alterados)).map((bloqueio) => bloqueio.caminho));
+  const noCommit = alterados.filter((caminho) => !sensiveis.has(caminho));
+  const paraCopiar: string[] = [];
+  for (const caminho of [...novos, ...alterados.filter((caminho) => sensiveis.has(caminho))]) {
+    if (await existe(join(projectRoot, caminho))) paraCopiar.push(caminho);
+  }
+  const semProva = (oQue: string, erro?: unknown): Error =>
+    new Error(
+      `não limpei a árvore principal: não consegui comprovar a guarda de ${oQue}` +
+        `${erro instanceof Error ? ` (${erro.message.split("\n")[0] ?? ""})` : ""}. ` +
+        `Nada foi apagado; o HEAD ainda tem os commits da integração reprovada, e o estado de antes dela é ${antes}`,
+    );
+
+  // 1. A cópia local do que não pode ir para o Git, conferida byte a byte.
+  const recuperacao = paraCopiar.length > 0 ? opcoes.pastaDeRecuperacao : null;
+  try {
+    if (recuperacao) await copiarComProva(projectRoot, paraCopiar, recuperacao);
+  } catch (erro) {
+    throw semProva(paraCopiar.join(", "), erro);
+  }
+
+  // 2. O commit de recuperação, só com versionados que não são segredo.
+  const pasta = await mkdtemp(join(tmpdir(), "capivara-indice-"));
+  let guardado: string;
+  try {
+    const comIndice = {
+      cwd: projectRoot,
+      env: { ...process.env, GIT_INDEX_FILE: join(pasta, "index"), GIT_LITERAL_PATHSPECS: "1" },
+      ...GRANDE,
+    };
+    await run("git", ["read-tree", "HEAD"], comIndice);
+    await adicionarExatamente(projectRoot, noCommit, "-u", comIndice.env);
+    const arvore = (await run("git", ["write-tree"], comIndice)).stdout.trim();
+    // Os objetos do que vai para o branch, conferidos (§101): o disco pode ter mudado depois da admissão.
+    const sensiveisNaArvore = await admitirIntervalo(projectRoot, await git(projectRoot, ["rev-parse", "HEAD^{tree}"]), arvore);
+    if (sensiveisNaArvore.length > 0) throw new Error(`a árvore de recuperação trouxe ${sensiveisNaArvore.map((bloqueio) => bloqueio.caminho).join(", ")}`);
+    const commit = await git(projectRoot, ["commit-tree", arvore, "-p", "HEAD", "-m", opcoes.mensagem]);
+    guardado = `${opcoes.guardarEm}-${commit.slice(0, 8)}`;
+    await git(projectRoot, ["branch", guardado, commit]);
+  } catch (erro) {
+    throw semProva("os arquivos versionados", erro);
+  } finally {
+    await rm(pasta, { recursive: true, force: true });
+  }
+
+  // 3. A prova: o branch tem cada versionado exatamente como está em disco.
+  for (const caminho of noCommit) {
+    const emDisco = await existe(join(projectRoot, caminho));
+    const noBranch = await git(projectRoot, ["rev-parse", "--verify", "-q", `${guardado}:${caminho}`]).catch(() => null);
+    const confere = emDisco ? noBranch !== null && noBranch === (await git(projectRoot, ["hash-object", "--", caminho])) : noBranch === null;
+    if (!confere) throw semProva(caminho);
+  }
+
+  // 4. Só agora: a árvore volta a ser a de antes da integração.
+  await git(projectRoot, ["reset", "-q", "--hard", antes]);
+  for (const caminho of novos) await rm(join(projectRoot, caminho), { force: true });
+  return { limpo: false, arquivos: [...alterados, ...novos].sort(), guardado, recuperacao };
 }
 
 /**

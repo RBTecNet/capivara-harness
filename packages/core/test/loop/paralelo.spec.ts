@@ -7,15 +7,16 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runBuild, type EngineCall, type EngineResult } from "../../src/loop/index.js";
+import { MARCA_DO_HARNESS, runBuild, type EngineCall, type EngineResult } from "../../src/loop/index.js";
 import type { BuildOptions } from "../../src/loop/index.js";
-import { readEvents, replayEvents, runIdFor, runPaths } from "../../src/state/index.js";
+import { artifactPaths, readEvents, replayEvents, runIdFor, runPaths } from "../../src/state/index.js";
 import { sha12 } from "../../src/contract/index.js";
+import { arquivoSensivel } from "../../src/loop/admissao.js";
 
 const run = promisify(execFile);
 
@@ -59,6 +60,10 @@ interface Passo {
   demora?: Record<string, number>;
   /** Fases cujo verificador nunca aprova. */
   reprova?: string[];
+  /** O que o verificador responde, por fase, quando não é o DONE de sempre. */
+  veredito?: Record<string, string>;
+  /** Fases cujo executor escreve e então lança — o provider que cai no meio. */
+  lanca?: string[];
 }
 
 let projectRoot: string;
@@ -97,7 +102,8 @@ function motor(passo: Passo) {
     chamadas.push(chamada);
     if (chamada.role === "verifier") {
       const reprova = passo.reprova?.includes(chamada.phase.id) === true;
-      return { exitCode: 0, stdout: reprova ? "TASK 1: INCOMPLETE — falta o arquivo" : "TASK 1: DONE", stderr: "", timedOut: null };
+      const proprio = passo.veredito?.[chamada.phase.id];
+      return { exitCode: 0, stdout: proprio ?? (reprova ? "TASK 1: INCOMPLETE — falta o arquivo" : "TASK 1: DONE"), stderr: "", timedOut: null };
     }
     ativos += 1;
     pico = Math.max(pico, ativos);
@@ -108,9 +114,10 @@ function motor(passo: Passo) {
       await writeFile(destino, arquivo.content, "utf8");
     }
     ativos -= 1;
+    if (passo.lanca?.includes(chamada.phase.id) === true) throw new Error("o provider caiu no meio da sessão");
     return { exitCode: 0, stdout: "feito", stderr: "", timedOut: null };
   };
-  return { call, chamadas, pico: () => pico };
+  return { call, chamadas, pico: () => pico, ativos: () => ativos };
 }
 
 const ESCRITAS: Passo["escreve"] = {
@@ -333,5 +340,317 @@ describe("build paralelo", () => {
     const { outcome } = await construir({ escreve });
     expect(outcome.exitCode).toBe(0);
     expect(await readFile(join(projectRoot, "node_modules", "pacote", "index.js"), "utf8")).toBe("module.exports = 1;\n");
+  });
+});
+
+/**
+ * Os achados da auditoria do paralelo (docs/AUDITORIA-PARALELO.md, §99). Cada
+ * teste reproduz o cenário do achado e falhava antes da correção.
+ */
+describe("build paralelo — auditoria (§99)", () => {
+  const VERDE = { exitCode: 0, output: "ok" };
+  const RUN = (): string => runIdFor("build", sha12(PLANO));
+
+  async function commitar(arquivos: Record<string, string>, mensagem: string): Promise<void> {
+    for (const [caminho, conteudo] of Object.entries(arquivos)) {
+      await mkdir(join(projectRoot, caminho, ".."), { recursive: true });
+      await writeFile(join(projectRoot, caminho), conteudo, "utf8");
+    }
+    await git(["add", "-A"]);
+    await git(["commit", "-q", "-m", mensagem]);
+  }
+
+  async function aprovadasDa(fase: string): Promise<unknown[]> {
+    const texto = await readFile(join(artifactPaths(projectRoot).handoffs, "tasks.json"), "utf8").catch(() => "[]");
+    return (JSON.parse(texto) as { phase: string }[]).filter((entrada) => entrada.phase === fase);
+  }
+
+  async function arquivosDoBranch(branch: string): Promise<string[]> {
+    return (await git(["ls-tree", "-r", "--name-only", branch])).split("\n");
+  }
+
+  /** A pasta de recuperação local da fase: fora do Git, dentro do plano de controle do run. */
+  async function recuperacaoDa(fase: string): Promise<string> {
+    const pasta = join(runPaths(projectRoot, RUN()).root, "recuperacao");
+    const [unica] = (await readdir(pasta)).filter((nome) => nome.startsWith(`${fase}-`));
+    if (!unica) throw new Error(`sem recuperação da ${fase} em ${pasta}`);
+    return join(pasta, unica);
+  }
+
+  /** A integração da P03 reprova, e a suíte deixa na árvore o que `extra` disser — o cenário do rollback. */
+  function suiteQueReprovaAP03(extra: () => Promise<void> = async () => undefined, antesDaP03: () => Promise<void> = async () => undefined) {
+    return async (_comando: string, cwd: string): Promise<{ exitCode: number; output: string }> => {
+      if (cwd !== projectRoot) return VERDE;
+      if (!(await existe(join(cwd, "relatorio.txt")))) {
+        await antesDaP03();
+        return VERDE;
+      }
+      await escreverNaPrincipal("coverage/report.txt", "da suíte integrada\n");
+      await extra();
+      return { exitCode: 1, output: "FAIL" };
+    };
+  }
+
+  const COM_COVERAGE = { ...ESCRITAS, P03: [...ESCRITAS.P03!, { path: "coverage/report.txt", content: "da fase\n" }] };
+
+  async function escreverNaPrincipal(caminho: string, conteudo: string): Promise<void> {
+    await mkdir(join(projectRoot, caminho, ".."), { recursive: true });
+    await writeFile(join(projectRoot, caminho), conteudo, "utf8");
+  }
+
+  it("B1: a suíte da árvore integrada roda com o .env preparado, como a do worktree", async () => {
+    await commitar({ ".env.example": "SEGREDO_DA_APP=exemplo\n", ".gitignore": ".env\n" }, "ambiente");
+    // A suíte do projeto lê o ambiente: sem .env, reprova — no worktree e na principal.
+    const { outcome, anuncios } = await construir(
+      { escreve: ESCRITAS },
+      { testRunner: async (_comando, cwd) => ((await existe(join(cwd, ".env"))) ? VERDE : { exitCode: 1, output: "FAIL: SEGREDO_DA_APP não definido" }) },
+    );
+
+    expect(outcome.exitCode, anuncios.join("\n")).toBe(0);
+    expect(anuncios.some((linha) => linha.includes("a suíte da árvore integrada reprovou"))).toBe(false);
+    expect((await readFile(join(projectRoot, ".env"), "utf8")).startsWith(MARCA_DO_HARNESS)).toBe(true);
+  });
+
+  it("B2: a fase que para num gate não deixa aprovação de código que saiu da árvore", async () => {
+    const segunda = [
+      "- [ ] **Task:** Entregar o resto do cadastro",
+      "  - **Acceptance criteria:**",
+      "    - O resto do cadastro existe",
+      "  - **Traces:** US-2.2",
+      "",
+    ].join("\n");
+    const plano = PLANO.replace(FASE(2, "Cadastro", "Phase 1"), `${FASE(2, "Cadastro", "Phase 1")}${segunda}\n`);
+    await commitar({ ".capivara/init/project-phases.md": plano }, "plano com duas tasks na P2");
+
+    const primeiro = await construir({ escreve: ESCRITAS, veredito: { P02: "TASK 1: DONE\nTASK 2: INCOMPLETE — falta o resto" } });
+    expect(primeiro.outcome.exitCode, primeiro.anuncios.join("\n")).toBe(2);
+    // O código da task 1 foi para o branch da fase; a árvore principal não o tem.
+    expect(await existe(join(projectRoot, "cadastro.txt"))).toBe(false);
+    expect(await aprovadasDa("P02")).toEqual([]);
+
+    // A retomada pergunta de novo sobre a task 1, em vez de carimbá-la.
+    const segundo = await construir({ escreve: ESCRITAS, veredito: { P02: "TASK 1: DONE\nTASK 2: DONE" } });
+    const verificacoes = segundo.engine.chamadas.filter((chamada) => chamada.role === "verifier" && chamada.phase.id === "P02");
+    expect(verificacoes[0]?.prompt).not.toContain("Already DONE");
+  });
+
+  it("B2: a fase que nem sozinha fecha na árvore integrada também não deixa aprovação", async () => {
+    const { outcome } = await construir(
+      { escreve: ESCRITAS, demora: { P02: 20, P03: 150 } },
+      {
+        testRunner: async (_comando, cwd) =>
+          cwd === projectRoot && (await existe(join(cwd, "relatorio.txt"))) ? { exitCode: 1, output: "FAIL" } : VERDE,
+      },
+    );
+    expect(outcome.errors.join("\n")).toContain("mesmo rodando sozinha");
+    expect(await aprovadasDa("P03")).toEqual([]);
+    // A que entrou no produto continua aprovada.
+    expect(await aprovadasDa("P02")).toHaveLength(1);
+  });
+
+  it("M1: arquivo não versionado na árvore principal não é chamado de conflito, e não é apagado", async () => {
+    const escreve = { ...ESCRITAS, P03: [...ESCRITAS.P03!, { path: "coverage/report.txt", content: "da fase\n" }] };
+    const { outcome, engine, anuncios } = await construir(
+      { escreve, demora: { P02: 20, P03: 150 } },
+      {
+        // A suíte da principal deixa um relatório que ninguém versionou.
+        testRunner: async (_comando, cwd) => {
+          if (cwd === projectRoot) await escreverNaPrincipal("coverage/report.txt", "da suíte integrada\n");
+          return VERDE;
+        },
+      },
+    );
+
+    expect(outcome.exitCode).toBe(2);
+    expect(anuncios.some((linha) => linha.includes("conflito ao integrar"))).toBe(false);
+    expect(outcome.errors.join("\n")).toContain("coverage/report.txt");
+    // Não é conflito: refazer não muda nada, e a fase não é refeita.
+    expect(engine.chamadas.filter((chamada) => chamada.role === "builder" && chamada.phase.id === "P03")).toHaveLength(1);
+    expect(await readFile(join(projectRoot, "coverage", "report.txt"), "utf8")).toBe("da suíte integrada\n");
+    expect(await git(["log", "--format=%s", "-1", `capivara/${RUN()}/P03`])).toContain("feat(phase-3)");
+  });
+
+  it("M1: suíte vermelha com a árvore alterada no caminho: nada reprovado fica na árvore, e nada se perde", async () => {
+    const escreve = { ...ESCRITAS, P03: [...ESCRITAS.P03!, { path: "coverage/report.txt", content: "da fase\n" }] };
+    const { outcome, engine } = await construir(
+      { escreve, demora: { P02: 20, P03: 150 } },
+      {
+        /*
+         * Na integração da P03, a suíte reescreve um arquivo que a fase
+         * versionou e deixa um que ninguém versionou — e reprova. O `reset
+         * --keep` recusa por causa do primeiro.
+         */
+        testRunner: async (_comando, cwd) => {
+          if (cwd !== projectRoot || !(await existe(join(cwd, "relatorio.txt")))) return VERDE;
+          await escreverNaPrincipal("coverage/report.txt", "da suíte integrada\n");
+          await escreverNaPrincipal("saida-da-suite.log", "FAIL relatorio.spec\n");
+          return { exitCode: 1, output: "FAIL" };
+        },
+      },
+    );
+
+    expect(outcome.exitCode).toBe(2);
+    expect((await git(["log", "--format=%s"])).split("\n").some((linha) => linha.includes("phase-3"))).toBe(false);
+    expect(engine.chamadas.filter((chamada) => chamada.role === "builder" && chamada.phase.id === "P03")).toHaveLength(1);
+
+    /*
+     * O risco do `--soft`: o código reprovado ficava na árvore como alteração
+     * não commitada, e o preflight seguinte mandava `git add -A && git commit`
+     * — promovendo-o a código aprovado. A árvore tem de voltar a ser a de antes
+     * da integração: nada a commitar, nada da fase reprovada em disco.
+     */
+    expect(await git(["status", "--porcelain", "--", ".", ":(exclude).capivara"])).toBe("");
+    for (const arquivo of ["relatorio.txt", "coverage/report.txt", "saida-da-suite.log"]) {
+      expect(await existe(join(projectRoot, arquivo)), arquivo).toBe(false);
+    }
+
+    // E nada se perdeu: o que estava na árvore ficou num branch, e a fase no dela.
+    const guardado = await git(["branch", "--list", "--format=%(refname:short)", `capivara/${RUN()}/P03-reprovada-*`]);
+    expect(guardado).not.toBe("");
+    expect(await git(["show", `${guardado}:coverage/report.txt`])).toBe("da suíte integrada");
+    // O que ninguém versionou não entra em commit: vai para a recuperação local, fora do Git.
+    expect(await arquivosDoBranch(guardado)).not.toContain("saida-da-suite.log");
+    expect(await readFile(join(await recuperacaoDa("P03"), "saida-da-suite.log"), "utf8")).toBe("FAIL relatorio.spec\n");
+    expect(await git(["show", `${guardado}:relatorio.txt`])).toBe("relatório");
+    expect(outcome.errors.join("\n")).toContain("coverage/report.txt");
+    expect(outcome.errors.join("\n")).toContain(guardado);
+    expect(await git(["log", "--format=%s", "-1", `capivara/${RUN()}/P03`])).toContain("feat(phase-3)");
+
+    // A retomada começa — o preflight não acha nada a commitar — e refaz a fase pelos gates.
+    const retomada = await construir({ escreve: ESCRITAS }, { testRunner: async () => VERDE });
+    expect(retomada.outcome.exitCode, retomada.anuncios.join("\n")).toBe(0);
+    expect(retomada.engine.chamadas.some((chamada) => chamada.role === "builder" && chamada.phase.id === "P03")).toBe(true);
+    expect((await git(["log", "--format=%s"])).split("\n").filter((linha) => linha.includes("phase-3"))).toHaveLength(1);
+    expect(await git(["branch", "--list", "--format=%(refname:short)", `capivara/${RUN()}/P03-reprovada-*`])).toBe(guardado);
+  });
+
+  it("rollback: a regra do que pode ter segredo pelo nome é fechada, e deixa passar os exemplos", () => {
+    // O .pem é julgado pelo conteúdo (§100): um certificado público passa.
+    for (const caminho of [".env", ".env.local", "config/.env.production", "chave.key", "deploy/id_ed25519"]) {
+      expect(arquivoSensivel(caminho), caminho).toBe(true);
+    }
+    for (const caminho of [".env.example", ".env.sample", "api/.env.template", "environment.ts", "id_ed25519.pub", "keys.json", "certs/ca.pem"]) {
+      expect(arquivoSensivel(caminho), caminho).toBe(false);
+    }
+  });
+
+  it("rollback: um .env que ninguém ignorou não vai para o branch de recuperação, e não se perde", async () => {
+    const SEGREDO = "SEGREDO_DA_APP=valor-real-que-nao-pode-ir-para-o-git";
+    const { outcome } = await construir(
+      { escreve: COM_COVERAGE, demora: { P02: 20, P03: 150 } },
+      { testRunner: suiteQueReprovaAP03(() => escreverNaPrincipal(".env", `${SEGREDO}\n`)) },
+    );
+
+    expect(outcome.exitCode).toBe(2);
+    const guardado = await git(["branch", "--list", "--format=%(refname:short)", `capivara/${RUN()}/P03-reprovada-*`]);
+    expect(guardado).not.toBe("");
+    expect(await arquivosDoBranch(guardado)).not.toContain(".env");
+    // Em nenhum objeto alcançável do repositório.
+    expect(await git(["log", "--all", "-p", "--format=%H"])).not.toContain("valor-real-que-nao-pode-ir-para-o-git");
+    // Guardado só localmente, fora do Git, com o conteúdo inteiro.
+    expect(await readFile(join(await recuperacaoDa("P03"), ".env"), "utf8")).toBe(`${SEGREDO}\n`);
+    expect(await git(["status", "--porcelain", "--", ".", ":(exclude).capivara"])).toBe("");
+    expect(outcome.errors.join("\n")).toContain("recuperacao");
+  });
+
+  it("rollback: o arquivo não versionado que já estava na árvore fica onde estava, fora de qualquer commit", async () => {
+    const { outcome } = await construir(
+      { escreve: COM_COVERAGE, demora: { P02: 20, P03: 150 } },
+      {
+        testRunner: suiteQueReprovaAP03(undefined, async () => {
+          if (!(await existe(join(projectRoot, "notas-locais.txt")))) await escreverNaPrincipal("notas-locais.txt", "anotação do usuário\n");
+        }),
+      },
+    );
+
+    expect(outcome.exitCode).toBe(2);
+    expect(await readFile(join(projectRoot, "notas-locais.txt"), "utf8")).toBe("anotação do usuário\n");
+    const guardado = await git(["branch", "--list", "--format=%(refname:short)", `capivara/${RUN()}/P03-reprovada-*`]);
+    expect(await arquivosDoBranch(guardado)).not.toContain("notas-locais.txt");
+    // Não foi criado pela integração: nem copiado, nem removido.
+    const recuperacao = await recuperacaoDa("P03").catch(() => null);
+    if (recuperacao) expect(await existe(join(recuperacao, "notas-locais.txt"))).toBe(false);
+    expect((await git(["log", "--format=%s"])).split("\n").some((linha) => linha.includes("phase-3"))).toBe(false);
+  });
+
+  it("rollback: se a recuperação não pode ser gravada, nada é limpo — sem reset --hard", async () => {
+    // A pasta de recuperação não pode ser criada: há um arquivo no caminho.
+    await mkdir(runPaths(projectRoot, RUN()).root, { recursive: true });
+    await writeFile(join(runPaths(projectRoot, RUN()).root, "recuperacao"), "no caminho\n", "utf8");
+
+    const { outcome } = await construir(
+      { escreve: COM_COVERAGE, demora: { P02: 20, P03: 150 } },
+      { testRunner: suiteQueReprovaAP03(() => escreverNaPrincipal("saida-da-suite.log", "FAIL relatorio.spec\n")) },
+    );
+
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.errors.join("\n")).toContain("não limpei a árvore");
+    // Tudo continua onde estava: nada apagado, nada sobrescrito.
+    expect(await readFile(join(projectRoot, "coverage", "report.txt"), "utf8")).toBe("da suíte integrada\n");
+    expect(await readFile(join(projectRoot, "saida-da-suite.log"), "utf8")).toBe("FAIL relatorio.spec\n");
+    expect(await existe(join(projectRoot, "relatorio.txt"))).toBe(true);
+    expect(await git(["branch", "--list", `capivara/${RUN()}/P03-reprovada-*`])).toBe("");
+  });
+
+  it("M2: depois de uma falha fatal na integração, a fase que ainda rodava não entra na árvore", async () => {
+    const escreve = { ...ESCRITAS, P02: [...ESCRITAS.P02!, { path: "coverage/report.txt", content: "da fase\n" }] };
+    const { outcome, anuncios } = await construir(
+      { escreve, demora: { P02: 20, P03: 300 } },
+      {
+        // A integração da P02 fica fatal (M1); a da P03, sozinha, passaria.
+        testRunner: async (_comando, cwd) => {
+          if (cwd !== projectRoot) return VERDE;
+          if ((await existe(join(cwd, "cadastro.txt"))) && !(await existe(join(cwd, "relatorio.txt")))) {
+            await escreverNaPrincipal("coverage/report.txt", "da suíte integrada\n");
+            return { exitCode: 1, output: "FAIL" };
+          }
+          return VERDE;
+        },
+      },
+    );
+
+    expect(outcome.exitCode).toBe(2);
+    expect(await existe(join(projectRoot, "relatorio.txt"))).toBe(false);
+    expect((await git(["log", "--format=%s"])).split("\n").some((linha) => linha.includes("phase-3"))).toBe(false);
+    expect(anuncios.some((linha) => linha.startsWith("[P03]") && linha.includes("não foi integrada"))).toBe(true);
+    // O trabalho dela não se perdeu: está no branch.
+    expect(await git(["log", "--format=%s", "-1", `capivara/${RUN()}/P03`])).toContain("feat(phase-3)");
+  });
+
+  it("M3: erro inesperado numa fase: o build só sai depois das outras, nada entra depois, e o parcial fica no branch", async () => {
+    const engine = motor({ escreve: ESCRITAS, demora: { P02: 20, P03: 300 }, lanca: ["P02"] });
+    const erro = await runBuild({
+      projectRoot,
+      language: "português do Brasil",
+      engine: "codex",
+      call: engine.call,
+      sleep: async () => undefined,
+      environment: { XDG_CACHE_HOME: cache },
+      skipAcceptance: true,
+      explicitTestCommand: "npm test",
+      testRunner: async () => VERDE,
+      parallel: {
+        maxConcurrency: 2,
+        agentes: [
+          { engine: "codex", label: "codex", systemInstall: false },
+          { engine: "codex", label: "codex", systemInstall: false },
+        ],
+        resumo: [],
+      },
+    }).then(
+      () => null,
+      (motivo: unknown) => motivo,
+    );
+
+    // Nenhum agente ainda trabalhando quando o build devolve o erro.
+    expect(engine.ativos()).toBe(0);
+    expect(erro instanceof Error ? erro.message : String(erro)).toContain("o provider caiu");
+    const historico = await git(["log", "--format=%s"]);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(await git(["log", "--format=%s"])).toBe(historico);
+    expect(historico).not.toContain("phase-3");
+    // O parcial da que caiu e o verde da que não pôde entrar ficam nos branches.
+    expect(await git(["log", "--format=%s", "-1", `capivara/${RUN()}/P02`])).toContain("wip(P02)");
+    expect(await git(["log", "--format=%s", "-1", `capivara/${RUN()}/P03`])).toContain("feat(phase-3)");
   });
 });

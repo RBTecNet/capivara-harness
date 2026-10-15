@@ -56,7 +56,7 @@ const DRAFT = {
 const PTY_DRIVER = String.raw`
 import codecs, fcntl, json, os, pty, re, select, struct, subprocess, sys, termios, time
 rows, columns = int(sys.argv[1]), int(sys.argv[2])
-wizard_answers, wizard_output = json.loads(sys.argv[3]), ""
+wizard_answers, wizard_output, wizard_frames = json.loads(sys.argv[3]), "", 1
 master, slave = pty.openpty()
 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
 process = subprocess.Popen(sys.argv[4:], stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
@@ -83,10 +83,13 @@ try:
                 typing += chunk
             if wizard_answers:
                 wizard_output += chunk
-                # Cada campo recebe só sua resposta; colar o lote em um TTY
-                # daria decisões antecipadas que createLineIO descarta.
-                if re.search(r"(?:^|[\r\n])[^\r\n]*: $|(?:^|[\r\n])> $", wizard_output):
-                    os.write(master, (wizard_answers.pop(0) + "\r").encode())
+                # O wizard em TTY é a tela por tecla: cada desenho termina no
+                # rodapé "Ctrl-C sai". Cada resposta diz quantos desenhos ela
+                # provoca até a pergunta seguinte estar na tela; tecla mandada
+                # antes disso seria descartada, de propósito, pelo key-io.
+                if wizard_output.count("Ctrl-C sai") >= wizard_frames:
+                    keys, wizard_frames = wizard_answers.pop(0)
+                    os.write(master, keys.encode())
                     wizard_output = ""
                 continue
             if typed_at is None and re.search(r"sua resposta[^\r\n]*: ", output, re.IGNORECASE):
@@ -208,8 +211,24 @@ event({ type: "turn.completed", usage: { input_tokens: 200, output_tokens: 30 } 
     const project = await mkdtemp(join(directory, "project-"));
     await mkdir(join(project, "global-config"));
     await writeFile(join(project, "analysis.json"), JSON.stringify(analysis), "utf8");
-    const wizardAnswers = wizard ? [project, "6", "1", "Um sistema de reservas.", ".", "",
-      "1", "terminal-fake-model", "1", "n", "s"] : [];
+    /*
+     * [teclas, desenhos até a próxima pergunta]. Digitar move o cursor e
+     * redesenha; colar redesenha uma vez; o Enter que confirma não redesenha — o
+     * desenho seguinte já é a pergunta nova.
+     */
+    const colar = (texto: string): string => `\x1b[200~${texto}\x1b[201~`;
+    const wizardAnswers: [string, number][] = wizard ? [
+      [`${colar(project)}\r`, 2], // pasta do projeto
+      ["6\r", 2], // prompt-engineer
+      ["1\r", 2], // escrever agora
+      [`${colar("Um sistema de reservas.")}\r.\r`, 4], // o pedido, o ponto que fecha
+      ["\r", 1], // onde gravar: o padrão
+      ["1\r", 2], // codex
+      [`${colar("terminal-fake-model")}\r`, 2], // modelo
+      ["1\r", 2], // sem effort
+      ["2\r", 2], // sem ajuste por papel
+      ["1\r", 0], // executar
+    ] : [];
     const command = wizard ? ["wizard"] : [
       "prompt-engineer", "Organizar um sistema de reservas para uma pousada.", "--project", project,
       "--writer-provider", "codex", "--writer-model", "terminal-fake-model", "--no-splash", "--no-modal",

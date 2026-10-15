@@ -23,8 +23,16 @@ import type { Choice, WizardAnswers } from "../tui/index.js";
 import { createLineIO } from "./line-io.js";
 import type { LineIO, LineSource } from "./line-io.js";
 
-/** O wizard lê linha a linha como todo o resto do CLI. */
-export type WizardIO = LineIO;
+/**
+ * O wizard lê linha a linha como todo o resto do CLI — e, quando há uma pessoa
+ * no terminal, por tecla (`key-io.ts`): a escolha vira lista com cursor e o
+ * texto vira campo. As duas capacidades são opcionais de propósito; sem elas, a
+ * mesma pergunta sai numerada, que é o que pipes e testes respondem.
+ */
+export type WizardIO = LineIO & {
+  select?: (title: string, choices: readonly Choice[], defaultIndex: number, keepLabel?: string) => Promise<number>;
+  multiline?: (title: string) => Promise<string>;
+};
 export { createLineIO };
 export type { LineSource };
 
@@ -139,6 +147,13 @@ async function choose(
   defaultIndex: number,
   rotuloPadrao?: string,
 ): Promise<number> {
+  if (io.select) {
+    try {
+      return await io.select(title, choices, defaultIndex, rotuloPadrao);
+    } catch {
+      throw new InputEnded();
+    }
+  }
   io.write(`\n${renderChoices(title, choices, defaultIndex)}\n`);
   const dica = rotuloPadrao ?? String(defaultIndex + 1);
   for (;;) {
@@ -154,6 +169,7 @@ async function text(io: WizardIO, prompt: string, fallback = ""): Promise<string
 }
 
 async function yesNo(io: WizardIO, prompt: string, defaultYes: boolean): Promise<boolean> {
+  if (io.select) return (await choose(io, prompt, [{ label: "sim" }, { label: "não" }], defaultYes ? 0 : 1)) === 0;
   const answer = (await pergunta(io, `${prompt} [${defaultYes ? "S/n" : "s/N"}]: `)).trim().toLowerCase();
   if (answer === "") return defaultYes;
   return /^(?:s|sim|y|yes)$/.test(answer);
@@ -167,6 +183,14 @@ async function yesNo(io: WizardIO, prompt: string, defaultYes: boolean): Promise
  * quase sempre um parágrafo colado, então ele precisa de um fim explícito.
  */
 async function multiline(io: WizardIO, title: string): Promise<string> {
+  if (io.multiline) {
+    try {
+      return (await io.multiline(title)).trim();
+    } catch {
+      // Ctrl-D no campo de várias linhas entrega o texto; erro aqui é a entrada fechada.
+      return "";
+    }
+  }
   io.write(`\n${title}\n`);
   io.write("Cole ou digite quantas linhas quiser. Termine com uma linha contendo só um ponto, ou Ctrl-D.\n");
   const lines: string[] = [];
@@ -271,6 +295,23 @@ async function escolherModelo(
   }
 
   const opcoes: Choice[] = candidatos.map((modelo) => ({ label: modelo }));
+
+  /*
+   * Na lista com cursor, o "0 volta" e o "ou digite o nome" do modo de linha
+   * viram linhas no fim da própria lista — escolha que só existe como dica no
+   * prompt é escolha que não se navega até ela.
+   */
+  if (io.select) {
+    const extras: Choice[] = [
+      { label: "digitar outro nome", hint: "a CLI pode conhecer o que ela não lista" },
+      { label: "voltar ao provider" },
+    ];
+    const indice = await choose(io, rotulo, [...opcoes, ...extras], 0);
+    if (indice < candidatos.length) return { modelo: candidatos[indice]! };
+    if (indice === candidatos.length + 1) return "voltar";
+    return { modelo: await text(io, `${rotulo} — nome exato [${candidatos[0] ?? ""}]: `, candidatos[0] ?? "") };
+  }
+
   io.write(`\n${renderChoices(rotulo, opcoes, 0)}\n`);
   for (;;) {
     const resposta = (await pergunta(io, "Escolha [1, 0 volta ao provider, ou digite o nome]: ")).trim();

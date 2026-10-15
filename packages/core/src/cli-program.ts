@@ -48,6 +48,8 @@ import type { EntradaDeTeclado, Janela, Parada, SaidaDeTela } from "./tui/index.
 import { paradaDeProntidao, paradaDoEstagio, type Estagio } from "./commands/paradas.js";
 import { runWizard, runWizardDePapeis, runWizardDoPedido } from "./commands/wizard.js";
 import { InputEndedError, createLineIO } from "./commands/line-io.js";
+import { createKeyPrompter } from "./commands/key-io.js";
+import type { WizardIO } from "./commands/wizard.js";
 import type { LineIO } from "./commands/line-io.js";
 import { listarEfforts, listarModelos } from "./provider/index.js";
 import type { RoleName } from "./provider/index.js";
@@ -70,6 +72,39 @@ interface CommonFlags extends CliRoleFlags {
 
 function style() {
   return { enabled: supportsColor() };
+}
+
+/**
+ * A entrada dos wizards.
+ *
+ * Com uma pessoa no terminal — entrada E saída em TTY —, a escolha é uma lista
+ * com cursor dentro da moldura do painel (`key-io.ts`). Em pipe, arquivo, CI ou
+ * `CAPIVARA_LINE_INPUT=1`, é a leitura de linha numerada de sempre: um roteiro
+ * escrito para o wizard continua respondendo do mesmo jeito.
+ */
+function abrirEntradaDoWizard(subtitulo: string): { io: WizardIO; close: () => void; teclas: boolean } {
+  if (stdin.isTTY === true && stdout.isTTY === true && process.env.CAPIVARA_LINE_INPUT !== "1") {
+    const teclas = createKeyPrompter({
+      input: stdin,
+      write: (texto) => void stdout.write(texto),
+      dimensions: () => ({ columns: stdout.columns ?? 100, rows: stdout.rows ?? 40 }),
+      style: style(),
+      version: VERSION,
+      subtitle: subtitulo,
+      environment: process.env,
+      onResize: (listener) => {
+        stdout.on("resize", listener);
+        return () => void stdout.off("resize", listener);
+      },
+    });
+    return { io: teclas, close: () => teclas.close(), teclas: true };
+  }
+  const terminal = createInterface({ input: stdin, output: stdout });
+  return {
+    io: createLineIO(terminal, (texto) => void stdout.write(texto), { interactive: stdin.isTTY === true }),
+    close: () => terminal.close(),
+    teclas: false,
+  };
 }
 
 /**
@@ -135,10 +170,10 @@ async function lerEvidencia(projectRoot: string, caminhos: readonly string[] | u
 async function completarPapeis<T extends CliRoleFlags>(comando: string, faltando: readonly string[], flags: T): Promise<T | null> {
   if (stdin.isTTY !== true) return null;
 
-  const terminal = createInterface({ input: stdin, output: stdout });
+  const entrada = abrirEntradaDoWizard(`${comando} · falta o modelo`);
   try {
     const escolha = await runWizardDePapeis({
-      io: createLineIO(terminal, (texto) => void stdout.write(texto), { interactive: stdin.isTTY === true }),
+      io: entrada.io,
       cwd: process.cwd(),
       comando,
       faltando: faltando as RoleName[],
@@ -156,7 +191,7 @@ async function completarPapeis<T extends CliRoleFlags>(comando: string, faltando
     }
     return completo as T;
   } finally {
-    terminal.close();
+    entrada.close();
   }
 }
 
@@ -209,10 +244,10 @@ function mundoDoWizard() {
 async function completarPedido(comando: string, projectRoot = process.cwd()): Promise<{ prompt?: string; file?: string; mcp?: string; mcpProject?: string } | null> {
   if (stdin.isTTY !== true) return null;
 
-  const terminal = createInterface({ input: stdin, output: stdout });
+  const entrada = abrirEntradaDoWizard(`${comando} · falta o pedido`);
   try {
     const escolhido = await runWizardDoPedido({
-      io: createLineIO(terminal, (texto) => void stdout.write(texto), { interactive: stdin.isTTY === true }),
+      io: entrada.io,
       cwd: projectRoot,
       comando,
       ...mundoDoWizard(),
@@ -225,7 +260,7 @@ async function completarPedido(comando: string, projectRoot = process.cwd()): Pr
       ...(escolhido.mcpProject !== undefined ? { mcpProject: escolhido.mcpProject } : {}),
     };
   } finally {
-    terminal.close();
+    entrada.close();
   }
 }
 
@@ -1708,12 +1743,11 @@ export function createProgram(): Command {
    * é literalmente o que ele roda.
    */
   const wizard = async (): Promise<void> => {
-    const terminal = createInterface({ input: stdin, output: stdout });
-    const linhas = createLineIO(terminal, (text) => void stdout.write(text), { interactive: stdin.isTTY === true });
+    const entrada = abrirEntradaDoWizard("wizard · monta o comando com você");
     let resultado;
     try {
       resultado = await runWizard({
-        io: linhas,
+        io: entrada.io,
         cwd: process.cwd(),
         listModels: (providerId) => listarModelos(providerId),
         listEfforts: (providerId, model) => listarEfforts(providerId, model),
@@ -1726,7 +1760,13 @@ export function createProgram(): Command {
         requestRecorded: async (root) => (await readRequestState(root)) !== null,
       });
     } finally {
-      if (!resultado?.execute || resultado.answers.command !== "prompt-engineer") terminal.close();
+      /*
+       * A fila de linhas segue aberta para o prompt-engineer quando ela veio de
+       * pipe: a entrevista dele pode estar no mesmo roteiro. A entrada por tecla
+       * sempre fecha aqui — o estágio abre a própria, e o terminal precisa sair
+       * do modo raw antes disso.
+       */
+      if (entrada.teclas || !resultado?.execute || resultado.answers.command !== "prompt-engineer") entrada.close();
     }
 
     if (!resultado) {
@@ -1737,11 +1777,11 @@ export function createProgram(): Command {
       stdout.write("Nada foi executado. O comando acima faz o mesmo quando você quiser.\n");
       return;
     }
-    if (resultado.answers.command === "prompt-engineer") {
+    if (resultado.answers.command === "prompt-engineer" && !entrada.teclas) {
       // O pipe pode conter a entrevista depois do wizard; a fila continua sendo a mesma.
-      entradaDoWizard = linhas;
+      entradaDoWizard = entrada.io;
       try { await program.parseAsync(resultado.argv, { from: "user" }); }
-      finally { entradaDoWizard = undefined; terminal.close(); }
+      finally { entradaDoWizard = undefined; entrada.close(); }
     } else {
       await program.parseAsync(resultado.argv, { from: "user" });
     }

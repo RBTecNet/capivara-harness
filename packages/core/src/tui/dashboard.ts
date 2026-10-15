@@ -159,7 +159,7 @@ function duration(seconds: number): string {
 }
 
 /** Caixa com título embutido na borda de cima, como no painel de referência. */
-function box(title: string, body: string[], width: number, style: Style): string[] {
+export function box(title: string, body: string[], width: number, style: Style): string[] {
   const inner = width - 2;
   const heading = truncateVisible(` ${title} `, inner);
   const top = `┌${heading}${"─".repeat(Math.max(0, inner - visibleWidth(heading)))}┐`;
@@ -281,8 +281,11 @@ interface Layout {
  */
 const TITLE_ROOM = 12;
 
+/** O que o cabeçalho lê do modelo; a tela do wizard o desenha sem ter um run. */
+export type HeaderModel = Pick<DashboardModel, "version" | "command" | "subtitle" | "style" | "environment">;
+
 /** A capivara fica no centro do painel, independentemente da largura do título. */
-function header(model: DashboardModel, width: number, artwork: boolean): string[] {
+export function header(model: HeaderModel, width: number, artwork: boolean): string[] {
   const { style } = model;
   const lines: string[] = [];
   const stage = mascotStage(model.command);

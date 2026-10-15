@@ -6304,3 +6304,41 @@ resultado legível, com código diferente de zero ou com erro reportado, dizendo
 é do ambiente e mostrando o que a CLI disse. Provado com o codex de verdade e a
 pasta inexistente: a chamada respondeu.
 
+
+## §92 — A escolha vira lista na moldura do painel
+
+O wizard imprimia uma pergunta embaixo da outra e lia números: quem chegava ao
+modelo do verificador já não via o que tinha escolhido para o escritor, e a tela
+não se parecia com o painel que vinha depois. O pedido do desenvolvedor foi
+escolher "diretamente na TUI", e a mascote nova (`docs/mascote/`) veio junto.
+
+A D-08 continua valendo — nenhuma dependência de UI entrou. O que muda é a forma
+da regra "toda escolha fechada é NUMÉRICA". Ela existia por dois defeitos, e os
+dois continuam impedidos por outro caminho:
+
+- **colagem lida como escolha.** O terminal agora marca a colagem (*bracketed
+  paste*, `tui/keys.ts`), e a lista a recusa com aviso. No campo de uma linha,
+  a colagem fica inteira no campo com as quebras viradas espaço — não responde
+  mais as perguntas seguintes, uma linha por pergunta;
+- **tecla perdida virando decisão** (o `assistencia2`, 33 decisões em rajadas
+  de 0,26s). Tecla que chega sem pergunta na tela é descartada e o descarte é
+  dito, como no `line-io`. E o número MOVE o cursor, não confirma: só o Enter
+  decide.
+
+Com uma pessoa no terminal (entrada e saída em TTY), os três wizards — o
+`capivara` sem argumentos, o "falta o pedido" e o "falta o modelo" — desenham a
+pergunta dentro da moldura do painel, com a capivara, "SUAS ESCOLHAS" e o campo
+ou a lista (`commands/key-io.ts`, `tui/wizard-screen.ts`). O modelo deixou de
+ser uma lista impressa mais um campo livre: "digitar outro nome" e "voltar ao
+provider" viraram linhas da própria lista. Em pipe, arquivo, CI ou com
+`CAPIVARA_LINE_INPUT=1`, é a leitura numerada de sempre — o wizard só pergunta
+ao `WizardIO` se ele sabe `select`/`multiline`, e os roteiros de linha
+continuam respondendo igual.
+
+O modo raw tira o Ctrl-C do terminal como sinal. Ele é devolvido à mão:
+restaura o terminal e só então envia SIGINT. E o terminal sai do modo raw ANTES
+de o comando montado rodar, porque o estágio abre o próprio readline — o teste
+de PTY do prompt-engineer passa por esse ponto com o wizard por tecla.
+
+Fica para depois: a entrevista, as paradas e os impasses ainda pedem a resposta
+numa linha embaixo do painel.

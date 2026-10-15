@@ -1,23 +1,25 @@
 /**
- * Desenho da capivara em meio-blocos.
+ * A capivara, uma por estágio.
  *
- * Duas linhas de pixel por linha de terminal: o pixel de cima vira a cor de
- * frente de `▀` e o de baixo vira a cor de fundo. Pixel transparente vira
- * espaço, para o fundo do terminal aparecer em vez de um retângulo azul-marinho
- * flutuando num terminal claro.
+ * Cada estágio pode ter a sua; hoje todos usam a de capacete e chave, a única
+ * que ficou legível no tamanho que o painel comporta. Os desenhos são saída do
+ * chafa, gravada como texto em `mascots-data.ts` — o runtime não depende de
+ * imagem. As tentativas descartadas estão em docs/mascote/LEIA.md.
  *
- * Terminal sem cor verdadeira cai no mascote ASCII: a capivara em blocos ficaria
- * uma mancha marrom em 16 cores, e uma mancha é pior do que um desenho honesto.
+ * A versão anterior desenhava em meio-blocos a partir de um recorte reduzido por
+ * média de área e reamostrado de novo no painel: duas reduções empilhadas, e o
+ * resultado saía borrado e deformado. Meio-bloco tem dois pixels por célula; o
+ * chafa escolhe, célula a célula, entre centenas de símbolos o que melhor cobre a
+ * forma. Nada aqui reamostra: o desenho tem um tamanho só e aparece nele.
+ *
+ * Terminal sem cor verdadeira cai no mascote ASCII: em 16 cores o desenho viraria
+ * uma mancha marrom, e uma mancha é pior do que um desenho honesto.
  */
 
-import { CAPYBARA_COLS, CAPYBARA_PIXELS, CAPYBARA_ROWS } from "./capybara-data.js";
+import { MASCOT_ART } from "./mascots-data.js";
 import type { Style } from "./ansi.js";
 
-export { CAPYBARA_COLS, CAPYBARA_ROWS };
-
-const RESET = "\u001B[0m";
-const UPPER_HALF = "\u2580";
-const TRANSPARENT = "------";
+export type MascotStage = keyof typeof MASCOT_ART;
 
 /** Mascote em ASCII, para quando não há cor verdadeira. */
 export const CAPYBARA_ASCII: readonly string[] = [
@@ -38,33 +40,26 @@ export function supportsTrueColor(environment: NodeJS.ProcessEnv = process.env):
   return declared.includes("truecolor") || declared.includes("24bit");
 }
 
-function channel(hex: string, offset: number): number {
-  return Number.parseInt(hex.slice(offset, offset + 2), 16);
+/**
+ * O estágio cuja capivara aparece para um comando.
+ *
+ * `plan` e `build` têm a sua; os demais (`survey`, `change`, `prompt-engineer`)
+ * abrem trabalho novo como o `init`, e ficam com a dele.
+ */
+export function mascotStage(command: string): MascotStage {
+  return command === "plan" || command === "build" ? command : "init";
 }
 
-function paintCell(top: string, bottom: string): string {
-  const topClear = top === TRANSPARENT;
-  const bottomClear = bottom === TRANSPARENT;
-
-  if (topClear && bottomClear) return " ";
-
-  if (bottomClear) {
-    return `\u001B[38;2;${channel(top, 0)};${channel(top, 2)};${channel(top, 4)}m${UPPER_HALF}${RESET}`;
-  }
-  if (topClear) {
-    // Só metade de baixo: o bloco inferior evita pintar o fundo inteiro.
-    return `\u001B[38;2;${channel(bottom, 0)};${channel(bottom, 2)};${channel(bottom, 4)}m\u2584${RESET}`;
-  }
-  return (
-    `\u001B[38;2;${channel(top, 0)};${channel(top, 2)};${channel(top, 4)}m` +
-    `\u001B[48;2;${channel(bottom, 0)};${channel(bottom, 2)};${channel(bottom, 4)}m${UPPER_HALF}${RESET}`
-  );
+/** Colunas e linhas que o desenho colorido ocupa. */
+export function mascotSize(stage: MascotStage): { columns: number; rows: number } {
+  const lines = MASCOT_ART[stage].lines;
+  return { columns: lines[0]!.replace(/\u001B\[[0-9;]*m/g, "").length, rows: lines.length };
 }
 
 export interface CapybaraOptions {
   style: Style;
-  /** Reduz o desenho proporcionalmente, sem cortar suas linhas. */
-  columns?: number;
+  /** Qual capivara; ausente é a do `init`. */
+  stage?: MascotStage;
   /** Colunas de recuo à esquerda. */
   indent?: number;
   environment?: NodeJS.ProcessEnv;
@@ -76,21 +71,5 @@ export function renderCapybara(options: CapybaraOptions): string[] {
   if (!options.style.enabled || !supportsTrueColor(options.environment)) {
     return CAPYBARA_ASCII.map((line) => `${indent}${line}`);
   }
-
-  const columns = Math.max(1, Math.min(CAPYBARA_COLS, Math.floor(options.columns ?? CAPYBARA_COLS)));
-  const rows = Math.max(1, Math.round(CAPYBARA_ROWS * columns / CAPYBARA_COLS));
-  const pixel = (x: number, y: number): string => {
-    const sourceX = Math.min(CAPYBARA_COLS - 1, Math.floor((x + 0.5) * CAPYBARA_COLS / columns));
-    const sourceY = Math.min(CAPYBARA_ROWS * 2 - 1, Math.floor((y + 0.5) * CAPYBARA_ROWS / rows));
-    const offset = sourceX * 12 + (sourceY % 2) * 6;
-    return CAPYBARA_PIXELS[Math.floor(sourceY / 2)]!.slice(offset, offset + 6);
-  };
-
-  return Array.from({ length: rows }, (_, row) => {
-    let line = indent;
-    for (let column = 0; column < columns; column += 1) {
-      line += paintCell(pixel(column, row * 2), pixel(column, row * 2 + 1));
-    }
-    return line.replace(/\s+$/, "");
-  });
+  return MASCOT_ART[options.stage ?? "init"].lines.map((line) => `${indent}${line}`);
 }

@@ -13,7 +13,7 @@
 import { paint, padVisible, tint, truncatePath, truncateVisible, visibleWidth, type Style } from "./ansi.js";
 import { renderPhaseRows, type BuildPhaseRow } from "./build-phases.js";
 import { blockText } from "./blockfont.js";
-import { renderCapybara } from "./capybara.js";
+import { mascotSize, mascotStage, renderCapybara } from "./capybara.js";
 
 export type StepState = "concluído" | "em andamento" | "aguardando" | "falhou" | "pulado";
 
@@ -275,14 +275,21 @@ interface Layout {
   boxes: "cheias" | "compactas" | "nenhuma";
 }
 
+/**
+ * Largura mínima ao lado do desenho para o título caber em texto simples:
+ * `  CAPIVARA` e a versão embaixo.
+ */
+const TITLE_ROOM = 12;
+
 /** A capivara fica no centro do painel, independentemente da largura do título. */
 function header(model: DashboardModel, width: number, artwork: boolean): string[] {
   const { style } = model;
   const lines: string[] = [];
-  if (artwork && width >= 64) {
+  const stage = mascotStage(model.command);
+  if (artwork && width >= Math.max(64, mascotSize(stage).columns + 2 * TITLE_ROOM)) {
     const mascot = renderCapybara({
       style,
-      columns: 32,
+      stage,
       ...(model.environment !== undefined ? { environment: model.environment } : {}),
     });
     const mascotWidth = Math.max(...mascot.map(visibleWidth));
@@ -470,8 +477,14 @@ function dashboardLines(model: DashboardModel, layout: Layout): string[] {
 export function renderDashboard(model: DashboardModel): string {
   const width = dashboardWidth(model);
   const budget = model.height === undefined ? Infinity : Math.max(1, model.height - 1);
+  /*
+   * O desenho só entra se sobrar, além dele, o que o painel tinha quando a
+   * capivara ocupava 8 linhas num terminal de 35: as caixas e a lista de fases
+   * não podem pagar pela altura de uma mascote maior.
+   */
+  const artworkRows = mascotSize(mascotStage(model.command)).rows;
   let layout: Layout = {
-    artwork: budget >= 35,
+    artwork: budget >= 27 + artworkRows,
     dense: budget < 27,
     events: Math.min(6, model.events.length),
     phases: model.phases?.maxRows ?? 0,

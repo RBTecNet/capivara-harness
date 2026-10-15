@@ -3,8 +3,8 @@ import type { DashboardModel } from "../../src/tui/dashboard.js";
 import {
   BLOCK_FONT_ROWS,
   CAPYBARA_ASCII,
-  CAPYBARA_COLS,
-  CAPYBARA_ROWS,
+  mascotSize,
+  mascotStage,
   DEFAULT_LANGUAGE,
   PHASE_GATES,
   blockText,
@@ -311,9 +311,9 @@ describe("dashboard", () => {
     expect(view).not.toContain("retomável");
   });
 
-  it("centraliza o mascote inteiro e reduz o topo em terminal com cor verdadeira", () => {
+  it("centraliza o mascote inteiro e o topo não passa da altura dele em terminal com cor verdadeira", () => {
     const environment = { COLORTERM: "truecolor" };
-    const mascot = renderCapybara({ style: colored, environment, columns: 32 });
+    const mascot = renderCapybara({ style: colored, environment, stage: "build" });
     for (const width of [80, 110, 160]) {
       const lines = renderDashboard({ ...model, width, style: colored, environment }).split("\n");
       const start = Math.floor((width - Math.max(...mascot.map(visibleWidth))) / 2);
@@ -323,8 +323,31 @@ describe("dashboard", () => {
         expect(position).toBeGreaterThanOrEqual(0);
         expect(visibleWidth(line.slice(0, position))).toBe(start);
       });
-      expect(lines.findIndex((line) => line.includes("SITUAÇÃO"))).toBeLessThanOrEqual(10);
+      expect(lines.findIndex((line) => line.includes("SITUAÇÃO"))).toBeLessThanOrEqual(mascot.length + 2);
     }
+  });
+
+  it.each([
+    ["init", "init"],
+    ["plan", "plan"],
+    ["build", "build"],
+    ["survey", "init"],
+    ["prompt-engineer", "init"],
+  ] as const)("o painel do %s mostra a capivara do %s", (command, stage) => {
+    const environment = { COLORTERM: "truecolor" };
+    const view = renderDashboard({ ...model, command, width: 160, style: colored, environment });
+    expect(mascotStage(command)).toBe(stage);
+    for (const row of renderCapybara({ style: colored, environment, stage })) expect(view).toContain(row);
+  });
+
+  it("terminal baixo demais para a mascote do estágio fica sem ela, e as fases não pagam por ela", () => {
+    const environment = { COLORTERM: "truecolor" };
+    const { rows } = mascotSize("plan");
+    const art = renderCapybara({ style: colored, environment, stage: "plan" });
+    const short = renderDashboard({ ...model, command: "plan", width: 160, height: 27 + rows, style: colored, environment });
+    expect(short).not.toContain(art[0]);
+    const tall = renderDashboard({ ...model, command: "plan", width: 160, height: 40 + rows, style: colored, environment });
+    expect(tall).toContain(art[0]);
   });
 
   it.each([40, 64, 80, 110, 160])("cabe em %i colunas e acompanha a altura sem esconder a fase corrente", (width) => {
@@ -419,16 +442,26 @@ describe("capivara", () => {
     expect(linhas).toEqual([...CAPYBARA_ASCII]);
   });
 
-  it("com cor verdadeira, desenha em meio-blocos", () => {
-    const linhas = renderCapybara({ style: colored, environment: { COLORTERM: "truecolor" } });
-    expect(linhas).toHaveLength(CAPYBARA_ROWS);
-    expect(linhas.join("")).toContain("▀");
+  it.each(["init", "plan", "build"] as const)("com cor verdadeira, a capivara do %s sai em cor de 24 bits", (stage) => {
+    const linhas = renderCapybara({ style: colored, environment: { COLORTERM: "truecolor" }, stage });
+    expect(linhas).toHaveLength(mascotSize(stage).rows);
     expect(linhas.join("")).toContain(`${ESC}[38;2;`);
   });
 
-  it("cada linha cobre a largura do desenho", () => {
-    const linhas = renderCapybara({ style: colored, environment: { COLORTERM: "truecolor" } });
-    expect(visibleWidth(linhas[5] ?? "")).toBeLessThanOrEqual(CAPYBARA_COLS);
+  it.each(["init", "plan", "build"] as const)("toda linha da capivara do %s tem a mesma largura e fecha a própria cor", (stage) => {
+    const linhas = renderCapybara({ style: colored, environment: { COLORTERM: "truecolor" }, stage });
+    for (const linha of linhas) {
+      expect(visibleWidth(linha)).toBe(mascotSize(stage).columns);
+      expect(linha.endsWith(`${ESC}[0m`)).toBe(true);
+    }
+  });
+
+  it("o desenho só carrega códigos de cor, nenhum comando que mova o cursor", () => {
+    for (const stage of ["init", "plan", "build"] as const) {
+      const linhas = renderCapybara({ style: colored, environment: { COLORTERM: "truecolor" }, stage });
+      const codes = linhas.join("").match(new RegExp(`${ESC}\\[[0-9;?]*[A-Za-z]`, "g")) ?? [];
+      expect(codes.every((code) => /^\u001B\[[0-9;]*m$/.test(code))).toBe(true);
+    }
   });
 
   it("CAPIVARA_ASCII_MASCOT força o desenho simples", () => {
@@ -441,11 +474,9 @@ describe("capivara", () => {
     expect(linhas.every((line) => line.startsWith("    "))).toBe(true);
   });
 
-  it("reduz largura e altura na mesma proporção, sem gerar cores inválidas", () => {
-    const lines = renderCapybara({ style: colored, environment: { COLORTERM: "truecolor" }, columns: 32 });
-    expect(lines).toHaveLength(CAPYBARA_ROWS * 0.8);
-    expect(Math.max(...lines.map(visibleWidth))).toBe(CAPYBARA_COLS * 0.8);
-    expect(lines.join("\n")).not.toContain("NaN");
+  it("o recuo também desloca o desenho colorido", () => {
+    const linhas = renderCapybara({ style: colored, environment: { COLORTERM: "truecolor" }, stage: "build", indent: 2 });
+    expect(linhas.every((line) => line.startsWith("  "))).toBe(true);
   });
 });
 

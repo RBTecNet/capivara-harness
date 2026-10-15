@@ -8,13 +8,13 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { InitBlockedError, runInit } from "../../src/init/index.js";
-import { isRepository, runBuild, splitPhases } from "../../src/loop/index.js";
+import { detectPrerequisites, isRepository, runBuild, splitPhases } from "../../src/loop/index.js";
 import type { FlowRunner } from "../../src/loop/index.js";
 import type { BuildProgress } from "../../src/loop/index.js";
 import { readEvents, runIdFor, runPaths } from "../../src/state/index.js";
@@ -48,6 +48,32 @@ import type { EngineStep } from "../support/fake-engine.js";
 
 const run = promisify(execFile);
 let projectRoot = "";
+
+/*
+ * O catálogo descreve o que o harness faz, não o que está instalado em quem roda
+ * a suíte. O esqueleto do `happyPath` decide PostgreSQL, e o preflight procura o
+ * `psql` com `which`: numa máquina sem ele, o build parava antes da primeira fase
+ * e três cenários ficavam vermelhos por causa do ambiente. Cada binário de
+ * sistema do catálogo de pré-requisitos ganha um executável falso à frente do
+ * PATH, só durante este arquivo.
+ */
+let fakeBin = "";
+const originalPath = process.env.PATH;
+
+beforeAll(async () => {
+  fakeBin = await mkdtemp(join(tmpdir(), "capivara-catalogo-bin-"));
+  const sistema = detectPrerequisites("## Stack\npostgresql mysql mongodb redis sqlite docker\n").filter((item) => item.systemLevel);
+  for (const { binary } of sistema) {
+    await writeFile(join(fakeBin, binary), "#!/bin/sh\nexit 0\n", "utf8");
+    await chmod(join(fakeBin, binary), 0o755);
+  }
+  process.env.PATH = `${fakeBin}:${originalPath ?? ""}`;
+});
+
+afterAll(async () => {
+  process.env.PATH = originalPath;
+  await rm(fakeBin, { recursive: true, force: true });
+});
 
 beforeEach(async () => {
   projectRoot = await mkdtemp(join(tmpdir(), "capivara-catalogo-"));

@@ -221,6 +221,7 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
         naoVersionadosAntes: naoVersionados,
         guardarEm: `${worktree.branch}-reprovada`,
         mensagem: `capivara: árvore principal quando a integração da ${session.id} foi reprovada (${motivo.split("\n")[0] ?? ""})`,
+        pastaDeRecuperacao: join(paths.root, "recuperacao", `${session.id}-${options.now().toISOString().replace(/[:.]/g, "-")}`),
       });
       if (desfeita.limpo) return { desfecho: "refazer", motivo };
       /*
@@ -231,8 +232,9 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
       return pararSemTocar(
         `${motivo}; e a árvore principal foi alterada durante a integração (${desfeita.arquivos.join(", ")}). ` +
           `Nada da integração reprovada ficou na árvore: o HEAD e os arquivos voltaram a ser os de antes da fase. ` +
-          `Nada se perdeu: o que estava na árvore está no branch ${desfeita.guardado} (git show ${desfeita.guardado}), ` +
-          `e o trabalho da fase no branch ${worktree.branch}`,
+          `Nada se perdeu: os versionados estão no branch ${desfeita.guardado} (git show ${desfeita.guardado})` +
+          `${desfeita.recuperacao ? `, e o que não é versionado ou pode ter segredo foi copiado, fora do Git, para ${desfeita.recuperacao}` : ""}; ` +
+          `o trabalho da fase está no branch ${worktree.branch}`,
       );
     };
 

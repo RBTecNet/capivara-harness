@@ -6679,14 +6679,25 @@ integração: o `reset --keep` recusa e o HEAD voltava com os commits
 reprovados. A primeira correção voltava o HEAD com `--soft` e deixava os
 arquivos como alteração não commitada — e a execução seguinte achava a árvore
 suja, e o preflight mandava `git add -A && git commit`, que promovia o código
-reprovado a commit. Agora `desfazerSemApagar` primeiro GUARDA e depois limpa:
-o estado inteiro da árvore (a fase integrada mais o que a suíte escreveu,
-versionado ou não) vira um commit no branch `capivara/<run>/<fase>-reprovada-<sha>`,
-montado com um índice temporário; só com ele gravado a árvore volta a ser a de
-antes da integração (`reset --hard` nos versionados, remoção só dos não
-versionados que a integração criou). O preflight não foi tocado: a árvore que
-ele encontra é a de antes, e não há nada da integração reprovada para ele
-mandar commitar. Se guardar falhar, nada é limpo. Os três casos param o build
+reprovado a commit. Agora `desfazerSemApagar` primeiro GUARDA, confere a
+guarda, e só então limpa:
+- os versionados alterados vão para um commit no branch
+  `capivara/<run>/<fase>-reprovada-<sha>`, montado com um índice temporário e
+  `add -u` — nunca `add -A`, que levaria para o repositório qualquer não
+  versionado, inclusive um `.env` que ninguém ignorou;
+- os não versionados que a integração criou, e os versionados com nome de
+  segredo (`arquivoSensivel`: `.env` e `.env.*` menos os exemplos, `*.pem`,
+  `*.key`, chaves de SSH), são copiados para
+  `.capivara/runs/<run>/recuperacao/<fase>-<instante>/`, que o Git ignora;
+- os não versionados que já estavam não são copiados, commitados nem
+  removidos;
+- a guarda é comprovada (mesmo sha256 em cada cópia, mesmo blob no branch
+  para cada versionado) antes do `reset --hard` e da remoção dos não
+  versionados criados pela integração. Sem prova, nada é limpo e o erro diz
+  onde a árvore ficou.
+
+O preflight não foi tocado: a árvore que ele encontra é a de antes da
+integração, sem nada dela para mandar commitar. Os três casos param o build
 como falha fatal, dizendo os arquivos, o branch guardado e o branch da fase.
 
 **M2 — depois da fatal, nada entra.** A fila de integração pergunta pela

@@ -7,7 +7,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -16,6 +16,7 @@ import { MARCA_DO_HARNESS, runBuild, type EngineCall, type EngineResult } from "
 import type { BuildOptions } from "../../src/loop/index.js";
 import { artifactPaths, readEvents, replayEvents, runIdFor, runPaths } from "../../src/state/index.js";
 import { sha12 } from "../../src/contract/index.js";
+import { arquivoSensivel } from "../../src/loop/worktree.js";
 
 const run = promisify(execFile);
 
@@ -364,6 +365,34 @@ describe("build paralelo — auditoria (§99)", () => {
     return (JSON.parse(texto) as { phase: string }[]).filter((entrada) => entrada.phase === fase);
   }
 
+  async function arquivosDoBranch(branch: string): Promise<string[]> {
+    return (await git(["ls-tree", "-r", "--name-only", branch])).split("\n");
+  }
+
+  /** A pasta de recuperação local da fase: fora do Git, dentro do plano de controle do run. */
+  async function recuperacaoDa(fase: string): Promise<string> {
+    const pasta = join(runPaths(projectRoot, RUN()).root, "recuperacao");
+    const [unica] = (await readdir(pasta)).filter((nome) => nome.startsWith(`${fase}-`));
+    if (!unica) throw new Error(`sem recuperação da ${fase} em ${pasta}`);
+    return join(pasta, unica);
+  }
+
+  /** A integração da P03 reprova, e a suíte deixa na árvore o que `extra` disser — o cenário do rollback. */
+  function suiteQueReprovaAP03(extra: () => Promise<void> = async () => undefined, antesDaP03: () => Promise<void> = async () => undefined) {
+    return async (_comando: string, cwd: string): Promise<{ exitCode: number; output: string }> => {
+      if (cwd !== projectRoot) return VERDE;
+      if (!(await existe(join(cwd, "relatorio.txt")))) {
+        await antesDaP03();
+        return VERDE;
+      }
+      await escreverNaPrincipal("coverage/report.txt", "da suíte integrada\n");
+      await extra();
+      return { exitCode: 1, output: "FAIL" };
+    };
+  }
+
+  const COM_COVERAGE = { ...ESCRITAS, P03: [...ESCRITAS.P03!, { path: "coverage/report.txt", content: "da fase\n" }] };
+
   async function escreverNaPrincipal(caminho: string, conteudo: string): Promise<void> {
     await mkdir(join(projectRoot, caminho, ".."), { recursive: true });
     await writeFile(join(projectRoot, caminho), conteudo, "utf8");
@@ -479,7 +508,9 @@ describe("build paralelo — auditoria (§99)", () => {
     const guardado = await git(["branch", "--list", "--format=%(refname:short)", `capivara/${RUN()}/P03-reprovada-*`]);
     expect(guardado).not.toBe("");
     expect(await git(["show", `${guardado}:coverage/report.txt`])).toBe("da suíte integrada");
-    expect(await git(["show", `${guardado}:saida-da-suite.log`])).toBe("FAIL relatorio.spec");
+    // O que ninguém versionou não entra em commit: vai para a recuperação local, fora do Git.
+    expect(await arquivosDoBranch(guardado)).not.toContain("saida-da-suite.log");
+    expect(await readFile(join(await recuperacaoDa("P03"), "saida-da-suite.log"), "utf8")).toBe("FAIL relatorio.spec\n");
     expect(await git(["show", `${guardado}:relatorio.txt`])).toBe("relatório");
     expect(outcome.errors.join("\n")).toContain("coverage/report.txt");
     expect(outcome.errors.join("\n")).toContain(guardado);
@@ -491,6 +522,73 @@ describe("build paralelo — auditoria (§99)", () => {
     expect(retomada.engine.chamadas.some((chamada) => chamada.role === "builder" && chamada.phase.id === "P03")).toBe(true);
     expect((await git(["log", "--format=%s"])).split("\n").filter((linha) => linha.includes("phase-3"))).toHaveLength(1);
     expect(await git(["branch", "--list", "--format=%(refname:short)", `capivara/${RUN()}/P03-reprovada-*`])).toBe(guardado);
+  });
+
+  it("rollback: a regra do que pode ter segredo é por nome, fechada, e deixa passar os exemplos", () => {
+    for (const caminho of [".env", ".env.local", "config/.env.production", "certs/servidor.pem", "chave.key", "deploy/id_ed25519"]) {
+      expect(arquivoSensivel(caminho), caminho).toBe(true);
+    }
+    for (const caminho of [".env.example", ".env.sample", "api/.env.template", "environment.ts", "id_ed25519.pub", "keys.json"]) {
+      expect(arquivoSensivel(caminho), caminho).toBe(false);
+    }
+  });
+
+  it("rollback: um .env que ninguém ignorou não vai para o branch de recuperação, e não se perde", async () => {
+    const SEGREDO = "SEGREDO_DA_APP=valor-real-que-nao-pode-ir-para-o-git";
+    const { outcome } = await construir(
+      { escreve: COM_COVERAGE, demora: { P02: 20, P03: 150 } },
+      { testRunner: suiteQueReprovaAP03(() => escreverNaPrincipal(".env", `${SEGREDO}\n`)) },
+    );
+
+    expect(outcome.exitCode).toBe(2);
+    const guardado = await git(["branch", "--list", "--format=%(refname:short)", `capivara/${RUN()}/P03-reprovada-*`]);
+    expect(guardado).not.toBe("");
+    expect(await arquivosDoBranch(guardado)).not.toContain(".env");
+    // Em nenhum objeto alcançável do repositório.
+    expect(await git(["log", "--all", "-p", "--format=%H"])).not.toContain("valor-real-que-nao-pode-ir-para-o-git");
+    // Guardado só localmente, fora do Git, com o conteúdo inteiro.
+    expect(await readFile(join(await recuperacaoDa("P03"), ".env"), "utf8")).toBe(`${SEGREDO}\n`);
+    expect(await git(["status", "--porcelain", "--", ".", ":(exclude).capivara"])).toBe("");
+    expect(outcome.errors.join("\n")).toContain("recuperacao");
+  });
+
+  it("rollback: o arquivo não versionado que já estava na árvore fica onde estava, fora de qualquer commit", async () => {
+    const { outcome } = await construir(
+      { escreve: COM_COVERAGE, demora: { P02: 20, P03: 150 } },
+      {
+        testRunner: suiteQueReprovaAP03(undefined, async () => {
+          if (!(await existe(join(projectRoot, "notas-locais.txt")))) await escreverNaPrincipal("notas-locais.txt", "anotação do usuário\n");
+        }),
+      },
+    );
+
+    expect(outcome.exitCode).toBe(2);
+    expect(await readFile(join(projectRoot, "notas-locais.txt"), "utf8")).toBe("anotação do usuário\n");
+    const guardado = await git(["branch", "--list", "--format=%(refname:short)", `capivara/${RUN()}/P03-reprovada-*`]);
+    expect(await arquivosDoBranch(guardado)).not.toContain("notas-locais.txt");
+    // Não foi criado pela integração: nem copiado, nem removido.
+    const recuperacao = await recuperacaoDa("P03").catch(() => null);
+    if (recuperacao) expect(await existe(join(recuperacao, "notas-locais.txt"))).toBe(false);
+    expect((await git(["log", "--format=%s"])).split("\n").some((linha) => linha.includes("phase-3"))).toBe(false);
+  });
+
+  it("rollback: se a recuperação não pode ser gravada, nada é limpo — sem reset --hard", async () => {
+    // A pasta de recuperação não pode ser criada: há um arquivo no caminho.
+    await mkdir(runPaths(projectRoot, RUN()).root, { recursive: true });
+    await writeFile(join(runPaths(projectRoot, RUN()).root, "recuperacao"), "no caminho\n", "utf8");
+
+    const { outcome } = await construir(
+      { escreve: COM_COVERAGE, demora: { P02: 20, P03: 150 } },
+      { testRunner: suiteQueReprovaAP03(() => escreverNaPrincipal("saida-da-suite.log", "FAIL relatorio.spec\n")) },
+    );
+
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.errors.join("\n")).toContain("não limpei a árvore");
+    // Tudo continua onde estava: nada apagado, nada sobrescrito.
+    expect(await readFile(join(projectRoot, "coverage", "report.txt"), "utf8")).toBe("da suíte integrada\n");
+    expect(await readFile(join(projectRoot, "saida-da-suite.log"), "utf8")).toBe("FAIL relatorio.spec\n");
+    expect(await existe(join(projectRoot, "relatorio.txt"))).toBe(true);
+    expect(await git(["branch", "--list", `capivara/${RUN()}/P03-reprovada-*`])).toBe("");
   });
 
   it("M2: depois de uma falha fatal na integração, a fase que ainda rodava não entra na árvore", async () => {

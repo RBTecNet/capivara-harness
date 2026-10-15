@@ -19,9 +19,10 @@
  */
 
 import { execFile } from "node:child_process";
-import { cp, mkdir, mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { sha12 } from "../contract/stamps.js";
 import { FLOW_RESULTS, FLOWS_DIR } from "./flows.js";
@@ -299,32 +300,50 @@ export async function impedimentosDaPrincipal(
 }
 
 /**
+ * Arquivo que pode guardar segredo, e que por isso nunca vai para um commit de recuperação.
+ *
+ * Regra fechada, por nome: `.env` e `.env.<qualquer>` (menos os exemplos
+ * versionáveis por regra, §46), chaves `*.pem` e `*.key`, e as chaves de SSH.
+ */
+export function arquivoSensivel(caminho: string): boolean {
+  const nome = caminho.split("/").pop() ?? caminho;
+  if (/^\.env\.(?:example|sample|template|dist)$/.test(nome)) return false;
+  return /^\.env(?:\..+)?$/.test(nome) || /\.(?:pem|key)$/.test(nome) || /^id_(?:rsa|dsa|ecdsa|ed25519)$/.test(nome);
+}
+
+async function hashDoArquivo(caminho: string): Promise<string> {
+  return createHash("sha256").update(await readFile(caminho)).digest("hex");
+}
+
+/**
  * Desfaz a integração reprovada sem apagar nada e sem deixar nada dela na árvore (§99).
  *
  * O `reset --keep` recusa quando um arquivo que a integração trouxe foi
  * alterado depois — pela suíte, por exemplo. Duas saídas erradas foram
- * descartadas:
+ * descartadas: deixar os commits reprovados no HEAD; e voltar o HEAD com
+ * `--soft`, que deixava o código reprovado na árvore para o preflight seguinte
+ * mandar commitar.
  *
- * - deixar os commits reprovados no HEAD (o que acontecia antes);
- * - voltar o HEAD com `--soft` e deixar os arquivos como alteração não
- *   commitada. O histórico ficava limpo, mas a árvore não: a execução seguinte
- *   via a árvore suja, e o preflight mandava `git add -A && git commit` — que
- *   PROMOVE o código reprovado a commit, e a retomada revalidava a fase em cima
- *   dele.
+ * Então: primeiro GUARDA, confere a guarda, e só então limpa.
  *
- * Então: primeiro GUARDA, depois limpa. O estado inteiro da árvore — a fase
- * integrada mais o que a suíte escreveu, versionado ou não — vira um commit
- * num branch próprio, montado com um índice temporário (o índice e a árvore
- * da principal não são tocados para isso). Só com ele gravado a árvore volta
- * a ser exatamente a de antes da integração: `reset --hard` para os
- * versionados, e remoção só dos não versionados que a integração criou. O que
- * já estava ali antes fica. Se guardar falhar, nada é limpo.
+ * - **Versionados alterados** vão para um commit num branch de recuperação,
+ *   montado com um índice temporário (o índice e a árvore da principal não são
+ *   tocados). Só versionados: `add -u`, nunca `add -A` — um não versionado
+ *   qualquer, como um `.env` que ninguém ignorou, viraria objeto do repositório.
+ * - **Não versionados que a integração criou**, e versionados com nome de
+ *   segredo (`arquivoSensivel`), são COPIADOS para a pasta de recuperação do
+ *   run, que o Git ignora — fora de qualquer commit.
+ * - **Não versionados que já estavam** não são copiados, commitados nem removidos.
+ *
+ * A guarda é comprovada antes de qualquer limpeza: cada cópia com o mesmo
+ * sha256 do original, cada versionado com o mesmo blob no branch. Sem a prova,
+ * nada é limpo — nenhum `reset --hard` — e o erro diz onde a árvore ficou.
  */
 export async function desfazerSemApagar(
   projectRoot: string,
   antes: string,
-  opcoes: { naoVersionadosAntes: readonly string[]; guardarEm: string; mensagem: string },
-): Promise<{ limpo: true } | { limpo: false; arquivos: string[]; guardado: string }> {
+  opcoes: { naoVersionadosAntes: readonly string[]; guardarEm: string; mensagem: string; pastaDeRecuperacao: string },
+): Promise<{ limpo: true } | { limpo: false; arquivos: string[]; guardado: string; recuperacao: string | null }> {
   try {
     await desfazerIntegracao(projectRoot, antes);
     return { limpo: true };
@@ -335,24 +354,65 @@ export async function desfazerSemApagar(
   const { alterados, naoVersionados } = await situacaoDaPrincipal(projectRoot);
   const jaEstavam = new Set(opcoes.naoVersionadosAntes);
   const novos = naoVersionados.filter((caminho) => !jaEstavam.has(caminho));
+  const noCommit = alterados.filter((caminho) => !arquivoSensivel(caminho));
+  const paraCopiar: string[] = [];
+  for (const caminho of [...novos, ...alterados.filter(arquivoSensivel)]) {
+    if (await existe(join(projectRoot, caminho))) paraCopiar.push(caminho);
+  }
+  const semProva = (oQue: string, erro?: unknown): Error =>
+    new Error(
+      `não limpei a árvore principal: não consegui comprovar a guarda de ${oQue}` +
+        `${erro instanceof Error ? ` (${erro.message.split("\n")[0] ?? ""})` : ""}. ` +
+        `Nada foi apagado; o HEAD ainda tem os commits da integração reprovada, e o estado de antes dela é ${antes}`,
+    );
 
+  // 1. A cópia local do que não pode ir para o Git, conferida byte a byte.
+  const recuperacao = paraCopiar.length > 0 ? opcoes.pastaDeRecuperacao : null;
+  for (const caminho of paraCopiar) {
+    const origem = join(projectRoot, caminho);
+    const destino = join(opcoes.pastaDeRecuperacao, caminho);
+    try {
+      await mkdir(dirname(destino), { recursive: true });
+      await cp(origem, destino, { preserveTimestamps: true });
+      if ((await hashDoArquivo(origem)) !== (await hashDoArquivo(destino))) throw new Error("a cópia difere do original");
+    } catch (erro) {
+      throw semProva(caminho, erro);
+    }
+  }
+
+  // 2. O commit de recuperação, só com versionados que não são segredo.
   const pasta = await mkdtemp(join(tmpdir(), "capivara-indice-"));
   let guardado: string;
   try {
-    const comIndice = { cwd: projectRoot, env: { ...process.env, GIT_INDEX_FILE: join(pasta, "index") }, ...GRANDE };
+    const comIndice = {
+      cwd: projectRoot,
+      env: { ...process.env, GIT_INDEX_FILE: join(pasta, "index"), GIT_LITERAL_PATHSPECS: "1" },
+      ...GRANDE,
+    };
     await run("git", ["read-tree", "HEAD"], comIndice);
-    await run("git", ["add", "-A", "--", ".", ":(exclude).capivara"], comIndice);
+    if (noCommit.length > 0) await run("git", ["add", "-u", "--", ...noCommit], comIndice);
     const arvore = (await run("git", ["write-tree"], comIndice)).stdout.trim();
     const commit = await git(projectRoot, ["commit-tree", arvore, "-p", "HEAD", "-m", opcoes.mensagem]);
     guardado = `${opcoes.guardarEm}-${commit.slice(0, 8)}`;
     await git(projectRoot, ["branch", guardado, commit]);
+  } catch (erro) {
+    throw semProva("os arquivos versionados", erro);
   } finally {
     await rm(pasta, { recursive: true, force: true });
   }
 
+  // 3. A prova: o branch tem cada versionado exatamente como está em disco.
+  for (const caminho of noCommit) {
+    const emDisco = await existe(join(projectRoot, caminho));
+    const noBranch = await git(projectRoot, ["rev-parse", "--verify", "-q", `${guardado}:${caminho}`]).catch(() => null);
+    const confere = emDisco ? noBranch !== null && noBranch === (await git(projectRoot, ["hash-object", "--", caminho])) : noBranch === null;
+    if (!confere) throw semProva(caminho);
+  }
+
+  // 4. Só agora: a árvore volta a ser a de antes da integração.
   await git(projectRoot, ["reset", "-q", "--hard", antes]);
   for (const caminho of novos) await rm(join(projectRoot, caminho), { force: true });
-  return { limpo: false, arquivos: [...alterados, ...novos].sort(), guardado };
+  return { limpo: false, arquivos: [...alterados, ...novos].sort(), guardado, recuperacao };
 }
 
 /**

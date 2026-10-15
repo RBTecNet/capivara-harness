@@ -36,6 +36,8 @@ import {
   detectLanguage,
   UBUNTU_AUBERGINE,
   paint,
+  interactiveQuestionBox,
+  interviewChoices,
   questionBox,
   renderAnswerContext,
   renderDashboard,
@@ -44,11 +46,11 @@ import {
   supportsColor,
   supportsTrueColor,
 } from "./tui/index.js";
-import type { EntradaDeTeclado, Janela, Parada, SaidaDeTela } from "./tui/index.js";
+import type { EntradaDeTeclado, InterviewInput, Janela, Parada, SaidaDeTela } from "./tui/index.js";
 import { paradaDeProntidao, paradaDoEstagio, type Estagio } from "./commands/paradas.js";
 import { runWizard, runWizardDePapeis, runWizardDoPedido } from "./commands/wizard.js";
 import { InputEndedError, createLineIO } from "./commands/line-io.js";
-import { createKeyPrompter } from "./commands/key-io.js";
+import { createKeyPrompter, createKeySession } from "./commands/key-io.js";
 import type { WizardIO } from "./commands/wizard.js";
 import type { LineIO } from "./commands/line-io.js";
 import { listarEfforts, listarModelos } from "./provider/index.js";
@@ -331,14 +333,25 @@ function estagioInterativo(options: {
   const { projectRoot, runId, roles, comPainel } = options;
   const engenharia = options.estagio === "prompt-engineer";
   const bridge = createAgentBridge({ projectRoot, runId, language: options.language, roles, limits: DEFAULT_LIMITS });
-  const terminal = options.entrada ? null : createInterface({ input: stdin, output: stdout });
+  /*
+   * Com o painel na tela e uma pessoa no terminal, a resposta é escolhida
+   * DENTRO da caixa da pergunta, por tecla (§93). A sessão de teclas é dona do
+   * stdin enquanto o estágio roda — um readline aberto ao mesmo tempo leria as
+   * mesmas teclas como linha —, e as demais perguntas do estágio passam pela
+   * pergunta em linha dela.
+   */
+  const teclas =
+    !options.entrada && comPainel && stdin.isTTY === true && stdout.isTTY === true && process.env.CAPIVARA_LINE_INPUT !== "1"
+      ? createKeySession({ input: stdin, write: (text) => void stdout.write(text), columns: () => stdout.columns ?? 100 })
+      : null;
+  const terminal = options.entrada || teclas ? null : createInterface({ input: stdin, output: stdout });
 
   /*
    * A leitura é enfileirada, não `terminal.question()` direto: entrada vinda de
    * pipe ou arquivo chega inteira antes da primeira pergunta, o readline fecha
    * no fim dela, e a pergunta seguinte estoura em ERR_USE_AFTER_CLOSE.
    */
-  const linhas = options.entrada ?? createLineIO(terminal!, (text) => void stdout.write(text), { interactive: stdin.isTTY === true });
+  const linhas = options.entrada ?? teclas?.line ?? createLineIO(terminal!, (text) => void stdout.write(text), { interactive: stdin.isTTY === true });
   const perguntar = async (prompt: string, decision: string): Promise<string> => {
     try {
       return await linhas.ask(prompt);
@@ -533,6 +546,45 @@ function estagioInterativo(options: {
      */
     if (engenharia) progress.setStage("interview");
     progress.waitingForDeveloper();
+    if (live.enabled && teclas) {
+      const screen = { question, index, total, document: options.documento, style: style() };
+      const descartadas = teclas.takeEarly();
+      if (descartadas > 0) progress.note(`(ignorei ${descartadas} tecla(s) batida(s) antes desta pergunta aparecer — responda olhando para ela)`);
+      /*
+       * A caixa cabe no terminal: na tela mínima da pergunta, cabeçalho, linha
+       * de atividade, as duas bordas e o rodapé ocupam 6 linhas, e uma fica
+       * livre para o cursor. O resto é dela.
+       */
+      const mostrar = (input: InterviewInput): void => {
+        progress.asking(interactiveQuestionBox(screen, larguraAtual(), input, Math.max(8, (stdout.rows ?? 40) - 7)));
+        repaint();
+      };
+      try {
+        if (question.options.length === 0) {
+          const spec = { label: "Sua resposta" };
+          return (await teclas.text(spec, (state) => mostrar({ kind: "text", spec, state }))) ?? "";
+        }
+        const escolhas = interviewChoices(question, { leaveOpen: engenharia });
+        for (;;) {
+          const indice = await teclas.select(escolhas.spec, (state) => mostrar({ kind: "select", choices: escolhas, state }));
+          const resposta = escolhas.answers[indice];
+          if (resposta !== null && resposta !== undefined) return resposta;
+          // Texto livre: Esc ou Enter vazio voltam às opções em vez de virar "não sei".
+          const spec = { label: "Sua resposta", cancelable: true };
+          const texto = await teclas.text(spec, (state) => mostrar({ kind: "text", spec, state }));
+          if (texto !== null && texto.trim() !== "") return texto;
+        }
+      } catch (error) {
+        if (!(error instanceof InputEndedError)) throw error;
+        // Ctrl-D: a entrada acabou. Com a sessão fechada, `perguntar` cai no
+        // mesmo bloqueio retomável que a leitura de linha já explica.
+        teclas.close();
+        return await perguntar("", question.decision);
+      } finally {
+        progress.asking(null);
+      }
+    }
+
     if (live.enabled) {
       const screen = { question, index, total, document: options.documento, style: style() };
       progress.asking(questionBox(screen, larguraAtual()));
@@ -591,7 +643,7 @@ function estagioInterativo(options: {
       ask,
       ...(stdin.isTTY === true ? { decideStandoff } : {}),
     },
-    close: () => { live.release(); terminal?.close(); },
+    close: () => { live.release(); terminal?.close(); teclas?.close(); },
   };
 }
 

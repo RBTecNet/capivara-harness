@@ -8,7 +8,7 @@
 
 import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
-import { createKeyPrompter } from "../../src/commands/key-io.js";
+import { createKeyPrompter, createKeySession } from "../../src/commands/key-io.js";
 import { runWizard, runWizardDePapeis } from "../../src/commands/wizard.js";
 import { InputEndedError } from "../../src/commands/line-io.js";
 
@@ -197,5 +197,47 @@ describe("modelo pela lista", () => {
     await t.teclar("\r"); // sem ajuste
     expect((await escolha)?.global).toEqual({ provider: "codex", model: "modelo-novo" });
     t.prompter.close();
+  });
+});
+
+describe("sessão de teclas", () => {
+  function sessao() {
+    const input = new EventEmitter() as EventEmitter & { setRawMode: (mode: boolean) => void };
+    input.setRawMode = () => undefined;
+    const escrito: string[] = [];
+    const session = createKeySession({ input: input as never, write: (text) => void escrito.push(text), columns: () => 80, interrupt: () => undefined });
+    const teclar = async (bytes: string): Promise<void> => {
+      await new Promise((resolve) => setImmediate(resolve));
+      input.emit("data", bytes);
+    };
+    return { session, escrito, teclar };
+  }
+
+  it("Esc num campo que se pode cancelar devolve null — a entrevista volta às opções", async () => {
+    const { session, teclar } = sessao();
+    const texto = session.text({ label: "Sua resposta", cancelable: true }, () => undefined);
+    await teclar(`os dois${ESC}`);
+    expect(await texto).toBeNull();
+    session.close();
+  });
+
+  it("a pergunta em linha escreve o prompt, ecoa o que se digita e fecha a linha", async () => {
+    const { session, escrito, teclar } = sessao();
+    const resposta = session.line.ask("  ▸ sua decisão: ");
+    await teclar("publicar\r");
+    expect(await resposta).toBe("publicar");
+    expect(escrito.join("")).toContain("  ▸ sua decisão: publicar");
+    expect(escrito.at(-1)).toBe("\n");
+    session.close();
+  });
+
+  it("a pergunta em linha também diz o que descartou", async () => {
+    const { session, escrito, teclar } = sessao();
+    await teclar("xyz");
+    const resposta = session.line.ask("> ");
+    expect(escrito.join("")).toContain("ignorei 3 tecla(s)");
+    await teclar("ok\r");
+    expect(await resposta).toBe("ok");
+    session.close();
   });
 });

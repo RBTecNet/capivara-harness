@@ -8,7 +8,9 @@ import { KeyDecoder, type Key } from "../../src/tui/keys.js";
 import { initialSelect, reduceSelect, renderSelect, type SelectSpec, type SelectState } from "../../src/tui/select.js";
 import { reduceTextField, renderTextField, type TextFieldSpec, type TextFieldStep } from "../../src/tui/text-field.js";
 import { cleanPrompt, renderWizardScreen } from "../../src/tui/wizard-screen.js";
-import { visibleWidth } from "../../src/tui/index.js";
+import { interactiveQuestionBox, interviewChoices, visibleWidth } from "../../src/tui/index.js";
+import { classifyLocally } from "../../src/interview/classify.js";
+import type { Question } from "../../src/interview/index.js";
 
 const plain = { enabled: false };
 const ESC = "\u001B";
@@ -214,5 +216,72 @@ describe("tela do wizard", () => {
     expect(cleanPrompt("\nPasta do projeto [/home/x]: ")).toBe("Pasta do projeto");
     expect(cleanPrompt("Ciclos de correção por fase [3]: ")).toBe("Ciclos de correção por fase");
     expect(cleanPrompt("Executar agora?")).toBe("Executar agora?");
+  });
+});
+
+describe("entrevista por lista", () => {
+  const question: Question = {
+    id: "Q-01",
+    topic: "público",
+    evidence: "O pedido não identifica quem opera as reservas.",
+    decision: "Quem é o público inicial?",
+    why: "Define os fluxos e o vocabulário da interface.",
+    options: [
+      { label: "Recepcionistas", consequence: "Priorizar a operação interna da pousada." },
+      { label: "Hóspedes", consequence: "Priorizar reservas feitas pelo próprio hóspede." },
+    ],
+    recommended: "Hóspedes",
+    recommendationBasis: "O pedido fala de reservas online.",
+  };
+  const screen = { question, index: 1, total: 3, document: "skeleton.md", style: plain };
+
+  it("cada linha devolve o que o classificador já entende, do jeito certo", () => {
+    const { answers } = interviewChoices(question);
+    expect(answers).toEqual(["1", "2", null, "não sei"]);
+    expect(classifyLocally(question, answers[0]!)).toMatchObject({ disposition: "ACCEPTED", decision: "Recepcionistas" });
+    expect(classifyLocally(question, answers[1]!)).toMatchObject({ disposition: "ACCEPTED", decision: "Hóspedes" });
+    expect(classifyLocally(question, answers[3]!)).toMatchObject({ disposition: "DEFERRED" });
+  });
+
+  it("no prompt-engineer, deixar em aberto é a resposta vazia de sempre", () => {
+    const { answers, spec } = interviewChoices(question, { leaveOpen: true });
+    expect(spec.choices.at(-1)?.label).toBe("deixar em aberto");
+    expect(answers.at(-1)).toBe("");
+  });
+
+  it("o cursor começa na recomendada, marcada", () => {
+    const { spec } = interviewChoices(question);
+    expect(spec.defaultIndex).toBe(1);
+    expect(spec.choices[1]!.label).toContain("← recomendada");
+  });
+
+  it("a caixa mostra a evidência, a decisão, a lista e a consequência só da opção sob o cursor", () => {
+    const choices = interviewChoices(question);
+    const { title, body } = interactiveQuestionBox(screen, 100, { kind: "select", choices, state: initialSelect(choices.spec) });
+    const texto = body.join("\n");
+    expect(title).toBe("PERGUNTA 1/3 · skeleton");
+    expect(texto).toContain("O pedido não identifica quem opera");
+    expect(texto).toContain("Quem é o público inicial?");
+    expect(texto).toContain("❯ 2) Hóspedes ← recomendada");
+    expect(texto).toContain("↳ Priorizar reservas feitas pelo próprio hóspede.");
+    expect(texto).not.toContain("Priorizar a operação interna");
+    expect(texto).toContain("recomendo porque");
+    expect(texto).toContain("Enter confirma");
+  });
+
+  it("numa tela baixa, o por que importa sai antes da evidência, e a lista nunca", () => {
+    const choices = interviewChoices(question);
+    const completo = interactiveQuestionBox(screen, 100, { kind: "select", choices, state: initialSelect(choices.spec) }).body;
+    const apertado = interactiveQuestionBox(screen, 100, { kind: "select", choices, state: initialSelect(choices.spec) }, completo.length - 2).body.join("\n");
+    expect(apertado).not.toContain("Por que importa");
+    expect(apertado).toContain("O pedido não identifica quem opera");
+    expect(apertado).toContain("Hóspedes");
+    expect(apertado).toContain("não sei");
+  });
+
+  it("no texto livre, a caixa diz como voltar às opções", () => {
+    const { body } = interactiveQuestionBox(screen, 100, { kind: "text", spec: { label: "Sua resposta", cancelable: true }, state: { value: "os dois" } });
+    expect(body.join("\n")).toContain("os dois");
+    expect(body.join("\n")).toContain("Esc volta às opções");
   });
 });

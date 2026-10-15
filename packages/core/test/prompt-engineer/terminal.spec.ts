@@ -59,7 +59,8 @@ rows, columns = int(sys.argv[1]), int(sys.argv[2])
 wizard_answers, wizard_output, wizard_frames = json.loads(sys.argv[3]), "", 1
 master, slave = pty.openpty()
 fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
-process = subprocess.Popen(sys.argv[4:], stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
+question_pattern = sys.argv[4]
+process = subprocess.Popen(sys.argv[5:], stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
 os.close(slave)
 decoder = codecs.getincrementaldecoder("utf-8")("replace")
 output, before, typing, after = "", "", "", ""
@@ -92,7 +93,7 @@ try:
                     os.write(master, keys.encode())
                     wizard_output = ""
                 continue
-            if typed_at is None and re.search(r"sua resposta[^\r\n]*: ", output, re.IGNORECASE):
+            if typed_at is None and re.search(question_pattern, output, re.IGNORECASE):
                 before = output
                 question_found = True
                 os.write(master, b"1")
@@ -207,7 +208,12 @@ event({ type: "turn.completed", usage: { input_tokens: 200, output_tokens: 30 } 
 
   afterAll(async () => { if (directory) await rm(directory, { recursive: true, force: true }); });
 
-  async function run(rows: number, columns: number, dashboard = true, analysis = QUESTION_ANALYSIS, wizard = false): Promise<{ capture: Capture; published: string; calls: { stage: string; prompt: string }[] }> {
+  /*
+   * Com o painel, a resposta é escolhida por tecla dentro da caixa da pergunta
+   * (§93); `lineInput` força a linha embaixo do painel, que continua existindo
+   * para quem pede `CAPIVARA_LINE_INPUT=1`.
+   */
+  async function run(rows: number, columns: number, dashboard = true, analysis = QUESTION_ANALYSIS, wizard = false, lineInput = false): Promise<{ capture: Capture; published: string; calls: { stage: string; prompt: string }[] }> {
     const project = await mkdtemp(join(directory, "project-"));
     await mkdir(join(project, "global-config"));
     await writeFile(join(project, "analysis.json"), JSON.stringify(analysis), "utf8");
@@ -234,11 +240,13 @@ event({ type: "turn.completed", usage: { input_tokens: 200, output_tokens: 30 } 
       "--writer-provider", "codex", "--writer-model", "terminal-fake-model", "--no-splash", "--no-modal",
       ...(dashboard ? [] : ["--no-dashboard"]),
     ];
-    const result = await execute("python3", ["-c", PTY_DRIVER, String(rows), String(columns), JSON.stringify(wizardAnswers), process.execPath, cli,
+    const keys = dashboard && !lineInput;
+    const questionPattern = keys ? String.raw`PERGUNTA \d+/\d+[^\n]*\n[\s\S]*Enter confirma` : String.raw`sua resposta[^\r\n]*: `;
+    const result = await execute("python3", ["-c", PTY_DRIVER, String(rows), String(columns), JSON.stringify(wizardAnswers), questionPattern, process.execPath, cli,
       ...command,
     ], {
       env: { ...process.env, TERM: "xterm", NO_COLOR: "1", CAPIVARA_BG: "none",
-        CAPIVARA_CODEX_BIN: adapter, CAPIVARA_CONFIG_DIR: join(project, "global-config"),
+        CAPIVARA_CODEX_BIN: adapter, CAPIVARA_CONFIG_DIR: join(project, "global-config"), CAPIVARA_LINE_INPUT: lineInput ? "1" : "",
         CAPIVARA_MCP_URL: "", CAPIVARA_MCP_TOKEN: "", DOC_CENTER_URL: "", DOC_CENTER_TOKEN: "" },
       timeout: 25_000, maxBuffer: 4 * 1024 * 1024,
     });
@@ -261,10 +269,13 @@ event({ type: "turn.completed", usage: { input_tokens: 200, output_tokens: 30 } 
       expect(waiting).toContain("Recepcionistas");
       expect(waiting).toContain("Hóspedes");
       expect(waiting).toContain("não identifica quem opera");
-      expect(waiting).toMatch(/sua resposta.*número.*texto/i);
-      expect(viewport(capture.before + capture.typing, rows, columns)).toContain("Quem é o público inicial?");
-      expect(capture.typing).toContain("1");
-      expect(capture.typing).not.toMatch(/\x1b\[\d*A|\x1b\[[02]J/);
+      expect(waiting).toContain("responder com texto livre");
+      expect(waiting).toContain("Enter confirma");
+      // A tecla move o cursor DENTRO da caixa; a pergunta continua na tela.
+      const typed = viewport(capture.before + capture.typing, rows, columns);
+      expect(typed).toContain("Quem é o público inicial?");
+      expect(typed).toMatch(/❯ 1\) Recepcionistas/);
+      expect(typed).toContain("Priorizar a operação interna da pousada.");
 
       expect(plain(capture.before)).toMatch(/PROMPT ENGINEER/i);
       expect(capture.before).toContain("\x1b[0J");
@@ -289,7 +300,17 @@ event({ type: "turn.completed", usage: { input_tokens: 200, output_tokens: 30 } 
     const waiting = viewport(capture.before, 24, 80);
     expect(waiting).toContain("Quem é o público inicial?");
     for (const option of LONG_ANALYSIS.questions[0]!.options) expect(waiting).toContain(option.label);
+    expect(waiting).toContain("Enter confirma");
+  });
+
+  it("CAPIVARA_LINE_INPUT=1 mantém a resposta digitada embaixo do painel, sem redesenho durante a digitação", async () => {
+    const { capture, published } = await run(24, 80, true, QUESTION_ANALYSIS, false, true);
+    const waiting = viewport(capture.before, 24, 80);
+    expect(waiting).toContain("Quem é o público inicial?");
     expect(waiting).toMatch(/sua resposta.*número.*texto/i);
+    expect(capture.typing).toContain("1");
+    expect(capture.typing).not.toMatch(/\x1b\[\d*A|\x1b\[[02]J/);
+    expect(published).toContain("Receptionists are the initial audience.");
   });
 
   it("a opção 6 do wizard chega ao painel, aceita a resposta e salva o prompt em TTY real", async () => {
@@ -299,8 +320,7 @@ event({ type: "turn.completed", usage: { input_tokens: 200, output_tokens: 30 } 
     expect(capture.before).toContain("\x1b[0J");
     expect(waiting).toContain("Quem é o público inicial?");
     expect(waiting).toContain("Recepcionistas");
-    expect(waiting).toMatch(/sua resposta.*número.*texto/i);
-    expect(capture.typing).not.toMatch(/\x1b\[\d*A|\x1b\[[02]J/);
+    expect(waiting).toContain("Enter confirma");
     expect(plain(capture.after)).toMatch(/há 0m 01s nesta chamada/);
     expect(calls.map((call) => call.stage)).toEqual(["interview", "interview", "authoring"]);
     expect(published).toContain("Receptionists are the initial audience.");

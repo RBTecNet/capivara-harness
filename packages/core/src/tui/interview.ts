@@ -9,6 +9,9 @@
 
 import { paint, type Style } from "./ansi.js";
 import type { Question } from "../interview/types.js";
+import { renderSelect, type SelectSpec, type SelectState } from "./select.js";
+import { renderTextField, type TextFieldSpec, type TextFieldState } from "./text-field.js";
+import type { Choice } from "./wizard.js";
 
 export interface QuestionScreen {
   question: Question;
@@ -197,4 +200,118 @@ export function renderAnswerContext(screen: QuestionScreen, width: number): stri
     ...question.options.flatMap((_, index) => optionLabelLines(question, index, inner, style)),
     "",
   ].join("\n");
+}
+
+/**
+ * As saídas de uma pergunta da entrevista, como linhas de uma lista.
+ *
+ * Cada linha devolve a MESMA string que a resposta digitada devolveria — o
+ * número da opção, `não sei`, ou vazio no prompt-engineer — para o classificador
+ * não saber, nem precisar saber, que a resposta veio de uma lista. `null` é o
+ * texto livre: a lista abre um campo, e o que for escrito ali segue como hoje.
+ */
+export interface InterviewChoices {
+  spec: SelectSpec;
+  answers: readonly (string | null)[];
+}
+
+export function interviewChoices(question: Question, options: { leaveOpen?: boolean } = {}): InterviewChoices {
+  const choices: Choice[] = question.options.map((option) => ({
+    label: `${option.label}${option.label === question.recommended ? " ← recomendada" : ""}`,
+  }));
+  const answers: (string | null)[] = question.options.map((_, index) => String(index + 1));
+  choices.push({ label: "responder com texto livre", hint: "o que nenhuma opção cobre, ou uma combinação delas" });
+  answers.push(null);
+  if (options.leaveOpen) {
+    choices.push({ label: "deixar em aberto", hint: "o prompt registra a dúvida sem decidir" });
+    answers.push("");
+  } else {
+    choices.push({ label: "não sei", hint: "fica em aberto para decidir depois" });
+    answers.push("não sei");
+  }
+  const recommended = question.options.findIndex((option) => option.label === question.recommended);
+  return { spec: { title: question.decision, choices, defaultIndex: recommended >= 0 ? recommended : 0 }, answers };
+}
+
+export type InterviewInput =
+  | { kind: "select"; choices: InterviewChoices; state: SelectState }
+  | { kind: "text"; spec: TextFieldSpec; state: TextFieldState };
+
+/**
+ * A pergunta com a resposta DENTRO da caixa, para a entrada por tecla.
+ *
+ * O conteúdo é o de `questionBox`, menos a lista numerada e a instrução de
+ * digitar: no lugar delas fica a lista com cursor, ou o campo de texto. A
+ * consequência aparece só para a opção sob o cursor — repetida para todas, ela
+ * empurrava a lista para fora da tela numa pergunta de quatro opções.
+ *
+ * `maxBody` é a altura que sobra no terminal. Uma caixa maior que a tela faz
+ * cada redesenho — a cada tecla e a cada pulso — empurrar a sobra para o
+ * histórico do terminal, duplicada. O "por que importa" cede primeiro e a
+ * evidência depois — mostrar o que já se sabe é o que separa a entrevista de um
+ * interrogatório (ver o topo deste arquivo); a decisão e a resposta nunca.
+ */
+export function interactiveQuestionBox(
+  screen: QuestionScreen,
+  width: number,
+  input: InterviewInput,
+  maxBody = Infinity,
+): { title: string; body: string[] } {
+  const { question, style } = screen;
+  const inner = Math.max(20, width - 4);
+
+  const pending: string[] = [];
+  if (question.pending?.trim()) {
+    pending.push(...wrap("Sua resposta foi registrada, mas ficou faltando:", inner).map((line) => paint(line, "yellow", style)));
+    for (const line of wrap(question.pending, inner - 2)) pending.push(paint(`  ${line}`, "yellow", style));
+    pending.push("");
+  }
+  const decision = wrap(question.decision, inner).map((line) => paint(line, "bold", style));
+  const evidence = question.evidence.trim() === "" ? [] : wrapKeepingBreaks(question.evidence, inner - 2).map((line) => `  ${line}`);
+  const why = question.why.trim() === "" ? [] : wrap(question.why, inner - 2).map((line) => `  ${line}`);
+
+  const answer: string[] = [""];
+  const keys = (text: string): string[] => ["", ...wrap(text, inner).map((line) => paint(line, "gray", style))];
+  if (input.kind === "select") {
+    const fixedRows = pending.length + decision.length + 6;
+    const listRows = Math.max(4, Math.min(input.choices.spec.choices.length + 1, maxBody - fixedRows - 3));
+    answer.push(...renderSelect(input.choices.spec, input.state, inner, listRows, style));
+    const option = question.options[input.state.cursor];
+    if (option) {
+      for (const line of wrapKeepingBreaks(option.consequence, inner - 5)) answer.push(`   ${paint(`↳ ${line}`, "gray", style)}`);
+      if (option.label === question.recommended && question.recommendationBasis) {
+        for (const line of wrap(`recomendo porque: ${question.recommendationBasis}`, inner - 5)) answer.push(`     ${paint(line, "gray", style)}`);
+      }
+    }
+    answer.push(...keys("↑ ↓ move · número leva à opção · Enter confirma"));
+  } else {
+    answer.push(paint("Sua resposta:", "cyan", style));
+    answer.push(...renderTextField(input.spec, input.state, inner, 4, style));
+    answer.push(...keys(input.spec.cancelable ? "Enter envia · Esc volta às opções" : "Enter envia · Enter vazio deixa para decidir depois"));
+  }
+
+  const build = (evidenceShown: string[], whyShown: string[]): string[] => [
+    ...pending,
+    ...(evidenceShown.length > 0 ? [paint("Já descobri:", "gray", style), ...evidenceShown, ""] : []),
+    ...decision,
+    ...(whyShown.length > 0 ? ["", paint("Por que importa:", "gray", style), ...whyShown] : []),
+    ...answer,
+  ];
+
+  let evidenceShown = evidence;
+  let whyShown = why;
+  let body = build(evidenceShown, whyShown);
+  if (body.length > maxBody && why.length > 0) {
+    whyShown = [];
+    body = build(evidenceShown, whyShown);
+  }
+  if (body.length > maxBody && evidence.length > 0) {
+    // A evidência encolhe até caber, e diz quanto ficou de fora; se nada dela
+    // couber, sai com o rótulo — rótulo sem conteúdo é ruído.
+    const keep = Math.max(0, evidence.length - (body.length - maxBody) - 1);
+    evidenceShown = keep > 0 ? [...evidence.slice(0, keep), paint(`  … mais ${evidence.length - keep} linha(s)`, "gray", style)] : [];
+    body = build(evidenceShown, whyShown);
+  }
+
+  return { title: `PERGUNTA ${screen.index}/${screen.total} · ${screen.document.replace(/\.md$/, "")}`, body };
 }

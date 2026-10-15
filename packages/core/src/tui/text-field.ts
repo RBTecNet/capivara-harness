@@ -16,6 +16,8 @@ export interface TextFieldSpec {
   /** O que o Enter num campo vazio aceita; aparece apagado dentro do campo. */
   placeholder?: string;
   multiline?: boolean;
+  /** Esc desiste do campo — na entrevista, volta para a lista de opções. */
+  cancelable?: boolean;
 }
 
 export interface TextFieldState {
@@ -23,9 +25,10 @@ export interface TextFieldState {
 }
 
 export type TextFieldStep =
-  | { state: TextFieldState; submitted?: undefined; ended?: undefined }
-  | { state: TextFieldState; submitted: string; ended?: undefined }
-  | { state: TextFieldState; ended: true; submitted?: undefined };
+  | { state: TextFieldState; submitted?: undefined; ended?: undefined; cancelled?: undefined }
+  | { state: TextFieldState; submitted: string; ended?: undefined; cancelled?: undefined }
+  | { state: TextFieldState; ended: true; submitted?: undefined; cancelled?: undefined }
+  | { state: TextFieldState; cancelled: true; submitted?: undefined; ended?: undefined };
 
 function dropLastCodePoint(value: string): string {
   const chars = [...value];
@@ -54,6 +57,8 @@ export function reduceTextField(spec: TextFieldSpec, state: TextFieldState, key:
       if (lines[lines.length - 1]!.trim() === ".") return { state, submitted: lines.slice(0, -1).join("\n").trim() };
       return { state: { value: `${value}\n` } };
     }
+    case "escape":
+      return spec.cancelable ? { state, cancelled: true } : { state };
     case "ctrl-d":
       if (spec.multiline) return { state, submitted: value.trim() };
       return value === "" ? { state, ended: true } : { state };

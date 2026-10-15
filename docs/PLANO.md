@@ -6342,3 +6342,36 @@ de PTY do prompt-engineer passa por esse ponto com o wizard por tecla.
 
 Fica para depois: a entrevista, as paradas e os impasses ainda pedem a resposta
 numa linha embaixo do painel.
+
+## §93 — A entrevista se responde dentro da caixa da pergunta
+
+Depois do §92, o wizard escolhia por lista, e a entrevista que vinha logo depois
+voltava a pedir "sua resposta:" numa linha embaixo do painel, com as opções
+numeradas no corpo da caixa. Agora, com o painel na tela e uma pessoa no
+terminal, a resposta é escolhida dentro da caixa `PERGUNTA n/m`: as opções
+viram linhas da lista, o cursor começa na recomendada, e a consequência aparece
+só para a opção sob o cursor — repetida para todas, ela empurrava a lista para
+fora de um terminal de 24 linhas.
+
+Cada linha devolve a MESMA string que a resposta digitada devolveria: o número
+da opção, `não sei`, ou vazio no prompt-engineer ("deixar em aberto"). O
+classificador da entrevista não sabe, e não precisa saber, que a resposta veio
+de uma lista; um teste confere cada linha contra `classifyLocally`. "Responder
+com texto livre" abre um campo dentro da mesma caixa; Esc ou Enter vazio ali
+voltam às opções, em vez de virar um "não sei" que ninguém disse. Pergunta sem
+opções vai direto ao campo, e Enter vazio é o adiamento de sempre.
+
+A caixa cabe no terminal. Uma caixa mais alta que a tela faz cada redesenho — a
+cada tecla e a cada pulso — empurrar a sobra para o histórico do terminal,
+duplicada. Quando falta altura, o "por que importa" sai primeiro e a evidência
+encolhe depois, dizendo quantas linhas ficaram de fora; a decisão e a lista
+nunca saem.
+
+A sessão de teclas (`createKeySession`) é dona do stdin durante o estágio: um
+readline aberto ao mesmo tempo leria as mesmas teclas como linha. As outras
+perguntas do estágio — o impasse do auditor, por exemplo — passam pela
+pergunta em linha da sessão, que imita o `readline.question` embaixo do painel.
+Sem painel, sem TTY ou com `CAPIVARA_LINE_INPUT=1`, tudo continua como antes; o
+teste de PTY real cobre os dois modos.
+
+Fica para depois: as paradas, os pré-requisitos e as decisões do build.

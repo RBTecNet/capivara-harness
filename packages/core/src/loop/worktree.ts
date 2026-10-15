@@ -249,9 +249,9 @@ export async function trazerRoteiros(worktree: Worktree, projectRoot: string): P
   const origem = join(worktree.dir, FLOWS_DIR);
   const entradas = await readdir(origem, { withFileTypes: true }).catch(() => []);
   let trazidos = 0;
-  await mkdir(join(projectRoot, FLOWS_DIR), { recursive: true });
   for (const entrada of entradas) {
     if (!entrada.isFile()) continue;
+    await mkdir(join(projectRoot, FLOWS_DIR), { recursive: true });
     await cp(join(origem, entrada.name), join(projectRoot, FLOWS_DIR, entrada.name), { force: true });
     trazidos += 1;
   }

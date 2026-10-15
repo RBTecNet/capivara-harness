@@ -31,3 +31,5 @@ export { apresentarConclusao, apresentarParada } from "./apresentacao.js";
 export type { Janela } from "./apresentacao.js";
 export { PLAN_COLUMNS, PLAN_LEGEND, PlanPhaseTracker } from "./plan-progress.js";
 export { emptyPlanColumns } from "./build-phases.js";
+export { WorkerTracker, renderWorkerRows, workersSummary } from "./build-workers.js";
+export type { WorkerRow } from "./build-workers.js";

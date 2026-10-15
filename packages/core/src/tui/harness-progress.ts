@@ -10,6 +10,7 @@
  * direito para nenhum dos dois.
  */
 
+import type { WorkerRow } from "./build-workers.js";
 import { PIPELINE_STEPS } from "./labels.js";
 import type { BuildPhaseRow } from "./build-phases.js";
 import type { Activity, DashboardModel, DashboardEvent, PipelineStep, ProgressBar, StepState, WorkField } from "./dashboard.js";
@@ -123,6 +124,7 @@ export class HarnessProgress {
    * mais se faz olhando um build, e a resposta estava a um campo de distância.
    */
   private ultimoErro = "";
+  private agentes: WorkerRow[] | null = null;
   /** Uma linha de contexto para a caixa de progresso — o comando de teste, por exemplo. */
   private nota = "";
 
@@ -288,6 +290,11 @@ export class HarnessProgress {
     this.fases = { rows, summary, maxRows, ...(columns ? { columns } : {}), ...(legend ? { legend } : {}), ...(anchorId ? { anchorId } : {}) };
   }
 
+  /** Os agentes do build paralelo; `null` some com a caixa. */
+  setWorkers(rows: WorkerRow[] | null): void {
+    this.agentes = rows;
+  }
+
   /** Uma linha de contexto para a caixa de progresso. O build usa para o comando de teste. */
   setNote(nota: string): void {
     this.nota = nota.trim();
@@ -367,6 +374,7 @@ export class HarnessProgress {
       durationSeconds: Math.max(0, Math.round((this.now().getTime() - this.startedAt) / 1000)),
       pipeline: this.pipeline(),
       ...(this.fases ? { phases: this.fases } : {}),
+      ...(this.agentes ? { workers: this.agentes } : {}),
       progress: this.progresso(),
       ...(this.nota === "" ? {} : { progressNote: this.nota }),
       work: this.trabalho(),

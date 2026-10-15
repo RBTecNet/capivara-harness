@@ -52,6 +52,7 @@ import { lerFasesFechadas, registrarFaseFechada, shaDaFase } from "./ledger.js";
 import { TasksAprovadas, tasksDaFase } from "./veredictos.js";
 import { defaultTestRunner, type TestRunner } from "./gates.js";
 import { conferirIsolamento } from "./isolamento.js";
+import { larguraDoPlano } from "./escalonador.js";
 import { executarEmParalelo, type AgenteDoPool, type ExecucaoDaFase } from "./paralelo.js";
 import { FLOW_PORT } from "./flows.js";
 import { garantirBase } from "./worktree.js";
@@ -376,6 +377,12 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       containerized: checked.testCommand?.containerized ?? false,
     });
     for (const linha of options.parallel.resumo) announce(linha);
+    const largura = larguraDoPlano(checked.sessions);
+    announce(
+      largura >= options.parallel.maxConcurrency
+        ? `o grafo deste plano deixa até ${largura} fase(s) rodarem ao mesmo tempo`
+        : `o grafo deste plano deixa no máximo ${largura} fase(s) ao mesmo tempo: ${options.parallel.maxConcurrency - largura} agente(s) não terão o que fazer`,
+    );
     if (isolamento.impedimentos.length > 0) {
       const razao = [
         "a execução paralela foi pedida, mas não pode rodar aqui:",

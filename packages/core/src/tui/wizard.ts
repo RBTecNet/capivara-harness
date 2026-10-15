@@ -8,6 +8,7 @@
 
 import { ROLE_NAMES, ROLES } from "../provider/roles.js";
 import type { RoleName } from "../provider/roles.js";
+import { agenteComoFlag, type EstrategiaDeExecucao } from "../config/execucao.js";
 
 export interface WizardAnswers {
   command: "survey" | "init" | "plan" | "build" | "change" | "prompt-engineer";
@@ -27,6 +28,27 @@ export interface WizardAnswers {
   saida?: string;
   /** Idioma do prompt reutilizável; o `prompt-engineer` usa inglês por padrão. */
   language?: "en" | "pt";
+  /**
+   * Serial ou paralelo, quando o build precisa dizer (§97). Ausente é o padrão
+   * serial — o comando impresso de quem nunca escolheu paralelo não muda.
+   */
+  execution?: EstrategiaDeExecucao;
+  /** Gravar a estratégia em `.capivara/execucao.json`, para as próximas execuções. */
+  saveExecution?: boolean;
+}
+
+/** As flags da estratégia, iguais no argv executado e no comando impresso. */
+function flagsDeExecucao(answers: WizardAnswers): string[] {
+  if (answers.command !== "build" || !answers.execution) return [];
+  const flags =
+    answers.execution.mode === "serial"
+      ? ["--serial"]
+      : [
+          "--parallel",
+          String(answers.execution.maxConcurrency),
+          ...answers.execution.workers.flatMap((agente) => ["--worker", agenteComoFlag(agente)]),
+        ];
+  return answers.saveExecution === true ? [...flags, "--save-execution"] : flags;
 }
 
 function quote(value: string): string {
@@ -72,6 +94,7 @@ export function toArgv(answers: WizardAnswers): string[] {
   if (answers.projectRoot) argv.push("--project", answers.projectRoot);
   if (answers.testCommand) argv.push("--test-cmd", answers.testCommand);
   if (answers.maxCycles !== undefined) argv.push("--max-cycles", String(answers.maxCycles));
+  argv.push(...flagsDeExecucao(answers));
   if (answers.noSplash) argv.push("--no-splash");
 
   return argv;
@@ -103,6 +126,7 @@ export function renderCommand(answers: WizardAnswers): string {
   if (answers.projectRoot) parts.push("--project", quote(answers.projectRoot));
   if (answers.testCommand) parts.push("--test-cmd", quote(answers.testCommand));
   if (answers.maxCycles !== undefined) parts.push("--max-cycles", String(answers.maxCycles));
+  parts.push(...flagsDeExecucao(answers).map(quote));
   if (answers.noSplash) parts.push("--no-splash");
 
   return parts.join(" ");

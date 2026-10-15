@@ -6525,3 +6525,61 @@ gates não testarem a mesma porta livre ao mesmo tempo. As aprovações de task
 O caminho serial não mudou: sem `parallel` no `runBuild`, o laço é o de
 sempre, agora com o pulo de fase fechada, as opções da fase e o registro do
 verde em funções que os dois caminhos usam.
+
+### §97.1 — O pool de agentes, o wizard e a tela
+
+**O que se configura é o pool, não a divisão do trabalho.** `config/execucao.ts`
+define a estratégia: `serial` (padrão) ou `parallel` com `maxConcurrency` (2 a
+8) e até um agente por vaga, cada um com provider, modelo, effort e a restrição
+`systemInstall: false`. Agente sem configuração É o builder; agente de outro
+provider não herda o nome de modelo do builder. O `verifier` não entra no pool:
+a verificação continua única e independente de quem construiu. Ninguém atribui
+"frontend" ou "banco" a um agente — isso é do escalonador.
+
+**Precedência:** flags (`--serial`, `--parallel <n>`, `--worker`, repetível,
+`provider=…,model=…,effort=…,system-install=no` — chave=valor porque nome de
+modelo leva `:` e `/`), depois `.capivara/execucao.json`, depois serial. O
+arquivo só é escrito por `--save-execution`, que é o que o wizard emite: o
+comando impresso e o executado continuam saindo do mesmo argv. Arquivo
+malformado sem flag que o substitua para o build com a lista de defeitos; com
+flag, vira aviso. Projeto sem arquivo e sem flag roda serial, sempre.
+
+**Conferência antes de começar** (`commands/execucao.ts`): API direta não pode
+ser agente (o executor exige CLI), provider que não está na máquina para o
+build, `custom` sem adapter também. Intensidade que a CLI não recebe é
+limitação dita, descoberta perguntando ao próprio adaptador (a chamada com e
+sem effort sai igual — o cursor põe a intensidade no nome do modelo). Agentes
+todos no mesmo provider: limitação dita, porque o limite de uso é um só. Um
+agente nunca ganha mais acesso que o build: `--no-system-install` vale para
+todos.
+
+**O resumo** sai antes da primeira chamada: modo e origem, cada agente com
+modelo e restrição, o verificador, as limitações, a largura do grafo ("este
+plano deixa até 2 fases ao mesmo tempo: 1 agente não terá o que fazer") e o
+estado do isolamento. No serial pedido explicitamente, uma linha dizendo de
+onde veio; no serial padrão, nada — a saída de quem nunca pediu paralelo não
+mudou.
+
+**Na tela**, a caixa AGENTES (`tui/build-workers.ts`): uma linha por agente,
+com o modelo, o estado (livre, preparando, trabalhando, integrando), a fase e
+o detalhe dela, e o último desfecho de quem ficou livre. O PROVEDOR ATUAL
+mostra os agentes no lugar do builder, e o log diz `agente 2 · P03` para o
+executor e `verifier · P03` para o verificador, que não é de agente nenhum.
+Pausar e ver fase (§95) valem igual: a pausa segura a próxima chamada de
+QUALQUER agente.
+
+**O wizard** ganhou o passo "Estratégia de execução?" no build, depois dos
+papéis. Serial é o padrão e não acrescenta flag. A opção paralela diz a
+largura do plano e, quando o paralelo não roda na pasta (git ausente ou sem
+worktree), continua na lista com o motivo e não pode ser escolhida. Paralelo
+pergunta o teto — digitado, não escolhido numa lista onde "3" seria a opção 2
+—, se os agentes são todos o executor ou um a um (provider só entre as CLIs,
+modelo e intensidade pelas mesmas listas do papel, Enter mantém o executor), e
+se lembra para as próximas. Parte do que está salvo; escolher serial num
+projeto salvo como paralelo grava o serial.
+
+Provado com o CLI de verdade e um codex falso que escreve no `--cd` que recebe:
+P2 e P3 ao mesmo tempo com modelos diferentes, verificador único, histórico
+linear de quatro `feat(phase-N)`, nenhum branch ou worktree sobrando; o mesmo
+com conflito real em um arquivo das duas, refeito sozinho; e o wizard por tecla
+num PTY.

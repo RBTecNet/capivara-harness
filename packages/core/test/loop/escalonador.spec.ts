@@ -32,6 +32,10 @@ describe("dependências efetivas", () => {
     });
   });
 
+  it("a fundação que já chega por outro caminho não é ajuste", () => {
+    expect(dependenciasEfetivas(ERP[3]!, ERP)).toEqual({ numeros: [1, 2, 3], ajuste: "" });
+  });
+
   it("dependência que não vem antes vira todas as anteriores", () => {
     const fases = [fase(1, []), fase(2, [1]), fase(3, [7])];
     expect(dependenciasEfetivas(fases[2]!, fases).numeros).toEqual([1, 2]);

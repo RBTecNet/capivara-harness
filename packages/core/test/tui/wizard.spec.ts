@@ -116,10 +116,69 @@ describe("wizard", () => {
   });
 
   it("o build pergunta teste e ciclos, e não pergunta pedido", async () => {
-    const { deps, tela } = roteiro(["", "3", "1", "", "1", "n", "npm run test:ci", "5", "s"]);
+    // O "" depois do "n" é a estratégia: Enter fica no serial, e serial não acrescenta flag.
+    const { deps, tela } = roteiro(["", "3", "1", "", "1", "n", "", "npm run test:ci", "5", "s"]);
     const resultado = await runWizard(deps);
     expect(resultado?.argv).toEqual(["build", "--provider", "codex", "--test-cmd", "npm run test:ci", "--max-cycles", "5"]);
     expect(tela()).not.toContain("De onde vem o pedido?");
+  });
+
+  describe("estratégia de execução do build (§97)", () => {
+    // pasta, build, codex, modelo padrão, sem effort, sem ajuste por papel
+    const ATE_OS_PAPEIS = ["", "3", "1", "", "1", "n"];
+
+    it("paralela com todos os agentes iguais ao executor: só o teto vai ao comando", async () => {
+      const { deps, tela } = roteiro([...ATE_OS_PAPEIS, "2", "3", "1", "s", "", "", "s"]);
+      const resultado = await runWizard({ ...deps, planWidth: async () => 2 });
+      expect(resultado?.argv).toEqual(["build", "--provider", "codex", "--parallel", "3", "--save-execution"]);
+      expect(tela()).toContain("este plano deixa até 2");
+      expect(tela()).toContain("O plano só deixa 2 fase(s) rodarem ao mesmo tempo");
+    });
+
+    it("cada agente com o seu provider e modelo; Enter mantém o executor", async () => {
+      // teto 2, configurar cada um; agente 1 = executor; agente 2 = claude/opus, sem effort, restrito
+      const { deps } = roteiro([...ATE_OS_PAPEIS, "2", "2", "2", "", "2", "opus", "1", "s", "n", "", "", "s"]);
+      const resultado = await runWizard(deps);
+      expect(resultado?.argv).toEqual([
+        "build",
+        "--provider",
+        "codex",
+        "--parallel",
+        "2",
+        "--worker",
+        "codex",
+        "--worker",
+        "provider=claude,model=opus,system-install=no",
+      ]);
+      expect(resultado?.command).toContain('--worker "provider=claude,model=opus,system-install=no"');
+    });
+
+    it("a lista de providers dos agentes só tem CLI: API direta não constrói", async () => {
+      const { deps, tela } = roteiro([...ATE_OS_PAPEIS, "2", "2", "2", "", "", "n", "", "", "n"]);
+      await runWizard(deps);
+      const lista = tela().slice(tela().indexOf("Agente 1 — provider"));
+      expect(lista).toContain("claude");
+      expect(lista.slice(0, lista.indexOf("Agente 2"))).not.toContain("openrouter");
+    });
+
+    it("indisponível aqui: a opção diz por quê e não pode ser escolhida", async () => {
+      const { deps, tela } = roteiro([...ATE_OS_PAPEIS, "2", "1", "", "", "s"]);
+      const resultado = await runWizard({ ...deps, parallelAvailability: async () => ({ disponivel: false, motivo: "o git não está instalado" }) });
+      expect(tela()).toContain("indisponível aqui: o git não está instalado");
+      expect(tela()).toContain("A execução paralela não roda aqui");
+      expect(resultado?.argv).toEqual(["build", "--provider", "codex"]);
+    });
+
+    it("parte do que está salvo, e voltar ao serial num projeto paralelo grava o serial", async () => {
+      const salva = { mode: "parallel" as const, maxConcurrency: 3, workers: [{ provider: "claude", model: "opus", effort: "" }] };
+      const manter = roteiro([...ATE_OS_PAPEIS, "", "", "", "s", "", "", "s"]);
+      const mantido = await runWizard({ ...manter.deps, readExecution: async () => salva });
+      expect(mantido?.argv).toEqual(["build", "--provider", "codex", "--parallel", "3", "--worker", "provider=claude,model=opus", "--save-execution"]);
+
+      const voltar = roteiro([...ATE_OS_PAPEIS, "1", "s", "", "", "s"]);
+      const serial = await runWizard({ ...voltar.deps, readExecution: async () => salva });
+      expect(serial?.argv).toEqual(["build", "--provider", "codex", "--serial", "--save-execution"]);
+    });
   });
 
   it("o init não pergunta pelo executor, e o build não pergunta pelo escritor", async () => {

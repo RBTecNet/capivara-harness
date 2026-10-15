@@ -83,10 +83,26 @@ export function dependenciasEfetivas(fase: FaseAgendavel, fases: readonly FaseAg
 
   const fundacao = Math.min(...anteriores);
   const numeros = [...new Set([fundacao, ...fase.dependsOn])].sort((a, b) => a - b);
+  // Só é ajuste quando a fundação não chegava por nenhum caminho: P4 → P2 → P1 já a tinha.
   return {
     numeros,
-    ajuste: fase.dependsOn.includes(fundacao) ? "" : `a Phase ${fundacao} é a fundação: entra como dependência`,
+    ajuste: alcanca(fase, fundacao, fases) ? "" : `a Phase ${fundacao} é a fundação: entra como dependência`,
   };
+}
+
+/** A fase chega à outra pelo `Depends on` declarado, direta ou indiretamente? */
+function alcanca(fase: FaseAgendavel, alvo: number, fases: readonly FaseAgendavel[]): boolean {
+  const porNumero = new Map(fases.map((outra) => [outra.number, outra]));
+  const visitadas = new Set<number>();
+  const pilha = [...(fase.dependsOn ?? [])];
+  while (pilha.length > 0) {
+    const numero = pilha.pop()!;
+    if (numero === alvo) return true;
+    if (visitadas.has(numero)) continue;
+    visitadas.add(numero);
+    pilha.push(...(porNumero.get(numero)?.dependsOn ?? []).filter((dependencia) => dependencia < numero));
+  }
+  return false;
 }
 
 function estadoDe(agenda: Agenda, id: string): EstadoNaAgenda {

@@ -22,6 +22,7 @@ import { readChoice, renderChoices, renderCommand, roleHint, toArgv } from "../t
 import type { Choice, WizardAnswers } from "../tui/index.js";
 import { createLineIO } from "./line-io.js";
 import type { LineIO, LineSource } from "./line-io.js";
+import { aceitaEffort, MAX_AGENTES, MIN_AGENTES_PARALELOS, type AgenteConfigurado, type EstrategiaDeExecucao } from "../config/execucao.js";
 
 /**
  * O wizard lê linha a linha como todo o resto do CLI — e, quando há uma pessoa
@@ -85,6 +86,21 @@ export interface WizardDeps {
   readMcpPrompt?: (url: string, name: string) => Promise<string>;
   /** O endereço sugerido, quando o operador já tem um de costume. */
   defaultMcpUrl?: string;
+  /**
+   * A estratégia de execução já salva no projeto (`.capivara/execucao.json`),
+   * para o wizard partir dela em vez de do zero. Ausente ou nulo: serial.
+   */
+  readExecution?: (projectRoot: string) => Promise<EstrategiaDeExecucao | null>;
+  /**
+   * Se o build paralelo pode rodar nesta pasta, e por que não.
+   *
+   * Indisponível, a opção continua na lista — saber que ela existe é útil —,
+   * mas diz o motivo e não pode ser escolhida: escolher paralelo e rodar serial
+   * seria mentir no comando impresso.
+   */
+  parallelAvailability?: (projectRoot: string) => Promise<{ disponivel: boolean; motivo: string }>;
+  /** Quantas fases o plano deixa rodar ao mesmo tempo; nulo quando não há plano legível. */
+  planWidth?: (projectRoot: string) => Promise<number | null>;
 }
 
 export interface WizardResult {
@@ -564,17 +580,8 @@ async function perguntarPapeis(deps: WizardDeps, usados: readonly RoleName[]): P
   }
   global.provider = provider;
 
-  // O que este modelo aceita, quando a CLI sabe dizer; senão, a lista genérica.
-  const aceitos = global.model
-    ? await (deps.listEfforts ?? (async () => []))(provider, global.model).catch(() => [])
-    : [];
-  const opcoesEffort: Choice[] =
-    aceitos.length > 0
-      ? [{ label: "desligado", hint: `${global.model} aceita: ${aceitos.join(", ")}` }, ...aceitos.map((nivel) => ({ label: nivel }))]
-      : EFFORTS_GENERICOS;
-
-  const effort = opcoesEffort[await choose(io, "Intensidade de raciocínio?", opcoesEffort, 0)]?.label ?? "desligado";
-  if (effort !== "desligado") global.effort = effort;
+  const effort = await escolherEffort(deps, provider, global.model ?? "", "Intensidade de raciocínio?");
+  if (effort !== "") global.effort = effort;
 
   if (await yesNo(io, "\nAjustar algum papel separadamente?", false)) {
     const fila: RoleName[] = [...usados];
@@ -617,6 +624,126 @@ async function perguntarPapeis(deps: WizardDeps, usados: readonly RoleName[]): P
 
 
   return { global, roles };
+}
+
+/**
+ * A intensidade de raciocínio: o que este modelo aceita, quando a CLI sabe
+ * dizer; senão, a lista genérica. Vazio é desligado.
+ */
+async function escolherEffort(deps: WizardDeps, provider: string, model: string, titulo: string): Promise<string> {
+  const aceitos = model ? await (deps.listEfforts ?? (async () => []))(provider, model).catch(() => []) : [];
+  const opcoes: Choice[] =
+    aceitos.length > 0
+      ? [{ label: "desligado", hint: `${model} aceita: ${aceitos.join(", ")}` }, ...aceitos.map((nivel) => ({ label: nivel }))]
+      : EFFORTS_GENERICOS;
+  const effort = opcoes[await choose(deps.io, titulo, opcoes, 0)]?.label ?? "desligado";
+  return effort === "desligado" ? "" : effort;
+}
+
+/** Só CLI constrói: o executor escreve arquivos e roda comandos (§97). */
+const PROVIDERS_DE_AGENTE: Choice[] = PROVIDERS.filter((opcao) => (CLI_PROVIDERS as readonly string[]).includes(opcao.label));
+
+/**
+ * O passo "Estratégia de execução" do build (§97).
+ *
+ * Serial é o padrão e, escolhido num projeto que nunca foi paralelo, não
+ * acrescenta flag nenhuma ao comando: quem não pediu paralelo vê o comando de
+ * sempre. Paralelo pergunta o teto de agentes e, se a pessoa quiser, o
+ * provider, o modelo, a intensidade e a restrição de cada um. Ninguém reparte
+ * fases entre agentes: isso é do escalonador.
+ */
+async function perguntarExecucao(
+  deps: WizardDeps,
+  projectRoot: string,
+  builder: { provider: string; model: string; effort: string },
+): Promise<{ execution?: EstrategiaDeExecucao; save?: boolean }> {
+  const { io } = deps;
+  const salva = await (deps.readExecution ?? (async () => null))(projectRoot).catch(() => null);
+  const disponibilidade = await (deps.parallelAvailability ?? (async () => ({ disponivel: true, motivo: "" })))(projectRoot).catch(() => ({
+    disponivel: false,
+    motivo: "não consegui conferir o Git desta máquina",
+  }));
+  const largura = await (deps.planWidth ?? (async () => null))(projectRoot).catch(() => null);
+
+  const opcoes: Choice[] = [
+    { label: "serial", hint: "uma fase por vez — o build de sempre" },
+    {
+      label: "paralela",
+      hint: disponibilidade.disponivel
+        ? `várias fases ao mesmo tempo, cada uma num worktree próprio${largura !== null ? `; este plano deixa até ${largura}` : ""}`
+        : `indisponível aqui: ${disponibilidade.motivo}`,
+    },
+  ];
+  let modo: number;
+  for (;;) {
+    modo = await choose(io, "Estratégia de execução?", opcoes, salva?.mode === "parallel" && disponibilidade.disponivel ? 1 : 0);
+    if (modo === 0 || disponibilidade.disponivel) break;
+    io.write(`\nA execução paralela não roda aqui: ${disponibilidade.motivo}\n`);
+  }
+
+  if (modo === 0) {
+    // Serial num projeto que estava salvo como paralelo precisa dizer, senão o arquivo venceria.
+    if (salva?.mode !== "parallel") return {};
+    const lembrar = await yesNo(io, "\nEste projeto estava salvo como paralelo. Gravar serial para as próximas execuções?", true);
+    return { execution: { mode: "serial" }, save: lembrar };
+  }
+
+  const anterior = salva?.mode === "parallel" ? salva : null;
+  /*
+   * O teto é digitado, não escolhido numa lista: numa lista de 2 a 8, a opção
+   * "3" seria o número 2 — e quem digita o número que quer receberia outro.
+   */
+  const sugerido = anterior ? anterior.maxConcurrency : Math.min(MAX_AGENTES, Math.max(MIN_AGENTES_PARALELOS, largura ?? MIN_AGENTES_PARALELOS));
+  let teto = sugerido;
+  for (;;) {
+    const digitado = await text(io, `\nQuantos agentes no máximo ao mesmo tempo, de ${MIN_AGENTES_PARALELOS} a ${MAX_AGENTES} [${sugerido}]: `, String(sugerido));
+    const numero = /^\d+$/.test(digitado) ? Number(digitado) : Number.NaN;
+    if (numero >= MIN_AGENTES_PARALELOS && numero <= MAX_AGENTES) {
+      teto = numero;
+      break;
+    }
+    io.write(`Responda com um número de ${MIN_AGENTES_PARALELOS} a ${MAX_AGENTES}.\n`);
+  }
+  if (largura !== null && teto > largura) {
+    io.write(`O plano só deixa ${largura} fase(s) rodarem ao mesmo tempo: os agentes além disso ficam livres.\n`);
+  }
+
+  const executor = `${builder.provider}${builder.model ? `/${builder.model}` : ""}`;
+  const comoConfigurar: Choice[] = [
+    { label: "todos como o executor", hint: executor },
+    { label: "escolher provider e modelo de cada agente" },
+    ...(anterior && anterior.workers.length > 0 ? [{ label: "manter os agentes salvos", hint: `${anterior.workers.length} configurado(s)` }] : []),
+  ];
+  const como = await choose(io, "Com que modelos os agentes trabalham?", comoConfigurar, anterior && anterior.workers.length > 0 ? 2 : 0);
+
+  let workers: AgenteConfigurado[] = [];
+  if (como === 2 && anterior) {
+    workers = anterior.workers.slice(0, teto);
+  } else if (como === 1) {
+    const manter = -1;
+    for (let indice = 0; indice < teto; ) {
+      const escolhido = await choose(io, `Agente ${indice + 1} — provider`, PROVIDERS_DE_AGENTE, manter, `Enter mantém o executor (${executor})`);
+      if (escolhido === manter) {
+        workers.push({ provider: builder.provider, model: builder.model, effort: builder.effort });
+        indice += 1;
+        continue;
+      }
+      const provider = PROVIDERS_DE_AGENTE[escolhido]?.label ?? builder.provider;
+      const modelo = await escolherModelo(io, provider, `Modelo do agente ${indice + 1}`, deps.listModels ?? (async () => []));
+      if (modelo === "voltar") continue;
+      const effort = aceitaEffort(provider) ? await escolherEffort(deps, provider, modelo.modelo, `Intensidade do agente ${indice + 1}?`) : "";
+      const restrito = await yesNo(io, `Manter o agente ${indice + 1} dentro do workspace, sem instalar pacotes do sistema?`, false);
+      workers.push({ provider, model: modelo.modelo, effort, ...(restrito ? { systemInstall: false } : {}) });
+      indice += 1;
+    }
+    // Os do fim iguais ao executor não precisam ser ditos: agente sem configuração É o executor.
+    const ehExecutor = (agente: AgenteConfigurado): boolean =>
+      agente.provider === builder.provider && agente.model === builder.model && agente.effort === builder.effort && agente.systemInstall === undefined;
+    while (workers.length > 0 && ehExecutor(workers[workers.length - 1]!)) workers.pop();
+  }
+
+  const lembrar = await yesNo(io, "\nLembrar esta estratégia para as próximas execuções deste projeto?", true);
+  return { execution: { mode: "parallel", maxConcurrency: teto, workers }, save: lembrar };
 }
 
 /**
@@ -806,6 +933,16 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
   answers.roles = { ...answers.roles, ...papeis.roles };
 
   if (command === "build") {
+    // O executor como o build o resolve (`resolveRoles`): o do papel vence o global.
+    const builder = {
+      provider: papeis.roles.builder?.provider ?? papeis.global.provider ?? "",
+      model: papeis.roles.builder?.model ?? papeis.global.model ?? "",
+      effort: papeis.global.effort ?? "",
+    };
+    const execucao = await perguntarExecucao(deps, projectRoot, builder);
+    if (execucao.execution) answers.execution = execucao.execution;
+    if (execucao.save === true) answers.saveExecution = true;
+
     const comandoDeTeste = await text(io, "\nComando de teste do projeto (vazio detecta pelo manifesto): ");
     if (comandoDeTeste !== "") answers.testCommand = comandoDeTeste;
 

@@ -12,6 +12,7 @@
 
 import { paint, padVisible, tint, truncatePath, truncateVisible, visibleWidth, type Style } from "./ansi.js";
 import { renderPhaseRows, type BuildPhaseRow } from "./build-phases.js";
+import { renderWorkerRows, workersSummary, type WorkerRow } from "./build-workers.js";
 import { blockText } from "./blockfont.js";
 import { mascotSize, mascotStage, renderCapybara } from "./capybara.js";
 
@@ -86,6 +87,11 @@ export interface DashboardModel {
    * no seu lado do ciclo.
    */
   phases?: { rows: BuildPhaseRow[]; summary: string; maxRows: number; columns?: readonly string[]; legend?: readonly string[]; anchorId?: string };
+  /**
+   * Os agentes do build paralelo (§97): qual fase cada um pegou e em que pé ela
+   * está. Ausente no build serial, onde a fase em andamento já é a resposta.
+   */
+  workers?: WorkerRow[];
   /** As contagens do estágio. Vazio esconde a caixa. */
   progress?: ProgressBar[];
   /** Uma linha final da caixa de progresso — o comando de teste, por exemplo. */
@@ -432,6 +438,12 @@ function dashboardLines(model: DashboardModel, layout: Layout): string[] {
         width,
         style,
       ),
+    );
+  }
+
+  if (model.workers && model.workers.length > 0) {
+    lines.push(
+      ...box(`AGENTES · ${workersSummary(model.workers)}`, renderWorkerRows(model.workers, model.phases?.rows ?? [], width - 2, style), width, style),
     );
   }
 

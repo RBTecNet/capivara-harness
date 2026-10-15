@@ -27,6 +27,7 @@ import type { EscolhaNumerada } from "./loop/index.js";
 import {
   BACK,
   BuildPhaseTracker,
+  WorkerTracker,
   PLAN_COLUMNS,
   PLAN_LEGEND,
   PlanPhaseTracker,
@@ -56,6 +57,9 @@ import { chooseInBox, createKeyPrompter, createKeySession } from "./commands/key
 import type { KeySession } from "./commands/key-io.js";
 import { escolhaDaMudanca, escolhaDeColisao, respostaDaMudanca } from "./commands/escolhas-sem-painel.js";
 import { PauseGate, modalDaFase, teclasDoBuild, textoDaFase } from "./commands/build-controls.js";
+import { disponibilidadeDoParalelo, estrategiaSalva, larguraDoPlanoNaPasta, prepararExecucao } from "./commands/execucao.js";
+import { ARQUIVO_DE_EXECUCAO, gravarArquivoDeExecucao } from "./config/execucao.js";
+import type { WorkerProgress } from "./loop/progress.js";
 import { box } from "./tui/dashboard.js";
 import { renderSelect, type SelectSpec } from "./tui/select.js";
 import type { WizardIO } from "./commands/wizard.js";
@@ -263,6 +267,10 @@ function mundoDoWizard() {
       return await client.prompt(name);
     },
     ...(defaultMcpUrl ? { defaultMcpUrl } : {}),
+    // O passo de estratégia do build (§97): o que está salvo, se o paralelo roda aqui, e a largura do plano.
+    readExecution: estrategiaSalva,
+    parallelAvailability: disponibilidadeDoParalelo,
+    planWidth: larguraDoPlanoNaPasta,
     fileExists: (path: string) => stat(path).then((info) => info.isFile()).catch(() => false),
     directoryExists: (path: string) => stat(path).then((info) => info.isDirectory()).catch(() => false),
   };
@@ -1643,9 +1651,18 @@ export function createProgram(): Command {
       .option("--no-git", "não cria repositório Git em pasta nova; sem ele não há commit por fase")
       .option("--mcp <url>", "base documental por MCP, de onde vêm as skills do projeto")
       .option("--mcp-project <nome>", "de qual projeto da base vêm as skills")
+      .option("--serial", "uma fase por vez — o padrão; vence o que estiver em .capivara/execucao.json")
+      .option("--parallel <n>", "até n fases ao mesmo tempo (2 a 8), cada uma num git worktree próprio")
+      .option(
+        "--worker <spec>",
+        "um agente do pool paralelo: provider=codex,model=…,effort=…,system-install=no (repetível; sem ele, o agente é o builder)",
+        (valor: string, anteriores: string[]) => [...anteriores, valor],
+        [] as string[],
+      )
+      .option("--save-execution", "grava a estratégia desta execução em .capivara/execucao.json, para as próximas")
       .option("--no-dashboard", "não desenha o painel; só as linhas de progresso"),
     ["builder", "verifier"],
-  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean; flows?: boolean; rebuildAll?: boolean; git?: boolean; mcp?: string; mcpProject?: string; dashboard?: boolean }) => {
+  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean; flows?: boolean; rebuildAll?: boolean; git?: boolean; mcp?: string; mcpProject?: string; dashboard?: boolean; serial?: boolean; parallel?: string; worker?: string[]; saveExecution?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     let escolhas = flags;
     let roles = rolesFromFlags(escolhas);
@@ -1661,6 +1678,33 @@ export function createProgram(): Command {
       roles = rolesFromFlags(escolhas);
     }
     const language = flags.language ?? "português do Brasil";
+
+    /*
+     * Serial ou paralelo (§97), resolvido ANTES de qualquer tela: flag
+     * contraditória, arquivo malformado ou agente que não pode construir param
+     * aqui, sem uma chamada de modelo — e sem nunca virar serial em silêncio.
+     */
+    const execucao = await prepararExecucao({
+      projectRoot,
+      flags: {
+        ...(flags.serial === true ? { serial: true } : {}),
+        ...(flags.parallel !== undefined ? { parallel: flags.parallel } : {}),
+        ...((flags.worker ?? []).length > 0 ? { worker: flags.worker } : {}),
+      },
+      roles,
+      systemInstall: flags.systemInstall !== false,
+    });
+    if (!execucao.ok) {
+      stdout.write(`${execucao.erros.join("\n")}\n`);
+      process.exitCode = 2;
+      return;
+    }
+    if (flags.saveExecution === true) {
+      await gravarArquivoDeExecucao(projectRoot, execucao.estrategia);
+      stdout.write(`estratégia de execução salva em ${ARQUIVO_DE_EXECUCAO}: as próximas execuções deste projeto a usam sem flag\n`);
+    }
+    const paralela = execucao.estrategia.mode === "parallel";
+    const agentesNaTela = paralela ? new WorkerTracker(execucao.agentes.map((agente) => agente.label)) : null;
 
     const comPainel = flags.dashboard !== false && stdout.isTTY === true;
     if (flags.splash !== false && !comPainel) {
@@ -1683,7 +1727,17 @@ export function createProgram(): Command {
       version: VERSION,
       command: "build",
       project: basename(resolve(projectRoot)),
-      roles: describeRoles(roles).filter((role) => (BUILD_ROLES as readonly string[]).includes(role.role)),
+      /*
+       * No paralelo quem constrói são os agentes, não o builder: mostrar o
+       * builder aqui diria que um modelo está trabalhando quando são outros.
+       */
+      roles: describeRoles(roles)
+        .filter((role) => (BUILD_ROLES as readonly string[]).includes(role.role))
+        .map((role) =>
+          paralela && role.role === "builder"
+            ? { role: "agentes", provider: [...new Set(execucao.agentes.map((agente) => agente.label))].join(", "), model: "" }
+            : role,
+        ),
       provider: {
         perfil: `${roles.builder.provider}${roles.builder.model ? `:${roles.builder.model}` : ""}`,
         transporte: `${roles.builder.provider}-cli`,
@@ -1704,6 +1758,7 @@ export function createProgram(): Command {
 
     const desenharBuild = semDerrubarORun(() => {
       painelBuild.setPhases(fases.rows(), fases.summary(), MAX_LINHAS_DE_FASE);
+      painelBuild.setWorkers(agentesNaTela?.rows() ?? null);
       return renderDashboard({
         ...painelBuild.model(),
         width: larguraBuild(),
@@ -1899,9 +1954,30 @@ export function createProgram(): Command {
           }
         : undefined;
 
+    const anunciar = (message: string): void => {
+      painelBuild.note(message.trim());
+      if (liveBuild.enabled) repaintBuild();
+      else stdout.write(`${message}\n`);
+    };
+    // O serial pedido explicitamente diz de onde veio; o paralelo é resumido pelo loop, depois do preflight.
+    if (!paralela) for (const linha of execucao.resumo) anunciar(linha);
+
     const outcome = await runBuild({
       projectRoot,
       roles: snapshotDePapeis(roles, BUILD_ROLES),
+      ...(paralela && execucao.estrategia.mode === "parallel"
+        ? {
+            parallel: {
+              maxConcurrency: execucao.estrategia.maxConcurrency,
+              agentes: execucao.agentes.map((agente) => ({ engine: agente.config.provider, label: agente.label, systemInstall: agente.systemInstall })),
+              resumo: execucao.resumo,
+            },
+            onWorker: (evento: WorkerProgress) => {
+              agentesNaTela?.apply(evento);
+              repaintBuild();
+            },
+          }
+        : {}),
       skeleton: esqueletoDoBuild,
       skipFlows: flags.flows === false,
       ...(flags.rebuildAll === true ? { rebuildAll: true } : {}),
@@ -1955,11 +2031,7 @@ export function createProgram(): Command {
       systemInstall: flags.systemInstall !== false,
       skipAcceptance: flags.acceptance === false,
       ...(flags.keepGoing !== undefined ? { keepGoing: flags.keepGoing } : {}),
-      announce: (message) => {
-        painelBuild.note(message.trim());
-        if (liveBuild.enabled) repaintBuild();
-        else stdout.write(`${message}\n`);
-      },
+      announce: anunciar,
       onPlanned: (planejadas, contexto) => {
         totalDeFases = planejadas.length;
         fases.plan(planejadas);
@@ -1972,15 +2044,22 @@ export function createProgram(): Command {
         repaintBuild();
       },
       call: async (call) => {
+        /*
+         * No paralelo, a chamada vem com o agente e a árvore dela: o executor é
+         * o modelo daquele agente, e os dois papéis trabalham no worktree da
+         * fase. O verificador continua sendo o mesmo para todos.
+         */
+        const agente = call.worker !== undefined ? execucao.agentes[call.worker] : undefined;
         const bridge = createAgentBridge({
-          projectRoot,
+          projectRoot: call.root ?? projectRoot,
           runId: "build",
           language,
-          roles,
+          roles: agente ? { ...roles, builder: agente.config } : roles,
           limits: DEFAULT_LIMITS,
-          systemInstall: flags.systemInstall !== false,
+          systemInstall: agente ? agente.systemInstall : flags.systemInstall !== false,
         });
-        const quem = `${call.role} · ${call.phase.id}`;
+        // O número é do agente, e só o executor é de um agente: o verificador é um só.
+        const quem = `${call.role === "builder" && call.worker !== undefined ? `agente ${call.worker + 1}` : call.role} · ${call.phase.id}`;
         // A pausa segura AQUI: nenhuma sessão de agente fica pela metade.
         await pausa.wait(() => {
           painelBuild.paused(`antes de ${quem} · p retoma`);

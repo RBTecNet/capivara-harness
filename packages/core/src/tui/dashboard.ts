@@ -92,6 +92,8 @@ export interface DashboardModel {
    * está. Ausente no build serial, onde a fase em andamento já é a resposta.
    */
   workers?: WorkerRow[];
+  /** O agente sob o cursor, quando há teclado: Enter abre o log dele. */
+  workerSelected?: number;
   /** As contagens do estágio. Vazio esconde a caixa. */
   progress?: ProgressBar[];
   /** Uma linha final da caixa de progresso — o comando de teste, por exemplo. */
@@ -443,7 +445,7 @@ function dashboardLines(model: DashboardModel, layout: Layout): string[] {
 
   if (model.workers && model.workers.length > 0) {
     lines.push(
-      ...box(`AGENTES · ${workersSummary(model.workers)}`, renderWorkerRows(model.workers, model.phases?.rows ?? [], width - 2, style), width, style),
+      ...box(`AGENTES · ${workersSummary(model.workers)}`, renderWorkerRows(model.workers, model.phases?.rows ?? [], width - 2, style, model.workerSelected), width, style),
     );
   }
 

@@ -125,6 +125,7 @@ export class HarnessProgress {
    */
   private ultimoErro = "";
   private agentes: WorkerRow[] | null = null;
+  private agenteSelecionado: number | undefined = undefined;
   /** Uma linha de contexto para a caixa de progresso — o comando de teste, por exemplo. */
   private nota = "";
 
@@ -291,8 +292,9 @@ export class HarnessProgress {
   }
 
   /** Os agentes do build paralelo; `null` some com a caixa. */
-  setWorkers(rows: WorkerRow[] | null): void {
+  setWorkers(rows: WorkerRow[] | null, selected?: number): void {
     this.agentes = rows;
+    this.agenteSelecionado = selected;
   }
 
   /** Uma linha de contexto para a caixa de progresso. O build usa para o comando de teste. */
@@ -375,6 +377,7 @@ export class HarnessProgress {
       pipeline: this.pipeline(),
       ...(this.fases ? { phases: this.fases } : {}),
       ...(this.agentes ? { workers: this.agentes } : {}),
+      ...(this.agentes && this.agenteSelecionado !== undefined ? { workerSelected: this.agenteSelecionado } : {}),
       progress: this.progresso(),
       ...(this.nota === "" ? {} : { progressNote: this.nota }),
       work: this.trabalho(),

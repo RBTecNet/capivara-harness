@@ -61,8 +61,11 @@ export class PauseGate {
 }
 
 /** As teclas que o painel do build atende, para o rodapé. */
-export function teclasDoBuild(estado: EstadoDaPausa): string {
-  return estado === "pausado" ? "p retoma · f vê uma fase" : estado === "pausa pedida" ? "p desiste da pausa · f vê uma fase" : "p pausa · f vê uma fase";
+export function teclasDoBuild(estado: EstadoDaPausa, paralelo = false): string {
+  const base =
+    estado === "pausado" ? "p retoma · f vê uma fase" : estado === "pausa pedida" ? "p desiste da pausa · f vê uma fase" : "p pausa · f vê uma fase";
+  // No paralelo, a caixa AGENTES tem cursor: as setas escolhem, o Enter abre o log (§98).
+  return paralelo ? `↑ ↓ agente · Enter log · ${base}` : base;
 }
 
 const NOME_DO_GATE: Record<(typeof GATES)[number], string> = {

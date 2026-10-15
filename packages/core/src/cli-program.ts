@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises";
+import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { Command } from "commander";
@@ -60,13 +61,17 @@ import { PauseGate, modalDaFase, teclasDoBuild, textoDaFase } from "./commands/b
 import { disponibilidadeDoParalelo, estrategiaSalva, larguraDoPlanoNaPasta, prepararExecucao } from "./commands/execucao.js";
 import { ARQUIVO_DE_EXECUCAO, gravarArquivoDeExecucao } from "./config/execucao.js";
 import type { WorkerProgress } from "./loop/progress.js";
+import { teclaNaCaixaDeAgentes } from "./tui/build-workers.js";
+import { LogsDosAgentes, descreverEventoDoAgente, descreverProgressoDaFase } from "./tui/worker-logs.js";
+import { abrirPainel, reduzirPainel, renderPainelDoAgente, type Medidas as MedidasDoPainel } from "./tui/worker-log-panel.js";
+import { KeyDecoder } from "./tui/keys.js";
 import { box } from "./tui/dashboard.js";
 import { renderSelect, type SelectSpec } from "./tui/select.js";
 import type { WizardIO } from "./commands/wizard.js";
 import type { LineIO } from "./commands/line-io.js";
 import { listarEfforts, listarModelos } from "./provider/index.js";
 import type { RoleName } from "./provider/index.js";
-import { runIdFor, safeProjectPath, writeAtomic } from "./state/index.js";
+import { runIdFor, runPaths, safeProjectPath, writeAtomic } from "./state/index.js";
 import { sha12 } from "./contract/index.js";
 import { MAX_DOMINIOS, SurveyBlockedError, runSurvey } from "./survey/index.js";
 import { ChangeBlockedError, renderQuestion as renderPerguntaDaMudanca, runChange } from "./change/index.js";
@@ -1705,6 +1710,41 @@ export function createProgram(): Command {
     }
     const paralela = execucao.estrategia.mode === "parallel";
     const agentesNaTela = paralela ? new WorkerTracker(execucao.agentes.map((agente) => agente.label)) : null;
+    /*
+     * O log de cada agente (§98): um buffer limitado na memória, para a tela, e
+     * o arquivo completo na pasta do run, que só existe depois de o loop dizer
+     * qual é o run. Separados por agente desde a origem — a chamada diz de qual
+     * agente é —, nunca por leitura do texto.
+     */
+    const logsDosAgentes = paralela ? new LogsDosAgentes(execucao.agentes.length) : null;
+    let agenteSelecionado = 0;
+    let pastaDosLogs: string | null = null;
+    const arquivosDosAgentes = new Map<string, WriteStream>();
+    const gravarNoLog = (slot: number, fluxo: "out" | "err", texto: string): void => {
+      if (pastaDosLogs === null) return;
+      const caminho = join(pastaDosLogs, `agente-${slot + 1}.${fluxo}.log`);
+      let arquivo = arquivosDosAgentes.get(caminho);
+      if (!arquivo) {
+        mkdirSync(pastaDosLogs, { recursive: true });
+        arquivo = createWriteStream(caminho, { flags: "a" });
+        // Disco cheio não derruba o build: o log é evidência, não trabalho.
+        arquivo.on("error", () => undefined);
+        arquivosDosAgentes.set(caminho, arquivo);
+      }
+      arquivo.write(texto);
+    };
+    const marcarNoLog = (slot: number, texto: string, inicio: boolean): void => {
+      if (!logsDosAgentes) return;
+      if (inicio) logsDosAgentes.comecarChamada(slot, texto, Date.now());
+      else {
+        logsDosAgentes.log(slot)?.fecharParciais();
+        logsDosAgentes.terminarChamada(slot, texto);
+      }
+      const linha = `\n${inicio ? "▶" : "■"} [${new Date().toISOString()}] ${texto}\n`;
+      gravarNoLog(slot, "out", linha);
+      gravarNoLog(slot, "err", linha);
+    };
+    const eventoDoAgente = (slot: number, texto: string): void => logsDosAgentes?.eventosDe(slot)?.registrar(texto, new Date());
 
     const comPainel = flags.dashboard !== false && stdout.isTTY === true;
     if (flags.splash !== false && !comPainel) {
@@ -1758,7 +1798,7 @@ export function createProgram(): Command {
 
     const desenharBuild = semDerrubarORun(() => {
       painelBuild.setPhases(fases.rows(), fases.summary(), MAX_LINHAS_DE_FASE);
-      painelBuild.setWorkers(agentesNaTela?.rows() ?? null);
+      painelBuild.setWorkers(agentesNaTela?.rows() ?? null, teclasBuild && agentesNaTela ? agenteSelecionado : undefined);
       return renderDashboard({
         ...painelBuild.model(),
         width: larguraBuild(),
@@ -1807,15 +1847,102 @@ export function createProgram(): Command {
      * terminal não há quem aperte, e sem painel não há onde mostrar.
      */
     const pausa = new PauseGate();
-    let vendoFase: Promise<void> | null = null;
+    let telaAberta: Promise<void> | null = null;
     let buildTerminou = false;
     const verFases = (): void => {
-      if (vendoFase || !teclasBuild) return;
-      vendoFase = mostrarFases().catch((erro: unknown) => {
+      if (telaAberta || !teclasBuild) return;
+      telaAberta = mostrarFases().catch((erro: unknown) => {
         // Sessão fechada no meio — o terminal volta, e o build segue o desfecho.
         stdout.write("\u001B[?25h\u001B[?1049l");
         if (!(erro instanceof InputEndedError)) throw erro;
       });
+    };
+    const verLogDoAgente = (slot: number): void => {
+      if (telaAberta || !teclasBuild || !logsDosAgentes || !agentesNaTela) return;
+      telaAberta = mostrarLogDoAgente(slot).catch((erro: unknown) => {
+        stdout.write("\u001B[?25h\u001B[?1049l");
+        if (!(erro instanceof InputEndedError)) throw erro;
+      });
+    };
+    /*
+     * O log de um agente, em tela alternativa (§98). Redesenha no máximo dez
+     * vezes por segundo e só quando algo mudou — o log do agente, os eventos
+     * dele, o relógio, o tamanho da janela —: um agente que despeja milhares de
+     * linhas por segundo não congela a tela, e a tela não segura o build.
+     */
+    const mostrarLogDoAgente = async (inicial: number): Promise<void> => {
+      if (!teclasBuild || !logsDosAgentes || !agentesNaTela) return;
+      const logs = logsDosAgentes;
+      const agentes = agentesNaTela;
+      const sessao = teclasBuild;
+      try {
+        await liveBuild.hold(async () => {
+          stdout.write("\u001B[?1049h\u001B[?25l\u001B[2J");
+          let estado = abrirPainel(inicial);
+          let medidas: MedidasDoPainel = { saida: { total: 0, visiveis: 1 }, eventos: { total: 0, visiveis: 0 } };
+          let assinatura = "";
+          const desenhar = (forcar: boolean): void => {
+            const agora = Date.now();
+            const tela = { columns: stdout.columns ?? 100, rows: stdout.rows ?? 40 };
+            const atual = `${estado.slot}|${logs.versao(estado.slot)}|${Math.floor(agora / 1000)}|${tela.columns}x${tela.rows}|${buildTerminou}`;
+            if (!forcar && atual === assinatura) return;
+            assinatura = atual;
+            const agente = agentes.rows()[estado.slot]!;
+            const fase = agente.phaseId ? fases.rows().find((linha) => linha.id === agente.phaseId) : undefined;
+            const log = logs.log(estado.slot)!;
+            const desenho = renderPainelDoAgente(
+              {
+                agente,
+                ...(fase ? { fase } : {}),
+                linhas: log.ver(),
+                descartadas: log.descartadas,
+                eventos: logs.eventosDe(estado.slot)?.ver() ?? [],
+                agora,
+                inicioDaChamada: logs.inicioDaChamada(estado.slot),
+                arquivo: pastaDosLogs
+                  ? `${relative(resolve(projectRoot), join(pastaDosLogs, `agente-${estado.slot + 1}.out.log`))} (stderr em .err.log)`
+                  : null,
+                totalDeAgentes: logs.quantos,
+                buildTerminou,
+              },
+              estado,
+              tela,
+              style(),
+            );
+            medidas = desenho.medidas;
+            stdout.write(`\u001B[H${desenho.linhas.map((linha) => `${linha}\u001B[K`).join("\n")}\u001B[J`);
+          };
+          await new Promise<void>((pronto) => {
+            const decodificador = new KeyDecoder();
+            const aoRedimensionar = (): void => {
+              stdout.write("\u001B[2J");
+              desenhar(true);
+            };
+            const relogio = setInterval(() => desenhar(false), 100);
+            const fechar = (): void => {
+              clearInterval(relogio);
+              stdout.off("resize", aoRedimensionar);
+              soltar();
+              pronto();
+            };
+            const soltar = sessao.capture((texto) => {
+              for (const tecla of decodificador.feed(texto)) {
+                const passo = reduzirPainel(estado, tecla, medidas, logs.quantos);
+                if (passo.fechar) return fechar();
+                estado = passo.estado;
+                if (estado.slot !== agenteSelecionado) agenteSelecionado = estado.slot;
+                desenhar(true);
+              }
+            });
+            stdout.on("resize", aoRedimensionar);
+            desenhar(true);
+          });
+          stdout.write("\u001B[?25h\u001B[?1049l");
+        });
+      } finally {
+        telaAberta = null;
+        repaintBuild();
+      }
     };
     const mostrarFases = async (): Promise<void> => {
       if (!teclasBuild) return;
@@ -1871,13 +1998,23 @@ export function createProgram(): Command {
           stdout.write(TELA_NORMAL);
         });
       } finally {
-        vendoFase = null;
+        telaAberta = null;
         repaintBuild();
       }
     };
     if (teclasBuild) {
-      painelBuild.setKeys(teclasDoBuild(pausa.state));
+      painelBuild.setKeys(teclasDoBuild(pausa.state, paralela));
       teclasBuild.onIdle((tecla) => {
+        // A escolha de agente só existe no paralelo, e só move um cursor: nada aqui espera nada.
+        if (agentesNaTela && logsDosAgentes) {
+          const passo = teclaNaCaixaDeAgentes(agenteSelecionado, tecla, logsDosAgentes.quantos);
+          if (passo) {
+            agenteSelecionado = passo.selecionado;
+            if (passo.abrir) verLogDoAgente(agenteSelecionado);
+            else repaintBuild();
+            return true;
+          }
+        }
         if (tecla.type !== "char") return false;
         const letra = tecla.text.toLowerCase();
         if (letra === "p") {
@@ -1889,7 +2026,7 @@ export function createProgram(): Command {
                 ? "pedido de pausa desfeito"
                 : "build retomado",
           );
-          painelBuild.setKeys(teclasDoBuild(pausa.state));
+          painelBuild.setKeys(teclasDoBuild(pausa.state, paralela));
           repaintBuild();
           return true;
         }
@@ -1974,6 +2111,7 @@ export function createProgram(): Command {
             },
             onWorker: (evento: WorkerProgress) => {
               agentesNaTela?.apply(evento);
+              eventoDoAgente(evento.slot, descreverEventoDoAgente(evento));
               repaintBuild();
             },
           }
@@ -2034,6 +2172,7 @@ export function createProgram(): Command {
       announce: anunciar,
       onPlanned: (planejadas, contexto) => {
         totalDeFases = planejadas.length;
+        if (contexto?.runId && logsDosAgentes) pastaDosLogs = runPaths(projectRoot, contexto.runId).logs;
         fases.plan(planejadas);
         if (contexto?.testCommand) painelBuild.setNote(`Teste: ${contexto.testCommand}`);
         repaintBuild();
@@ -2041,6 +2180,10 @@ export function createProgram(): Command {
       onProgress: (evento) => {
         fases.apply(evento);
         if (evento.kind === "phase") painelBuild.setStage(`${evento.id} · ${evento.detail}`);
+        // O gate que mudou vai aos eventos do agente que está naquela fase — pelo id, não pelo texto.
+        for (const agente of agentesNaTela?.rows() ?? []) {
+          if (agente.phaseId === evento.id) eventoDoAgente(agente.slot, descreverProgressoDaFase(evento));
+        }
         repaintBuild();
       },
       call: async (call) => {
@@ -2063,23 +2206,45 @@ export function createProgram(): Command {
         // A pausa segura AQUI: nenhuma sessão de agente fica pela metade.
         await pausa.wait(() => {
           painelBuild.paused(`antes de ${quem} · p retoma`);
-          painelBuild.setKeys(teclasDoBuild(pausa.state));
+          painelBuild.setKeys(teclasDoBuild(pausa.state, paralela));
           repaintBuild();
         });
-        painelBuild.setKeys(teclasBuild ? teclasDoBuild(pausa.state) : null);
+        painelBuild.setKeys(teclasBuild ? teclasDoBuild(pausa.state, paralela) : null);
         painelBuild.beginCall(quem);
         repaintBuild();
-        const resposta = await bridge({
-          role: call.role,
-          stage: "implement",
-          prompt: call.prompt,
-          // Sem isto o terminal fica com cara de travado durante os minutos em
-          // que a sessão do executor trabalha.
-          onActivity: (line) => {
-            painelBuild.note(`${quem}: ${line}`);
-            repaintBuild();
-          },
-        });
+        const slot = logsDosAgentes && call.worker !== undefined ? call.worker : null;
+        const papel = `${call.role === "builder" ? "executor" : "verificador"} · ${call.phase.id} · tentativa ${call.attempt}`;
+        if (slot !== null) marcarNoLog(slot, papel, true);
+        const comecou = Date.now();
+        let resposta: Awaited<ReturnType<typeof bridge>>;
+        try {
+          resposta = await bridge({
+            role: call.role,
+            stage: "implement",
+            prompt: call.prompt,
+            ...(slot !== null
+              ? {
+                  onOutput: (pedaco: string, fluxo: "out" | "err") => {
+                    logsDosAgentes!.log(slot)?.anexar(fluxo, pedaco);
+                    gravarNoLog(slot, fluxo, pedaco);
+                  },
+                }
+              : {}),
+            // Sem isto o terminal fica com cara de travado durante os minutos em
+            // que a sessão do executor trabalha.
+            onActivity: (line) => {
+              painelBuild.note(`${quem}: ${line}`);
+              repaintBuild();
+            },
+          });
+        } catch (erro) {
+          if (slot !== null) marcarNoLog(slot, `${papel}: a chamada não terminou (${erro instanceof Error ? erro.message.split("\n")[0] : String(erro)})`, false);
+          throw erro;
+        }
+        if (slot !== null) {
+          const segundos = Math.round((Date.now() - comecou) / 1000);
+          marcarNoLog(slot, `${papel}: terminou com código ${resposta.exitCode} em ${segundos}s${resposta.timedOut ? ` · interrompida: ${resposta.timedOut}` : ""}`, false);
+        }
         painelBuild.charge(resposta.usage);
         repaintBuild();
         return resposta;
@@ -2091,7 +2256,8 @@ export function createProgram(): Command {
     // Quem está lendo uma fase quando o build termina fecha a leitura primeiro:
     // o desfecho abre a própria telinha, e duas telas alternativas se pisariam.
     buildTerminou = true;
-    if (vendoFase) await vendoFase;
+    if (telaAberta) await telaAberta;
+    for (const arquivo of arquivosDosAgentes.values()) arquivo.end();
     // Antes da telinha da parada: ela põe o terminal em modo raw por conta própria.
     teclasBuild?.close();
     painelBuild.setKeys(null);

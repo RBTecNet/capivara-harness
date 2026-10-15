@@ -36,6 +36,12 @@ export interface BridgeRequest {
   prompt: string;
   /** Uma linha por acontecimento, enquanto a chamada acontece. */
   onActivity?: (line: string) => void;
+  /**
+   * Os bytes crus da sessão, assim que chegam, com o fluxo de cada um. É o que
+   * o log de cada agente do build paralelo mostra e grava; quem recebe é
+   * responsável por sanitizar antes de pôr na tela.
+   */
+  onOutput?: (chunk: string, stream: "out" | "err") => void;
 }
 
 export interface BridgeResponse {
@@ -104,7 +110,14 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
       prompt: request.prompt,
       // Quem não transmite não pode ser medido pelo relógio da primeira saída.
       limits: limitsFor(invocation, options.limits),
-      ...(observador ? { onOutput: (chunk: string, stream: "out" | "err") => stream === "out" && observador(chunk) } : {}),
+      ...(observador || request.onOutput
+        ? {
+            onOutput: (chunk: string, stream: "out" | "err") => {
+              request.onOutput?.(chunk, stream);
+              if (stream === "out") observador?.(chunk);
+            },
+          }
+        : {}),
     });
 
     // O transcrito é lido aqui para que os orquestradores continuem recebendo

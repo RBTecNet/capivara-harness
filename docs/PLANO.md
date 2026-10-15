@@ -6583,3 +6583,63 @@ P2 e P3 ao mesmo tempo com modelos diferentes, verificador único, histórico
 linear de quatro `feat(phase-N)`, nenhum branch ou worktree sobrando; o mesmo
 com conflito real em um arquivo das duas, refeito sozinho; e o wizard por tecla
 num PTY.
+
+## §98 — O log de cada agente, aberto pela caixa AGENTES
+
+Com vários agentes, a caixa AGENTES diz quem pegou qual fase, mas não o que
+cada um está escrevendo. Agora, com o painel e uma pessoa no terminal:
+
+- **↑ ↓ (e Tab) escolhem o agente** na caixa, com cursor; **Enter abre o log**
+  dele em tela alternativa. Escolher só move um cursor: nada espera nada, e o
+  escalonador não sabe que alguém está olhando.
+- **O painel** (`tui/worker-log-panel.ts`, função pura) mostra quem é o agente
+  e com que modelo, o estado e a fase, o tempo na fase e o da chamada
+  corrente — medidos, nunca estimados —, o arquivo do log, a SAÍDA ao vivo
+  (stdout normal, stderr em amarelo, as marcas do harness em ciano: `▶
+  executor · P03 · tentativa 1`, `■ … terminou com código 0 em 11s`) e os
+  EVENTOS DO ESCALONADOR do agente. **Tab** troca a área com foco; **↑ ↓ PgUp
+  PgDn Home End** rolam a área com foco; rolar a saída para cima para de seguir
+  o fim, e o título diz quantas linhas chegaram embaixo; **F** liga e desliga o
+  seguir; **← →** trocam de agente; **Esc** fecha e o build segue. O agente
+  que termina com o painel aberto aparece livre, com o desfecho, e o log
+  continua lá; o build que termina com o painel aberto espera a pessoa fechar,
+  como o `f` do §95.
+
+**A origem decide o agente, nunca o texto.** A saída crua chega pelo
+`onOutput` da ponte (`commands/agent.ts`), que agora repassa os bytes de
+stdout e stderr com o fluxo de cada um; a chamada já diz de qual agente é
+(`EngineCall.worker`). Cada agente tem buffer e eventos próprios, em
+instâncias separadas (`tui/worker-logs.ts`), e stdout e stderr nunca se
+emendam no meio de uma linha. Os eventos saem dos campos dos eventos
+estruturados do loop (`WorkerProgress` e o progresso da fase em que o agente
+está) — nada lê a prosa do modelo para inferir estado. A chamada do
+verificador de uma fase vai ao log do agente daquela fase, marcada como
+`verificador`.
+
+**Memória limitada:** 2000 linhas por agente, cada uma cortada em 1000
+caracteres (o corte diz que a linha inteira está no arquivo), e linha que
+nunca termina é fechada ao passar do limite. O título conta as linhas que
+saíram da memória. **Arquivo completo:** `runs/<run>/logs/agente-N.out.log` e
+`agente-N.err.log`, cópia fiel e crua, com as marcas de início e fim de cada
+chamada — o run passou a dizer seu id no `onPlanned` para isso.
+
+**Saída de modelo é hostil por definição** (`tui/sanitize.ts`): antes da tela
+saem todas as sequências de escape (CSI, OSC — inclusive o 52 da área de
+transferência —, DCS, SOS, PM, APC e as de dois bytes), todo controle C0 menos
+quebra e tabulação, todo C1 e os controles bidirecionais; `\r` deixa só a
+última versão da linha. A linha só é limpa quando completa, para um escape
+partido entre dois pedaços não escapar. O arquivo guarda o original: é
+evidência, não tela.
+
+**Responsivo:** o painel redesenha no máximo dez vezes por segundo, e só
+quando o log ou os eventos do agente mudaram, o relógio virou de segundo ou a
+janela mudou de tamanho; a saída que chega não redesenha o painel principal.
+Terminal estreito encurta rótulos e dicas; baixo (menos de 14 linhas) esconde
+os eventos e o Tab deixa de levar a eles. Sem TTY nada muda na saída: as
+linhas sequenciais de sempre, e os arquivos de log são gravados igual.
+
+Provado num PTY real com dois agentes e um codex falso que escreve em stdout e
+stderr e tenta limpar a tela e trocar o título da janela: escolha pela seta,
+Enter, PgUp parando a leitura, F voltando a seguir, Tab para os eventos, ←
+para o outro agente, Esc de volta ao painel; nenhum byte da injeção chegou ao
+terminal, e o build fechou as quatro fases enquanto isso.

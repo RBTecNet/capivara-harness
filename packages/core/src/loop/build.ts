@@ -38,10 +38,11 @@ import {
   runPaths,
   writeRunState,
 } from "../state/index.js";
-import { iniciarRepositorio, isClean, isRepository, lerEscolhaDeRepositorio, renderSemRepositorio } from "./git.js";
+import { escolhaSemRepositorio, iniciarRepositorio, isClean, isRepository, lerEscolhaDeRepositorio, renderSemRepositorio } from "./git.js";
 import { materializeSessions } from "./split.js";
 import { preflight, type PreflightWarning } from "./preflight.js";
-import { readPrerequisiteChoice, renderPrerequisiteChoice, resolvePrerequisites } from "./prerequisites.js";
+import { prerequisiteChoice, readPrerequisiteChoice, renderPrerequisiteChoice, resolvePrerequisites } from "./prerequisites.js";
+import type { EscolhaNumerada } from "./escolha.js";
 import { resolveTestCommand } from "./testcmd.js";
 import { runPhase, type EngineCaller, type PhaseOutcome } from "./runner.js";
 import { runAcceptance, type AcceptanceResult, type CommandRunner } from "./acceptance.js";
@@ -93,7 +94,7 @@ export interface BuildOptions {
    * interativo não tem a quem perguntar, e criar repositório sobre trabalho alheio
    * não é coisa que se faça por palpite.
    */
-  askGit?: (rendered: string) => Promise<string>;
+  askGit?: (rendered: string, escolha: EscolhaNumerada) => Promise<string>;
   /**
    * Recebe o que este build tem a devolver à base: o estado e o que o executor
    * anotou. Ausente significa build sem base — nada muda no resto.
@@ -131,7 +132,7 @@ export interface BuildOptions {
    * Sem isso, faltar pré-requisito continua sendo erro de preflight: um build
    * não interativo não tem a quem perguntar e não deve adivinhar.
    */
-  askPrerequisite?: (rendered: string) => Promise<string>;
+  askPrerequisite?: (rendered: string, escolha: EscolhaNumerada) => Promise<string>;
   /** Uma sessão do executor com escopo de instalar e nada mais. */
   installPrerequisites?: (prompt: string) => Promise<void>;
   /** Desliga a aceitação operacional final. */
@@ -236,7 +237,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   if (!repository && options.gitInit !== false) {
     if (options.askGit) {
       for (;;) {
-        const escolha = lerEscolhaDeRepositorio(await options.askGit(renderSemRepositorio()));
+        const escolha = lerEscolhaDeRepositorio(await options.askGit(renderSemRepositorio(), escolhaSemRepositorio()));
         if (escolha === null) {
           announce("  responda com 1, 2 ou 3.");
           continue;
@@ -300,7 +301,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         for (;;) {
           const perguntar = options.askPrerequisite;
           if (!perguntar) return "abortar";
-          const escolha = readPrerequisiteChoice(await perguntar(renderPrerequisiteChoice(faltando)));
+          const escolha = readPrerequisiteChoice(await perguntar(renderPrerequisiteChoice(faltando), prerequisiteChoice(faltando)));
           if (escolha) return escolha;
           announce("  responda com 1, 2 ou 3.");
         }

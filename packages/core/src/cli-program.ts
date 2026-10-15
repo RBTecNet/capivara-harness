@@ -23,6 +23,7 @@ import { configuredMcpUrl, resolveMcpEndpoint, resolveMcpProject, createMcpClien
 import type { McpClient, ProjectMaterial } from "./mcp/index.js";
 import type { InitOptions } from "./init/index.js";
 import { commitSpecification, iniciarRepositorio, relatorioDoBuild, runBuild } from "./loop/index.js";
+import type { EscolhaNumerada } from "./loop/index.js";
 import {
   BACK,
   BuildPhaseTracker,
@@ -46,11 +47,11 @@ import {
   supportsColor,
   supportsTrueColor,
 } from "./tui/index.js";
-import type { EntradaDeTeclado, InterviewInput, Janela, Parada, SaidaDeTela } from "./tui/index.js";
+import type { Choice, EntradaDeTeclado, InterviewInput, Janela, Parada, SaidaDeTela } from "./tui/index.js";
 import { paradaDeProntidao, paradaDoEstagio, type Estagio } from "./commands/paradas.js";
 import { runWizard, runWizardDePapeis, runWizardDoPedido } from "./commands/wizard.js";
 import { InputEndedError, createLineIO } from "./commands/line-io.js";
-import { createKeyPrompter, createKeySession } from "./commands/key-io.js";
+import { chooseInBox, createKeyPrompter, createKeySession } from "./commands/key-io.js";
 import type { WizardIO } from "./commands/wizard.js";
 import type { LineIO } from "./commands/line-io.js";
 import { listarEfforts, listarModelos } from "./provider/index.js";
@@ -619,6 +620,42 @@ function estagioInterativo(options: {
    */
   const decideStandoff: InitOptions["decideStandoff"] = async (rendered: string) => {
     progress.waitingForDeveloper();
+    /*
+     * Por tecla, as quatro saídas do impasse viram lista (§94), e cada uma
+     * devolve a palavra que o orquestrador já reconhece. A decisão escrita
+     * continua sendo texto: é ela que vira autoridade acima do auditor.
+     */
+    if (live.enabled && teclas) {
+      const texto = rendered.split("\n").filter((line) => !line.startsWith("Comandos:"));
+      const saidas: { choice: Choice; resposta: string | null }[] = [
+        { choice: { label: "escrever minha decisão", hint: "vira autoridade acima do auditor nos pontos do impasse" }, resposta: null },
+        { choice: { label: "reiniciar", hint: "o escritor tenta corrigir de novo e o auditor reconfere" }, resposta: "reiniciar" },
+        { choice: { label: "publicar como está" }, resposta: "publicar" },
+        { choice: { label: "abortar" }, resposta: "abortar" },
+      ];
+      return live.suspend(async () => {
+        try {
+          for (;;) {
+            const indice = await chooseInBox(teclas, {
+              title: "IMPASSE · precisa da sua decisão",
+              text: texto,
+              choices: saidas.map((saida) => saida.choice),
+              write: (text) => void stdout.write(text),
+              dimensions: () => ({ columns: stdout.columns ?? 100, rows: stdout.rows ?? 40 }),
+              style: style(),
+            });
+            const resposta = saidas[indice]?.resposta;
+            if (resposta) return resposta;
+            const decisao = await teclas.line.ask(paint("  ▸ sua decisão (Enter vazio volta às opções): ", "cyan", style()));
+            if (decisao.trim() !== "") return decisao;
+          }
+        } catch (error) {
+          if (!(error instanceof InputEndedError)) throw error;
+          teclas.close();
+          return await perguntar("", "o impasse do auditor");
+        }
+      });
+    }
     if (live.enabled) {
       progress.asking({ title: "IMPASSE · precisa da sua decisão", body: rendered.split("\n") });
       repaint();
@@ -1615,8 +1652,32 @@ export function createProgram(): Command {
     // O build pergunta ao desenvolvedor quando falta pré-requisito — mas só
     // quando há um desenvolvedor para responder. Sem terminal, faltar
     // pré-requisito continua sendo erro de preflight, e não um palpite.
-    const terminalBuild = stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
+    //
+    // Com o painel na tela, a decisão é uma lista numa caixa embaixo dele
+    // (§94). A sessão de teclas abre JÁ AQUI, e não na hora da pergunta: tecla
+    // batida durante o build ficaria no buffer do terminal e responderia a
+    // pergunta no instante em que ela abrisse — o defeito do `assistencia2`.
+    const teclasBuild =
+      comPainel && stdin.isTTY === true && stdout.isTTY === true && process.env.CAPIVARA_LINE_INPUT !== "1"
+        ? createKeySession({ input: stdin, write: (text) => void stdout.write(text), columns: () => stdout.columns ?? 100 })
+        : null;
+    const terminalBuild = !teclasBuild && stdin.isTTY === true ? createInterface({ input: stdin, output: stdout }) : null;
     const linhasBuild = terminalBuild ? createLineIO(terminalBuild, (text) => void stdout.write(text), { interactive: true }) : null;
+    const escolherNoBuild = (titulo: string, escolha: EscolhaNumerada): Promise<string> =>
+      liveBuild.suspend(() =>
+        chooseInBox(teclasBuild!, {
+          title: titulo,
+          text: escolha.texto,
+          choices: escolha.opcoes.map((label) => ({ label })),
+          write: (text) => void stdout.write(text),
+          dimensions: () => ({ columns: stdout.columns ?? 100, rows: stdout.rows ?? 40 }),
+          style: style(),
+        }).then((indice) => String(indice + 1), (error: unknown) => {
+          // Entrada esgotada é abortar, como na leitura de linha.
+          if (error instanceof InputEndedError) return String(escolha.opcoes.length);
+          throw error;
+        }),
+      );
 
     /*
      * O esqueleto do `init` é o que diz quais fluxos existem. Ele é carregado
@@ -1678,15 +1739,15 @@ export function createProgram(): Command {
       ...(flags.git === false ? { gitInit: false } : {}),
       ...(materialDoBuild && materialDoBuild !== "erro" ? { library: materialDoBuild.documents } : {}),
       ...(devolverMemorias ? { onMemorias: devolverMemorias } : {}),
-      ...(terminalBuild
+      ...(terminalBuild || teclasBuild
         ? {
             /*
              * A falta de repositório é perguntada pelo mesmo caminho do
              * pré-requisito ausente, porque é a mesma categoria de coisa: algo
              * que o build precisa e não está lá. Entrada esgotada é abortar.
              */
-            askGit: async (rendered: string) =>
-              liveBuild.suspend(async () => {
+            askGit: async (rendered: string, escolha: EscolhaNumerada) =>
+              teclasBuild ? escolherNoBuild("SEM REPOSITÓRIO GIT · precisa da sua decisão", escolha) : liveBuild.suspend(async () => {
                 stdout.write(`\n${rendered}\n`);
                 return await linhasBuild!.ask("> ").catch((error: unknown) => {
                   if (error instanceof InputEndedError) return "3";
@@ -1695,8 +1756,8 @@ export function createProgram(): Command {
               }),
             // A pergunta sai do alcance do painel: sem isso o pulso seguinte a
             // apagava, e o preflight ficava esperando uma resposta invisível.
-            askPrerequisite: async (rendered: string) =>
-              liveBuild.suspend(async () => {
+            askPrerequisite: async (rendered: string, escolha: EscolhaNumerada) =>
+              teclasBuild ? escolherNoBuild("PRÉ-REQUISITO AUSENTE · precisa da sua decisão", escolha) : liveBuild.suspend(async () => {
                 stdout.write(`\n${rendered}\n`);
                 // Entrada esgotada é "abortar": faltando pré-requisito e sem quem
                 // decida, instalar por conta própria seria um palpite caro.
@@ -1772,6 +1833,8 @@ export function createProgram(): Command {
 
     liveBuild.release();
     terminalBuild?.close();
+    // Antes da telinha da parada: ela põe o terminal em modo raw por conta própria.
+    teclasBuild?.close();
 
     /*
      * O desfecho, no formato único.

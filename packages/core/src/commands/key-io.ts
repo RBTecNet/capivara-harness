@@ -30,10 +30,12 @@ import type { LineIO } from "./line-io.js";
 import { createLiveRegion } from "../tui/live.js";
 import { BRACKETED_PASTE_OFF, BRACKETED_PASTE_ON, KeyDecoder } from "../tui/keys.js";
 import type { Key } from "../tui/keys.js";
-import { initialSelect, reduceSelect, type SelectSpec, type SelectState } from "../tui/select.js";
+import { initialSelect, reduceSelect, renderSelect, type SelectSpec, type SelectState } from "../tui/select.js";
+import { box } from "../tui/dashboard.js";
+import { wrapKeepingBreaks } from "../tui/interview.js";
 import { reduceTextField, type TextFieldSpec, type TextFieldState } from "../tui/text-field.js";
 import { cleanPrompt, renderWizardScreen, type WizardPrompt } from "../tui/wizard-screen.js";
-import { visibleWidth } from "../tui/ansi.js";
+import { paint, visibleWidth } from "../tui/ansi.js";
 import type { Choice } from "../tui/wizard.js";
 import type { Style } from "../tui/ansi.js";
 
@@ -214,6 +216,64 @@ export function createKeySession(options: KeySessionOptions): KeySession {
   };
 
   return session;
+}
+
+/**
+ * Uma escolha fechada embaixo do que já está na tela.
+ *
+ * É a forma do build e do impasse: o painel fica em cima, parado durante a
+ * pergunta. O texto da pergunta é escrito UMA vez, como texto comum — ele pode
+ * ser longo, como a lista do que o auditor insiste, e redesenhado a cada tecla
+ * empurraria a sobra duplicada para o histórico do terminal. Só a lista, numa
+ * moldura, se redesenha. Ao escolher, a moldura fica com a opção marcada: o que
+ * foi decidido tem de continuar legível depois.
+ *
+ * Devolve o índice da opção escolhida, a partir de zero.
+ */
+export async function chooseInBox(
+  session: KeySession,
+  options: {
+    title: string;
+    text: readonly string[];
+    choices: readonly Choice[];
+    defaultIndex?: number;
+    write: (text: string) => void;
+    dimensions: () => { columns: number; rows: number };
+    style: Style;
+  },
+): Promise<number> {
+  const { style } = options;
+  const region = createLiveRegion(options.write, true, options.dimensions);
+  const spec: SelectSpec = { title: options.title, choices: options.choices, defaultIndex: options.defaultIndex ?? 0 };
+  const largura = (): number => Math.min(110, Math.max(30, options.dimensions().columns));
+  const inner = largura() - 4;
+
+  const texto = options.text.flatMap((line) => {
+    if (line.trim() === "") return [""];
+    // O recuo é parte do texto: os itens com "·" ficam embaixo do que listam.
+    const recuo = /^\s*/.exec(line)![0];
+    return wrapKeepingBreaks(line, inner - recuo.length).map((part) => `  ${recuo}${part}`);
+  });
+  const descartadas = session.takeEarly();
+  options.write(
+    [
+      "",
+      paint(options.title, "cyan", style),
+      "",
+      ...texto,
+      ...(descartadas > 0 ? ["", paint(`(ignorei ${descartadas} tecla(s) batida(s) antes desta pergunta aparecer)`, "yellow", style)] : []),
+      "",
+    ].join("\n"),
+  );
+
+  const dica = paint(" ↑ ↓ move · número leva à opção · Enter confirma", "gray", style);
+  const indice = await session.select(spec, (state) => {
+    const rows = Math.max(4, options.dimensions().rows - 4);
+    region.draw(box("ESCOLHA", [...renderSelect(spec, state, largura() - 2, rows, style), "", dica], largura(), style).join("\n"));
+  });
+  region.draw(box("ESCOLHA", [` ${paint("✓", "green", style)} ${options.choices[indice]?.label ?? ""}`], largura(), style).join("\n"));
+  region.release();
+  return indice;
 }
 
 export interface KeyPrompter extends LineIO {

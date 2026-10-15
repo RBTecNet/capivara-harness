@@ -6375,3 +6375,33 @@ Sem painel, sem TTY ou com `CAPIVARA_LINE_INPUT=1`, tudo continua como antes; o
 teste de PTY real cobre os dois modos.
 
 Fica para depois: as paradas, os pré-requisitos e as decisões do build.
+
+## §94 — As decisões do build e o impasse, por lista
+
+Terceira parte do §92. O build pergunta em dois pontos — o projeto sem
+repositório Git e o pré-requisito ausente — e as duas perguntas existiam só
+como texto numerado. Desenhá-las como lista exigiria reler as opções de dentro
+do texto, um segundo parser da mesma pergunta, que é o que a tese deste projeto
+proíbe. Agora cada uma é dado (`EscolhaNumerada`, em `loop/escolha.ts`); o texto
+numerado é gerado dela, idêntico ao de antes — conferido contra a versão
+anterior —, e os hooks `askGit`/`askPrerequisite` recebem as duas formas. A
+lista devolve o número da opção, e o leitor de cada pergunta não mudou.
+
+Com o painel e uma pessoa no terminal, a decisão abre embaixo do painel parado:
+o texto da pergunta é escrito UMA vez, e só a lista, numa moldura, se redesenha
+(`chooseInBox`). O texto pode ser longo — o impasse lista cada ponto em que o
+auditor insiste —, e redesenhado a cada tecla empurraria a sobra duplicada para
+o histórico. Ao escolher, a moldura fica com a opção marcada.
+
+A sessão de teclas do build abre no começo do comando, não na hora da pergunta:
+a tecla batida durante horas de build ficaria no buffer do terminal e responderia
+a pergunta no instante em que ela abrisse. E fecha antes da telinha da parada,
+que põe o terminal em modo raw por conta própria.
+
+O impasse do auditor (init e plan) virou lista com as quatro saídas que o
+orquestrador reconhece: escrever a decisão, reiniciar, publicar como está,
+abortar. A decisão escrita continua sendo texto — é ela que vira autoridade
+acima do auditor —, e Enter vazio volta às opções.
+
+Ainda por linha: as perguntas do `change` e a colisão de projeto do `survey`,
+que não desenham painel.

@@ -8,7 +8,8 @@
 
 import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
-import { createKeyPrompter, createKeySession } from "../../src/commands/key-io.js";
+import { chooseInBox, createKeyPrompter, createKeySession } from "../../src/commands/key-io.js";
+import { escolhaSemRepositorio, lerEscolhaDeRepositorio } from "../../src/loop/git.js";
 import { runWizard, runWizardDePapeis } from "../../src/commands/wizard.js";
 import { InputEndedError } from "../../src/commands/line-io.js";
 
@@ -238,6 +239,64 @@ describe("sessão de teclas", () => {
     expect(escrito.join("")).toContain("ignorei 3 tecla(s)");
     await teclar("ok\r");
     expect(await resposta).toBe("ok");
+    session.close();
+  });
+});
+
+describe("escolha embaixo do painel", () => {
+  function caixa() {
+    const input = new EventEmitter() as EventEmitter & { setRawMode: (mode: boolean) => void };
+    input.setRawMode = () => undefined;
+    const escrito: string[] = [];
+    const session = createKeySession({ input: input as never, write: (text) => void escrito.push(text), interrupt: () => undefined });
+    const teclar = async (bytes: string): Promise<void> => {
+      for (let i = 0; i < 3; i += 1) await new Promise((resolve) => setImmediate(resolve));
+      input.emit("data", bytes);
+    };
+    const escolher = () => {
+      const escolha = escolhaSemRepositorio();
+      return chooseInBox(session, {
+        title: "SEM REPOSITÓRIO GIT",
+        text: escolha.texto,
+        choices: escolha.opcoes.map((label) => ({ label })),
+        write: (text) => void escrito.push(text),
+        dimensions: () => ({ columns: 100, rows: 30 }),
+        style: { enabled: false },
+      });
+    };
+    return { session, escrito, teclar, escolher };
+  }
+
+  it("o texto sai uma vez só, por mais teclas que se aperte; só a lista se redesenha", async () => {
+    const { session, escrito, teclar, escolher } = caixa();
+    const indice = escolher();
+    await teclar(`${ESC}[B`);
+    await teclar(`${ESC}[B`);
+    await teclar(`${ESC}[A\r`);
+    expect(await indice).toBe(1);
+    const tudo = escrito.join("");
+    expect(tudo.split("Duas razões, e nenhuma delas é gosto").length - 1).toBe(1);
+    expect(tudo.split("já criei em outro terminal").length - 1).toBeGreaterThan(2);
+    session.close();
+  });
+
+  it("a escolha fica marcada na tela, e o número dela é o que o leitor da pergunta já entende", async () => {
+    const { session, escrito, teclar, escolher } = caixa();
+    const indice = escolher();
+    await teclar("3\r");
+    const escolhido = await indice;
+    expect(escrito.join("")).toContain("✓ abortar");
+    expect(lerEscolhaDeRepositorio(String(escolhido + 1))).toBe("abortar");
+    session.close();
+  });
+
+  it("tecla batida antes da pergunta é dita no texto, e não escolhe nada", async () => {
+    const { session, escrito, teclar, escolher } = caixa();
+    await teclar("3\r");
+    const indice = escolher();
+    expect(escrito.join("")).toContain("ignorei 2 tecla(s)");
+    await teclar("\r");
+    expect(await indice).toBe(0);
     session.close();
   });
 });

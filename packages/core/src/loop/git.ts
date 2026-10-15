@@ -14,6 +14,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
+import { renderEscolhaNumerada, type EscolhaNumerada } from "./escolha.js";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
@@ -138,20 +139,27 @@ export type EscolhaDeRepositorio = "criar" | "verificar" | "abortar";
  * Mesma gramática do pré-requisito de sistema ausente, porque é a mesma coisa:
  * algo que o build precisa e não está lá. Três saídas, e só uma segue em frente.
  */
+export function escolhaSemRepositorio(): EscolhaNumerada {
+  return {
+    texto: [
+      "Este projeto não é um repositório Git, e o build precisa de um.",
+      "",
+      "Duas razões, e nenhuma delas é gosto:",
+      "  · cada fase verde vira um commit, e é o único ponto de retorno que existe — sem ele, uma",
+      "    fase que quebre o que outra construiu não tem para onde voltar;",
+      "  · critério que fale de arquivo versionado fica impossível de provar: o verificador vai",
+      "    conferir, não encontra versionamento, e reprova uma task correta.",
+    ],
+    opcoes: [
+      "criar o repositório agora e commitar o que já está aqui (respeitando o .gitignore)",
+      "já criei em outro terminal; verifique de novo",
+      "abortar",
+    ],
+  };
+}
+
 export function renderSemRepositorio(): string {
-  return [
-    "Este projeto não é um repositório Git, e o build precisa de um.",
-    "",
-    "Duas razões, e nenhuma delas é gosto:",
-    "  · cada fase verde vira um commit, e é o único ponto de retorno que existe — sem ele, uma",
-    "    fase que quebre o que outra construiu não tem para onde voltar;",
-    "  · critério que fale de arquivo versionado fica impossível de provar: o verificador vai",
-    "    conferir, não encontra versionamento, e reprova uma task correta.",
-    "",
-    "  1) criar o repositório agora e commitar o que já está aqui (respeitando o .gitignore)",
-    "  2) já criei em outro terminal; verifique de novo",
-    "  3) abortar",
-  ].join("\n");
+  return renderEscolhaNumerada(escolhaSemRepositorio());
 }
 
 /** Lê a escolha numérica; qualquer outra coisa é recusada, nunca adivinhada. */

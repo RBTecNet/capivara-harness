@@ -12,6 +12,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { renderEscolhaNumerada, type EscolhaNumerada } from "./escolha.js";
 
 const run = promisify(execFile);
 
@@ -196,17 +197,25 @@ export async function resolvePrerequisites(
   };
 }
 
-/** A tela da decisão, numerada: escolha fechada não se responde em texto livre. */
+/** A decisão, como dado: escolha fechada não se responde em texto livre. */
+export function prerequisiteChoice(missing: readonly PrerequisiteStatus[]): EscolhaNumerada {
+  return {
+    texto: [
+      `A stack decidida exige ${missing.map((status) => `${status.technology} (${status.binary})`).join(", ")},`,
+      "ausente(s) nesta máquina. O build não começa sem isso — descobrir na terceira fase",
+      "custa três sessões de agente.",
+    ],
+    opcoes: [
+      "instalar agora, numa sessão do executor com escopo de instalar e nada mais",
+      "já instalei em outro terminal; verifique de novo",
+      "abortar",
+    ],
+  };
+}
+
+/** A tela da decisão, numerada. */
 export function renderPrerequisiteChoice(missing: readonly PrerequisiteStatus[]): string {
-  return [
-    `A stack decidida exige ${missing.map((status) => `${status.technology} (${status.binary})`).join(", ")},`,
-    "ausente(s) nesta máquina. O build não começa sem isso — descobrir na terceira fase",
-    "custa três sessões de agente.",
-    "",
-    "  1) instalar agora, numa sessão do executor com escopo de instalar e nada mais",
-    "  2) já instalei em outro terminal; verifique de novo",
-    "  3) abortar",
-  ].join("\n");
+  return renderEscolhaNumerada(prerequisiteChoice(missing));
 }
 
 /** Lê a escolha numérica; qualquer outra coisa é recusada, nunca adivinhada. */

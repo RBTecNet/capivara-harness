@@ -61,7 +61,8 @@ export interface DashboardEvent {
  * de vida mais barata que existe.
  */
 export interface Activity {
-  kind: "modelo" | "você" | "parado";
+  /** `pausado` é a pausa pedida pela pessoa no build: nada roda até ela retomar. */
+  kind: "modelo" | "você" | "parado" | "pausado";
   detail: string;
   sinceSeconds: number;
 }
@@ -104,6 +105,8 @@ export interface DashboardModel {
    */
   question?: { title: string; body: string[] };
   activity: Activity;
+  /** As teclas que este painel atende, para o rodapé dizer; ausente é painel só de olhar. */
+  keys?: string;
   /**
    * Cor de fundo do painel, em hexadecimal. Ausente deixa o fundo do terminal.
    * Só tem efeito onde há cor verdadeira — em 16 cores, um tom escuro vira um
@@ -233,6 +236,7 @@ function columns(fields: { label: string; value: string; path?: boolean }[], wid
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 
 const ACTIVITY_TONE: Record<Activity["kind"], "yellow" | "cyan" | "red"> = {
+  pausado: "yellow",
   modelo: "yellow",
   "você": "cyan",
   parado: "red",
@@ -248,6 +252,9 @@ function activityLine(model: DashboardModel): string {
 
   if (activity.kind === "você") {
     return paint(`▸ aguardando sua resposta — há ${tempo}`, "cyan", style);
+  }
+  if (activity.kind === "pausado") {
+    return paint(`⏸ pausado — há ${tempo}${activity.detail === "" ? "" : ` · ${activity.detail}`}`, ACTIVITY_TONE.pausado, style);
   }
   if (activity.kind === "parado") {
     return paint(`✗ parado — ${activity.detail}`, "red", style);
@@ -319,6 +326,14 @@ function footer(model: DashboardModel, width: number): string {
     : width < NARROW
       ? "Ctrl-C interrompe com estado retomável"
       : "Ctrl-C interrompe com estado retomável · segredos nunca entram neste painel";
+  /*
+   * As teclas vêm antes do resto: atalho que não aparece na tela não existe. A
+   * frase dos segredos é a primeira a sair quando falta largura.
+   */
+  if (model.keys) {
+    const comTeclas = [`${model.keys} · Ctrl-C interrompe com estado retomável`, `${model.keys} · Ctrl-C interrompe`, model.keys];
+    return paint(comTeclas.find((opcao) => visibleWidth(opcao) <= width) ?? model.keys, "gray", model.style);
+  }
   return paint(text, "gray", model.style);
 }
 

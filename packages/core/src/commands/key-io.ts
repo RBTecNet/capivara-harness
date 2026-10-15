@@ -59,8 +59,11 @@ export interface KeySessionOptions {
 }
 
 export interface KeySession {
-  /** A lista; `render` é chamado ao abrir e a cada tecla, com o estado atual. */
-  select: (spec: SelectSpec, render: (state: SelectState) => void) => Promise<number>;
+  /**
+   * A lista; `render` é chamado ao abrir e a cada tecla, com o estado atual.
+   * Devolve `null` só quando a lista é `cancelable` e a pessoa aperta Esc.
+   */
+  select: (spec: SelectSpec, render: (state: SelectState) => void) => Promise<number | null>;
   /**
    * O campo; `render` como na lista. Ctrl-D num campo vazio é o fim da entrada,
    * e o Esc num campo `cancelable` devolve `null`.
@@ -74,6 +77,17 @@ export interface KeySession {
   line: LineIO;
   /** Quantas teclas chegaram sem pergunta aberta desde a última vez; zera ao ler. */
   takeEarly: () => number;
+  /**
+   * Quem atende a tecla quando não há pergunta aberta — os atalhos do build.
+   * Devolvendo falso, a tecla conta como batida antes da hora, como sempre.
+   */
+  onIdle: (handler: ((key: Key) => boolean) | null) => void;
+  /**
+   * Entrega os bytes crus a outro leitor até o cancelamento devolvido ser
+   * chamado — a telinha de rolagem tem o próprio leitor de teclas. O Ctrl-C
+   * continua sendo da sessão.
+   */
+  capture: (listener: (chunk: string) => void) => () => void;
   close: () => void;
   readonly closed: boolean;
 }
@@ -87,6 +101,8 @@ export function createKeySession(options: KeySessionOptions): KeySession {
   const { input, write } = options;
   const decoder = new KeyDecoder();
   let pending: Pending | null = null;
+  let idle: ((key: Key) => boolean) | null = null;
+  let captured: ((chunk: string) => void) | null = null;
   let early = 0;
   let closed = false;
 
@@ -94,16 +110,23 @@ export function createKeySession(options: KeySessionOptions): KeySession {
     pending = null;
   };
 
+  const interromper = (): void => {
+    session.close();
+    (options.interrupt ?? (() => process.kill(process.pid, "SIGINT")))();
+  };
+
   const onData = (chunk: string | Buffer): void => {
-    for (const key of decoder.feed(typeof chunk === "string" ? chunk : chunk.toString("utf8"))) {
+    const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    if (captured) {
+      if (text.includes("\u0003")) return interromper();
+      captured(text);
+      return;
+    }
+    for (const key of decoder.feed(text)) {
       if (closed) return;
-      if (key.type === "ctrl-c") {
-        session.close();
-        (options.interrupt ?? (() => process.kill(process.pid, "SIGINT")))();
-        return;
-      }
+      if (key.type === "ctrl-c") return interromper();
       if (pending) pending.onKey(key);
-      else early += 1;
+      else if (!(idle?.(key) ?? false)) early += 1;
     }
   };
 
@@ -146,14 +169,24 @@ export function createKeySession(options: KeySessionOptions): KeySession {
       early = 0;
       return count;
     },
+    onIdle: (handler) => {
+      idle = handler;
+    },
+    capture: (listener) => {
+      captured = listener;
+      return () => {
+        if (captured === listener) captured = null;
+      };
+    },
     select: (spec, render) =>
-      open<number>((resolve, reject) => {
+      open<number | null>((resolve, reject) => {
         let state = initialSelect(spec);
         render(state);
         return (key) => {
           if (key.type === "ctrl-d") return reject(new InputEndedError());
           const step = reduceSelect(spec, state, key);
           state = step.state;
+          if (step.cancelled) return resolve(null);
           if (step.chosen !== undefined) return resolve(step.chosen);
           render(state);
         };
@@ -267,10 +300,11 @@ export async function chooseInBox(
   );
 
   const dica = paint(" ↑ ↓ move · número leva à opção · Enter confirma", "gray", style);
-  const indice = await session.select(spec, (state) => {
-    const rows = Math.max(4, options.dimensions().rows - 4);
-    region.draw(box("ESCOLHA", [...renderSelect(spec, state, largura() - 2, rows, style), "", dica], largura(), style).join("\n"));
-  });
+  const indice =
+    (await session.select(spec, (state) => {
+      const rows = Math.max(4, options.dimensions().rows - 4);
+      region.draw(box("ESCOLHA", [...renderSelect(spec, state, largura() - 2, rows, style), "", dica], largura(), style).join("\n"));
+    })) ?? spec.defaultIndex;
   region.draw(box("ESCOLHA", [` ${paint("✓", "green", style)} ${options.choices[indice]?.label ?? ""}`], largura(), style).join("\n"));
   region.release();
   return indice;
@@ -393,11 +427,11 @@ export function createKeyPrompter(options: KeyPrompterOptions): KeyPrompter {
       const spec: SelectSpec = { title, choices, defaultIndex, ...(keepLabel !== undefined ? { keepLabel } : {}) };
       return ask(
         title,
-        () =>
-          session.select(spec, (state) => {
+        async () =>
+          (await session.select(spec, (state) => {
             current = { kind: "select", spec, state };
             draw();
-          }),
+          })) ?? spec.defaultIndex,
         (value) => (value < 0 ? (keepLabel ?? "padrão") : (choices[value]?.label ?? String(value))),
       );
     },

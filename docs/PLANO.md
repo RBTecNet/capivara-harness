@@ -6405,3 +6405,33 @@ acima do auditor —, e Enter vazio volta às opções.
 
 Ainda por linha: as perguntas do `change` e a colisão de projeto do `survey`,
 que não desenham painel.
+
+## §95 — Pausar e ver uma fase no meio do build
+
+O build é a etapa de horas, e o terminal só deixava olhar o painel ou
+interromper tudo com Ctrl-C. Agora, com o painel e uma pessoa no terminal:
+
+- **`p` pausa.** A pausa segura a próxima CHAMADA DE MODELO, no `call` do CLI,
+  por onde toda chamada do build passa. A sessão de agente em andamento termina,
+  a suíte e os fluxos que estiverem rodando terminam, e o build espera antes de
+  abrir a sessão seguinte — matar um agente no meio deixaria a árvore num estado
+  que nenhum gate avaliou. Enquanto a chamada corrente não acaba, a tela diz
+  "pausa pedida"; quando o build para, a atividade vira "⏸ pausado — há Xs". A
+  mesma tecla retoma, ou desiste do pedido antes de ele acontecer. O loop não
+  mudou: a pausa é do CLI.
+- **`f` vê uma fase.** Abre, em tela alternativa, a lista das fases com o estado
+  de cada uma, o cursor na corrente. Enter abre a telinha de rolagem das paradas
+  com estado, gates e tasks fixos em cima e o texto da fase embaixo — lido do
+  plano pelo mesmo `splitPhases` do loop, nenhum segundo parser —, mais os
+  eventos recentes que a citam. O build segue rodando por trás; o painel só para
+  de desenhar (`LiveRegion.hold`) e, ao voltar, redesenha no mesmo lugar.
+
+`f` só vale depois que o plano é anunciado: antes disso o build ainda pode estar
+fazendo uma pergunta própria (Git, pré-requisito), e duas listas disputariam o
+teclado. Se o build terminar com uma fase aberta, o desfecho espera a pessoa
+fechá-la — duas telas alternativas se pisariam. A telinha recebe o teclado da
+sessão de teclas, que continua dona do Ctrl-C. As teclas aparecem no rodapé:
+atalho que não aparece na tela não existe.
+
+Provado num PTY real, com o plano do `cron7` e um codex falso: lista, fase,
+volta, pausa pedida, pausado antes do ciclo seguinte, retomada.

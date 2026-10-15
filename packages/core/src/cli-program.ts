@@ -37,6 +37,7 @@ import {
   detectLanguage,
   UBUNTU_AUBERGINE,
   paint,
+  abrirModal,
   interactiveQuestionBox,
   interviewChoices,
   questionBox,
@@ -52,6 +53,9 @@ import { paradaDeProntidao, paradaDoEstagio, type Estagio } from "./commands/par
 import { runWizard, runWizardDePapeis, runWizardDoPedido } from "./commands/wizard.js";
 import { InputEndedError, createLineIO } from "./commands/line-io.js";
 import { chooseInBox, createKeyPrompter, createKeySession } from "./commands/key-io.js";
+import { PauseGate, modalDaFase, teclasDoBuild, textoDaFase } from "./commands/build-controls.js";
+import { box } from "./tui/dashboard.js";
+import { renderSelect, type SelectSpec } from "./tui/select.js";
 import type { WizardIO } from "./commands/wizard.js";
 import type { LineIO } from "./commands/line-io.js";
 import { listarEfforts, listarModelos } from "./provider/index.js";
@@ -567,7 +571,7 @@ function estagioInterativo(options: {
         }
         const escolhas = interviewChoices(question, { leaveOpen: engenharia });
         for (;;) {
-          const indice = await teclas.select(escolhas.spec, (state) => mostrar({ kind: "select", choices: escolhas, state }));
+          const indice = (await teclas.select(escolhas.spec, (state) => mostrar({ kind: "select", choices: escolhas, state }))) ?? escolhas.spec.defaultIndex;
           const resposta = escolhas.answers[indice];
           if (resposta !== null && resposta !== undefined) return resposta;
           // Texto livre: Esc ou Enter vazio voltam às opções em vez de virar "não sei".
@@ -1680,6 +1684,107 @@ export function createProgram(): Command {
       );
 
     /*
+     * Pausar e ver uma fase (§95). Só existem com a sessão de teclas: sem
+     * terminal não há quem aperte, e sem painel não há onde mostrar.
+     */
+    const pausa = new PauseGate();
+    let vendoFase: Promise<void> | null = null;
+    let buildTerminou = false;
+    const verFases = (): void => {
+      if (vendoFase || !teclasBuild) return;
+      vendoFase = mostrarFases().catch((erro: unknown) => {
+        // Sessão fechada no meio — o terminal volta, e o build segue o desfecho.
+        stdout.write("\u001B[?25h\u001B[?1049l");
+        if (!(erro instanceof InputEndedError)) throw erro;
+      });
+    };
+    const mostrarFases = async (): Promise<void> => {
+      if (!teclasBuild) return;
+      const TELA_ALTERNATIVA = "\u001B[?1049h\u001B[?25l";
+      const TELA_NORMAL = "\u001B[?25h\u001B[?1049l";
+      try {
+        await liveBuild.hold(async () => {
+          let cursor = Math.max(0, fases.rows().findIndex((linha) => linha.state === "em andamento"));
+          for (;;) {
+            const linhas = fases.rows();
+            const spec: SelectSpec = {
+              title: "Qual fase?",
+              choices: linhas.map((linha) => ({
+                label: `${linha.id}  ${linha.title}`,
+                hint: `${linha.state}${linha.detail && linha.detail !== linha.state ? ` · ${linha.detail}` : ""}`,
+              })),
+              defaultIndex: Math.min(cursor, linhas.length - 1),
+              cancelable: true,
+            };
+            stdout.write(TELA_ALTERNATIVA);
+            const escolhida = await teclasBuild.select(spec, (state) => {
+              const largura = Math.min(110, stdout.columns ?? 100);
+              const corpo = [
+                ...renderSelect(spec, state, largura - 2, Math.max(4, (stdout.rows ?? 40) - 6), style()),
+                "",
+                buildTerminou
+                  ? paint(" o build terminou · Esc mostra o resultado", "yellow", style())
+                  : paint(" ↑ ↓ move · Enter abre a fase · Esc volta ao painel — o build segue rodando", "gray", style()),
+              ];
+              stdout.write(`\u001B[2J\u001B[H${box("VER FASE", corpo, largura, style()).join("\n")}`);
+            });
+            if (escolhida === null) break;
+            cursor = escolhida;
+            const fase = linhas[escolhida]!;
+            const modal = modalDaFase(fase, await textoDaFase(projectRoot, fase.id), painelBuild.model().events, style());
+            // A telinha tem o próprio leitor de teclas; a sessão só repassa os bytes.
+            let soltar: (() => void) | null = null;
+            await abrirModal(modal, {
+              entrada: {
+                isTTY: true,
+                setRawMode: () => undefined,
+                resume: () => undefined,
+                pause: () => undefined,
+                on: (_evento, ouvinte) => {
+                  soltar = teclasBuild.capture((texto) => ouvinte(texto));
+                },
+                off: () => soltar?.(),
+              },
+              saida: stdout,
+              style: style(),
+            });
+          }
+          stdout.write(TELA_NORMAL);
+        });
+      } finally {
+        vendoFase = null;
+        repaintBuild();
+      }
+    };
+    if (teclasBuild) {
+      painelBuild.setKeys(teclasDoBuild(pausa.state));
+      teclasBuild.onIdle((tecla) => {
+        if (tecla.type !== "char") return false;
+        const letra = tecla.text.toLowerCase();
+        if (letra === "p") {
+          const efeito = pausa.toggle();
+          painelBuild.note(
+            efeito === "pedida"
+              ? "pausa pedida: o build para antes da próxima chamada de modelo"
+              : efeito === "cancelada"
+                ? "pedido de pausa desfeito"
+                : "build retomado",
+          );
+          painelBuild.setKeys(teclasDoBuild(pausa.state));
+          repaintBuild();
+          return true;
+        }
+        // Antes de o plano ser anunciado não há fase para ver — e é ali que o
+        // build ainda pode estar fazendo uma pergunta própria.
+        if (letra === "f" && fases.rows().length > 0) {
+          verFases();
+          return true;
+        }
+        return false;
+      });
+    }
+
+    /*
      * O esqueleto do `init` é o que diz quais fluxos existem. Ele é carregado
      * aqui, e não dentro do loop, porque quem o guarda é o estágio de
      * documentação: o loop importado pelo init não pode importar o init de volta.
@@ -1812,6 +1917,13 @@ export function createProgram(): Command {
           systemInstall: flags.systemInstall !== false,
         });
         const quem = `${call.role} · ${call.phase.id}`;
+        // A pausa segura AQUI: nenhuma sessão de agente fica pela metade.
+        await pausa.wait(() => {
+          painelBuild.paused(`antes de ${quem} · p retoma`);
+          painelBuild.setKeys(teclasDoBuild(pausa.state));
+          repaintBuild();
+        });
+        painelBuild.setKeys(teclasBuild ? teclasDoBuild(pausa.state) : null);
         painelBuild.beginCall(quem);
         repaintBuild();
         const resposta = await bridge({
@@ -1833,8 +1945,13 @@ export function createProgram(): Command {
 
     liveBuild.release();
     terminalBuild?.close();
+    // Quem está lendo uma fase quando o build termina fecha a leitura primeiro:
+    // o desfecho abre a própria telinha, e duas telas alternativas se pisariam.
+    buildTerminou = true;
+    if (vendoFase) await vendoFase;
     // Antes da telinha da parada: ela põe o terminal em modo raw por conta própria.
     teclasBuild?.close();
+    painelBuild.setKeys(null);
 
     /*
      * O desfecho, no formato único.

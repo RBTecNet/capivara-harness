@@ -33,6 +33,8 @@ export interface SelectSpec {
    */
   defaultIndex: number;
   keepLabel?: string;
+  /** Esc desiste da lista: quem abriu recebe `cancelled` em vez de uma opção. */
+  cancelable?: boolean;
 }
 
 export interface SelectState {
@@ -43,7 +45,7 @@ export interface SelectState {
   message: string | null;
 }
 
-export type SelectStep = { state: SelectState; chosen?: number };
+export type SelectStep = { state: SelectState; chosen?: number; cancelled?: true };
 
 function hasKeep(spec: SelectSpec): boolean {
   return spec.keepLabel !== undefined && spec.defaultIndex < 0;
@@ -90,6 +92,8 @@ export function reduceSelect(spec: SelectSpec, state: SelectState, key: Key): Se
       return { state: { cursor: Math.min(rows - 1, state.cursor + 5), digits: "", message: null } };
     case "enter":
       return { state: { ...state, digits: "" }, chosen: valueOfRow(spec, state.cursor) };
+    case "escape":
+      return spec.cancelable ? { state, cancelled: true } : { state };
     case "paste":
       return {
         state: {

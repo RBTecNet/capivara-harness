@@ -99,6 +99,7 @@ export class HarnessProgress {
 
   private etapa = "preflight";
   private situacao: { label: string; state: StepState } = { label: "iniciando", state: "em andamento" };
+  private teclas: string | null = null;
   private atividade: { kind: Activity["kind"]; detail: string; desde: number } = {
     kind: "modelo",
     detail: "preparando",
@@ -218,6 +219,16 @@ export class HarnessProgress {
   waitingForDeveloper(): void {
     this.atividade = { kind: "você", detail: "", desde: this.now().getTime() };
     if (this.options.command === "prompt-engineer") this.situacao = { label: "aguardando sua resposta", state: "aguardando" };
+  }
+
+  /** A pessoa pausou o build; `detail` diz como retomar. */
+  paused(detail: string): void {
+    this.atividade = { kind: "pausado", detail, desde: this.now().getTime() };
+  }
+
+  /** As teclas que o painel atende, para o rodapé. */
+  setKeys(teclas: string | null): void {
+    this.teclas = teclas;
   }
 
   /** Parou, e por quê. */
@@ -369,6 +380,7 @@ export class HarnessProgress {
       ],
       events: [...this.linhas],
       ...(this.pergunta ? { question: this.pergunta } : {}),
+      ...(this.teclas ? { keys: this.teclas } : {}),
       activity: {
         kind: this.atividade.kind,
         detail: this.atividade.detail,

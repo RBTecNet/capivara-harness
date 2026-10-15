@@ -37,6 +37,17 @@ export interface LiveRegion {
    * o pulso volta ao fim — mesmo se `durante` falhar.
    */
   suspend: <T>(durante: () => Promise<T>) => Promise<T>;
+  /**
+   * Para de desenhar enquanto `durante` roda, SEM esquecer onde o desenho está.
+   *
+   * É o que uma tela alternativa precisa — a de ver uma fase no meio do build.
+   * Ao voltar dela, o terminal devolve a tela de antes exatamente como estava,
+   * e o próximo desenho tem de cair em cima do painel, não embaixo dele, que é
+   * o que `suspend` faria. Os desenhos pedidos no meio tempo são descartados:
+   * o modelo continua sendo atualizado, e o desenho seguinte já mostra o estado
+   * de agora.
+   */
+  hold: <T>(durante: () => Promise<T>) => Promise<T>;
   readonly enabled: boolean;
 }
 
@@ -55,6 +66,7 @@ export function createLiveRegion(
   let previous: { columns: number; rows: number } | undefined;
   let pulso: NodeJS.Timeout | null = null;
   let ritmo: { render: () => string; intervalMilliseconds: number } | null = null;
+  let segurando = false;
 
   const region: LiveRegion = {
     enabled,
@@ -82,8 +94,20 @@ export function createLiveRegion(
         if (pulsava) region.beat(pulsava.render, pulsava.intervalMilliseconds);
       }
     },
+    hold: async (durante) => {
+      const pulsava = pulso !== null ? ritmo : null;
+      if (pulso) clearInterval(pulso);
+      pulso = null;
+      segurando = true;
+      try {
+        return await durante();
+      } finally {
+        segurando = false;
+        if (pulsava) region.beat(pulsava.render, pulsava.intervalMilliseconds);
+      }
+    },
     draw: (text) => {
-      if (!enabled) return;
+      if (!enabled || segurando) return;
       const corpo = text.endsWith("\n") ? text : `${text}\n`;
       const size = dimensions?.();
       // Depois de resize, o terminal pode ter refluído cada linha antiga.

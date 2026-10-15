@@ -36,14 +36,38 @@ relatório foi commitado e enviado. Base: `7754eee`.
   - `impedimentosDaPrincipal` (`:289`), antes do cherry-pick, recusa integrar quando há arquivo versionado alterado
     ou arquivo não versionado no caminho da fase. Não versionado fora do caminho, como o `.env` semeado, não impede;
   - o `integrar` só chama de conflito o que deixou arquivo em conflito; o resto é `recusada` (`:179`, `:212`);
-  - `desfazerSemApagar` (`:304`): se o `reset --keep` recusa, o HEAD volta com `--soft` e os arquivos ficam como
-    alteração não commitada;
+  - `desfazerSemApagar`: se o `reset --keep` recusa, primeiro guarda e depois limpa (ver "Ajuste do rollback"
+    abaixo);
   - os três casos param como falha fatal, dizendo os arquivos e o branch da fase.
 - **Evidência:**
   - teste "M1: arquivo não versionado…": antes, "conflito ao integrar" e a fase refeita duas vezes; agora uma
     sessão, erro com `coverage/report.txt`, conteúdo da principal intacto, fase no branch;
   - teste "M1: suíte vermelha com a árvore alterada…": antes, o `phase-3` ficava no histórico; agora o HEAD não o
-    tem, o arquivo alterado pela suíte continua com o conteúdo dela, e a fase está no branch.
+    tem, a árvore volta a ser a de antes da integração, o que estava nela fica num branch guardado, e a fase está no
+    branch dela.
+
+### Ajuste do rollback — o `--soft` promovia código reprovado
+
+A primeira versão do M1 voltava o HEAD com `--soft` e deixava o código da fase reprovada na árvore como alteração
+não commitada.
+
+- **Impacto:** na execução seguinte o `isClean` acusava árvore suja, e o preflight (`loop/preflight.ts:95`, o mesmo
+  do serial) sugeria `git add -A && git commit`. Seguir a sugestão punha o código reprovado no histórico, e a
+  retomada refazia a fase sobre um HEAD que já o tinha.
+- **Correção, só no rollback:** o preflight, o serial e o runner não mudaram. Quando o `reset --keep` recusa,
+  `desfazerSemApagar`:
+  1. guarda primeiro: o estado inteiro da árvore (a fase integrada mais o que a suíte escreveu, versionado ou não)
+     vira um commit no branch `capivara/<run>/<fase>-reprovada-<sha>`, montado com um índice temporário, sem tocar
+     no índice nem na árvore da principal;
+  2. só depois limpa: `reset --hard` para o commit de antes da integração, e remoção só dos não versionados que a
+     integração criou — os que já estavam ficam;
+  3. se guardar falhar, nada é limpo.
+- **Evidência:** o teste "M1: suíte vermelha com a árvore alterada no caminho…" foi reescrito. Com o `--soft` ele
+  falhava (`AM coverage/report.txt`, `A relatorio.txt` no status). Agora passa e confere que:
+  - `git status --porcelain` está vazio e os arquivos da integração reprovada não estão em disco;
+  - o branch guardado tem o que a suíte reescreveu, o que ela criou sem versionar e o código da fase;
+  - a retomada começa sem barreira do preflight, refaz a P03 pelos gates, o `phase-3` aparece uma vez só no
+    histórico e o branch guardado continua lá.
 
 ### M2 — integração depois de falha fatal
 
@@ -66,7 +90,7 @@ relatório foi commitado e enviado. Base: `7754eee`.
 | Arquivo | O que mudou |
 |---|---|
 | `packages/core/src/loop/paralelo.ts` | B1, B2, M1 (uso), M2, M3 |
-| `packages/core/src/loop/worktree.ts` | `impedimentosDaPrincipal`, `desfazerSemApagar`, `integrar` com `recusada` |
+| `packages/core/src/loop/worktree.ts` | `impedimentosDaPrincipal`, `desfazerSemApagar` (guarda e limpa), `integrar` com `recusada` |
 | `packages/core/test/loop/paralelo.spec.ts` | bloco "auditoria (§99)" com 7 testes; o motor falso ganhou `veredito` e `lanca` |
 | `docs/PLANO.md` | §99 |
 
@@ -79,7 +103,8 @@ existia e já era usado no conflito; agora é chamado em mais desfechos.
 - **Antes das correções:** os 7 testes novos falharam, cada um pelo defeito do seu achado (os outros 10 do arquivo
   passaram).
 - **Depois:** os 17 passaram.
-- **`npm run check` na raiz:** rc=0, 98 arquivos, **1890 testes** (1883 de antes mais os 7).
+- **`npm run check` na raiz:** rc=0, 98 arquivos, **1890 testes** (1883 de antes mais os 7), também depois do
+  ajuste do rollback. O bloco da auditoria passou 5 vezes em 5.
 - **Intermitência medida:** o teste antigo "fases independentes rodam ao mesmo tempo" exige que P02 e P03 se cruzem
   numa janela de 80ms e às vezes não se cruzam. No código original falhou 2 em 50 execuções; com as correções, 3 em
   50. Já existia e não vem destas mudanças; não foi alterado por estar fora do escopo.
@@ -89,9 +114,10 @@ existia e já era usado no conflito; agora é chamado em mais desfechos.
 - **Parada mais frequente e explícita:** projetos cuja suíte reescreve arquivo versionado (por exemplo `coverage/`
   ou um SQLite commitado) agora param como falha fatal, dizendo o arquivo. Antes falhavam com o diagnóstico errado
   ("conflito"). Ficou correto, mas o build para.
-- **Árvore suja depois do `--soft`:** no M1 com reset recusado, a árvore principal fica com o código da fase como
-  alteração não commitada. O preflight seguinte sugere `git add -A && git commit`, o que poria esse código vermelho
-  no histórico. A mensagem da fatal diz o que aconteceu, mas a sugestão do preflight continua genérica.
+- **Arquivos ignorados no rollback:** arquivos ignorados pelo Git (por exemplo `node_modules` depois de um
+  `npm install`) não são guardados nem voltam ao estado anterior. Não afeta o histórico nem o preflight.
+- **Branch da fase na nova execução (m3):** rodar de novo ainda apaga `capivara/<run>/<fase>`; o branch
+  `-reprovada-…`, que também tem o código da fase, sobrevive.
 - **Custo do B2:** uma fase que falha perde também aprovações de runs anteriores e reverifica essas tasks na
   retomada.
 - **Irmão serial do B2, não corrigido:** a instrução "descarta e a fase recomeça do zero" do runner também deixa

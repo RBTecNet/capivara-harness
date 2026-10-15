@@ -6643,3 +6643,67 @@ stderr e tenta limpar a tela e trocar o título da janela: escolha pela seta,
 Enter, PgUp parando a leitura, F voltando a seguir, Tab para os eventos, ←
 para o outro agente, Esc de volta ao painel; nenhum byte da injeção chegou ao
 terminal, e o build fechou as quatro fases enquanto isso.
+
+## §99 — O que a auditoria do paralelo achou, e o que foi corrigido
+
+A auditoria adversarial do §97 (`docs/AUDITORIA-PARALELO.md`) achou dois
+BLOCKERs e três MAJORs na integração. Os cinco foram corrigidos sem mudar a
+arquitetura: o escalonador, o worktree por fase e a fila de integração são os
+mesmos. O serial não foi tocado — só `loop/paralelo.ts` e `loop/worktree.ts`
+mudaram.
+
+**B1 — a árvore integrada passa pelo mesmo preparo do worktree.** O runner
+chama `prepararAmbiente` antes do gate 2; a integração não chamava, e a
+árvore principal nunca ganhava o `.env` nem a migração. Agora chama, com o
+mesmo executor do `npm install`, e grava a saída da migração em
+`<fase>.migrate-integracao.log`. É a correção pela metade de sempre: o
+preparo estava no irmão.
+
+**B2 — aprovação de task acompanha o código.** Em todo desfecho em que o
+trabalho da fase fica fora do produto — parou num gate, não fechou nem
+sozinha na árvore integrada, não pôde ser integrada, erro inesperado — as
+aprovações dela são revogadas (`esquecer`). Antes, a retomada abria um
+worktree do HEAD, sem o parcial, e o verificador era instruído a carimbar
+DONE no que não estava lá. O worktree que nem chegou a abrir não revoga: nada
+foi aprovado nem saiu da árvore. O custo é reverificar, na retomada, tasks que
+já tinham passado em runs anteriores.
+
+**M1 — a árvore principal é conferida antes de integrar, e nada é apagado.**
+`impedimentosDaPrincipal` recusa integrar quando há arquivo versionado
+alterado (a suíte julgaria uma árvore que não é o HEAD) ou arquivo não
+versionado no caminho da fase (o cherry-pick o sobrescreveria). Não
+versionado fora do caminho — o `.env` semeado — não impede. O `integrar` só
+chama de conflito o que deixou arquivo em conflito; o resto é `recusada`, que
+não se resolve refazendo. Suíte vermelha com a árvore alterada no meio da
+integração: o `reset --keep` recusa e o HEAD voltava com os commits
+reprovados. A primeira correção voltava o HEAD com `--soft` e deixava os
+arquivos como alteração não commitada — e a execução seguinte achava a árvore
+suja, e o preflight mandava `git add -A && git commit`, que promovia o código
+reprovado a commit. Agora `desfazerSemApagar` primeiro GUARDA e depois limpa:
+o estado inteiro da árvore (a fase integrada mais o que a suíte escreveu,
+versionado ou não) vira um commit no branch `capivara/<run>/<fase>-reprovada-<sha>`,
+montado com um índice temporário; só com ele gravado a árvore volta a ser a de
+antes da integração (`reset --hard` nos versionados, remoção só dos não
+versionados que a integração criou). O preflight não foi tocado: a árvore que
+ele encontra é a de antes, e não há nada da integração reprovada para ele
+mandar commitar. Se guardar falhar, nada é limpo. Os três casos param o build
+como falha fatal, dizendo os arquivos, o branch guardado e o branch da fase.
+
+**M2 — depois da fatal, nada entra.** A fila de integração pergunta pela
+falha fatal DENTRO da vez de cada fase: a que ainda rodava termina, fica
+verde no branch dela, e não é integrada.
+
+**M3 — erro inesperado não deixa órfão.** A exceção de uma fase não sai mais
+do laço na hora — saía, o lock era liberado e os outros agentes seguiam
+integrando depois de o build ter devolvido o erro. Agora o parcial vai para o
+branch, nada mais sai nem entra, os agentes em andamento terminam, e só então
+o erro sobe, como no serial.
+
+Cada achado tem teste em `test/loop/paralelo.spec.ts` (bloco "auditoria
+(§99)"), com Git de verdade, e os sete falhavam antes da correção.
+
+Fica para depois, registrado na auditoria: M4 (stacks sem npm não têm
+dependências na árvore principal), m1 a m3. E o irmão serial do B2: a
+instrução "descarta e a fase recomeça do zero" do runner também deixa as
+aprovações de um código descartado — não corrigido aqui por estar fora do
+escopo pedido.

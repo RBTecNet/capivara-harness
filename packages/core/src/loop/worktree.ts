@@ -19,8 +19,8 @@
  */
 
 import { execFile } from "node:child_process";
-import { cp, mkdir, readdir, rm, stat } from "node:fs/promises";
-import { homedir } from "node:os";
+import { cp, mkdir, mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { sha12 } from "../contract/stamps.js";
@@ -171,7 +171,12 @@ export async function guardarParcial(worktree: Worktree, mensagem: string): Prom
 export type Integracao =
   | { status: "integrada"; commits: number; arquivos: string[] }
   | { status: "nada a integrar" }
-  | { status: "conflito"; arquivos: string[] };
+  | { status: "conflito"; arquivos: string[] }
+  /**
+   * O git recusou o cherry-pick sem conflito de conteúdo — a árvore principal
+   * tinha algo no caminho. Não é da fase: refazê-la daria o mesmo (§99).
+   */
+  | { status: "recusada"; motivo: string };
 
 /**
  * Os commits da fase, aplicados um a um sobre a árvore principal.
@@ -190,14 +195,21 @@ export async function integrar(projectRoot: string, worktree: Worktree): Promise
   const antes = await git(projectRoot, ["rev-parse", "HEAD"]);
   try {
     await git(projectRoot, ["cherry-pick", "--allow-empty", "--keep-redundant-commits", ...commits]);
-  } catch {
+  } catch (erro) {
     const arquivos = (await git(projectRoot, ["diff", "--name-only", "--diff-filter=U"]).catch(() => ""))
       .split("\n")
       .filter(Boolean);
     await git(projectRoot, ["cherry-pick", "--abort"]).catch(() => undefined);
     // `--abort` volta ao commit de antes da sequência; se não voltou, voltar à mão.
     if ((await git(projectRoot, ["rev-parse", "HEAD"]).catch(() => antes)) !== antes) await desfazerIntegracao(projectRoot, antes);
-    return { status: "conflito", arquivos };
+    /*
+     * Conflito é só o que deixou arquivo em conflito. O resto — "seus arquivos
+     * locais seriam sobrescritos", um não versionado no caminho — era chamado de
+     * conflito, a fase era refeita, e recusava igual (§99).
+     */
+    if (arquivos.length > 0) return { status: "conflito", arquivos };
+    const saida = erro instanceof Error && "stderr" in erro ? String((erro as { stderr: unknown }).stderr) : String(erro);
+    return { status: "recusada", motivo: saida.split("\n").map((linha) => linha.trim()).filter(Boolean).slice(0, 4).join(" ") };
   }
   const arquivos = (await git(projectRoot, ["diff", "--name-only", antes, "HEAD"])).split("\n").filter(Boolean);
   return { status: "integrada", commits: commits.length, arquivos };
@@ -235,6 +247,112 @@ export async function cabeca(projectRoot: string): Promise<string> {
  */
 export async function desfazerIntegracao(projectRoot: string, antes: string): Promise<void> {
   await git(projectRoot, ["reset", "-q", "--keep", antes]);
+}
+
+/** Os caminhos de um `git status --porcelain -z`, sem o plano de controle; `alterados` são os versionados. */
+async function situacaoDaPrincipal(projectRoot: string): Promise<{ alterados: string[]; naoVersionados: string[] }> {
+  // Sem `trim`: o status começa com espaço quando só a árvore mudou (" M arquivo").
+  const { stdout } = await run("git", ["status", "--porcelain", "-z", "--untracked-files=all", "--", ".", ":(exclude).capivara"], {
+    cwd: projectRoot,
+    ...GRANDE,
+  });
+  const alterados: string[] = [];
+  const naoVersionados: string[] = [];
+  const entradas = stdout.split("\0");
+  for (let indice = 0; indice < entradas.length; indice += 1) {
+    const entrada = entradas[indice] ?? "";
+    if (entrada.length < 4) continue;
+    const codigo = entrada.slice(0, 2);
+    const caminho = entrada.slice(3);
+    if (codigo === "??") naoVersionados.push(caminho);
+    else alterados.push(caminho);
+    // Renomeação e cópia trazem o caminho de origem na entrada seguinte.
+    if (codigo.includes("R") || codigo.includes("C")) indice += 1;
+  }
+  return { alterados, naoVersionados };
+}
+
+/**
+ * O que, na árvore principal, impede de integrar esta fase sem mexer no que não é do integrador (§99).
+ *
+ * A árvore principal do build paralelo só é escrita pelo integrador — mas a
+ * suíte integrada e o `npm install` rodam nela, e o desenvolvedor pode ter
+ * editado algo. Integrar por cima disso faria a suíte julgar uma árvore que não é
+ * o HEAD, ou o git recusaria no meio. Então, ANTES do cherry-pick:
+ *
+ * - arquivo versionado alterado, qualquer um: a árvore não é mais o HEAD;
+ * - arquivo não versionado que a fase traz: o cherry-pick o sobrescreveria.
+ *
+ * Não versionado fora do caminho da fase — o `.env` semeado, um relatório
+ * ignorado — não impede: não muda o que a fase entrega nem é tocado por ela.
+ *
+ * Devolve também os não versionados que JÁ estavam: se a integração for
+ * reprovada, é por eles que o desfazer sabe o que ela deixou (`desfazerSemApagar`).
+ */
+export async function impedimentosDaPrincipal(
+  projectRoot: string,
+  worktree: Worktree,
+): Promise<{ impedimentos: string[]; naoVersionados: string[] }> {
+  const { alterados, naoVersionados } = await situacaoDaPrincipal(projectRoot);
+  const daFase = new Set((await git(projectRoot, ["diff", "--name-only", worktree.base, worktree.branch])).split("\n").filter(Boolean));
+  return { impedimentos: [...alterados, ...naoVersionados.filter((caminho) => daFase.has(caminho))].sort(), naoVersionados };
+}
+
+/**
+ * Desfaz a integração reprovada sem apagar nada e sem deixar nada dela na árvore (§99).
+ *
+ * O `reset --keep` recusa quando um arquivo que a integração trouxe foi
+ * alterado depois — pela suíte, por exemplo. Duas saídas erradas foram
+ * descartadas:
+ *
+ * - deixar os commits reprovados no HEAD (o que acontecia antes);
+ * - voltar o HEAD com `--soft` e deixar os arquivos como alteração não
+ *   commitada. O histórico ficava limpo, mas a árvore não: a execução seguinte
+ *   via a árvore suja, e o preflight mandava `git add -A && git commit` — que
+ *   PROMOVE o código reprovado a commit, e a retomada revalidava a fase em cima
+ *   dele.
+ *
+ * Então: primeiro GUARDA, depois limpa. O estado inteiro da árvore — a fase
+ * integrada mais o que a suíte escreveu, versionado ou não — vira um commit
+ * num branch próprio, montado com um índice temporário (o índice e a árvore
+ * da principal não são tocados para isso). Só com ele gravado a árvore volta
+ * a ser exatamente a de antes da integração: `reset --hard` para os
+ * versionados, e remoção só dos não versionados que a integração criou. O que
+ * já estava ali antes fica. Se guardar falhar, nada é limpo.
+ */
+export async function desfazerSemApagar(
+  projectRoot: string,
+  antes: string,
+  opcoes: { naoVersionadosAntes: readonly string[]; guardarEm: string; mensagem: string },
+): Promise<{ limpo: true } | { limpo: false; arquivos: string[]; guardado: string }> {
+  try {
+    await desfazerIntegracao(projectRoot, antes);
+    return { limpo: true };
+  } catch {
+    // O `--keep` recusou: há alteração no caminho. Segue para guardar e limpar.
+  }
+
+  const { alterados, naoVersionados } = await situacaoDaPrincipal(projectRoot);
+  const jaEstavam = new Set(opcoes.naoVersionadosAntes);
+  const novos = naoVersionados.filter((caminho) => !jaEstavam.has(caminho));
+
+  const pasta = await mkdtemp(join(tmpdir(), "capivara-indice-"));
+  let guardado: string;
+  try {
+    const comIndice = { cwd: projectRoot, env: { ...process.env, GIT_INDEX_FILE: join(pasta, "index") }, ...GRANDE };
+    await run("git", ["read-tree", "HEAD"], comIndice);
+    await run("git", ["add", "-A", "--", ".", ":(exclude).capivara"], comIndice);
+    const arvore = (await run("git", ["write-tree"], comIndice)).stdout.trim();
+    const commit = await git(projectRoot, ["commit-tree", arvore, "-p", "HEAD", "-m", opcoes.mensagem]);
+    guardado = `${opcoes.guardarEm}-${commit.slice(0, 8)}`;
+    await git(projectRoot, ["branch", guardado, commit]);
+  } finally {
+    await rm(pasta, { recursive: true, force: true });
+  }
+
+  await git(projectRoot, ["reset", "-q", "--hard", antes]);
+  for (const caminho of novos) await rm(join(projectRoot, caminho), { force: true });
+  return { limpo: false, arquivos: [...alterados, ...novos].sort(), guardado };
 }
 
 /**

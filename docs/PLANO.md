@@ -6777,3 +6777,68 @@ escreveu e volta a ser sensível.
 Os gates G0–G4 e a gramática do plano não mudaram. Testes em
 `test/loop/admissao.spec.ts`, com Git de verdade: treze falhavam antes da
 política, e o de arquivos legítimos passava antes e depois.
+
+## §101 — Só o Core registra no Git, e publica a árvore que conferiu
+
+O §100 conferia os arquivos e depois rodava `git add` e `git commit`. Duas
+fronteiras ficavam abertas.
+
+**A janela entre conferir e commitar.** O que vai para o commit é o que está
+no disco no instante do `add`, e o `git commit` roda os hooks do projeto: um
+`pre-commit` que faça `git add` põe no commit o que nenhuma conferência viu. A
+segunda conferência do §100 relia o DISCO, não o que foi preparado. Agora todo
+commit automático passa por `commitAdmitido` (`loop/admissao.ts`): índice
+temporário a partir do HEAD (o índice de quem chamou não é usado) →
+`write-tree`, que congela a árvore → admissão sobre os OBJETOS dessa árvore →
+`commit-tree` com ela, sem hooks → `update-ref` com o valor antigo esperado
+(HEAD que mudou no meio não é sobrescrito) → só os caminhos commitados são
+sincronizados no índice de quem chamou. Vale para o commit da fase, o inicial,
+o da especificação e o do parcial; o de recuperação (§99) confere os objetos
+da árvore dele antes do branch. Consequência dita: os commits automáticos não
+rodam mais os hooks `pre-commit`/`commit-msg` do projeto, e o
+`.git/COMMIT_EDITMSG` não é mais gravado por eles.
+
+**O agente que roda git.** O executor tem um shell; instrução no prompt não o
+impede de commitar ou de fazer push. O que impede depende do provider, e foi
+MEDIDO, não suposto (codex-cli 0.162.1, `codex sandbox -P :workspace`): no
+`workspace-write` do codex, o `.git` é somente leitura — inclusive o do
+worktree, que mora no repositório principal —, a rede é cortada e a escrita
+fora do projeto é recusada (exceto `/tmp`). Com acesso de SISTEMA — o padrão
+do build —, nada impede, em provider nenhum. claude, opencode, agy, cursor e
+custom em workspace não têm sandbox de sistema verificado sobre o `.git`.
+
+O que o Core impõe em todo caso é DETECÇÃO e CONTENÇÃO, determinísticas
+(`loop/autoridade.ts`): as referências são fotografadas antes e depois de
+TODA chamada de agente; referência movida — commit, reset, stash, tag, ou o
+rastreio remoto que um `push -u` atualiza — faz a fase sair `commit-blocked`
+sem nada registrado nem integrado, e a parada diz quais refs mudaram e se
+houve publicação provável. No worktree, o integrador e os outros agentes movem
+a principal e os branches no meio da chamada: ali se confere o HEAD do
+worktree (que cobre o branch da fase), as tags e o rastreio remoto. E o
+integrador guarda o HEAD que ele mesmo deixou: principal noutro commit na
+próxima integração, ou no fim do build, é commit de fora — nada mais entra. O
+branch de fase com commits além da base nunca é apagado numa falha. Nada é
+desfeito: mover a ref de volta seria reescrever o que a pessoa pode já ter
+visto, ou publicado. Antes da primeira chamada, o build diz, por executor, o
+que está impedido e o que é só detectado.
+
+O que fica sem garantia, dito: o `push` sem rastreio (`git push <url>`) não
+é detectável daqui; um commit de fora não é desfeito; com acesso de sistema, o
+executor pode até alterar o próprio repositório da Capivara.
+
+**A menor mudança de arquitetura para impedir de fato**, não feita aqui:
+(1) um modo protegido que só aceite executor em workspace num provider cujo
+sandbox comprovadamente torne o `.git` somente leitura — hoje, só o codex — e
+recuse o build nos outros; (2) para os outros providers, separar o diretório
+Git da árvore do executor: o worktree sem o arquivo `.git`, e o Core operando
+com `--git-dir`/`--work-tree` explícitos — com o sandbox do provider recusando
+a escrita fora da árvore, o executor não alcança o repositório. Sem sandbox
+de sistema operacional, nenhuma das duas é garantia: o processo com acesso ao
+sistema inteiro alcança tudo.
+
+Testes: `test/loop/autoridade.spec.ts` (hooks que preparam segredo depois da
+conferência; commit, stash e push do executor no serial; commit no worktree e
+na principal a partir do worktree no paralelo; e o sandbox real do codex,
+pulado onde o codex não está instalado) e `test/loop/commit-admitido.spec.ts`
+(disco que muda depois do `add`, HEAD que muda no meio, índice de quem chamou,
+segunda barreira da integração).

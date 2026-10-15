@@ -121,7 +121,7 @@ export async function admitirArvore(root: string, caminhos: readonly string[]): 
  * commitado por conta própria).
  */
 export async function admitirIntervalo(root: string, base: string, ponta: string): Promise<Bloqueio[]> {
-  const { stdout } = await run("git", ["diff", "--name-only", "-z", "--no-renames", "--diff-filter=d", base, ponta], { cwd: root, ...GRANDE });
+  const { stdout } = await run("git", ["diff", "--no-ext-diff", "--name-only", "-z", "--no-renames", "--diff-filter=d", base, ponta], { cwd: root, ...GRANDE });
   const bloqueios: Bloqueio[] = [];
   for (const caminho of stdout.split("\0").filter(Boolean)) {
     let conteudo: Buffer | null = null;
@@ -204,6 +204,75 @@ export async function adicionarExatamente(
       env: { ...env, GIT_LITERAL_PATHSPECS: "1" },
       ...GRANDE,
     });
+  } finally {
+    await rm(pasta, { recursive: true, force: true });
+  }
+}
+
+export type CommitAdmitido =
+  | { status: "commitado"; commit: string }
+  | { status: "vazio" }
+  | { status: "bloqueado"; bloqueios: Bloqueio[] };
+
+/**
+ * O commit automático, com a admissão sobre o que ele REALMENTE leva (§100, §101).
+ *
+ * Conferir os arquivos em disco e depois rodar `git add` + `git commit` deixa
+ * uma janela: o que vai para o commit é o que estiver no disco no instante do
+ * `add`, e o `git commit` ainda roda os hooks do projeto — um `pre-commit` que
+ * faça `git add` põe no commit o que nenhuma conferência viu. Fechado assim:
+ *
+ * 1. um índice TEMPORÁRIO, partindo do HEAD (ou vazio, no primeiro commit),
+ *    recebe exatamente `caminhos` — o índice de quem chamou não é usado;
+ * 2. `write-tree` congela a árvore: dali em diante, nada que mude no disco
+ *    muda o commit;
+ * 3. a admissão roda sobre os OBJETOS dessa árvore (`admitirIntervalo`), não
+ *    sobre o disco — é o conteúdo que vai ser publicado, byte a byte;
+ * 4. `commit-tree` cria o commit com ESSA árvore, sem hooks;
+ * 5. `update-ref` com o valor antigo esperado: se o HEAD mudou no meio, nada é
+ *    publicado;
+ * 6. só os caminhos commitados são sincronizados no índice de quem chamou — o
+ *    que mais estiver preparado lá continua preparado.
+ *
+ * Bloqueado, nada é publicado e nada em disco é tocado. Os objetos que o `add`
+ * gravou ficam soltos no banco local de objetos, sem nenhuma ref que os alcance.
+ *
+ * `depoisDoAdd` existe para o teste: é a janela onde o disco muda depois do
+ * `add`, e a prova de que o que vale é o objeto, não o arquivo.
+ */
+export async function commitAdmitido(
+  root: string,
+  opcoes: { caminhos: readonly string[]; mensagem: string; depoisDoAdd?: () => Promise<void> },
+): Promise<CommitAdmitido> {
+  const cabeca = await run("git", ["rev-parse", "-q", "--verify", "HEAD"], { cwd: root }).then(
+    (resultado) => resultado.stdout.trim(),
+    () => null,
+  );
+  const pasta = await mkdtemp(join(tmpdir(), "capivara-commit-"));
+  try {
+    const comIndice = { ...process.env, GIT_INDEX_FILE: join(pasta, "index") };
+    const git = (args: string[]) => run("git", args, { cwd: root, env: comIndice, ...GRANDE }).then((resultado) => resultado.stdout.trim());
+    await git(cabeca ? ["read-tree", cabeca] : ["read-tree", "--empty"]);
+    await adicionarExatamente(root, opcoes.caminhos, "-A", comIndice);
+    await opcoes.depoisDoAdd?.();
+    const arvore = await git(["write-tree"]);
+
+    const base = cabeca ? await git(["rev-parse", `${cabeca}^{tree}`]) : await git(["hash-object", "-t", "tree", "/dev/null"]);
+    if (arvore === base) return { status: "vazio" };
+    const bloqueios = await admitirIntervalo(root, base, arvore);
+    if (bloqueios.length > 0) return { status: "bloqueado", bloqueios };
+
+    const commit = await git(["commit-tree", arvore, ...(cabeca ? ["-p", cabeca] : []), "-m", opcoes.mensagem]);
+    await git(["update-ref", "-m", `commit (capivara): ${opcoes.mensagem.split("\n")[0] ?? ""}`, "HEAD", commit, cabeca ?? ""]);
+
+    // O índice de quem chamou: só os caminhos commitados passam a ser os do HEAD novo.
+    const lista = join(pasta, "commitados");
+    await writeFile(lista, `${opcoes.caminhos.join("\0")}\0`);
+    await run("git", ["reset", "-q", `--pathspec-from-file=${lista}`, "--pathspec-file-nul"], {
+      cwd: root,
+      env: { ...process.env, GIT_LITERAL_PATHSPECS: "1" },
+    }).catch(() => undefined);
+    return { status: "commitado", commit };
   } finally {
     await rm(pasta, { recursive: true, force: true });
   }

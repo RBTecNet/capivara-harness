@@ -226,7 +226,8 @@ describe("B-01 · caminho feliz completo", () => {
     ).toBe(true);
 
     // O build criou o repositório e cada fase verde virou um commit.
-    const historico = await readFile(join(projectRoot, ".git/COMMIT_EDITMSG"), "utf8").catch(() => "");
+    // Lido do histórico, não do `COMMIT_EDITMSG`: o commit automático é feito por `commit-tree` (§101), que não o grava.
+    const historico = await promisify(execFile)("git", ["log", "-1", "--format=%s"], { cwd: projectRoot }).then((saida) => saida.stdout, () => "");
     expect(historico).toContain("feat(phase-2)");
   });
 });

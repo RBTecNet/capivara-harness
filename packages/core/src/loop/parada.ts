@@ -214,6 +214,25 @@ export function relatorioDoBuild(outcome: BuildOutcome, contexto: ContextoDaPara
    */
   if (fase.outcome.status === "commit-blocked") {
     const caminhos = fase.outcome.bloqueios.map((bloqueio) => bloqueio.caminho);
+    // Referência movida pelo agente (§101): não há arquivo a ignorar — há um commit de fora a examinar.
+    if (fase.outcome.bloqueios.some((bloqueio) => bloqueio.motivo.includes("movid"))) {
+      return {
+        tipo: "parada",
+        parada: {
+          natureza: "decisão",
+          oQue: `${fase.id} parou: o Git foi mexido por fora do Core (${caminhos.join(", ")})`,
+          deQuem: "do agente, que commitou ou mexeu em referências por conta própria — nada desta fase foi registrado nem integrado pelo Core",
+          custou: gasto,
+          evidencia: evidenciaDaFase(outcome.runId, fase),
+          paraSeguir: [
+            "confira o que o agente fez: `git log --all --oneline -10` e `git reflog` — nada foi desfeito",
+            "se ele fez push, confira o remoto antes de qualquer outra coisa",
+            "decida o que manter e rode `capivara build` — com --no-system-install, o codex não consegue commitar",
+          ],
+          detalhe: fase.outcome.cause,
+        },
+      };
+    }
     return {
       tipo: "parada",
       parada: {

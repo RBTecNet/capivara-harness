@@ -25,7 +25,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { sha12 } from "../contract/stamps.js";
-import { adicionarExatamente, admitirArvore, alteracoesParaCommit, lerStatus, type Bloqueio } from "./admissao.js";
+import { adicionarExatamente, admitirArvore, admitirIntervalo, alteracoesParaCommit, commitAdmitido, lerStatus, type Bloqueio } from "./admissao.js";
 import { FLOW_RESULTS, FLOWS_DIR } from "./flows.js";
 
 const run = promisify(execFile);
@@ -172,6 +172,16 @@ async function copiarComProva(raiz: string, caminhos: readonly string[], destino
   }
 }
 
+/**
+ * O branch da fase tem commits que a base não tem? Um agente que commitou por
+ * conta própria (§101) deixa o worktree limpo e o trabalho só no branch: apagar
+ * o branch seria perdê-lo.
+ */
+export async function branchTemTrabalho(projectRoot: string, worktree: Worktree): Promise<boolean> {
+  const quantos = await git(projectRoot, ["rev-list", "--count", `${worktree.base}..${worktree.branch}`]).catch(() => "1");
+  return quantos !== "0";
+}
+
 export interface ParcialGuardado {
   /** Há um commit novo no branch da fase. */
   guardado: boolean;
@@ -212,17 +222,18 @@ export async function guardarParcial(worktree: Worktree, mensagem: string, pasta
     if (recuperacao) await copiarComProva(worktree.dir, presentes, recuperacao);
 
     const admitidos = entradas.map((entrada) => entrada.caminho).filter((caminho) => !fora.has(caminho));
-    const literal = { cwd: worktree.dir, env: { ...process.env, GIT_LITERAL_PATHSPECS: "1" }, ...GRANDE };
-    await adicionarExatamente(worktree.dir, admitidos, "-A");
-    const noIndice = (await run("git", ["diff", "--cached", "--name-only", "-z"], literal)).stdout.split("\0").filter(Boolean);
-    // O índice é conferido de novo: o que o agente tenha deixado preparado também passa pela política.
-    const escapou = await admitirArvore(worktree.dir, noIndice);
-    if (escapou.length > 0) {
-      await git(worktree.dir, ["reset", "-q"]);
-      return { guardado: false, bloqueados: [...bloqueados, ...escapou], recuperacao, preservarArvore: true, motivo: "havia arquivo sensível preparado no índice" };
+    // Conferido de novo nos objetos que vão para o branch (§101): o que mudou depois da conferência não entra.
+    const publicado = await commitAdmitido(worktree.dir, { caminhos: admitidos, mensagem });
+    if (publicado.status === "bloqueado") {
+      return {
+        guardado: false,
+        bloqueados: [...bloqueados, ...publicado.bloqueios],
+        recuperacao,
+        preservarArvore: true,
+        motivo: "o conteúdo mudou depois da conferência e trouxe arquivo sensível",
+      };
     }
-    if (noIndice.length === 0) return { ...nada, bloqueados, recuperacao };
-    await git(worktree.dir, ["commit", "-q", "--no-verify", "-m", mensagem]);
+    if (publicado.status === "vazio") return { ...nada, bloqueados, recuperacao };
     return { guardado: true, bloqueados, recuperacao, preservarArvore: false };
   } catch (erro) {
     return { ...nada, preservarArvore: true, motivo: erro instanceof Error ? (erro.message.split("\n")[0] ?? "") : String(erro) };
@@ -422,6 +433,9 @@ export async function desfazerSemApagar(
     await run("git", ["read-tree", "HEAD"], comIndice);
     await adicionarExatamente(projectRoot, noCommit, "-u", comIndice.env);
     const arvore = (await run("git", ["write-tree"], comIndice)).stdout.trim();
+    // Os objetos do que vai para o branch, conferidos (§101): o disco pode ter mudado depois da admissão.
+    const sensiveisNaArvore = await admitirIntervalo(projectRoot, await git(projectRoot, ["rev-parse", "HEAD^{tree}"]), arvore);
+    if (sensiveisNaArvore.length > 0) throw new Error(`a árvore de recuperação trouxe ${sensiveisNaArvore.map((bloqueio) => bloqueio.caminho).join(", ")}`);
     const commit = await git(projectRoot, ["commit-tree", arvore, "-p", "HEAD", "-m", opcoes.mensagem]);
     guardado = `${opcoes.guardarEm}-${commit.slice(0, 8)}`;
     await git(projectRoot, ["branch", guardado, commit]);

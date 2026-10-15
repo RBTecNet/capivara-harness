@@ -86,6 +86,90 @@ Levantados por busca em todo o `src/` (`git add`, `commit`, `commit-tree`, `cher
 - **Cópias locais:** os sensíveis copiados ficam em `.capivara/runs/`, fora do Git, com a permissão que o `fs.cp`
   der (não é forçado `0600`).
 
+## Revisão da autoridade Git (§101)
+
+A revisão final apontou duas fronteiras abertas: o agente que roda git por conta própria, e a janela entre a
+conferência dos arquivos e o que de fato vai para o commit.
+
+### A janela entre admissão e staging
+
+- **Defeito:** o §100 conferia o disco e depois rodava `git add` e `git commit`. A segunda conferência relia o
+  disco, não o índice. E o `git commit` rodava os hooks do projeto: um `pre-commit` com `git add` punha no commit o
+  que nenhuma conferência viu.
+- **Correção:** `commitAdmitido` (`loop/admissao.ts`), usado pelos commits da fase, inicial, da especificação e do
+  parcial. O rollback confere os objetos da árvore dele.
+  1. índice temporário a partir do HEAD;
+  2. `write-tree`, que congela a árvore;
+  3. admissão sobre os objetos dessa árvore;
+  4. `commit-tree` com ela, sem hooks;
+  5. `update-ref` com compare-and-swap;
+  6. sincronização só dos caminhos commitados no índice de quem chamou.
+- **Consequência:** os commits automáticos não rodam mais os hooks `pre-commit`/`commit-msg` do projeto e não gravam
+  `.git/COMMIT_EDITMSG`. Um teste do catálogo lia esse arquivo e passou a ler `git log -1`.
+
+### O agente que roda git
+
+Medido nesta máquina, sem chamada de modelo, com `codex sandbox -P :workspace` (codex-cli 0.162.1):
+
+| Provider (acesso) | `git commit` | push pela rede | escrita fora do projeto |
+|---|---|---|---|
+| codex, workspace | recusado (`.git` somente leitura, inclusive pelo worktree) | recusado (sem rede) | recusada, exceto `/tmp` |
+| qualquer um com acesso de sistema (o padrão do build) | sem restrição | sem restrição | sem restrição |
+| claude, opencode, agy, cursor, custom em workspace | sem sandbox de sistema verificado sobre o `.git` | não verificado | não verificado |
+
+Não verifiquei se `codex exec --sandbox workspace-write` aplica exatamente o mesmo perfil `:workspace`, porque isso
+exigiria uma chamada de modelo.
+
+**O que o Core impõe em qualquer provider:** detecção e contenção (`loop/autoridade.ts`).
+- As refs são fotografadas antes e depois de cada chamada de agente. Ref movida faz a fase sair `commit-blocked`,
+  sem nada registrado nem integrado.
+- No worktree, a conferência cobre o HEAD do worktree, as tags e o rastreio remoto.
+- O integrador confere se a principal está no commit que ele deixou.
+- O branch de fase com commits além da base nunca é apagado numa falha. Esta foi uma perda de dados achada pelo
+  teste: o agente que commitava tudo deixava o parcial vazio, e o branch era apagado.
+- Nada é desfeito.
+- Antes da primeira chamada, o build declara por executor o que está impedido e o que é só detectado.
+
+**A menor mudança de arquitetura para impedir de fato** (proposta, não implementada; detalhe no §101):
+1. Um modo protegido que só aceite executor em workspace num provider com sandbox comprovado sobre o `.git`, hoje só o
+   codex.
+2. Para os outros providers, separar o diretório Git da árvore do executor: o Core opera com `--git-dir` e
+   `--work-tree` explícitos.
+
+Sem sandbox de sistema operacional, nenhuma das duas é garantia.
+
+### Testes
+
+| Teste | Código anterior (`d5d20a0`) | Agora |
+|---|---|---|
+| `pre-commit` que prepara `.env.local` depois da conferência | `.env.local` no commit | commit só com `src/app.ts`; segredo fora do histórico |
+| `pre-commit` que troca o conteúdo de arquivo já conferido | chave privada no commit | commit com o conteúdo conferido |
+| `.env` deixado preparado no índice | bloqueado (§100) | bloqueado; o índice de quem preparou fica como estava |
+| commit do executor na principal, serial | fase "já implementada", build seguia | build para; P02 não concluída; P03 não roda; commit do agente mantido |
+| `git stash` do executor | não detectado | detectado (`refs/stash`); stash preservado |
+| `push -u` do executor para um remoto | não detectado | detectado (`refs/remotes/origin/main`), dito como push provável |
+| commit do agente no worktree | cherry-picked na principal | nada na principal; branch mantido; fase independente integrada |
+| commit do agente na principal a partir do worktree | as fases continuavam integrando | integrador para; nada mais entra |
+| sandbox real do codex (pulado sem codex) | passa (mede o provider) | passa |
+| disco limpo depois do `add` de uma chave (`commitAdmitido`) | — (API nova) | bloqueado pelo objeto |
+| disco alterado depois do `add` | — | publicado o conteúdo conferido |
+| HEAD movido no meio do commit | — | nada publicado por cima; o commit de quem mudou fica |
+| índice de quem chamou | — | só os caminhos commitados mudam |
+| commit com `.env` feito fora da Capivara, conferido pelos objetos | — | bloqueado mesmo com o arquivo já fora do disco |
+
+- **`autoridade.spec.ts` contra o `src` anterior:** 7 de 9 falharam, cada um pelo defeito do seu cenário.
+- **Depois:** 9 de 9.
+- **`commit-admitido.spec.ts`:** 5 de 5. Ele testa APIs novas, então não tem versão "antes".
+- **`npm run check` na raiz:** rc=0, 101 arquivos, **1922 testes**.
+
+### Riscos que ficam
+
+- O executor com acesso de sistema, que é o padrão, pode commitar e publicar. O Core detecta e para, mas não impede
+  nem desfaz.
+- Push sem rastreio (`git push <url>`) não é detectável.
+- Uma tag criada pelo agente de uma fase pode ser atribuída ao agente de outra fase no paralelo (as tags são
+  compartilhadas). A falha é segura: a fase errada para.
+
 ## Estado do Git
 
-Commit na branch `revisao/correcoes-paralelo-99`, publicada para a revisão final. Sem merge na `main`.
+Commits na branch `revisao/correcoes-paralelo-99`, publicada para a revisão final. Sem merge na `main`.

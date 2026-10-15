@@ -408,7 +408,8 @@ describe("build paralelo", () => {
     expect(await existe(join(projectRoot, ".env"))).toBe(false);
     // O branch, feito pelo agente, é mantido — apagá-lo seria perder o trabalho — e a tela diz para não publicá-lo.
     expect(await git(["log", "--format=%s", "-1", `capivara/${RUN()}/P02`])).toBe("commit feito pelo agente");
-    expect(outcome.errors.join("\n")).toContain(".env");
+    // Quem para primeiro é a guarda das referências (§101); a conferência da integração é a segunda barreira.
+    expect(outcome.errors.join("\n")).toContain("mexeu no Git");
     expect([...anuncios, ...outcome.errors].join("\n")).not.toContain("valor-real");
   });
 });

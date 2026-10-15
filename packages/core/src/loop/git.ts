@@ -14,7 +14,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { adicionarExatamente, admitirArvore, alteracoesParaCommit, descreverBloqueios, lerStatus, orientacaoDeBloqueio, type Bloqueio } from "./admissao.js";
+import { admitirArvore, alteracoesParaCommit, commitAdmitido, descreverBloqueios, lerStatus, orientacaoDeBloqueio, type Bloqueio } from "./admissao.js";
 import { renderEscolhaNumerada, type EscolhaNumerada } from "./escolha.js";
 import { promisify } from "node:util";
 
@@ -133,11 +133,17 @@ export async function iniciarRepositorio(
           motivo: `o commit inicial não foi feito: ${descreverBloqueios(bloqueios)}. ${orientacaoDeBloqueio(bloqueios, new Set())}`,
         };
       }
-      await run("git", ["add", "-A", "--", ...CONTROL_PLANE_PATHSPEC], { cwd: projectRoot });
-      if (!(await isClean(projectRoot))) {
-        await run("git", ["commit", "-q", "-m", "chore: estado inicial, antes do primeiro build"], { cwd: projectRoot });
+      // O mesmo commit admitido das fases, sobre os objetos (§101): o repositório ainda não tem HEAD.
+      const caminhos = (await lerStatus(projectRoot)).map((entrada) => entrada.caminho);
+      const publicado = await commitAdmitido(projectRoot, { caminhos, mensagem: "chore: estado inicial, antes do primeiro build" });
+      if (publicado.status === "bloqueado") {
+        return {
+          criado: true,
+          commitInicial: false,
+          motivo: `o commit inicial não foi feito: ${descreverBloqueios(publicado.bloqueios)}. ${orientacaoDeBloqueio(publicado.bloqueios, new Set())}`,
+        };
       }
-      return { criado: true, motivo: "", commitInicial: true };
+      return { criado: true, motivo: "", commitInicial: publicado.status === "commitado" };
     }
 
     return { criado: true, motivo: "", commitInicial: false };
@@ -295,19 +301,19 @@ async function bloqueioDoCommit(projectRoot: string, pathspec: readonly string[]
 }
 
 /**
- * Depois do `git add`, o que de fato está no índice passa pela mesma admissão.
- * Se algo escapou entre a conferência e o `add`, o índice volta a ser o HEAD —
- * só o índice: nenhum arquivo em disco é tocado.
+ * Publica o commit pela admissão sobre os OBJETOS (`commitAdmitido`, §101): o
+ * que for bloqueado ali mudou depois da conferência dos arquivos — e não vai.
  */
-async function conferirIndice(projectRoot: string, pathspec: readonly string[]): Promise<CommitResult | null> {
-  const { stdout } = await run("git", ["diff", "--cached", "--name-only", "-z", "--", ...pathspec], { cwd: projectRoot });
-  const bloqueios = await admitirArvore(projectRoot, stdout.split("\0").filter(Boolean));
-  if (bloqueios.length === 0) return null;
-  await run("git", ["reset", "-q", "--", ...pathspec], { cwd: projectRoot });
+async function publicar(projectRoot: string, caminhos: readonly string[], message: string): Promise<CommitResult> {
+  const resultado = await commitAdmitido(projectRoot, { caminhos, mensagem: message });
+  if (resultado.status === "commitado") return { committed: true, message };
+  if (resultado.status === "vazio") return { committed: false, message: "nada a commitar: a fase já estava implementada em HEAD" };
   return {
     committed: false,
-    bloqueios,
-    message: `commit bloqueado — arquivo sensível não entra no histórico: ${descreverBloqueios(bloqueios)}. ${orientacaoDeBloqueio(bloqueios, new Set())}`,
+    bloqueios: resultado.bloqueios,
+    message:
+      `commit bloqueado — o conteúdo preparado para o commit trouxe arquivo sensível que não estava na conferência: ` +
+      `${descreverBloqueios(resultado.bloqueios)}. ${orientacaoDeBloqueio(resultado.bloqueios, new Set())}`,
   };
 }
 
@@ -335,13 +341,14 @@ export async function commitPhase(projectRoot: string, phaseNumber: number, titl
   const bloqueado = await bloqueioDoCommit(projectRoot, CONTROL_PLANE_PATHSPEC);
   if (bloqueado) return bloqueado;
   try {
-    // Só o que a admissão viu, pelo nome exato: o `.env` do harness fica de fora.
+    /*
+     * Só o que a admissão viu, pelo nome exato — o `.env` do harness fica de
+     * fora —, e conferido de novo nos objetos que vão ser publicados (§101).
+     * O commit não roda os hooks do projeto: um `pre-commit` que fizesse
+     * `git add` poria no commit o que nenhuma conferência viu.
+     */
     const admitidos = (await alteracoesParaCommit(projectRoot, CONTROL_PLANE_PATHSPEC)).map((entrada) => entrada.caminho);
-    await adicionarExatamente(projectRoot, admitidos, "-A");
-    const escapou = await conferirIndice(projectRoot, CONTROL_PLANE_PATHSPEC);
-    if (escapou) return escapou;
-    await run("git", ["commit", "-q", "-m", message], { cwd: projectRoot });
-    return { committed: true, message };
+    return await publicar(projectRoot, admitidos, message);
   } catch (erro) {
     const causa = (erro instanceof Error ? erro.message : String(erro)).split("\n").slice(0, 4).join(" ").trim();
     return { committed: false, message: `a fase passou, mas o commit não foi criado: ${causa}` };
@@ -373,13 +380,10 @@ export async function commitSpecification(projectRoot: string, gate: "PLAN READY
   // Pathspec explícito: nada do trabalho em andamento de quem chamou entra junto.
   const bloqueado = await bloqueioDoCommit(projectRoot, [".capivara/init"]);
   if (bloqueado) return { ...bloqueado, message: bloqueado.message.replace("rode `capivara build` de novo", "rode o estágio de novo") };
-  await run("git", ["add", "--", ".capivara/init"], { cwd: projectRoot });
-  const escapou = await conferirIndice(projectRoot, [".capivara/init"]);
-  if (escapou) return escapou;
-  const staged = await run("git", ["diff", "--cached", "--name-only", "--", ".capivara/init"], { cwd: projectRoot });
-  if (staged.stdout.trim() === "") return { committed: false, message: "a especificação versionada já é esta" };
+  const caminhos = (await lerStatus(projectRoot, [".capivara/init"])).map((entrada) => entrada.caminho);
+  if (caminhos.length === 0) return { committed: false, message: "a especificação versionada já é esta" };
 
   const message = `docs(capivara): especificação ${gate}`;
-  await run("git", ["commit", "-q", "-m", message, "--", ".capivara/init"], { cwd: projectRoot });
-  return { committed: true, message };
+  const publicado = await publicar(projectRoot, caminhos, message);
+  return publicado.committed || publicado.bloqueios ? publicado : { committed: false, message: "a especificação versionada já é esta" };
 }

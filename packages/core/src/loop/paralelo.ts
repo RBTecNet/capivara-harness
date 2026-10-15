@@ -36,6 +36,7 @@ import type { PhaseOutcome } from "./runner.js";
 import type { PhaseSession } from "./split.js";
 import {
   abrirWorktree,
+  branchTemTrabalho,
   cabeca,
   desfazerSemApagar,
   fecharWorktree,
@@ -145,6 +146,13 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
    * só então sobe — como no serial, mas sem órfãos.
    */
   let erroInesperado: { erro: unknown } | null = null;
+  /**
+   * O HEAD da principal que o INTEGRADOR deixou (§101). Só ele a move; se ela
+   * estiver noutro commit quando a próxima integração chega, alguém — um agente
+   * com acesso de sistema — commitou nela por fora.
+   */
+  let cabecaConhecida: string | null = await cabeca(projectRoot).catch(() => null);
+  let ultimaIntegrada: PhaseSession | null = null;
 
   const evento = async (subject: string, status: "complete" | "retry" | "blocked", detail: string): Promise<void> => {
     await appendEvent(paths.events, { timestamp: options.now().toISOString(), stage: "implement", subject, attempt: 1, status, detail });
@@ -194,7 +202,24 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
         };
       }
       try {
-        return await integrarNaFila(session, worktree, slot);
+        const atual = await cabeca(projectRoot);
+        if (cabecaConhecida !== null && atual !== cabecaConhecida) {
+          fatal = true;
+          return {
+            desfecho: "falhou" as const,
+            outcome: {
+              status: "commit-blocked" as const,
+              bloqueios: [{ caminho: "HEAD da árvore principal", motivo: "movido por fora do integrador" }],
+              cause:
+                `a árvore principal recebeu commit que não é do integrador: o HEAD era ${cabecaConhecida.slice(0, 12)} e agora é ${atual.slice(0, 12)}. ` +
+                "Só o Core registra no Git; nada mais é integrado neste build, e nada foi desfeito — confira com `git log --oneline -10` e `git reflog`",
+              cycles: 0,
+            },
+          };
+        }
+        const resultado = await integrarNaFila(session, worktree, slot);
+        if (resultado.desfecho === "integrada") ultimaIntegrada = session;
+        return resultado;
       } catch (erro) {
         /*
          * A árvore principal ficou num estado que o integrador não sabe
@@ -207,6 +232,9 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
           desfecho: "falhou",
           outcome: { status: "failed", gate: "gate 2 — suíte do projeto", cause: `a integração parou no meio e a árvore principal precisa de atenção: ${causa}`, cycles: 0 },
         };
+      } finally {
+        // O que o integrador deixou — integrado, desfeito ou intocado — é a nova referência.
+        cabecaConhecida = await cabeca(projectRoot).catch(() => cabecaConhecida);
       }
     });
 
@@ -405,7 +433,7 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
         `wip(${session.id}): trabalho parcial, ${outcome.status === "commit-blocked" ? "commit bloqueado pela política de admissão" : "gates não fecharam"}`,
         pastaDeRecuperacao(session),
       );
-      manterBranch = parcial.guardado || parcial.preservarArvore;
+      manterBranch = parcial.guardado || parcial.preservarArvore || (await branchTemTrabalho(projectRoot, worktree));
       manterArvore = parcial.preservarArvore;
       anunciarParcial(session, worktree, parcial);
       /*
@@ -522,6 +550,27 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
       erroInesperado ??= { erro };
       fatal = true;
     });
+  }
+
+  /*
+   * Depois da última integração, a principal ainda é a que o integrador deixou?
+   * Um agente que commitou nela depois disso não teria outra integração para
+   * denunciá-lo (§101).
+   */
+  const conhecida = cabecaConhecida as string | null;
+  const final = await cabeca(projectRoot).catch(() => conhecida);
+  if (conhecida !== null && final !== conhecida) {
+    const causa =
+      `a árvore principal recebeu commit que não é do integrador: o HEAD era ${conhecida.slice(0, 12)} e agora é ${(final ?? "?").slice(0, 12)}. ` +
+      "Nada foi desfeito — confira com `git log --oneline -10` e `git reflog`";
+    announce(`PARADA DE AUTORIDADE — ${causa}`);
+    const quem = (ultimaIntegrada as PhaseSession | null) ?? options.sessions[0];
+    if (quem) {
+      parada ??= {
+        session: quem,
+        outcome: { status: "commit-blocked", bloqueios: [{ caminho: "HEAD da árvore principal", motivo: "movido por fora do integrador" }], cause: causa, cycles: 0 },
+      };
+    }
   }
 
   // Atribuído dentro dos agentes: o TypeScript não vê, e estreitaria para nulo.

@@ -52,6 +52,7 @@ import { lerFasesFechadas, registrarFaseFechada, shaDaFase } from "./ledger.js";
 import { TasksAprovadas, tasksDaFase } from "./veredictos.js";
 import { defaultTestRunner, type TestRunner } from "./gates.js";
 import { admitirArvore, alteracoesParaCommit } from "./admissao.js";
+import { garantiaDeAutoridade } from "./autoridade.js";
 import { conferirIsolamento } from "./isolamento.js";
 import { larguraDoPlano } from "./escalonador.js";
 import { executarEmParalelo, type AgenteDoPool, type ExecucaoDaFase } from "./paralelo.js";
@@ -376,6 +377,24 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     announce("         Use --no-system-install para mantê-lo dentro do workspace.");
   }
   for (const warning of checked.warnings) announce(`aviso: ${warning.message}`);
+
+  /*
+   * O que está garantido sobre o Git do executor, dito antes da primeira
+   * chamada (§101): impedido só onde o sandbox do provider impede de fato;
+   * no resto, o Core detecta e para — e diz isso.
+   */
+  if (checked.commitsEnabled) {
+    const executores = options.parallel
+      ? options.parallel.agentes.map((agente) => ({ provider: agente.engine, sistema: agente.systemInstall }))
+      : [{ provider: options.engine, sistema: options.systemInstall === true }];
+    const ditas = new Set<string>();
+    for (const executor of executores) {
+      const garantia = garantiaDeAutoridade(executor.provider, executor.sistema);
+      if (ditas.has(garantia)) continue;
+      ditas.add(garantia);
+      announce(`autoridade Git: ${garantia}`);
+    }
+  }
 
   /*
    * O resumo da execução paralela, antes de qualquer chamada de modelo: quem

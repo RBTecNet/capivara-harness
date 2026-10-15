@@ -17,6 +17,7 @@ import { writeAtomic } from "../state/atomic.js";
 import { declarouRoteiroErrado, fixPrompt, flowPrompt, implementPrompt, triagePrompt, verifyPrompt, type Triagem } from "../prompts/index.js";
 import type { BuildProgressListener, LoopGate, LoopGateState } from "./progress.js";
 import type { Bloqueio } from "./admissao.js";
+import { fotografarRefs, publicacaoProvavel, refsMovidas } from "./autoridade.js";
 import { commitPhase, hasPendingChanges, treeSignature } from "./git.js";
 import { declaredComplete, defaultTestRunner, gate0, gate1, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
 import { detectCredentialRejection, detectRateLimit, planWait } from "./ratelimit.js";
@@ -189,13 +190,34 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   const session = options.session;
   const arvore = options.workRoot ?? options.projectRoot;
   const noWorktree = arvore !== options.projectRoot;
+  /*
+   * Só o Core registra no Git (§101). As referências são fotografadas antes e
+   * depois de TODA chamada de agente; referência movida é violação, e a fase
+   * para sem registrar nada. No worktree, o integrador e os outros agentes
+   * movem branches e a principal no meio da chamada — ali o que se confere é o
+   * HEAD deste worktree (que cobre o branch da fase), tags e rastreio remoto.
+   */
+  const refsDeOutros = noWorktree ? ["refs/heads/", "refs/stash"] : [];
+  class AutoridadeViolada extends Error {
+    constructor(
+      readonly movidas: string[],
+      readonly papel: string,
+    ) {
+      super(movidas.join(", "));
+    }
+  }
   /** Toda chamada desta fase leva a árvore e o agente: quem atende precisa dos dois. */
-  const chamar: EngineCaller = (chamada) =>
-    options.call({
+  const chamar: EngineCaller = async (chamada) => {
+    const antes = await fotografarRefs(arvore, refsDeOutros);
+    const resposta = await options.call({
       ...chamada,
       ...(noWorktree ? { root: arvore } : {}),
       ...(options.worker !== undefined ? { worker: options.worker } : {}),
     });
+    const movidas = refsMovidas(antes, await fotografarRefs(arvore, refsDeOutros));
+    if (movidas.length > 0) throw new AutoridadeViolada(movidas, chamada.role === "builder" ? "executor" : "verificador");
+    return resposta;
+  };
   /** A conclusão vai ao log do run só quando a fase já está no produto. */
   const concluir = async (detalhe: string, cycle: number): Promise<void> => {
     if (options.integracaoPendente === true) await event("started", `verde no worktree, aguardando integração: ${detalhe}`, cycle);
@@ -675,6 +697,28 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   }
   } catch (erro) {
     if (erro instanceof LimiteEsgotado) return { status: "rate-limit-exhausted", waits };
+    if (erro instanceof AutoridadeViolada) {
+      /*
+       * O agente mexeu no Git por conta própria. Nada desta fase é registrado
+       * nem integrado, e nada é desfeito: mover a ref de volta seria reescrever
+       * o que a pessoa pode já ter visto — ou publicado.
+       */
+      const publicou = publicacaoProvavel(erro.movidas);
+      const cause =
+        `o ${erro.papel} mexeu no Git por conta própria — referências movidas durante a chamada: ${erro.movidas.join(", ")}. ` +
+        "Só o Core registra e publica: nada desta fase foi registrado nem integrado, e o que o agente fez não foi desfeito. " +
+        `${publicou ? "O rastreio remoto mudou: o agente provavelmente fez push — confira o remoto. " : ""}` +
+        "Confira com `git log --all --oneline -10` e `git reflog`, decida o que manter, e rode `capivara build` de novo.";
+      await event("blocked", `referências movidas pelo agente: ${erro.movidas.join(", ")}`, cicloCorrente);
+      relatar({ kind: "phase", id: session.id, state: "falhou", cycle: cicloCorrente, detail: "git por fora do Core" });
+      announce(`[${session.id}] PARADA DE AUTORIDADE — ${cause}`);
+      return {
+        status: "commit-blocked",
+        bloqueios: erro.movidas.map((ref) => ({ caminho: ref, motivo: "referência movida pelo agente durante a chamada" })),
+        cause,
+        cycles: cicloCorrente,
+      };
+    }
     if (!(erro instanceof CredencialRecusada)) throw erro;
 
     /*

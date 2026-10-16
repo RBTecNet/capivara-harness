@@ -36,8 +36,10 @@ import type { PhaseOutcome } from "./runner.js";
 import type { PhaseSession } from "./split.js";
 import {
   abrirWorktree,
+  alteradosNaPrincipal,
   branchTemTrabalho,
   cabeca,
+  comandoDeInstalacao,
   desfazerSemApagar,
   fecharWorktree,
   guardarParcial,
@@ -153,6 +155,8 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
    */
   let cabecaConhecida: string | null = await cabeca(projectRoot).catch(() => null);
   let ultimaIntegrada: PhaseSession | null = null;
+  /** O versionado que os passos do harness alteraram na árvore integrada (§102). */
+  let sujeiraDoHarness: { session: PhaseSession; causa: string } | null = null;
 
   const evento = async (subject: string, status: "complete" | "retry" | "blocked", detail: string): Promise<void> => {
     await appendEvent(paths.events, { timestamp: options.now().toISOString(), stage: "implement", subject, attempt: 1, status, detail });
@@ -196,7 +200,9 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
           outcome: {
             status: "failed" as const,
             gate: "gate 2 — suíte do projeto" as const,
-            cause: "não foi integrada: uma falha fatal anterior deixou a árvore principal precisando de atenção, e nada mais entra nela neste build",
+            cause: sujeiraDoHarness
+              ? `não foi integrada: ${sujeiraDoHarness.causa}`
+              : "não foi integrada: uma falha fatal anterior deixou a árvore principal precisando de atenção, e nada mais entra nela neste build",
             cycles: 0,
           },
         };
@@ -324,10 +330,12 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
       if (mexeuNasDependencias(integracao.arquivos) && options.instalar) {
         const temManifesto = await readFile(join(projectRoot, "package.json"), "utf8").then(() => true, () => false);
         if (temManifesto) {
-          announce(`[${session.id}] a fase mexeu nas dependências; instalando na árvore integrada`);
-          const instalado = await options.instalar("npm install --no-audit --no-fund", projectRoot);
+          // Nunca `npm install` com lockfile: ele reescreve o lockfile versionado (§102).
+          const instalacao = await comandoDeInstalacao(projectRoot);
+          announce(`[${session.id}] a fase mexeu nas dependências; instalando na árvore integrada com \`${instalacao}\``);
+          const instalado = await options.instalar(instalacao, projectRoot);
           if (instalado.exitCode !== 0) {
-            return desfazer(`npm install falhou na árvore integrada: ${instalado.output.split("\n").slice(-3).join(" ").trim()}`);
+            return desfazer(`\`${instalacao}\` falhou na árvore integrada: ${instalado.output.split("\n").slice(-3).join(" ").trim()}`);
           }
         }
       }
@@ -348,6 +356,29 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
       const g2 = await gate2(projectRoot, comando, options.testRunner, options.systemInstall);
       if (!g2.green) {
         return desfazer(`a suíte da árvore integrada reprovou: ${g2.cause.split("\n")[0] ?? ""}`);
+      }
+      /*
+       * A árvore estava igual ao HEAD antes do cherry-pick, e a fila de
+       * integração é de uma fase por vez: um versionado alterado agora foi
+       * escrito pelo que o próprio harness rodou nela. A fase está integrada e
+       * verde — os commits ficam —, mas nada mais entra por cima de uma árvore
+       * que não é o HEAD, e o desenvolvedor sabe na hora de quem é a alteração.
+       * Nada é descartado (§102).
+       */
+      const deixados = await alteradosNaPrincipal(projectRoot);
+      if (deixados.length > 0) {
+        fatal = true;
+        sujeiraDoHarness ??= {
+          session,
+          causa:
+            `a integração da ${session.id} deixou ${deixados.join(", ")} alterado(s) na árvore principal. ` +
+            `Quem alterou foi o próprio harness — a instalação, a migração ou a suíte que ele roda na árvore integrada —, não você. ` +
+            `Os commits da fase estão no HEAD e a suíte passou; nada foi descartado. ` +
+            `Confira com \`git diff\` e descarte (\`git checkout -- ${deixados.join(" ")}\`) ou commite antes de retomar`,
+        };
+        announce(`[${session.id}] ATENÇÃO — ${sujeiraDoHarness.causa}`);
+        // Nenhuma fase nova sai: ela trabalharia para ser recusada na integração.
+        parada ??= { session, outcome: { status: "failed", gate: "gate 2 — suíte do projeto", cause: sujeiraDoHarness.causa, cycles: 0 } };
       }
       const roteiros = await trazerRoteiros(worktree, projectRoot);
       announce(

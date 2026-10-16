@@ -61,7 +61,9 @@ mexe na árvore principal.
 
 Nada indica alteração do desenvolvedor.
 
-## A correção proposta (§102 do `PLANO.md`)
+## A correção (§102 do `PLANO.md`)
+
+Aplicada no branch `correcao/lockfile-integracao-102`.
 
 1. **Com lockfile, `npm ci`** (`comandoDeInstalacao`, em `worktree.ts`): instala
    o que o lockfile diz e nunca escreve nele. Se o lockfile não fechar com o

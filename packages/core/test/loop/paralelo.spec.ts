@@ -653,4 +653,64 @@ describe("build paralelo — auditoria (§99)", () => {
     expect(await git(["log", "--format=%s", "-1", `capivara/${RUN()}/P02`])).toContain("wip(P02)");
     expect(await git(["log", "--format=%s", "-1", `capivara/${RUN()}/P03`])).toContain("feat(phase-3)");
   });
+
+  /*
+   * §102 — o piloto paralelo real: o lockfile que o executor gerou no worktree
+   * não tinha `"hasInstallScript": true`, o `npm install` da integração o
+   * acrescentou na árvore principal, e a fase seguinte, verde, foi barrada como
+   * se o desenvolvedor tivesse editado o lockfile. O npm falso abaixo faz o que
+   * o npm 11 fez de verdade (reproduzido): `install` reescreve o lockfile,
+   * `ci` nunca escreve nele.
+   */
+  const LOCK_DO_EXECUTOR = '{\n  "name": "lab",\n  "lockfileVersion": 3,\n  "packages": {\n    "node_modules/better-sqlite3": {\n      "version": "13.0.3"\n    }\n  }\n}\n';
+  const COM_DEPENDENCIAS: Passo["escreve"] = {
+    ...ESCRITAS,
+    P01: [
+      ...ESCRITAS.P01!,
+      { path: "package.json", content: '{ "name": "lab", "dependencies": { "better-sqlite3": "13.0.3" } }\n' },
+      { path: "package-lock.json", content: LOCK_DO_EXECUTOR },
+    ],
+  };
+  const npmFalso = (comandos: { command: string; cwd: string }[], suite?: (cwd: string) => Promise<void>) =>
+    async (command: string, cwd: string): Promise<{ exitCode: number; output: string }> => {
+      comandos.push({ command, cwd });
+      if (/^npm install\b/.test(command) && !command.includes("--no-package-lock")) {
+        const lock = join(cwd, "package-lock.json");
+        const atual = await readFile(lock, "utf8").catch(() => null);
+        if (atual !== null) await writeFile(lock, atual.replace('"version": "13.0.3"', '"version": "13.0.3",\n      "hasInstallScript": true'), "utf8");
+      }
+      if (command === "npm test" && suite) await suite(cwd);
+      return { exitCode: 0, output: "1 passed" };
+    };
+
+  it("§102: a instalação na árvore integrada não reescreve o lockfile, e a fase seguinte integra", async () => {
+    const comandos: { command: string; cwd: string }[] = [];
+    const { outcome, anuncios } = await construir({ escreve: COM_DEPENDENCIAS }, { testRunner: npmFalso(comandos) });
+
+    expect(outcome.exitCode, anuncios.join("\n")).toBe(0);
+    expect((await git(["log", "--format=%s"])).split("\n").filter((linha) => linha.startsWith("feat(phase-"))).toHaveLength(4);
+    // A árvore principal sai igual ao HEAD, e o lockfile é o que a fase commitou.
+    expect(await git(["status", "--porcelain", "--", ".", ":(exclude).capivara"])).toBe("");
+    expect(await readFile(join(projectRoot, "package-lock.json"), "utf8")).toBe(LOCK_DO_EXECUTOR);
+    const naPrincipal = comandos.filter((comando) => comando.cwd === projectRoot && comando.command.startsWith("npm ") && comando.command !== "npm test");
+    expect(naPrincipal.map((comando) => comando.command)).toEqual(["npm ci --no-audit --no-fund"]);
+  });
+
+  it("§102: o que o próprio harness altera na árvore integrada é dito na hora, com o nome dele, e nada é descartado", async () => {
+    const comandos: { command: string; cwd: string }[] = [];
+    // A suíte que reescreve um arquivo versionado — só na árvore principal, durante a integração da P01.
+    const suite = async (cwd: string): Promise<void> => {
+      if (cwd === projectRoot && (await existe(join(cwd, "base.txt")))) await writeFile(join(cwd, "base.txt"), "reescrito pela suíte\n", "utf8");
+    };
+    const { outcome, engine, anuncios } = await construir({ escreve: ESCRITAS }, { testRunner: npmFalso(comandos, suite) });
+
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.errors.join("\n")).toContain("Quem alterou foi o próprio harness");
+    expect(outcome.errors.join("\n")).toContain("base.txt");
+    expect(anuncios.some((anuncio) => anuncio.includes("[P01] ATENÇÃO"))).toBe(true);
+    // A P01 entrou; nada foi desfeito nem descartado; nenhuma fase saiu por cima.
+    expect(await git(["log", "--format=%s", "-1"])).toBe("feat(phase-1): Fundação");
+    expect(await readFile(join(projectRoot, "base.txt"), "utf8")).toBe("reescrito pela suíte\n");
+    expect(engine.chamadas.filter((chamada) => chamada.role === "builder").map((chamada) => chamada.phase.id)).toEqual(["P01"]);
+  });
 });

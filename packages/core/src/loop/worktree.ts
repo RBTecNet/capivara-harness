@@ -480,6 +480,42 @@ export async function trazerRoteiros(worktree: Worktree, projectRoot: string): P
   return trazidos;
 }
 
+/**
+ * Os versionados que estão diferentes do HEAD na árvore principal, sem o plano de controle.
+ *
+ * Antes do cherry-pick, `impedimentosDaPrincipal` garante que não há nenhum. Se
+ * houver depois de uma integração verde, quem os escreveu foram os passos que o
+ * PRÓPRIO harness roda ali — instalação, migração, suíte —, e isso precisa ser
+ * dito na hora, com o nome certo, e não descoberto pela fase seguinte como
+ * "alteração que não é do integrador" (§102).
+ */
+export async function alteradosNaPrincipal(projectRoot: string): Promise<string[]> {
+  return (await situacaoDaPrincipal(projectRoot)).alterados.sort();
+}
+
+/**
+ * Como instalar as dependências na árvore principal sem reescrever o que é versionado (§102).
+ *
+ * `npm install` não é só instalação: ele também REESCREVE o lockfile quando
+ * acha que o que leu do registro e o que está no `node_modules` divergem. No
+ * primeiro piloto paralelo, o lockfile que o executor gerou no worktree não
+ * tinha `"hasInstallScript": true` no `better-sqlite3`; o `npm install` da
+ * integração o acrescentou, a árvore principal ficou com um versionado
+ * alterado, e a fase seguinte, verde, foi barrada como se o desenvolvedor o
+ * tivesse editado.
+ *
+ * Com lockfile, `npm ci`: instala exatamente o que o lockfile diz e nunca
+ * escreve nele — e falha se ele não fechar com o `package.json`, que é defeito
+ * da fase e deve reprovar a integração. Sem lockfile, `--no-package-lock`: o
+ * `npm install` não cria um arquivo que a fase não trouxe.
+ */
+export async function comandoDeInstalacao(projectRoot: string): Promise<string> {
+  for (const lockfile of ["package-lock.json", "npm-shrinkwrap.json"]) {
+    if (await existe(join(projectRoot, lockfile))) return "npm ci --no-audit --no-fund";
+  }
+  return "npm install --no-audit --no-fund --no-package-lock";
+}
+
 /** O commit tocou o manifesto ou o lockfile de dependências do Node? */
 export function mexeuNasDependencias(arquivos: readonly string[]): boolean {
   return arquivos.some((arquivo) => /^(?:package\.json|package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(arquivo));

@@ -52,6 +52,17 @@ O `acceptEdits` aprova edições de arquivo. Para o Bash, só passam os comandos
 que o Claude Code classifica como somente leitura. O resto pede aprovação, e
 numa chamada `-p` não existe quem aprove.
 
+As permissões chegam ao Claude CLI só por essa flag. O adapter não passa
+`--allowedTools`, `--settings` nem `--add-dir`. Nenhum arquivo de settings
+amplia ou restringe o que ele pode fazer:
+
+- o projeto não tem `.claude/`;
+- não existem `~/.claude/settings.local.json` nem
+  `/etc/claude-code/managed-settings.json`;
+- o `~/.claude/settings.json` do usuário não tem bloco `permissions`.
+
+O que decidiu as negações foi, portanto, só o modo `acceptEdits`.
+
 O nível veio da configuração do operador: `systemInstall: false` nos três
 agentes. Com isso, `commands/execucao.ts:103` dá `systemInstall` falso,
 `buildInvocation` escolhe o acesso `workspace` e o adapter monta `acceptEdits`.

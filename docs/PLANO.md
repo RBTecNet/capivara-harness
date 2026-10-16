@@ -6842,3 +6842,44 @@ na principal a partir do worktree no paralelo; e o sandbox real do codex,
 pulado onde o codex não está instalado) e `test/loop/commit-admitido.spec.ts`
 (disco que muda depois do `add`, HEAD que muda no meio, índice de quem chamou,
 segunda barreira da integração).
+
+## §102 — A integração não reescreve o lockfile, e o que o harness suja ele diz
+
+No primeiro piloto paralelo (`teste_paralelismo`), a P01 foi integrada no
+`17b2225` e a P02, verde no worktree, foi barrada: "a árvore principal tem
+alterações que não são do integrador (package-lock.json)". O diff era uma
+linha — `"hasInstallScript": true` no `better-sqlite3` — e quem a escreveu foi
+o próprio harness: depois do cherry-pick da P01, a integração rodou
+`npm install` na árvore principal (a fase mexeu nas dependências), e o
+`npm install` reescreve o lockfile quando o que lê do `node_modules` diverge do
+que o executor gravou. O lockfile tem mtime 23:42:10.688Z, entre o verde no
+worktree (23:42:05.970Z) e o evento "integrada" (23:42:10.845Z). Reproduzido
+fora do projeto, com o `package.json` e o lockfile do `17b2225`: `npm install`
+acrescenta exatamente a linha; `npm ci` deixa o arquivo idêntico.
+
+Duas mudanças:
+
+1. **Com lockfile, `npm ci`** (`comandoDeInstalacao`, em `worktree.ts`):
+   instala o que o lockfile diz e nunca escreve nele; se o lockfile não fechar
+   com o `package.json`, falha — e isso é defeito da fase, que reprova a
+   integração pelo caminho que já existia. Sem lockfile,
+   `npm install --no-package-lock`, para não criar o arquivo que a fase não
+   trouxe.
+2. **O que sobrar é dito na hora, com o nome certo.** A árvore estava igual ao
+   HEAD antes do cherry-pick (§99) e a fila integra uma fase por vez; um
+   versionado alterado depois da suíte verde foi escrito pelos passos do
+   harness — instalação, migração, suíte. A fase fica integrada (os commits
+   são verdes), nada é descartado nem desfeito, nenhuma fase nova sai, e a
+   parada diz que a alteração é do harness e não do desenvolvedor, com o
+   comando para descartar ou commitar. Antes, era a fase seguinte que
+   descobria, depois de trabalhar, e a culpa ia para a pessoa.
+
+Nada dos §§99–101 mudou: a conferência de antes do cherry-pick, a admissão do
+intervalo, o desfazer com guarda comprovada e a guarda do HEAD continuam como
+estavam. O `.capivara/.gitignore` não versionado do piloto é o do plano de
+controle (`ensureArtifactTree`), escrito no `init`; o status da principal já o
+exclui, e ele não teve papel na parada.
+
+Testes: `test/loop/paralelo.spec.ts`, os dois "§102" — um npm falso que faz o
+que o npm 11 fez (`install` reescreve o lockfile, `ci` não): com o código
+anterior, o primeiro para em exit 2 e o segundo reproduz a mensagem do piloto.

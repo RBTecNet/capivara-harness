@@ -418,6 +418,47 @@ describe("o runner de fluxos é dito antes, não depois", () => {
 });
 
 /*
+ * §107: no `build-96756ca336b0` o contrato do gate 4 só aparecia na causa do
+ * último ciclo, e P03, P04 e P05 bloquearam com a aplicação na 3001 da `PORTA`.
+ */
+describe("o contrato de subida do gate 4 é dito desde o primeiro ciclo", () => {
+  async function primeiroPrompt(workflows: { number: string; name: string; steps: string[] }[]) {
+    const chamadas: EngineCall[] = [];
+    await runPhase({
+      projectRoot,
+      runId: RUN,
+      language: "pt-BR",
+      engine: "codex",
+      session: session(),
+      testCommand: null,
+      commitsEnabled: false,
+      maxCycles: 1,
+      sleep: async () => undefined,
+      flows: { workflows, resolveStart: async () => null, runner: async () => ({ exitCode: 0, output: "" }) },
+      call: async (call) => {
+        chamadas.push(call);
+        return ok(call.role === "verifier" ? "CAPIVARA_VERIFY: 1.1 | DONE | pronto" : "feito");
+      },
+      testRunner: async () => ({ exitCode: 0, output: "" }),
+    });
+    return chamadas.find((chamada) => chamada.role === "builder")?.prompt ?? "";
+  }
+
+  it("a fase com fluxo recebe npm start, PORT e HOST na primeira sessão", async () => {
+    const prompt = await primeiroPrompt([{ number: "1", name: "Cadastro", steps: ["abre", "salva"] }]);
+    expect(prompt).toContain("`npm start`");
+    expect(prompt).toContain("`PORT` and `HOST`");
+    expect(prompt).toContain("listens on a fixed port fails the gate");
+  });
+
+  it("a fase sem fluxo não recebe o contrato", async () => {
+    const prompt = await primeiroPrompt([]);
+    expect(prompt).not.toBe("");
+    expect(prompt).not.toContain("How the application is started for the flow gate");
+  });
+});
+
+/*
  * O P02 do `assistencia2`: o codex começou a responder `401 Unauthorized:
  * Incorrect API key` no meio do build. O verificador do ciclo 2 recebeu isso, não
  * emitiu linha nenhuma, e o gate 3 contou como reprovação; o executor do ciclo 3

@@ -7030,3 +7030,77 @@ Os gates G0–G4 não mudaram. As garantias comprovadas, a matriz de sondas com
 os providers reais e as limitações estão em `docs/GARANTIAS-WORKSPACE-106.md`.
 A principal limitação: o sandbox contém a sessão do executor, mas G2 e G4
 executam o código que ele escreveu fora de qualquer sandbox.
+
+## §107 — O gate 4 diz como sobe a aplicação, e a porta ocupada é atribuída a quem a abriu
+
+No build paralelo `build-96756ca336b0`, P03, P04 e P05 bloquearam no gate 4.
+O gate sobe a aplicação com `npm start` e passa a porta em `PORT`, mas a
+aplicação lia `PORTA` e escutava na 3001. O contrato só aparecia na causa de
+"NÃO SUBIU", que saiu no terceiro e último ciclo e por isso nunca chegou a um
+executor. A causa do ciclo 2 pedia um `start` e não falava em porta.
+
+No ciclo 3, a P05 recebeu `EADDRINUSE 127.0.0.1:3001`, porque o gate 4 da P04
+já tinha um servidor na 3001. O gate, que procurava "porta ocupada" em qualquer
+parte da saída, respondeu "a porta 47535 foi ocupada… do ambiente". Atribuiu
+a porta errada a um dono errado. O diagnóstico está em
+`docs/DIAGNOSTICO-G4-PORTAS-PARALELO.md`.
+
+Três mudanças, sem tocar no scheduler, nos worktrees, nas permissões do §106 ou
+nos critérios dos gates:
+
+1. **O contrato vai no prompt.** Toda fase que passa pelo gate 4 (fluxos
+   próprios ou de regressão) recebe o contrato no prompt do executor, desde o
+   primeiro ciclo e também nos de correção. O gate roda o `start` do manifesto
+   (`npm start` em Node), com `PORT` e `HOST` no ambiente. O projeto pode
+   manter os próprios nomes, desde que o entrypoint honre esses dois. A fase
+   sem gate 4 não recebe nada. A causa da falta de entrypoint também passa a
+   citar `PORT` e `HOST`.
+2. **A porta ocupada é atribuída pelo número na saída.** `portasEmUso` lê o fim
+   da linha que acusa o uso (`listen EADDRINUSE … :3001` no Node e
+   `http://…:47535 is already used` no Playwright).
+   - **A porta é a do gate:** a falha é do ambiente.
+   - **É outra porta:** a falha é configuração do entrypoint. A causa diz qual
+     porta a aplicação tentou abrir e qual `PORT`/`HOST` o gate forneceu.
+   - **Sem número legível:** a causa diz que a saída não informa a porta e não
+     atribui a falha a ninguém.
+3. **A porta do gate tomada troca uma vez, dentro da mesma chamada.** O gate
+   escolhe outra porta livre, reescreve a configuração e roda a passagem de
+   novo uma única vez, sem gastar ciclo do executor. O roteiro não é reescrito,
+   porque usa caminho relativo, e nenhum processo de terceiro é tocado. Se a
+   porta for tomada de novo, a causa é de ambiente e cita a porta efetiva.
+   Colisão na porta da aplicação nunca troca a porta do gate.
+
+Nenhum formato persistido mudou. A retomada e as fases já integradas seguem
+como antes, e um run retomado recebe o contrato no próximo prompt de ciclo.
+
+Fica documentado, fora do escopo:
+- **Portas fixas na suíte do projeto.** A suíte do `teste_haiku_v2`
+  (`servidor.test.ts`) abre a 3001 e a 5173 fixas. Isso é risco de colisão no
+  gate 2 entre fases paralelas, e entre o gate 2 de uma fase e o gate 4 de
+  outra. É do projeto, e nada mudou no harness por isso.
+- **Só o `start` serve de entrypoint.** `startCommandFor` só reconhece
+  `scripts.start`, então um projeto com `iniciar` continua precisando declarar
+  `start`. Agora isso é dito antes do ciclo 1, mas a descoberta não mudou.
+- **Duas trocas simultâneas.** Dois gates que troquem de porta ao mesmo tempo
+  pedem portas efêmeras ao sistema e podem, em tese, receber a mesma. A
+  segunda colisão é relatada como ambiente.
+
+Nada disto foi comprovado num build real com o Haiku. A prova é dos testes,
+com runners e portas simulados.
+
+Testes:
+- `test/loop/runner.spec.ts`:
+  - "a fase com fluxo recebe npm start, PORT e HOST na primeira sessão";
+  - "a fase sem fluxo não recebe o contrato".
+- `test/loop/flows.spec.ts`:
+  - "EADDRINUSE na porta da aplicação é configuração do entrypoint, e não
+    troca a porta do gate", com o caso do run: 3001 contra 47535;
+  - "porta do gate tomada uma vez: outra porta, a mesma chamada, verde —
+    nenhum ciclo do executor";
+  - "porta do gate tomada duas vezes é dita como ambiente", que adapta o teste
+    anterior: o runner falso agora acusa a porta que o gate de fato escreveu;
+  - "porta ocupada sem número legível não é atribuída a ninguém";
+  - "dois gates simultâneos se recuperam cada um na sua árvore";
+  - a extração de `portasEmUso`.
+- Contra o código anterior, 7 desses testes falham. O de fase sem fluxo passa
+  nos dois, como deve.

@@ -23,7 +23,7 @@ import {
   portaLivre,
   renderFlowConfig,
 } from "../../src/loop/index.js";
-import { FLOW_MARK, FLOW_RESULTS, nomesNaoDefinidos, retratosDaFalha } from "../../src/loop/flows.js";
+import { FLOW_MARK, FLOW_RESULTS, nomesNaoDefinidos, portasEmUso, retratosDaFalha } from "../../src/loop/flows.js";
 import { lerTriagem } from "../../src/prompts/index.js";
 import { FLOW_HELPER, bancosDeclarados, ferramentasDaMaquina } from "../../src/loop/passagem.js";
 import { flowPrompt } from "../../src/prompts/index.js";
@@ -58,6 +58,12 @@ function roteiroBom(workflow: SkeletonWorkflow = WORKFLOW): string {
 }
 
 const verde: FlowRun = { exitCode: 0, output: "3 passed" };
+
+/** A porta que o gate escreveu na configuração da passagem — é nela que o Playwright espera. */
+async function portaDaConfig(): Promise<number> {
+  const config = await readFile(join(projectRoot, FLOWS_DIR, FLOW_CONFIG), "utf8");
+  return Number(/baseURL: 'http:\/\/127\.0\.0\.1:(\d+)'/.exec(config)?.[1]);
+}
 
 describe("a conferência do roteiro, antes de abrir navegador nenhum", () => {
   it("aceita o roteiro que cita todo passo e afirma algo em cada um", () => {
@@ -665,23 +671,148 @@ describe("a porta em que a aplicação sobe", () => {
   /*
    * A janela entre escolher a porta e o Playwright abri-la é pequena e real.
    * Quando alguém a ocupa nesse intervalo, a causa é do ambiente — e dizer "a
-   * aplicação não subiu" manda consertar o que não está quebrado.
+   * aplicação não subiu" manda consertar o que não está quebrado. Desde o §107 o
+   * gate troca de porta uma vez antes de dizer isso; aqui a porta é tomada nas duas.
    */
-  it("porta tomada no intervalo é dita como ambiente, não como produto", async () => {
+  it("porta do gate tomada duas vezes é dita como ambiente, não como produto", async () => {
+    const portas: number[] = [];
     const resultado = await gate4({
       ...base,
       projectRoot,
       author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
-      runner: async () => ({
-        exitCode: 1,
-        output: "Error: http://127.0.0.1:47533 is already used, make sure that nothing is running on the port/url",
-      }),
+      runner: async () => {
+        const porta = await portaDaConfig();
+        portas.push(porta);
+        return { exitCode: 1, output: `Error: http://127.0.0.1:${porta} is already used, make sure that nothing is running on the port/url` };
+      },
     });
 
     if (resultado.green) throw new Error("deveria reprovar");
     expect(resultado.startupFailed).toBe(true);
     expect(resultado.cause).toContain("Isto é do ambiente, não do seu código");
+    expect(resultado.cause).toContain(`a porta ${portas[1]} do gate`);
     expect(resultado.cause).not.toContain("NÃO SUBIU");
+    // Uma troca, não um laço.
+    expect(portas).toHaveLength(2);
+    expect(portas[1]).not.toBe(portas[0]);
+  });
+
+  /*
+   * §107, o caso do `build-96756ca336b0`: a aplicação ignorava a `PORT` do gate e
+   * abria a 3001 da sua `PORTA`, que o gate 4 de outra fase já ocupava. O gate
+   * disse "a porta 47535 foi ocupada… do ambiente" — a porta errada e o dono errado.
+   */
+  it("EADDRINUSE na porta da aplicação é configuração do entrypoint, e não troca a porta do gate", async () => {
+    let corridas = 0;
+    const resultado = await gate4({
+      ...base,
+      projectRoot,
+      port: 47535,
+      author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
+      runner: async () => {
+        corridas += 1;
+        return {
+          exitCode: 1,
+          output:
+            "Error: Process from config.webServer was not able to start. Exit code: 1\n\n" +
+            "[WebServer] Falha ao iniciar a aplicação: listen EADDRINUSE: address already in use 127.0.0.1:3001",
+        };
+      },
+    });
+
+    if (resultado.green) throw new Error("deveria reprovar");
+    expect(corridas).toBe(1);
+    expect(resultado.startupFailed).toBe(true);
+    expect(resultado.cause).toContain("tentou escutar na porta 3001");
+    expect(resultado.cause).toContain("PORT=47535");
+    expect(resultado.cause).toContain("HOST=127.0.0.1");
+    expect(resultado.cause).not.toContain("a porta 47535 foi ocupada");
+    expect(resultado.cause).not.toContain("Isto é do ambiente");
+  });
+
+  it("porta do gate tomada uma vez: outra porta, a mesma chamada, verde — nenhum ciclo do executor", async () => {
+    const portas: number[] = [];
+    let roteiros = 0;
+    const resultado = await gate4({
+      ...base,
+      projectRoot,
+      author: async () => {
+        roteiros += 1;
+        return `\`\`\`ts\n${roteiroBom()}\n\`\`\``;
+      },
+      runner: async () => {
+        const porta = await portaDaConfig();
+        portas.push(porta);
+        return portas.length === 1
+          ? { exitCode: 1, output: `[WebServer] Error: listen EADDRINUSE: address already in use :::${porta}` }
+          : verde;
+      },
+    });
+
+    // Verde dentro da mesma chamada do gate: o runner não vê reprovação e o ciclo não é gasto.
+    expect(resultado.green).toBe(true);
+    expect(portas).toHaveLength(2);
+    expect(portas[1]).not.toBe(portas[0]);
+    // A troca de porta não reescreve roteiro: o roteiro usa caminho relativo.
+    expect(roteiros).toBe(1);
+  });
+
+  it("porta ocupada sem número legível não é atribuída a ninguém", async () => {
+    const resultado = await gate4({
+      ...base,
+      projectRoot,
+      port: 47535,
+      author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
+      runner: async () => ({ exitCode: 1, output: "[WebServer] OSError: [Errno 98] Address already in use" }),
+    });
+
+    if (resultado.green) throw new Error("deveria reprovar");
+    expect(resultado.cause).toContain("não diz qual porta");
+    expect(resultado.cause).not.toContain("Isto é do ambiente");
+  });
+
+  /*
+   * Em paralelo (§97), cada fase tem o seu gate 4 na sua árvore. A troca de porta
+   * de uma não pode mexer na configuração da outra nem cair na porta dela.
+   */
+  it("dois gates simultâneos se recuperam cada um na sua árvore, sem tocar no outro", async () => {
+    const outra = await mkdtemp(join(tmpdir(), "capivara-fluxos-outra-"));
+    try {
+      const portaDe = async (raiz: string): Promise<number> =>
+        Number(/baseURL: 'http:\/\/127\.0\.0\.1:(\d+)'/.exec(await readFile(join(raiz, FLOWS_DIR, FLOW_CONFIG), "utf8"))?.[1]);
+      const vistas: Record<string, number[]> = { [projectRoot]: [], [outra]: [] };
+      const gate = (raiz: string, port: number) =>
+        gate4({
+          ...base,
+          projectRoot: raiz,
+          port,
+          author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
+          runner: async (dir) => {
+            const porta = await portaDe(dir);
+            vistas[dir]?.push(porta);
+            return vistas[dir]?.length === 1 ? { exitCode: 1, output: `listen EADDRINUSE: address already in use 127.0.0.1:${porta}` } : verde;
+          },
+        });
+
+      const [um, dois] = await Promise.all([gate(projectRoot, 47533), gate(outra, 47534)]);
+      expect(um.green && dois.green).toBe(true);
+      expect(vistas[projectRoot]?.[0]).toBe(47533);
+      expect(vistas[outra]?.[0]).toBe(47534);
+      expect(vistas[projectRoot]?.[1]).not.toBe(47533);
+      expect(vistas[outra]?.[1]).not.toBe(47534);
+      expect(await portaDe(projectRoot)).toBe(vistas[projectRoot]?.[1]);
+      expect(await portaDe(outra)).toBe(vistas[outra]?.[1]);
+    } finally {
+      await rm(outra, { recursive: true, force: true });
+    }
+  });
+
+  it("a porta sai do fim da linha que acusa o uso, no Node e no Playwright", () => {
+    expect(portasEmUso("listen EADDRINUSE: address already in use 127.0.0.1:3001")).toEqual([3001]);
+    expect(portasEmUso("Error: listen EADDRINUSE: address already in use :::5173")).toEqual([5173]);
+    expect(portasEmUso("Error: http://127.0.0.1:47535 is already used, make sure that nothing is running on the port/url")).toEqual([47535]);
+    expect(portasEmUso("OSError: [Errno 98] Address already in use")).toEqual([]);
+    expect(portasEmUso("GET http://127.0.0.1:3001/ 200")).toEqual([]);
   });
 });
 

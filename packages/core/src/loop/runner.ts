@@ -360,6 +360,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       containerized: options.testCommand?.containerized ?? false,
       phaseMarkdown: session.markdown,
       ...(precisaDoRunner ? { runnerDeFluxosAusente: true } : {}),
+      ...((options.flows?.workflows.length ?? 0) + (options.flows?.regressao?.length ?? 0) > 0 ? { temFluxos: true } : {}),
       ...(options.skills !== undefined && options.skills !== "" ? { skills: options.skills } : {}),
       ...(options.onMemorias ? { memoriasDir: MEMORIAS_DIR } : {}),
     };

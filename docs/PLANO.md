@@ -6918,9 +6918,9 @@ Fica registrado, sem mudar aqui:
   por chamada, limitada ao número de fluxos.
 - **A causa ao roteirista** leva a correção, a evidência e o retrato da página,
   mas não o `onde` (arquivo e linha) nem o `critério` que a triagem citou.
-- **A retomada** reconstrói os cumpridos na ordem do plano, não na ordem em que
-  foram integrados: no paralelo, as duas podem divergir (aqui, 5,1,2,3,4
-  contra 5,1,4,2,3).
+- **A retomada** reconstruía os cumpridos na ordem do plano, não na ordem em
+  que foram integrados: no paralelo, as duas divergem (aqui, 5,1,2,3,4 contra
+  5,1,4,2,3). Corrigido no §104.
 - **O isolamento do banco é por passagem, não por fluxo.** O workflow 5 só
   está certo se rodar primeiro; a correção que a triagem propôs para ele ("um
   SQLite exclusivo para o fluxo 5") não é executável por um roteiro: a
@@ -6929,3 +6929,24 @@ Fica registrado, sem mudar aqui:
 Teste: `test/integration/catalog.spec.ts`, "a fase que cobre de novo fluxos já
 cumpridos os percorre na ordem em que foram cumpridos" — com o código anterior,
 a terceira passagem sai na ordem do plano.
+
+## §104 — Retomado, o build devolve os fluxos cumpridos na ordem em que as fases fecharam
+
+O §103 deixou a ordem da passagem estável ao vivo, mas não na retomada. Ali,
+as fases puladas — fechadas antes, neste run ou noutro — entravam nos
+cumpridos na ordem do PLANO. No serial dá no mesmo; no paralelo, não: no
+piloto, P01, P02, P05, P03, P04 fecharam nessa ordem (fluxos 5,1,4,2,3), e a
+retomada da P06 os reconstruiria como 5,1,2,3,4 — de novo uma ordem que os
+roteiros nunca percorreram juntos.
+
+O ledger (`.capivara/handoffs/fases.json`) já guarda `closedAt` de cada fase.
+Os três caminhos que acrescentam cumpridos — a fase verde, a fechada em run
+anterior e a fechada neste run — passam por um só (`cumprir`), que ordena
+pela data de fechamento; o verde usa a mesma data que acabou de gravar no
+ledger. Sem data, o fluxo fica junto do anterior. Nenhum gate, critério ou
+limite mudou.
+
+Teste: `test/integration/catalog.spec.ts`, "retomado, os fluxos cumpridos
+voltam na ordem em que as fases fecharam, não na do plano" — um ledger em que
+a P02 fechou antes da P01; com o código anterior, a passagem da P03 sai na
+ordem do plano.

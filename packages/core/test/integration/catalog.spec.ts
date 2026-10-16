@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { InitBlockedError, runInit } from "../../src/init/index.js";
-import { detectPrerequisites, isRepository, runBuild, splitPhases } from "../../src/loop/index.js";
+import { detectPrerequisites, isRepository, registrarFaseFechada, runBuild, shaDaFase, splitPhases } from "../../src/loop/index.js";
 import type { FlowRunner } from "../../src/loop/index.js";
 import type { BuildProgress } from "../../src/loop/index.js";
 import { readEvents, runIdFor, runPaths } from "../../src/state/index.js";
@@ -1474,6 +1474,58 @@ describe("B-41 · o gate que abre a aplicação", () => {
       // Não a ordem do plano (1, 2): a ordem em que os roteiros já passaram juntos.
       ["workflow-2.spec.ts", "workflow-1.spec.ts"],
     ]);
+  }, 20_000);
+
+  /*
+   * §104 — no paralelo, as fases fecham fora da ordem do plano (no piloto,
+   * P01, P02, P05, P03, P04), e a retomada reconstruía os cumpridos na ordem do
+   * plano. A passagem precisa da ordem em que fecharam, que é a do ledger.
+   */
+  it("retomado, os fluxos cumpridos voltam na ordem em que as fases fecharam, não na do plano", async () => {
+    const { tasks } = await publishPlan({ extra: PHASE_3 });
+    const plano = await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8");
+    const split = splitPhases(plano, projectRoot, runIdFor("build", sha12(plano)));
+    if (!split.ok) throw new Error("plano de teste inválido");
+    // A P02 fechou antes da P01 — o que o paralelo produz.
+    for (const [indice, quando] of [[1, "2026-01-01T10:00:00.000Z"], [0, "2026-01-01T11:00:00.000Z"]] as const) {
+      const fase = split.sessions[indice]!;
+      await registrarFaseFechada(projectRoot, { id: fase.id, title: fase.title, sha: shaDaFase(fase.markdown), runId: "build-anterior", closedAt: quando });
+    }
+    await writeFile(join(projectRoot, "package.json"), MANIFESTO.content, "utf8");
+    await gitRepo();
+    const passos = ["escolhe a data", "confirma a reserva", "vê a reserva na lista"];
+    const esqueleto: Skeleton = {
+      ...ESQUELETO,
+      workflows: [
+        { number: "1", name: "Reservar uma diária", steps: passos },
+        { number: "2", name: "Rever a reserva", steps: passos },
+      ],
+      phases: [
+        { number: 1, title: "Fundação de dados", goal: "migrations", dependsOn: "none", covers: ["workflow 1"], areas: ["dados"], taskCount: 2 },
+        { number: 2, title: "API", goal: "rotas", dependsOn: "none", covers: ["workflow 2"], areas: ["backend"], taskCount: 2 },
+        { number: 3, title: "Editar a reserva", goal: "edição", dependsOn: "Phase 2", covers: ["workflow 1", "workflow 2"], areas: ["backend"], taskCount: 1 },
+      ],
+      mvpCutPhase: 3,
+    };
+    const percorridos: string[][] = [];
+    const { outcome } = await build(
+      [
+        { match: { role: "builder", phase: "P03" }, writes: [{ path: "src/c.ts", content: "export const c = 3;" }], respond: { stdout: "fiz" }, repeat: true },
+        { match: { role: "verifier", prompt: "CAPIVARA_FLOW" }, respond: { stdout: ROTEIRO }, repeat: true },
+        { match: { role: "verifier", phase: "P03" }, respond: { stdout: allDone(tasks[2] ?? 1) }, repeat: true },
+      ],
+      {
+        skeleton: esqueleto,
+        skipAcceptance: true,
+        flowRunner: async (_root, scripts) => {
+          percorridos.push(scripts);
+          return { exitCode: 0, output: "3 passed" };
+        },
+      },
+    );
+
+    expect(outcome.errors).toEqual([]);
+    expect(percorridos).toEqual([["workflow-2.spec.ts", "workflow-1.spec.ts"]]);
   }, 20_000);
 
   /*

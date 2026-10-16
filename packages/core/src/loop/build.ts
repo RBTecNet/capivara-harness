@@ -691,20 +691,40 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       };
     };
 
+    /*
+     * Os fluxos da fase entram nos cumpridos na ordem em que a fase FECHOU (§104).
+     *
+     * A passagem roda os roteiros nessa ordem, e cada um foi escrito contando com
+     * o que os anteriores deixaram. Ao vivo, a ordem de chegada já é essa; na
+     * retomada, as fases puladas chegam na ordem do PLANO — e no paralelo as duas
+     * divergem: no piloto, P01, P02, P05, P03, P04 fecharam nessa ordem (fluxos
+     * 5,1,4,2,3), e a retomada os reconstruiria como 5,1,2,3,4. O ledger guarda
+     * quando cada fase fechou; sem a data, o fluxo fica junto do anterior.
+     */
+    const cumpridoEm = new Map<string, string>();
+    const cumprir = (session: PhaseSession, fechadaEm: string | undefined): void => {
+      if (esqueleto === null) return;
+      for (const workflow of workflowsForPhase(esqueleto, session.number)) {
+        if (fluxosCumpridos.some((cumprido) => cumprido.number === workflow.number)) continue;
+        const anterior = fluxosCumpridos.at(-1);
+        fluxosCumpridos.push(workflow);
+        cumpridoEm.set(workflow.number, fechadaEm ?? (anterior ? (cumpridoEm.get(anterior.number) ?? "") : ""));
+      }
+      // `sort` é estável: empate fica na ordem de chegada.
+      fluxosCumpridos.sort((a, b) => (cumpridoEm.get(a.number) ?? "").localeCompare(cumpridoEm.get(b.number) ?? ""));
+    };
+
     /** O que toda fase verde deixa: o registro no ledger e os fluxos como regressão das seguintes. */
     const aposVerde = async (session: PhaseSession): Promise<void> => {
+      const fechadaEm = now().toISOString();
       await registrarFaseFechada(options.projectRoot, {
         id: session.id,
         title: session.title,
         sha: shaDaFase(session.markdown),
         runId,
-        closedAt: now().toISOString(),
+        closedAt: fechadaEm,
       });
-      if (esqueleto !== null) {
-        for (const workflow of workflowsForPhase(esqueleto, session.number)) {
-          if (!fluxosCumpridos.some((cumprido) => cumprido.number === workflow.number)) fluxosCumpridos.push(workflow);
-        }
-      }
+      cumprir(session, fechadaEm);
     };
 
     /*
@@ -723,11 +743,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         if (fluxosDaFase !== null) options.onProgress?.({ kind: "gate", id: session.id, gate: "G4", state: "verde", cycle: 0 });
 
         // O fluxo de uma fase fechada continua sendo regressão das seguintes.
-        if (esqueleto !== null) {
-          for (const workflow of workflowsForPhase(esqueleto, session.number)) {
-            if (!fluxosCumpridos.some((cumprido) => cumprido.number === workflow.number)) fluxosCumpridos.push(workflow);
-          }
-        }
+        cumprir(session, shaFechado.get(shaDaFase(session.markdown))?.closedAt);
         return true;
       }
 
@@ -756,11 +772,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
          * retomado, a P04 rodou só os próprios fluxos, e o fluxo 2, escrito para
          * rodar depois do 1, rodou primeiro num banco sem tabela.
          */
-        if (esqueleto !== null) {
-          for (const workflow of workflowsForPhase(esqueleto, session.number)) {
-            if (!fluxosCumpridos.some((cumprido) => cumprido.number === workflow.number)) fluxosCumpridos.push(workflow);
-          }
-        }
+        cumprir(session, shaFechado.get(shaDaFase(session.markdown))?.closedAt);
         return true;
       }
       return false;

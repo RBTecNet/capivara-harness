@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ROLE_NAMES, ROLES, buildInvocation, limitsFor } from "../../src/provider/index.js";
+import { CLI_ADAPTERS, ROLE_NAMES, ROLES, buildInvocation, limitsFor } from "../../src/provider/index.js";
 import type { RoleConfig } from "../../src/provider/index.js";
 
 const context = {
@@ -118,6 +118,19 @@ describe("ambiente da invocação", () => {
     expect(invocation.env.CAPIVARA_ROLE).toBe("verifier");
     expect(invocation.env.CAPIVARA_PERMISSION).toBe("read-only");
     expect(invocation.env.CAPIVARA_LANGUAGE).toBe("pt-BR");
+  });
+
+  /*
+   * O diretório da chamada é o do projeto, para TODA CLI (§105). Só o codex
+   * recebia a raiz, por `--cd`; o claude herdava o cwd de quem rodou a
+   * capivara, e no paralelo o executor Haiku escreveu a P01 inteira na árvore
+   * principal enquanto o verificador conferia o worktree vazio.
+   */
+  it("toda CLI roda no diretório do projeto, não no de quem chamou", () => {
+    for (const adapter of CLI_ADAPTERS) {
+      const invocation = buildInvocation("builder", config({ provider: adapter.id, command: "/bin/adapter" }), context);
+      expect(invocation.cwd, adapter.id).toBe(context.projectRoot);
+    }
   });
 });
 

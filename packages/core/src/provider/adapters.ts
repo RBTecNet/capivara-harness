@@ -35,6 +35,15 @@ export interface Invocation {
   command: string;
   args: string[];
   env: NodeJS.ProcessEnv;
+  /**
+   * Onde o processo nasce: a raiz do projeto — no paralelo, o worktree da fase.
+   *
+   * Flag de diretório é coisa de cada CLI, e nem toda tem (§105). O claude não
+   * recebia nenhuma e herdava o cwd de quem rodou a capivara: no primeiro build
+   * paralelo com o Haiku, a P01 inteira foi escrita na árvore principal, e o
+   * verificador, no worktree, achou tudo ausente.
+   */
+  cwd: string;
   /** O que será escrito no stdin do processo. */
   stdinIsPrompt: true;
   /** Como ler o que a CLI escreveu. Ausente significa texto puro. */
@@ -123,6 +132,7 @@ export function buildInvocation(role: RoleName, config: RoleConfig, context: Inv
         CAPIVARA_DIRECT_REASONING: reasoning.enabled ? (reasoning.effort ?? "") : "",
         ...(context.secret ? { [provider.envKey]: context.secret } : {}),
       },
+      cwd: context.projectRoot,
       stdinIsPrompt: true,
       // A ponte de API direta devolve a resposta de uma vez, como as CLIs de
       // objeto único.
@@ -155,6 +165,7 @@ export function buildInvocation(role: RoleName, config: RoleConfig, context: Inv
     command: built.command ?? binary,
     args: built.args,
     env: built.env ?? env,
+    cwd: context.projectRoot,
     stdinIsPrompt: true,
     streams: adapter.streams,
     ...(adapter.transcript ? { transcript: adapter.transcript } : {}),

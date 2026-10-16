@@ -101,7 +101,8 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
      * pasta de SAÍDA como raiz, e ela só era criada depois do mapa: o survey do
      * cronus3 com o codex foi recusado três vezes como "JSON inválido" sem que
      * o modelo tivesse chegado a rodar. Para init, plan e build a pasta já existe
-     * e isto não faz nada.
+     * e isto não faz nada. E é também o `cwd` do processo (§105): sem a pasta,
+     * o `spawn` falharia antes de a CLI começar.
      */
     await mkdir(options.projectRoot, { recursive: true });
 

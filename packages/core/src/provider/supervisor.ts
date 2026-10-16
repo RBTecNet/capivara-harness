@@ -75,6 +75,7 @@ export async function runProvider(options: RunOptions): Promise<RunResult> {
 
   const child = spawn(invocation.command, invocation.args, {
     env: invocation.env,
+    cwd: invocation.cwd,
     stdio: ["pipe", "pipe", "pipe"],
     detached: true,
   });

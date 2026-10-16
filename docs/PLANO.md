@@ -6950,3 +6950,38 @@ Teste: `test/integration/catalog.spec.ts`, "retomado, os fluxos cumpridos
 voltam na ordem em que as fases fecharam, não na do plano" — um ledger em que
 a P02 fechou antes da P01; com o código anterior, a passagem da P03 sai na
 ordem do plano.
+
+## §105 — Toda CLI trabalha na raiz que a ponte recebeu
+
+No primeiro build paralelo com o Claude Haiku (run `build-f1cd4ae9e525`), a
+P01 parou no gate 3 depois de três ciclos. O executor declarou a fundação
+completa, com 25 testes verdes, e o verificador achou tudo ausente. Os dois
+disseram a verdade sobre lugares diferentes. O worktree chegava certo até a
+ponte e se perdia ali. O adaptador do claude não passa diretório nenhum, e o
+`spawn` não recebia `cwd`, então o processo nascia na árvore principal, onde a
+capivara foi rodada. Só o codex trabalhava no worktree, porque recebe `--cd`.
+O diagnóstico, com as evidências, está em
+`docs/DIAGNOSTICO-CWD-CLAUDE-PARALELO.md`.
+
+A invocação agora leva `cwd` (a raiz do projeto, que no paralelo é o
+worktree), e o supervisor o usa no `spawn`. O campo é obrigatório: uma
+invocação sem diretório não compila. Isso vale para todas as CLIs, inclusive
+as que não têm flag de diretório (claude, cursor e custom). Também corrige o
+serial com `--project` diferente do cwd e o survey, que passa a pasta de
+saída como raiz.
+
+Nenhum gate, critério ou limite mudou.
+
+Fica aberto que nenhuma guarda percebe a árvore principal mudando durante uma
+fase em worktree, porque a conferência do §99 só roda na integração. A
+proposta é fotografar a principal antes e depois de cada chamada de agente e
+parar sem descartar nada. Não foi implementada.
+
+Testes:
+- `test/provider/adapters.spec.ts`: "toda CLI roda no diretório do projeto,
+  não no de quem chamou";
+- `test/provider/supervisor.spec.ts`: "roda o processo no diretório da
+  invocação";
+- `test/integration/cwd-do-executor.spec.ts`: um claude falso devolve o
+  próprio cwd pela ponte. Com o código anterior, devolve `packages/core` em
+  vez do worktree, a mesma falha do piloto.

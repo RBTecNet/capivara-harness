@@ -1,15 +1,29 @@
 import { execFileSync } from "node:child_process";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { limitsFor, runProvider } from "../../src/provider/index.js";
 import type { Invocation } from "../../src/provider/index.js";
 
 function node(script: string): Invocation {
-  return { command: process.execPath, args: ["-e", script], env: { ...process.env }, stdinIsPrompt: true, streams: true };
+  return { command: process.execPath, args: ["-e", script], env: { ...process.env }, cwd: process.cwd(), stdinIsPrompt: true, streams: true };
 }
 
 const limits = { firstOutputSeconds: 0, idleSeconds: 0, wallSeconds: 0, maxOutputBytes: 1_000_000, graceMilliseconds: 200 };
 
 describe("runProvider", () => {
+  // §105: o processo nasce no diretório da invocação, não no de quem chamou.
+  it("roda o processo no diretório da invocação", async () => {
+    const pasta = await realpath(await mkdtemp(join(tmpdir(), "capivara-cwd-")));
+    try {
+      const result = await runProvider({ invocation: { ...node("process.stdout.write(process.cwd())"), cwd: pasta }, prompt: "", limits });
+      expect(result.stdout).toBe(pasta);
+    } finally {
+      await rm(pasta, { recursive: true, force: true });
+    }
+  });
+
   it("entrega o prompt por stdin e devolve a saída", async () => {
     const result = await runProvider({
       invocation: node("let d='';process.stdin.on('data',c=>d+=c).on('end',()=>process.stdout.write('recebi: '+d))"),
@@ -152,7 +166,7 @@ describe("contenção", () => {
 
   it("comando inexistente devolve 127 em vez de explodir", async () => {
     const result = await runProvider({
-      invocation: { command: "/nao/existe/binario", args: [], env: {}, stdinIsPrompt: true, streams: true },
+      invocation: { command: "/nao/existe/binario", args: [], env: {}, cwd: process.cwd(), stdinIsPrompt: true, streams: true },
       prompt: "",
       limits,
     });
@@ -167,6 +181,7 @@ describe("segredos", () => {
         command: process.execPath,
         args: ["-e", "process.stdout.write('vazou: '+process.env.OPENAI_API_KEY)"],
         env: { ...process.env, OPENAI_API_KEY: "sk-supersecretovalor" },
+        cwd: process.cwd(),
         stdinIsPrompt: true,
         streams: true,
       },

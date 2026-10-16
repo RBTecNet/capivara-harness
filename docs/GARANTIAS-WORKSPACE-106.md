@@ -1,5 +1,10 @@
 # O nível workspace do executor: o que é garantido (§106)
 
+> **Substituído para o claude pelo §108.** O executor claude não usa mais o
+> sandbox descrito aqui. Ele roda com `--dangerously-skip-permissions` e tem
+> acesso amplo ao sistema, à rede e aos arquivos do usuário. O que segue vale
+> como registro histórico do §106 e para os contratos dos outros providers.
+
 Esta correção resolve os problemas de `docs/DIAGNOSTICO-PERMISSOES-CLAUDE-WORKSPACE.md`
 (run `build-96756ca336b0`, `teste_haiku_v2`). O Haiku não podia rodar nem
 `npm --version`, a especificação não chegava ao worktree, e três ciclos foram

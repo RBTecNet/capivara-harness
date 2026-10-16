@@ -7104,3 +7104,58 @@ Testes:
   - a extração de `portasEmUso`.
 - Contra o código anterior, 7 desses testes falham. O de fase sem fluxo passa
   nos dois, como deve.
+
+## §108 — O executor claude roda com `--dangerously-skip-permissions`
+
+O §106 pôs o executor claude em `acceptEdits` dentro do sandbox nativo do
+Claude Code. No `teste_haiku_v2` isso ainda mandava para aprovação comandos
+normais de desenvolvimento, como `| tail`, `| head`, `timeout`, variável na
+frente do comando e laços. Em `-p`, aprovação pendente é negação. O operador
+decidiu que o executor precisa rodar Bash, npm, pipes, laços, compilação e
+testes livremente, sem aprovação interativa.
+
+**O que mudou:**
+- **Executor claude no nível workspace:** recebe
+  `--dangerously-skip-permissions`, sem `--permission-mode acceptEdits` e sem
+  o `--settings` do sandbox. A montagem do sandbox (`sandboxDoWorkspace`, as
+  listas de sockets, credenciais e variáveis) saiu do adaptador. O
+  temporário próprio da chamada (`TMPDIR`) continua, porque o prompt manda o
+  rascunho para lá.
+- **Os outros papéis não mudam.** Os somente-leitura (writer, auditor e
+  verifier) seguem em `--permission-mode default`, e o acesso de sistema
+  segue em `bypassPermissions`. As outras CLIs não mudam, e nada mexe em
+  configuração global do Claude Code.
+- **`permission_denials` deixou de parar a fase.** A negação é anunciada
+  ("comando(s) negado(s) por permissão: … — registrado, a fase segue para os
+  gates") e fica no log do ciclo, que guarda o envelope inteiro. A fase segue
+  para os gates como qualquer outra sessão. A parada `PermissaoNegada` do
+  §106 saiu.
+- **O contrato do claude não promete confinamento.** Ele vale
+  `nao-verificado` em toda plataforma, sem dependência de `bwrap`/`socat`, e
+  o preflight passa a mostrar a limitação no resumo do build.
+
+**O preço, dito sem rodeio:** o executor claude tem acesso amplo ao sistema,
+à rede e aos arquivos do usuário. Pode ler credenciais do home, alcançar
+sockets locais, escrever fora do projeto e rodar o que quiser. É o mesmo
+alcance do acesso de sistema, só que sem precisar do `systemInstall`. O que
+continua com o harness é o que ele já fazia fora da sessão:
+- os gates G0–G4;
+- a verificação independente;
+- a autoridade Git do Core, com a conferência de referências depois de cada
+  chamada (§101);
+- a fila de integração.
+
+O scheduler paralelo não mudou.
+
+Testes atualizados:
+- `test/provider/adapters.spec.ts`: o executor recebe a flag, sem
+  `--permission-mode` e sem `--settings`; os papéis somente-leitura não a
+  recebem; o temporário próprio continua; o contrato diz "acesso amplo".
+- `test/loop/runner.spec.ts`: a negação não para a fase, o verificador julga
+  e nenhum evento `blocked` aparece.
+- `test/loop/paralelo.spec.ts`: a negação é anunciada e a fase segue para os
+  gates no worktree dela.
+- `test/commands/execucao.spec.ts`: o claude começa sem `bwrap`, e o resumo
+  diz que o executor tem acesso amplo.
+- `test/integration/workspace-claude.spec.ts`: pela ponte, a CLI falsa
+  recebe a flag e nenhum `--settings`.

@@ -294,20 +294,6 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     }
   }
   class LimiteEsgotado extends Error {}
-  /*
-   * A sessão do executor recusou comandos por permissão e não concluiu (§106).
-   *
-   * Não é código incompleto: o código nem chegou a ser julgado pelo que o
-   * executor queria rodar. No `teste_haiku_v2` cada ciclo voltou com o `npm`
-   * negado, e os três foram cobrados como correção — um problema que nenhuma
-   * correção resolveria. Pára no ciclo em que aconteceu.
-   */
-  class PermissaoNegada extends Error {
-    constructor(readonly negacoes: string[]) {
-      super(negacoes.join(", "));
-    }
-  }
-
   const chamarLeitor = async (chamada: Parameters<EngineCaller>[0]): Promise<EngineResult> => {
     for (;;) {
       const resposta = await chamar(chamada);
@@ -378,8 +364,17 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
 
     const recusa = detectCredentialRejection(`${result.stdout}\n${result.stderr}`);
     if (recusa !== null) throw new CredencialRecusada(recusa);
-    // Quem declarou conclusão segue para os gates: a negação não o impediu, e eles decidem.
-    if ((result.negacoes?.length ?? 0) > 0 && !declaredComplete(result.stdout)) throw new PermissaoNegada(result.negacoes!);
+    /*
+     * A negação de permissão é diagnóstico, não parada (§108): a fase segue para
+     * os gates, que julgam o que ficou. O §106 parava aqui quando a sessão não
+     * concluía; com o executor liberado, uma negação não diz mais que o ambiente
+     * impede a fase.
+     */
+    const negacoes = result.negacoes ?? [];
+    if (negacoes.length > 0) {
+      const lista = negacoes.slice(0, 6).join(", ") + (negacoes.length > 6 ? ` e mais ${negacoes.length - 6}` : "");
+      announce(`[${session.id}] a sessão do executor teve comando(s) negado(s) por permissão: ${lista} — registrado, a fase segue para os gates`);
+    }
 
     // Limite de uso não é defeito da implementação: espera e repete a MESMA
     // fase, sem consumir ciclo de correção.
@@ -736,24 +731,6 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         cause,
         cycles: cicloCorrente,
       };
-    }
-    if (erro instanceof PermissaoNegada) {
-      const lista = erro.negacoes.slice(0, 6).join(", ") + (erro.negacoes.length > 6 ? ` e mais ${erro.negacoes.length - 6}` : "");
-      const cause =
-        `a sessão do executor recusou comandos por permissão (${lista}) e não concluiu a fase. ` +
-        "Isto é do ambiente, não do seu código: o nível de acesso deste executor não deixa rodar esses comandos, " +
-        "e repetir a fase não muda isso. Confira o acesso do agente (`systemInstall` em .capivara/execucao.json, " +
-        "--no-system-install) e o contrato do provider no nível workspace, e rode `capivara build` de novo.";
-      await recolher(cicloCorrente);
-      await event("blocked", `permissão negada ao executor: ${lista}`, cicloCorrente);
-      relatar({ kind: "phase", id: session.id, state: "falhou", cycle: cicloCorrente, detail: "permissão negada" });
-      announce(`[${session.id}] a sessão do executor recusou comandos por permissão: ${lista} — isto não é defeito da fase`);
-      // No worktree, quem guarda o parcial é o build paralelo, num branch da fase.
-      if (!noWorktree && (await hasPendingChanges(options.projectRoot))) {
-        announce("           o trabalho desta fase ficou na árvore; antes de rodar de novo:");
-        announce("           git add -A && git commit -m \"wip: trabalho parcial\"   → o loop revalida a fase e segue");
-      }
-      return { status: "failed", gate: "gate 0 — engine", cause, cycles: cicloCorrente };
     }
     if (!(erro instanceof CredencialRecusada)) throw erro;
 

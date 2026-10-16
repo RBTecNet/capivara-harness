@@ -511,9 +511,9 @@ describe("credencial recusada pelo provider", () => {
 });
 
 /*
- * O `teste_haiku_v2` (§106): no nível workspace o Claude negou todo `npm`, o
- * executor disse que não podia rodá-lo, e os três ciclos foram cobrados como
- * código incompleto. A negação vem no envelope; o runner a recebe já resumida.
+ * §108: a negação de permissão é diagnóstico, não parada. O §106 parava a fase
+ * quando a sessão negada não concluía; com o executor liberado, quem julga o
+ * que ficou são os gates, como em qualquer outra sessão.
  */
 describe("comandos negados por permissão ao executor", () => {
   const negado = (): EngineResult => ({
@@ -521,25 +521,17 @@ describe("comandos negados por permissão ao executor", () => {
     negacoes: ["Bash: npm", "Bash: node"],
   });
 
-  it("pára no ciclo em que aconteceu, sem ciclo de correção, e diz que é do ambiente", async () => {
+  it("não pára a fase: ela segue para os gates, e o verificador julga", async () => {
     const { outcome, calls } = await phase({ builder: async () => negado() });
-    expect(outcome.status).toBe("failed");
-    if (outcome.status !== "failed") return;
-    expect(outcome.cycles).toBe(1);
-    expect(outcome.gate).toBe("gate 0 — engine");
-    expect(outcome.cause).toContain("Bash: npm, Bash: node");
-    expect(outcome.cause).toContain("Isto é do ambiente, não do seu código");
-    expect(calls.filter((call) => call.role === "builder")).toHaveLength(1);
-    // Nem o verificador é chamado: não há o que julgar no código.
-    expect(calls.filter((call) => call.role === "verifier")).toHaveLength(0);
+    expect(outcome.status).toBe("complete");
+    expect(calls.filter((call) => call.role === "verifier").length).toBeGreaterThan(0);
   });
 
-  it("o trabalho parcial fica onde estava, e a parada é retomável pelo log de eventos", async () => {
-    const { target } = await phase({ builder: async () => negado() });
-    expect(await readFile(join(projectRoot, "fase-1.ts"), "utf8")).toContain("x = 1");
+  it("nenhuma parada de permissão no log de eventos", async () => {
+    await phase({ builder: async () => negado() });
     const events = await readEvents(runPaths(projectRoot, RUN).events);
-    expect(events.at(-1)).toMatchObject({ subject: target.id, status: "blocked" });
-    expect(events.at(-1)?.detail).toContain("permissão negada ao executor: Bash: npm");
+    expect(events.some((evento) => evento.status === "blocked")).toBe(false);
+    expect(events.some((evento) => evento.detail.includes("permissão negada"))).toBe(false);
   });
 
   it("quem declarou conclusão segue para os gates: a negação não o impediu", async () => {

@@ -135,22 +135,17 @@ describe("o contrato do nível workspace no preflight", () => {
     expect(preparada).toMatchObject({ ok: true, resumo: [] });
   });
 
-  it("claude no Linux sem bubblewrap é recusado: sem ele não há sandbox, e a CLI nem subiria", async () => {
+  it("claude começa sem bubblewrap, e o resumo diz que o executor tem acesso amplo (§108)", async () => {
     const preparada = await prepararExecucao({
       projectRoot: raiz,
       flags: {},
       roles: CLAUDE,
       systemInstall: false,
       instalado,
-      workspace: { platform: "linux", noPath: async (binario) => binario !== "bwrap" },
+      workspace: { platform: "linux", noPath: async () => false },
     });
-    expect(preparada.ok).toBe(false);
-    if (!preparada.ok) expect(preparada.erros.join("\n")).toContain("depende de bwrap");
-  });
-
-  it("claude no Linux com as dependências: começa, sem limitação a declarar", async () => {
-    const preparada = await prepararExecucao({ projectRoot: raiz, flags: {}, roles: CLAUDE, systemInstall: false, instalado, workspace });
-    expect(preparada).toMatchObject({ ok: true, resumo: [] });
+    expect(preparada.ok).toBe(true);
+    if (preparada.ok) expect(preparada.resumo.join("\n")).toContain("acesso amplo ao sistema, à rede e aos arquivos do usuário");
   });
 
   it("o que não foi verificado segue, e diz que não garante", async () => {

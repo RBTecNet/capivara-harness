@@ -716,26 +716,20 @@ describe("build paralelo — auditoria (§99)", () => {
     expect(await readFile(join(projectRoot, ".capivara", "init", "skeleton.md"), "utf8")).toBe("# esqueleto\n");
   });
 
-  it("§106: o executor que teve comandos negados para a fase no ciclo, e o parcial fica no branch dela", async () => {
+  it("§108: a negação ao executor é registrada, e a fase segue para os gates no worktree dela", async () => {
     const engine = motor({ escreve: ESCRITAS });
     const call = async (chamada: EngineCall): Promise<EngineResult> => {
       const resposta = await engine.call(chamada);
-      if (chamada.role === "builder" && chamada.phase.id === "P01") return { ...resposta, stdout: "não pude rodar npm", negacoes: ["Bash: npm"] };
+      if (chamada.role === "builder" && chamada.phase.id === "P01") return { ...resposta, negacoes: ["Bash: npm"] };
       return resposta;
     };
-    const { outcome, anuncios } = await construir({ escreve: ESCRITAS }, { call });
+    const { anuncios } = await construir({ escreve: ESCRITAS }, { call });
 
-    expect(outcome.exitCode).not.toBe(0);
-    expect(engine.chamadas.filter((chamada) => chamada.role === "builder" && chamada.phase.id === "P01")).toHaveLength(1);
-    expect(anuncios.some((linha) => linha.includes("recusou comandos por permissão: Bash: npm"))).toBe(true);
-    const runId = runIdFor("build", sha12(PLANO));
-    const branch = `capivara/${runId}/P01`;
-    expect(await git(["branch", "--list", branch])).toContain(branch);
-    expect(await git(["show", "--name-only", "--format=%s", branch])).toContain("base.txt");
-    // Nada entrou na árvore principal.
-    expect(await existe(join(projectRoot, "base.txt"))).toBe(false);
-    const eventos = await readEvents(runPaths(projectRoot, runId).events);
-    expect(eventos.some((evento) => evento.subject === "P01" && evento.status === "blocked" && evento.detail.includes("permissão negada"))).toBe(true);
+    expect(anuncios.some((linha) => linha.includes("negado(s) por permissão: Bash: npm — registrado"))).toBe(true);
+    // Os gates julgaram a P01: o verificador foi chamado para ela.
+    expect(engine.chamadas.some((chamada) => chamada.role === "verifier" && chamada.phase.id === "P01")).toBe(true);
+    const eventos = await readEvents(runPaths(projectRoot, runIdFor("build", sha12(PLANO))).events);
+    expect(eventos.some((evento) => evento.detail.includes("permissão negada"))).toBe(false);
   });
 
   it("§102: a instalação na árvore integrada não reescreve o lockfile, e a fase seguinte integra", async () => {

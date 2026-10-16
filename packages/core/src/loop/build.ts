@@ -483,9 +483,18 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       esqueleto !== null
         ? (phaseNumber: number) => ({
             workflows: workflowsForPhase(esqueleto, phaseNumber),
-            regressao: fluxosCumpridos.filter(
-              (workflow) => !workflowsForPhase(esqueleto, phaseNumber).some((atual) => atual.number === workflow.number),
-            ),
+            /*
+             * TODOS os cumpridos, na ordem em que foram cumpridos — inclusive os
+             * que esta fase cobre de novo (§103). A passagem roda em sequência
+             * sobre um banco só, e cada roteiro foi escrito contando com o que os
+             * anteriores deixaram. Tirar daqui os fluxos da fase os jogava para a
+             * ordem do plano: na P06 do piloto paralelo, que cobria os cinco, a
+             * ordem 5,1,4,2,3 virou 1,2,3,4,5, os quatro roteiros certos
+             * reprovaram um atrás do outro, e a fase gastou dois ciclos do
+             * executor e parou. O gate 4 tira a repetição e mantém a primeira
+             * posição; os fluxos novos da fase vão para o fim, como antes.
+             */
+            regressao: [...fluxosCumpridos],
             resolveStart: () => startCommandFor(options.projectRoot),
             ...(options.flowRunner !== undefined ? { runner: options.flowRunner } : {}),
           })

@@ -6883,3 +6883,49 @@ exclui, e ele não teve papel na parada.
 Testes: `test/loop/paralelo.spec.ts`, os dois "§102" — um npm falso que faz o
 que o npm 11 fez (`install` reescreve o lockfile, `ci` não): com o código
 anterior, o primeiro para em exit 2 e o segundo reproduz a mensagem do piloto.
+
+## §103 — A fase que cobre de novo um fluxo cumprido não reordena a passagem
+
+Na P06 do piloto paralelo (`teste_paralelismo`, run `build-159b7675b57b`), a
+fase de verificação final cobria os cinco fluxos, todos já cumpridos pelas
+fases anteriores, na ordem 5, 1, 4, 2, 3 — a ordem em que passaram juntos na
+P04. A regressão excluía os fluxos da própria fase; com os cinco nela, ficou
+vazia, e a passagem caiu na ordem do plano: 1, 2, 3, 4, 5.
+
+A passagem roda os roteiros em sequência sobre um banco só (§ passagem
+isolada, v2), e cada roteiro foi escrito contando com o que os anteriores
+deixaram. Na ordem nova, os quatro reprovaram, um atrás do outro, porque o
+Playwright para no primeiro: o 2 e o 3 esperavam registros que o 5 cria, o 4
+uma anotação do 5, e o 5, que exige banco vazio, rodou por último. A triagem
+acertou as quatro vezes (ROTEIRO), mas o gate reescreve um roteiro por
+chamada: o segundo ROTEIRO de cada passagem foi ao executor, que gastou dois
+ciclos só para responder `CAPIVARA_ROTEIRO_ERRADO`, sem tocar em arquivo, e a
+fase parou com as nove tasks aprovadas pelo verificador.
+
+A correção é na origem: a regressão é TODO fluxo cumprido, na ordem em que foi
+cumprido, inclusive os que a fase cobre de novo. O gate 4 já tirava a
+repetição mantendo a primeira posição; os fluxos novos da fase continuam indo
+para o fim. Nenhum gate, critério ou limite mudou: o que a fase cobre continua
+sendo conferido como da fase (`checkFlowScript`, redação do que falta), e a
+triagem e as reescritas seguem as mesmas regras.
+
+Fica registrado, sem mudar aqui:
+
+- **O limite de uma reescrita por chamada do gate** amplificou o desperdício:
+  quando o ROTEIRO seguinte é de OUTRO fluxo, ninguém o reescreveu, e a causa
+  que vai ao executor diz "que o harness já reescreveu uma vez nesta passagem"
+  — falso para aquele roteiro. A menor mudança seria uma reescrita por ROTEIRO
+  por chamada, limitada ao número de fluxos.
+- **A causa ao roteirista** leva a correção, a evidência e o retrato da página,
+  mas não o `onde` (arquivo e linha) nem o `critério` que a triagem citou.
+- **A retomada** reconstrói os cumpridos na ordem do plano, não na ordem em que
+  foram integrados: no paralelo, as duas podem divergir (aqui, 5,1,2,3,4
+  contra 5,1,4,2,3).
+- **O isolamento do banco é por passagem, não por fluxo.** O workflow 5 só
+  está certo se rodar primeiro; a correção que a triagem propôs para ele ("um
+  SQLite exclusivo para o fluxo 5") não é executável por um roteiro: a
+  aplicação é uma só, de pé, com o ambiente da passagem.
+
+Teste: `test/integration/catalog.spec.ts`, "a fase que cobre de novo fluxos já
+cumpridos os percorre na ordem em que foram cumpridos" — com o código anterior,
+a terceira passagem sai na ordem do plano.

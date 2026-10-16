@@ -10,6 +10,8 @@ import { WorkerTracker, renderWorkerRows } from "../../src/tui/build-workers.js"
 
 const ROLES = resolveRoles({ global: { provider: "codex", model: "gpt-5.5" }, roles: { verifier: { provider: "claude", model: "opus" } } });
 const instalado = async (): Promise<boolean> => true;
+// O contrato do workspace (§106) conferido como no Linux com bubblewrap e socat no PATH.
+const workspace = { platform: "linux" as const, noPath: async (): Promise<boolean> => true };
 
 let raiz: string;
 beforeEach(async () => {
@@ -28,16 +30,17 @@ describe("a execução que o CLI entrega ao build", () => {
   it("o paralelo resume modo, agentes, verificador e limitações antes de começar", async () => {
     const preparada = await prepararExecucao({
       projectRoot: raiz,
-      flags: { parallel: "3", worker: ["provider=cursor,model=sonnet-4,effort=high", "provider=codex,system-install=no"] },
+      flags: { parallel: "3", worker: ["provider=cursor,model=sonnet-4,effort=high", "provider=claude,model=haiku,system-install=no"] },
       roles: ROLES,
       systemInstall: true,
       instalado,
+      workspace,
     });
     expect(preparada.ok).toBe(true);
     if (!preparada.ok) return;
     expect(preparada.resumo[0]).toBe("execução: paralela, até 3 agentes ao mesmo tempo (pedida na linha de comando)");
     expect(preparada.resumo).toContain("  agente 1: cursor/sonnet-4 · high");
-    expect(preparada.resumo).toContain("  agente 2: codex/gpt-5.5 · sem instalar no sistema");
+    expect(preparada.resumo).toContain("  agente 2: claude/haiku · nível workspace, sem acesso de sistema");
     expect(preparada.resumo).toContain("  agente 3: codex/gpt-5.5 (o executor)");
     expect(preparada.resumo.some((linha) => linha.includes("verificador continua um só") && linha.includes("claude/opus"))).toBe(true);
     expect(preparada.resumo.some((linha) => linha.startsWith("limitação: agente 1: cursor"))).toBe(true);
@@ -47,10 +50,11 @@ describe("a execução que o CLI entrega ao build", () => {
   it("agente nunca ganha mais acesso que o build", async () => {
     const preparada = await prepararExecucao({
       projectRoot: raiz,
-      flags: { parallel: "2", worker: ["provider=codex,system-install=yes"] },
-      roles: ROLES,
+      flags: { parallel: "2", worker: ["provider=claude,system-install=yes"] },
+      roles: resolveRoles({ global: { provider: "claude", model: "haiku" }, roles: {} }),
       systemInstall: false,
       instalado,
+      workspace,
     });
     expect(preparada.ok && preparada.agentes.map((agente) => agente.systemInstall)).toEqual([false, false]);
   });
@@ -81,6 +85,86 @@ describe("a execução que o CLI entrega ao build", () => {
     await writeFile(join(raiz, ARQUIVO_DE_EXECUCAO), JSON.stringify({ version: 1, mode: "parallel", maxConcurrency: 40 }), "utf8");
     const preparada = await prepararExecucao({ projectRoot: raiz, flags: {}, roles: ROLES, systemInstall: true, instalado });
     expect(preparada.ok).toBe(false);
+  });
+});
+
+/*
+ * §106: o nível workspace tem um contrato — rodar comandos, alcançar a internet,
+ * instalar dependências, não escrever fora do projeto. O provider que
+ * comprovadamente não entrega isso é recusado antes da primeira chamada: nem a
+ * rede é tirada, nem o acesso é promovido, em silêncio.
+ */
+describe("o contrato do nível workspace no preflight", () => {
+  const CLAUDE = resolveRoles({ global: { provider: "claude", model: "haiku" }, roles: {} });
+
+  it("serial: executor codex sem acesso de sistema é recusado, com o motivo e a saída", async () => {
+    const preparada = await prepararExecucao({ projectRoot: raiz, flags: {}, roles: ROLES, systemInstall: false, instalado, workspace });
+    expect(preparada.ok).toBe(false);
+    if (preparada.ok) return;
+    const texto = preparada.erros.join("\n");
+    expect(texto).toContain("codex não cumpre o nível workspace");
+    expect(texto).toContain("systemd");
+    expect(texto).toContain("systemInstall: true");
+  });
+
+  it("paralelo: o agente opencode em workspace é recusado; o de acesso de sistema passa", async () => {
+    const recusada = await prepararExecucao({
+      projectRoot: raiz,
+      flags: { parallel: "2", worker: ["provider=opencode,system-install=no"] },
+      roles: ROLES,
+      systemInstall: true,
+      instalado,
+      workspace,
+    });
+    expect(recusada.ok).toBe(false);
+    if (!recusada.ok) expect(recusada.erros.join("\n")).toContain("agente 1: opencode não cumpre o nível workspace");
+
+    const aceita = await prepararExecucao({
+      projectRoot: raiz,
+      flags: { parallel: "2", worker: ["provider=opencode,system-install=yes"] },
+      roles: ROLES,
+      systemInstall: true,
+      instalado,
+      workspace,
+    });
+    expect(aceita.ok).toBe(true);
+  });
+
+  it("acesso de sistema é decisão explícita do operador: o contrato não se aplica", async () => {
+    const preparada = await prepararExecucao({ projectRoot: raiz, flags: {}, roles: ROLES, systemInstall: true, instalado, workspace });
+    expect(preparada).toMatchObject({ ok: true, resumo: [] });
+  });
+
+  it("claude no Linux sem bubblewrap é recusado: sem ele não há sandbox, e a CLI nem subiria", async () => {
+    const preparada = await prepararExecucao({
+      projectRoot: raiz,
+      flags: {},
+      roles: CLAUDE,
+      systemInstall: false,
+      instalado,
+      workspace: { platform: "linux", noPath: async (binario) => binario !== "bwrap" },
+    });
+    expect(preparada.ok).toBe(false);
+    if (!preparada.ok) expect(preparada.erros.join("\n")).toContain("depende de bwrap");
+  });
+
+  it("claude no Linux com as dependências: começa, sem limitação a declarar", async () => {
+    const preparada = await prepararExecucao({ projectRoot: raiz, flags: {}, roles: CLAUDE, systemInstall: false, instalado, workspace });
+    expect(preparada).toMatchObject({ ok: true, resumo: [] });
+  });
+
+  it("o que não foi verificado segue, e diz que não garante", async () => {
+    const preparada = await prepararExecucao({
+      projectRoot: raiz,
+      flags: { serial: true },
+      roles: resolveRoles({ global: { provider: "cursor", model: "sonnet-4" }, roles: {} }),
+      systemInstall: false,
+      instalado,
+      workspace,
+    });
+    expect(preparada.ok).toBe(true);
+    if (!preparada.ok) return;
+    expect(preparada.resumo.some((linha) => linha.startsWith("limitação: executor:") && linha.includes("não são garantidos"))).toBe(true);
   });
 });
 

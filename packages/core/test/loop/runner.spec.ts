@@ -470,6 +470,46 @@ describe("credencial recusada pelo provider", () => {
 });
 
 /*
+ * O `teste_haiku_v2` (§106): no nível workspace o Claude negou todo `npm`, o
+ * executor disse que não podia rodá-lo, e os três ciclos foram cobrados como
+ * código incompleto. A negação vem no envelope; o runner a recebe já resumida.
+ */
+describe("comandos negados por permissão ao executor", () => {
+  const negado = (): EngineResult => ({
+    ...ok("Não consegui rodar npm: todo comando pediu aprovação. Não emiti a conclusão."),
+    negacoes: ["Bash: npm", "Bash: node"],
+  });
+
+  it("pára no ciclo em que aconteceu, sem ciclo de correção, e diz que é do ambiente", async () => {
+    const { outcome, calls } = await phase({ builder: async () => negado() });
+    expect(outcome.status).toBe("failed");
+    if (outcome.status !== "failed") return;
+    expect(outcome.cycles).toBe(1);
+    expect(outcome.gate).toBe("gate 0 — engine");
+    expect(outcome.cause).toContain("Bash: npm, Bash: node");
+    expect(outcome.cause).toContain("Isto é do ambiente, não do seu código");
+    expect(calls.filter((call) => call.role === "builder")).toHaveLength(1);
+    // Nem o verificador é chamado: não há o que julgar no código.
+    expect(calls.filter((call) => call.role === "verifier")).toHaveLength(0);
+  });
+
+  it("o trabalho parcial fica onde estava, e a parada é retomável pelo log de eventos", async () => {
+    const { target } = await phase({ builder: async () => negado() });
+    expect(await readFile(join(projectRoot, "fase-1.ts"), "utf8")).toContain("x = 1");
+    const events = await readEvents(runPaths(projectRoot, RUN).events);
+    expect(events.at(-1)).toMatchObject({ subject: target.id, status: "blocked" });
+    expect(events.at(-1)?.detail).toContain("permissão negada ao executor: Bash: npm");
+  });
+
+  it("quem declarou conclusão segue para os gates: a negação não o impediu", async () => {
+    const { outcome } = await phase({
+      builder: async () => ({ ...ok("feito\nCAPIVARA_BUILDER_STATUS: COMPLETE"), negacoes: ["Bash: npm"] }),
+    });
+    expect(outcome.status).toBe("complete");
+  });
+});
+
+/*
  * A P04 do `assistencia2`: quem reprovava era o roteiro de REGRESSÃO da P02, o
  * executor contestou certo, e a reescrita foi para os roteiros da fase — que
  * nem tinham rodado, porque o de regressão falhou antes deles.

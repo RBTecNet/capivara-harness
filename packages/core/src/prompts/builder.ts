@@ -173,6 +173,11 @@ export function implementPrompt(context: BuilderContext): string {
     "You may install dependencies and download scaffolding with the project's package manager.",
     "Prefer the ecosystem's standard tooling and pin versions the way this project already does.",
     "Never add a new stack, framework or tool that the documentation does not call for.",
+    "Some sessions refuse a command that sets a variable in front of it (`FOO=bar npm test`), uses",
+    "`export`, or loops in the shell, and a refused command stays refused: do not retry it as written.",
+    "Write those lines to a script under `.capivara/tmp/` and run it with `bash .capivara/tmp/<name>.sh`;",
+    "that directory never enters a commit. Keep other scratch files under `$TMPDIR`, never at a fixed",
+    "path under `/tmp`.",
     ...(context.runnerDeFluxosAusente
       ? [
           "",

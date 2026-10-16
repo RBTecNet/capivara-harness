@@ -71,4 +71,9 @@ export const cursorAdapter = {
     if (access === "system") args.push("--sandbox", "disabled");
     return { args };
   },
+  // Sem a CLI nesta máquina, nada disto foi conferido (§106).
+  workspace: () => ({
+    estado: "nao-verificado",
+    motivo: "o sandbox do cursor-agent no nível workspace não foi verificado: rede e confinamento dependem da CLI",
+  }),
 } as const satisfies CliAdapter;

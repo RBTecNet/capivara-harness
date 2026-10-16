@@ -29,6 +29,10 @@ export interface InvocationContext {
   /** Segredo resolvido para providers de API direta. Nunca vira argumento. */
   secret?: string;
   environment?: NodeJS.ProcessEnv;
+  /** Padrão: a plataforma desta máquina. */
+  platform?: NodeJS.Platform;
+  /** O diretório comum do Git da raiz, absoluto; ausente fora de um repositório. */
+  gitDir?: string | null;
 }
 
 export interface Invocation {
@@ -44,6 +48,8 @@ export interface Invocation {
    * verificador, no worktree, achou tudo ausente.
    */
   cwd: string;
+  /** A chamada precisa de um `TMPDIR` só dela, fora de `/tmp`: quem roda o cria e o apaga (§106). */
+  tmpPrivado?: boolean;
   /** O que será escrito no stdin do processo. */
   stdinIsPrompt: true;
   /** Como ler o que a CLI escreveu. Ausente significa texto puro. */
@@ -153,6 +159,8 @@ export function buildInvocation(role: RoleName, config: RoleConfig, context: Inv
   const binary = env[adapter.binaryEnv]?.trim() || adapter.defaultBinary;
   const built = adapter.build({
     projectRoot: context.projectRoot,
+    platform: context.platform ?? process.platform,
+    gitDir: context.gitDir ?? null,
     model,
     effort,
     access: readOnly ? "read-only" : systemAccess ? "system" : "workspace",
@@ -166,6 +174,7 @@ export function buildInvocation(role: RoleName, config: RoleConfig, context: Inv
     args: built.args,
     env: built.env ?? env,
     cwd: context.projectRoot,
+    ...(built.tmpPrivado ? { tmpPrivado: true } : {}),
     stdinIsPrompt: true,
     streams: adapter.streams,
     ...(adapter.transcript ? { transcript: adapter.transcript } : {}),

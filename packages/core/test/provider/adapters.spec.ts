@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { CLI_ADAPTERS, ROLE_NAMES, ROLES, buildInvocation, limitsFor } from "../../src/provider/index.js";
+import { CLI_ADAPTERS, DIRECT_CATALOG, ROLE_NAMES, ROLES, buildInvocation, contratoDoWorkspace, limitsFor } from "../../src/provider/index.js";
+import { VARIAVEIS_DE_CREDENCIAL } from "../../src/provider/cli/claude.js";
 import type { RoleConfig } from "../../src/provider/index.js";
 
 const context = {
@@ -313,5 +314,143 @@ describe("o relógio de primeira saída só vale para quem transmite", () => {
       expect(invocation.streams, provider).toBe(true);
       expect(limitsFor(invocation, limites).firstOutputSeconds, provider).toBe(1200);
     }
+  });
+});
+
+/*
+ * §106: no nível workspace, `acceptEdits` sozinho negava todo Bash que não é de
+ * leitura — o Haiku do `teste_haiku_v2` não rodou nem `npm --version`. O
+ * executor agora recebe o sandbox nativo do Claude Code. Estes testes fixam a
+ * configuração que as sondas com a CLI real comprovaram (o diagnóstico em
+ * docs/ traz a matriz); eles não substituem a sonda, que é evidência de outra
+ * natureza.
+ */
+describe("claude no nível workspace: o sandbox nativo", () => {
+  const raiz = "/home/x/.cache/capivara/worktrees/abc/build-1/P01";
+  const workspace = (platform: NodeJS.Platform = "linux") =>
+    buildInvocation("builder", config({ provider: "claude", model: "haiku" }), {
+      ...context,
+      projectRoot: raiz,
+      platform,
+      gitDir: "/home/x/projeto/.git",
+      environment: { XDG_RUNTIME_DIR: "/run/user/1000" },
+    });
+  const settings = (platform?: NodeJS.Platform): Record<string, any> => {
+    const args = workspace(platform).args;
+    const indice = args.indexOf("--settings");
+    expect(indice).toBeGreaterThan(-1);
+    return JSON.parse(args[indice + 1]!);
+  };
+
+  it("o Bash roda sem aprovação, mas só dentro do sandbox, e o sandbox não tem como ficar de fora", () => {
+    const sandbox = settings().sandbox;
+    expect(sandbox.enabled).toBe(true);
+    expect(sandbox.autoAllowBashIfSandboxed).toBe(true);
+    // O comando que falha no sandbox não é repetido fora dele…
+    expect(sandbox.allowUnsandboxedCommands).toBe(false);
+    // …e sem bubblewrap a CLI não sobe, em vez de rodar sem sandbox.
+    expect(sandbox.failIfUnavailable).toBe(true);
+    expect(sandbox.excludedCommands).toBeUndefined();
+  });
+
+  it("a internet é alcançável pelo proxy do sandbox: os domínios não começam vazios", () => {
+    expect(settings().sandbox.network.allowedDomains).toEqual(["*"]);
+  });
+
+  it("a escrita fora do projeto continua negada: Git, especificação e plano de controle", () => {
+    const fs = settings().sandbox.filesystem;
+    expect(fs.denyWrite).toContain("/home/x/projeto/.git");
+    expect(fs.denyWrite).toContain(`${raiz}/.capivara/init`);
+    expect(fs.denyWrite).toContain(`${raiz}/.capivara/runs`);
+    // Fora do projeto, só os caches dos gerenciadores de pacote.
+    expect(fs.allowWrite).toEqual(["~/.npm", "~/.cache/ms-playwright"]);
+    // As ferramentas de arquivo rodam fora do sandbox: a regra de permissão as cobre.
+    expect(settings().permissions.deny).toEqual([`Edit(/${raiz}/.capivara/init/**)`, `Edit(/${raiz}/.capivara/runs/**)`]);
+  });
+
+  it("no Linux, sem o filtro de sockets, os diretórios onde eles vivem ficam ilegíveis", () => {
+    const sandbox = settings("linux").sandbox;
+    expect(sandbox.network.allowAllUnixSockets).toBe(true);
+    for (const pasta of ["/run", "/var/run", "/tmp", "~/.ssh", "~/.gnupg", "~/.codex"]) expect(sandbox.filesystem.denyRead).toContain(pasta);
+  });
+
+  it("fora do Linux, nenhum socket é liberado, e nada do Linux é mascarado", () => {
+    const sandbox = settings("darwin").sandbox;
+    expect(sandbox.network.allowAllUnixSockets).toBeUndefined();
+    expect(sandbox.filesystem.denyRead).not.toContain("/run");
+  });
+
+  it("com a internet liberada, as credenciais conhecidas ficam ilegíveis, em toda plataforma", () => {
+    for (const platform of ["linux", "darwin"] as const) {
+      const ilegiveis = settings(platform).sandbox.filesystem.denyRead;
+      for (const caminho of ["~/.config/gh", "~/.claude/.credentials.json", "~/.aws", "~/.ssh", "~/.git-credentials"]) {
+        expect(ilegiveis, `${platform} ${caminho}`).toContain(caminho);
+      }
+      // A instalação lê a configuração do gerenciador de pacotes.
+      expect(ilegiveis).not.toContain("~/.npmrc");
+    }
+  });
+
+  it("as chaves dos providers e o token do GitHub saem do ambiente dos comandos", () => {
+    const negadas = settings().sandbox.credentials.envVars;
+    for (const nome of ["GITHUB_TOKEN", "GH_TOKEN", "ANTHROPIC_API_KEY"]) expect(negadas).toContainEqual({ name: nome, mode: "deny" });
+    // Nenhuma chave do catálogo de APIs diretas fica de fora da lista.
+    for (const provider of DIRECT_CATALOG) expect(VARIAVEIS_DE_CREDENCIAL, provider.id).toContain(provider.envKey);
+    // O token do npm fica: o pacote privado depende dele.
+    expect(negadas.map((entrada: { name: string }) => entrada.name)).not.toContain("NPM_TOKEN");
+  });
+
+  it("nunca acesso irrestrito: nem bypassPermissions, nem Bash liberado por regra", () => {
+    const args = workspace().args.join(" ");
+    expect(args).toContain("--permission-mode acceptEdits");
+    expect(args).not.toContain("bypassPermissions");
+    expect(args).not.toMatch(/--allowed-?tools/i);
+    expect(args).not.toContain("--dangerously");
+    expect(settings().permissions.allow).toBeUndefined();
+  });
+
+  it("pede um TMPDIR só dele: o padrão /tmp/claude-<uid> é o mesmo para toda sessão do usuário", () => {
+    expect(workspace().tmpPrivado).toBe(true);
+  });
+
+  it("os outros níveis não mudam: sem settings e sem temporário próprio", () => {
+    for (const [papel, nivel] of [["verifier", "default"], ["builder", "bypassPermissions"]] as const) {
+      const invocation = buildInvocation(papel, config({ provider: "claude" }), { ...context, systemInstall: true });
+      expect(invocation.args.join(" ")).toContain(`--permission-mode ${nivel}`);
+      expect(invocation.args).not.toContain("--settings");
+      expect(invocation.tmpPrivado).toBeUndefined();
+    }
+  });
+});
+
+describe("o contrato do nível workspace em cada provider (§106)", () => {
+  it("toda CLI declara o que garante, com o motivo", () => {
+    for (const adapter of CLI_ADAPTERS) {
+      for (const platform of ["linux", "darwin", "win32"] as const) {
+        const contrato = adapter.workspace(platform);
+        expect(["garantido", "insuficiente", "nao-verificado"], adapter.id).toContain(contrato.estado);
+        expect(contrato.motivo.length, adapter.id).toBeGreaterThan(20);
+      }
+    }
+  });
+
+  it("claude: garantido no Linux, dependendo de bubblewrap e socat; insuficiente no Windows", () => {
+    expect(contratoDoWorkspace("claude", "linux")).toMatchObject({ estado: "garantido", dependencias: ["bwrap", "socat"] });
+    expect(contratoDoWorkspace("claude", "win32")?.estado).toBe("insuficiente");
+    expect(contratoDoWorkspace("claude", "darwin")?.estado).toBe("nao-verificado");
+  });
+
+  it("codex e opencode: insuficientes — rede e confinamento não cabem juntos, ou não há sandbox", () => {
+    expect(contratoDoWorkspace("codex", "linux")?.estado).toBe("insuficiente");
+    expect(contratoDoWorkspace("codex", "linux")?.motivo).toContain("systemd");
+    expect(contratoDoWorkspace("opencode", "linux")?.estado).toBe("insuficiente");
+  });
+
+  it("o que não pôde ser verificado não é anunciado como garantido", () => {
+    for (const id of ["cursor", "agy", "custom"]) expect(contratoDoWorkspace(id, "linux")?.estado, id).toBe("nao-verificado");
+  });
+
+  it("API direta não tem contrato de workspace: nem pode construir", () => {
+    expect(contratoDoWorkspace("openai", "linux")).toBeNull();
   });
 });

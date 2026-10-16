@@ -20,4 +20,9 @@ export const customAdapter = {
     if (command.trim() === "") throw new Error("o provider custom exige o caminho do executável do adapter");
     return { command: command.trim(), args: [] };
   },
+  // Quem isola é o adapter do operador, e o harness não o vê por dentro.
+  workspace: () => ({
+    estado: "nao-verificado",
+    motivo: "o adapter custom decide sozinho o isolamento e a rede do executor",
+  }),
 } as const satisfies CliAdapter;

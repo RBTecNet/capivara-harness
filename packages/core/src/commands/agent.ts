@@ -6,7 +6,11 @@
  * sem tocar em provider real, e o que mantém o custo do desenvolvimento honesto.
  */
 
-import { mkdir } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import {
   buildInvocation,
   createLineSplitter,
@@ -63,6 +67,34 @@ export interface BridgeResponse {
   resultRead?: boolean;
   /** A CLI declarou a volta como erro, em vez de simplesmente não responder. */
   engineError?: boolean;
+  /**
+   * O que a sessão recusou por permissão, só ferramenta e programa (§106).
+   * Ausente quando nada foi recusado, ou quando a CLI não conta.
+   */
+  negacoes?: string[];
+}
+
+const run = promisify(execFile);
+
+/** O diretório comum do Git, absoluto; null fora de um repositório. */
+async function diretorioDoGit(raiz: string): Promise<string | null> {
+  try {
+    const { stdout } = await run("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: raiz });
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Onde nasce o `TMPDIR` de uma chamada que o pede: no cache da capivara, fora
+ * de `/tmp`. O sandbox do Claude torna `/tmp` ilegível (é onde vivem sockets
+ * de outras sessões, do X11 e do acesso remoto), e um temporário lá dentro
+ * ficaria inalcançável para o próprio executor (§106).
+ */
+function pastaDosTemporarios(ambiente: NodeJS.ProcessEnv): string {
+  const cache = ambiente.XDG_CACHE_HOME?.trim() || join(homedir(), ".cache");
+  return join(cache, "capivara", "tmp");
 }
 
 export function createAgentBridge(options: AgentBridgeOptions): (request: BridgeRequest) => Promise<BridgeResponse> {
@@ -71,8 +103,22 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
     const stored = await readCredentials(options.credentialsFile);
     const credential = selectCredential(stored, config.provider, config.credential);
 
+    /*
+     * A pasta de trabalho existe ANTES da chamada.
+     *
+     * O codex recebe `--cd <raiz>`, e com uma pasta que não existe ele responde
+     * "Error: No such file or directory" e sai com código ZERO. O survey passa a
+     * pasta de SAÍDA como raiz, e ela só era criada depois do mapa: o survey do
+     * cronus3 com o codex foi recusado três vezes como "JSON inválido" sem que
+     * o modelo tivesse chegado a rodar. Para init, plan e build a pasta já existe
+     * e isto não faz nada. E é também o `cwd` do processo (§105): sem a pasta,
+     * o `spawn` falharia antes de a CLI começar. E vem antes de montar a
+     * invocação, que pergunta ao Git onde está o repositório.
+     */
+    await mkdir(options.projectRoot, { recursive: true });
     const invocation = buildInvocation(request.role, config, {
       projectRoot: options.projectRoot,
+      gitDir: await diretorioDoGit(options.projectRoot),
       runId: options.runId,
       stage: request.stage,
       language: options.language,
@@ -93,21 +139,15 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
           })
         : null;
 
-    /*
-     * A pasta de trabalho existe ANTES da chamada.
-     *
-     * O codex recebe `--cd <raiz>`, e com uma pasta que não existe ele responde
-     * "Error: No such file or directory" e sai com código ZERO. O survey passa a
-     * pasta de SAÍDA como raiz, e ela só era criada depois do mapa: o survey do
-     * cronus3 com o codex foi recusado três vezes como "JSON inválido" sem que
-     * o modelo tivesse chegado a rodar. Para init, plan e build a pasta já existe
-     * e isto não faz nada. E é também o `cwd` do processo (§105): sem a pasta,
-     * o `spawn` falharia antes de a CLI começar.
-     */
-    await mkdir(options.projectRoot, { recursive: true });
+    let temporario: string | null = null;
+    if (invocation.tmpPrivado) {
+      const base = pastaDosTemporarios(invocation.env);
+      await mkdir(base, { recursive: true });
+      temporario = await mkdtemp(join(base, "chamada-"));
+    }
 
     const result = await runProvider({
-      invocation,
+      invocation: temporario ? { ...invocation, env: { ...invocation.env, TMPDIR: temporario } } : invocation,
       prompt: request.prompt,
       // Quem não transmite não pode ser medido pelo relógio da primeira saída.
       limits: limitsFor(invocation, options.limits),
@@ -119,6 +159,9 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
             },
           }
         : {}),
+    }).finally(async () => {
+      // O que a sessão deixou no temporário não é do projeto e não sobrevive a ela.
+      if (temporario) await rm(temporario, { recursive: true, force: true }).catch(() => undefined);
     });
 
     // O transcrito é lido aqui para que os orquestradores continuem recebendo
@@ -133,6 +176,7 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
       ...(transcript?.usage ? { usage: transcript.usage } : {}),
       ...(transcript ? { resultRead: !transcript.raw } : {}),
       ...(transcript?.error === true ? { engineError: true } : {}),
+      ...(transcript?.negacoes ? { negacoes: transcript.negacoes } : {}),
     };
   };
 }

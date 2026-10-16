@@ -25,7 +25,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { CLI_CATALOG, isCliProvider, isDirectProvider } from "../provider/index.js";
-import { CLI_ADAPTERS } from "../provider/cli/index.js";
+import { CLI_ADAPTERS, contratoDoWorkspace } from "../provider/cli/index.js";
 import type { RoleConfig } from "../provider/index.js";
 import { writeAtomic } from "../state/atomic.js";
 
@@ -355,6 +355,62 @@ export async function providerInstalado(provider: string, environment: NodeJS.Pr
   }
 }
 
+/** O binário está no PATH desta máquina? */
+export async function binarioNoPath(binario: string): Promise<boolean> {
+  try {
+    await run("which", [binario]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * O nível `workspace` deste executor cumpre o contrato (§106)?
+ *
+ * Só olha quem constrói sem acesso de sistema: com ele, o agente tem a máquina,
+ * por decisão explícita do operador. No workspace o contrato é rodar comandos,
+ * alcançar a internet e instalar dependências sem escrever fora do projeto. O
+ * provider que comprovadamente não entrega as duas metades juntas é recusado
+ * aqui, antes da primeira chamada — nem a rede é tirada, nem o acesso é
+ * promovido, em silêncio. O que não pôde ser verificado segue, e é dito.
+ */
+export async function conferirWorkspace(
+  executores: readonly { nome: string; provider: string; systemInstall: boolean }[],
+  opcoes: { platform?: NodeJS.Platform; noPath?: (binario: string) => Promise<boolean> } = {},
+): Promise<{ erros: string[]; limitacoes: string[] }> {
+  const platform = opcoes.platform ?? process.platform;
+  const noPath = opcoes.noPath ?? binarioNoPath;
+  const erros: string[] = [];
+  const limitacoes: string[] = [];
+  for (const executor of executores) {
+    if (executor.systemInstall) continue;
+    const contrato = contratoDoWorkspace(executor.provider, platform);
+    if (!contrato) continue;
+    if (contrato.estado === "insuficiente") {
+      erros.push(
+        `${executor.nome}: ${executor.provider} não cumpre o nível workspace — ${contrato.motivo}. ` +
+          "Dê acesso de sistema a este executor de forma explícita (systemInstall: true, sem --no-system-install) " +
+          "ou use um provider que cumpra o workspace (claude, no Linux)",
+      );
+      continue;
+    }
+    if (contrato.estado === "nao-verificado") {
+      limitacoes.push(`${executor.nome}: ${contrato.motivo}; rede, instalação de dependências e confinamento não são garantidos pelo harness`);
+      continue;
+    }
+    const faltam: string[] = [];
+    for (const binario of contrato.dependencias ?? []) if (!(await noPath(binario))) faltam.push(binario);
+    if (faltam.length > 0) {
+      erros.push(
+        `${executor.nome}: o nível workspace do ${executor.provider} depende de ${faltam.join(" e ")}, que não estão no PATH ` +
+          `(${contrato.motivo}). Instale-os ou dê acesso de sistema ao executor de forma explícita`,
+      );
+    }
+  }
+  return { erros, limitacoes };
+}
+
 /**
  * A intensidade chega à CLI?
  *
@@ -365,7 +421,7 @@ export async function providerInstalado(provider: string, environment: NodeJS.Pr
 export function aceitaEffort(provider: string): boolean {
   const adaptador = CLI_ADAPTERS.find((item) => item.id === provider);
   if (!adaptador) return false;
-  const base = { projectRoot: "/projeto", model: "", access: "workspace" as const, binary: adaptador.defaultBinary || "x", env: {}, command: "x" };
+  const base = { projectRoot: "/projeto", platform: "linux" as const, gitDir: null, model: "", access: "workspace" as const, binary: adaptador.defaultBinary || "x", env: {}, command: "x" };
   return JSON.stringify(adaptador.build({ ...base, effort: "high" }).args) !== JSON.stringify(adaptador.build({ ...base, effort: "" }).args);
 }
 

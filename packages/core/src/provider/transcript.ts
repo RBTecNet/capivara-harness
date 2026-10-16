@@ -43,6 +43,41 @@ export interface Transcript {
    * decide se a chamada valeu precisa das duas coisas separadas.
    */
   error?: true;
+  /**
+   * O que a sessão recusou por permissão, um item por ferramenta e programa —
+   * `Bash: npm`, `Edit` —, sem argumento nenhum (§106). Ausente quando nada foi
+   * recusado ou a CLI não conta.
+   *
+   * Sem argumento porque o comando pode carregar segredo (`TOKEN=… npm
+   * publish`), e isto vai para a tela e para o log de eventos. O programa basta
+   * para dizer a causa: "o executor não pôde rodar npm".
+   */
+  negacoes?: string[];
+}
+
+/** `Bash: npm` a partir de `FOO=bar npm view x`; só o nome do programa sobrevive. */
+export function resumirNegacao(ferramenta: string, entrada: unknown): string {
+  const nome = /^[A-Za-z][A-Za-z0-9_]*$/.test(ferramenta) ? ferramenta : "ferramenta";
+  const comando = typeof entrada === "object" && entrada !== null ? (entrada as Record<string, unknown>)["command"] : undefined;
+  if (typeof comando !== "string") return nome;
+  const palavra = comando
+    .trim()
+    .split(/\s+/)
+    .find((parte) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(parte));
+  const programa = (palavra ?? "").replace(/^["'(]+/, "").split("/").pop() ?? "";
+  return /^[A-Za-z0-9][A-Za-z0-9._+-]{0,39}$/.test(programa) ? `${nome}: ${programa}` : nome;
+}
+
+function negacoesDoEnvelope(objeto: Record<string, unknown>): string[] {
+  const lista = objeto["permission_denials"];
+  if (!Array.isArray(lista)) return [];
+  const vistas = new Set<string>();
+  for (const item of lista) {
+    if (typeof item !== "object" || item === null) continue;
+    const registro = item as Record<string, unknown>;
+    vistas.add(resumirNegacao(typeof registro["tool_name"] === "string" ? registro["tool_name"] : "", registro["tool_input"]));
+  }
+  return [...vistas];
 }
 
 interface CodexEvent {
@@ -138,11 +173,13 @@ export function parseClaudeJson(stdout: string): Transcript {
 
   // Erro reportado pela própria CLI: devolve tudo, porque o diagnóstico pode
   // estar em qualquer campo do envelope e engoli-lo é trocar causa por vazio.
-  if (objeto["is_error"] === true) return { text: stdout, usage, raw: true, error: true };
+  const negacoes = negacoesDoEnvelope(objeto);
+  const recusas = negacoes.length > 0 ? { negacoes } : {};
+  if (objeto["is_error"] === true) return { text: stdout, usage, raw: true, error: true, ...recusas };
 
   const resultado = objeto["result"];
-  if (typeof resultado !== "string") return { text: stdout, usage, raw: true };
-  return { text: resultado, usage, raw: false };
+  if (typeof resultado !== "string") return { text: stdout, usage, raw: true, ...recusas };
+  return { text: resultado, usage, raw: false, ...recusas };
 }
 
 /**

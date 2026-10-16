@@ -13,14 +13,14 @@
  * rodaria junto; o `vitest` e o `jest` não ignoram `.capivara/`.
  *
  * O que um checkout não traz e a fase precisa vai junto, copiado: o plano de
- * controle que não é versionado (skills e roteiros do gate 4), o `.env` e o
- * `node_modules`. Cópia, nunca link: um `npm install` dentro do worktree
+ * controle que não é versionado (skills e roteiros do gate 4), a especificação
+ * em `.capivara/init` quando não foi commitada, o `.env` e o `node_modules`. Cópia, nunca link: um `npm install` dentro do worktree
  * escreveria, pelo link, nas dependências da árvore principal.
  */
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -91,6 +91,18 @@ async function copiarPasta(origem: string, destino: string): Promise<void> {
   }
 }
 
+/**
+ * Os arquivos ficam só de leitura; as pastas não, para o worktree poder ser
+ * removido no fim da fase.
+ */
+async function somenteLeitura(pasta: string): Promise<void> {
+  for (const entrada of await readdir(pasta, { withFileTypes: true })) {
+    const caminho = join(pasta, entrada.name);
+    if (entrada.isDirectory()) await somenteLeitura(caminho);
+    else if (entrada.isFile()) await chmod(caminho, 0o444);
+  }
+}
+
 /** Remove um worktree que tenha sobrado de um run que caiu, e o branch dele. */
 async function limparSobra(projectRoot: string, dir: string, branch: string): Promise<void> {
   await git(projectRoot, ["worktree", "remove", "--force", dir]).catch(() => undefined);
@@ -126,6 +138,21 @@ export async function abrirWorktree(
     // O resultado da passagem anterior é da árvore principal, não desta fase.
     await rm(join(dir, FLOWS_DIR, FLOW_RESULTS), { recursive: true, force: true });
     copiado.push(pasta);
+  }
+  /*
+   * A especificação do projeto, quando não está versionada (§106).
+   *
+   * O prompt manda o executor ler `.capivara/init/skeleton.md`, e o checkout do
+   * HEAD não o traz se o `init` não foi commitado — no `teste_haiku_v2` executor
+   * e verificador trabalharam sem o esqueleto. Vai copiada e só de leitura: é
+   * especificação, e o commit da fase já deixa `.capivara` de fora.
+   */
+  const especificacao = join(".capivara", "init");
+  if ((await existe(join(projectRoot, especificacao))) && !(await rastreado(projectRoot, especificacao))) {
+    await mkdir(join(dir, ".capivara"), { recursive: true });
+    await copiarPasta(join(projectRoot, especificacao), join(dir, especificacao));
+    await somenteLeitura(join(dir, especificacao));
+    copiado.push(especificacao);
   }
   for (const arquivo of [join(".capivara", ".gitignore"), ".env"]) {
     if (!(await existe(join(projectRoot, arquivo))) || (await rastreado(projectRoot, arquivo))) continue;

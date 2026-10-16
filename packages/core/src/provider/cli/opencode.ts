@@ -36,4 +36,9 @@ export const opencodeAdapter = {
     if (effort) args.push("--variant", effort);
     return { args, env: { ...env, OPENCODE_PERMISSION: access === "read-only" ? SOMENTE_LEITURA : EXECUTOR } };
   },
+  // Não há sandbox: o executor recebe bash e diretório externo liberados (§106).
+  workspace: () => ({
+    estado: "insuficiente",
+    motivo: "o opencode não tem sandbox: no executor, bash e diretórios externos ficam liberados, e ele escreveria fora do projeto",
+  }),
 } as const satisfies CliAdapter;

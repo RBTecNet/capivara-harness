@@ -6985,3 +6985,48 @@ Testes:
 - `test/integration/cwd-do-executor.spec.ts`: um claude falso devolve o
   próprio cwd pela ponte. Com o código anterior, devolve `packages/core` em
   vez do worktree, a mesma falha do piloto.
+
+## §106 — O nível workspace do executor tem contrato, e o claude o cumpre com o sandbox nativo
+
+No `teste_haiku_v2` (run `build-96756ca336b0`), o executor Claude em
+workspace recebia só `acceptEdits`. Em `-p`, todo Bash que não fosse de
+leitura era negado, a especificação não chegava ao worktree, e três ciclos
+foram cobrados como código incompleto
+(`docs/DIAGNOSTICO-PERMISSOES-CLAUDE-WORKSPACE.md`).
+
+Decisão: o nível workspace roda comandos, alcança a internet, instala
+dependências e não escreve fora do projeto, sem acesso irrestrito e sem mexer
+no Git do Core. Cada adapter declara `workspace(platform)`:
+
+- `garantido`;
+- `insuficiente`: o preflight serial e o paralelo recusam, com diagnóstico;
+- `nao-verificado`: o build segue e declara a limitação.
+
+Nem a rede é tirada, nem o acesso é promovido, em silêncio.
+
+O que mudou:
+
+- **Claude, workspace:** recebe `--settings` com o sandbox nativo:
+  - `failIfUnavailable`, `allowUnsandboxedCommands: false` e
+    `allowedDomains: ["*"]`;
+  - os caches do npm e do Playwright graváveis;
+  - `denyWrite` do `.git` comum, de `.capivara/init` e de `.capivara/runs`;
+  - no Linux, `allowAllUnixSockets` com `/run` e `/tmp` ilegíveis, porque o
+    seccomp não sobe neste kernel e, sem máscara, `systemd-run --user`
+    escapava;
+  - credenciais conhecidas ilegíveis e chaves removidas do ambiente;
+  - um `TMPDIR` por chamada, fora de `/tmp`.
+- **`abrirWorktree`:** copia `.capivara/init` não versionada, com os
+  arquivos em 0444.
+- **Envelope `claude-json`:** expõe `permission_denials` como "ferramenta:
+  programa", sem argumentos. O executor com negações e sem COMPLETE para no
+  ciclo, como falha do gate 0, com causa de ambiente; o parcial segue o
+  caminho de sempre.
+- **Codex e opencode no workspace:** são recusados. O codex não entrega rede
+  e confinamento juntos (fuga comprovada com rede); o opencode não tem
+  sandbox.
+
+Os gates G0–G4 não mudaram. As garantias comprovadas, a matriz de sondas com
+os providers reais e as limitações estão em `docs/GARANTIAS-WORKSPACE-106.md`.
+A principal limitação: o sandbox contém a sessão do executor, mas G2 e G4
+executam o código que ele escreveu fora de qualquer sandbox.

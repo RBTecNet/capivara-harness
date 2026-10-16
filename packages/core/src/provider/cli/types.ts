@@ -22,6 +22,14 @@ export type AccessLevel = "read-only" | "workspace" | "system";
 
 export interface CliInvocationInput {
   projectRoot: string;
+  /** Onde a CLI roda: o isolamento de cada uma depende do sistema operacional. */
+  platform: NodeJS.Platform;
+  /**
+   * O diretório comum do Git (`git rev-parse --git-common-dir`), absoluto, ou
+   * null fora de um repositório. Num worktree é o `.git` da árvore principal:
+   * quem isola o executor o protege, porque só o Core registra no Git (§101).
+   */
+  gitDir: string | null;
   /** Já validado contra caracteres perigosos; vazio significa "o padrão da CLI". */
   model: string;
   effort: string;
@@ -39,6 +47,37 @@ export interface CliInvocation {
   args: string[];
   /** Só quando o adaptador precisa mexer no ambiente herdado. */
   env?: NodeJS.ProcessEnv;
+  /**
+   * A chamada precisa de um `TMPDIR` só dela, fora de `/tmp` (§106).
+   *
+   * O sandbox do Claude Code torna gravável o temporário "por usuário" que ele
+   * deriva do `TMPDIR` — `/tmp/claude-<uid>` por padrão, o MESMO para toda
+   * sessão do usuário. Sem isto, um executor escreveria no temporário de outro
+   * agente, ou no de outra ferramenta.
+   */
+  tmpPrivado?: boolean;
+}
+
+/**
+ * O que o nível `workspace` do executor entrega nesta CLI (§106).
+ *
+ * O contrato é um só para todas: rodar os comandos de desenvolvimento, alcançar
+ * a internet, instalar dependências no projeto, e não alterar nada fora dele —
+ * sem acesso irrestrito ao sistema e sem mexer no Git do Core. Cada CLI declara
+ * o que consegue GARANTIR disso, com a evidência; o que ela não garante não é
+ * anunciado.
+ *
+ * - `garantido`: comprovado com a CLI real, nesta plataforma;
+ * - `insuficiente`: comprovadamente falta uma capacidade obrigatória — o build
+ *   recusa a configuração, em vez de reduzir a rede ou promover o acesso em
+ *   silêncio;
+ * - `nao-verificado`: a CLI não pôde ser verificada; o build segue, e diz isso.
+ */
+export interface ContratoDoWorkspace {
+  estado: "garantido" | "insuficiente" | "nao-verificado";
+  motivo: string;
+  /** Binários de que o isolamento depende nesta plataforma. */
+  dependencias?: readonly string[];
 }
 
 export interface CliAdapter {
@@ -61,4 +100,6 @@ export interface CliAdapter {
    */
   streams: boolean;
   build: (input: CliInvocationInput) => CliInvocation;
+  /** O que o nível `workspace` do executor garante nesta plataforma (§106). */
+  workspace: (platform: NodeJS.Platform) => ContratoDoWorkspace;
 }

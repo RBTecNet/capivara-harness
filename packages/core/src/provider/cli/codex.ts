@@ -30,4 +30,19 @@ export const codexAdapter = {
     args.push("-");
     return { args };
   },
+  /*
+   * Comprovado com codex-cli 0.162.1 (§106): no `workspace-write` o sandbox só
+   * bloqueia Unix sockets enquanto a rede está desligada. Com
+   * `sandbox_workspace_write.network_access`, um comando alcança o gerenciador
+   * do systemd do usuário, e `systemd-run --user` executa fora do sandbox. Sem
+   * rede, o executor não instala dependência nenhuma (EAI_AGAIN no piloto-6).
+   * As duas metades do contrato não cabem juntas — o build recusa, em vez de
+   * escolher uma delas em silêncio.
+   */
+  workspace: () => ({
+    estado: "insuficiente",
+    motivo:
+      "o sandbox workspace-write do codex só bloqueia Unix sockets com a rede desligada: com rede, um comando " +
+      "executa fora do sandbox pelo systemd do usuário; sem rede, o executor não instala dependências",
+  }),
 } as const satisfies CliAdapter;

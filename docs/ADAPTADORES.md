@@ -79,6 +79,43 @@ export const CLI_ADAPTERS = [codexAdapter, claudeAdapter, opencodeAdapter, agyAd
 É só isso. `capivara doctor`, o wizard, `capivara providers list`, a validação de
 flags e as mensagens de erro leem todos dessa lista.
 
+## Execução sem aprovação (§112)
+
+O executor e a sessão explícita de reparo recebem o bypass em `workspace` e
+`system`, inclusive com `--no-system-install`. Os equivalentes por CLI são:
+
+| CLI | Configuração da chamada |
+|---|---|
+| Claude | `--dangerously-skip-permissions` em workspace; `--permission-mode bypassPermissions` em system |
+| Codex | `--dangerously-bypass-approvals-and-sandbox` |
+| Cursor | `--force --approve-mcps --sandbox disabled --trust` |
+| AGY | `--mode accept-edits --dangerously-skip-permissions`, sem `--sandbox` |
+| OpenCode | `--auto` e `OPENCODE_PERMISSION={"*":"allow"}`; não tem sandbox próprio |
+
+No OpenCode, enumerar apenas `edit`, `bash`, `task` e `external_directory`
+deixava permissões como `read`, `webfetch`, ferramentas MCP e `doom_loop`
+dependentes dos defaults ou da configuração herdada. O wildcard libera todas
+as permissões globais; `--auto` também aprova pedidos restantes automaticamente.
+A flag foi conferida no `opencode run --help` da versão 1.18.31.
+O `debug agent build` dessa versão também confirmou a configuração efetiva:
+`bash`, leitura de `.env`, diretório externo, `doom_loop`, `webfetch` e uma
+permissão MCP ficaram em `allow` mesmo com regras globais restritivas no projeto,
+para executor e reparador, com e sem `systemInstall`. Isso verifica a resolução
+das permissões, sem executar uma sessão de modelo. Cursor e AGY não estavam
+instalados nesta máquina para uma nova validação real.
+
+No Cursor, `--force` é sinônimo de `--yolo`, mas ainda respeita regras `deny`
+explícitas da CLI; `--approve-mcps` elimina a confirmação dos servidores MCP.
+Essas flags não prometem remover políticas impostas pelo próprio fornecedor.
+Referências: [parâmetros do Cursor](https://cursor.com/docs/cli/reference/parameters),
+[permissões do OpenCode](https://opencode.ai/docs/permissions/) e
+[variáveis do OpenCode](https://opencode.ai/docs/cli/#environment-variables).
+
+Os testes dos adaptadores cobrem executor e reparador, com `systemInstall`
+ausente, falso e verdadeiro, em Linux, macOS e Windows. As avaliações normais
+continuam somente leitura; o preflight aceita os três providers em execução
+serial e paralela e informa o acesso amplo.
+
 ## O teste que acompanha
 
 Use as amostras capturadas no passo 1, nunca inventadas:
@@ -112,8 +149,9 @@ stdin, que é como o harness já manda todo prompt.
 planeja antes de agir e grava o plano num arquivo. O adaptador do Claude usou
 `plan` para os papéis de leitura e uma fase inteira do piloto 6 veio com a
 explicação da CLI de que não conseguiu reabrir o próprio plano, no lugar das
-tasks. Somente-leitura de verdade é não conceder aprovação automática: em print
-mode, sem ninguém para aprovar, a ferramenta que exigiria permissão é negada.
+tasks. No AGY, quem garante somente leitura é `--sandbox`; ele é combinado com
+`--dangerously-skip-permissions` para que ferramentas de leitura não dependam
+de aprovação em modo headless e a resposta não volte vazia.
 
 **Quem executa precisa da permissão dita por extenso.** O adaptador do opencode
 não declarava nada para o executor e herdava o default da CLI, que nega diretório

@@ -63,12 +63,64 @@ describe("sandbox por papel — a fronteira mais delicada", () => {
    * tsc usam `/tmp` e `~/.npm` o tempo todo. O piloto 6-mimo morreu na primeira
    * linha da sessão, com "auto-rejecting" e nenhum arquivo escrito.
    */
-  it("opencode: o executor recebe as permissões declaradas, não herdadas", () => {
-    const permissao = buildInvocation("builder", config({ provider: "opencode" }), context).env.OPENCODE_PERMISSION;
-    expect(permissao).toBeDefined();
-    expect(permissao).toContain('"edit":"allow"');
-    expect(permissao).toContain('"bash":"allow"');
-    expect(permissao).toContain('"external_directory":"allow"');
+  it("opencode: o executor libera todas as permissões, inclusive as não enumeradas", () => {
+    const invocation = buildInvocation("builder", config({ provider: "opencode" }), {
+      ...context,
+      environment: { OPENCODE_PERMISSION: '{"*":"deny"}' },
+    });
+    expect(JSON.parse(invocation.env.OPENCODE_PERMISSION!)).toEqual({ "*": "allow" });
+    expect(invocation.args).toContain("--auto");
+  });
+});
+
+describe("cursor, agy e opencode: execução e reparo sem sandbox nem aprovação (§112)", () => {
+  for (const provider of ["cursor", "agy", "opencode"]) {
+    for (const systemInstall of [undefined, false, true]) {
+      for (const role of ["builder", "verifier"] as const) {
+        it(`${provider}: ${role}, systemInstall=${systemInstall}`, () => {
+          for (const platform of ["linux", "darwin", "win32"] as const) {
+            const invocation = buildInvocation(role, config({ provider }), {
+              ...context,
+              platform,
+              ...(systemInstall !== undefined ? { systemInstall } : {}),
+              ...(role === "verifier" ? { verifierRepair: true } : {}),
+            });
+            expect(invocation.env.CAPIVARA_PERMISSION).toBe("workspace-write");
+            if (provider === "cursor") {
+              expect(invocation.args).toContain("--force");
+              expect(invocation.args).toContain("--approve-mcps");
+              expect(invocation.args[invocation.args.indexOf("--sandbox") + 1]).toBe("disabled");
+            } else if (provider === "agy") {
+              expect(invocation.args).toContain("--dangerously-skip-permissions");
+              expect(invocation.args).not.toContain("--sandbox");
+            } else {
+              expect(invocation.args).toContain("--auto");
+              expect(JSON.parse(invocation.env.OPENCODE_PERMISSION!)).toEqual({ "*": "allow" });
+            }
+          }
+        });
+      }
+    }
+  }
+
+  it.each(["cursor", "agy", "opencode"])("%s: as avaliações após o reparo continuam somente leitura", (provider) => {
+    for (const role of ["writer", "auditor", "verifier"] as const) {
+      const invocation = buildInvocation(role, config({ provider }), { ...context, systemInstall: true });
+      expect(invocation.env.CAPIVARA_PERMISSION).toBe("read-only");
+      if (provider === "cursor") {
+        expect(invocation.args[invocation.args.indexOf("--mode") + 1]).toBe("ask");
+        expect(invocation.args).not.toContain("--force");
+        expect(invocation.args).not.toContain("--approve-mcps");
+        expect(invocation.args).not.toContain("--sandbox");
+      } else if (provider === "agy") {
+        expect(invocation.args).toContain("--sandbox");
+      } else {
+        expect(invocation.args).not.toContain("--auto");
+        const permission = JSON.parse(invocation.env.OPENCODE_PERMISSION!);
+        for (const tool of ["edit", "bash", "task", "external_directory"]) expect(permission[tool]).toBe("deny");
+        expect(permission["*"]).not.toBe("allow");
+      }
+    }
   });
 });
 
@@ -124,7 +176,7 @@ describe("sessão explícita de reparo pelo verificador", () => {
     expect(repair.env.CAPIVARA_SYSTEM_INSTALL).toBeUndefined();
     if (provider === "codex") expect(repair.args).toContain("--dangerously-bypass-approvals-and-sandbox");
     if (provider === "claude") expect(repair.args).toContain("--dangerously-skip-permissions");
-    if (provider === "opencode") expect(repair.env.OPENCODE_PERMISSION).toContain('"edit":"allow"');
+    if (provider === "opencode") expect(JSON.parse(repair.env.OPENCODE_PERMISSION!)).toEqual({ "*": "allow" });
     const assessment = buildInvocation("verifier", configured, context);
     expect(assessment.env.CAPIVARA_PERMISSION).toBe("read-only");
     expect(assessment.env.CAPIVARA_REPAIR).toBe("0");

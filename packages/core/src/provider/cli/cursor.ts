@@ -17,9 +17,9 @@
  * uma fase inteira do piloto 6 voltou com a CLI explicando que não conseguiu
  * reabrir o próprio plano.
  *
- * **`-p` já concede tudo ao executor**: a ajuda diz, com todas as letras, "has
- * access to all tools, including write and shell". Não há permissão a declarar
- * além da confiança no diretório.
+ * **`-p` habilita write e shell**, mas a execução sem aprovação ainda exige
+ * `--force` (sinônimo de `--yolo`), `--sandbox disabled` e `--approve-mcps`.
+ * A CLI ainda respeita regras de negação explícita do operador.
  */
 
 import type { CliAdapter } from "./types.js";
@@ -59,6 +59,9 @@ export const cursorAdapter = {
      * executar, não — e a diferença entre as duas é uma flag.
      */
     args.push("--force");
+    // A confiança do workspace não aprova os servidores MCP. Sem isto, uma
+    // ferramenta MCP ainda pode depender de confirmação numa chamada headless.
+    args.push("--approve-mcps");
 
     /*
      * Sem sandbox, em qualquer nível do executor (§112).
@@ -71,6 +74,6 @@ export const cursorAdapter = {
   },
   workspace: () => ({
     estado: "nao-verificado",
-    motivo: "o executor cursor roda com --sandbox disabled: tem acesso amplo ao sistema, à rede e aos arquivos do usuário (§112)",
+    motivo: "o executor cursor roda com --force --approve-mcps --sandbox disabled: tem acesso amplo ao sistema, à rede e aos arquivos do usuário; regras deny explícitas da CLI continuam valendo (§112)",
   }),
 } as const satisfies CliAdapter;

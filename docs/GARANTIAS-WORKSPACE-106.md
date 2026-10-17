@@ -6,10 +6,13 @@
 > como registro histórico do §106 e para os contratos dos outros providers.
 >
 > **Substituído para todos os executores pelo §112.** Codex
-> (`--dangerously-bypass-approvals-and-sandbox`), cursor (`--sandbox disabled`),
-> agy (sem `--sandbox`) e opencode rodam sem sandbox e sem aprovação, em qualquer
+> (`--dangerously-bypass-approvals-and-sandbox`), cursor
+> (`--force --approve-mcps --sandbox disabled`), agy
+> (`--dangerously-skip-permissions`, sem `--sandbox`) e opencode
+> (`--auto`, `OPENCODE_PERMISSION={"*":"allow"}`) rodam sem sandbox e sem aprovação, em qualquer
 > nível. Nenhum é mais recusado no workspace: o preflight diz que o executor tem
 > acesso amplo. Os papéis somente-leitura não mudaram.
+> Os limites das flags e as evidências estão em [ADAPTADORES.md](ADAPTADORES.md#execução-sem-aprovação-112).
 
 Esta correção resolve os problemas de `docs/DIAGNOSTICO-PERMISSOES-CLAUDE-WORKSPACE.md`
 (run `build-96756ca336b0`, `teste_haiku_v2`). O Haiku não podia rodar nem

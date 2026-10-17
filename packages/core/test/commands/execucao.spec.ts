@@ -98,28 +98,31 @@ describe("o contrato do nível workspace no preflight", () => {
   const CLAUDE = resolveRoles({ global: { provider: "claude", model: "haiku" }, roles: {} });
 
   // §112: sem sandbox, o executor codex não é recusado no workspace — o acesso amplo é dito.
-  it("serial: executor codex sem acesso de sistema segue, com o acesso amplo dito", async () => {
-    const preparada = await prepararExecucao({ projectRoot: raiz, flags: {}, roles: ROLES, systemInstall: false, instalado, workspace });
+  it.each(["codex", "cursor", "agy", "opencode"])("serial: executor %s sem acesso de sistema segue, com o acesso amplo dito", async (provider) => {
+    const roles = resolveRoles({ global: { provider }, roles: {} });
+    const preparada = await prepararExecucao({ projectRoot: raiz, flags: {}, roles, systemInstall: false, instalado, workspace });
     expect(preparada.ok).toBe(true);
     if (!preparada.ok) return;
-    expect(preparada.resumo.join("\n")).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(preparada.resumo.join("\n")).toContain("acesso amplo ao sistema, à rede e aos arquivos do usuário");
   });
 
-  it("paralelo: o agente opencode em workspace segue, com o acesso amplo dito; o de acesso de sistema também passa", async () => {
+  it.each(["cursor", "agy", "opencode"])("paralelo: %s segue com ou sem acesso de sistema", async (provider) => {
     const workspaceSemSandbox = await prepararExecucao({
       projectRoot: raiz,
-      flags: { parallel: "2", worker: ["provider=opencode,system-install=no"] },
+      flags: { parallel: "2", worker: [`provider=${provider},system-install=no`] },
       roles: ROLES,
       systemInstall: true,
       instalado,
       workspace,
     });
     expect(workspaceSemSandbox.ok).toBe(true);
-    if (workspaceSemSandbox.ok) expect(workspaceSemSandbox.resumo.join("\n")).toContain("agente 1: o opencode não tem sandbox");
+    if (workspaceSemSandbox.ok) {
+      expect(workspaceSemSandbox.resumo.some((linha) => linha.includes("agente 1:") && linha.includes("acesso amplo ao sistema, à rede e aos arquivos do usuário"))).toBe(true);
+    }
 
     const aceita = await prepararExecucao({
       projectRoot: raiz,
-      flags: { parallel: "2", worker: ["provider=opencode,system-install=yes"] },
+      flags: { parallel: "2", worker: [`provider=${provider},system-install=yes`] },
       roles: ROLES,
       systemInstall: true,
       instalado,

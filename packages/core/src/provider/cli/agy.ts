@@ -8,9 +8,10 @@
  * agir e grava o plano num arquivo, e o papel depois tenta relê-lo. O adaptador
  * do Claude usava `plan` para os papéis de leitura, e uma fase inteira do piloto
  * 6 veio com a explicação da CLI de que não conseguiu abrir o próprio arquivo de
- * plano no lugar das tasks. Aqui `plan` não aparece: quem só lê roda sem
- * `--dangerously-skip-permissions`, e em print mode, sem ninguém para aprovar,
- * toda ferramenta que exigiria permissão é negada. Somente-leitura de fato.
+ * plano no lugar das tasks. Aqui `plan` não aparece: quem só lê recebe
+ * `--sandbox`, que impede escrita, junto com `--dangerously-skip-permissions`
+ * para não depender de aprovação em modo headless. O executor recebe o bypass
+ * sem sandbox, como o Claude.
  *
  * **Quem executa precisa da permissão dita por extenso.** O adaptador do opencode
  * não declarava nada para o executor e herdava o default da CLI, que nega

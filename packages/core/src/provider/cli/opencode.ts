@@ -20,7 +20,9 @@ const SOMENTE_LEITURA = '{"edit":"deny","bash":"deny","task":"deny","external_di
  * nada" — verdade que escondia a causa. Quem executa recebe o que executar exige,
  * dito por extenso.
  */
-const EXECUTOR = '{"edit":"allow","bash":"allow","task":"allow","external_directory":"allow"}';
+// O equivalente ao bypass das outras CLIs precisa cobrir TODAS as ferramentas,
+// inclusive read, webfetch, MCP e doom_loop, sem herdar ask/deny do ambiente.
+const EXECUTOR = '{"*":"allow"}';
 
 export const opencodeAdapter = {
   id: "opencode",
@@ -34,11 +36,14 @@ export const opencodeAdapter = {
     const args = ["run", "--dir", projectRoot, "--format", "json"];
     if (model) args.push("--model", model);
     if (effort) args.push("--variant", effort);
+    // --auto evita prompts restantes; o wildcard acima também libera os denies
+    // de permissão global. Só --auto continuaria respeitando esses denies.
+    if (access !== "read-only") args.push("--auto");
     return { args, env: { ...env, OPENCODE_PERMISSION: access === "read-only" ? SOMENTE_LEITURA : EXECUTOR } };
   },
   // Não há sandbox: o executor recebe bash e diretório externo liberados, e o build segue (§112).
   workspace: () => ({
     estado: "nao-verificado",
-    motivo: "o opencode não tem sandbox: o executor tem bash e diretórios externos liberados, com acesso amplo ao sistema, à rede e aos arquivos do usuário (§112)",
+    motivo: 'o opencode não tem sandbox: o executor roda com --auto e OPENCODE_PERMISSION={"*":"allow"}, com acesso amplo ao sistema, à rede e aos arquivos do usuário (§112)',
   }),
 } as const satisfies CliAdapter;

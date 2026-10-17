@@ -42,6 +42,14 @@ export interface BuilderContext {
    * e três fases bloquearam sem que um executor soubesse o que o gate esperava.
    */
   temFluxos?: boolean;
+  /**
+   * E o projeto ainda não declara esse `start` (§109).
+   *
+   * O contrato genérico do §107 não bastou: no `build-96756ca336b0` retomado, as
+   * três fases o receberam e as três deixaram o gate 4 descobrir a falta — um
+   * ciclo cada. O harness sabe antes do ciclo 1, e agora diz.
+   */
+  entrypointAusente?: boolean;
 }
 
 export interface FixContext extends BuilderContext {
@@ -160,6 +168,13 @@ export function flowStartBlock(context: BuilderContext): string {
     "address. The entrypoint must exist and listen on that `PORT` and `HOST`; a server that only",
     "listens on a fixed port fails the gate. The project may keep its own variable names, as long as",
     "the entrypoint honours these two.",
+    ...(context.entrypointAusente
+      ? [
+          "",
+          "This project does NOT declare that entrypoint yet: the manifest has no `start`. Create it in this",
+          "session — honouring `PORT` and `HOST` — or the flow gate fails before walking a single flow.",
+        ]
+      : []),
   ].join("\n");
 }
 

@@ -7159,3 +7159,87 @@ Testes atualizados:
   diz que o executor tem acesso amplo.
 - `test/integration/workspace-claude.spec.ts`: pela ponte, a CLI falsa
   recebe a flag e nenhum `--settings`.
+
+## §109 — O roteiro do gate 4 pode reiniciar a aplicação, e nenhum passo passa sem ser executado
+
+No `build-96756ca336b0` retomado, a P05 bloqueou no gate 4 num passo que
+ninguém podia cumprir: "reiniciar o servidor com o mesmo arquivo SQLite e
+conferir os valores persistidos". O roteiro era proibido de subir ou parar
+servidores, o ajudante não reiniciava nada, e a conferência exigia o passo.
+
+Os dois roteiristas resolveram esse impasse em sentidos opostos. O da P03 trocou
+o passo por uma anotação de pendência e passou sem executá-lo. O da P05
+escreveu `expect.soft(false)` e reprovou de propósito. O diagnóstico está em
+`docs/DIAGNOSTICO-G4-REINICIO-P05.md`.
+
+Decisão do proprietário: os roteiros têm liberdade operacional para executar o
+que os critérios exigem. O gate não proíbe uma operação legítima para depois
+reprovar o projeto por ela não ter sido feita.
+
+**O que mudou:**
+1. **`aplicacaoPropria()` no ajudante (`passagem.ts`).** A instância do gate
+   pertence ao Playwright e não pode ser reiniciada pelo roteiro. O ajudante
+   passa a subir outra instância do produto:
+   - usa o mesmo comando de início do gate (`CAPIVARA_INICIO`, que o gate 4
+     passa ao runner), o ambiente da passagem e o mesmo arquivo de banco;
+   - recebe uma porta livre só dela, com `PORT` e `HOST`, e o ajudante espera
+     ela responder;
+   - `reiniciar()` encerra o processo de verdade (SIGTERM ao grupo, SIGKILL
+     depois de 5s), espera ele sair e sobe de novo na mesma porta e no mesmo
+     banco; `encerrar()` só para a instância.
+2. **Nenhum órfão.** Cada instância nasce líder de um grupo de processos e é
+   anotada na lista da passagem (`CAPIVARA_PROCESSOS`). O processo do roteiro
+   mata as suas instâncias ao sair, e a limpeza da passagem
+   (`encerrarOrfaos`) mata o grupo de cada processo anotado que ainda esteja
+   vivo. Só os anotados: nenhum processo alheio é tocado.
+3. **As proibições que conflitavam saíram.** O prompt do roteirista não proíbe
+   mais `child_process`, nem iniciar ou parar servidores, e ensina o reinício
+   com um exemplo. A conferência estrutural parou de recusar `child_process` e
+   o `build` pelo ajudante. Continua recusando subir o servidor com
+   `comandoDoProjeto`, que esperaria até o prazo um comando que não termina,
+   e aponta `aplicacaoPropria`.
+4. **Nenhum passo aprovado sem ser executado.** A conferência recusa asserção
+   sobre uma constante (`expect(false)`, `expect(true)`, também `.soft`),
+   `CAPIVARA_REMARK` e a anotação `pendente`. O prompt diz isso.
+5. **Os roteiros da v2 são reescritos uma vez.** O `FLOW_MARK` foi para a v3.
+   Os roteiros da v2, escritos sob a proibição (entre eles o fluxo 1 do
+   `teste_haiku_v2`, que passou com o reinício pendente), passam pelo
+   mecanismo de sempre: são reescritos uma vez, custando uma sessão de
+   roteirista.
+6. **A falta de `start` é dita antes do ciclo 1.** Quando a fase tem fluxos e
+   `startCommandFor` devolve `null`, o prompt do executor diz que o projeto
+   não tem `start` e que ele deve criá-lo honrando `PORT` e `HOST`. Na
+   retomada, as três fases receberam só o contrato genérico do §107, e as três
+   deixaram o gate 4 descobrir a falta.
+
+Gates G0–G4, scheduler paralelo e permissões não mudaram. Nenhum bloqueio,
+sandbox ou autorização foi acrescentado.
+
+**Testes**, com o que foi executado e o que foi substituído:
+- `test/integration/reinicio-g4.spec.ts` roda o `gate4` inteiro sobre um
+  produto real: servidor HTTP com SQLite em arquivo (`node:sqlite`), subido
+  por `npm start`.
+  - **Real:** a passagem isolada, o ajudante gerado, os processos, as portas,
+    o arquivo SQLite, o reinício e a limpeza. O roteiro executado é o arquivo
+    que o gate gravou, no formato do roteirista.
+  - **Substituído:** só o Playwright, que não é dependência deste pacote. O
+    `@playwright/test` do projeto temporário é um substituto mínimo (`test`,
+    `test.step`, `expect`, `page.request` sobre `fetch`).
+  - **Os casos:**
+    - cria, confere, reinicia, comprova que o processo antigo morreu, que o
+      novo usa o mesmo banco, e que o registro persistiu;
+    - um roteiro que não reinicia reprova;
+    - dois gates em paralelo, com servidores, portas e bancos independentes;
+    - `encerrarOrfaos` mata o grupo inteiro, inclusive o neto.
+- `test/loop/flows.spec.ts`: a conferência aceita `child_process`, recusa
+  constante, `CAPIVARA_REMARK` e pendência, e recusa subir com
+  `comandoDoProjeto`; o prompt ensina o reinício e não traz a proibição; o
+  runner recebe `CAPIVARA_INICIO`.
+- `test/loop/runner.spec.ts`: sem `start`, a primeira sessão ouve que precisa
+  criá-lo.
+- Contra o código anterior, 12 desses testes falham.
+
+**Limitação:** o Playwright real não foi executado contra o ajudante neste
+pacote. A instância própria e a do gate abrem o mesmo arquivo SQLite ao mesmo
+tempo, o que o SQLite permite. Um produto que tranque o arquivo com exclusividade
+não sobe a segunda instância, e o ajudante relata a saída dela.

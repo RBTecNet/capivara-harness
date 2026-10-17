@@ -83,11 +83,27 @@ describe("a conferência do roteiro, antes de abrir navegador nenhum", () => {
    * encerrou antes de abrir a página" — mensagem do próprio roteiro, sobre um
    * processo que o harness nem sabia que existia.
    */
-  it("recusa o roteiro que sobe a própria aplicação", () => {
-    const comServidor = `import { spawn } from 'node:child_process';\n${roteiroBom()}`;
-    const defeitos = checkFlowScript(comServidor, WORKFLOW);
-    expect(defeitos.map((defeito) => defeito.problem).join(" ")).toContain("sobe a própria aplicação");
-    expect(defeitos.map((defeito) => defeito.hint).join(" ")).toContain("JÁ ESTÁ DE PÉ");
+  // §109: o roteiro pode rodar processos — subir e reiniciar a aplicação é com o ajudante.
+  it("aceita o roteiro que usa child_process", () => {
+    const comProcesso = `import { spawn } from 'node:child_process';\n${roteiroBom()}`;
+    expect(checkFlowScript(comProcesso, WORKFLOW)).toEqual([]);
+  });
+
+  /*
+   * §109: os dois jeitos de "passar" um passo sem executá-lo, ambos vistos no
+   * `teste_haiku_v2` quando reiniciar o servidor era proibido.
+   */
+  it("recusa a asserção sobre uma constante e o passo marcado como pendente", () => {
+    for (const fingido of [
+      "expect.soft(false, 'não reiniciei').toBe(true);",
+      "expect(true).toBe(true);",
+      "console.info('CAPIVARA_REMARK: passo 6 pendente');",
+      "test.info().annotations.push({ type: 'pendente', description: 'reinício' });",
+    ]) {
+      const roteiro = roteiroBom().replace("await page.goto('/');", `await page.goto('/'); ${fingido}`);
+      const problemas = checkFlowScript(roteiro, WORKFLOW).map((defeito) => defeito.problem).join(" ");
+      expect(problemas, fingido).toMatch(/constante|pendente/);
+    }
   });
 
   it("recusa o roteiro que escolhe onde a aplicação está", () => {
@@ -355,7 +371,7 @@ describe("o gate", () => {
     // O roteiro do run anterior, com o servidor que o roteirista subiu sozinho.
     await mkdir(join(projectRoot, FLOWS_DIR), { recursive: true });
     const arquivo = join(projectRoot, FLOWS_DIR, flowScriptName(WORKFLOW.number));
-    await writeFile(arquivo, `import { spawn } from 'node:child_process';\n${roteiroBom()}\n`, "utf8");
+    await writeFile(arquivo, `${FLOW_MARK}\n${roteiroBom().replace("await page.goto('/');", "await page.goto('/'); expect(false).toBe(true);")}\n`, "utf8");
 
     const resultado = await gate4({
       ...base,
@@ -365,7 +381,7 @@ describe("o gate", () => {
     });
 
     expect(resultado.green).toBe(true);
-    expect(await readFile(arquivo, "utf8")).not.toContain("child_process");
+    expect(await readFile(arquivo, "utf8")).not.toContain("expect(false)");
   });
 
   it("põe o erro da APLICAÇÃO antes do seletor, quando o servidor registrou algum", async () => {
@@ -980,7 +996,10 @@ describe("a passagem isolada, em sequência", () => {
     expect(env.SQLITE_PATH?.startsWith(projectRoot)).toBe(false);
     expect(env.CAPIVARA_RAIZ).toBe(projectRoot);
     // A migração roda no banco da passagem — o mesmo ambiente que a aplicação recebe.
-    expect(migracoes).toEqual([{ comando: "npm run migrate", env }]);
+    // O runner recebe também o comando de início, para a instância que o roteiro reinicia (§109).
+    expect(env.CAPIVARA_INICIO).toBe("npm start");
+    const { CAPIVARA_INICIO: _inicio, ...semInicio } = env;
+    expect(migracoes).toEqual([{ comando: "npm run migrate", env: semInicio }]);
     // Nada sobrevive à passagem.
     await expect(stat(dirname(env.HOME ?? ""))).rejects.toThrow();
     // O ajudante do roteiro está ao lado dele.
@@ -1022,12 +1041,12 @@ describe("a passagem isolada, em sequência", () => {
     expect(ferramentasDaMaquina({ PLAYWRIGHT_BROWSERS_PATH: "/opt/pw" }, "/home/dev", "linux").PLAYWRIGHT_BROWSERS_PATH).toBeUndefined();
   });
 
-  it("o ajudante não serve para construir nem subir a aplicação", () => {
+  it("o servidor não sobe com comandoDoProjeto, que espera o comando terminar", () => {
     const roteiro = roteiroBom().replace(
       "await page.goto('/');",
-      "await comandoDoProjeto('npm', ['run', 'build']); await page.goto('/');",
+      "await comandoDoProjeto('npm', ['run', 'start']); await page.goto('/');",
     );
-    expect(checkFlowScript(roteiro, WORKFLOW).map((defeito) => defeito.problem).join(" ")).toContain("construir ou subir");
+    expect(checkFlowScript(roteiro, WORKFLOW).map((defeito) => defeito.hint).join(" ")).toContain("aplicacaoPropria()");
     const instalar = roteiroBom().replace("await page.goto('/');", "await comandoDoProjeto('npm', ['run', 'install:initial']);");
     expect(checkFlowScript(instalar, WORKFLOW)).toEqual([]);
   });
@@ -1049,6 +1068,12 @@ describe("a passagem isolada, em sequência", () => {
     expect(prompt).toContain("No migration is applied for you");
     expect(prompt).toContain("workflow 1 — Instalação inicial (`.capivara/flows/workflow-1.spec.ts`)");
     expect(prompt).toContain("import { comandoDoProjeto } from './capivara-comando';");
+    // §109: reiniciar é possível e ensinado; nada proíbe o que um passo exige; nada se aprova sem executar.
+    expect(prompt).toContain("import { aplicacaoPropria } from './capivara-comando';");
+    expect(prompt).toContain("await app.reiniciar();");
+    expect(prompt).not.toContain("child_process` stays forbidden");
+    expect(prompt).not.toContain("no starting, stopping or building a server");
+    expect(prompt).toContain("Every step is EXECUTED");
   });
 });
 

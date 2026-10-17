@@ -340,13 +340,15 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     const precisaDoRunner =
       cycle === 1 && (options.flows?.workflows.length ?? 0) > 0 && (await faltaOPacoteDoRunner(arvore));
 
+    const temFluxos = (options.flows?.workflows.length ?? 0) + (options.flows?.regressao?.length ?? 0) > 0;
     const context = {
       language: options.language,
       testCommand: options.testCommand?.command ?? null,
       containerized: options.testCommand?.containerized ?? false,
       phaseMarkdown: session.markdown,
       ...(precisaDoRunner ? { runnerDeFluxosAusente: true } : {}),
-      ...((options.flows?.workflows.length ?? 0) + (options.flows?.regressao?.length ?? 0) > 0 ? { temFluxos: true } : {}),
+      ...(temFluxos ? { temFluxos: true } : {}),
+      ...(temFluxos && (await options.flows?.resolveStart()) === null ? { entrypointAusente: true } : {}),
       ...(options.skills !== undefined && options.skills !== "" ? { skills: options.skills } : {}),
       ...(options.onMemorias ? { memoriasDir: MEMORIAS_DIR } : {}),
     };

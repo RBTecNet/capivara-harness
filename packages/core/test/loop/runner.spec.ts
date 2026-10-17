@@ -422,7 +422,7 @@ describe("o runner de fluxos é dito antes, não depois", () => {
  * último ciclo, e P03, P04 e P05 bloquearam com a aplicação na 3001 da `PORTA`.
  */
 describe("o contrato de subida do gate 4 é dito desde o primeiro ciclo", () => {
-  async function primeiroPrompt(workflows: { number: string; name: string; steps: string[] }[]) {
+  async function primeiroPrompt(workflows: { number: string; name: string; steps: string[] }[], start: string | null = null) {
     const chamadas: EngineCall[] = [];
     await runPhase({
       projectRoot,
@@ -434,7 +434,7 @@ describe("o contrato de subida do gate 4 é dito desde o primeiro ciclo", () => 
       commitsEnabled: false,
       maxCycles: 1,
       sleep: async () => undefined,
-      flows: { workflows, resolveStart: async () => null, runner: async () => ({ exitCode: 0, output: "" }) },
+      flows: { workflows, resolveStart: async () => start, runner: async () => ({ exitCode: 0, output: "" }) },
       call: async (call) => {
         chamadas.push(call);
         return ok(call.role === "verifier" ? "CAPIVARA_VERIFY: 1.1 | DONE | pronto" : "feito");
@@ -449,6 +449,16 @@ describe("o contrato de subida do gate 4 é dito desde o primeiro ciclo", () => 
     expect(prompt).toContain("`npm start`");
     expect(prompt).toContain("`PORT` and `HOST`");
     expect(prompt).toContain("listens on a fixed port fails the gate");
+  });
+
+  /*
+   * §109: no `build-96756ca336b0` retomado as três fases receberam o contrato e
+   * as três deixaram o gate 4 descobrir a falta de `start`, um ciclo cada.
+   */
+  it("sem start no manifesto, a primeira sessão ouve que precisa criá-lo", async () => {
+    const fluxo = [{ number: "1", name: "Cadastro", steps: ["abre", "salva"] }];
+    expect(await primeiroPrompt(fluxo, null)).toContain("This project does NOT declare that entrypoint yet");
+    expect(await primeiroPrompt(fluxo, "npm start")).not.toContain("does NOT declare that entrypoint");
   });
 
   it("a fase sem fluxo não recebe o contrato", async () => {

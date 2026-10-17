@@ -39,6 +39,18 @@ export const FLOW_HELPER = "capivara-comando.ts";
  */
 export const VARIAVEL_DA_RAIZ = "CAPIVARA_RAIZ";
 
+/** O comando com que o gate sobe a aplicação; o ajudante o usa para subir outra instância (§109). */
+export const VARIAVEL_DO_INICIO = "CAPIVARA_INICIO";
+
+/**
+ * O arquivo onde o ajudante anota cada processo que subiu (§109).
+ *
+ * Um roteiro que sobe uma instância e morre antes de encerrá-la deixaria um
+ * servidor órfão segurando o banco e a porta. A passagem lê esta lista ao fim e
+ * encerra o que sobrou — só o que o ajudante anotou, nunca um processo alheio.
+ */
+export const VARIAVEL_DOS_PROCESSOS = "CAPIVARA_PROCESSOS";
+
 /** Extensões de um banco que mora num arquivo. */
 const ARQUIVO_DE_BANCO = /\.(sqlite3?|db3?)$/i;
 
@@ -143,32 +155,68 @@ export async function criarAmbienteDaPassagem(
       XDG_DATA_HOME: join(pessoal, ".local", "share"),
       XDG_STATE_HOME: join(pessoal, ".local", "state"),
       [VARIAVEL_DA_RAIZ]: projectRoot,
+      [VARIAVEL_DOS_PROCESSOS]: join(raiz, "processos.txt"),
       ...bancos,
     },
     bancoNovo: Object.keys(declarados).sort(),
     limpar: async () => {
+      await encerrarOrfaos(join(raiz, "processos.txt"));
       await rm(raiz, { recursive: true, force: true }).catch(() => undefined);
     },
   };
 }
 
 /**
+ * Encerra o grupo de cada processo que o ajudante anotou e ainda está vivo.
+ *
+ * O ajudante sobe cada instância como líder de um grupo próprio (`detached`), e
+ * o grupo leva junto o que o comando de início criou — `npm` cria shell e node.
+ */
+export async function encerrarOrfaos(lista: string): Promise<void> {
+  const pids = (await readFile(lista, "utf8").catch(() => ""))
+    .split("\n")
+    .map((linha) => Number(linha.trim()))
+    .filter((pid) => Number.isInteger(pid) && pid > 0);
+  for (const pid of pids) {
+    try {
+      if (process.platform === "win32") process.kill(pid, "SIGKILL");
+      else process.kill(-pid, "SIGKILL");
+    } catch {
+      // Já tinha saído: é o caso comum, o roteiro encerrou o que subiu.
+    }
+  }
+}
+
+/**
  * O ajudante, escrito pelo harness a cada passagem como a configuração.
  *
- * É a única porta do roteiro para o terminal. O roteiro continua proibido de
- * importar `child_process`: foi assim que um roteirista subiu um segundo servidor
- * e o gate relatou a morte dele como defeito do produto. O ajudante roda UM
- * comando, na raiz, com o ambiente da passagem, e com prazo.
+ * Duas portas para o terminal, com o ambiente da passagem:
+ *
+ * - `comandoDoProjeto` roda UM comando na raiz, com prazo — instalar, migrar,
+ *   semear, ler o que o produto gravou;
+ * - `aplicacaoPropria` (§109) sobe OUTRA instância do produto, com o mesmo
+ *   comando de início do gate, o mesmo ambiente e o mesmo arquivo de banco, numa
+ *   porta livre só dela, e a reinicia ou encerra de verdade. É o que torna
+ *   percorrível o passo "reiniciar o servidor e conferir o que persistiu": a
+ *   instância do gate pertence ao Playwright e não pode ser reiniciada pelo
+ *   roteiro. No `build-96756ca336b0` o roteiro era proibido de subir servidores,
+ *   o ajudante não reiniciava nada, e a P05 bloqueou num passo que ninguém podia
+ *   cumprir.
+ *
+ * Cada instância nasce líder de um grupo de processos e é anotada na lista da
+ * passagem, que encerra ao fim o que o roteiro deixou de pé.
  */
 export function renderFlowHelper(): string {
   return [
     "// Gerado pelo capivara a cada passagem do gate 4. Não edite: será sobrescrito.",
-    "import { execFile } from 'node:child_process';",
+    "import { execFile, spawn, type ChildProcess } from 'node:child_process';",
+    "import { appendFileSync } from 'node:fs';",
+    "import { createServer } from 'node:net';",
     "",
     "/**",
     " * Roda um comando que o PROJETO declara — instalar, migrar, semear — na raiz do",
-    " * projeto, com o ambiente desta passagem. Nunca para construir ou subir a aplicação:",
-    " * ela já está de pé.",
+    " * projeto, com o ambiente desta passagem. Para subir, parar ou reiniciar a aplicação,",
+    " * use `aplicacaoPropria`.",
     " */",
     "export async function comandoDoProjeto(",
     "  comando: string,",
@@ -189,6 +237,126 @@ export function renderFlowHelper(): string {
     "    );",
     "    filho.stdin?.end(opcoes.entrada ?? '');",
     "  });",
+    "}",
+    "",
+    "export interface AplicacaoPropria {",
+    "  /** Onde esta instância responde — use `${app.url}/rota` ou `page.goto(app.url + '/rota')`. */",
+    "  url: string;",
+    "  porta: number;",
+    "  /** O processo de agora; muda a cada `reiniciar`. */",
+    "  pid: () => number;",
+    "  /** Encerra o processo de verdade, espera ele sair, e sobe de novo na mesma porta e no mesmo banco. */",
+    "  reiniciar: () => Promise<void>;",
+    "  /** Encerra e espera sair. Chame ao fim do passo que subiu a instância. */",
+    "  encerrar: () => Promise<void>;",
+    "  /** O que a instância escreveu até agora, para pôr na mensagem de uma asserção. */",
+    "  saida: () => string;",
+    "}",
+    "",
+    "const vivos = new Set<ChildProcess>();",
+    "process.once('exit', () => {",
+    "  for (const filho of vivos) matar(filho, 'SIGKILL');",
+    "});",
+    "",
+    "function matar(filho: ChildProcess, sinal: NodeJS.Signals): void {",
+    "  if (filho.pid === undefined) return;",
+    "  try {",
+    "    if (process.platform === 'win32') filho.kill(sinal);",
+    "    else process.kill(-filho.pid, sinal);",
+    "  } catch {",
+    "    // já saiu",
+    "  }",
+    "}",
+    "",
+    "async function portaLivre(): Promise<number> {",
+    "  return await new Promise((resolve, reject) => {",
+    "    const servidor = createServer();",
+    "    servidor.once('error', reject);",
+    "    servidor.listen(0, '127.0.0.1', () => {",
+    "      const endereco = servidor.address();",
+    "      const porta = typeof endereco === 'object' && endereco ? endereco.port : 0;",
+    "      servidor.close(() => resolve(porta));",
+    "    });",
+    "  });",
+    "}",
+    "",
+    "/**",
+    " * Sobe outra instância da aplicação, com o comando de início do gate, o ambiente desta",
+    " * passagem e o MESMO arquivo de banco, numa porta livre só dela. A instância do gate",
+    " * continua de pé em paralelo; esta é a que o roteiro pode reiniciar e encerrar.",
+    " */",
+    "export async function aplicacaoPropria(opcoes: { tempoMs?: number; ambiente?: Record<string, string> } = {}): Promise<AplicacaoPropria> {",
+    `  const raiz = process.env.${VARIAVEL_DA_RAIZ};`,
+    `  const comando = process.env.${VARIAVEL_DO_INICIO};`,
+    `  if (!raiz || !comando) throw new Error('aplicacaoPropria: ${VARIAVEL_DA_RAIZ} ou ${VARIAVEL_DO_INICIO} ausente — este ajudante só roda dentro do gate 4');`,
+    "  const prazo = opcoes.tempoMs ?? 120_000;",
+    "  const porta = await portaLivre();",
+    "  const url = `http://127.0.0.1:${porta}`;",
+    "  let filho: ChildProcess | undefined;",
+    "  let saida = '';",
+    "",
+    "  const saiu = (processo: ChildProcess): Promise<void> =>",
+    "    processo.exitCode !== null || processo.signalCode !== null",
+    "      ? Promise.resolve()",
+    "      : new Promise((resolve) => processo.once('exit', () => resolve()));",
+    "",
+    "  const subir = async (): Promise<void> => {",
+    "    const atual = spawn(comando, {",
+    "      cwd: raiz,",
+    "      env: { ...process.env, ...opcoes.ambiente, PORT: String(porta), HOST: '127.0.0.1' },",
+    "      shell: true,",
+    "      detached: process.platform !== 'win32',",
+    "      stdio: ['ignore', 'pipe', 'pipe'],",
+    "    });",
+    "    filho = atual;",
+    "    vivos.add(atual);",
+    "    atual.once('exit', () => vivos.delete(atual));",
+    `    const lista = process.env.${VARIAVEL_DOS_PROCESSOS};`,
+    "    if (lista && atual.pid !== undefined) appendFileSync(lista, `${atual.pid}\\n`);",
+    "    atual.stdout?.on('data', (pedaco) => (saida += String(pedaco)));",
+    "    atual.stderr?.on('data', (pedaco) => (saida += String(pedaco)));",
+    "    const limite = Date.now() + prazo;",
+    "    for (;;) {",
+    "      if (atual.exitCode !== null || atual.signalCode !== null) {",
+    "        throw new Error(`aplicacaoPropria: a instância saiu antes de responder em ${url}:\\n${saida.slice(-2000)}`);",
+    "      }",
+    "      try {",
+    "        await fetch(url, { signal: AbortSignal.timeout(2_000) });",
+    "        return;",
+    "      } catch {",
+    "        if (Date.now() > limite) {",
+    "          matar(atual, 'SIGKILL');",
+    "          throw new Error(`aplicacaoPropria: nada respondeu em ${url} em ${prazo} ms:\\n${saida.slice(-2000)}`);",
+    "        }",
+    "        await new Promise((resolve) => setTimeout(resolve, 250));",
+    "      }",
+    "    }",
+    "  };",
+    "",
+    "  const encerrar = async (): Promise<void> => {",
+    "    const atual = filho;",
+    "    if (!atual) return;",
+    "    const fim = saiu(atual);",
+    "    matar(atual, 'SIGTERM');",
+    "    const aindaVivo = setTimeout(() => matar(atual, 'SIGKILL'), 5_000);",
+    "    await fim;",
+    "    clearTimeout(aindaVivo);",
+    "    // O grupo inteiro: o comando de início pode ter deixado filhos.",
+    "    matar(atual, 'SIGKILL');",
+    "  };",
+    "",
+    "  await subir();",
+    "  return {",
+    "    url,",
+    "    porta,",
+    "    pid: () => filho?.pid ?? 0,",
+    "    reiniciar: async () => {",
+    "      await encerrar();",
+    "      await subir();",
+    "    },",
+    "    encerrar,",
+    "    saida: () => saida,",
+    "  };",
     "}",
     "",
   ].join("\n");

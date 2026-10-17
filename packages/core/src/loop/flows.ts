@@ -25,7 +25,7 @@ import { join } from "node:path";
 import type { SkeletonWorkflow } from "../contract/index.js";
 import { extractFlowScript, lerTriagem, stepLabel, type Triagem } from "../prompts/index.js";
 import { comandoDeMigracao } from "./ambiente.js";
-import { FLOW_HELPER, bancosDeclarados, criarAmbienteDaPassagem, renderFlowHelper } from "./passagem.js";
+import { FLOW_HELPER, VARIAVEL_DO_INICIO, bancosDeclarados, criarAmbienteDaPassagem, renderFlowHelper } from "./passagem.js";
 
 /** Onde os roteiros moram, relativo à raiz do projeto. */
 export const FLOWS_DIR = join(".capivara", "flows");
@@ -51,8 +51,12 @@ export const FLOW_RESULTS = "resultados";
  * aquilo — que lê um arquivo que ninguém criou, ou conta com um estado que não
  * existe mais — reprova um produto certo. Sem a marca, o roteiro é reescrito uma
  * vez, e custa uma sessão de roteirista em vez de um ciclo do executor.
+ *
+ * A v3 (§109) é a do roteiro que pode reiniciar a aplicação. Os da v2 foram
+ * escritos proibidos disso, e um deles — o fluxo 1 do `teste_haiku_v2` — trocou
+ * o passo de reinício por uma anotação de pendência e passou sem executá-lo.
  */
-export const FLOW_MARK = "// capivara-flow: v2 — passagem isolada, em sequência";
+export const FLOW_MARK = "// capivara-flow: v3 — passagem isolada, em sequência, com reinício";
 
 /** O roteiro gravado foi escrito para o ambiente de hoje? */
 export function roteiroAtual(conteudo: string): boolean {
@@ -185,37 +189,37 @@ export function checkFlowScript(
   }
 
   /*
-   * O roteiro NÃO sobe a aplicação.
+   * Nenhum passo aprovado sem ser executado (§109).
    *
-   * Quem constrói, sobe e espera o produto responder é o harness — é o que dá ao
-   * gate a autoridade de dizer que a aplicação está de pé. No `teste` o
-   * roteirista escreveu oitenta linhas antes do primeiro passo: importava
-   * `child_process`, subia um segundo servidor numa porta sua e ficava
-   * consultando com `fetch` até responder. Esse servidor morria, e o gate
-   * relatava "O servidor de teste encerrou antes de abrir a página" — uma
-   * mensagem do próprio roteiro, sobre um servidor que o harness nem sabia que
-   * existia, enquanto a aplicação de verdade estava de pé ao lado.
+   * Proibido de reiniciar o servidor, o roteirista do fluxo 1 do `teste_haiku_v2`
+   * trocou o passo por uma anotação de pendência e passou; o do fluxo 3 escreveu
+   * `expect.soft(false)` e reprovou de propósito. Agora o reinício é possível, e
+   * as duas saídas deixam de ser aceitas: asserção sobre uma constante não prova
+   * nada do produto, e `CAPIVARA_REMARK` é do protocolo do auditor, não de um roteiro.
    */
-  if (/from\s*['"`]node:child_process['"`]|from\s*['"`]child_process['"`]|require\s*\(\s*['"`](?:node:)?child_process['"`]/.test(script)) {
+  if (/\bexpect\s*(?:\.\s*soft\s*)?\(\s*(?:true|false)\s*[,)]/.test(script)) {
     defects.push({
-      problem: "o roteiro sobe a própria aplicação",
-      hint:
-        "a aplicação JÁ ESTÁ DE PÉ quando o roteiro começa: o harness a constrói, sobe e espera responder. " +
-        "Remova o child_process e use `page.goto('/rota')` com caminho relativo",
+      problem: "o roteiro afirma uma constante (`expect(true)` / `expect(false)`) em vez do produto",
+      hint: "cada passo é executado de verdade e afirma o que o produto fez; para reiniciar o servidor, use `aplicacaoPropria` do ajudante",
+    });
+  }
+  if (/CAPIVARA_REMARK|type:\s*['"`]pendente['"`]/.test(script)) {
+    defects.push({
+      problem: "o roteiro marca um passo como pendente em vez de executá-lo",
+      hint: "nenhum passo é aprovado sem ser executado; percorra o passo — subir, parar e reiniciar a aplicação é possível com `aplicacaoPropria`",
     });
   }
 
   /*
-   * O ajudante roda o que um operador rodaria — instalar, migrar, semear. Nunca
-   * construir nem subir: a aplicação já está de pé, e um `build` no meio da
-   * passagem reescreve o que o servidor está servindo.
+   * `comandoDoProjeto` espera o comando terminar, e um servidor não termina: o
+   * passo ficaria parado até o prazo do ajudante. Subir, parar e reiniciar a
+   * aplicação é com `aplicacaoPropria` (§109), que espera ela responder e a
+   * encerra de verdade.
    */
-  if (/comandoDoProjeto\s*\([^)]*['"`](?:start|dev|serve|preview|build)['"`]/.test(script)) {
+  if (/comandoDoProjeto\s*\([^)]*['"`](?:start|dev|serve|preview)['"`]/.test(script)) {
     defects.push({
-      problem: "o roteiro usa o ajudante para construir ou subir a aplicação",
-      hint:
-        "a aplicação JÁ ESTÁ DE PÉ: o harness a constrói e sobe antes do primeiro passo. Use `comandoDoProjeto` " +
-        "só para o que o operador faria no terminal — instalar, migrar, semear",
+      problem: "o roteiro sobe a aplicação com `comandoDoProjeto`, que espera o comando terminar",
+      hint: "para subir, parar ou reiniciar a aplicação, use `aplicacaoPropria()` do ajudante: ela devolve `url`, `reiniciar()` e `encerrar()`",
     });
   }
 
@@ -871,7 +875,8 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
           announce(`\`${migracao}\` falhou no banco novo da passagem (código ${migrou.exitCode}):\n${tail(migrou.output, 15)}`);
         }
       }
-      return await runner(options.projectRoot, scripts, ambiente.env);
+      // O comando de início vai junto: o ajudante sobe com ele a instância que o roteiro reinicia (§109).
+      return await runner(options.projectRoot, scripts, { ...ambiente.env, [VARIAVEL_DO_INICIO]: startCommand });
     } finally {
       await ambiente.limpar();
     }

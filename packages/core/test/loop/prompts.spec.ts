@@ -17,13 +17,27 @@ describe("prompt de implementação", () => {
     expect(prompt).toContain("Writing there invalidates this attempt");
   });
 
-  // §106: o que o sandbox do Claude recusa mesmo dentro dele tem um caminho que roda.
-  it("diz como rodar o comando que a sessão recusa pela forma, e onde pôr o temporário", () => {
+  // §112: sem sandbox, nenhum comando é recusado pela forma; fica só onde pôr o temporário.
+  it("não fala de comando recusado, e diz onde pôr o temporário", () => {
     const prompt = implementPrompt(base);
-    expect(prompt).toContain("`FOO=bar npm test`");
-    expect(prompt).toContain("run it with `bash .capivara/tmp/<name>.sh`");
-    expect(prompt).toContain("do not retry it as written");
-    expect(prompt).toContain("never at a fixed\npath under `/tmp`");
+    expect(prompt).not.toContain("refuse");
+    expect(prompt).not.toContain("do not retry it as written");
+    expect(prompt).toContain("`.capivara/tmp/`, which never enters a commit");
+    expect(prompt).toContain("never at a fixed path under `/tmp`");
+  });
+
+  /*
+   * §112: no `teste_luna` o executor da P05 escreveu specs de navegador por três
+   * ciclos sem rodá-las — "a instrução proíbe outro executor" — e o G3 recusou
+   * o que a primeira execução teria mostrado. A P04, que rodou, fechou.
+   */
+  it("o comando do gate é obrigatório, mas não é o único: os testes de navegador também rodam", () => {
+    const prompt = implementPrompt({ ...base, testCommand: "npm test" });
+    expect(prompt).not.toContain("Do not use another runner");
+    expect(prompt).toContain("This is the exact command the gate uses to validate the phase");
+    expect(prompt).toContain("its browser or end-to-end\ntests");
+    expect(prompt).toContain("Write a browser test and run it");
+    expect(prompt).toContain("A test from an earlier phase that contradicts what this phase requires is out of date: update it.");
   });
 
   it("libera rede para instalar dependências, mas proíbe stack nova", () => {

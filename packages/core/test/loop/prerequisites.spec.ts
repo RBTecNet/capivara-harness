@@ -76,15 +76,18 @@ describe("acesso de sistema é só do executor", () => {
     expect(Object.values(ROLES).filter((role) => role.systemInstall).map((role) => role.name)).toEqual(["builder"]);
   });
 
-  it("ligado, o executor recebe sandbox de acesso total", () => {
+  // §112: o executor roda sem sandbox e sem aprovação nos dois níveis; o nível ainda decide o aviso de instalação.
+  it("ligado, o executor roda sem sandbox e é avisado de que pode instalar", () => {
     const invocation = buildInvocation("builder", config, { ...context, systemInstall: true });
-    expect(invocation.args.join(" ")).toContain("--sandbox danger-full-access");
+    expect(invocation.args.join(" ")).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(invocation.args).not.toContain("--sandbox");
     expect(invocation.env.CAPIVARA_SYSTEM_INSTALL).toBe("1");
   });
 
-  it("desligado, o executor fica no workspace", () => {
+  it("desligado, o executor também roda sem sandbox", () => {
     const invocation = buildInvocation("builder", config, { ...context, systemInstall: false });
-    expect(invocation.args.join(" ")).toContain("--sandbox workspace-write");
+    expect(invocation.args.join(" ")).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(invocation.args).not.toContain("--sandbox");
     expect(invocation.env.CAPIVARA_SYSTEM_INSTALL).toBeUndefined();
   });
 

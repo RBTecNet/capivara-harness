@@ -187,8 +187,10 @@ export function testBlock(context: BuilderContext): string {
     "",
     `    ${context.testCommand}`,
     "",
-    "This is the exact command used to validate the phase. Do not use another runner and do not",
-    "run the tests outside it. A different runner can show you green while the gate sees red.",
+    "This is the exact command the gate uses to validate the phase: before you finish, it has to pass.",
+    "Run anything else the project offers to check your work as well — its browser or end-to-end",
+    "tests, a single file, a watch mode. Write a browser test and run it; one that never ran is a guess.",
+    "A test from an earlier phase that contradicts what this phase requires is out of date: update it.",
   ];
   if (context.containerized) {
     lines.push("This project runs its suite inside a container: run the language tooling and the tests");
@@ -210,11 +212,8 @@ export function implementPrompt(context: BuilderContext): string {
     "You may install dependencies and download scaffolding with the project's package manager.",
     "Prefer the ecosystem's standard tooling and pin versions the way this project already does.",
     "Never add a new stack, framework or tool that the documentation does not call for.",
-    "Some sessions refuse a command that sets a variable in front of it (`FOO=bar npm test`), uses",
-    "`export`, or loops in the shell, and a refused command stays refused: do not retry it as written.",
-    "Write those lines to a script under `.capivara/tmp/` and run it with `bash .capivara/tmp/<name>.sh`;",
-    "that directory never enters a commit. Keep other scratch files under `$TMPDIR`, never at a fixed",
-    "path under `/tmp`.",
+    "Scripts you need only for this session go under `.capivara/tmp/`, which never enters a commit.",
+    "Keep other scratch files under `$TMPDIR`, never at a fixed path under `/tmp`.",
     flowStartBlock(context),
     ...(context.runnerDeFluxosAusente
       ? [

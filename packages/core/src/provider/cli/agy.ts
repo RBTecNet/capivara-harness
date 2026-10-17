@@ -61,14 +61,12 @@ export const agyAdapter = {
     }
 
     // Executor: edita sem perguntar, porque não há quem responda.
+    // Sem sandbox, em qualquer nível do executor (§112).
     args.push("--mode", "accept-edits", "--dangerously-skip-permissions");
-    // `system` é o executor com permissão de instalar, e aí nem o sandbox entra.
-    if (access === "workspace") args.push("--sandbox");
     return { args };
   },
-  // Sem a CLI nesta máquina, nada disto foi conferido (§106).
   workspace: () => ({
     estado: "nao-verificado",
-    motivo: "o `--sandbox` do agy no nível workspace não foi verificado: rede e confinamento dependem da CLI",
+    motivo: "o executor agy roda com --dangerously-skip-permissions e sem --sandbox: tem acesso amplo ao sistema, à rede e aos arquivos do usuário (§112)",
   }),
 } as const satisfies CliAdapter;

@@ -27,8 +27,10 @@ describe("sandbox por papel — a fronteira mais delicada", () => {
     }
   });
 
-  it("codex: só o executor recebe workspace-write", () => {
-    expect(buildInvocation("builder", config(), context).args.join(" ")).toContain("--sandbox workspace-write");
+  it("codex: o executor roda sem sandbox e sem aprovação (§112)", () => {
+    const args = buildInvocation("builder", config(), context).args;
+    expect(args).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(args).not.toContain("--sandbox");
   });
 
   /*
@@ -182,9 +184,9 @@ describe("antigravity", () => {
     expect(agy("builder")).toContain("--dangerously-skip-permissions");
   });
 
-  it("com instalação de sistema, nem o sandbox entra", () => {
+  it("o executor roda sem sandbox, com ou sem instalação de sistema (§112)", () => {
     expect(agy("builder", true)).not.toContain("--sandbox");
-    expect(agy("builder", false)).toContain("--sandbox");
+    expect(agy("builder", false)).not.toContain("--sandbox");
   });
 
   it("modelo e effort chegam à linha de comando", () => {
@@ -260,14 +262,12 @@ describe("cursor", () => {
     expect(args).toContain("--force");
   });
 
-  it("acesso de sistema desliga o sandbox, como nas outras CLIs", () => {
-    const comSistema = { ...context, systemInstall: true };
-    const args = buildInvocation("builder", config({ provider: "cursor", model: "" }), comSistema).args;
-    expect(args).toContain("--sandbox");
-    expect(args[args.indexOf("--sandbox") + 1]).toBe("disabled");
-
-    // Sem o acesso de sistema, o sandbox fica como o operador configurou.
-    expect(buildInvocation("builder", config({ provider: "cursor", model: "" }), context).args).not.toContain("--sandbox");
+  it("o executor roda com o sandbox desligado, com ou sem acesso de sistema (§112)", () => {
+    for (const nivel of [{ ...context, systemInstall: true }, context]) {
+      const args = buildInvocation("builder", config({ provider: "cursor", model: "" }), nivel).args;
+      expect(args).toContain("--sandbox");
+      expect(args[args.indexOf("--sandbox") + 1]).toBe("disabled");
+    }
   });
 
   it("papel de leitura não ganha --force: ele não executa nada", () => {
@@ -377,10 +377,12 @@ describe("o contrato do nível workspace em cada provider (§106)", () => {
     }
   });
 
-  it("codex e opencode: insuficientes — rede e confinamento não cabem juntos, ou não há sandbox", () => {
-    expect(contratoDoWorkspace("codex", "linux")?.estado).toBe("insuficiente");
-    expect(contratoDoWorkspace("codex", "linux")?.motivo).toContain("systemd");
-    expect(contratoDoWorkspace("opencode", "linux")?.estado).toBe("insuficiente");
+  // §112: nenhum executor é recusado por falta de confinamento — todos rodam sem sandbox, e isso é dito.
+  it("codex, opencode, cursor e agy: sem sandbox, dizem que o executor tem acesso amplo", () => {
+    for (const id of ["codex", "opencode", "cursor", "agy"]) {
+      expect(contratoDoWorkspace(id, "linux")?.estado, id).toBe("nao-verificado");
+      expect(contratoDoWorkspace(id, "linux")?.motivo, id).toContain("acesso amplo ao sistema, à rede e aos arquivos do usuário");
+    }
   });
 
   it("o que não pôde ser verificado não é anunciado como garantido", () => {

@@ -23,26 +23,24 @@ export const codexAdapter = {
       "--skip-git-repo-check",
       "--color", "never",
       "--json",
-      "--sandbox", access === "read-only" ? "read-only" : access === "system" ? "danger-full-access" : "workspace-write",
+      /*
+       * O executor roda sem sandbox e sem aprovação (§112). Com
+       * `danger-full-access` a CLI ainda recusava comandos pela regra de
+       * aprovação: no `teste_luna` um `rm -f` de limpeza voltou "rejected: rm -f
+       * style command". O somente-leitura dos papéis que julgam não muda.
+       */
+      ...(access === "read-only" ? ["--sandbox", "read-only"] : ["--dangerously-bypass-approvals-and-sandbox"]),
     ];
     if (model) args.push("--model", model);
     if (effort) args.push("-c", `model_reasoning_effort="${effort}"`);
     args.push("-");
     return { args };
   },
-  /*
-   * Comprovado com codex-cli 0.162.1 (§106): no `workspace-write` o sandbox só
-   * bloqueia Unix sockets enquanto a rede está desligada. Com
-   * `sandbox_workspace_write.network_access`, um comando alcança o gerenciador
-   * do systemd do usuário, e `systemd-run --user` executa fora do sandbox. Sem
-   * rede, o executor não instala dependência nenhuma (EAI_AGAIN no piloto-6).
-   * As duas metades do contrato não cabem juntas — o build recusa, em vez de
-   * escolher uma delas em silêncio.
-   */
+  // Sem sandbox, o nível workspace não confina nada (§112): a limitação é dita, e o build segue.
   workspace: () => ({
-    estado: "insuficiente",
+    estado: "nao-verificado",
     motivo:
-      "o sandbox workspace-write do codex só bloqueia Unix sockets com a rede desligada: com rede, um comando " +
-      "executa fora do sandbox pelo systemd do usuário; sem rede, o executor não instala dependências",
+      "o executor codex roda com --dangerously-bypass-approvals-and-sandbox: tem acesso amplo ao sistema, à rede e " +
+      "aos arquivos do usuário, sem sandbox (§112)",
   }),
 } as const satisfies CliAdapter;

@@ -4,6 +4,12 @@
 > sandbox descrito aqui. Ele roda com `--dangerously-skip-permissions` e tem
 > acesso amplo ao sistema, à rede e aos arquivos do usuário. O que segue vale
 > como registro histórico do §106 e para os contratos dos outros providers.
+>
+> **Substituído para todos os executores pelo §112.** Codex
+> (`--dangerously-bypass-approvals-and-sandbox`), cursor (`--sandbox disabled`),
+> agy (sem `--sandbox`) e opencode rodam sem sandbox e sem aprovação, em qualquer
+> nível. Nenhum é mais recusado no workspace: o preflight diz que o executor tem
+> acesso amplo. Os papéis somente-leitura não mudaram.
 
 Esta correção resolve os problemas de `docs/DIAGNOSTICO-PERMISSOES-CLAUDE-WORKSPACE.md`
 (run `build-96756ca336b0`, `teste_haiku_v2`). O Haiku não podia rodar nem

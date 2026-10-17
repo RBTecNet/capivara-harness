@@ -7346,3 +7346,51 @@ Testes:
 
 Contra o código anterior, 5 dos 7 testes falham. Os 2 casos negativos passam
 nos dois, como devem.
+
+## §112 — O executor roda sem sandbox e sem aprovação, e o prompt não proíbe o que ele precisa rodar
+
+O operador decidiu eliminar as travas que impediam o executor de agir. Este foi o
+segundo teste com uma falha desse tipo. No `teste_luna`
+(`docs/DIAGNOSTICO-TESTE-LUNA-2.md`):
+- o executor da P05 escreveu specs de navegador por três ciclos sem rodá-las,
+  porque "a instrução proíbe outro executor", e bloqueou no G3 por defeitos que
+  a primeira execução teria mostrado;
+- o codex recusou um `rm -f` de limpeza, mesmo com `danger-full-access`;
+- as fases gastaram o ciclo 1 sem atualizar um teste antigo que contradizia a
+  fase.
+
+**Providers.** Em qualquer nível, com ou sem `systemInstall`:
+- codex: `--dangerously-bypass-approvals-and-sandbox` no lugar de `--sandbox`;
+- cursor: `--sandbox disabled`;
+- agy: sem `--sandbox`;
+- opencode: já tinha tudo liberado;
+- claude: já estava assim desde o §108.
+
+O contrato do workspace de codex e opencode deixou de ser `insuficiente`: nenhum
+executor é recusado no preflight, e o resumo diz que ele tem acesso amplo ao
+sistema, à rede e aos arquivos do usuário. `systemInstall` continua decidindo só
+o aviso `CAPIVARA_SYSTEM_INSTALL`.
+
+**Prompt do executor.**
+- "Do not use another runner and do not run the tests outside it" saiu. O
+  comando do gate continua sendo o que precisa passar, e o executor é mandado
+  rodar também o que mais o projeto oferecer: testes de navegador e e2e, um
+  arquivo só, watch. "Write a browser test and run it."
+- Entrou: "A test from an earlier phase that contradicts what this phase
+  requires is out of date: update it."
+- Saiu o parágrafo do comando "que a sessão recusa pela forma" (§106). Ficou só
+  onde pôr o temporário.
+
+**O que fica, por ser do juiz e não do executor:**
+- os papéis somente-leitura (verificador, auditor, escritor);
+- `.capivara/init` e `.capivara/runs` fora do alcance;
+- "nunca apagar ou pular teste para passar";
+- os critérios G0–G4;
+- a definição dos papéis de planejamento e da sessão de instalação.
+
+Testes: `adapters.spec`, `prerequisites.spec`, `execucao.spec` e
+`prompts.spec` foram reescritos para o comportamento novo; os anteriores fixavam
+as travas.
+
+**Não validado** com uma chamada real ao codex: a flag é a que o
+`codex exec --help` da 0.162.1 documenta.

@@ -97,18 +97,16 @@ describe("a execução que o CLI entrega ao build", () => {
 describe("o contrato do nível workspace no preflight", () => {
   const CLAUDE = resolveRoles({ global: { provider: "claude", model: "haiku" }, roles: {} });
 
-  it("serial: executor codex sem acesso de sistema é recusado, com o motivo e a saída", async () => {
+  // §112: sem sandbox, o executor codex não é recusado no workspace — o acesso amplo é dito.
+  it("serial: executor codex sem acesso de sistema segue, com o acesso amplo dito", async () => {
     const preparada = await prepararExecucao({ projectRoot: raiz, flags: {}, roles: ROLES, systemInstall: false, instalado, workspace });
-    expect(preparada.ok).toBe(false);
-    if (preparada.ok) return;
-    const texto = preparada.erros.join("\n");
-    expect(texto).toContain("codex não cumpre o nível workspace");
-    expect(texto).toContain("systemd");
-    expect(texto).toContain("systemInstall: true");
+    expect(preparada.ok).toBe(true);
+    if (!preparada.ok) return;
+    expect(preparada.resumo.join("\n")).toContain("--dangerously-bypass-approvals-and-sandbox");
   });
 
-  it("paralelo: o agente opencode em workspace é recusado; o de acesso de sistema passa", async () => {
-    const recusada = await prepararExecucao({
+  it("paralelo: o agente opencode em workspace segue, com o acesso amplo dito; o de acesso de sistema também passa", async () => {
+    const workspaceSemSandbox = await prepararExecucao({
       projectRoot: raiz,
       flags: { parallel: "2", worker: ["provider=opencode,system-install=no"] },
       roles: ROLES,
@@ -116,8 +114,8 @@ describe("o contrato do nível workspace no preflight", () => {
       instalado,
       workspace,
     });
-    expect(recusada.ok).toBe(false);
-    if (!recusada.ok) expect(recusada.erros.join("\n")).toContain("agente 1: opencode não cumpre o nível workspace");
+    expect(workspaceSemSandbox.ok).toBe(true);
+    if (workspaceSemSandbox.ok) expect(workspaceSemSandbox.resumo.join("\n")).toContain("agente 1: o opencode não tem sandbox");
 
     const aceita = await prepararExecucao({
       projectRoot: raiz,

@@ -87,3 +87,17 @@ export async function resolveTestCommand(
 
   return null;
 }
+
+/**
+ * Os testes de navegador do projeto, quando o manifesto os declara (§113).
+ *
+ * Não é o comando do gate 2, que continua sendo o de `resolveTestCommand`: é o
+ * que o executor precisa saber que existe para rodar o que escreve. No
+ * `teste_luna`, `npm test` era só o Vitest e as specs Playwright rodavam por
+ * `test:e2e`; o executor da P05 as escreveu três ciclos sem nunca rodá-las.
+ */
+export async function resolveE2eCommand(projectRoot: string): Promise<string | null> {
+  const scripts = (await json(join(projectRoot, "package.json")))?.scripts as Record<string, unknown> | undefined;
+  for (const nome of ["test:e2e", "e2e"]) if (typeof scripts?.[nome] === "string") return `npm run ${nome}`;
+  return null;
+}

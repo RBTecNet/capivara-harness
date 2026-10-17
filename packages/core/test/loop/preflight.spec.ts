@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { materializeSessions, phaseId, preflight, resolveTestCommand, splitPhases } from "../../src/loop/index.js";
+import { resolveE2eCommand } from "../../src/loop/testcmd.js";
 import { VALID_PHASES } from "../contract/fixture.js";
 
 let projectRoot = "";
@@ -96,6 +97,24 @@ describe("comando de teste", () => {
 
   it("projeto sem suíte devolve null em vez de inventar comando", async () => {
     expect(await resolveTestCommand(projectRoot, { environment: {} })).toBeNull();
+  });
+});
+
+// §113: o e2e do projeto é dito ao executor; o comando do gate 2 continua o mesmo.
+describe("comando de e2e do projeto", () => {
+  it("test:e2e vira npm run test:e2e, e o gate 2 continua com npm test", async () => {
+    await writeFile(join(projectRoot, "package.json"), JSON.stringify({ scripts: { test: "vitest run", "test:e2e": "playwright test", "test:e2e:install": "x" } }), "utf8");
+    expect(await resolveE2eCommand(projectRoot)).toBe("npm run test:e2e");
+    expect((await resolveTestCommand(projectRoot, { environment: {} }))?.command).toBe("npm test");
+  });
+
+  it("e2e também conta; sem script de e2e, nada", async () => {
+    await writeFile(join(projectRoot, "package.json"), JSON.stringify({ scripts: { test: "vitest run", e2e: "playwright test" } }), "utf8");
+    expect(await resolveE2eCommand(projectRoot)).toBe("npm run e2e");
+    await writeFile(join(projectRoot, "package.json"), JSON.stringify({ scripts: { test: "vitest run" } }), "utf8");
+    expect(await resolveE2eCommand(projectRoot)).toBeNull();
+    await rm(join(projectRoot, "package.json"));
+    expect(await resolveE2eCommand(projectRoot)).toBeNull();
   });
 });
 

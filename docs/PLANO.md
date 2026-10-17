@@ -7394,3 +7394,45 @@ as travas.
 
 **Não validado** com uma chamada real ao codex: a flag é a que o
 `codex exec --help` da 0.162.1 documenta.
+
+## §113 — O e2e do projeto é nomeado, o parcial volta no que não conflita, e o G2 reconhece a rota que passou a existir
+
+Três consequências de `docs/DIAGNOSTICO-TESTE-LUNA-2.md`.
+
+**1. O comando de e2e no prompt.** `resolveE2eCommand` lê `scripts.test:e2e`, ou
+`scripts.e2e`, do `package.json` do worktree e devolve `npm run <script>`.
+- O bloco do comando de teste passa a nomeá-lo: "The project's browser and
+  end-to-end tests run with: `npm run test:e2e`". Ele manda rodá-los ao escrever
+  ou mudar um teste desses, e de novo antes de terminar.
+- O G2 continua com `resolveTestCommand` (`npm test`), com os mesmos critérios.
+
+**2. Recuperação parcial do parcial.** Quando o `merge --squash` do §111
+conflita, os arquivos em conflito ficam com a versão do HEAD, inteiros
+(`checkout HEAD --`, ou removidos se o HEAD não os tem), e o resto do parcial
+volta como alteração não commitada.
+- Nada é resolvido por conteúdo.
+- O anúncio diz quais arquivos ficaram com a versão integrada.
+- Se nada sobra fora do conflito, ou o git recusa por outro motivo, a árvore
+  volta ao HEAD, como antes.
+- Com os parciais reais do `teste_luna` sobre `74ad68a`, voltariam 7 dos 8
+  arquivos da P04 e 5 dos 6 da P05. O que fica de fora é
+  `testes/compartilhado/api-fundacao.test.ts`.
+
+**3. O diagnóstico do G2.** `raizComum` reconhece a falha "expected 2xx to be
+404" e "expected 2xx to be greater than or equal to 400", em qualquer número.
+- Em vez de "costuma ser configuração do ambiente de teste", diz que é um teste
+  que fixava a ausência de uma rota, contradito pela rota que a fase implementa.
+- Nomeia os arquivos (`FAIL <arquivo>`) e manda atualizar a expectativa sem
+  apagar o teste.
+- O caso contrário, 404 onde se esperava 200, continua na regra de antes.
+
+Os critérios G0–G4 não mudaram.
+
+Testes:
+- `preflight.spec`: o e2e é resolvido, e o comando do G2 continua `npm test`;
+- `prompts.spec`: o e2e é nomeado no implement e no fix, e não aparece sem o
+  script;
+- `prerequisites.spec`: usa a saída real do G2 da P04; uma falha só já basta; o
+  404 inverso não entra;
+- `paralelo.spec`, com Git real: o parcial volta nos arquivos que não conflitam,
+  e o que conflita fica com a versão integrada, sem marcador.

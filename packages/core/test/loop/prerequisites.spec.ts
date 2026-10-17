@@ -350,6 +350,48 @@ describe("o gate 2 explica a causa, não só o sintoma", () => {
     const { raizComum } = await import("../../src/loop/gates.js");
     expect(raizComum("→ mesma coisa\n→ mesma coisa")).toBe("");
   });
+
+  /*
+   * §113 — a saída real do G2 da P04 no `teste_luna`: o teste da P02 fixava 404
+   * nas rotas dos módulos ainda ausentes, e o gate mandava procurar o ambiente.
+   */
+  const ROTA_QUE_AGORA_EXISTE = [
+    "   × fundação HTTP > roteadores_de_modulos_pendentes_nao_simulam_operacoes 49ms",
+    "     → GET /api/tarefas: expected 200 to be greater than or equal to 400",
+    "   × fundação HTTP > aplicacao_pode_ser_criada_com_banco_injetado e aplicacao_registra_os_tres_modulos 87ms",
+    "     → expected 200 to be 404 // Object.is equality",
+    "   × fundação HTTP > reinicio_utilitario_reabre_mesmo_arquivo 16ms",
+    "     → expected 200 to be 404 // Object.is equality",
+    " FAIL  testes/compartilhado/api-fundacao.test.ts > fundação HTTP > roteadores_de_modulos_pendentes_nao_simulam_operacoes",
+    "AssertionError: GET /api/tarefas: expected 200 to be greater than or equal to 400",
+    " FAIL  testes/compartilhado/api-fundacao.test.ts > fundação HTTP > aplicacao_pode_ser_criada_com_banco_injetado e aplicacao_registra_os_tres_modulos",
+    "AssertionError: expected 200 to be 404 // Object.is equality",
+    " FAIL  testes/compartilhado/api-fundacao.test.ts > fundação HTTP > reinicio_utilitario_reabre_mesmo_arquivo",
+    "AssertionError: expected 200 to be 404 // Object.is equality",
+  ].join("\n");
+
+  it("teste que espera 404 de uma rota que agora responde 200 não é ambiente: é teste desatualizado", async () => {
+    const { raizComum } = await import("../../src/loop/gates.js");
+    const aviso = raizComum(ROTA_QUE_AGORA_EXISTE);
+    expect(aviso).not.toContain("configuração do ambiente de teste");
+    expect(aviso).not.toContain("setup do runner");
+    expect(aviso).toContain("Isto não é configuração do ambiente");
+    expect(aviso).toContain("6 das 6 falhas são testes que esperam 404");
+    expect(aviso).toContain("(testes/compartilhado/api-fundacao.test.ts)");
+    expect(aviso).toContain("atualize a expectativa para o comportamento novo, sem apagá-lo");
+  });
+
+  it("vale com poucas falhas: a P05 tinha só duas", async () => {
+    const { raizComum } = await import("../../src/loop/gates.js");
+    const duas = [" FAIL  testes/compartilhado/api-fundacao.test.ts > categorias", "     → expected 201 to be 404 // Object.is equality"].join("\n");
+    expect(raizComum(duas)).toContain("1 das 1 falhas são testes que esperam 404");
+  });
+
+  it("a rota que devia existir e responde 404 continua sendo outra coisa", async () => {
+    const { raizComum } = await import("../../src/loop/gates.js");
+    const ausente = ["→ expected 404 to be 200", "→ expected 404 to be 200", "→ expected 404 to be 200"].join("\n");
+    expect(raizComum(ausente)).not.toContain("esperam 404");
+  });
 });
 
 describe("o gate 2 pede o que o executor pode fazer", () => {

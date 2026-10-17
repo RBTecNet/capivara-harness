@@ -182,6 +182,33 @@ export async function gate2(
 }
 
 /**
+ * Teste que espera 404 (ou um erro) de uma rota que agora responde 2xx (§113).
+ *
+ * No `teste_luna` a P02 fixou que as rotas dos módulos ainda não implementados
+ * respondiam 404. Cada fase que implementou um módulo quebrou esse teste, e o
+ * gate disse "a MESMA mensagem… costuma ser configuração do ambiente de teste" —
+ * o executor gastou o ciclo 1 de seis tentativas sem tocar no teste. Não é
+ * ambiente: é um teste de fase anterior que contradiz a rota que esta fase cria.
+ * Vale com qualquer número de falhas — a P05 tinha só duas, e não recebia dica.
+ */
+function rotaQueAgoraExiste(output: string, mensagens: readonly string[]): string {
+  const deRota = mensagens.filter((mensagem) =>
+    /expected 2\d\d to (?:be|equal|strictly equal) 404\b|expected 2\d\d to be (?:greater than or equal to|at least) 400\b/i.test(mensagem),
+  );
+  if (deRota.length === 0) return "";
+  const arquivos = [
+    ...new Set([...output.matchAll(/^\s*FAIL\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx?)\b/gm)].map((match) => match[1] ?? "").filter(Boolean)),
+  ];
+  return (
+    ` ATENÇÃO: ${deRota.length} das ${mensagens.length} falhas são testes que esperam 404 (ou erro) de uma rota que agora ` +
+    `responde com sucesso — "${deRota[0]}". Isto não é configuração do ambiente. É um teste que fixava a ausência ` +
+    `de uma rota${arquivos.length > 0 ? ` (${arquivos.join(", ")})` : ""}, contradito pela rota que esta fase implementa. ` +
+    "Se a fase exige a rota, o teste está desatualizado: atualize a expectativa para o comportamento novo, sem apagá-lo " +
+    "e mantendo o que ele ainda verifica das rotas que continuam ausentes."
+  );
+}
+
+/**
  * Quando muitas falhas têm a MESMA mensagem, dizê-lo antes da saída bruta.
  *
  * Quinze testes vermelhos parecem quinze problemas. No piloto 6 eram um só —
@@ -197,6 +224,8 @@ export function raizComum(output: string): string {
   const mensagens = [...output.matchAll(/^\s*(?:→|Error:|AssertionError:)\s*(\S.*)$/gm)]
     .map((match) => (match[1] ?? "").trim())
     .filter((mensagem) => mensagem !== "");
+  const rota = rotaQueAgoraExiste(output, mensagens);
+  if (rota !== "") return rota;
   if (mensagens.length < 3) return "";
 
   const contagem = new Map<string, number>();

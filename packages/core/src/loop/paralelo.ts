@@ -445,7 +445,10 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
         const retomado = aberto.retomado;
         if (retomado) {
           announce(
-            retomado.aplicado
+            retomado.aplicado && retomado.foraDoParcial.length > 0
+              ? `[${session.id}] o parcial da tentativa anterior (${retomado.commit.slice(0, 12)}) foi reaplicado em parte sobre a árvore integrada: ` +
+                  `${retomado.foraDoParcial.join(", ")} conflitava e ficou com a versão da árvore integrada; o original continua no branch ${retomado.branch}`
+              : retomado.aplicado
               ? `[${session.id}] o parcial da tentativa anterior (${retomado.commit.slice(0, 12)}) foi reaplicado sobre a árvore integrada; o original continua no branch ${retomado.branch}`
               : `[${session.id}] o parcial da tentativa anterior (${retomado.commit.slice(0, 12)}) não foi reaplicado — ${retomado.motivo}; a fase começa do HEAD, e o parcial continua no branch ${retomado.branch}`,
           );

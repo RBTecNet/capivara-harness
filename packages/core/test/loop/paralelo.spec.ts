@@ -991,7 +991,7 @@ describe("retomada com o parcial de uma tentativa anterior", () => {
     expect(await readFile(join(projectRoot, "relatorio.txt"), "utf8")).toBe("relatório\n");
   });
 
-  it("o parcial que conflita com a árvore integrada não entra; a fase começa do HEAD e o parcial fica no branch", async () => {
+  it("o parcial que só tem o arquivo em conflito não entra; a fase começa do HEAD e o parcial fica no branch", async () => {
     const primeira = await construir({
       escreve: { ...ESCRITAS, P02: [{ path: "relatorio.txt", content: "versão da P02\n" }] },
       demora: { P02: 20, P03: 120 },
@@ -1014,6 +1014,48 @@ describe("retomada com o parcial de uma tentativa anterior", () => {
     expect(await git(["show", `${preservado}:relatorio.txt`])).toBe("versão da P02");
     expect(await readFile(join(projectRoot, "relatorio.txt"), "utf8")).toBe("relatório\n");
     expect(await readFile(join(projectRoot, "cadastro.txt"), "utf8")).toBe("cadastro\n");
+  });
+
+  /*
+   * §113 — no `teste_luna` um único arquivo compartilhado conflitava e a
+   * reaplicação, tudo ou nada, jogava fora os outros cinco da P05.
+   */
+  it("o parcial que conflita num arquivo volta no resto; o arquivo em conflito fica com a versão integrada", async () => {
+    const primeira = await construir({
+      escreve: {
+        ...ESCRITAS,
+        P02: [
+          { path: "relatorio.txt", content: "versão da P02\n" },
+          { path: "cadastro.txt", content: "parcial da P02\n" },
+          { path: "cadastro/formulario.txt", content: "formulário da P02\n" },
+        ],
+      },
+      demora: { P02: 20, P03: 120 },
+      reprova: ["P02"],
+    });
+    expect(primeira.outcome.exitCode).toBe(2);
+    const parcial = await git(["rev-parse", `capivara/${RUN()}/P02`]);
+
+    const engine = motor({ escreve: { ...ESCRITAS, P02: [{ path: "extra.txt", content: "da retomada\n" }] } });
+    const espiaoCadastro = espiar(engine, "P02", "cadastro.txt");
+    const espiaoRelatorio = espiar({ ...engine, call: espiaoCadastro.call }, "P02", "relatorio.txt");
+    const retomada = await construir({ escreve: {} }, { call: espiaoRelatorio.call });
+
+    expect(retomada.outcome.exitCode, retomada.anuncios.join("\n")).toBe(0);
+    // O executor encontrou o parcial que não conflitava, e a versão integrada do que conflitava, sem marcador.
+    expect(espiaoCadastro.visto()).toBe("parcial da P02\n");
+    expect(espiaoRelatorio.visto()).toBe("relatório\n");
+    const preservado = `capivara/${RUN()}/P02-parcial-${parcial.slice(0, 7)}`;
+    expect(retomada.anuncios).toContain(
+      `[P02] o parcial da tentativa anterior (${parcial.slice(0, 12)}) foi reaplicado em parte sobre a árvore integrada: ` +
+        `relatorio.txt conflitava e ficou com a versão da árvore integrada; o original continua no branch ${preservado}`,
+    );
+    expect(await readFile(join(projectRoot, "cadastro.txt"), "utf8")).toBe("parcial da P02\n");
+    expect(await readFile(join(projectRoot, "cadastro", "formulario.txt"), "utf8")).toBe("formulário da P02\n");
+    expect(await readFile(join(projectRoot, "extra.txt"), "utf8")).toBe("da retomada\n");
+    expect(await readFile(join(projectRoot, "relatorio.txt"), "utf8")).toBe("relatório\n");
+    expect(await git(["show", `${preservado}:relatorio.txt`])).toBe("versão da P02");
+    expect((await git(["log", "--format=%s"])).split("\n").filter((linha) => linha.includes("phase-2"))).toHaveLength(1);
   });
 
   it("sem parcial anterior, nada é preservado nem anunciado", async () => {

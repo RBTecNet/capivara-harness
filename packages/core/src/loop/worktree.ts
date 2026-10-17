@@ -116,8 +116,13 @@ export interface ParcialRetomado {
   /** O branch que o guarda, com o sha no nome — o da fase é recriado. */
   branch: string;
   commit: string;
-  /** Foi reaplicado sobre o HEAD integrado, como alteração ainda não commitada. */
+  /** Foi reaplicado sobre o HEAD integrado, como alteração ainda não commitada — no todo ou em parte. */
   aplicado: boolean;
+  /**
+   * Os arquivos do parcial que conflitaram e ficaram com a versão da árvore
+   * integrada (§113). Vazio quando o parcial voltou inteiro.
+   */
+  foraDoParcial: string[];
   motivo?: string;
 }
 
@@ -139,26 +144,56 @@ async function guardarSobra(projectRoot: string, branch: string): Promise<{ bran
 /**
  * O parcial reaplicado no worktree novo, como alteração não commitada: o commit
  * da fase continua sendo um só, sobre o HEAD integrado, e a integração não muda.
- * Se não se aplica — o HEAD andou por cima dos mesmos arquivos —, a árvore volta
- * ao HEAD e a fase começa limpa; o parcial continua no branch.
+ *
+ * Arquivo que conflita fica com a versão do HEAD, e o resto do parcial volta
+ * (§113). No `teste_luna` a reaplicação era tudo ou nada, e um único arquivo
+ * compartilhado (`testes/compartilhado/api-fundacao.test.ts`) jogou fora os
+ * outros sete da P04 e cinco da P05. Nada é resolvido por conteúdo: o arquivo
+ * em conflito é o do HEAD, inteiro, e a lista sai no anúncio. Se o git recusa
+ * por outro motivo, ou se nada do parcial sobra, a árvore volta ao HEAD.
  */
-async function reaplicarParcial(dir: string, commit: string): Promise<string | null> {
+async function reaplicarParcial(dir: string, commit: string): Promise<{ foraDoParcial: string[] } | { motivo: string }> {
   // O `merge --squash` deixa a mensagem dele, e um `git commit` sem `-m` a usaria.
   const semMensagem = async (): Promise<void> => {
     await rm(resolve(dir, await git(dir, ["rev-parse", "--git-path", "SQUASH_MSG"])), { force: true }).catch(() => undefined);
+  };
+  const voltarAoHead = async (): Promise<void> => {
+    await git(dir, ["reset", "-q", "--hard", "HEAD"]).catch(() => undefined);
+    await git(dir, ["clean", "-q", "-fd"]).catch(() => undefined);
+    await semMensagem();
   };
   try {
     await git(dir, ["merge", "--squash", commit]);
     await git(dir, ["reset", "-q"]);
     await semMensagem();
-    return null;
+    return { foraDoParcial: [] };
   } catch (erro) {
     const conflitos = (await git(dir, ["diff", "--name-only", "--diff-filter=U"]).catch(() => "")).split("\n").filter(Boolean);
-    await git(dir, ["reset", "-q", "--hard", "HEAD"]).catch(() => undefined);
-    await semMensagem();
-    if (conflitos.length > 0) return `conflita com a árvore integrada em ${conflitos.join(", ")}`;
-    const saida = erro instanceof Error && "stderr" in erro ? String((erro as { stderr: unknown }).stderr) : String(erro);
-    return saida.split("\n").map((linha) => linha.trim()).find((linha) => linha !== "") ?? "o git recusou";
+    if (conflitos.length === 0) {
+      await voltarAoHead();
+      const saida = erro instanceof Error && "stderr" in erro ? String((erro as { stderr: unknown }).stderr) : String(erro);
+      return { motivo: saida.split("\n").map((linha) => linha.trim()).find((linha) => linha !== "") ?? "o git recusou" };
+    }
+    try {
+      for (const caminho of conflitos) {
+        const noHead = await git(dir, ["cat-file", "-e", `HEAD:${caminho}`]).then(() => true, () => false);
+        if (noHead) {
+          await git(dir, ["checkout", "HEAD", "--", caminho]);
+        } else {
+          await git(dir, ["rm", "-q", "-f", "--cached", "--", caminho]);
+          await rm(join(dir, caminho), { force: true });
+        }
+      }
+      await git(dir, ["reset", "-q"]);
+      await semMensagem();
+    } catch (falha) {
+      await voltarAoHead();
+      return { motivo: `conflita com a árvore integrada em ${conflitos.join(", ")}, e a parte que não conflita não pôde ser separada: ${falha instanceof Error ? (falha.message.split("\n")[0] ?? "") : String(falha)}` };
+    }
+    if ((await git(dir, ["status", "--porcelain"])) === "") {
+      return { motivo: `conflita com a árvore integrada em ${conflitos.join(", ")}, e não sobra nada do parcial fora deles` };
+    }
+    return { foraDoParcial: conflitos };
   }
 }
 
@@ -183,8 +218,11 @@ export async function abrirWorktree(
   await git(projectRoot, ["worktree", "add", "-q", "-b", branch, dir, base]);
   let retomado: ParcialRetomado | null = null;
   if (sobra) {
-    const motivo = await reaplicarParcial(dir, sobra.commit);
-    retomado = motivo === null ? { ...sobra, aplicado: true } : { ...sobra, aplicado: false, motivo };
+    const reaplicado = await reaplicarParcial(dir, sobra.commit);
+    retomado =
+      "motivo" in reaplicado
+        ? { ...sobra, aplicado: false, foraDoParcial: [], motivo: reaplicado.motivo }
+        : { ...sobra, aplicado: true, foraDoParcial: reaplicado.foraDoParcial };
   }
 
   const copiado: string[] = [];

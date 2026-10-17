@@ -30,7 +30,7 @@ import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mc
 import { featureTestNames, sha12 } from "../contract/index.js";
 import type { SkeletonWorkflow } from "../contract/index.js";
 import type { PhaseSession } from "./split.js";
-import type { TestCommand } from "./testcmd.js";
+import { resolveE2eCommand, type TestCommand } from "./testcmd.js";
 
 export interface EngineResult {
   exitCode: number;
@@ -345,6 +345,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       language: options.language,
       testCommand: options.testCommand?.command ?? null,
       containerized: options.testCommand?.containerized ?? false,
+      ...(await resolveE2eCommand(arvore).then((comando) => (comando ? { e2eCommand: comando } : {}))),
       phaseMarkdown: session.markdown,
       ...(precisaDoRunner ? { runnerDeFluxosAusente: true } : {}),
       ...(temFluxos ? { temFluxos: true } : {}),

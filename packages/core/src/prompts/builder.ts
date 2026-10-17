@@ -14,6 +14,8 @@ export interface BuilderContext {
   /** Comando exato que o gate 2 vai executar. Ausente quando não foi resolvido. */
   testCommand: string | null;
   containerized: boolean;
+  /** Os testes de navegador do projeto, quando o manifesto os declara (§113). Não é o do gate 2. */
+  e2eCommand?: string;
   phaseMarkdown: string;
   /**
    * As skills desta fase, já escolhidas por área e materializadas no disco.
@@ -195,6 +197,17 @@ export function testBlock(context: BuilderContext): string {
   if (context.containerized) {
     lines.push("This project runs its suite inside a container: run the language tooling and the tests");
     lines.push("through that command, never directly on the host.");
+  }
+  if (context.e2eCommand) {
+    lines.push(
+      "",
+      "The project's browser and end-to-end tests run with:",
+      "",
+      `    ${context.e2eCommand}`,
+      "",
+      "Run them whenever you write or change one, and again before you finish. The gate's command",
+      "above does not run them, so this is the only time they run before the verifier reads them.",
+    );
   }
   return lines.join("\n");
 }

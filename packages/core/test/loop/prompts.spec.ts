@@ -31,6 +31,16 @@ describe("prompt de implementação", () => {
    * ciclos sem rodá-las — "a instrução proíbe outro executor" — e o G3 recusou
    * o que a primeira execução teria mostrado. A P04, que rodou, fechou.
    */
+  // §113: quando o manifesto declara `test:e2e`, o prompt o nomeia; o comando do gate não muda.
+  it("nomeia o comando de e2e do projeto, quando existe, sem trocar o do gate", () => {
+    const prompt = implementPrompt({ ...base, testCommand: "npm test", e2eCommand: "npm run test:e2e" });
+    expect(prompt).toContain("Always run the suite with:\n\n    npm test");
+    expect(prompt).toContain("The project's browser and end-to-end tests run with:\n\n    npm run test:e2e");
+    expect(prompt).toContain("Run them whenever you write or change one, and again before you finish.");
+    expect(fixPrompt({ ...base, testCommand: "npm test", e2eCommand: "npm run test:e2e", gate: "gate 3", cause: "x", previousWroteNothing: false })).toContain("npm run test:e2e");
+    expect(implementPrompt({ ...base, testCommand: "npm test" })).not.toContain("end-to-end tests run with");
+  });
+
   it("o comando do gate é obrigatório, mas não é o único: os testes de navegador também rodam", () => {
     const prompt = implementPrompt({ ...base, testCommand: "npm test" });
     expect(prompt).not.toContain("Do not use another runner");

@@ -47,8 +47,14 @@ export const agyAdapter = {
 | nível | quem usa | o que a CLI pode fazer |
 |---|---|---|
 | `read-only` | auditor, verificador | ler e rodar comando que não altera nada |
-| `workspace` | executor | escrever dentro do projeto |
-| `system` | executor, só com `--system-install` | instalar pacote de sistema |
+| `workspace` | executor e sessão explícita de reparo do verificador | escrever dentro do projeto |
+| `system` | executor ou reparador, quando a política de instalação permite | instalar pacote de sistema |
+
+A avaliação normal do verificador continua em `read-only`. Somente a chamada
+com `verifierRepair: true` recebe escrita; `CAPIVARA_ROLE` permanece `verifier`,
+`CAPIVARA_REPAIR` vale `1` e o modelo configurado para esse papel é preservado.
+Na avaliação seguinte, as permissões voltam a somente leitura. API direta não
+recebe essa elevação, pois não há ferramentas para executar o reparo.
 
 Um adaptador que ignora `read-only` entrega permissão de escrita a quem só
 deveria julgar. O teste de arquitetura exige que todo adaptador monte uma chamada

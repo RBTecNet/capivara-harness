@@ -669,11 +669,13 @@ describe("build paralelo — auditoria (§99)", () => {
       ...ESCRITAS.P01!,
       { path: "package.json", content: '{ "name": "lab", "dependencies": { "better-sqlite3": "13.0.3" } }\n' },
       { path: "package-lock.json", content: LOCK_DO_EXECUTOR },
+      { path: ".gitignore", content: "node_modules/\n" },
     ],
   };
   const npmFalso = (comandos: { command: string; cwd: string }[], suite?: (cwd: string) => Promise<void>) =>
     async (command: string, cwd: string): Promise<{ exitCode: number; output: string }> => {
       comandos.push({ command, cwd });
+      if (/^npm (?:ci|install)\b/.test(command)) await mkdir(join(cwd, "node_modules"), { recursive: true });
       if (/^npm install\b/.test(command) && !command.includes("--no-package-lock")) {
         const lock = join(cwd, "package-lock.json");
         const atual = await readFile(lock, "utf8").catch(() => null);
@@ -742,7 +744,7 @@ describe("build paralelo — auditoria (§99)", () => {
     expect(await git(["status", "--porcelain", "--", ".", ":(exclude).capivara"])).toBe("");
     expect(await readFile(join(projectRoot, "package-lock.json"), "utf8")).toBe(LOCK_DO_EXECUTOR);
     const naPrincipal = comandos.filter((comando) => comando.cwd === projectRoot && comando.command.startsWith("npm ") && comando.command !== "npm test");
-    expect(naPrincipal.map((comando) => comando.command)).toEqual(["npm ci --no-audit --no-fund"]);
+    expect(naPrincipal.map((comando) => comando.command)).toEqual(["npm ci --no-audit --no-fund --engine-strict"]);
   });
 
   it("§102: o que o próprio harness altera na árvore integrada é dito na hora, com o nome dele, e nada é descartado", async () => {
@@ -934,8 +936,11 @@ describe("build paralelo — fundação do gate 4 e verde preservado (§110)", (
     // A refeita entrou no produto como antes, e a árvore principal está limpa.
     expect(await readFile(join(projectRoot, "compartilhado.txt"), "utf8")).toBe("do relatório\n");
     expect(await git(["status", "--porcelain", "--", ".", ":(exclude).capivara"])).toBe("");
-    // O branch da fase, recriado pela segunda rodada, foi fechado como sempre; o preservado não.
-    expect((await git(["branch", "--list", "capivara/*"])).trim()).toBe(branch);
+    // O branch da fase foi fechado; aprovado e parcial da reaplicação guardam o mesmo acerto.
+    const restantes = (await git(["branch", "--list", "--format=%(refname:short)", "capivara/*"])).split("\n");
+    expect(restantes).toContain(branch);
+    expect(restantes).toContain(`capivara/${runId}/P03-parcial-${commit.slice(0, 7)}`);
+    expect(restantes).not.toContain(`capivara/${runId}/P03`);
     expect(anuncios.some((linha) => linha.includes(`[P03] o commit aprovado antes (${commit}) continua no branch ${branch}`))).toBe(true);
   });
 });

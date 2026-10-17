@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { BUILDER_COMPLETE_MARKER, declarouRoteiroErrado, fixPrompt, implementPrompt, parseVerification, verifyPrompt } from "../../src/prompts/index.js";
+import { BUILDER_COMPLETE_MARKER, declarouRoteiroErrado, fixPrompt, implementPrompt, parseVerification, verifierRepairPrompt, verifyPrompt } from "../../src/prompts/index.js";
+import { gate3 } from "../../src/loop/gates.js";
 
 const base = { language: "português do Brasil", testCommand: "npm test", containerized: false, phaseMarkdown: "## Phase 1: X" };
 
@@ -68,6 +69,13 @@ describe("prompt de implementação", () => {
   it("pede o marcador de conclusão", () => {
     expect(implementPrompt(base)).toContain(BUILDER_COMPLETE_MARKER);
   });
+
+  it("cobra o comportamento real do critério desde a implementação", () => {
+    const prompt = implementPrompt(base);
+    expect(prompt).toContain("behaviour and failure mode the acceptance criterion actually names");
+    expect(prompt).toContain("assert the message");
+    expect(prompt).toContain("`route.fulfill()` exercises a different path");
+  });
 });
 
 describe("prompt de correção", () => {
@@ -95,6 +103,16 @@ describe("prompt de correção", () => {
     const prompt = fixPrompt({ ...base, gate: "g", cause: causa, previousWroteNothing: true });
     expect(prompt).toContain("previous session ended without changing any file");
   });
+
+  it("recebe a orientação completa sem perder a implementação e o cenário que devem ser preservados", () => {
+    const orientacao = "T7.C2: fetch rejeita; src/api.ts:18 devolve TypeError; envolver o await em try/catch e traduzir; testar route.abort e texto português";
+    const prompt = fixPrompt({ ...base, gate: "gate 3", cause: orientacao, previousWroteNothing: false });
+    expect(prompt).toContain(orientacao);
+    expect(prompt).toContain("Use them as your repair plan");
+    expect(prompt).toContain("do not recreate the phase from scratch");
+    expect(prompt).toContain("HTTP 503 from `route.fulfill()` does not exercise it");
+    expect(prompt).toContain("assert the displayed message/language");
+  });
 });
 
 describe("prompt e protocolo do verificador", () => {
@@ -116,6 +134,24 @@ describe("prompt e protocolo do verificador", () => {
 
   it("na dúvida, INCOMPLETE", () => {
     expect(verifyPrompt(context)).toContain("When in doubt, INCOMPLETE");
+  });
+
+  it("exige todas as pendências com evidência, alteração localizada e prova de regressão", () => {
+    const prompt = verifyPrompt(context);
+    expect(prompt).toContain("Inspect EVERY acceptance criterion");
+    expect(prompt).toContain("Report ALL");
+    expect(prompt).toContain("file, symbol or test");
+    expect(prompt).toContain("smallest concrete change");
+    expect(prompt).toContain("regression scenario/assertion and command");
+    expect(prompt).toContain("You report the repair; you still never perform it here");
+  });
+
+  it("distingue a falha real de transporte da resposta HTTP e exige o idioma do alerta", () => {
+    const prompt = verifyPrompt(context);
+    expect(prompt).toContain("route.abort()");
+    expect(prompt).toContain("does NOT prove transport handling");
+    expect(prompt).toContain("merely asserting that an alert exists is insufficient");
+    expect(prompt).toContain("requirements actually stated");
   });
 
   /*
@@ -156,6 +192,81 @@ describe("prompt e protocolo do verificador", () => {
 
   it("ignora linha que não é um veredito", () => {
     expect(parseVerification("TASK um: DONE\nTASK 1: TALVEZ")).toEqual([]);
+  });
+
+  it("preserva toda orientação na causa do gate sem quebrar TASK legado", () => {
+    const orientacao = "T2.C1: mensagem de rede em português; src/api.ts:18 expõe TypeError; capturar rejeição de fetch e usar mensagem localizada; executar npm run test:e2e -- --grep rede com route.abort e assert do texto; T2.C2: manter retry habilitado";
+    const output = `TASK 1: DONE\nTASK 2: INCOMPLETE — ${orientacao}\nTASK 3: INCOMPLETE - falta um teste legado`;
+    expect(parseVerification(output)[1]).toEqual({ index: 2, done: false, missing: orientacao });
+    const result = gate3(output, 3);
+    expect(result.green).toBe(false);
+    if (!result.green) {
+      expect(result.cause).toContain(orientacao);
+      expect(result.cause).toContain("falta um teste legado");
+    }
+  });
+});
+
+describe("reparo pelo validador separado da aprovação", () => {
+  const context = {
+    language: "pt-BR",
+    phaseMarkdown: "## Phase 7: Rede\n- [ ] Mensagem de rede em português",
+    cause: "TASK 1: INCOMPLETE — src/api.ts:18; capturar rejeição do fetch; npm run test:e2e -- --grep rede",
+    testCommand: "npm test -- --run",
+    e2eCommand: "npm run test:e2e",
+  };
+
+  it("leva o diagnóstico completo, escopo e comandos reais, sem conceder a própria aprovação", () => {
+    const prompt = verifierRepairPrompt(context);
+    expect(prompt).toContain(context.phaseMarkdown);
+    expect(prompt).toContain(context.cause);
+    expect(prompt).toContain(context.testCommand);
+    expect(prompt).toContain(context.e2eCommand);
+    expect(prompt).toContain("Fix ONLY the listed gaps");
+    expect(prompt).toContain("NEW independent read-only verification");
+    expect(prompt).toContain("Do not emit TASK verdicts or claim approval");
+    expect(prompt).not.toContain(BUILDER_COMPLETE_MARKER);
+  });
+
+  it("autoriza código, regressões e dependências locais, sem entregar Git ou especificação", () => {
+    const prompt = verifierRepairPrompt(context);
+    expect(prompt).toContain("Edit the project's code, tests");
+    expect(prompt).toContain("including dependencies the builder could not install");
+    expect(prompt).toContain("Do not commit, stage files, change Git branches/refs");
+    expect(prompt).toContain("Never edit the specification");
+    expect(prompt).toContain("Never delete, skip or disable tests");
+    expect(prompt).toContain("cannot replace a transport failure");
+  });
+
+  it("amarra instalação e testes ao runtime real do harness", () => {
+    const prompt = verifierRepairPrompt(context);
+    expect(prompt).toContain(process.execPath);
+    expect(prompt).toContain(process.version);
+    expect(prompt).toContain(`ABI ${process.versions.modules}`);
+    expect(prompt).toContain("Do not activate another Node/NVM version");
+  });
+
+  it.each([undefined, false])("sem autorização explícita (%s), não instala pré-requisito de sistema", (systemInstall) => {
+    const prompt = verifierRepairPrompt({ ...context, ...(systemInstall !== undefined ? { systemInstall } : {}) });
+    expect(prompt).toContain("System installation is NOT enabled");
+    expect(prompt).toContain("never install system packages, use sudo or change global");
+    expect(prompt).not.toContain("System installation is enabled for this run");
+  });
+
+  it("com política de sistema ligada, permite apenas pré-requisito demonstrado no achado", () => {
+    const prompt = verifierRepairPrompt({ ...context, systemInstall: true });
+    expect(prompt).toContain("System installation is enabled for this run");
+    expect(prompt).toContain("demonstrated missing system");
+    expect(prompt).not.toContain("System installation is NOT enabled");
+  });
+
+  it("sem comando de gate ou e2e, informa a ausência sem inventar comando", () => {
+    const { e2eCommand, ...withoutE2e } = context;
+    const prompt = verifierRepairPrompt({ ...withoutE2e, cause: "falta dependência", testCommand: null });
+    expect(prompt).toContain("No gate test command was resolved");
+    expect(prompt).not.toContain("    null");
+    expect(prompt).not.toContain("    undefined");
+    expect(prompt).not.toContain("also run:");
   });
 });
 

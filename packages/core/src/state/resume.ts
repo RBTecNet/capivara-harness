@@ -46,7 +46,8 @@ export function replayEvents(events: RunEvent[]): RunProgress {
   }
 
   const status: RunStatus =
-    lastEvent?.status === "blocked" ? "blocked" : lastEvent?.status === "paused" ? "paused" : "running";
+    lastEvent?.status === "blocked" ? "blocked" : lastEvent?.status === "paused" ? "paused"
+      : lastEvent?.stage === "complete" && lastEvent.status === "complete" ? "complete" : "running";
 
   return {
     events: events.length,
@@ -80,7 +81,7 @@ export async function restoreRun(projectRoot: string, runId: string): Promise<Re
   const last = progress.lastEvent;
   if (!last) return { state, progress, snapshotWasStale: false };
 
-  const stale = state.stage !== last.stage || state.subject !== last.subject || state.attempt !== last.attempt;
+  const stale = state.stage !== last.stage || state.subject !== last.subject || state.attempt !== last.attempt || state.status !== progress.status;
 
   return {
     state: {

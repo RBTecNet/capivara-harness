@@ -34,6 +34,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { ARQUIVO_DE_AMBIENTE, ambienteEhDescartavel } from "./ambiente.js";
+import { MARCA_DE_INSTALACAO_NODE } from "./instalacao-node.js";
 
 const run = promisify(execFile);
 const GRANDE = { maxBuffer: 64 * 1024 * 1024 };
@@ -178,7 +179,9 @@ export async function lerStatus(root: string, pathspec: readonly string[] = ["."
 export async function alteracoesParaCommit(root: string, pathspec?: readonly string[]): Promise<EntradaDoStatus[]> {
   const entradas = await lerStatus(root, pathspec);
   const doHarness = await ambienteEhDescartavel(root);
-  return entradas.filter((entrada) => !(doHarness && entrada.naoVersionado && entrada.caminho === ARQUIVO_DE_AMBIENTE));
+  return entradas.filter((entrada) => !(entrada.naoVersionado && (
+    (doHarness && entrada.caminho === ARQUIVO_DE_AMBIENTE) || entrada.caminho === `node_modules/${MARCA_DE_INSTALACAO_NODE}`
+  )));
 }
 
 /**

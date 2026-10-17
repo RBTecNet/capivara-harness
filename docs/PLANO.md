@@ -7436,3 +7436,68 @@ Testes:
   404 inverso não entra;
 - `paralelo.spec`, com Git real: o parcial volta nos arquivos que não conflitam,
   e o que conflita fica com a versão integrada, sem marcador.
+
+## 114. Validação orientada, reparo assistido e dependências compatíveis
+
+A P07 do `teste_luna` chegou a passar nos gates da worktree duas vezes, mas
+falhou na integração porque o SQLite nativo da pasta principal continuava
+compilado para o Node anterior. Refazer a fase não corrigia essa instalação e
+a segunda implementação perdeu uma correção de mensagens de rede. O diagnóstico
+também expôs testes que verificavam o alerta sem conferir seu conteúdo ou que
+substituíam uma falha de transporte por uma resposta HTTP simulada.
+
+O verificador agora deve enumerar todas as lacunas de cada critério e informar
+evidência, localização, como corrigir e qual teste ou comando confirma o reparo.
+O protocolo `TASK n: DONE|INCOMPLETE` permanece compatível; a orientação completa
+segue na causa entregue ao construtor. O prompt distingue falha real de rede
+de HTTP 503 e exige o comportamento e a mensagem previstos na especificação.
+
+O build via CLI habilita, por padrão, um reparo pelo verificador por fase.
+`--max-verifier-repairs` aceita de 0 a 10; a biblioteca recebe esse orçamento
+explicitamente e mantém zero como padrão. API direta continua fornecendo
+orientação, sem prometer ferramentas que não possui.
+
+Avaliação e reparo são sessões distintas. A avaliação permanece somente leitura;
+a sessão de reparo pode corrigir código, fortalecer testes e instalar
+dependências locais. Instalação de sistema depende da política do build.
+O reparador não altera especificação nem referências Git e não aprova o próprio
+trabalho: o Core repete G2, inventário, uma nova verificação G3 completa e G4.
+As aprovações anteriores são revogadas após o reparo para impedir que uma
+mudança regrida uma tarefa e seja aceita com base no veredito antigo.
+G2, G3 com diagnóstico válido e G4 com defeito do produto podem acionar o
+reparo. Defeito de roteiro ou critério não autoriza adaptar o produto.
+
+As dependências Node passam a ter identidade por executável, versão, ABI,
+plataforma, arquitetura e manifestos/lockfiles. Instalações antigas são
+inspecionadas em busca de incompatibilidade nativa; cópias sabidamente
+incompatíveis não são levadas às worktrees. A preparação é limitada e os
+comandos npm respeitam `engines` com `--engine-strict`. Instalações, scripts,
+gates e aceitação usam o diretório do Node que iniciou o harness à frente do
+`PATH`, evitando carimbar uma instalação produzida por outro runtime.
+
+A integração prepara as dependências da pasta principal mesmo sem alteração
+do manifesto quando a instalação é incompatível ou ausente. Uma falha de
+dependência permite reparo limitado e nova execução da suíte sobre a mesma
+integração. Se o ambiente não fechar, o commit e a worktree aprovados ficam
+preservados com um checkpoint; a retomada tenta integrar esse mesmo commit sem
+chamar novamente o construtor. `--rebuild-all` continua exigindo reconstrução.
+Falhas funcionais mantêm a reavaliação, reaproveitando os acertos preservados.
+
+Os logs completos de instalação e G2 da integração ficam no run. Cada chamada
+também registra papel, modelo, effort, worker, runtime e modo de reparo em
+`calls.jsonl`. O snapshot final acompanha pausa ou conclusão e conserva a data
+de criação na retomada. Antes de uma nova tentativa, o snapshot, os prompts e
+os logs anteriores são arquivados em `attempts/`, para não confundir ciclos
+de tentativas diferentes.
+
+Regressões cobrem reparo de código e dependências, revalidação após mutação,
+limites finitos, permissões por chamada, preservação de diagnóstico, runtime
+conflitante no PATH, integração sem reconstrução por erro ambiental,
+`--rebuild-all` e recuperação do estado final.
+
+Validação final: `npm run check` passou com build, checagem de tipos e 2.067
+testes em 110 arquivos, incluindo a CLI empacotada com adaptador de teste e
+integrações com Git real. Na pasta principal do `teste_luna`, as dependências
+também foram reinstaladas com Node 24.22.0 e `npm ci --engine-strict`; o módulo
+nativo do SQLite carregou nesse runtime e a instalação ficou compatível. Essa
+verificação não executou novamente a P07 nem alterou seus commits aprovados.

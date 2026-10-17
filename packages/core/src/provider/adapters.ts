@@ -15,10 +15,13 @@ import { decideReasoning, directProvider, isCliProvider, isDirectProvider } from
 import { cliAdapter } from "./cli/index.js";
 import type { TranscriptKind } from "./transcript.js";
 import type { SupervisorLimits } from "./supervisor.js";
+import { runtimeEnvironment } from "./runtime-env.js";
 
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:\/-]*$/;
 
 export interface InvocationContext {
+  /** Eleva somente a sessão explícita de reparo do verificador; avaliações continuam somente leitura. */
+  verifierRepair?: boolean;
   /** Liga o acesso de sistema do executor. Desligado, ele fica no workspace. */
   systemInstall?: boolean;
   projectRoot: string;
@@ -94,7 +97,7 @@ function safe(value: string, field: string): string {
 function baseEnvironment(role: RoleName, config: RoleConfig, context: InvocationContext): NodeJS.ProcessEnv {
   const definition = ROLES[role];
   return {
-    ...(context.environment ?? process.env),
+    ...runtimeEnvironment(context.environment ?? process.env),
     CAPIVARA_ROLE: role,
     CAPIVARA_PROJECT_ROOT: context.projectRoot,
     CAPIVARA_RUN_ID: context.runId,
@@ -103,23 +106,29 @@ function baseEnvironment(role: RoleName, config: RoleConfig, context: Invocation
     CAPIVARA_PROVIDER: config.provider,
     CAPIVARA_MODEL: config.model,
     CAPIVARA_EFFORT: config.effort,
-    CAPIVARA_PERMISSION: definition.permission,
+    CAPIVARA_PERMISSION: role === "verifier" && context.verifierRepair === true ? "workspace-write" : definition.permission,
+    CAPIVARA_REPAIR: role === "verifier" && context.verifierRepair === true ? "1" : "0",
     ...(context.telemetryFile ? { CAPIVARA_TELEMETRY_FILE: context.telemetryFile } : {}),
   };
 }
 
 export function buildInvocation(role: RoleName, config: RoleConfig, context: InvocationContext): Invocation {
+  if (context.verifierRepair === true && role !== "verifier") {
+    throw new Error("a permissão de reparo só se aplica ao papel verifier");
+  }
   const definition = ROLES[role];
+  const repairing = role === "verifier" && context.verifierRepair === true;
   const model = safe(config.model, "modelo");
   const effort = safe(config.effort, "effort");
   const env = baseEnvironment(role, config, context);
-  const readOnly = definition.permission === "read-only";
+  const readOnly = !repairing && definition.permission === "read-only";
   // Acesso de sistema é do executor, e só quando o operador liga.
-  const systemAccess = !readOnly && definition.systemInstall && context.systemInstall === true;
+  const systemAccess = !readOnly && (definition.systemInstall || repairing) && context.systemInstall === true;
+  delete env.CAPIVARA_SYSTEM_INSTALL;
   if (systemAccess) env.CAPIVARA_SYSTEM_INSTALL = "1";
 
   if (isDirectProvider(config.provider)) {
-    if (definition.requiresCli) {
+    if (definition.requiresCli || repairing) {
       throw new Error(
         `o papel ${role} (${definition.label}) precisa escrever arquivos e rodar comandos, o que exige uma CLI ` +
           `(codex, claude ou opencode) ou um adapter custom; ${config.provider} é uma API direta`,

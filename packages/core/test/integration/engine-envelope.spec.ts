@@ -68,6 +68,28 @@ async function chamar(corpo: string) {
 }
 
 describe("o envelope da CLI atravessa a ponte até o gate 0", () => {
+  it("a ponte dá escrita apenas à chamada explícita de reparo do verificador", async () => {
+    const script = join(raiz, "claude-reparo");
+    await writeFile(script, `#!/usr/bin/env node
+for await (const chunk of process.stdin) {}
+console.log(JSON.stringify({type:"result",is_error:false,result:JSON.stringify({permission:process.env.CAPIVARA_PERMISSION,repair:process.env.CAPIVARA_REPAIR,role:process.env.CAPIVARA_ROLE})}));
+`);
+    await chmod(script, 0o755);
+    const { roles } = papeis(script);
+    const previous = process.env.CAPIVARA_CLAUDE_BIN;
+    process.env.CAPIVARA_CLAUDE_BIN = script;
+    try {
+      const bridge = createAgentBridge({ projectRoot: raiz, runId: "build-reparo", language: "pt-BR", roles, limits: DEFAULT_LIMITS });
+      const repair = await bridge({ role: "verifier", stage: "repair", repair: true, prompt: "corrija o erro" });
+      expect(JSON.parse(repair.stdout)).toEqual({ permission: "workspace-write", repair: "1", role: "verifier" });
+      const assessment = await bridge({ role: "verifier", stage: "implement", prompt: "avalie o código" });
+      expect(JSON.parse(assessment.stdout)).toEqual({ permission: "read-only", repair: "0", role: "verifier" });
+    } finally {
+      if (previous === undefined) delete process.env.CAPIVARA_CLAUDE_BIN;
+      else process.env.CAPIVARA_CLAUDE_BIN = previous;
+    }
+  });
+
   it("volta bem-sucedida do claude passa no gate 0 e declara conclusão", async () => {
     const resposta = await chamar(
       JSON.stringify({ type: "result", is_error: false, result: RESPOSTA, usage: { input_tokens: 10, output_tokens: 5 } }),

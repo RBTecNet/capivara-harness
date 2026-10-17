@@ -19,6 +19,7 @@ import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { killTree } from "../provider/supervisor.js";
+import { runtimeEnvironment } from "../provider/runtime-env.js";
 
 export interface AcceptanceStep {
   id: string;
@@ -149,7 +150,7 @@ export const defaultRunner: CommandRunner = (command, cwd, seconds) =>
   new Promise((resolve) => {
     // Grupo próprio também aqui: um `npm run build` pode deixar watcher de pé, e
     // um passo que não termina segura o CLI do mesmo jeito que um serviço.
-    const child = spawn("bash", ["-c", command], { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("bash", ["-c", command], { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"], env: runtimeEnvironment() });
     let output = "";
     let settled = false;
 
@@ -198,7 +199,7 @@ export const serviceRunner: CommandRunner = (command, cwd, seconds) =>
      * `npm start` cria pelo menos dois níveis — bash, npm, node — então matar o
      * filho direto nunca bastou.
      */
-    const child = spawn("bash", ["-c", command], { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("bash", ["-c", command], { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"], env: runtimeEnvironment() });
     let output = "";
     let settled = false;
 

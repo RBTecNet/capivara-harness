@@ -14,6 +14,7 @@
 import { execFile } from "node:child_process";
 import { BUILDER_COMPLETE_MARKER, parseVerification } from "../prompts/index.js";
 import type { TaskVerdict } from "../prompts/index.js";
+import { runtimeEnvironment } from "../provider/runtime-env.js";
 
 export type GateName =
   | "gate 0 — engine"
@@ -110,7 +111,7 @@ export const defaultTestRunner: TestRunner = async (command, projectRoot) =>
     const child = execFile(
       "bash",
       ["-c", command],
-      { cwd: projectRoot, maxBuffer: 32 * 1024 * 1024 },
+      { cwd: projectRoot, maxBuffer: 32 * 1024 * 1024, env: runtimeEnvironment() },
       (error, stdout, stderr) => {
         const code = error && typeof (error as { code?: number }).code === "number" ? (error as { code: number }).code : error ? 1 : 0;
         resolve({ exitCode: code, output: `${stdout}${stderr}` });
@@ -248,6 +249,8 @@ export function raizComum(output: string): string {
  * e não um `extends`: herdar de união não se declara em TypeScript.
  */
 export type Gate3Result = GateResult & {
+  /** Vereditos completos e válidos com pendências de implementação: permitem reparo assistido. */
+  repairable?: boolean;
   /** As tasks que este veredito declarou DONE — o que o registro vai guardar. */
   done: number[];
   /**
@@ -290,6 +293,16 @@ export function gate3(output: string, expectedTasks: number, aprovadas: Readonly
     };
   }
 
+  const indices = new Set(verdicts.map((verdict) => verdict.index));
+  if (indices.size !== expectedTasks || verdicts.some((verdict) => verdict.index < 1 || verdict.index > expectedTasks)) {
+    return {
+      ...vazio,
+      green: false,
+      gate: "gate 3 — verificação independente",
+      cause: "O verificador emitiu índices de TASK repetidos ou fora da fase — protocolo inválido, não é diagnóstico de implementação.",
+    };
+  }
+
   /*
    * Reabrir uma task já aprovada VALE, como qualquer INCOMPLETE.
    *
@@ -305,6 +318,7 @@ export function gate3(output: string, expectedTasks: number, aprovadas: Readonly
 
   if (incomplete.length > 0) {
     return {
+      repairable: true,
       done,
       reabertas,
       green: false,

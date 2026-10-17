@@ -36,6 +36,8 @@ export interface AgentBridgeOptions {
 
 export interface BridgeRequest {
   role: RoleName;
+  /** Sessão de reparo explícita do verificador, separada da avaliação somente leitura. */
+  repair?: boolean;
   stage: string;
   prompt: string;
   /** Uma linha por acontecimento, enquanto a chamada acontece. */
@@ -122,6 +124,7 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
       runId: options.runId,
       stage: request.stage,
       language: options.language,
+      ...(request.repair === true ? { verifierRepair: true } : {}),
       ...(options.systemInstall !== undefined ? { systemInstall: options.systemInstall } : {}),
       ...(credential ? { secret: credential.secret } : {}),
     });

@@ -115,7 +115,7 @@ export function verifyPrompt(context: VerifierContext): string {
     "whatever the task requires — and emit EXACTLY ONE line:",
     "",
     "TASK <n>: DONE",
-    "TASK <n>: INCOMPLETE — <what is missing>",
+    "TASK <n>: INCOMPLETE — <all missing criteria; evidence; concrete correction; regression check>",
     "",
     "Rules:",
     "- <n> is the index of the task within the phase, starting at 1.",
@@ -125,11 +125,124 @@ export function verifyPrompt(context: VerifierContext): string {
     "- A task marked [x] is verified like any other. The mark is a claim, not evidence.",
     "- When in doubt, INCOMPLETE.",
     "",
+    "## Findings must be executable repair instructions",
+    "Inspect EVERY acceptance criterion of each task under verification before answering. Report ALL",
+    "the gaps you can substantiate now on its one TASK line, not one gap per correction cycle.",
+    "For each missing criterion include: (1) which requirement is unmet, (2) the file, symbol or test",
+    "and its actual behaviour, (3) the smallest concrete change that closes it, and (4) the exact",
+    "regression scenario/assertion and command that would prove it. Separate findings with semicolons.",
+    "Do not merely say 'fix the code', 'add coverage' or 'handle errors'. Name the location and the",
+    "expected behaviour so a builder with no memory can follow your instructions. If a location does",
+    "not exist, say so and point to the existing integration point; never invent a file you did not read.",
+    "Distinguish a product defect from a missing dependency or incompatible runtime. For an installation",
+    "failure include the failed command and evidence, then the project-local installation/rebuild and",
+    "check needed under the SAME runtime as the harness. Do not ask to rewrite working product code",
+    "to compensate for a broken environment. You report the repair; you still never perform it here.",
+    "",
+    "## A passing test must prove the specified failure mode",
+    "Read the setup AND assertions of the tests; a matching name or a green suite is not proof.",
+    "A rejected fetch or browser `route.abort()` exercises a transport/network failure. An HTTP 503",
+    "created with `route.fulfill()` exercises a server response and does NOT prove transport handling.",
+    "When the criterion requires a localized network error, require the real transport failure and an",
+    "assertion of the displayed message/language; merely asserting that an alert exists is insufficient.",
+    "Apply this distinction only to requirements actually stated in the phase or its cited specification.",
+    "Never suggest weakening an assertion, replacing the failing scenario with an easier mock, hiding",
+    "a failure from the checks, or changing the specification to pass. Preserve fixes already delivered.",
+    "",
     ...featureTestBlock(context.featureTests ?? []),
     ...aprovadasBlock(context.tasksJaAprovadas ?? []),
     "",
     "## The phase to verify",
     context.phaseMarkdown,
+  ].join("\n");
+}
+
+export interface VerifierRepairContext {
+  language: string;
+  phaseMarkdown: string;
+  /** O diagnóstico completo, inclusive como corrigir e verificar cada pendência. */
+  cause: string;
+  testCommand: string | null;
+  e2eCommand?: string;
+  /** Instalação de sistema depende da política do run; dependências locais são permitidas. */
+  systemInstall?: boolean;
+}
+
+export const VERIFY_REPAIR_HEADER = "CAPIVARA_VERIFY_REPAIR";
+
+/**
+ * Sessão de reparo separada da avaliação independente.
+ *
+ * O verificador sabe onde está o defeito e pode consertá-lo sem obrigar o
+ * construtor a redescobrir a causa. Isso não o autoriza a aprovar a própria
+ * mudança: o runner repete os gates e chama outra verificação somente leitura.
+ */
+export function verifierRepairPrompt(context: VerifierRepairContext): string {
+  return [
+    languageBlock(context.language),
+    "",
+    VERIFY_REPAIR_HEADER,
+    "",
+    "You are repairing explicit findings from an independent verification of this phase.",
+    "This is a bounded REPAIR session, not the read-only verification session and not a new implementation.",
+    "Read the current code and the cited evidence first. Fix ONLY the listed gaps and their direct causes.",
+    "Preserve all existing correct behaviour, previous corrections and unrelated work.",
+    "",
+    "## Allowed actions and boundaries",
+    "- Edit the project's code, tests and required local configuration to close the explicit findings.",
+    "- Install, rebuild or restore project-local dependencies with this project's package manager,",
+    "  including dependencies the builder could not install. Use existing manifests and lockfiles;",
+    "  do not introduce a new stack or unrelated packages.",
+    ...(context.systemInstall === true
+      ? [
+          "- System installation is enabled for this run: you may install a demonstrated missing system",
+          "  prerequisite required by a finding. Use the existing system package manager, change only",
+          "  what that prerequisite needs, and report the exact command and result.",
+        ]
+      : [
+          "- System installation is NOT enabled: never install system packages, use sudo or change global",
+          "  configuration. If a required prerequisite is unavailable, report the failed command and",
+          "  the specific prerequisite instead of bypassing the failure.",
+        ]),
+    "- Do not commit, stage files, change Git branches/refs, merge, reset or cherry-pick. The harness",
+    "  owns checkpointing and integration; leave the patch in the current worktree.",
+    "- Never edit the specification under `.capivara/init/`, phase requirements, or run state under",
+    "  `.capivara/runs/`. Do not alter the acceptance criteria to fit the implementation.",
+    "- Never delete, skip or disable tests, weaken assertions, suppress failures to pass checks, or replace",
+    "  a failing scenario with an easier mock. HTTP 503 via `route.fulfill()` cannot replace a transport failure",
+    "  via rejected fetch or `route.abort()` when the requirement is network-failure handling.",
+    "",
+    "## Runtime and verification",
+    `For Node projects the harness uses \`${process.execPath}\` (${process.version}, ABI ${process.versions.modules}).`,
+    "Use that SAME Node executable for installation, rebuilds and checks, with its directory first in",
+    "PATH for package-manager scripts. Do not activate another Node/NVM version to make a command pass.",
+    "For other stacks use the runtime and commands already declared by this project.",
+    "First add or strengthen the regression check for the actual finding, then apply the smallest fix",
+    "and run the relevant check. Preserve the original failing scenario and assert the required result.",
+    ...(context.testCommand
+      ? ["Run the project's gate test command before finishing:", "", `    ${context.testCommand}`, ""]
+      : ["No gate test command was resolved; report that explicitly and use the project's documented checks."]),
+    ...(context.e2eCommand
+      ? [
+          "When the repair changes browser behaviour or browser tests, also run:",
+          "",
+          `    ${context.e2eCommand}`,
+          "",
+        ]
+      : []),
+    "## Findings to repair",
+    "````",
+    context.cause,
+    "````",
+    "",
+    "## The phase — read-only requirements",
+    context.phaseMarkdown,
+    "",
+    "## Required report",
+    "Report each finding with the changed files, the correction, the exact commands and observed",
+    "results, and any unresolved prerequisite or gap. Say explicitly when you could not fix something.",
+    "Do not emit TASK verdicts or claim approval. Your report is not evidence of success: the harness",
+    "will rerun the tests and perform a NEW independent read-only verification of the resulting code.",
   ].join("\n");
 }
 

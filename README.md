@@ -234,7 +234,7 @@ Termina em `RALPH READY` ou em `NOT READY` dizendo exatamente o que falta. Nunca
 
 ### `capivara build`
 
-Uma fase = uma sessão de agente. Por fase, cinco gates:
+Cada fase usa sessões separadas de construção e validação. Por fase, cinco gates:
 
 | Gate | O que verifica |
 |---|---|
@@ -257,6 +257,27 @@ limpa → a fase já estava implementada. Qualquer um vermelho → sessão nova 
 Esgotados os ciclos, o loop para e é retomável: `capivara build` de novo continua
 de onde parou, sem refazer o que já ficou verde.
 
+O verificador informa, para cada pendência, a evidência, como corrigir e qual
+teste ou comando confirma a correção. Ele deve cobrir todos os critérios da
+tarefa, incluindo o comportamento e a mensagem apresentados em falhas reais.
+
+Com um verificador via CLI, o build também permite uma sessão de reparo por
+fase, por padrão. Nessa sessão separada, o verificador pode corrigir código,
+fortalecer testes e instalar dependências do projeto que o construtor não
+conseguiu preparar. Depois, o Core executa novamente a suíte, uma nova
+verificação somente leitura e os fluxos. O reparador não aprova sua própria
+alteração nem faz commits. `--max-verifier-repairs 0` desliga os reparos;
+valores de 1 a 10 definem o orçamento por fase. Com API direta, o verificador
+fornece orientação, e o construtor continua responsável pelas alterações.
+`--no-system-install` também se aplica aos reparos do verificador.
+
+Dependências Node são conferidas pelo runtime e pelos manifestos/lockfiles.
+Uma instalação incompatível é preparada novamente com o runtime do harness,
+respeitando `engines`. No paralelo, falhas desse ambiente na integração têm
+reparo limitado e log completo; se persistirem, o commit aprovado é preservado
+para retomar a integração, sem reconstruir a fase. Logs de cada chamada em
+`calls.jsonl` registram papel, modelo, agente e se houve reparo.
+
 ## Os quatro papéis
 
 | Papel | O que faz | Permissão |
@@ -264,7 +285,7 @@ de onde parou, sem refazer o que já ficou verde.
 | `writer` | escreve o esqueleto e as fases | somente leitura |
 | `auditor` | aprova ou devolve com orientação | somente leitura |
 | `builder` | implementa a fase | escrita + rede |
-| `verifier` | diz o que está feito e o que não está | leitura + comandos read-only |
+| `verifier` | verifica e orienta a correção; pode reparar em sessão separada | avaliação somente leitura; escrita + rede na sessão de reparo |
 
 Cada um aceita provider, modelo e effort próprios; sem configuração, herdam o
 global.

@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
 import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { appendFile, readFile } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
@@ -69,7 +69,7 @@ import { box } from "./tui/dashboard.js";
 import { renderSelect, type SelectSpec } from "./tui/select.js";
 import type { WizardIO } from "./commands/wizard.js";
 import type { LineIO } from "./commands/line-io.js";
-import { listarEfforts, listarModelos } from "./provider/index.js";
+import { isCliProvider, listarEfforts, listarModelos } from "./provider/index.js";
 import type { RoleName } from "./provider/index.js";
 import { runIdFor, runPaths, safeProjectPath, writeAtomic } from "./state/index.js";
 import { sha12 } from "./contract/index.js";
@@ -1648,6 +1648,7 @@ export function createProgram(): Command {
       .description("Constrói a aplicação a partir da documentação RALPH READY")
       .option("--test-cmd <comando>", "comando de teste do projeto (gate 2)")
       .option("--max-cycles <n>", "ciclos de correção por fase", "3")
+      .option("--max-verifier-repairs <n>", "reparos pelo validador por fase (0 desliga; requer CLI)", "1")
       .option("--keep-going", "continua mesmo depois de uma fase falhar")
       .option("--no-system-install", "mantém o executor dentro do workspace, sem instalar pacotes de sistema")
       .option("--no-acceptance", "pula a aceitação operacional final")
@@ -1667,8 +1668,14 @@ export function createProgram(): Command {
       .option("--save-execution", "grava a estratégia desta execução em .capivara/execucao.json, para as próximas")
       .option("--no-dashboard", "não desenha o painel; só as linhas de progresso"),
     ["builder", "verifier"],
-  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean; flows?: boolean; rebuildAll?: boolean; git?: boolean; mcp?: string; mcpProject?: string; dashboard?: boolean; serial?: boolean; parallel?: string; worker?: string[]; saveExecution?: boolean }) => {
+  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; maxVerifierRepairs: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean; flows?: boolean; rebuildAll?: boolean; git?: boolean; mcp?: string; mcpProject?: string; dashboard?: boolean; serial?: boolean; parallel?: string; worker?: string[]; saveExecution?: boolean }) => {
     const projectRoot = flags.project ?? ".";
+    const requestedRepairs = Number(flags.maxVerifierRepairs);
+    if (!Number.isSafeInteger(requestedRepairs) || requestedRepairs < 0 || requestedRepairs > 10) {
+      stdout.write("erro: --max-verifier-repairs deve ser um inteiro entre 0 e 10.\n");
+      process.exitCode = 2;
+      return;
+    }
     let escolhas = flags;
     let roles = rolesFromFlags(escolhas);
     const semProvider = unresolvedRoles(roles, BUILD_ROLES);
@@ -1683,6 +1690,10 @@ export function createProgram(): Command {
       roles = rolesFromFlags(escolhas);
     }
     const language = flags.language ?? "português do Brasil";
+    const verifierRepairs = isCliProvider(roles.verifier.provider) ? requestedRepairs : 0;
+    if (requestedRepairs > 0 && verifierRepairs === 0) {
+      stdout.write("O validador usa API direta: fornecerá orientação de correção ao construtor; reparos automáticos exigem um validador via CLI.\n");
+    }
 
     /*
      * Serial ou paralelo (§97), resolvido ANTES de qualquer tela: flag
@@ -2101,7 +2112,13 @@ export function createProgram(): Command {
 
     const outcome = await runBuild({
       projectRoot,
-      roles: snapshotDePapeis(roles, BUILD_ROLES),
+      roles: {
+        ...snapshotDePapeis(roles, BUILD_ROLES),
+        ...(paralela ? Object.fromEntries(execucao.agentes.map((agente, slot) => [
+          `worker-${slot + 1}`,
+          { provider: agente.config.provider, model: agente.config.model, effort: agente.config.effort },
+        ])) : {}),
+      },
       ...(paralela && execucao.estrategia.mode === "parallel"
         ? {
             parallel: {
@@ -2166,13 +2183,17 @@ export function createProgram(): Command {
       engine: roles.builder.provider,
       ...(flags.testCmd !== undefined ? { explicitTestCommand: flags.testCmd } : {}),
       maxCycles: Number(flags.maxCycles),
+      maxVerifierRepairs: verifierRepairs,
       systemInstall: flags.systemInstall !== false,
       skipAcceptance: flags.acceptance === false,
       ...(flags.keepGoing !== undefined ? { keepGoing: flags.keepGoing } : {}),
       announce: anunciar,
       onPlanned: (planejadas, contexto) => {
         totalDeFases = planejadas.length;
-        if (contexto?.runId && logsDosAgentes) pastaDosLogs = runPaths(projectRoot, contexto.runId).logs;
+        if (contexto?.runId) {
+          pastaDosLogs = runPaths(projectRoot, contexto.runId).logs;
+          mkdirSync(pastaDosLogs, { recursive: true });
+        }
         fases.plan(planejadas);
         if (contexto?.testCommand) painelBuild.setNote(`Teste: ${contexto.testCommand}`);
         repaintBuild();
@@ -2202,7 +2223,7 @@ export function createProgram(): Command {
           systemInstall: agente ? agente.systemInstall : flags.systemInstall !== false,
         });
         // O número é do agente, e só o executor é de um agente: o verificador é um só.
-        const quem = `${call.role === "builder" && call.worker !== undefined ? `agente ${call.worker + 1}` : call.role} · ${call.phase.id}`;
+        const quem = `${call.role === "builder" && call.worker !== undefined ? `agente ${call.worker + 1}` : call.repair ? "verificador em reparo" : call.role} · ${call.phase.id}`;
         // A pausa segura AQUI: nenhuma sessão de agente fica pela metade.
         await pausa.wait(() => {
           painelBuild.paused(`antes de ${quem} · p retoma`);
@@ -2218,9 +2239,19 @@ export function createProgram(): Command {
         const comecou = Date.now();
         let resposta: Awaited<ReturnType<typeof bridge>>;
         try {
+          if (pastaDosLogs) {
+            const effective = call.role === "builder" && agente ? agente.config : roles[call.role];
+            await appendFile(join(pastaDosLogs, "calls.jsonl"), `${JSON.stringify({
+              timestamp: new Date().toISOString(), role: call.role, repair: call.repair === true,
+              phase: call.phase.id, attempt: call.attempt, worker: call.worker ?? null,
+              provider: effective.provider, model: effective.model, effort: effective.effort,
+              root: call.root ?? projectRoot, node: process.version, abi: process.versions.modules,
+            })}\n`).catch(() => undefined);
+          }
           resposta = await bridge({
             role: call.role,
-            stage: "implement",
+            stage: call.repair ? "repair" : "implement",
+            ...(call.repair === true ? { repair: true } : {}),
             prompt: call.prompt,
             ...(slot !== null
               ? {

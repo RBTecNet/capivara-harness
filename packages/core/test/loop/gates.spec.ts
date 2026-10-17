@@ -222,6 +222,15 @@ describe("G3 — verificação task a task", () => {
     expect(gate3("TASK 1: DONE\nTASK 2: DONE", 2).green).toBe(true);
   });
 
+  it.each([
+    "TASK 1: DONE\nTASK 1: DONE",
+    "TASK 0: DONE\nTASK 2: DONE",
+    "TASK 1: DONE\nTASK 3: DONE",
+  ])("índices repetidos ou fora da fase não aprovam nem autorizam reparo", (output) => {
+    expect(gate3(output, 2)).toMatchObject({ green: false });
+    expect(gate3(output, 2).repairable).not.toBe(true);
+  });
+
   it("reprova cobertura parcial", () => {
     const result = gate3("TASK 1: DONE", 3);
     if (result.green) throw new Error("deveria reprovar");

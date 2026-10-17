@@ -8,7 +8,8 @@
  * e a evidência do anterior não é aplicada em silêncio a um plano diferente.
  */
 
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { sha12 } from "../contract/stamps.js";
 import { workflowsForPhase, type Skeleton, type SkeletonWorkflow } from "../contract/index.js";
@@ -37,6 +38,8 @@ import {
   runIdFor,
   runPaths,
   writeRunState,
+  readRunState,
+  writeAtomic,
 } from "../state/index.js";
 import { escolhaSemRepositorio, iniciarRepositorio, isClean, isRepository, lerEscolhaDeRepositorio, renderSemRepositorio } from "./git.js";
 import { materializeSessions } from "./split.js";
@@ -120,6 +123,8 @@ export interface BuildOptions {
   testRunner?: TestRunner;
   explicitTestCommand?: string;
   maxCycles?: number;
+  /** Orçamento de sessões de reparo do verificador; quem chama deve conferir capacidade de CLI. */
+  maxVerifierRepairs?: number;
   keepGoing?: boolean;
   announce?: (message: string) => void;
   /**
@@ -440,19 +445,31 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
 
   const lock = await acquireLock({ projectRoot: options.projectRoot, runId, command: "build", now });
   const paths = runPaths(options.projectRoot, runId);
+  const previousState = await readRunState(options.projectRoot, runId);
+  const snapshot = createRunState({
+    runId,
+    command: "build",
+    language: options.language,
+    now,
+    ...(options.roles ? { roles: options.roles } : {}),
+    sources: [{ name: "project-phases.md", sha12: sha12(plan) }],
+  });
+  if (previousState) snapshot.createdAt = previousState.createdAt;
 
   try {
-    await writeRunState(
-      options.projectRoot,
-      createRunState({
-        runId,
-        command: "build",
-        language: options.language,
-        now,
-        ...(options.roles ? { roles: options.roles } : {}),
-      }),
-      now,
-    );
+    if (previousState) {
+      const attempt = `${now().toISOString().replace(/[:.]/g, "-")}-${randomUUID().slice(0, 8)}`;
+      const archive = join(paths.root, "attempts", attempt);
+      await mkdir(archive, { recursive: true });
+      await writeAtomic(join(archive, "run.json"), JSON.stringify(previousState, null, 2));
+      for (const name of ["logs", "prompts"]) {
+        await rename(join(paths.root, name), join(archive, name)).catch((error: NodeJS.ErrnoException) => {
+          if (error.code !== "ENOENT") throw error;
+        });
+        await mkdir(join(paths.root, name), { recursive: true });
+      }
+    }
+    await writeRunState(options.projectRoot, snapshot, now);
     await materializeSessions(checked.sessions);
 
     const progress = replayEvents(await readEvents(paths.events));
@@ -682,6 +699,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         aprovadas,
         systemInstall: execucao?.systemInstall ?? options.systemInstall === true,
         ...(options.maxCycles !== undefined ? { maxCycles: options.maxCycles } : {}),
+        ...(options.maxVerifierRepairs !== undefined ? { maxVerifierRepairs: options.maxVerifierRepairs } : {}),
         commitsEnabled: checked.commitsEnabled,
         announce,
         ...(options.onProgress !== undefined ? { onProgress: options.onProgress } : {}),
@@ -803,6 +821,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     if (options.parallel) {
       const resultado = await executarEmParalelo({
         projectRoot: options.projectRoot,
+        ...(options.rebuildAll === true ? { rebuildAll: true } : {}),
         runId,
         sessions: checked.sessions,
         agentes: options.parallel.agentes,
@@ -969,6 +988,19 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     announce("aplicação concluída: todas as fases verdes");
     return { runId, exitCode: 0, phases, warnings: checked.warnings, errors: [], acceptance };
   } finally {
-    await lock.release();
+    try {
+      const lastEvent = (await readEvents(paths.events)).at(-1);
+      snapshot.stage = lastEvent
+        ? lastEvent.stage === "complete" ? "complete" : lastEvent.stage === "validate" ? "validate" : "implement"
+        : snapshot.stage;
+      snapshot.subject = lastEvent?.subject ?? "-";
+      snapshot.attempt = lastEvent?.attempt ?? 0;
+      snapshot.status = lastEvent?.status === "complete" && lastEvent.stage === "complete"
+        ? "complete"
+        : lastEvent?.status === "paused" ? "paused" : "blocked";
+      await writeRunState(options.projectRoot, snapshot, now);
+    } finally {
+      await lock.release();
+    }
   }
 }

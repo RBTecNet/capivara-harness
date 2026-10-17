@@ -27,6 +27,7 @@ import { promisify } from "node:util";
 import { sha12 } from "../contract/stamps.js";
 import { adicionarExatamente, admitirArvore, admitirIntervalo, alteracoesParaCommit, commitAdmitido, lerStatus, type Bloqueio } from "./admissao.js";
 import { FLOW_RESULTS, FLOWS_DIR } from "./flows.js";
+import { inspecionarInstalacaoNode, MARCA_DE_INSTALACAO_NODE } from "./instalacao-node.js";
 
 const run = promisify(execFile);
 const GRANDE = { maxBuffer: 64 * 1024 * 1024 };
@@ -208,7 +209,7 @@ export async function abrirWorktree(
   runId: string,
   phaseId: string,
   environment: NodeJS.ProcessEnv = process.env,
-): Promise<{ worktree: Worktree; copiado: string[]; retomado: ParcialRetomado | null }> {
+): Promise<{ worktree: Worktree; copiado: string[]; naoCopiado: string[]; retomado: ParcialRetomado | null }> {
   const base = await git(projectRoot, ["rev-parse", "HEAD"]);
   const branch = branchDaFase(runId, phaseId);
   const dir = join(pastaDosWorktrees(projectRoot, runId, environment), phaseId);
@@ -226,6 +227,7 @@ export async function abrirWorktree(
   }
 
   const copiado: string[] = [];
+  const naoCopiado: string[] = [];
   for (const pasta of [join(".capivara", "skills"), FLOWS_DIR]) {
     if (!(await existe(join(projectRoot, pasta)))) continue;
     await mkdir(join(dir, pasta, ".."), { recursive: true });
@@ -255,11 +257,29 @@ export async function abrirWorktree(
     copiado.push(arquivo);
   }
   if ((await existe(join(projectRoot, "node_modules"))) && !(await existe(join(dir, "node_modules")))) {
-    await copiarPasta(join(projectRoot, "node_modules"), join(dir, "node_modules"));
-    copiado.push("node_modules");
+    const instalacao = await inspecionarInstalacaoNode(projectRoot);
+    if (instalacao.estado === "incompativel") {
+      naoCopiado.push(`node_modules: ${instalacao.motivo}`);
+    } else {
+      await copiarPasta(join(projectRoot, "node_modules"), join(dir, "node_modules"));
+      copiado.push("node_modules");
+    }
   }
 
-  return { worktree: { dir, branch, base }, copiado, retomado };
+  return { worktree: { dir, branch, base }, copiado, naoCopiado, retomado };
+}
+
+/** Recupera a MESMA árvore e commit que já passaram pelos gates, sem nova sessão de construção. */
+export async function conferirWorktreeAprovado(projectRoot: string, worktree: Worktree, commit: string): Promise<void> {
+  if ((await git(projectRoot, ["rev-parse", `${worktree.branch}^{commit}`])) !== commit) {
+    throw new Error(`o branch aprovado ${worktree.branch} mudou desde a suspensão; o commit aprovado é ${commit}`);
+  }
+  if ((await git(worktree.dir, ["rev-parse", "HEAD"])) !== commit) {
+    throw new Error(`o worktree aprovado ${worktree.dir} mudou desde a suspensão`);
+  }
+  if ((await alteracoesParaCommit(worktree.dir)).length > 0) {
+    throw new Error(`o worktree aprovado ${worktree.dir} tem alterações posteriores à validação`);
+  }
 }
 
 /**
@@ -462,7 +482,7 @@ export async function desfazerIntegracao(projectRoot: string, antes: string): Pr
 
 /** Os caminhos do `git status`, sem o plano de controle; `alterados` são os versionados. */
 async function situacaoDaPrincipal(projectRoot: string): Promise<{ alterados: string[]; naoVersionados: string[] }> {
-  const entradas = await lerStatus(projectRoot);
+  const entradas = (await lerStatus(projectRoot)).filter((entrada) => !(entrada.naoVersionado && entrada.caminho === `node_modules/${MARCA_DE_INSTALACAO_NODE}`));
   return {
     alterados: entradas.filter((entrada) => !entrada.naoVersionado).map((entrada) => entrada.caminho),
     naoVersionados: entradas.filter((entrada) => entrada.naoVersionado).map((entrada) => entrada.caminho),
@@ -650,9 +670,9 @@ export async function alteradosNaPrincipal(projectRoot: string): Promise<string[
  */
 export async function comandoDeInstalacao(projectRoot: string): Promise<string> {
   for (const lockfile of ["package-lock.json", "npm-shrinkwrap.json"]) {
-    if (await existe(join(projectRoot, lockfile))) return "npm ci --no-audit --no-fund";
+    if (await existe(join(projectRoot, lockfile))) return "npm ci --no-audit --no-fund --engine-strict";
   }
-  return "npm install --no-audit --no-fund --no-package-lock";
+  return "npm install --no-audit --no-fund --no-package-lock --engine-strict";
 }
 
 /** O commit tocou o manifesto ou o lockfile de dependências do Node? */

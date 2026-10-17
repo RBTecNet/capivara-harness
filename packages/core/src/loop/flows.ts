@@ -26,6 +26,7 @@ import type { SkeletonWorkflow } from "../contract/index.js";
 import { extractFlowScript, lerTriagem, stepLabel, type Triagem } from "../prompts/index.js";
 import { comandoDeMigracao } from "./ambiente.js";
 import { FLOW_HELPER, VARIAVEL_DO_INICIO, bancosDeclarados, criarAmbienteDaPassagem, renderFlowHelper } from "./passagem.js";
+import { runtimeEnvironment } from "../provider/runtime-env.js";
 
 /** Onde os roteiros moram, relativo à raiz do projeto. */
 export const FLOWS_DIR = join(".capivara", "flows");
@@ -463,7 +464,7 @@ export const defaultFlowRunner: FlowRunner = async (projectRoot, scripts, env = 
     const child = execFile(
       "npx",
       ["--no-install", "playwright", "test", "--config", FLOW_CONFIG, ...scripts],
-      { cwd: join(projectRoot, FLOWS_DIR), maxBuffer: 32 * 1024 * 1024, env: { ...process.env, ...env, CI: "1" } },
+      { cwd: join(projectRoot, FLOWS_DIR), maxBuffer: 32 * 1024 * 1024, env: runtimeEnvironment({ ...process.env, ...env, CI: "1" }) },
       (error, stdout, stderr) => {
         const saida = `${stdout}${stderr}`;
         const code = error && typeof (error as { code?: number }).code === "number" ? (error as { code: number }).code : error ? 1 : 0;
@@ -621,7 +622,7 @@ const executarNoShell = async (
   env: Record<string, string>,
 ): Promise<{ exitCode: number; output: string }> =>
   new Promise((resolve) => {
-    const child = execFile("bash", ["-c", comando], { cwd, env: { ...process.env, ...env }, maxBuffer: 32 * 1024 * 1024 }, (error, stdout, stderr) => {
+    const child = execFile("bash", ["-c", comando], { cwd, env: runtimeEnvironment({ ...process.env, ...env }), maxBuffer: 32 * 1024 * 1024 }, (error, stdout, stderr) => {
       const code = error && typeof (error as { code?: number }).code === "number" ? (error as { code: number }).code : error ? 1 : 0;
       resolve({ exitCode: code, output: `${stdout}${stderr}` });
     });

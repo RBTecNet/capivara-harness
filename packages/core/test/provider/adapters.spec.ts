@@ -114,6 +114,38 @@ describe("regras de provider", () => {
   });
 });
 
+describe("sessão explícita de reparo pelo verificador", () => {
+  it.each(["codex", "claude", "opencode", "custom"])("%s permite reparar sem mudar as avaliações seguintes", (provider) => {
+    const configured = config({ provider, command: "/bin/verificador" });
+    const repair = buildInvocation("verifier", configured, { ...context, verifierRepair: true });
+    expect(repair.env.CAPIVARA_ROLE).toBe("verifier");
+    expect(repair.env.CAPIVARA_PERMISSION).toBe("workspace-write");
+    expect(repair.env.CAPIVARA_REPAIR).toBe("1");
+    expect(repair.env.CAPIVARA_SYSTEM_INSTALL).toBeUndefined();
+    if (provider === "codex") expect(repair.args).toContain("--dangerously-bypass-approvals-and-sandbox");
+    if (provider === "claude") expect(repair.args).toContain("--dangerously-skip-permissions");
+    if (provider === "opencode") expect(repair.env.OPENCODE_PERMISSION).toContain('"edit":"allow"');
+    const assessment = buildInvocation("verifier", configured, context);
+    expect(assessment.env.CAPIVARA_PERMISSION).toBe("read-only");
+    expect(assessment.env.CAPIVARA_REPAIR).toBe("0");
+  });
+
+  it("a instalação fora do projeto depende da política explícita do build", () => {
+    const repair = buildInvocation("verifier", config(), { ...context, verifierRepair: true, systemInstall: true });
+    expect(repair.env.CAPIVARA_SYSTEM_INSTALL).toBe("1");
+    const assessment = buildInvocation("verifier", config(), { ...context, systemInstall: true });
+    expect(assessment.env.CAPIVARA_SYSTEM_INSTALL).toBeUndefined();
+    const inherited = { ...context, environment: { CAPIVARA_SYSTEM_INSTALL: "1" } };
+    expect(buildInvocation("verifier", config(), inherited).env.CAPIVARA_SYSTEM_INSTALL).toBeUndefined();
+    expect(buildInvocation("verifier", config(), { ...inherited, verifierRepair: true, systemInstall: false }).env.CAPIVARA_SYSTEM_INSTALL).toBeUndefined();
+  });
+
+  it("não promove outros papéis nem promete ferramentas de reparo por API direta", () => {
+    expect(() => buildInvocation("writer", config(), { ...context, verifierRepair: true })).toThrow(/só se aplica/);
+    expect(() => buildInvocation("verifier", config({ provider: "openai", model: "gpt-5" }), { ...context, verifierRepair: true })).toThrow(/exige uma CLI/);
+  });
+});
+
 describe("ambiente da invocação", () => {
   it("declara papel, permissão e idioma", () => {
     const invocation = buildInvocation("verifier", config(), context);

@@ -21,15 +21,16 @@
  * saem do escalonador, do git e da suíte.
  */
 
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, rm } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { writeAtomic } from "../state/atomic.js";
 import { appendEvent } from "../state/events.js";
 import { runPaths } from "../state/paths.js";
 import { admitirIntervalo, descreverBloqueios } from "./admissao.js";
 import { prepararAmbiente } from "./ambiente.js";
 import { bloqueadas, dependenciasEfetivas, proximas, type EstadoNaAgenda } from "./escalonador.js";
-import { gate2, type TestRunner } from "./gates.js";
+import { defaultTestRunner, gate2, type TestRunner } from "./gates.js";
+import { falhaDeInstalacaoNode, inspecionarInstalacaoNode, registrarInstalacaoNode } from "./instalacao-node.js";
 import type { Isolamento } from "./isolamento.js";
 import type { BuildProgressListener, WorkerProgressListener } from "./progress.js";
 import type { PhaseOutcome } from "./runner.js";
@@ -38,14 +39,17 @@ import {
   abrirWorktree,
   alteradosNaPrincipal,
   branchTemTrabalho,
+  branchDaFase,
   cabeca,
   comandoDeInstalacao,
+  conferirWorktreeAprovado,
   desfazerSemApagar,
   fecharWorktree,
   guardarParcial,
   impedimentosDaPrincipal,
   integrar,
   mexeuNasDependencias,
+  pastaDosWorktrees,
   preservarAprovado,
   trazerRoteiros,
   type ParcialGuardado,
@@ -76,6 +80,8 @@ export interface ParaleloOptions {
   agentes: readonly AgenteDoPool[];
   maxConcurrency: number;
   keepGoing: boolean;
+  /** Refaz explicitamente mesmo uma fase aprovada cuja integração ficou suspensa. */
+  rebuildAll?: boolean;
   /** A fase já fechada antes (neste run ou em outro): devolve true e o build não a refaz. */
   jaFechada: (session: PhaseSession) => boolean;
   rodar: (session: PhaseSession, execucao: ExecucaoDaFase) => Promise<PhaseOutcome>;
@@ -207,6 +213,9 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
 
   /** O verde que conflitou na integração, por fase: onde ele ficou (§110). */
   const preservados = new Map<string, { branch: string; commit: string }>();
+  const aprovados = new Map<string, PhaseOutcome>();
+  const integracoesSuspensas = new Set<string>();
+  const checkpointDaIntegracao = (id: string): string => join(paths.root, "integracoes", `${id}.json`);
   for (const slot of livres) agente(slot, "livre", null);
 
   // Ajustes de dependência são ditos uma vez, antes de qualquer fase sair.
@@ -311,6 +320,18 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
           `o trabalho da fase está no branch ${worktree.branch}`,
       );
     };
+    const pararPorAmbiente = async (motivo: string): Promise<{ desfecho: "falhou"; outcome: PhaseOutcome }> => {
+      const desfeita = await desfazer(motivo);
+      if (desfeita.desfecho === "falhou") return desfeita;
+      const commit = await cabeca(worktree.dir);
+      await writeAtomic(checkpointDaIntegracao(session.id), JSON.stringify({ versao: 1, worktree, commit, outcome: aprovados.get(session.id) }));
+      integracoesSuspensas.add(session.id);
+      return pararSemTocar(
+        `falha de ambiente na integração: ${motivo}. A fase aprovada não será reconstruída; ` +
+          `o commit ${commit.slice(0, 12)} e o worktree ${worktree.dir} foram preservados no branch ${worktree.branch}. ` +
+          "Retome o mesmo build após reparar o ambiente: o Core tentará integrar este mesmo commit sem chamar o construtor",
+      );
+    };
 
     /*
      * O que os commits da fase TRAZEM passa pela política de admissão antes do
@@ -361,16 +382,29 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
        * o `node_modules` do worktree, e a suíte integrada reprovaria por um
        * pacote que só faltava instalar.
        */
-      if (mexeuNasDependencias(integracao.arquivos) && options.instalar) {
-        const temManifesto = await readFile(join(projectRoot, "package.json"), "utf8").then(() => true, () => false);
-        if (temManifesto) {
-          // Nunca `npm install` com lockfile: ele reescreve o lockfile versionado (§102).
-          const instalacao = await comandoDeInstalacao(projectRoot);
-          announce(`[${session.id}] a fase mexeu nas dependências; instalando na árvore integrada com \`${instalacao}\``);
-          const instalado = await options.instalar(instalacao, projectRoot);
-          if (instalado.exitCode !== 0) {
-            return desfazer(`\`${instalacao}\` falhou na árvore integrada: ${instalado.output.split("\n").slice(-3).join(" ").trim()}`);
+      let instalacoes = 0;
+      const instalarNaPrincipal = async (motivo: string): Promise<{ exitCode: number; output: string }> => {
+        const comando = await comandoDeInstalacao(projectRoot);
+        announce(`[${session.id}] ${motivo}; instalando na árvore integrada com \`${comando}\``);
+        instalacoes += 1;
+        const resultado = await options.instalar!(comando, projectRoot);
+        await writeAtomic(join(paths.logs, `${session.id}.install-integracao-${instalacoes}.log`), `$ ${comando}\nexit: ${resultado.exitCode}\n${resultado.output}`);
+        if (resultado.exitCode === 0) await registrarInstalacaoNode(projectRoot);
+        return resultado;
+      };
+      const instalacao = await inspecionarInstalacaoNode(projectRoot);
+      const manifestoMudou = mexeuNasDependencias(integracao.arquivos) && instalacao.estado !== "nao-se-aplica";
+      const precisaInstalar = manifestoMudou || instalacao.estado === "ausente" || instalacao.estado === "incompativel";
+      if (precisaInstalar) {
+        if (!options.instalar) return pararPorAmbiente(`${instalacao.motivo}; não há instalador configurado`);
+        const instalado = await instalarNaPrincipal(manifestoMudou ? "a fase mexeu nas dependências" : instalacao.motivo);
+        if (instalado.exitCode !== 0) {
+          const motivo = `a instalação falhou; saída completa em ${join(paths.logs, `${session.id}.install-integracao-${instalacoes}.log`)}`;
+          // Um lockfile incoerente é uma entrega incorreta, e não um runtime avariado.
+          if (/npm (?:error|ERR!)[\s\S]*(?:package\.json and .*lock.*(?:in sync|sync)|Missing: .* from lock file|Invalid: lock file)/i.test(instalado.output)) {
+            return desfazer(`${motivo}: manifesto e lockfile não estão sincronizados`);
           }
+          return pararPorAmbiente(motivo);
         }
       }
 
@@ -387,10 +421,34 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
       }
 
       const comando = await options.comandoDeTeste();
-      const g2 = await gate2(projectRoot, comando, options.testRunner, options.systemInstall);
-      if (!g2.green) {
-        return desfazer(`a suíte da árvore integrada reprovou: ${g2.cause.split("\n")[0] ?? ""}`);
+      let tentativa = 0;
+      let saida = "";
+      const testar: TestRunner = async (command, cwd) => {
+        const resultado = await (options.testRunner ?? defaultTestRunner)(command, cwd);
+        saida = resultado.output;
+        tentativa += 1;
+        await writeAtomic(join(paths.logs, `${session.id}.g2-integracao-${tentativa}.log`), `$ ${command}\nexit: ${resultado.exitCode}\n${resultado.output}`);
+        return resultado;
+      };
+      let g2 = await gate2(projectRoot, comando, testar, options.systemInstall);
+      if (!g2.green && await falhaDeInstalacaoNode(projectRoot, saida)) {
+        if (instalacoes === 0 && options.instalar) {
+          const reparada = await instalarNaPrincipal("G2 identificou dependência ausente ou incompatível; reparo limitado sem reconstruir a fase aprovada");
+          if (reparada.exitCode !== 0) return pararPorAmbiente(`o único reparo de dependências falhou; veja ${join(paths.logs, `${session.id}.install-integracao-${instalacoes}.log`)}`);
+          // A migração que usa o addon também deve rodar com a instalação reparada.
+          const reparo = await prepararAmbiente(projectRoot, options.instalar);
+          for (const aviso of reparo.anuncios) announce(`[${session.id}] árvore integrada: ${aviso}`);
+          if (reparo.saidaDaMigracao !== "") await writeAtomic(join(paths.logs, `${session.id}.migrate-integracao-reparo.log`), reparo.saidaDaMigracao);
+          g2 = await gate2(projectRoot, comando, testar, options.systemInstall);
+        }
+        if (!g2.green && await falhaDeInstalacaoNode(projectRoot, saida)) {
+          return pararPorAmbiente(`G2 continua sem ambiente válido após ${instalacoes} tentativa(s) de instalação; saída completa em ${join(paths.logs, `${session.id}.g2-integracao-${tentativa}.log`)}`);
+        }
       }
+      if (!g2.green) {
+        return desfazer(`a suíte da árvore integrada reprovou: ${g2.cause.split("\n")[0] ?? ""}; saída completa em ${join(paths.logs, `${session.id}.g2-integracao-${tentativa}.log`)}`);
+      }
+      if (!g2.skipped) await registrarInstalacaoNode(projectRoot);
       /*
        * A árvore estava igual ao HEAD antes do cherry-pick, e a fila de
        * integração é de uma fase por vez: um versionado alterado agora foi
@@ -431,18 +489,42 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
     let manterBranch = false;
     /** A guarda do parcial não foi comprovada: o worktree não sai do disco (§100). */
     let manterArvore = false;
+    let aprovadoRetomado: PhaseOutcome | null = null;
     try {
       agente(slot, "preparando", session.id);
       const anterior = preservados.get(session.id);
       if (anterior) announce(`[${session.id}] o commit aprovado antes (${anterior.commit.slice(0, 12)}) continua no branch ${anterior.branch}`);
       try {
-        const aberto = await abrirWorktree(projectRoot, options.runId, session.id, options.environment);
-        worktree = aberto.worktree;
-        announce(
-          `[${session.id}] agente ${slot + 1} (${pool.label}) num worktree próprio` +
-            `${aberto.copiado.length > 0 ? `; copiado: ${aberto.copiado.join(", ")}` : ""}`,
-        );
-        const retomado = aberto.retomado;
+        const salvo = options.rebuildAll ? null : await readFile(checkpointDaIntegracao(session.id), "utf8").catch(() => null);
+        if (salvo !== null) {
+          const checkpoint = JSON.parse(salvo) as { versao: number; worktree: Worktree; commit: string; outcome: PhaseOutcome };
+          if (checkpoint.versao !== 1 || !checkpoint.worktree || !["complete", "already-implemented"].includes(checkpoint.outcome?.status) ||
+            checkpoint.worktree.branch !== branchDaFase(options.runId, session.id) ||
+            typeof checkpoint.worktree.dir !== "string" || resolve(checkpoint.worktree.dir) !== resolve(pastaDosWorktrees(projectRoot, options.runId, options.environment), session.id) ||
+            !/^[0-9a-f]{40,64}$/.test(checkpoint.commit) || !/^[0-9a-f]{40,64}$/.test(checkpoint.worktree.base)) {
+            throw new Error("registro da integração aprovada inválido; o branch foi mantido para inspeção");
+          }
+          // Não limpar/reaplicar o parcial: esse é exatamente o commit já aprovado.
+          await conferirWorktreeAprovado(projectRoot, checkpoint.worktree, checkpoint.commit);
+          worktree = checkpoint.worktree;
+          aprovadoRetomado = checkpoint.outcome;
+          integracoesSuspensas.add(session.id);
+          manterBranch = true;
+          manterArvore = true;
+          announce(`[${session.id}] retomando a integração do commit já aprovado ${checkpoint.commit.slice(0, 12)}; nenhuma nova sessão de construção`);
+        }
+        const aberto = worktree === null ? await abrirWorktree(projectRoot, options.runId, session.id, options.environment) : null;
+        if (aberto) {
+          worktree = aberto.worktree;
+          // abrirWorktree já guardou o commit anterior antes de recriar o branch.
+          if (options.rebuildAll) await rm(checkpointDaIntegracao(session.id), { force: true });
+          announce(
+            `[${session.id}] agente ${slot + 1} (${pool.label}) num worktree próprio` +
+              `${aberto.copiado.length > 0 ? `; copiado: ${aberto.copiado.join(", ")}` : ""}`,
+          );
+          for (const naoCopiado of aberto.naoCopiado) announce(`[${session.id}] dependências não copiadas: ${naoCopiado}; a instalação será preparada no worktree`);
+        }
+        const retomado = aberto?.retomado;
         if (retomado) {
           announce(
             retomado.aplicado && retomado.foraDoParcial.length > 0
@@ -464,8 +546,9 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
         return;
       }
 
-      agente(slot, "trabalhando", session.id);
-      const outcome = await options.rodar(session, {
+      if (!worktree) throw new Error("a fase não tem worktree");
+      agente(slot, aprovadoRetomado ? "integrando" : "trabalhando", session.id);
+      const outcome = aprovadoRetomado ?? await options.rodar(session, {
         workRoot: worktree.dir,
         worker: slot,
         engine: pool.engine,
@@ -474,6 +557,7 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
       });
 
       if (outcome.status === "complete" || outcome.status === "already-implemented") {
+        aprovados.set(session.id, outcome);
         const integracao = await integrarFase(session, worktree, slot);
         if (integracao.desfecho === "integrada") {
           estados.set(session.id, "integrada");
@@ -481,6 +565,10 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
           await evento(session.id, "complete", outcome.status === "complete" ? `integrada: ${outcome.message}` : "integrada: já implementada");
           options.onProgress?.({ kind: "phase", id: session.id, state: "concluído", cycle: outcome.cycles, detail: "integrada" });
           await options.aposIntegrar(session, outcome);
+          await rm(checkpointDaIntegracao(session.id), { force: true });
+          integracoesSuspensas.delete(session.id);
+          manterBranch = false;
+          manterArvore = false;
           agente(slot, "livre", null, `${session.id} integrada`);
           return;
         }
@@ -491,6 +579,12 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
            * no log, não só na tela.
            */
           const preservado = await preservarAprovado(projectRoot, worktree);
+          await rm(checkpointDaIntegracao(session.id), { force: true });
+          integracoesSuspensas.delete(session.id);
+          // A próxima abertura reaplica o trabalho aprovado que não conflita.
+          // Guardar só o branch de auditoria deixava o builder recomeçar do zero.
+          manterBranch = true;
+          manterArvore = false;
           preservados.set(session.id, preservado);
           exclusivas.add(session.id);
           estados.set(session.id, "pendente");
@@ -514,8 +608,9 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
             ? integracao.outcome
             : { status: "failed", gate: "gate 2 — suíte do projeto", cause: `mesmo rodando sozinha, a fase não fechou na árvore integrada: ${integracao.motivo}`, cycles: outcome.cycles };
         manterBranch = true;
+        manterArvore ||= integracoesSuspensas.has(session.id);
         // Verde no worktree, fora do produto: o que se aprovou dela só existe no branch (§99).
-        await options.esquecer(session);
+        if (!integracoesSuspensas.has(session.id)) await options.esquecer(session);
         await registrarFalha(session, falha, slot);
         return;
       }

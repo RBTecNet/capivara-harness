@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { appendEvent } from "../state/events.js";
 import { runPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
-import { declarouRoteiroErrado, fixPrompt, flowPrompt, implementPrompt, triagePrompt, verifyPrompt, type Triagem } from "../prompts/index.js";
+import { declarouRoteiroErrado, fixPrompt, flowPrompt, implementPrompt, triagePrompt, verifierRepairPrompt, verifyPrompt, type Triagem } from "../prompts/index.js";
 import type { BuildProgressListener, LoopGate, LoopGateState } from "./progress.js";
 import type { Bloqueio } from "./admissao.js";
 import { fotografarRefs, publicacaoProvavel, refsMovidas } from "./autoridade.js";
@@ -31,6 +31,8 @@ import { featureTestNames, sha12 } from "../contract/index.js";
 import type { SkeletonWorkflow } from "../contract/index.js";
 import type { PhaseSession } from "./split.js";
 import { resolveE2eCommand, type TestCommand } from "./testcmd.js";
+import { falhaDeInstalacaoNode, inspecionarInstalacaoNode, registrarInstalacaoNode } from "./instalacao-node.js";
+import { comandoDeInstalacao } from "./worktree.js";
 
 export interface EngineResult {
   exitCode: number;
@@ -49,6 +51,8 @@ export interface EngineResult {
 
 export interface EngineCall {
   role: "builder" | "verifier";
+  /** Sessão separada de reparo. Apenas o verificador recebe escrita nesta chamada. */
+  repair?: boolean;
   phase: PhaseSession;
   attempt: number;
   prompt: string;
@@ -149,6 +153,8 @@ export interface PhaseRunOptions {
   /** Se o executor pode instalar fora do projeto. Muda o que o gate 2 pede a ele. */
   systemInstall?: boolean;
   maxCycles?: number;
+  /** Reparos assistidos pelo verificador. Só habilitar quando o provider tem ferramentas de escrita. */
+  maxVerifierRepairs?: number;
   maxLimitWaits?: number;
   commitsEnabled: boolean;
   announce?: (message: string) => void;
@@ -184,6 +190,10 @@ export const DEFAULT_MAX_LIMIT_WAITS = 20;
 
 export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> {
   const maxCycles = options.maxCycles ?? DEFAULT_MAX_CYCLES;
+  const maxVerifierRepairs = options.maxVerifierRepairs ?? 0;
+  if (!Number.isInteger(maxVerifierRepairs) || maxVerifierRepairs < 0 || maxVerifierRepairs > 10) {
+    throw new Error("maxVerifierRepairs deve ser um inteiro entre 0 e 10");
+  }
   const maxLimitWaits = options.maxLimitWaits ?? DEFAULT_MAX_LIMIT_WAITS;
   const announce = options.announce ?? (() => undefined);
   const sleep = options.sleep ?? ((seconds) => new Promise((resolve) => setTimeout(resolve, seconds * 1000)));
@@ -230,6 +240,11 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   let lastGate: GateName | null = null;
   let lastCause = "";
   let previousWroteNothing = false;
+  let verifierRepairs = 0;
+  let lastRepairGuidance = "";
+  // Um reparo pode atingir qualquer task. Depois dele nenhum DONE antigo substitui
+  // a leitura independente do estado atual, mesmo se a chamada terminou em erro.
+  let verificarTudo = false;
   /*
    * As VERSÕES de roteiro já contestadas, pelo sha do conteúdo.
    *
@@ -312,6 +327,45 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     }
   };
 
+  let preparacoesNode = 0;
+  let falhaNaPreparacaoNode = "";
+  let runtimeRecusado = false;
+  /** Uma instalação de infraestrutura por fase, sem pedir outra implementação. */
+  const prepararDependenciasNode = async (cycle: number, evidencia?: string): Promise<boolean> => {
+    if (preparacoesNode >= 1) return false;
+    let motivo: string;
+    if (evidencia !== undefined) {
+      if (!(await falhaDeInstalacaoNode(arvore, evidencia))) return false;
+      motivo = "G2 identificou dependência declarada ausente ou incompatibilidade do runtime Node";
+    } else {
+      const instalacao = await inspecionarInstalacaoNode(arvore);
+      if (instalacao.estado !== "ausente" && instalacao.estado !== "incompativel") return false;
+      motivo = instalacao.motivo;
+    }
+    preparacoesNode += 1;
+    const comando = await comandoDeInstalacao(arvore);
+    announce(`[${session.id}] preparando dependências do projeto antes de julgar a implementação: ${motivo}`);
+    await event("started", `preparação Node ${preparacoesNode}/1: ${motivo}`, cycle);
+    const instalacao = await (options.testRunner ?? defaultTestRunner)(comando, arvore).catch((erro: unknown) => ({
+      exitCode: 1,
+      output: erro instanceof Error ? erro.message : String(erro),
+    }));
+    await writeAtomic(`${paths.logs}/${session.id}.dependencies-prepare-${preparacoesNode}.log`, `$ ${comando}\n${instalacao.output}`);
+    if (instalacao.exitCode === 0) {
+      await registrarInstalacaoNode(arvore);
+      announce(`[${session.id}] dependências preparadas para o runtime atual; a suíte ainda precisa passar`);
+      return true;
+    }
+    const resumo = instalacao.output.split(/\r?\n/).slice(-80).join("\n");
+    runtimeRecusado = /\bEBADENGINE\b|Unsupported engine/i.test(instalacao.output);
+    falhaNaPreparacaoNode =
+      `A preparação automática de dependências falhou (código ${instalacao.exitCode}): ${comando}. ` +
+      `Corrija a instalação no projeto sem substituir testes ou afrouxar critérios. ` +
+      `Saída (últimas 80 linhas; log completo: ${session.id}.dependencies-prepare-${preparacoesNode}.log):\n${resumo}`;
+    announce(`[${session.id}] a preparação de dependências falhou; diagnóstico preservado para o executor e o reparo assistido`);
+    return false;
+  };
+
   let cicloCorrente = 1;
   try {
   for (let cycle = 1; cycle <= maxCycles; ) {
@@ -328,6 +382,15 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     // O engine roda antes de qualquer veredito: o gate 0 é o que está correndo
     // enquanto a sessão trabalha, e é o que a tela precisa mostrar por minutos.
     gate("G0", "corrente", cycle);
+    await prepararDependenciasNode(cycle);
+    if (runtimeRecusado) {
+      const cause = `O ambiente Node/npm foi recusado por engines. Reinicie a Capivara com uma versão compatível com o projeto; nenhuma sessão de construção foi iniciada.\n${falhaNaPreparacaoNode}`;
+      gate("G0", "neutro", cycle);
+      gate("G2", "vermelho", cycle);
+      await event("blocked", cause, cycle);
+      relatar({ kind: "phase", id: session.id, state: "falhou", cycle, detail: cause });
+      return { status: "failed", gate: "gate 2 — suíte do projeto", cause, cycles: cycle - 1 };
+    }
 
     /*
      * O runner de fluxos, dito ANTES de a sessão começar.
@@ -354,10 +417,16 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       ...(options.onMemorias ? { memoriasDir: MEMORIAS_DIR } : {}),
     };
 
-    const prompt =
+    const promptBase =
       cycle === 1
         ? implementPrompt(context)
-        : fixPrompt({ ...context, gate: lastGate ?? "gate 0 — engine", cause: lastCause, previousWroteNothing });
+        : fixPrompt({
+            ...context,
+            gate: lastGate ?? "gate 0 — engine",
+            cause: lastCause + (lastRepairGuidance ? `\n\nRelatório do último reparo assistido pelo verificador (confira os gates; o relatório não é aprovação):\n${lastRepairGuidance}` : ""),
+            previousWroteNothing,
+          });
+    const prompt = promptBase + (falhaNaPreparacaoNode ? `\n\n## Dependency preparation — unresolved environment failure\n${falhaNaPreparacaoNode}` : "");
 
     await writeAtomic(`${paths.prompts}/${session.id}.cycle-${cycle}.txt`, prompt);
 
@@ -394,7 +463,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
 
     // A fase pode ter acabado de criar a suíte. Perguntar de novo custa um
     // acesso a disco; não perguntar custa a fase inteira sem validação.
-    const testeAgora = options.resolveTest ? await options.resolveTest() : options.testCommand;
+    let testeAgora = options.resolveTest ? await options.resolveTest() : options.testCommand;
     if (testeAgora && testeAgora.command !== options.testCommand?.command) {
       announce(`[${session.id}] comando de teste detectado: ${testeAgora.command} (${testeAgora.source})`);
     }
@@ -403,7 +472,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     previousWroteNothing = !wrote;
     if (!wrote) announce(`[${session.id}] a sessão não escreveu nada; validando o código existente`);
 
-    const noChangeNote = wrote ? "" : "A sessão anterior terminou sem alterar nenhum arquivo. ";
+    let noChangeNote = wrote ? "" : "A sessão anterior terminou sem alterar nenhum arquivo. ";
 
     /*
      * G4 — a aplicação faz o que foi pedido.
@@ -412,9 +481,12 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
      * errada: abrir o produto para percorrer um fluxo que o código nem tem
      * gastaria uma sessão e um navegador para descobrir o que o gate 3 já sabia.
      */
+    let reparoDeFluxo = false;
     const passouNosFluxos = async (cycleAtual: number, contestacao?: string): Promise<boolean> => {
+      reparoDeFluxo = false;
       const fluxos = options.flows;
       if (!fluxos) return true;
+      const passagem = verifierRepairs > 0 ? `${cycleAtual}-after-repair-${verifierRepairs}` : `${cycleAtual}`;
 
       gate("G4", "corrente", cycleAtual);
       const g4 = await gate4({
@@ -438,7 +510,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
             }),
           });
           await writeAtomic(
-            `${paths.logs}/${session.id}.flow-${workflow.number}-${cycleAtual}.log`,
+            `${paths.logs}/${session.id}.flow-${workflow.number}-${passagem}.log`,
             resposta.stdout,
           );
           return resposta.stdout;
@@ -463,7 +535,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
               serverErrors: entrada.serverErrors,
             }),
           });
-          await writeAtomic(`${paths.logs}/${session.id}.triagem-${cycleAtual}-${triagensNoCiclo}.log`, resposta.stdout);
+          await writeAtomic(`${paths.logs}/${session.id}.triagem-${passagem}-${triagensNoCiclo}.log`, resposta.stdout);
           return resposta.stdout;
         },
         ...(fluxos.runner !== undefined ? { runner: fluxos.runner } : {}),
@@ -471,6 +543,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         ...(fluxos.preferredPort !== undefined ? { preferredPort: fluxos.preferredPort } : {}),
         announce: (message) => announce(`[${session.id}] ${message}`),
       });
+      reparoDeFluxo = !g4.green && g4.triagem?.tipo === "PRODUTO";
       triagensNoCiclo = 0;
       if (g4.green === false && g4.triagem?.tipo === "CRITERIO") {
         await registrarDecisaoDoBuild(options.projectRoot, session.id, cycleAtual, g4.triagem);
@@ -485,7 +558,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
        * produto precisa deixar a prova no lugar onde já se procura.
        */
       if (g4.output !== undefined && g4.output !== "") {
-        await writeAtomic(`${paths.logs}/${session.id}.flow-run-${cycleAtual}.log`, g4.output);
+        await writeAtomic(`${paths.logs}/${session.id}.flow-run-${passagem}.log`, g4.output);
       }
 
       gate("G4", g4.green ? "verde" : "vermelho", cycleAtual);
@@ -549,6 +622,55 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     }
     const contestacaoDoRoteiro = contestacao ?? undefined;
 
+    /**
+     * Reparar e julgar são sessões diferentes, ainda que usem o mesmo modelo.
+     * O orçamento pertence à fase e não renova a cada tentativa do executor.
+     * Instalar dependências pode corrigir G2 sem mudar arquivos versionados:
+     * quem confirma o reparo são os gates executados novamente, nunca a fala
+     * do reparador nem a presença de um diff.
+     */
+    const repararComVerificador = async (cause: string): Promise<boolean> => {
+      if (verifierRepairs >= maxVerifierRepairs) return false;
+      verifierRepairs += 1;
+      verificarTudo = true;
+      const tasks = tasksDaFase(session.markdown);
+      await options.aprovadas?.revogar(session.id, tasks, tasks.map((task) => task.index));
+      const repairPrompt = verifierRepairPrompt({
+        language: options.language,
+        phaseMarkdown: session.markdown,
+        cause,
+        testCommand: testeAgora?.command ?? null,
+        ...(context.e2eCommand ? { e2eCommand: context.e2eCommand } : {}),
+        systemInstall: options.systemInstall === true,
+      });
+      const nome = `${session.id}.repair-${verifierRepairs}-cycle-${cycle}`;
+      await writeAtomic(`${paths.prompts}/${nome}.txt`, repairPrompt);
+      announce(`[${session.id}] verificador corrigindo a falha (${verifierRepairs}/${maxVerifierRepairs}); os gates serão executados novamente por sessões independentes`);
+      await event("retry", `reparo ${verifierRepairs}/${maxVerifierRepairs} pelo verificador: ${cause.split("\n")[0] ?? ""}`, cycle);
+      gate("G0", "corrente", cycle);
+      const repairSignatureBefore = await treeSignature(arvore);
+      const repair = await chamarLeitor({ role: "verifier", repair: true, phase: session, attempt: cycle, prompt: repairPrompt });
+      lastRepairGuidance = `${repair.stdout}\n${repair.stderr}`.trim();
+      await writeAtomic(`${paths.logs}/${nome}.log`, `${repair.stdout}\n${repair.stderr}`);
+      const repairWrote = gate1(repairSignatureBefore, await treeSignature(arvore));
+      gate("G1", repairWrote ? "verde" : "neutro", cycle);
+      if (repairWrote) {
+        previousWroteNothing = false;
+        noChangeNote = "";
+      }
+      const reparoTerminou = gate0(repair, options.engine);
+      gate("G0", reparoTerminou.green ? "verde" : "vermelho", cycle);
+      if (!reparoTerminou.green) {
+        // O trabalho parcial fica na árvore. A correção seguinte recebe o
+        // diagnóstico original e o erro desta tentativa, sem afirmar sucesso.
+        lastCause = `${cause}\n\nO reparo assistido pelo verificador não concluiu: ${reparoTerminou.cause}`;
+        announce(`[${session.id}] reparo do verificador não concluiu; o trabalho foi preservado para o executor`);
+        return false;
+      }
+      if (options.resolveTest) testeAgora = await options.resolveTest();
+      return true;
+    };
+
     const g0 = gate0(result, options.engine);
     gate("G0", g0.green ? "verde" : "vermelho", cycle);
     /*
@@ -566,81 +688,93 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       lastGate = g0.gate;
       lastCause = g0.cause;
     } else {
-      /*
-       * Antes de qualquer gate rodar o produto: configuração e esquema.
-       *
-       * Aqui e não no preflight porque quem entrega o `.env.example` e a
-       * migração é o executor, e ele os entrega no meio da fase. A cada ciclo
-       * porque cada fase acrescenta tabela.
-       */
-      const ambiente = await prepararAmbiente(arvore, options.testRunner ?? defaultTestRunner);
-      for (const aviso of ambiente.anuncios) announce(`[${session.id}] ${aviso}`);
-      /*
-       * A saída da migração vai ao disco SEMPRE que ela roda.
-       *
-       * Ela saía só na tela, e a tela corta: no `assitencia` a linha terminou em
-       * "> gestao-assistencia-tec…" e a causa real não existia em lugar nenhum.
-       * Mensagem que só cabe na tela é mensagem que se perde no primeiro caso
-       * interessante.
-       */
-      if (ambiente.saidaDaMigracao !== "") {
-        await writeAtomic(`${paths.logs}/${session.id}.migrate-${cycle}.log`, ambiente.saidaDaMigracao);
-      }
-
-      gate("G2", "corrente", cycle);
-      const g2 = await gate2(arvore, testeAgora?.command ?? null, options.testRunner, options.systemInstall === true);
-      gate("G2", g2.green ? "verde" : "vermelho", cycle);
-      if (!g2.green) {
-        lastGate = g2.gate;
-        // Ferramenta ausente não ganha o prefixo de "não escreveu nada": a sessão
-        // corretamente não mexeu no código, porque o defeito é de ambiente.
-        lastCause = g2.toolMissing === true ? g2.cause : `${noChangeNote}${g2.cause}`;
-        if (g2.toolMissing === true) {
-          announce(
-            `[${session.id}] o runner de testes não está instalado; ` +
-              (options.systemInstall === true
-                ? "o executor tem acesso de sistema para instalá-lo"
-                : "o executor vai instalá-lo como dependência do projeto"),
-          );
-        }
-      } else {
-        if (g2.skipped) announce(`[${session.id}] gate 2 pulado: nenhum comando de teste resolvido`);
-        gate("G3", "corrente", cycle);
+      for (;;) {
         /*
-         * O inventário mecânico dos testes nomeados, antes de gastar o
-         * verificador. Ele não decide nada — decide quem lê o código —, mas
-         * entrega todos os buracos de uma vez, em vez de um por ciclo.
-         */
-        const nomeados = await procurarTestesNomeados(arvore, featureTestNames(session.markdown));
-        const semNome = nomeados.filter((teste) => !teste.found);
-        if (semNome.length > 0) {
-          announce(`[${session.id}] testes nomeados que não existem na árvore: ${semNome.map((teste) => teste.name).join(", ")}`);
-        }
-
-        /*
-         * O que já passou não volta à fila.
+         * Antes de qualquer gate rodar o produto: configuração e esquema.
          *
-         * O verificador é sem memória, e é o que o torna independente. Mas
-         * reperguntar sobre um código que ninguém tocou não é independência: é
-         * pagar por um sorteio. Medido em P01 do `assitencia`: três ciclos, seis
-         * tasks diferentes, nunca mais de duas por vez, todas fechadas — e duas
-         * novas em cada volta, entre as que ele mesmo havia aprovado.
+         * Aqui e não no preflight porque quem entrega o `.env.example` e a
+         * migração é o executor, e ele os entrega no meio da fase. A cada ciclo
+         * porque cada fase acrescenta tabela.
          */
-        const tasksDestaFase = tasksDaFase(session.markdown);
-        const jaAprovadas = options.aprovadas?.jaAprovadas(session.id, tasksDestaFase) ?? [];
-        const indicesAprovados = new Set(jaAprovadas.map((task) => task.index));
-        if (jaAprovadas.length > 0) {
-          announce(
-            `[${session.id}] ${jaAprovadas.length} de ${session.taskCount} task(s) já verificadas com este texto; ` +
-              "não vou reperguntar sobre elas",
-          );
+        const ambiente = await prepararAmbiente(arvore, options.testRunner ?? defaultTestRunner);
+        for (const aviso of ambiente.anuncios) announce(`[${session.id}] ${aviso}`);
+        /*
+         * A saída da migração vai ao disco SEMPRE que ela roda.
+         *
+         * Ela saía só na tela, e a tela corta: no `assitencia` a linha terminou em
+         * "> gestao-assistencia-tec…" e a causa real não existia em lugar nenhum.
+         * Mensagem que só cabe na tela é mensagem que se perde no primeiro caso
+         * interessante.
+         */
+        const passagem = verifierRepairs > 0 ? `${cycle}-after-repair-${verifierRepairs}` : `${cycle}`;
+        if (ambiente.saidaDaMigracao !== "") {
+          await writeAtomic(`${paths.logs}/${session.id}.migrate-${passagem}.log`, ambiente.saidaDaMigracao);
         }
 
-        const verification = await chamarLeitor({
-          role: "verifier",
-          phase: session,
-          attempt: cycle,
-          prompt: verifyPrompt({
+        if (await prepararDependenciasNode(cycle)) {
+          if (options.resolveTest) testeAgora = await options.resolveTest();
+        }
+        gate("G2", "corrente", cycle);
+        const g2 = await gate2(arvore, testeAgora?.command ?? null, options.testRunner, options.systemInstall === true);
+        gate("G2", g2.green ? "verde" : "vermelho", cycle);
+        if (!g2.green) {
+          if (await prepararDependenciasNode(cycle, g2.cause)) {
+            if (options.resolveTest) testeAgora = await options.resolveTest();
+            continue;
+          }
+          lastGate = g2.gate;
+          // Ferramenta ausente não ganha o prefixo de "não escreveu nada": a sessão
+          // corretamente não mexeu no código, porque o defeito é de ambiente.
+          lastCause = (g2.toolMissing === true ? g2.cause : `${noChangeNote}${g2.cause}`) +
+            (falhaNaPreparacaoNode ? `\n\n${falhaNaPreparacaoNode}` : "");
+          if (g2.toolMissing === true) {
+            announce(
+              `[${session.id}] o runner de testes não está instalado; ` +
+                (options.systemInstall === true
+                  ? "o executor tem acesso de sistema para instalá-lo"
+                  : "o executor vai instalá-lo como dependência do projeto"),
+            );
+          }
+          if (await repararComVerificador(lastCause)) continue;
+          break;
+        } else {
+          if (!g2.skipped) {
+            await registrarInstalacaoNode(arvore);
+            falhaNaPreparacaoNode = "";
+          }
+          if (g2.skipped) announce(`[${session.id}] gate 2 pulado: nenhum comando de teste resolvido`);
+          gate("G3", "corrente", cycle);
+          /*
+           * O inventário mecânico dos testes nomeados, antes de gastar o
+           * verificador. Ele não decide nada — decide quem lê o código —, mas
+           * entrega todos os buracos de uma vez, em vez de um por ciclo.
+           */
+          const nomeados = await procurarTestesNomeados(arvore, featureTestNames(session.markdown));
+          const semNome = nomeados.filter((teste) => !teste.found);
+          if (semNome.length > 0) {
+            announce(`[${session.id}] testes nomeados que não existem na árvore: ${semNome.map((teste) => teste.name).join(", ")}`);
+          }
+
+          /*
+           * O que já passou não volta à fila.
+           *
+           * O verificador é sem memória, e é o que o torna independente. Mas
+           * reperguntar sobre um código que ninguém tocou não é independência: é
+           * pagar por um sorteio. Medido em P01 do `assitencia`: três ciclos, seis
+           * tasks diferentes, nunca mais de duas por vez, todas fechadas — e duas
+           * novas em cada volta, entre as que ele mesmo havia aprovado.
+           */
+          const tasksDestaFase = tasksDaFase(session.markdown);
+          const jaAprovadas = verificarTudo ? [] : options.aprovadas?.jaAprovadas(session.id, tasksDestaFase) ?? [];
+          const indicesAprovados = new Set(jaAprovadas.map((task) => task.index));
+          if (jaAprovadas.length > 0) {
+            announce(
+              `[${session.id}] ${jaAprovadas.length} de ${session.taskCount} task(s) já verificadas com este texto; ` +
+                "não vou reperguntar sobre elas",
+            );
+          }
+
+          const verificationPrompt = verifyPrompt({
             language: options.language,
             phaseMarkdown: session.markdown,
             taskCount: session.taskCount,
@@ -648,58 +782,76 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
             ...(jaAprovadas.length > 0
               ? { tasksJaAprovadas: jaAprovadas.map((task) => ({ index: task.index, title: task.title })) }
               : {}),
-          }),
-        });
-        await writeAtomic(`${paths.logs}/${session.id}.verify-${cycle}.log`, verification.stdout);
+          });
+          await writeAtomic(`${paths.prompts}/${session.id}.verify-${passagem}.txt`, verificationPrompt);
+          const verification = await chamarLeitor({
+            role: "verifier",
+            phase: session,
+            attempt: cycle,
+            prompt: verificationPrompt,
+          });
+          await writeAtomic(`${paths.logs}/${session.id}.verify-${passagem}.log`, `${verification.stdout}\n${verification.stderr}`);
+          const g0Verifier = gate0(verification, options.engine);
+          if (!g0Verifier.green) {
+            gate("G3", "vermelho", cycle);
+            lastGate = g0Verifier.gate;
+            lastCause = `A sessão de verificação independente não concluiu: ${g0Verifier.cause}`;
+            break;
+          }
 
-        const g3 = gate3(verification.stdout, session.taskCount, indicesAprovados);
-        /*
-         * Desconsiderar não pode ser calado: o texto fica no log da verificação e
-         * a linha sai na tela. Se o veredito velho estiver errado, é aqui que o
-         * desenvolvedor vê o rastro.
-         */
-        for (const reaberta of g3.reabertas) {
-          announce(`[${session.id}] TASK ${reaberta.index} já estava aprovada e foi reaberta pelo verificador: ${reaberta.missing}`);
-        }
-        /*
-         * A reaberta sai do registro: no ciclo seguinte ela volta a ser verificada,
-         * em vez de aparecer na lista do que o verificador não precisa olhar.
-         */
-        if (g3.reabertas.length > 0) {
-          await options.aprovadas?.revogar(session.id, tasksDestaFase, g3.reabertas.map((task) => task.index));
-        }
-        if (g3.done.length > 0) await options.aprovadas?.aprovar(session.id, tasksDestaFase, g3.done, cycle, now);
-        gate("G3", g3.green ? "verde" : "vermelho", cycle);
-        if (!g3.green) {
-          lastGate = g3.gate;
-          lastCause = `${noChangeNote}${g3.cause}`;
-        } else if (!(await passouNosFluxos(cycle, contestacaoDoRoteiro))) {
-          // A causa já foi registrada por `passouNosFluxos`; o ciclo segue.
-        } else {
-          const commit = options.commitsEnabled
-            ? await commitPhase(arvore, session.number, session.title)
-            : { committed: false, message: "commits desabilitados: nenhum repositório Git" };
+          const g3 = gate3(verification.stdout, session.taskCount, indicesAprovados);
+          /*
+           * Desconsiderar não pode ser calado: o texto fica no log da verificação e
+           * a linha sai na tela. Se o veredito velho estiver errado, é aqui que o
+           * desenvolvedor vê o rastro.
+           */
+          for (const reaberta of g3.reabertas) {
+            announce(`[${session.id}] TASK ${reaberta.index} já estava aprovada e foi reaberta pelo verificador: ${reaberta.missing}`);
+          }
+          /*
+           * A reaberta sai do registro: no ciclo seguinte ela volta a ser verificada,
+           * em vez de aparecer na lista do que o verificador não precisa olhar.
+           */
+          if (g3.reabertas.length > 0) {
+            await options.aprovadas?.revogar(session.id, tasksDestaFase, g3.reabertas.map((task) => task.index));
+          }
+          if (g3.done.length > 0) await options.aprovadas?.aprovar(session.id, tasksDestaFase, g3.done, cycle, now);
+          gate("G3", g3.green ? "verde" : "vermelho", cycle);
+          if (!g3.green) {
+            lastGate = g3.gate;
+            lastCause = `${noChangeNote}${g3.cause}`;
+            if (g3.repairable === true && await repararComVerificador(lastCause)) continue;
+            break;
+          } else if (!(await passouNosFluxos(cycle, contestacaoDoRoteiro))) {
+            // A causa já foi registrada por `passouNosFluxos`; o ciclo segue.
+            if (reparoDeFluxo && await repararComVerificador(lastCause)) continue;
+            break;
+          } else {
+            const commit = options.commitsEnabled
+              ? await commitPhase(arvore, session.number, session.title)
+              : { committed: false, message: "commits desabilitados: nenhum repositório Git" };
 
-          if (commit.bloqueios && commit.bloqueios.length > 0) {
+            if (commit.bloqueios && commit.bloqueios.length > 0) {
+              await recolher(cycle);
+              await event("blocked", `commit bloqueado: ${commit.bloqueios.map((bloqueio) => bloqueio.caminho).join(", ")}`, cycle);
+              relatar({ kind: "phase", id: session.id, state: "falhou", cycle, detail: "commit bloqueado" });
+              announce(`[${session.id}] gates verdes, mas o commit foi BLOQUEADO — ${commit.message}`);
+              return { status: "commit-blocked", bloqueios: commit.bloqueios, cause: commit.message, cycles: cycle };
+            }
+
+            if (!commit.committed && commit.message.includes("já estava implementada")) {
+              await concluir("já implementada em HEAD", cycle);
+              relatar({ kind: "phase", id: session.id, state: "concluído", cycle, detail: "já implementada" });
+              announce(`[${session.id}] JÁ IMPLEMENTADA — gates verdes, nada a commitar`);
+              return { status: "already-implemented", cycles: cycle };
+            }
+
             await recolher(cycle);
-            await event("blocked", `commit bloqueado: ${commit.bloqueios.map((bloqueio) => bloqueio.caminho).join(", ")}`, cycle);
-            relatar({ kind: "phase", id: session.id, state: "falhou", cycle, detail: "commit bloqueado" });
-            announce(`[${session.id}] gates verdes, mas o commit foi BLOQUEADO — ${commit.message}`);
-            return { status: "commit-blocked", bloqueios: commit.bloqueios, cause: commit.message, cycles: cycle };
+            await concluir(commit.message, cycle);
+            relatar({ kind: "phase", id: session.id, state: "concluído", cycle, detail: commit.committed ? "commitada" : "completa" });
+            announce(`[${session.id}] COMPLETA${commit.committed ? ` — ${commit.message}` : ""}`);
+            return { status: "complete", committed: commit.committed, message: commit.message, cycles: cycle };
           }
-
-          if (!commit.committed && commit.message.includes("já estava implementada")) {
-            await concluir("já implementada em HEAD", cycle);
-            relatar({ kind: "phase", id: session.id, state: "concluído", cycle, detail: "já implementada" });
-            announce(`[${session.id}] JÁ IMPLEMENTADA — gates verdes, nada a commitar`);
-            return { status: "already-implemented", cycles: cycle };
-          }
-
-          await recolher(cycle);
-          await concluir(commit.message, cycle);
-          relatar({ kind: "phase", id: session.id, state: "concluído", cycle, detail: commit.committed ? "commitada" : "completa" });
-          announce(`[${session.id}] COMPLETA${commit.committed ? ` — ${commit.message}` : ""}`);
-          return { status: "complete", committed: commit.committed, message: commit.message, cycles: cycle };
         }
       }
     }

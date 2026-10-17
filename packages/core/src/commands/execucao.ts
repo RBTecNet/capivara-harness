@@ -11,6 +11,7 @@
 
 import {
   conferirAgentes,
+  conferirWorkspace,
   lerArquivoDeExecucao,
   papeisDosAgentes,
   resolverEstrategia,
@@ -67,6 +68,8 @@ export async function prepararExecucao(options: {
   /** O build permite instalar no sistema (`--no-system-install` desliga). */
   systemInstall: boolean;
   instalado?: (provider: string) => Promise<boolean>;
+  /** O contrato do workspace, por plataforma e PATH (§106); injetável nos testes. */
+  workspace?: { platform?: NodeJS.Platform; noPath?: (binario: string) => Promise<boolean> };
 }): Promise<ExecucaoPreparada> {
   const resolvida = resolverEstrategia(options.flags, await lerArquivoDeExecucao(options.projectRoot));
   if (!resolvida.ok) return { ok: false, erros: resolvida.erros };
@@ -74,12 +77,21 @@ export async function prepararExecucao(options: {
   const { estrategia, origem } = resolvida;
   const avisos = resolvida.avisos.map((aviso) => `aviso: ${aviso}`);
   if (estrategia.mode === "serial") {
+    const contrato = await conferirWorkspace(
+      [{ nome: "executor", provider: options.roles.builder.provider, systemInstall: options.systemInstall }],
+      options.workspace,
+    );
+    if (contrato.erros.length > 0) return { ok: false, erros: ["o build não pode começar com este executor:", ...contrato.erros.map((erro) => `  · ${erro}`)] };
+    const limitacoes = contrato.limitacoes.map((limitacao) => `limitação: ${limitacao}`);
     return {
       ok: true,
       estrategia,
       origem,
       agentes: [],
-      resumo: origem === "padrão" ? avisos : [`execução: serial, uma fase por vez (${DE_ONDE[origem]})`, ...avisos],
+      resumo:
+        origem === "padrão" && limitacoes.length === 0
+          ? avisos
+          : [`execução: serial, uma fase por vez (${DE_ONDE[origem]})`, ...limitacoes, ...avisos],
     };
   }
 
@@ -103,17 +115,33 @@ export async function prepararExecucao(options: {
     systemInstall: options.systemInstall && agente.systemInstall !== false,
     label: rotuloDoAgente(agente.config),
   }));
+  const contrato = await conferirWorkspace(
+    agentes.map((agente, indice) => ({ nome: `agente ${indice + 1}`, provider: agente.config.provider, systemInstall: agente.systemInstall })),
+    options.workspace,
+  );
+  if (contrato.erros.length > 0) {
+    return {
+      ok: false,
+      erros: [
+        "a execução paralela não pode começar com estes agentes:",
+        ...contrato.erros.map((erro) => `  · ${erro}`),
+        "",
+        `Ajuste com --worker, no wizard, ou em ${ARQUIVO_DE_EXECUCAO}; ou rode com --serial.`,
+      ],
+    };
+  }
   const verificador = options.roles.verifier;
   const resumo = [
     `execução: paralela, até ${estrategia.maxConcurrency} agentes ao mesmo tempo (${DE_ONDE[origem]})`,
     ...agentes.map(
       (agente, indice) =>
-        `  agente ${indice + 1}: ${agente.label}${options.systemInstall && !agente.systemInstall ? " · sem instalar no sistema" : ""}` +
+        `  agente ${indice + 1}: ${agente.label}${options.systemInstall && !agente.systemInstall ? " · nível workspace, sem acesso de sistema" : ""}` +
         `${estrategia.workers[indice] ? "" : " (o executor)"}`,
     ),
     `  o verificador continua um só, independente de quem construiu: ${rotuloDoAgente(verificador)}`,
     "  quem decide qual fase vai para qual agente é o escalonador, pelo Depends on do plano",
     ...conferencia.limitacoes.map((limitacao) => `limitação: ${limitacao}`),
+    ...contrato.limitacoes.map((limitacao) => `limitação: ${limitacao}`),
     ...avisos,
   ];
   return { ok: true, estrategia, origem, agentes, resumo };

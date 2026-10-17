@@ -66,4 +66,9 @@ export const agyAdapter = {
     if (access === "workspace") args.push("--sandbox");
     return { args };
   },
+  // Sem a CLI nesta máquina, nada disto foi conferido (§106).
+  workspace: () => ({
+    estado: "nao-verificado",
+    motivo: "o `--sandbox` do agy no nível workspace não foi verificado: rede e confinamento dependem da CLI",
+  }),
 } as const satisfies CliAdapter;

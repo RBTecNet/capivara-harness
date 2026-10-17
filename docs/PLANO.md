@@ -6985,3 +6985,177 @@ Testes:
 - `test/integration/cwd-do-executor.spec.ts`: um claude falso devolve o
   próprio cwd pela ponte. Com o código anterior, devolve `packages/core` em
   vez do worktree, a mesma falha do piloto.
+
+## §106 — O nível workspace do executor tem contrato, e o claude o cumpre com o sandbox nativo
+
+No `teste_haiku_v2` (run `build-96756ca336b0`), o executor Claude em
+workspace recebia só `acceptEdits`. Em `-p`, todo Bash que não fosse de
+leitura era negado, a especificação não chegava ao worktree, e três ciclos
+foram cobrados como código incompleto
+(`docs/DIAGNOSTICO-PERMISSOES-CLAUDE-WORKSPACE.md`).
+
+Decisão: o nível workspace roda comandos, alcança a internet, instala
+dependências e não escreve fora do projeto, sem acesso irrestrito e sem mexer
+no Git do Core. Cada adapter declara `workspace(platform)`:
+
+- `garantido`;
+- `insuficiente`: o preflight serial e o paralelo recusam, com diagnóstico;
+- `nao-verificado`: o build segue e declara a limitação.
+
+Nem a rede é tirada, nem o acesso é promovido, em silêncio.
+
+O que mudou:
+
+- **Claude, workspace:** recebe `--settings` com o sandbox nativo:
+  - `failIfUnavailable`, `allowUnsandboxedCommands: false` e
+    `allowedDomains: ["*"]`;
+  - os caches do npm e do Playwright graváveis;
+  - `denyWrite` do `.git` comum, de `.capivara/init` e de `.capivara/runs`;
+  - no Linux, `allowAllUnixSockets` com `/run` e `/tmp` ilegíveis, porque o
+    seccomp não sobe neste kernel e, sem máscara, `systemd-run --user`
+    escapava;
+  - credenciais conhecidas ilegíveis e chaves removidas do ambiente;
+  - um `TMPDIR` por chamada, fora de `/tmp`.
+- **`abrirWorktree`:** copia `.capivara/init` não versionada, com os
+  arquivos em 0444.
+- **Envelope `claude-json`:** expõe `permission_denials` como "ferramenta:
+  programa", sem argumentos. O executor com negações e sem COMPLETE para no
+  ciclo, como falha do gate 0, com causa de ambiente; o parcial segue o
+  caminho de sempre.
+- **Codex e opencode no workspace:** são recusados. O codex não entrega rede
+  e confinamento juntos (fuga comprovada com rede); o opencode não tem
+  sandbox.
+
+Os gates G0–G4 não mudaram. As garantias comprovadas, a matriz de sondas com
+os providers reais e as limitações estão em `docs/GARANTIAS-WORKSPACE-106.md`.
+A principal limitação: o sandbox contém a sessão do executor, mas G2 e G4
+executam o código que ele escreveu fora de qualquer sandbox.
+
+## §107 — O gate 4 diz como sobe a aplicação, e a porta ocupada é atribuída a quem a abriu
+
+No build paralelo `build-96756ca336b0`, P03, P04 e P05 bloquearam no gate 4.
+O gate sobe a aplicação com `npm start` e passa a porta em `PORT`, mas a
+aplicação lia `PORTA` e escutava na 3001. O contrato só aparecia na causa de
+"NÃO SUBIU", que saiu no terceiro e último ciclo e por isso nunca chegou a um
+executor. A causa do ciclo 2 pedia um `start` e não falava em porta.
+
+No ciclo 3, a P05 recebeu `EADDRINUSE 127.0.0.1:3001`, porque o gate 4 da P04
+já tinha um servidor na 3001. O gate, que procurava "porta ocupada" em qualquer
+parte da saída, respondeu "a porta 47535 foi ocupada… do ambiente". Atribuiu
+a porta errada a um dono errado. O diagnóstico está em
+`docs/DIAGNOSTICO-G4-PORTAS-PARALELO.md`.
+
+Três mudanças, sem tocar no scheduler, nos worktrees, nas permissões do §106 ou
+nos critérios dos gates:
+
+1. **O contrato vai no prompt.** Toda fase que passa pelo gate 4 (fluxos
+   próprios ou de regressão) recebe o contrato no prompt do executor, desde o
+   primeiro ciclo e também nos de correção. O gate roda o `start` do manifesto
+   (`npm start` em Node), com `PORT` e `HOST` no ambiente. O projeto pode
+   manter os próprios nomes, desde que o entrypoint honre esses dois. A fase
+   sem gate 4 não recebe nada. A causa da falta de entrypoint também passa a
+   citar `PORT` e `HOST`.
+2. **A porta ocupada é atribuída pelo número na saída.** `portasEmUso` lê o fim
+   da linha que acusa o uso (`listen EADDRINUSE … :3001` no Node e
+   `http://…:47535 is already used` no Playwright).
+   - **A porta é a do gate:** a falha é do ambiente.
+   - **É outra porta:** a falha é configuração do entrypoint. A causa diz qual
+     porta a aplicação tentou abrir e qual `PORT`/`HOST` o gate forneceu.
+   - **Sem número legível:** a causa diz que a saída não informa a porta e não
+     atribui a falha a ninguém.
+3. **A porta do gate tomada troca uma vez, dentro da mesma chamada.** O gate
+   escolhe outra porta livre, reescreve a configuração e roda a passagem de
+   novo uma única vez, sem gastar ciclo do executor. O roteiro não é reescrito,
+   porque usa caminho relativo, e nenhum processo de terceiro é tocado. Se a
+   porta for tomada de novo, a causa é de ambiente e cita a porta efetiva.
+   Colisão na porta da aplicação nunca troca a porta do gate.
+
+Nenhum formato persistido mudou. A retomada e as fases já integradas seguem
+como antes, e um run retomado recebe o contrato no próximo prompt de ciclo.
+
+Fica documentado, fora do escopo:
+- **Portas fixas na suíte do projeto.** A suíte do `teste_haiku_v2`
+  (`servidor.test.ts`) abre a 3001 e a 5173 fixas. Isso é risco de colisão no
+  gate 2 entre fases paralelas, e entre o gate 2 de uma fase e o gate 4 de
+  outra. É do projeto, e nada mudou no harness por isso.
+- **Só o `start` serve de entrypoint.** `startCommandFor` só reconhece
+  `scripts.start`, então um projeto com `iniciar` continua precisando declarar
+  `start`. Agora isso é dito antes do ciclo 1, mas a descoberta não mudou.
+- **Duas trocas simultâneas.** Dois gates que troquem de porta ao mesmo tempo
+  pedem portas efêmeras ao sistema e podem, em tese, receber a mesma. A
+  segunda colisão é relatada como ambiente.
+
+Nada disto foi comprovado num build real com o Haiku. A prova é dos testes,
+com runners e portas simulados.
+
+Testes:
+- `test/loop/runner.spec.ts`:
+  - "a fase com fluxo recebe npm start, PORT e HOST na primeira sessão";
+  - "a fase sem fluxo não recebe o contrato".
+- `test/loop/flows.spec.ts`:
+  - "EADDRINUSE na porta da aplicação é configuração do entrypoint, e não
+    troca a porta do gate", com o caso do run: 3001 contra 47535;
+  - "porta do gate tomada uma vez: outra porta, a mesma chamada, verde —
+    nenhum ciclo do executor";
+  - "porta do gate tomada duas vezes é dita como ambiente", que adapta o teste
+    anterior: o runner falso agora acusa a porta que o gate de fato escreveu;
+  - "porta ocupada sem número legível não é atribuída a ninguém";
+  - "dois gates simultâneos se recuperam cada um na sua árvore";
+  - a extração de `portasEmUso`.
+- Contra o código anterior, 7 desses testes falham. O de fase sem fluxo passa
+  nos dois, como deve.
+
+## §108 — O executor claude roda com `--dangerously-skip-permissions`
+
+O §106 pôs o executor claude em `acceptEdits` dentro do sandbox nativo do
+Claude Code. No `teste_haiku_v2` isso ainda mandava para aprovação comandos
+normais de desenvolvimento, como `| tail`, `| head`, `timeout`, variável na
+frente do comando e laços. Em `-p`, aprovação pendente é negação. O operador
+decidiu que o executor precisa rodar Bash, npm, pipes, laços, compilação e
+testes livremente, sem aprovação interativa.
+
+**O que mudou:**
+- **Executor claude no nível workspace:** recebe
+  `--dangerously-skip-permissions`, sem `--permission-mode acceptEdits` e sem
+  o `--settings` do sandbox. A montagem do sandbox (`sandboxDoWorkspace`, as
+  listas de sockets, credenciais e variáveis) saiu do adaptador. O
+  temporário próprio da chamada (`TMPDIR`) continua, porque o prompt manda o
+  rascunho para lá.
+- **Os outros papéis não mudam.** Os somente-leitura (writer, auditor e
+  verifier) seguem em `--permission-mode default`, e o acesso de sistema
+  segue em `bypassPermissions`. As outras CLIs não mudam, e nada mexe em
+  configuração global do Claude Code.
+- **`permission_denials` deixou de parar a fase.** A negação é anunciada
+  ("comando(s) negado(s) por permissão: … — registrado, a fase segue para os
+  gates") e fica no log do ciclo, que guarda o envelope inteiro. A fase segue
+  para os gates como qualquer outra sessão. A parada `PermissaoNegada` do
+  §106 saiu.
+- **O contrato do claude não promete confinamento.** Ele vale
+  `nao-verificado` em toda plataforma, sem dependência de `bwrap`/`socat`, e
+  o preflight passa a mostrar a limitação no resumo do build.
+
+**O preço, dito sem rodeio:** o executor claude tem acesso amplo ao sistema,
+à rede e aos arquivos do usuário. Pode ler credenciais do home, alcançar
+sockets locais, escrever fora do projeto e rodar o que quiser. É o mesmo
+alcance do acesso de sistema, só que sem precisar do `systemInstall`. O que
+continua com o harness é o que ele já fazia fora da sessão:
+- os gates G0–G4;
+- a verificação independente;
+- a autoridade Git do Core, com a conferência de referências depois de cada
+  chamada (§101);
+- a fila de integração.
+
+O scheduler paralelo não mudou.
+
+Testes atualizados:
+- `test/provider/adapters.spec.ts`: o executor recebe a flag, sem
+  `--permission-mode` e sem `--settings`; os papéis somente-leitura não a
+  recebem; o temporário próprio continua; o contrato diz "acesso amplo".
+- `test/loop/runner.spec.ts`: a negação não para a fase, o verificador julga
+  e nenhum evento `blocked` aparece.
+- `test/loop/paralelo.spec.ts`: a negação é anunciada e a fase segue para os
+  gates no worktree dela.
+- `test/commands/execucao.spec.ts`: o claude começa sem `bwrap`, e o resumo
+  diz que o executor tem acesso amplo.
+- `test/integration/workspace-claude.spec.ts`: pela ponte, a CLI falsa
+  recebe a flag e nenhum `--settings`.

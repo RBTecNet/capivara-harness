@@ -418,6 +418,47 @@ describe("o runner de fluxos é dito antes, não depois", () => {
 });
 
 /*
+ * §107: no `build-96756ca336b0` o contrato do gate 4 só aparecia na causa do
+ * último ciclo, e P03, P04 e P05 bloquearam com a aplicação na 3001 da `PORTA`.
+ */
+describe("o contrato de subida do gate 4 é dito desde o primeiro ciclo", () => {
+  async function primeiroPrompt(workflows: { number: string; name: string; steps: string[] }[]) {
+    const chamadas: EngineCall[] = [];
+    await runPhase({
+      projectRoot,
+      runId: RUN,
+      language: "pt-BR",
+      engine: "codex",
+      session: session(),
+      testCommand: null,
+      commitsEnabled: false,
+      maxCycles: 1,
+      sleep: async () => undefined,
+      flows: { workflows, resolveStart: async () => null, runner: async () => ({ exitCode: 0, output: "" }) },
+      call: async (call) => {
+        chamadas.push(call);
+        return ok(call.role === "verifier" ? "CAPIVARA_VERIFY: 1.1 | DONE | pronto" : "feito");
+      },
+      testRunner: async () => ({ exitCode: 0, output: "" }),
+    });
+    return chamadas.find((chamada) => chamada.role === "builder")?.prompt ?? "";
+  }
+
+  it("a fase com fluxo recebe npm start, PORT e HOST na primeira sessão", async () => {
+    const prompt = await primeiroPrompt([{ number: "1", name: "Cadastro", steps: ["abre", "salva"] }]);
+    expect(prompt).toContain("`npm start`");
+    expect(prompt).toContain("`PORT` and `HOST`");
+    expect(prompt).toContain("listens on a fixed port fails the gate");
+  });
+
+  it("a fase sem fluxo não recebe o contrato", async () => {
+    const prompt = await primeiroPrompt([]);
+    expect(prompt).not.toBe("");
+    expect(prompt).not.toContain("How the application is started for the flow gate");
+  });
+});
+
+/*
  * O P02 do `assistencia2`: o codex começou a responder `401 Unauthorized:
  * Incorrect API key` no meio do build. O verificador do ciclo 2 recebeu isso, não
  * emitiu linha nenhuma, e o gate 3 contou como reprovação; o executor do ciclo 3
@@ -464,6 +505,38 @@ describe("credencial recusada pelo provider", () => {
     const { outcome } = await phase({
       builder: async () =>
         ok(["implementei a rota de anexos", "✓ GET /anexos sem sessão responde 401 Unauthorized", "✓ 38 passed", "feito"].join("\n")),
+    });
+    expect(outcome.status).toBe("complete");
+  });
+});
+
+/*
+ * §108: a negação de permissão é diagnóstico, não parada. O §106 parava a fase
+ * quando a sessão negada não concluía; com o executor liberado, quem julga o
+ * que ficou são os gates, como em qualquer outra sessão.
+ */
+describe("comandos negados por permissão ao executor", () => {
+  const negado = (): EngineResult => ({
+    ...ok("Não consegui rodar npm: todo comando pediu aprovação. Não emiti a conclusão."),
+    negacoes: ["Bash: npm", "Bash: node"],
+  });
+
+  it("não pára a fase: ela segue para os gates, e o verificador julga", async () => {
+    const { outcome, calls } = await phase({ builder: async () => negado() });
+    expect(outcome.status).toBe("complete");
+    expect(calls.filter((call) => call.role === "verifier").length).toBeGreaterThan(0);
+  });
+
+  it("nenhuma parada de permissão no log de eventos", async () => {
+    await phase({ builder: async () => negado() });
+    const events = await readEvents(runPaths(projectRoot, RUN).events);
+    expect(events.some((evento) => evento.status === "blocked")).toBe(false);
+    expect(events.some((evento) => evento.detail.includes("permissão negada"))).toBe(false);
+  });
+
+  it("quem declarou conclusão segue para os gates: a negação não o impediu", async () => {
+    const { outcome } = await phase({
+      builder: async () => ({ ...ok("feito\nCAPIVARA_BUILDER_STATUS: COMPLETE"), negacoes: ["Bash: npm"] }),
     });
     expect(outcome.status).toBe("complete");
   });

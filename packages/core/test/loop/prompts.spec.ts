@@ -17,6 +17,15 @@ describe("prompt de implementação", () => {
     expect(prompt).toContain("Writing there invalidates this attempt");
   });
 
+  // §106: o que o sandbox do Claude recusa mesmo dentro dele tem um caminho que roda.
+  it("diz como rodar o comando que a sessão recusa pela forma, e onde pôr o temporário", () => {
+    const prompt = implementPrompt(base);
+    expect(prompt).toContain("`FOO=bar npm test`");
+    expect(prompt).toContain("run it with `bash .capivara/tmp/<name>.sh`");
+    expect(prompt).toContain("do not retry it as written");
+    expect(prompt).toContain("never at a fixed\npath under `/tmp`");
+  });
+
   it("libera rede para instalar dependências, mas proíbe stack nova", () => {
     const prompt = implementPrompt(base);
     expect(prompt).toContain("You may install dependencies");

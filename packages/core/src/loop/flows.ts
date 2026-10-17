@@ -672,6 +672,27 @@ function falhouAoSubir(output: string): boolean {
 }
 
 /**
+ * As portas que a saída diz estarem em uso, quando ela diz (§107).
+ *
+ * "Porta ocupada" não basta para saber de quem é a falha: no `build-96756ca336b0`
+ * o `EADDRINUSE` era da APLICAÇÃO, em 127.0.0.1:3001 — ela ignorava a `PORT` do
+ * gate —, e o gate o atribuiu à porta dele, 47535, e ao ambiente. A porta vem do
+ * fim da linha que acusa o uso: `listen EADDRINUSE: … 127.0.0.1:3001` no Node,
+ * `http://127.0.0.1:47535 is already used` no Playwright. Linha sem número não
+ * entra: sem porta, não há atribuição.
+ */
+export function portasEmUso(output: string): number[] {
+  const portas = new Set<number>();
+  for (const linha of output.split("\n")) {
+    if (!/EADDRINUSE|address already in use|is already used/i.test(linha)) continue;
+    const ultima = [...linha.matchAll(/:(\d{1,5})(?!\d)/g)].at(-1)?.[1];
+    const porta = Number(ultima);
+    if (ultima !== undefined && porta > 0 && porta < 65536) portas.add(porta);
+  }
+  return [...portas];
+}
+
+/**
  * O que a PRÓPRIA aplicação registrou enquanto o roteiro rodava.
  *
  * O runner de fluxos prefixa a saída do servidor com `[WebServer]`, e ela some
@@ -723,9 +744,10 @@ export function ehEsquemaAusente(erros: readonly string[]): boolean {
 export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   const announce = options.announce ?? ((): void => {});
   const preferida = options.preferredPort ?? FLOW_PORT;
-  const port = options.port ?? (await portaLivre(preferida));
+  // `let`: a colisão na porta do próprio gate troca a porta uma vez (§107).
+  let port = options.port ?? (await portaLivre(preferida));
   if (port !== preferida) announce(`porta ${port} para subir a aplicação; a preferida estava ocupada`);
-  const baseUrl = `http://127.0.0.1:${port}`;
+  let baseUrl = `http://127.0.0.1:${port}`;
   const pasta = join(options.projectRoot, FLOWS_DIR);
 
   const regressao = options.regressao ?? [];
@@ -738,7 +760,8 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
       green: false,
       cause:
         "o gate 4 não sabe como subir a aplicação: o projeto não declara um entrypoint (`start`) " +
-        "que o loop possa executar. Declare-o no manifesto para que os fluxos possam ser percorridos.",
+        "que o loop possa executar. Declare-o no manifesto para que os fluxos possam ser percorridos. " +
+        "O gate o executa com PORT e HOST no ambiente, e a aplicação precisa escutar nesse endereço.",
     };
   }
 
@@ -827,7 +850,8 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
 
   if (scripts.length === 0) return { green: true, skipped: "nenhum fluxo a percorrer", scripts: [] };
 
-  await writeFile(join(pasta, FLOW_CONFIG), renderFlowConfig({ startCommand: options.startCommand, port, scripts }), "utf8");
+  const startCommand = options.startCommand;
+  await writeFile(join(pasta, FLOW_CONFIG), renderFlowConfig({ startCommand, port, scripts }), "utf8");
   await writeFile(join(pasta, FLOW_HELPER), renderFlowHelper(), "utf8");
 
   const runner = options.runner ?? defaultFlowRunner;
@@ -838,7 +862,7 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
    * a segunda passagem depois de um roteiro reescrito, que não pode herdar o que a
    * primeira deixou.
    */
-  const rodar = async (): Promise<FlowRun> => {
+  const passagem = async (): Promise<FlowRun> => {
     const ambiente = await criarAmbienteDaPassagem(options.projectRoot, bancos);
     try {
       if (migracao !== null) {
@@ -851,6 +875,26 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
     } finally {
       await ambiente.limpar();
     }
+  };
+
+  /*
+   * A porta do GATE tomada entre a escolha e a subida: outra porta, uma vez (§107).
+   *
+   * Só quando a saída aponta a porta que o gate escolheu — colisão em outra porta
+   * é da aplicação, e trocar a do gate não a resolve. Uma vez por chamada do gate,
+   * sem tocar no processo que ocupou a porta: ele não é nosso.
+   */
+  let portaTrocada = false;
+  const rodar = async (): Promise<FlowRun> => {
+    const corrida = await passagem();
+    if (portaTrocada || corrida.exitCode === 0 || !portasEmUso(corrida.output).includes(port)) return corrida;
+    portaTrocada = true;
+    const anterior = port;
+    port = await portaLivre(0);
+    baseUrl = `http://127.0.0.1:${port}`;
+    announce(`a porta ${anterior} do gate foi ocupada antes de a aplicação subir; tentando de novo na ${port}, sem gastar ciclo`);
+    await writeFile(join(pasta, FLOW_CONFIG), renderFlowConfig({ startCommand, port, scripts }), "utf8");
+    return await passagem();
   };
 
   announce(
@@ -968,22 +1012,29 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   }
 
   /*
-   * Porta ocupada não é a aplicação falhando.
+   * Porta ocupada: de QUEM é a porta decide de quem é a falha (§107).
    *
-   * Com a porta escolhida livre a cada passagem isto virou raro, mas a janela
-   * entre escolher e abrir é real. Quando acontece, a causa precisa dizer que é
-   * do ambiente: no `MCP_teste2` a mensagem "a aplicação NÃO SUBIU" mandou o
-   * executor procurar defeito num produto que subia — no último ciclo dele.
+   * A do gate, tomada entre a escolha e a subida, é do ambiente — já houve uma
+   * troca de porta em `rodar`, e esta é a segunda falha. Qualquer outra é a
+   * aplicação escutando onde o gate não mandou: no `build-96756ca336b0` ela
+   * ignorava a `PORT` e abria a 3001, que o gate 4 de outra fase já ocupava, e o
+   * gate disse "porta 47535, do ambiente". Sem porta legível, não se atribui.
    */
-  if (run.exitCode !== 0 && /is already used|EADDRINUSE/i.test(run.output)) {
-    return {
-      green: false,
-      startupFailed: true,
-      output: run.output,
-      cause:
-        `a porta ${port} foi ocupada por outro processo entre a escolha e a subida, e o gate não chegou a abrir a ` +
-        `aplicação. Isto é do ambiente, não do seu código: nada precisa ser corrigido na implementação.\n${tail(run.output)}`,
-    };
+  if (run.exitCode !== 0 && /is already used|EADDRINUSE|address already in use/i.test(run.output)) {
+    const ocupadas = portasEmUso(run.output);
+    const daAplicacao = ocupadas.filter((ocupada) => ocupada !== port);
+    const cause = ocupadas.includes(port)
+      ? `a porta ${port} do gate foi ocupada por outro processo antes de a aplicação subir` +
+        (portaTrocada ? ", e isso já tinha acontecido com a anterior, nesta mesma passagem" : "") +
+        `. Isto é do ambiente, não do seu código: nada precisa ser corrigido na implementação.`
+      : daAplicacao.length > 0
+        ? `a aplicação tentou escutar na porta ${daAplicacao.join(", ")}, e não na que o gate forneceu: PORT=${port}, ` +
+          `HOST=127.0.0.1. É configuração do entrypoint, não do ambiente — trocar a porta do gate não resolve. ` +
+          `\`${startCommand}\` precisa fazer a aplicação escutar na porta que vem em PORT e no host que vem em HOST; ` +
+          `o projeto pode manter a própria variável, desde que o entrypoint aceite estas.`
+        : `a aplicação não subiu por porta em uso, e a saída não diz qual porta. O gate forneceu PORT=${port} e ` +
+          `HOST=127.0.0.1; confira se \`${startCommand}\` escuta nesse endereço.`;
+    return { green: false, startupFailed: true, output: run.output, cause: `${cause}\n${tail(run.output)}` };
   }
 
   if (run.exitCode !== 0 && falhouAoSubir(run.output)) {

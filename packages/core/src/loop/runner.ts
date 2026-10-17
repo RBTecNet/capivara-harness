@@ -43,6 +43,8 @@ export interface EngineResult {
    */
   resultRead?: boolean;
   engineError?: boolean;
+  /** O que a sessão recusou por permissão: só ferramenta e programa, nunca argumentos (§106). */
+  negacoes?: string[];
 }
 
 export interface EngineCall {
@@ -292,7 +294,6 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     }
   }
   class LimiteEsgotado extends Error {}
-
   const chamarLeitor = async (chamada: Parameters<EngineCaller>[0]): Promise<EngineResult> => {
     for (;;) {
       const resposta = await chamar(chamada);
@@ -345,6 +346,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       containerized: options.testCommand?.containerized ?? false,
       phaseMarkdown: session.markdown,
       ...(precisaDoRunner ? { runnerDeFluxosAusente: true } : {}),
+      ...((options.flows?.workflows.length ?? 0) + (options.flows?.regressao?.length ?? 0) > 0 ? { temFluxos: true } : {}),
       ...(options.skills !== undefined && options.skills !== "" ? { skills: options.skills } : {}),
       ...(options.onMemorias ? { memoriasDir: MEMORIAS_DIR } : {}),
     };
@@ -362,6 +364,17 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
 
     const recusa = detectCredentialRejection(`${result.stdout}\n${result.stderr}`);
     if (recusa !== null) throw new CredencialRecusada(recusa);
+    /*
+     * A negação de permissão é diagnóstico, não parada (§108): a fase segue para
+     * os gates, que julgam o que ficou. O §106 parava aqui quando a sessão não
+     * concluía; com o executor liberado, uma negação não diz mais que o ambiente
+     * impede a fase.
+     */
+    const negacoes = result.negacoes ?? [];
+    if (negacoes.length > 0) {
+      const lista = negacoes.slice(0, 6).join(", ") + (negacoes.length > 6 ? ` e mais ${negacoes.length - 6}` : "");
+      announce(`[${session.id}] a sessão do executor teve comando(s) negado(s) por permissão: ${lista} — registrado, a fase segue para os gates`);
+    }
 
     // Limite de uso não é defeito da implementação: espera e repete a MESMA
     // fase, sem consumir ciclo de correção.

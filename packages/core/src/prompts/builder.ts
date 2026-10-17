@@ -34,6 +34,14 @@ export interface BuilderContext {
    * estava anotada antes da primeira chamada.
    */
   runnerDeFluxosAusente?: boolean;
+  /**
+   * Esta fase passa pelo gate 4, e a aplicação precisa subir do jeito dele (§107).
+   *
+   * No `build-96756ca336b0` o contrato só aparecia na causa do último ciclo: o
+   * gate sobe com `npm start` e `PORT`, a aplicação abria a 3001 da sua `PORTA`,
+   * e três fases bloquearam sem que um executor soubesse o que o gate esperava.
+   */
+  temFluxos?: boolean;
 }
 
 export interface FixContext extends BuilderContext {
@@ -141,6 +149,20 @@ export function discoveryPreamble(): string {
   ].join("\n");
 }
 
+/** Como o gate 4 sobe a aplicação — só para quem será percorrido nele (§107). */
+export function flowStartBlock(context: BuilderContext): string {
+  if (!context.temFluxos) return "";
+  return [
+    "",
+    "## How the application is started for the flow gate",
+    "After the tests, the gate runs the manifest's `start` entrypoint (`npm start` in a Node project)",
+    "from the project root, with `PORT` and `HOST` set in the environment, and walks the flows at that",
+    "address. The entrypoint must exist and listen on that `PORT` and `HOST`; a server that only",
+    "listens on a fixed port fails the gate. The project may keep its own variable names, as long as",
+    "the entrypoint honours these two.",
+  ].join("\n");
+}
+
 export function testBlock(context: BuilderContext): string {
   if (!context.testCommand) return "";
   const lines = [
@@ -173,6 +195,12 @@ export function implementPrompt(context: BuilderContext): string {
     "You may install dependencies and download scaffolding with the project's package manager.",
     "Prefer the ecosystem's standard tooling and pin versions the way this project already does.",
     "Never add a new stack, framework or tool that the documentation does not call for.",
+    "Some sessions refuse a command that sets a variable in front of it (`FOO=bar npm test`), uses",
+    "`export`, or loops in the shell, and a refused command stays refused: do not retry it as written.",
+    "Write those lines to a script under `.capivara/tmp/` and run it with `bash .capivara/tmp/<name>.sh`;",
+    "that directory never enters a commit. Keep other scratch files under `$TMPDIR`, never at a fixed",
+    "path under `/tmp`.",
+    flowStartBlock(context),
     ...(context.runnerDeFluxosAusente
       ? [
           "",
@@ -224,6 +252,7 @@ export function fixPrompt(context: FixContext): string {
     "",
     discoveryPreamble(),
     testBlock(context),
+    flowStartBlock(context),
     "",
     "## Situation",
     "A previous session tried to implement the phase below and did not pass verification.",

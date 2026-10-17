@@ -79,6 +79,8 @@ describe("arquitetura", () => {
       for (const access of ["read-only", "workspace", "system"] as const) {
         const built = adapter.build({
           projectRoot: "/projeto",
+          platform: "linux",
+          gitDir: null,
           model: "",
           effort: "",
           access,

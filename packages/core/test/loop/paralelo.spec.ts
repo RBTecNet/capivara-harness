@@ -683,6 +683,55 @@ describe("build paralelo — auditoria (§99)", () => {
       return { exitCode: 0, output: "1 passed" };
     };
 
+  /*
+   * §106 — o `teste_haiku_v2`: o `init` não estava commitado, o worktree nasce do
+   * HEAD, e executor e verificador trabalharam sem o esqueleto que o prompt
+   * manda ler.
+   */
+  it("§106: a especificação não versionada chega ao worktree, só de leitura, e nunca entra num commit", async () => {
+    await git(["rm", "-r", "-q", "--cached", ".capivara/init"]);
+    await git(["commit", "-q", "-m", "chore: init fora do histórico"]);
+    const base = await git(["rev-parse", "HEAD"]);
+    await writeFile(join(projectRoot, ".capivara", "init", "skeleton.md"), "# esqueleto\n", "utf8");
+
+    const vistos: { fase: string; existe: boolean; gravavel: boolean; escreveu: boolean }[] = [];
+    const engine = motor({ escreve: ESCRITAS });
+    const call = async (chamada: EngineCall): Promise<EngineResult> => {
+      if (chamada.role === "builder") {
+        const esqueleto = join(chamada.root ?? projectRoot, ".capivara", "init", "skeleton.md");
+        const info = await stat(esqueleto).catch(() => null);
+        const escreveu = await writeFile(esqueleto, "adulterado", "utf8").then(() => true, () => false);
+        vistos.push({ fase: chamada.phase.id, existe: info !== null, gravavel: info !== null && (info.mode & 0o222) !== 0, escreveu });
+      }
+      return engine.call(chamada);
+    };
+    const { outcome, anuncios } = await construir({ escreve: ESCRITAS }, { call });
+
+    expect(outcome.exitCode, anuncios.join("\n")).toBe(0);
+    expect(vistos.length).toBe(4);
+    for (const visto of vistos) expect(visto, visto.fase).toEqual({ fase: visto.fase, existe: true, gravavel: false, escreveu: false });
+    expect(anuncios.some((linha) => linha.includes("copiado:") && linha.includes(join(".capivara", "init")))).toBe(true);
+    // Nenhum commit, de fase ou de integração, leva a especificação.
+    expect(await git(["log", "--name-only", "--format=", `${base}..HEAD`])).not.toContain(".capivara/init");
+    expect(await readFile(join(projectRoot, ".capivara", "init", "skeleton.md"), "utf8")).toBe("# esqueleto\n");
+  });
+
+  it("§108: a negação ao executor é registrada, e a fase segue para os gates no worktree dela", async () => {
+    const engine = motor({ escreve: ESCRITAS });
+    const call = async (chamada: EngineCall): Promise<EngineResult> => {
+      const resposta = await engine.call(chamada);
+      if (chamada.role === "builder" && chamada.phase.id === "P01") return { ...resposta, negacoes: ["Bash: npm"] };
+      return resposta;
+    };
+    const { anuncios } = await construir({ escreve: ESCRITAS }, { call });
+
+    expect(anuncios.some((linha) => linha.includes("negado(s) por permissão: Bash: npm — registrado"))).toBe(true);
+    // Os gates julgaram a P01: o verificador foi chamado para ela.
+    expect(engine.chamadas.some((chamada) => chamada.role === "verifier" && chamada.phase.id === "P01")).toBe(true);
+    const eventos = await readEvents(runPaths(projectRoot, runIdFor("build", sha12(PLANO))).events);
+    expect(eventos.some((evento) => evento.detail.includes("permissão negada"))).toBe(false);
+  });
+
   it("§102: a instalação na árvore integrada não reescreve o lockfile, e a fase seguinte integra", async () => {
     const comandos: { command: string; cwd: string }[] = [];
     const { outcome, anuncios } = await construir({ escreve: COM_DEPENDENCIAS }, { testRunner: npmFalso(comandos) });

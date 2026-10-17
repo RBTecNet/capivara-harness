@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLI_ADAPTERS, ROLE_NAMES, ROLES, buildInvocation, limitsFor } from "../../src/provider/index.js";
+import { CLI_ADAPTERS, DIRECT_CATALOG, ROLE_NAMES, ROLES, buildInvocation, contratoDoWorkspace, limitsFor } from "../../src/provider/index.js";
 import type { RoleConfig } from "../../src/provider/index.js";
 
 const context = {
@@ -46,8 +46,8 @@ describe("sandbox por papel — a fronteira mais delicada", () => {
     }
   });
 
-  it("claude: o executor continua podendo editar", () => {
-    expect(buildInvocation("builder", config({ provider: "claude" }), context).args.join(" ")).toContain("--permission-mode acceptEdits");
+  it("claude: o executor roda sem aprovação nenhuma (§108)", () => {
+    expect(buildInvocation("builder", config({ provider: "claude" }), context).args).toContain("--dangerously-skip-permissions");
   });
 
   it("opencode: read-only nega edit, bash, task e diretório externo", () => {
@@ -313,5 +313,81 @@ describe("o relógio de primeira saída só vale para quem transmite", () => {
       expect(invocation.streams, provider).toBe(true);
       expect(limitsFor(invocation, limites).firstOutputSeconds, provider).toBe(1200);
     }
+  });
+});
+
+/*
+ * §108: o executor claude sai do `acceptEdits` com sandbox, que ainda mandava
+ * para aprovação `| tail`, `timeout`, variável na frente do comando e laços —
+ * e aprovação pendente, em `-p`, é negação. Ele passa a rodar com
+ * `--dangerously-skip-permissions`; só ele: os papéis somente-leitura não mudam.
+ */
+describe("claude no nível workspace: o executor liberado", () => {
+  const workspace = () =>
+    buildInvocation("builder", config({ provider: "claude", model: "haiku" }), {
+      ...context,
+      projectRoot: "/home/x/.cache/capivara/worktrees/abc/build-1/P01",
+      platform: "linux",
+      gitDir: "/home/x/projeto/.git",
+    });
+
+  it("o executor recebe --dangerously-skip-permissions, sem acceptEdits e sem o sandbox", () => {
+    const args = workspace().args;
+    expect(args).toContain("--dangerously-skip-permissions");
+    expect(args).not.toContain("--permission-mode");
+    expect(args).not.toContain("--settings");
+  });
+
+  it("os papéis somente-leitura continuam em default, sem a flag", () => {
+    for (const papel of ["writer", "auditor", "verifier"] as const) {
+      const args = buildInvocation(papel, config({ provider: "claude" }), { ...context, systemInstall: true }).args;
+      expect(args.join(" "), papel).toContain("--permission-mode default");
+      expect(args, papel).not.toContain("--dangerously-skip-permissions");
+    }
+  });
+
+  it("o temporário próprio da chamada continua: o prompt manda o rascunho para $TMPDIR", () => {
+    expect(workspace().tmpPrivado).toBe(true);
+  });
+
+  it("o acesso de sistema não muda: bypassPermissions, sem temporário próprio", () => {
+    const invocation = buildInvocation("builder", config({ provider: "claude" }), { ...context, systemInstall: true });
+    expect(invocation.args.join(" ")).toContain("--permission-mode bypassPermissions");
+    expect(invocation.tmpPrivado).toBeUndefined();
+  });
+});
+
+describe("o contrato do nível workspace em cada provider (§106)", () => {
+  it("toda CLI declara o que garante, com o motivo", () => {
+    for (const adapter of CLI_ADAPTERS) {
+      for (const platform of ["linux", "darwin", "win32"] as const) {
+        const contrato = adapter.workspace(platform);
+        expect(["garantido", "insuficiente", "nao-verificado"], adapter.id).toContain(contrato.estado);
+        expect(contrato.motivo.length, adapter.id).toBeGreaterThan(20);
+      }
+    }
+  });
+
+  it("claude: não promete confinamento — diz que o executor tem acesso amplo, em toda plataforma (§108)", () => {
+    for (const platform of ["linux", "darwin", "win32"] as const) {
+      const contrato = contratoDoWorkspace("claude", platform);
+      expect(contrato?.estado, platform).toBe("nao-verificado");
+      expect(contrato?.motivo, platform).toContain("acesso amplo ao sistema, à rede e aos arquivos do usuário");
+      expect(contrato?.dependencias, platform).toBeUndefined();
+    }
+  });
+
+  it("codex e opencode: insuficientes — rede e confinamento não cabem juntos, ou não há sandbox", () => {
+    expect(contratoDoWorkspace("codex", "linux")?.estado).toBe("insuficiente");
+    expect(contratoDoWorkspace("codex", "linux")?.motivo).toContain("systemd");
+    expect(contratoDoWorkspace("opencode", "linux")?.estado).toBe("insuficiente");
+  });
+
+  it("o que não pôde ser verificado não é anunciado como garantido", () => {
+    for (const id of ["cursor", "agy", "custom"]) expect(contratoDoWorkspace(id, "linux")?.estado, id).toBe("nao-verificado");
+  });
+
+  it("API direta não tem contrato de workspace: nem pode construir", () => {
+    expect(contratoDoWorkspace("openai", "linux")).toBeNull();
   });
 });

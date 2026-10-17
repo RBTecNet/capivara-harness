@@ -6,6 +6,7 @@ import { parseAgyJson, parseCursorJson,
   parseCodexJsonl,
   parseOpencodeJsonl,
   readTranscript,
+  resumirNegacao,
   summarizeCodexEvent,
 } from "../../src/provider/index.js";
 
@@ -358,5 +359,53 @@ describe("transcrito do cursor", () => {
 
   it("o despachante escolhe este leitor pelo tipo do adaptador", () => {
     expect(readTranscript("cursor-json", CURSOR).text).toBe("OK");
+  });
+});
+
+/*
+ * §106: o envelope do claude conta o que a sessão recusou. No `teste_haiku_v2`
+ * foram 17, 11 e 8 negações, e ninguém as lia. O resumo leva ferramenta e
+ * programa, nunca argumento — o comando pode trazer segredo.
+ */
+describe("negações de permissão no envelope do claude", () => {
+  const envelope = (negacoes: unknown[]): string =>
+    JSON.stringify({ type: "result", is_error: false, result: "não consegui", permission_denials: negacoes });
+
+  it("cada negação vira ferramenta e programa, sem repetir", () => {
+    const lido = parseClaudeJson(
+      envelope([
+        { tool_name: "Bash", tool_use_id: "a", tool_input: { command: "npm view typescript version && npm view vite version" } },
+        { tool_name: "Bash", tool_use_id: "b", tool_input: { command: "npm --version" } },
+        { tool_name: "Bash", tool_use_id: "c", tool_input: { command: "for f in src/*.ts; do cat \"$f\"; done" } },
+        { tool_name: "Write", tool_use_id: "d", tool_input: { file_path: "/tmp/verif/x.mjs", content: "..." } },
+      ]),
+    );
+    expect(lido.text).toBe("não consegui");
+    expect(lido.negacoes).toEqual(["Bash: npm", "Bash: for", "Write"]);
+  });
+
+  it("o segredo de uma atribuição nunca chega ao resumo", () => {
+    const resumo = resumirNegacao("Bash", { command: "NPM_TOKEN=npm_abc123segredo npm publish --otp 918273" });
+    expect(resumo).toBe("Bash: npm");
+    expect(resumo).not.toContain("abc123");
+    expect(resumo).not.toContain("918273");
+  });
+
+  it("o caminho do programa vira só o nome dele", () => {
+    expect(resumirNegacao("Bash", { command: "/usr/local/bin/node scripts/migrar.ts" })).toBe("Bash: node");
+    expect(resumirNegacao("Bash", { command: "'$(cat ~/.ssh/id_rsa)'" })).toBe("Bash");
+  });
+
+  it("sem negação, não há o campo — e o caminho de sempre não muda", () => {
+    expect(parseClaudeJson(envelope([])).negacoes).toBeUndefined();
+    expect(parseClaudeJson(JSON.stringify({ type: "result", result: "ok" })).negacoes).toBeUndefined();
+  });
+
+  it("a negação também chega quando a CLI declara a volta como erro", () => {
+    const lido = parseClaudeJson(
+      JSON.stringify({ type: "result", is_error: true, result: "falhou", permission_denials: [{ tool_name: "Bash", tool_input: { command: "npm ci" } }] }),
+    );
+    expect(lido.error).toBe(true);
+    expect(lido.negacoes).toEqual(["Bash: npm"]);
   });
 });

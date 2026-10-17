@@ -32,6 +32,17 @@ describe("relatório do build", () => {
     expect(relatorio.parada.paraSeguir[0]).toContain("nada no seu código precisa mudar");
   });
 
+  // §106: a permissão negada ao executor é do ambiente, nunca do modelo nem do código.
+  it("cobra do ambiente quando a sessão do executor recusou comandos por permissão", () => {
+    const causa =
+      "a sessão do executor recusou comandos por permissão (Bash: npm) e não concluiu a fase. " +
+      "Isto é do ambiente, não do seu código: o nível de acesso deste executor não deixa rodar esses comandos";
+    const relatorio = relatorioDoBuild(build({ phases: [falhou("P01", "gate 0 — engine", causa, 1)], errors: [causa] }));
+
+    if (relatorio.tipo !== "parada") throw new Error("esperava parada");
+    expect(relatorio.parada.natureza).toBe("ambiente");
+  });
+
   it("cobra do produto quando a suíte simplesmente reprovou", () => {
     const causa = "2 testes falharam em P03";
     const relatorio = relatorioDoBuild(build({ phases: [falhou("P03", "gate 2 — suíte do projeto", causa)], errors: [causa] }));

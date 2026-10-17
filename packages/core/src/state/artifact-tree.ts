@@ -32,6 +32,10 @@ import { artifactPaths } from "./paths.js";
  * excluem `.capivara/` por pathspec; a instrução que o harness dá ao
  * desenvolvedor não excluía, e as duas regras discordavam em silêncio.
  *
+ * E `tmp/` (§106): é onde o executor põe o script do comando que a sessão do
+ * Claude recusa na forma direta (`FOO=bar npm test`, um laço). É do executor,
+ * de uma sessão só, e não pertence a nada.
+ *
  * `init/` fica de FORA desta lista de propósito: é a especificação, e ela entra no
  * histórico pelo `commitSpecification`. `design/` também: é do desenvolvedor.
  */
@@ -42,6 +46,7 @@ export const CONTROL_PLANE_IGNORE = [
   "flows/",
   "skills/",
   "memorias/",
+  "tmp/",
   "",
 ].join("\n");
 

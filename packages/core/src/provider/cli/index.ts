@@ -13,7 +13,7 @@ import { codexAdapter } from "./codex.js";
 import { cursorAdapter } from "./cursor.js";
 import { customAdapter } from "./custom.js";
 import { opencodeAdapter } from "./opencode.js";
-import type { CliAdapter } from "./types.js";
+import type { CliAdapter, ContratoDoWorkspace } from "./types.js";
 
 export const CLI_ADAPTERS = [codexAdapter, claudeAdapter, opencodeAdapter, agyAdapter, cursorAdapter, customAdapter] as const;
 
@@ -29,4 +29,9 @@ export function cliAdapter(id: CliProviderId): CliAdapter {
   return found;
 }
 
-export type { AccessLevel, CliAdapter, CliInvocation, CliInvocationInput } from "./types.js";
+/** O contrato do nível `workspace` do executor neste provider (§106); null fora das CLIs. */
+export function contratoDoWorkspace(id: string, platform: NodeJS.Platform = process.platform): ContratoDoWorkspace | null {
+  return isCliProvider(id) ? cliAdapter(id).workspace(platform) : null;
+}
+
+export type { AccessLevel, CliAdapter, CliInvocation, CliInvocationInput, ContratoDoWorkspace } from "./types.js";

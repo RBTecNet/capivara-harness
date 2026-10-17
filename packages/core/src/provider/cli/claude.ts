@@ -17,7 +17,32 @@
  * de planejamento que ninguém pediu.
  */
 
-import type { CliAdapter } from "./types.js";
+import type { CliAdapter, ContratoDoWorkspace } from "./types.js";
+
+/*
+ * O executor claude roda com `--dangerously-skip-permissions` (§108).
+ *
+ * O §106 o pôs em `acceptEdits` dentro do sandbox nativo do Claude Code, e no
+ * `teste_haiku_v2` isso ainda mandava para aprovação comandos normais de
+ * desenvolvimento — `| tail`, `| head`, `timeout`, variável na frente do
+ * comando, laço —, e aprovação pendente, em `-p`, é negação. O operador decidiu
+ * liberar o executor: Bash, npm, pipes, laços, compilação e testes sem aprovação
+ * nenhuma.
+ *
+ * O preço é dito sem rodeio: o executor tem acesso amplo ao sistema, à rede e
+ * aos arquivos do usuário — o mesmo do acesso de sistema. O que continua com o
+ * harness é o que ele já fazia fora da sessão: os gates G0–G4, a verificação
+ * independente, e o Git do Core, que confere as referências depois de cada
+ * chamada (§101). Os papéis somente-leitura não mudam.
+ */
+function contrato(_platform: NodeJS.Platform): ContratoDoWorkspace {
+  return {
+    estado: "nao-verificado",
+    motivo:
+      "o executor claude roda com --dangerously-skip-permissions: tem acesso amplo ao sistema, à rede e aos " +
+      "arquivos do usuário, sem sandbox (§108)",
+  };
+}
 
 export const claudeAdapter = {
   id: "claude",
@@ -31,7 +56,9 @@ export const claudeAdapter = {
     const args = [
       "-p",
       "--output-format", "json",
-      "--permission-mode", access === "read-only" ? "default" : access === "system" ? "bypassPermissions" : "acceptEdits",
+      ...(access === "workspace"
+        ? ["--dangerously-skip-permissions"]
+        : ["--permission-mode", access === "read-only" ? "default" : "bypassPermissions"]),
     ];
     if (model) args.push("--model", model);
     if (effort) args.push("--effort", effort);
@@ -39,6 +66,7 @@ export const claudeAdapter = {
     // O marcador de sessão faz a CLI se comportar como se estivesse aninhada em
     // outra; a chamada aqui é independente e precisa nascer limpa.
     const { CLAUDECODE: _ignorado, ...semMarcador } = env;
-    return { args, env: semMarcador };
+    return { args, env: semMarcador, ...(access === "workspace" ? { tmpPrivado: true } : {}) };
   },
+  workspace: contrato,
 } as const satisfies CliAdapter;

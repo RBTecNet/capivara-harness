@@ -17,7 +17,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { promisify, stripVTControlCharacters } from "node:util";
 import { CLI_ADAPTERS } from "./cli/index.js";
 
 const run = promisify(execFile);
@@ -64,18 +64,18 @@ export const CLAUDE_FAMILIES = ["opus", "sonnet", "haiku", "fable"];
  * não aparece na linha, a linha inteira precisa ser um identificador válido —
  * é isso que descarta "Available models" e "Fetching available models…".
  */
-function porSeparador(separador: RegExp): (stdout: string) => string[] {
+function porSeparador(separador?: RegExp): (stdout: string) => string[] {
   return (stdout) =>
-    stdout
+    stripVTControlCharacters(stdout)
       .split("\n")
       .map((linha) => linha.trim())
       .filter((linha) => linha !== "" && !linha.startsWith("#"))
-      .map((linha) => (linha.split(separador)[0] ?? "").trim())
+      .map((linha) => separador ? (linha.split(separador)[0] ?? "").trim() : linha)
       .filter((identificador) => IDENTIFICADOR.test(identificador));
 }
 
 /** Um identificador de modelo: sem espaço, e não uma frase em prosa. */
-const IDENTIFICADOR = /^[a-z0-9][a-z0-9._/-]*$/i;
+const IDENTIFICADOR = /^[a-z0-9][a-z0-9._:/-]*$/i;
 
 export const MODEL_LISTINGS: Record<string, ModelListing> = {
   /*
@@ -114,7 +114,9 @@ export const MODEL_LISTINGS: Record<string, ModelListing> = {
     },
   },
   claude: { command: [], parse: () => CLAUDE_FAMILIES },
-  opencode: { command: ["models"], parse: porSeparador(/\s+/) },
+  // A linha inteira é o identificador; separar por espaço aceitava avisos
+  // como "Available models" como se "Available" fosse um modelo.
+  opencode: { command: ["models"], parse: porSeparador() },
   agy: { command: ["models"], parse: porSeparador(/\t/) },
   cursor: { command: ["models"], parse: porSeparador(/ - /) },
 };
@@ -125,7 +127,7 @@ export async function cliDisponivel(providerId: string, env: NodeJS.ProcessEnv =
   if (!adapter || adapter.id === "custom") return false;
   const binary = env[adapter.binaryEnv]?.trim() || adapter.defaultBinary;
   try {
-    const { stdout } = await run("which", [binary]);
+    const { stdout } = await run("which", [binary], { env });
     return stdout.trim() !== "";
   } catch {
     return false;
@@ -149,7 +151,7 @@ export async function listarModelos(providerId: string, env: NodeJS.ProcessEnv =
   const binary = env[adapter?.binaryEnv ?? ""]?.trim() || adapter?.defaultBinary || providerId;
 
   try {
-    const { stdout } = await run(binary, listagem.command, { timeout: TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+    const { stdout } = await run(binary, listagem.command, { env, timeout: TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
     return [...new Set(listagem.parse(stdout))];
   } catch {
     return [];
@@ -176,7 +178,7 @@ export async function listarEfforts(
   const binary = env[adapter?.binaryEnv ?? ""]?.trim() || adapter?.defaultBinary || providerId;
 
   try {
-    const { stdout } = await run(binary, listagem.command, { timeout: TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+    const { stdout } = await run(binary, listagem.command, { env, timeout: TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
     return listagem.efforts(stdout)[modelo] ?? [];
   } catch {
     return [];

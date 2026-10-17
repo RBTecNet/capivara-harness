@@ -8,12 +8,34 @@
  * de existir listagem.
  */
 
-import { describe, expect, it } from "vitest";
-import { CLAUDE_FAMILIES, MODEL_LISTINGS, listarModelos } from "../../src/provider/index.js";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { CLAUDE_FAMILIES, MODEL_LISTINGS, cliDisponivel, listarEfforts, listarModelos } from "../../src/provider/index.js";
+
+let directory: string | undefined;
+afterEach(async () => {
+  if (directory) await rm(directory, { recursive: true, force: true });
+  directory = undefined;
+});
+
+async function fakeCli(name: string, output: string): Promise<string> {
+  directory = await mkdtemp(join(tmpdir(), "capivara-models-"));
+  const binary = join(directory, name);
+  await writeFile(binary, `#!${process.execPath}\nif (process.env.CAPIVARA_MODEL_TEST !== "presente") process.exit(2);\nprocess.stdout.write(${JSON.stringify(output)});\n`);
+  await chmod(binary, 0o755);
+  return binary;
+}
 
 describe("cada CLI separa identificador de descrição do seu jeito", () => {
   it("cursor: hífen cercado de espaço, e o cabeçalho não vira modelo", () => {
     const saida = ["Available models", "", "auto - Auto (default)", "gpt-5.3-codex-low - Codex 5.3 Low"].join("\n");
+    expect(MODEL_LISTINGS.cursor?.parse(saida)).toEqual(["auto", "gpt-5.3-codex-low"]);
+  });
+
+  it("cursor: cores ANSI não fazem os modelos desaparecerem", () => {
+    const saida = "\u001b[2mAvailable models\u001b[22m\n\n\u001b[32mauto\u001b[39m \u001b[2m- Auto\u001b[22m\n\u001b[36mgpt-5.3-codex-low\u001b[39m \u001b[2m- Codex 5.3 Low\u001b[22m\n";
     expect(MODEL_LISTINGS.cursor?.parse(saida)).toEqual(["auto", "gpt-5.3-codex-low"]);
   });
 
@@ -27,6 +49,11 @@ describe("cada CLI separa identificador de descrição do seu jeito", () => {
       "opencode/big-pickle",
       "opencode-go/glm-5.2",
     ]);
+  });
+
+  it("opencode: preserva versões com dois-pontos e ignora avisos e cabeçalhos", () => {
+    const saida = "Available models\nFetching available models...\n\u001b[36mollama/qwen3:8b\u001b[0m\r\nopencode/big-pickle\n";
+    expect(MODEL_LISTINGS.opencode?.parse(saida)).toEqual(["ollama/qwen3:8b", "opencode/big-pickle"]);
   });
 
   it("codex: JSON, e respeita o que a própria CLI marca como visível", () => {
@@ -43,6 +70,44 @@ describe("cada CLI separa identificador de descrição do seu jeito", () => {
     expect(MODEL_LISTINGS.claude?.parse("")).toEqual(CLAUDE_FAMILIES);
     expect(CLAUDE_FAMILIES).toContain("opus");
     expect(CLAUDE_FAMILIES).toContain("haiku");
+  });
+});
+
+describe.skipIf(process.platform === "win32")("o ambiente usado para consultar a CLI", () => {
+  it.each(["opencode", "cursor"])("%s: procura o binário no PATH recebido", async (provider) => {
+    const name = `capivara-test-${provider}`;
+    const output = provider === "opencode" ? "opencode/big-pickle\n" : "auto - Auto (default)\n";
+    const binary = await fakeCli(name, output);
+    const env = {
+      ...process.env,
+      PATH: `${dirname(binary)}${delimiter}${process.env.PATH ?? ""}`,
+      [`CAPIVARA_${provider.toUpperCase()}_BIN`]: name,
+      CAPIVARA_MODEL_TEST: "presente",
+    };
+    expect(await cliDisponivel(provider, env)).toBe(true);
+    expect(await listarModelos(provider, env)).toEqual([provider === "opencode" ? "opencode/big-pickle" : "auto"]);
+  });
+
+  it.each(["opencode", "cursor"])("%s: repassa o ambiente ao binário configurado por caminho absoluto", async (provider) => {
+    const output = provider === "opencode" ? "opencode/big-pickle\n" : "auto - Auto (default)\n";
+    const binary = await fakeCli(`capivara-test-${provider}`, output);
+    const env = {
+      ...process.env,
+      [`CAPIVARA_${provider.toUpperCase()}_BIN`]: binary,
+      CAPIVARA_MODEL_TEST: "presente",
+    };
+    expect(await listarModelos(provider, env)).toEqual([provider === "opencode" ? "opencode/big-pickle" : "auto"]);
+  });
+
+  it("a consulta de níveis usa o mesmo ambiente da consulta de modelos", async () => {
+    const binary = await fakeCli("capivara-test-codex", JSON.stringify({
+      models: [{ slug: "modelo-teste", supported_reasoning_levels: [{ effort: "high" }] }],
+    }));
+    expect(await listarEfforts("codex", "modelo-teste", {
+      ...process.env,
+      CAPIVARA_CODEX_BIN: binary,
+      CAPIVARA_MODEL_TEST: "presente",
+    })).toEqual(["high"]);
   });
 });
 

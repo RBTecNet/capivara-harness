@@ -279,8 +279,8 @@ export function filtrarModelos(modelos: string[], filtro: string): string[] {
  *   listagem. Um provider indisponível continua aparecendo na escolha anterior,
  *   porque saber que ele existe é útil; o que ele não faz é ser consultado.
  * - **Poucos modelos** — lista numerada direto.
- * - **Muitos** — o cursor oferece 223, que numerados não ajudam ninguém: pede-se
- *   um trecho do nome primeiro e numera-se o que casou.
+ * - **Muitos** — no terminal, a lista rola e oferece uma opção de filtro.
+ *   Na leitura por linha, pede-se um trecho do nome antes de imprimir a lista.
  *
  * `0` volta para a escolha do provider, para quem se enganou não precisar
  * recomeçar o wizard.
@@ -299,18 +299,22 @@ async function escolherModelo(
   }
 
   let candidatos = modelos;
-  if (modelos.length > MODELOS_SEM_FILTRO) {
-    io.write(`\n${providerId} oferece ${modelos.length} modelos.\n`);
+  const muitos = modelos.length > MODELOS_SEM_FILTRO;
+  const filtrar = async (): Promise<"voltar" | undefined> => {
     const filtro = (await pergunta(io, "Digite parte do nome para filtrar (vazio lista todos, 0 volta ao provider): ")).trim();
     if (filtro === "0") return "voltar";
+    candidatos = modelos;
     if (filtro !== "") {
       const casaram = filtrarModelos(modelos, filtro);
       if (casaram.length === 0) io.write(`Nenhum modelo com "${filtro}"; mostrando todos.\n`);
       else candidatos = casaram;
     }
+    return undefined;
+  };
+  if (muitos) {
+    io.write(`\n${providerId} oferece ${modelos.length} modelos.\n`);
+    if (!io.select && await filtrar() === "voltar") return "voltar";
   }
-
-  const opcoes: Choice[] = candidatos.map((modelo) => ({ label: modelo }));
 
   /*
    * Na lista com cursor, o "0 volta" e o "ou digite o nome" do modo de linha
@@ -318,16 +322,27 @@ async function escolherModelo(
    * prompt é escolha que não se navega até ela.
    */
   if (io.select) {
-    const extras: Choice[] = [
-      { label: "digitar outro nome", hint: "a CLI pode conhecer o que ela não lista" },
-      { label: "voltar ao provider" },
+    const extras: { acao: "filtrar" | "digitar" | "voltar"; opcao: Choice }[] = [
+      ...(muitos ? [{ acao: "filtrar" as const, opcao: { label: "filtrar modelos", hint: "digite um trecho do nome; vazio restaura todos" } }] : []),
+      { acao: "digitar", opcao: { label: "digitar outro nome", hint: "a CLI pode conhecer o que ela não lista" } },
+      { acao: "voltar", opcao: { label: "voltar ao provider" } },
     ];
-    const indice = await choose(io, rotulo, [...opcoes, ...extras], 0);
-    if (indice < candidatos.length) return { modelo: candidatos[indice]! };
-    if (indice === candidatos.length + 1) return "voltar";
-    return { modelo: await text(io, `${rotulo} — nome exato [${candidatos[0] ?? ""}]: `, candidatos[0] ?? "") };
+    for (;;) {
+      const opcoes: Choice[] = candidatos.map((modelo) => ({ label: modelo }));
+      const indice = await choose(io, muitos ? `${rotulo} — ${candidatos.length} modelos; no fim da lista: filtrar modelos` : rotulo,
+        [...opcoes, ...extras.map((extra) => extra.opcao)], 0);
+      if (indice < candidatos.length) return { modelo: candidatos[indice]! };
+      const acao = extras[indice - candidatos.length]?.acao;
+      if (acao === "voltar") return "voltar";
+      if (acao === "filtrar") {
+        if (await filtrar() === "voltar") return "voltar";
+        continue;
+      }
+      return { modelo: await text(io, `${rotulo} — nome exato [${candidatos[0] ?? ""}]: `, candidatos[0] ?? "") };
+    }
   }
 
+  const opcoes: Choice[] = candidatos.map((modelo) => ({ label: modelo }));
   io.write(`\n${renderChoices(rotulo, opcoes, 0)}\n`);
   for (;;) {
     const resposta = (await pergunta(io, "Escolha [1, 0 volta ao provider, ou digite o nome]: ")).trim();

@@ -159,6 +159,49 @@ describe("wizard por tecla", () => {
 });
 
 describe("modelo pela lista", () => {
+  it.each([{ provider: "opencode", numero: 3 }, { provider: "cursor", numero: 5 }])(
+    "$provider: mostra listas grandes imediatamente e permite filtrar e restaurar todos",
+    async ({ provider, numero }) => {
+      const t = fakeTerminal();
+      const modelos = Array.from({ length: 30 }, (_, index) => `${provider}/modelo-${index}`);
+      const escolha = runWizardDePapeis({
+        io: t.prompter,
+        cwd: "/projeto",
+        comando: "init",
+        faltando: ["writer"],
+        fileExists: async () => false,
+        directoryExists: async () => true,
+        listModels: async (id) => id === provider ? modelos : [],
+      });
+      try {
+        await t.teclar(`${numero}\r`);
+        await t.teclar("");
+        expect(t.ultima()).toContain(`${provider}/modelo-0`);
+        expect(t.ultima()).toContain("filtrar modelos");
+        expect(t.ultima()).not.toContain("Digite parte do nome");
+
+        await t.teclar("31\r"); // filtrar, depois dos 30 modelos
+        await t.teclar("");
+        expect(t.ultima()).toContain("Digite parte do nome");
+        await t.teclar("modelo-29\r");
+        await t.teclar("");
+        expect(t.ultima()).toContain(`${provider}/modelo-29`);
+        expect(t.ultima()).not.toContain(`${provider}/modelo-0`);
+
+        await t.teclar("2\r"); // filtrar de novo, depois do único resultado
+        await t.teclar("\r"); // filtro vazio restaura todos
+        await t.teclar("");
+        expect(t.ultima()).toContain(`${provider}/modelo-0`);
+        await t.teclar("2\r"); // segundo modelo
+        await t.teclar("\r"); // sem effort
+        await t.teclar("\r"); // sem ajuste por papel
+        expect((await escolha)?.global).toEqual({ provider, model: `${provider}/modelo-1` });
+      } finally {
+        t.prompter.close();
+      }
+    },
+  );
+
   function papeis(t: ReturnType<typeof fakeTerminal>) {
     return runWizardDePapeis({
       io: t.prompter,

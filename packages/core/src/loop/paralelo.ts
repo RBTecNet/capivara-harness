@@ -442,6 +442,14 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
           `[${session.id}] agente ${slot + 1} (${pool.label}) num worktree próprio` +
             `${aberto.copiado.length > 0 ? `; copiado: ${aberto.copiado.join(", ")}` : ""}`,
         );
+        const retomado = aberto.retomado;
+        if (retomado) {
+          announce(
+            retomado.aplicado
+              ? `[${session.id}] o parcial da tentativa anterior (${retomado.commit.slice(0, 12)}) foi reaplicado sobre a árvore integrada; o original continua no branch ${retomado.branch}`
+              : `[${session.id}] o parcial da tentativa anterior (${retomado.commit.slice(0, 12)}) não foi reaplicado — ${retomado.motivo}; a fase começa do HEAD, e o parcial continua no branch ${retomado.branch}`,
+          );
+        }
       } catch (erro) {
         const causa = erro instanceof Error ? erro.message.split("\n")[0] ?? "" : String(erro);
         const outcome: PhaseOutcome = { status: "failed", gate: "gate 0 — engine", cause: `não consegui criar o worktree da fase: ${causa}`, cycles: 0 };

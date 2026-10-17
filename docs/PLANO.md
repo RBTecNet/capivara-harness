@@ -7295,3 +7295,54 @@ Testes (`test/loop/paralelo.spec.ts`, Git real, provider e Playwright falsos):
 
 Contra o código anterior, o primeiro e o terceiro falham. O segundo passa nos
 dois, como deve.
+
+## §111 — O G4 diz em que porta a aplicação escutou, e a retomada não apaga o parcial
+
+No `build-6e34384deccd` (`teste_luna`, codex/gpt-6-luna), a P04 bloqueou no G4.
+A fundação lia `PORTA`, e não `PORT`: a aplicação escutou na 3000, e o gate
+esperou a 47533 até estourar os 180 s. A saída inteira foi `Timed out waiting
+180000ms from config.webServer`, porque o stdout da aplicação era descartado. Na
+retomada, o `wip(P04)`, que já tinha passado no G3, foi apagado, e a fase
+recomeçou do zero. O diagnóstico está em `docs/DIAGNOSTICO-TESTE-LUNA.md`.
+
+**1. A saída da aplicação no G4.** A configuração gerada passa a ter
+`stdout: 'pipe'`. Quando a aplicação não sobe, `portasAnunciadas` lê as linhas
+`[WebServer]` (um endereço `http://host:N`, ou "port N" / "porta N").
+- Se a aplicação anunciou outra porta e não a do gate, a causa diz qual porta
+  ela anunciou, qual o gate forneceu, e que o defeito é do entrypoint, como no
+  §107.
+- Se anunciou a do gate, ou não anunciou nenhuma, a mensagem é a de antes.
+- O gate roda o Playwright com `CI=1`, e a saída sai sem cores. As expressões
+  que procuram `[WebServer]` continuam valendo.
+
+**2. A retomada parte do parcial.** Ao abrir o worktree, se o branch da fase tem
+commits que o HEAD não tem (o `wip` de uma tentativa anterior), `guardarSobra` o
+preserva em `capivara/<run>/<fase>-parcial-<sha7>` antes de `limparSobra`
+apagá-lo.
+- O parcial é reaplicado no worktree novo, aberto do HEAD integrado, com
+  `merge --squash`, e fica como alteração não commitada. O commit da fase
+  continua sendo um só, e a integração não muda.
+- Se o parcial conflita com a árvore integrada, o worktree volta ao HEAD e a
+  fase começa limpa.
+- Nos dois casos, o anúncio diz o commit e o branch preservado.
+
+O §108, as permissões, os critérios G0–G4 e os prompts não mudaram, e não
+entrou nenhuma restrição nova aos agentes.
+
+**Limitações:**
+- os branches `-parcial-` não são apagados automaticamente, como os
+  `-aprovada-` do §110;
+- a fase retomada não é avisada no prompt de que o código parcial veio de uma
+  tentativa anterior: ela o encontra na árvore;
+- o modo serial não usa worktree, e não muda.
+
+Testes:
+- `test/loop/flows.spec.ts`: a configuração tem `stdout: 'pipe'`; as portas
+  anunciadas saem só das linhas da aplicação; o timeout com a porta 3000
+  anunciada diz qual é; anunciar a porta do gate mantém a mensagem genérica.
+- `test/loop/paralelo.spec.ts`, com Git real: o parcial é reaplicado sobre a
+  árvore integrada e o original fica no branch; o parcial que conflita não
+  entra, e a fase começa do HEAD; sem parcial, nada é preservado.
+
+Contra o código anterior, 5 dos 7 testes falham. Os 2 casos negativos passam
+nos dois, como devem.

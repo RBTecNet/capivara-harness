@@ -363,6 +363,13 @@ export function renderFlowConfig(options: {
      * nossa configuração. O fluxo percorre o produto como ele é.
      */
     `    env: { PORT: '${options.port}', HOST: '127.0.0.1' },`,
+    /*
+     * A saída da aplicação entra na do gate (§111). O padrão do runner é jogar o
+     * stdout fora: no `build-6e34384deccd` a aplicação escreveu "Parallel Lab em
+     * http://127.0.0.1:3000" — ela lia `PORTA`, não `PORT` — e o gate só soube
+     * dizer "Timed out waiting 180000ms", no último ciclo da P04.
+     */
+    "    stdout: 'pipe',",
     "    cwd: '../..',",
     "  },",
     "};",
@@ -692,6 +699,26 @@ export function portasEmUso(output: string): number[] {
     const ultima = [...linha.matchAll(/:(\d{1,5})(?!\d)/g)].at(-1)?.[1];
     const porta = Number(ultima);
     if (ultima !== undefined && porta > 0 && porta < 65536) portas.add(porta);
+  }
+  return [...portas];
+}
+
+/**
+ * As portas que a PRÓPRIA aplicação anunciou na saída (§111).
+ *
+ * Quando ela escuta noutra porta, o runner espera a do gate até estourar o
+ * tempo, e a única pista é o que a aplicação escreveu ao subir: um endereço
+ * (`http://127.0.0.1:3000`) ou "port 3000" / "porta 3000". Só as linhas
+ * `[WebServer]`: as do runner trazem a URL do próprio gate.
+ */
+export function portasAnunciadas(output: string): number[] {
+  const portas = new Set<number>();
+  for (const linha of output.split("\n")) {
+    if (!/^\s*\[WebServer\]/.test(linha)) continue;
+    for (const casou of linha.matchAll(/\bhttps?:\/\/[^\s/:]+:(\d{1,5})(?!\d)|\bport[a]?\b\D{0,3}(\d{2,5})(?!\d)/gi)) {
+      const porta = Number(casou[1] ?? casou[2]);
+      if (porta > 0 && porta < 65536) portas.add(porta);
+    }
   }
   return [...portas];
 }
@@ -1043,6 +1070,24 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   }
 
   if (run.exitCode !== 0 && falhouAoSubir(run.output)) {
+    /*
+     * Escutou noutra porta (§111): a causa diz qual, como a da porta ocupada.
+     * Se ela anunciou também a do gate, a porta não é a explicação.
+     */
+    const anunciadas = portasAnunciadas(run.output);
+    if (anunciadas.length > 0 && !anunciadas.includes(port)) {
+      return {
+        green: false,
+        startupFailed: true,
+        output: run.output,
+        cause:
+          `a aplicação NÃO SUBIU na porta do gate: ela anunciou que escuta na porta ${anunciadas.join(", ")}, e o gate ` +
+          `forneceu PORT=${port}, HOST=127.0.0.1 e esperou http://127.0.0.1:${port} até estourar o tempo. Nenhum fluxo ` +
+          `chegou a ser percorrido. É configuração do entrypoint, não do ambiente: \`${options.startCommand}\` precisa ` +
+          `fazer a aplicação escutar na porta que vem em PORT e no host que vem em HOST; o projeto pode manter a ` +
+          `própria variável, desde que o entrypoint aceite estas.\n${tail(run.output)}`,
+      };
+    }
     return {
       green: false,
       startupFailed: true,

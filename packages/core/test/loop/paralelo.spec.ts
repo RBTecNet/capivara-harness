@@ -939,3 +939,87 @@ describe("build paralelo — fundação do gate 4 e verde preservado (§110)", (
     expect(anuncios.some((linha) => linha.includes(`[P03] o commit aprovado antes (${commit}) continua no branch ${branch}`))).toBe(true);
   });
 });
+
+/*
+ * A retomada não apaga o parcial da tentativa anterior (§111). No
+ * `build-6e34384deccd` o `wip(P04)` já tinha passado no G3 — faltava a porta —,
+ * a retomada recriou o branch da fase a partir do HEAD, e a P04 recomeçou do zero.
+ */
+describe("retomada com o parcial de uma tentativa anterior", () => {
+  const RUN = (): string => runIdFor("build", sha12(PLANO));
+
+  /** O que o executor da fase encontra no worktree, na primeira chamada da retomada. */
+  function espiar(engine: ReturnType<typeof motor>, fase: string, arquivo: string) {
+    let visto: string | null | undefined;
+    const call = async (chamada: EngineCall): Promise<EngineResult> => {
+      if (visto === undefined && chamada.role === "builder" && chamada.phase.id === fase) {
+        visto = await readFile(join(chamada.root ?? projectRoot, arquivo), "utf8").catch(() => null);
+      }
+      return engine.call(chamada);
+    };
+    return { call, visto: () => visto };
+  }
+
+  it("o parcial é reaplicado sobre a árvore integrada, e o original fica num branch", async () => {
+    const primeira = await construir({
+      escreve: { ...ESCRITAS, P02: [{ path: "cadastro.txt", content: "parcial da P02\n" }] },
+      demora: { P02: 20, P03: 120 },
+      reprova: ["P02"],
+    });
+    expect(primeira.outcome.exitCode).toBe(2);
+    const parcial = await git(["rev-parse", `capivara/${RUN()}/P02`]);
+    expect(await git(["log", "--format=%s", "-1", parcial])).toContain("wip(P02)");
+
+    // A P03 entrou na árvore principal: o parcial é de um HEAD que já andou.
+    const engine = motor({ escreve: { ...ESCRITAS, P02: [{ path: "extra.txt", content: "da retomada\n" }] } });
+    const espiao = espiar(engine, "P02", "cadastro.txt");
+    const retomada = await construir({ escreve: {} }, { call: espiao.call });
+
+    expect(retomada.outcome.exitCode, retomada.anuncios.join("\n")).toBe(0);
+    expect(espiao.visto()).toBe("parcial da P02\n");
+    const preservado = `capivara/${RUN()}/P02-parcial-${parcial.slice(0, 7)}`;
+    expect(retomada.anuncios).toContain(
+      `[P02] o parcial da tentativa anterior (${parcial.slice(0, 12)}) foi reaplicado sobre a árvore integrada; o original continua no branch ${preservado}`,
+    );
+    expect(await git(["rev-parse", preservado])).toBe(parcial);
+    // Um commit só da fase, com o parcial e o da retomada, sobre a árvore integrada.
+    const historico = (await git(["log", "--format=%s"])).split("\n");
+    expect(historico.filter((linha) => linha.includes("phase-2"))).toHaveLength(1);
+    expect(historico.some((linha) => linha.includes("wip(P02)"))).toBe(false);
+    expect(await readFile(join(projectRoot, "cadastro.txt"), "utf8")).toBe("parcial da P02\n");
+    expect(await readFile(join(projectRoot, "extra.txt"), "utf8")).toBe("da retomada\n");
+    expect(await readFile(join(projectRoot, "relatorio.txt"), "utf8")).toBe("relatório\n");
+  });
+
+  it("o parcial que conflita com a árvore integrada não entra; a fase começa do HEAD e o parcial fica no branch", async () => {
+    const primeira = await construir({
+      escreve: { ...ESCRITAS, P02: [{ path: "relatorio.txt", content: "versão da P02\n" }] },
+      demora: { P02: 20, P03: 120 },
+      reprova: ["P02"],
+    });
+    expect(primeira.outcome.exitCode).toBe(2);
+    const parcial = await git(["rev-parse", `capivara/${RUN()}/P02`]);
+
+    const engine = motor({ escreve: ESCRITAS });
+    const espiao = espiar(engine, "P02", "relatorio.txt");
+    const retomada = await construir({ escreve: {} }, { call: espiao.call });
+
+    expect(retomada.outcome.exitCode, retomada.anuncios.join("\n")).toBe(0);
+    // O executor viu a árvore integrada, sem marcador de conflito.
+    expect(espiao.visto()).toBe("relatório\n");
+    const preservado = `capivara/${RUN()}/P02-parcial-${parcial.slice(0, 7)}`;
+    const aviso = retomada.anuncios.find((linha) => linha.startsWith("[P02] o parcial da tentativa anterior"));
+    expect(aviso).toContain("não foi reaplicado — conflita com a árvore integrada em relatorio.txt");
+    expect(aviso).toContain(`o parcial continua no branch ${preservado}`);
+    expect(await git(["show", `${preservado}:relatorio.txt`])).toBe("versão da P02");
+    expect(await readFile(join(projectRoot, "relatorio.txt"), "utf8")).toBe("relatório\n");
+    expect(await readFile(join(projectRoot, "cadastro.txt"), "utf8")).toBe("cadastro\n");
+  });
+
+  it("sem parcial anterior, nada é preservado nem anunciado", async () => {
+    const { outcome, anuncios } = await construir({ escreve: ESCRITAS });
+    expect(outcome.exitCode).toBe(0);
+    expect(anuncios.some((linha) => linha.includes("parcial da tentativa anterior"))).toBe(false);
+    expect(await git(["branch", "--list", "capivara/*"])).toBe("");
+  });
+});

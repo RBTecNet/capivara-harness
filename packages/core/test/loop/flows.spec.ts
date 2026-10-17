@@ -23,7 +23,7 @@ import {
   portaLivre,
   renderFlowConfig,
 } from "../../src/loop/index.js";
-import { FLOW_MARK, FLOW_RESULTS, nomesNaoDefinidos, portasEmUso, retratosDaFalha } from "../../src/loop/flows.js";
+import { FLOW_MARK, FLOW_RESULTS, nomesNaoDefinidos, portasAnunciadas, portasEmUso, retratosDaFalha } from "../../src/loop/flows.js";
 import { lerTriagem } from "../../src/prompts/index.js";
 import { FLOW_HELPER, bancosDeclarados, ferramentasDaMaquina } from "../../src/loop/passagem.js";
 import { flowPrompt } from "../../src/prompts/index.js";
@@ -829,6 +829,62 @@ describe("a porta em que a aplicação sobe", () => {
     expect(portasEmUso("Error: http://127.0.0.1:47535 is already used, make sure that nothing is running on the port/url")).toEqual([47535]);
     expect(portasEmUso("OSError: [Errno 98] Address already in use")).toEqual([]);
     expect(portasEmUso("GET http://127.0.0.1:3001/ 200")).toEqual([]);
+  });
+
+  /*
+   * §111 — no `build-6e34384deccd` a aplicação lia `PORTA`, escutou na 3000, e o
+   * gate esperou a 47533 até estourar: a saída inteira foi "Timed out waiting
+   * 180000ms", porque o stdout da aplicação ia para o lixo.
+   */
+  it("a saída da aplicação entra na do gate", () => {
+    expect(renderFlowConfig({ startCommand: "npm start", port: 4001 })).toContain("stdout: 'pipe'");
+  });
+
+  it("as portas anunciadas saem só das linhas da aplicação", () => {
+    expect(portasAnunciadas("[WebServer] Parallel Lab em http://127.0.0.1:3000")).toEqual([3000]);
+    expect(portasAnunciadas("[WebServer] Server listening on port 8080")).toEqual([8080]);
+    expect(portasAnunciadas("[WebServer] Servidor na porta 3001.")).toEqual([3001]);
+    // A linha do runner traz a URL do próprio gate; a variável do projeto não é anúncio.
+    expect(portasAnunciadas("Error: Timed out waiting 180000ms from config.webServer. http://127.0.0.1:47533")).toEqual([]);
+    expect(portasAnunciadas("[WebServer] PORTA_API=3001")).toEqual([]);
+  });
+
+  it("aplicação que escutou noutra porta: o timeout diz qual", async () => {
+    const saida = [
+      "[WebServer] > parallel-lab@1.0.0 start",
+      "[WebServer] Parallel Lab em http://127.0.0.1:3000",
+      "Error: Timed out waiting 180000ms from config.webServer.",
+    ].join("\n");
+    const resultado = await gate4({
+      ...base,
+      projectRoot,
+      port: 47533,
+      author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
+      runner: async () => ({ exitCode: 1, output: saida }),
+    });
+
+    if (resultado.green) throw new Error("deveria reprovar");
+    expect(resultado.startupFailed).toBe(true);
+    expect(resultado.cause).toContain("ela anunciou que escuta na porta 3000");
+    expect(resultado.cause).toContain("PORT=47533, HOST=127.0.0.1");
+    expect(resultado.cause).toContain("É configuração do entrypoint");
+    expect(resultado.cause).toContain("Parallel Lab em http://127.0.0.1:3000");
+  });
+
+  it("anunciou a porta do gate e mesmo assim não respondeu: a porta não é a explicação", async () => {
+    const saida = ["[WebServer] ouvindo em http://0.0.0.0:47533", "Error: Timed out waiting 180000ms from config.webServer."].join("\n");
+    const resultado = await gate4({
+      ...base,
+      projectRoot,
+      port: 47533,
+      author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
+      runner: async () => ({ exitCode: 1, output: saida }),
+    });
+
+    if (resultado.green) throw new Error("deveria reprovar");
+    expect(resultado.startupFailed).toBe(true);
+    expect(resultado.cause).toContain("NÃO SUBIU, e por isso nenhum fluxo");
+    expect(resultado.cause).not.toContain("anunciou");
   });
 });
 

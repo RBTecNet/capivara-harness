@@ -7243,3 +7243,55 @@ sandbox ou autorização foi acrescentado.
 pacote. A instância própria e a do gate abrem o mesmo arquivo SQLite ao mesmo
 tempo, o que o SQLite permite. Um produto que tranque o arquivo com exclusividade
 não sobe a segunda instância, e o ajudante relata a saída dela.
+
+## §110 — A fundação do gate 4 é preparada uma vez, e o verde que conflita fica num branch
+
+No `build-96756ca336b0`, a P03 e a P04 rodavam em paralelo. Cada uma, no seu
+worktree, criou o mesmo `start` e o mesmo suporte a `PORT`/`HOST` em
+`src/servidor/configuracao.ts`, a fundação compartilhada. A P04 fechou verde e
+conflitou na integração. O desfecho "refazer" apagou o branch da fase, e o
+commit aprovado (`8c9365e`) ficou sem referência. O diagnóstico está em
+`docs/DIAGNOSTICO-P04-CONFLITO-INTEGRACAO.md`.
+
+**1. Fundação antes do paralelo.** Quando o build tem fluxos e a árvore
+principal não declara `start` (`startCommandFor` devolve `null`), a primeira
+fase pendente com fluxo vira exclusiva antes da primeira leva. É o mesmo
+mecanismo de quem volta de um conflito. Ela roda sozinha e recebe o aviso do
+§109. Cria o `start` e passa pelos gates e pela integração de sempre. As
+seguintes abrem o worktree do HEAD que já o tem.
+- As fases anteriores a ela, que não têm fluxo, podem rodar junto, como em
+  qualquer fase exclusiva.
+- As outras fases com fluxo voltam ao paralelo assim que ela integra.
+- Com o `start` presente, nada disso acontece.
+- O Core não escreve código de produto: quem cria o `start` é o executor da
+  fase.
+
+**2. O verde que conflita não se perde.** No desfecho "refazer",
+`preservarAprovado` cria o branch `capivara/<run>/<fase>-aprovada-<sha7>`
+apontando para o mesmo commit aprovado.
+- Nada é copiado, reescrito ou integrado; o sha no nome evita colidir com o
+  branch da fase, que a nova rodada recria.
+- O evento `retry` e o anúncio dizem o commit e o branch.
+- A nova rodada anuncia onde o verde anterior continua.
+- A fase segue refazendo sozinha sobre a árvore integrada, como antes; não há
+  merge automático.
+
+O §108, as permissões e os critérios G0–G4 não mudaram, e não entrou nenhuma
+restrição nova aos agentes.
+
+**Limitação:** se a fase preparadora falhar com `--keep-going`, as outras
+fases com fluxo seguem em paralelo sem `start`. Cada uma recebe o aviso, e o
+risco de conflito volta. A preparação não é tentada com outra fase.
+
+Testes (`test/loop/paralelo.spec.ts`, Git real, provider e Playwright falsos):
+- "sem start: só uma fase prepara a fundação, sozinha, e as outras com fluxo
+  saem depois, em paralelo";
+- "com start: nada é preparado, e as três fases com fluxo correm juntas";
+- "conflito na integração: o commit aprovado fica num branch próprio, dito no
+  evento, intacto". O teste confere:
+  - o commit e o conteúdo;
+  - a árvore principal limpa;
+  - que o branch é achado pelo log de eventos.
+
+Contra o código anterior, o primeiro e o terceiro falham. O segundo passa nos
+dois, como deve.

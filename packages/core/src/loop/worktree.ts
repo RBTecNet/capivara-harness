@@ -171,6 +171,23 @@ export async function abrirWorktree(
  * Tira o worktree do disco. O branch só fica quando ainda guarda trabalho que
  * não chegou à árvore principal — o da fase que falhou, para quem quiser ler.
  */
+/**
+ * O commit aprovado de uma fase que conflitou na integração, num branch próprio (§110).
+ *
+ * O desfecho "refazer" fechava o worktree apagando o branch: no
+ * `build-96756ca336b0` o verde da P04 (`8c9365e`) ficou sem referência, à
+ * espera do `git gc`, e a fase seria refeita do zero. O branch novo aponta para
+ * o MESMO commit — nada é copiado, reescrito ou integrado — e leva o sha no nome,
+ * para nunca colidir com o branch da fase, que a nova rodada recria, nem com o de
+ * outra tentativa.
+ */
+export async function preservarAprovado(projectRoot: string, worktree: Worktree): Promise<{ branch: string; commit: string }> {
+  const commit = await git(projectRoot, ["rev-parse", "--verify", `${worktree.branch}^{commit}`]);
+  const branch = `${worktree.branch}-aprovada-${commit.slice(0, 7)}`;
+  await git(projectRoot, ["branch", "-f", branch, commit]);
+  return { branch, commit };
+}
+
 export async function fecharWorktree(
   projectRoot: string,
   worktree: Worktree,

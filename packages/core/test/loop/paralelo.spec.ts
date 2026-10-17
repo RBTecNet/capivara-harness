@@ -763,3 +763,179 @@ describe("build paralelo — auditoria (§99)", () => {
     expect(engine.chamadas.filter((chamada) => chamada.role === "builder").map((chamada) => chamada.phase.id)).toEqual(["P01"]);
   });
 });
+
+/*
+ * §110: no `build-96756ca336b0` a P03 e a P04 criaram, cada uma no seu
+ * worktree, o mesmo `start` com `PORT`/`HOST` na fundação compartilhada, e a
+ * P04 verde conflitou na integração — o branch dela foi apagado e o commit
+ * aprovado ficou sem referência.
+ */
+describe("build paralelo — fundação do gate 4 e verde preservado (§110)", () => {
+  /** P1 sem fluxo; P2, P3 e P4 com um fluxo cada, todas dependendo só da fundação. */
+  const PLANO_LEQUE = [
+    "# Leque — Project Phases",
+    "",
+    "<!-- inputs: skeleton.md@sha256:bbbbbbbbbbbb -->",
+    "",
+    "## Overview",
+    "",
+    "Fundação e três frentes independentes, todas com fluxo.",
+    "",
+    FASE(1, "Fundação", "none"),
+    FASE(2, "Cadastro", "Phase 1"),
+    FASE(3, "Relatório", "Phase 1"),
+    FASE(4, "Painel", "Phase 1"),
+    "## Open Questions",
+    "",
+    "Nenhuma.",
+    "",
+  ].join("\n");
+
+  const FLUXOS = [2, 3, 4].map((numero) => ({ number: String(numero), name: `Fluxo ${numero}`, steps: [`abrir a tela ${numero}`] }));
+  const ESQUELETO = {
+    workflows: FLUXOS,
+    phases: [1, 2, 3, 4].map((numero) => ({ number: numero, covers: numero === 1 ? [] : [`workflow ${numero}`] })),
+  } as unknown as NonNullable<BuildOptions["skeleton"]>;
+
+  const COM_START = JSON.stringify({ name: "leque", scripts: { start: "node servidor.js", test: "echo ok" } });
+
+  async function usarLeque(comStart: boolean): Promise<void> {
+    await writeFile(join(projectRoot, ".capivara", "init", "project-phases.md"), PLANO_LEQUE, "utf8");
+    if (comStart) await writeFile(join(projectRoot, "package.json"), COM_START, "utf8");
+    await git(["add", "-A"]);
+    await git(["commit", "-q", "-m", "docs: plano em leque"]);
+  }
+
+  /** O executor de cada fase escreve o seu arquivo; quem ouve que falta `start`, o cria. */
+  function motorDoLeque() {
+    const intervalos = new Map<string, { inicio: number; fim: number }[]>();
+    const avisados: string[] = [];
+    let ativos = 0;
+    let pico = 0;
+    const call = async (chamada: EngineCall): Promise<EngineResult> => {
+      if (chamada.role === "verifier") {
+        if (chamada.prompt.includes("You write ONE Playwright script")) {
+          const fluxo = FLUXOS.find((item) => chamada.prompt.includes(`workflow ${item.number}: ${item.name}`))!;
+          const script = [
+            "import { expect, test } from '@playwright/test';",
+            `test('workflow ${fluxo.number}', async ({ page }) => {`,
+            `  await test.step('passo 1: ${fluxo.steps[0]}', async () => {`,
+            "    await page.goto('/');",
+            "    await expect(page.getByRole('main')).toBeVisible();",
+            "  });",
+            "});",
+          ].join("\n");
+          return { exitCode: 0, stdout: `\`\`\`ts\n${script}\n\`\`\``, stderr: "", timedOut: null };
+        }
+        return { exitCode: 0, stdout: "TASK 1: DONE", stderr: "", timedOut: null };
+      }
+      const raiz = chamada.root ?? projectRoot;
+      const inicio = Date.now();
+      ativos += 1;
+      pico = Math.max(pico, ativos);
+      if (chamada.prompt.includes("This project does NOT declare that entrypoint yet")) {
+        avisados.push(chamada.phase.id);
+        await writeFile(join(raiz, "package.json"), COM_START, "utf8");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      await writeFile(join(raiz, `${chamada.phase.id.toLowerCase()}.txt`), `${chamada.phase.id}\n`, "utf8");
+      ativos -= 1;
+      intervalos.set(chamada.phase.id, [...(intervalos.get(chamada.phase.id) ?? []), { inicio, fim: Date.now() }]);
+      return { exitCode: 0, stdout: "feito", stderr: "", timedOut: null };
+    };
+    return { call, intervalos, avisados, pico: () => pico };
+  }
+
+  async function construirLeque(engine: ReturnType<typeof motorDoLeque>) {
+    const anuncios: string[] = [];
+    const outcome = await runBuild({
+      projectRoot,
+      language: "português do Brasil",
+      engine: "codex",
+      call: engine.call,
+      sleep: async () => undefined,
+      environment: { XDG_CACHE_HOME: cache },
+      skipAcceptance: true,
+      explicitTestCommand: "npm test",
+      testRunner: async () => ({ exitCode: 0, output: "1 passed" }),
+      skeleton: ESQUELETO,
+      flowRunner: async () => ({ exitCode: 0, output: "1 passed" }),
+      announce: (mensagem) => anuncios.push(mensagem),
+      parallel: {
+        maxConcurrency: 3,
+        agentes: [
+          { engine: "codex", label: "codex", systemInstall: false },
+          { engine: "codex", label: "codex", systemInstall: false },
+          { engine: "codex", label: "codex", systemInstall: false },
+        ],
+        resumo: ["execução: paralela, até 3 agentes"],
+      },
+    });
+    return { outcome, anuncios };
+  }
+
+  it("sem start: só uma fase prepara a fundação, sozinha, e as outras com fluxo saem depois, em paralelo", async () => {
+    await usarLeque(false);
+    const engine = motorDoLeque();
+    const { outcome, anuncios } = await construirLeque(engine);
+
+    expect(outcome.exitCode, anuncios.join("\n")).toBe(0);
+    // Uma fase só ouviu que falta o `start` — e foi a que o criou.
+    expect(engine.avisados).toEqual(["P02"]);
+    expect(anuncios.some((linha) => linha.includes("[P02] o projeto ainda não declara `start`"))).toBe(true);
+    // A preparadora rodou sozinha: P03 e P04 só começaram depois de ela terminar.
+    const fimDaPreparadora = Math.max(...(engine.intervalos.get("P02") ?? []).map((intervalo) => intervalo.fim));
+    for (const fase of ["P03", "P04"]) {
+      expect(Math.min(...(engine.intervalos.get(fase) ?? []).map((intervalo) => intervalo.inicio)), fase).toBeGreaterThanOrEqual(fimDaPreparadora);
+    }
+    // E as duas correram juntas.
+    const [p3] = engine.intervalos.get("P03") ?? [];
+    const [p4] = engine.intervalos.get("P04") ?? [];
+    expect(p3 && p4 && p3.inicio < p4.fim && p4.inicio < p3.fim).toBe(true);
+    expect(engine.pico()).toBe(2);
+    // Nenhum conflito: cada fase integrou uma vez, e o `start` é o da preparadora.
+    expect(anuncios.some((linha) => linha.includes("conflito ao integrar"))).toBe(false);
+    expect(JSON.parse(await readFile(join(projectRoot, "package.json"), "utf8")).scripts.start).toBe("node servidor.js");
+  });
+
+  it("com start: nada é preparado, e as três fases com fluxo correm juntas", async () => {
+    await usarLeque(true);
+    const engine = motorDoLeque();
+    const { outcome, anuncios } = await construirLeque(engine);
+
+    expect(outcome.exitCode, anuncios.join("\n")).toBe(0);
+    expect(engine.avisados).toEqual([]);
+    expect(anuncios.some((linha) => linha.includes("ainda não declara `start`"))).toBe(false);
+    expect(engine.pico()).toBe(3);
+  });
+
+  it("conflito na integração: o commit aprovado fica num branch próprio, dito no evento, intacto", async () => {
+    const escreve = {
+      ...ESCRITAS,
+      P02: [{ path: "compartilhado.txt", content: "do cadastro\n" }],
+      P03: [{ path: "compartilhado.txt", content: "do relatório\n" }],
+    };
+    const { outcome, anuncios } = await construir({ escreve, demora: { P02: 20, P03: 150 } });
+    expect(outcome.exitCode, anuncios.join("\n")).toBe(0);
+
+    // A retomada acha o trabalho pelo log de eventos, não pela tela.
+    const runId = runIdFor("build", sha12(PLANO));
+    const eventos = await readEvents(runPaths(projectRoot, runId).events);
+    const retry = eventos.find((evento) => evento.subject === "P03" && evento.status === "retry");
+    const achado = /o commit aprovado ([0-9a-f]{12}) ficou no branch (\S+)$/.exec(retry?.detail ?? "");
+    expect(achado, retry?.detail).not.toBeNull();
+    const [, commit = "", branch = ""] = achado ?? [];
+    expect(branch).toBe(`capivara/${runId}/P03-aprovada-${commit.slice(0, 7)}`);
+
+    // O branch aponta para o commit aprovado, com o conteúdo aprovado, sem nada a mais.
+    expect((await git(["rev-parse", branch])).startsWith(commit)).toBe(true);
+    expect(await git(["show", `${branch}:compartilhado.txt`])).toBe("do relatório");
+    expect(await git(["log", "--format=%s", "-1", branch])).toBe("feat(phase-3): Relatório");
+    // A refeita entrou no produto como antes, e a árvore principal está limpa.
+    expect(await readFile(join(projectRoot, "compartilhado.txt"), "utf8")).toBe("do relatório\n");
+    expect(await git(["status", "--porcelain", "--", ".", ":(exclude).capivara"])).toBe("");
+    // O branch da fase, recriado pela segunda rodada, foi fechado como sempre; o preservado não.
+    expect((await git(["branch", "--list", "capivara/*"])).trim()).toBe(branch);
+    expect(anuncios.some((linha) => linha.includes(`[P03] o commit aprovado antes (${commit}) continua no branch ${branch}`))).toBe(true);
+  });
+});

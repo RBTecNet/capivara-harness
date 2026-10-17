@@ -7243,3 +7243,106 @@ sandbox ou autorização foi acrescentado.
 pacote. A instância própria e a do gate abrem o mesmo arquivo SQLite ao mesmo
 tempo, o que o SQLite permite. Um produto que tranque o arquivo com exclusividade
 não sobe a segunda instância, e o ajudante relata a saída dela.
+
+## §110 — A fundação do gate 4 é preparada uma vez, e o verde que conflita fica num branch
+
+No `build-96756ca336b0`, a P03 e a P04 rodavam em paralelo. Cada uma, no seu
+worktree, criou o mesmo `start` e o mesmo suporte a `PORT`/`HOST` em
+`src/servidor/configuracao.ts`, a fundação compartilhada. A P04 fechou verde e
+conflitou na integração. O desfecho "refazer" apagou o branch da fase, e o
+commit aprovado (`8c9365e`) ficou sem referência. O diagnóstico está em
+`docs/DIAGNOSTICO-P04-CONFLITO-INTEGRACAO.md`.
+
+**1. Fundação antes do paralelo.** Quando o build tem fluxos e a árvore
+principal não declara `start` (`startCommandFor` devolve `null`), a primeira
+fase pendente com fluxo vira exclusiva antes da primeira leva. É o mesmo
+mecanismo de quem volta de um conflito. Ela roda sozinha e recebe o aviso do
+§109. Cria o `start` e passa pelos gates e pela integração de sempre. As
+seguintes abrem o worktree do HEAD que já o tem.
+- As fases anteriores a ela, que não têm fluxo, podem rodar junto, como em
+  qualquer fase exclusiva.
+- As outras fases com fluxo voltam ao paralelo assim que ela integra.
+- Com o `start` presente, nada disso acontece.
+- O Core não escreve código de produto: quem cria o `start` é o executor da
+  fase.
+
+**2. O verde que conflita não se perde.** No desfecho "refazer",
+`preservarAprovado` cria o branch `capivara/<run>/<fase>-aprovada-<sha7>`
+apontando para o mesmo commit aprovado.
+- Nada é copiado, reescrito ou integrado; o sha no nome evita colidir com o
+  branch da fase, que a nova rodada recria.
+- O evento `retry` e o anúncio dizem o commit e o branch.
+- A nova rodada anuncia onde o verde anterior continua.
+- A fase segue refazendo sozinha sobre a árvore integrada, como antes; não há
+  merge automático.
+
+O §108, as permissões e os critérios G0–G4 não mudaram, e não entrou nenhuma
+restrição nova aos agentes.
+
+**Limitação:** se a fase preparadora falhar com `--keep-going`, as outras
+fases com fluxo seguem em paralelo sem `start`. Cada uma recebe o aviso, e o
+risco de conflito volta. A preparação não é tentada com outra fase.
+
+Testes (`test/loop/paralelo.spec.ts`, Git real, provider e Playwright falsos):
+- "sem start: só uma fase prepara a fundação, sozinha, e as outras com fluxo
+  saem depois, em paralelo";
+- "com start: nada é preparado, e as três fases com fluxo correm juntas";
+- "conflito na integração: o commit aprovado fica num branch próprio, dito no
+  evento, intacto". O teste confere:
+  - o commit e o conteúdo;
+  - a árvore principal limpa;
+  - que o branch é achado pelo log de eventos.
+
+Contra o código anterior, o primeiro e o terceiro falham. O segundo passa nos
+dois, como deve.
+
+## §111 — O G4 diz em que porta a aplicação escutou, e a retomada não apaga o parcial
+
+No `build-6e34384deccd` (`teste_luna`, codex/gpt-6-luna), a P04 bloqueou no G4.
+A fundação lia `PORTA`, e não `PORT`: a aplicação escutou na 3000, e o gate
+esperou a 47533 até estourar os 180 s. A saída inteira foi `Timed out waiting
+180000ms from config.webServer`, porque o stdout da aplicação era descartado. Na
+retomada, o `wip(P04)`, que já tinha passado no G3, foi apagado, e a fase
+recomeçou do zero. O diagnóstico está em `docs/DIAGNOSTICO-TESTE-LUNA.md`.
+
+**1. A saída da aplicação no G4.** A configuração gerada passa a ter
+`stdout: 'pipe'`. Quando a aplicação não sobe, `portasAnunciadas` lê as linhas
+`[WebServer]` (um endereço `http://host:N`, ou "port N" / "porta N").
+- Se a aplicação anunciou outra porta e não a do gate, a causa diz qual porta
+  ela anunciou, qual o gate forneceu, e que o defeito é do entrypoint, como no
+  §107.
+- Se anunciou a do gate, ou não anunciou nenhuma, a mensagem é a de antes.
+- O gate roda o Playwright com `CI=1`, e a saída sai sem cores. As expressões
+  que procuram `[WebServer]` continuam valendo.
+
+**2. A retomada parte do parcial.** Ao abrir o worktree, se o branch da fase tem
+commits que o HEAD não tem (o `wip` de uma tentativa anterior), `guardarSobra` o
+preserva em `capivara/<run>/<fase>-parcial-<sha7>` antes de `limparSobra`
+apagá-lo.
+- O parcial é reaplicado no worktree novo, aberto do HEAD integrado, com
+  `merge --squash`, e fica como alteração não commitada. O commit da fase
+  continua sendo um só, e a integração não muda.
+- Se o parcial conflita com a árvore integrada, o worktree volta ao HEAD e a
+  fase começa limpa.
+- Nos dois casos, o anúncio diz o commit e o branch preservado.
+
+O §108, as permissões, os critérios G0–G4 e os prompts não mudaram, e não
+entrou nenhuma restrição nova aos agentes.
+
+**Limitações:**
+- os branches `-parcial-` não são apagados automaticamente, como os
+  `-aprovada-` do §110;
+- a fase retomada não é avisada no prompt de que o código parcial veio de uma
+  tentativa anterior: ela o encontra na árvore;
+- o modo serial não usa worktree, e não muda.
+
+Testes:
+- `test/loop/flows.spec.ts`: a configuração tem `stdout: 'pipe'`; as portas
+  anunciadas saem só das linhas da aplicação; o timeout com a porta 3000
+  anunciada diz qual é; anunciar a porta do gate mantém a mensagem genérica.
+- `test/loop/paralelo.spec.ts`, com Git real: o parcial é reaplicado sobre a
+  árvore integrada e o original fica no branch; o parcial que conflita não
+  entra, e a fase começa do HEAD; sem parcial, nada é preservado.
+
+Contra o código anterior, 5 dos 7 testes falham. Os 2 casos negativos passam
+nos dois, como devem.

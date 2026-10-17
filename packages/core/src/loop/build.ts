@@ -831,6 +831,12 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         instalar: options.testRunner ?? defaultTestRunner,
         systemInstall: options.systemInstall === true,
         portaBase: FLOW_PORT,
+        ...(fluxosDaFase
+          ? {
+              semEntrypoint: async () => (await startCommandFor(options.projectRoot)) === null,
+              comFluxos: (session: PhaseSession) => fluxosDaFase(session.number).workflows.length > 0,
+            }
+          : {}),
         announce,
         ...(options.onProgress !== undefined ? { onProgress: options.onProgress } : {}),
         ...(options.onWorker !== undefined ? { onWorker: options.onWorker } : {}),

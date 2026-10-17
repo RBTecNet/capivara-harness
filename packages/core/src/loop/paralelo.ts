@@ -46,6 +46,7 @@ import {
   impedimentosDaPrincipal,
   integrar,
   mexeuNasDependencias,
+  preservarAprovado,
   trazerRoteiros,
   type ParcialGuardado,
   type Worktree,
@@ -96,6 +97,13 @@ export interface ParaleloOptions {
   systemInstall: boolean;
   /** A porta do gate 4 que o primeiro agente prefere; os seguintes, as vizinhas. */
   portaBase: number;
+  /**
+   * A fundação que o gate 4 exige ainda falta na árvore principal (§110): o
+   * projeto não declara `start`. Perguntado uma vez, antes da primeira leva.
+   */
+  semEntrypoint?: () => Promise<boolean>;
+  /** A fase percorre fluxos no gate 4. */
+  comFluxos?: (session: PhaseSession) => boolean;
   announce: (message: string) => void;
   onProgress?: BuildProgressListener;
   onWorker?: WorkerProgressListener;
@@ -173,6 +181,32 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
       relatorios.set(session.id, { status: "already-implemented", cycles: 0 });
     }
   }
+
+  /*
+   * A fundação do gate 4, preparada uma vez antes do paralelo (§110).
+   *
+   * Sem `start`, cada fase com fluxo precisa criá-lo — e o servidor que honre
+   * `PORT` e `HOST` mora na fundação compartilhada. No `build-96756ca336b0` a
+   * P03 e a P04 escreveram o mesmo código na mesma `configuracao.ts`, cada uma no
+   * seu worktree, e a P04 verde conflitou na integração. A primeira fase pendente
+   * com fluxo roda SOZINHA — o mesmo mecanismo de quem volta de um conflito —, cria
+   * o `start` pelos gates de sempre, e as seguintes abrem o worktree do HEAD que
+   * já o tem. Com o `start` presente, nada disto acontece.
+   */
+  if (options.semEntrypoint && options.comFluxos) {
+    const comFluxos = options.comFluxos;
+    const preparadora = options.sessions.find((session) => estados.get(session.id) !== "integrada" && comFluxos(session));
+    if (preparadora && (await options.semEntrypoint())) {
+      exclusivas.add(preparadora.id);
+      announce(
+        `[${preparadora.id}] o projeto ainda não declara \`start\`, que o gate 4 exige: esta fase roda sozinha e o cria; ` +
+          "as outras fases com fluxo saem depois, sobre a árvore que já o tem",
+      );
+    }
+  }
+
+  /** O verde que conflitou na integração, por fase: onde ele ficou (§110). */
+  const preservados = new Map<string, { branch: string; commit: string }>();
   for (const slot of livres) agente(slot, "livre", null);
 
   // Ajustes de dependência são ditos uma vez, antes de qualquer fase sair.
@@ -399,6 +433,8 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
     let manterArvore = false;
     try {
       agente(slot, "preparando", session.id);
+      const anterior = preservados.get(session.id);
+      if (anterior) announce(`[${session.id}] o commit aprovado antes (${anterior.commit.slice(0, 12)}) continua no branch ${anterior.branch}`);
       try {
         const aberto = await abrirWorktree(projectRoot, options.runId, session.id, options.environment);
         worktree = aberto.worktree;
@@ -406,6 +442,14 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
           `[${session.id}] agente ${slot + 1} (${pool.label}) num worktree próprio` +
             `${aberto.copiado.length > 0 ? `; copiado: ${aberto.copiado.join(", ")}` : ""}`,
         );
+        const retomado = aberto.retomado;
+        if (retomado) {
+          announce(
+            retomado.aplicado
+              ? `[${session.id}] o parcial da tentativa anterior (${retomado.commit.slice(0, 12)}) foi reaplicado sobre a árvore integrada; o original continua no branch ${retomado.branch}`
+              : `[${session.id}] o parcial da tentativa anterior (${retomado.commit.slice(0, 12)}) não foi reaplicado — ${retomado.motivo}; a fase começa do HEAD, e o parcial continua no branch ${retomado.branch}`,
+          );
+        }
       } catch (erro) {
         const causa = erro instanceof Error ? erro.message.split("\n")[0] ?? "" : String(erro);
         const outcome: PhaseOutcome = { status: "failed", gate: "gate 0 — engine", cause: `não consegui criar o worktree da fase: ${causa}`, cycles: 0 };
@@ -438,11 +482,26 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
           return;
         }
         if (integracao.desfecho === "refazer" && !exclusivas.has(session.id)) {
+          /*
+           * O verde não é descartado antes da nova rodada (§110): o commit
+           * aprovado ganha um branch próprio, dito no evento — a retomada o acha
+           * no log, não só na tela.
+           */
+          const preservado = await preservarAprovado(projectRoot, worktree);
+          preservados.set(session.id, preservado);
           exclusivas.add(session.id);
           estados.set(session.id, "pendente");
           await options.esquecer(session);
-          await evento(session.id, "retry", `${integracao.motivo}; volta à fila para rodar sozinha sobre a árvore integrada`);
-          announce(`[${session.id}] ${integracao.motivo}. A integração foi desfeita; a fase volta à fila para rodar SOZINHA sobre a árvore integrada`);
+          await evento(
+            session.id,
+            "retry",
+            `${integracao.motivo}; volta à fila para rodar sozinha sobre a árvore integrada; ` +
+              `o commit aprovado ${preservado.commit.slice(0, 12)} ficou no branch ${preservado.branch}`,
+          );
+          announce(
+            `[${session.id}] ${integracao.motivo}. A integração foi desfeita; a fase volta à fila para rodar SOZINHA sobre a árvore integrada. ` +
+              `O commit aprovado ${preservado.commit.slice(0, 12)} ficou no branch ${preservado.branch} (git log ${preservado.branch})`,
+          );
           options.onProgress?.({ kind: "phase", id: session.id, state: "aguardando", cycle: 0, detail: "refaz sozinha" });
           agente(slot, "livre", null, `${session.id} conflito`);
           return;

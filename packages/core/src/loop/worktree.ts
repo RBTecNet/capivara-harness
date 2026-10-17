@@ -111,6 +111,57 @@ async function limparSobra(projectRoot: string, dir: string, branch: string): Pr
   await git(projectRoot, ["branch", "-D", branch]).catch(() => undefined);
 }
 
+/** O parcial de uma tentativa anterior da fase, encontrado ao reabri-la (§111). */
+export interface ParcialRetomado {
+  /** O branch que o guarda, com o sha no nome — o da fase é recriado. */
+  branch: string;
+  commit: string;
+  /** Foi reaplicado sobre o HEAD integrado, como alteração ainda não commitada. */
+  aplicado: boolean;
+  motivo?: string;
+}
+
+/**
+ * O branch da fase guarda trabalho que o HEAD não tem? Então é o `wip` de uma
+ * tentativa anterior, e vai para um branch próprio antes de `limparSobra`
+ * apagá-lo (§111). No `build-6e34384deccd` a retomada apagou o `wip(P04)` que já
+ * tinha passado no G3 — faltava só a porta — e a fase recomeçou do zero.
+ */
+async function guardarSobra(projectRoot: string, branch: string): Promise<{ branch: string; commit: string } | null> {
+  const commit = await git(projectRoot, ["rev-parse", "--verify", "--quiet", `${branch}^{commit}`]).catch(() => "");
+  if (commit === "") return null;
+  if ((await git(projectRoot, ["rev-list", "--count", `HEAD..${commit}`]).catch(() => "0")) === "0") return null;
+  const preservado = `${branch}-parcial-${commit.slice(0, 7)}`;
+  await git(projectRoot, ["branch", "-f", preservado, commit]);
+  return { branch: preservado, commit };
+}
+
+/**
+ * O parcial reaplicado no worktree novo, como alteração não commitada: o commit
+ * da fase continua sendo um só, sobre o HEAD integrado, e a integração não muda.
+ * Se não se aplica — o HEAD andou por cima dos mesmos arquivos —, a árvore volta
+ * ao HEAD e a fase começa limpa; o parcial continua no branch.
+ */
+async function reaplicarParcial(dir: string, commit: string): Promise<string | null> {
+  // O `merge --squash` deixa a mensagem dele, e um `git commit` sem `-m` a usaria.
+  const semMensagem = async (): Promise<void> => {
+    await rm(resolve(dir, await git(dir, ["rev-parse", "--git-path", "SQUASH_MSG"])), { force: true }).catch(() => undefined);
+  };
+  try {
+    await git(dir, ["merge", "--squash", commit]);
+    await git(dir, ["reset", "-q"]);
+    await semMensagem();
+    return null;
+  } catch (erro) {
+    const conflitos = (await git(dir, ["diff", "--name-only", "--diff-filter=U"]).catch(() => "")).split("\n").filter(Boolean);
+    await git(dir, ["reset", "-q", "--hard", "HEAD"]).catch(() => undefined);
+    await semMensagem();
+    if (conflitos.length > 0) return `conflita com a árvore integrada em ${conflitos.join(", ")}`;
+    const saida = erro instanceof Error && "stderr" in erro ? String((erro as { stderr: unknown }).stderr) : String(erro);
+    return saida.split("\n").map((linha) => linha.trim()).find((linha) => linha !== "") ?? "o git recusou";
+  }
+}
+
 /**
  * O worktree da fase, partindo do HEAD integrado, com o que o checkout não traz.
  *
@@ -122,13 +173,19 @@ export async function abrirWorktree(
   runId: string,
   phaseId: string,
   environment: NodeJS.ProcessEnv = process.env,
-): Promise<{ worktree: Worktree; copiado: string[] }> {
+): Promise<{ worktree: Worktree; copiado: string[]; retomado: ParcialRetomado | null }> {
   const base = await git(projectRoot, ["rev-parse", "HEAD"]);
   const branch = branchDaFase(runId, phaseId);
   const dir = join(pastaDosWorktrees(projectRoot, runId, environment), phaseId);
+  const sobra = await guardarSobra(projectRoot, branch);
   await limparSobra(projectRoot, dir, branch);
   await mkdir(join(dir, ".."), { recursive: true });
   await git(projectRoot, ["worktree", "add", "-q", "-b", branch, dir, base]);
+  let retomado: ParcialRetomado | null = null;
+  if (sobra) {
+    const motivo = await reaplicarParcial(dir, sobra.commit);
+    retomado = motivo === null ? { ...sobra, aplicado: true } : { ...sobra, aplicado: false, motivo };
+  }
 
   const copiado: string[] = [];
   for (const pasta of [join(".capivara", "skills"), FLOWS_DIR]) {
@@ -164,13 +221,30 @@ export async function abrirWorktree(
     copiado.push("node_modules");
   }
 
-  return { worktree: { dir, branch, base }, copiado };
+  return { worktree: { dir, branch, base }, copiado, retomado };
 }
 
 /**
  * Tira o worktree do disco. O branch só fica quando ainda guarda trabalho que
  * não chegou à árvore principal — o da fase que falhou, para quem quiser ler.
  */
+/**
+ * O commit aprovado de uma fase que conflitou na integração, num branch próprio (§110).
+ *
+ * O desfecho "refazer" fechava o worktree apagando o branch: no
+ * `build-96756ca336b0` o verde da P04 (`8c9365e`) ficou sem referência, à
+ * espera do `git gc`, e a fase seria refeita do zero. O branch novo aponta para
+ * o MESMO commit — nada é copiado, reescrito ou integrado — e leva o sha no nome,
+ * para nunca colidir com o branch da fase, que a nova rodada recria, nem com o de
+ * outra tentativa.
+ */
+export async function preservarAprovado(projectRoot: string, worktree: Worktree): Promise<{ branch: string; commit: string }> {
+  const commit = await git(projectRoot, ["rev-parse", "--verify", `${worktree.branch}^{commit}`]);
+  const branch = `${worktree.branch}-aprovada-${commit.slice(0, 7)}`;
+  await git(projectRoot, ["branch", "-f", branch, commit]);
+  return { branch, commit };
+}
+
 export async function fecharWorktree(
   projectRoot: string,
   worktree: Worktree,

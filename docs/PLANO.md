@@ -9441,3 +9441,232 @@ passaram (166,68 s). Uma segunda expectativa antiga de inventário após reparo
 foi corrigida preservando a revalidação de todas as tasks. Executável instalado
 0.5.0 recompilado às 13:52:51. Log: /tmp/capivara-main-final-check.log.
 Commit de todas as alterações acumuladas autorizado pelo usuário na main.
+
+## §116 — Reformulação do INIT e do PLAN: arquitetura, infraestrutura, sem testes, recuperação orientada à conclusão
+
+Pedido do proprietário em 19/10/2026, com uma diretriz acima de todas: **a
+Capivara trabalha para concluir a etapa, não para encontrar um motivo para
+interrompê-la.** Tempo e custo são métricas; uma operação recuperável não pode
+repetir trabalho intelectual já feito. Esta seção registra o que havia, o que
+mudou, os contratos alterados, o impacto em cada estágio, os pontos de
+compatibilidade com o build, os testes, as limitações e como medir.
+
+### 116.1 O que havia
+
+- O `init` entrevistava, escrevia o esqueleto em uma chamada e parava em PLAN
+  READY. As respostas sobreviviam nos handoffs, mas o esqueleto não tinha
+  memória: um `init` retomado depois de uma falha repagava a chamada do
+  esqueleto com todas as respostas em disco.
+- O `plan` detalhava fase a fase a partir da divisão FIXA do esqueleto. O
+  escritor da fase e o auditor eram proibidos de dividir, fundir ou reordenar
+  fases ("THE PHASES THEMSELVES ARE NOT YOURS TO CHANGE"). Não existia nenhum
+  artefato de arquitetura; a única infraestrutura declarada eram as sondas de
+  prontidão do esqueleto.
+- O contrato `capivara-phases/v1` carregava `**Feature tests:**` no parser, nos
+  templates, nos rótulos estruturais, na memória de tasks e em
+  `loop/feature-tests.ts`. O §115.39 o tinha tornado "advisory" por prompt — mas
+  o contrato continuava exigindo o comportamento antigo, e um prompt não vence
+  um parser.
+- Recuperação: limite de uso esperava e repetia; timeout e saída vazia tinham
+  uma segunda tentativa; qualquer outro erro do provider abortava. A ponte do
+  `init`/`plan` descartava `engineError` e `timedOut`, e uma CLI que falhava
+  antes de responder virava "texto inválido" (HANDOFF §16). Aprovações por task
+  e a base da coerência viviam só em memória: uma retomada reauditava o que já
+  estava aprovado. Os achados de contrato do self-check saíam como `linha N`
+  sem fase e caíam no fallback de reescrever todas as fases, derrubando
+  aprovações pagas (anotado no HANDOFF de 25/09, nunca consertado).
+
+### 116.2 O que existe agora
+
+**Contrato.** `capivara-phases/v2`: o plano descreve comportamento, não testes.
+`**Feature tests:**` saiu do parser, dos templates, dos rótulos estruturais, da
+memória de tasks e da cobertura; um documento que o carrega é recusado por
+**I-15**, nunca lido como se o rótulo fosse critério nem convertido em silêncio.
+A saída FRESCA do escritor que ainda o emite por hábito é limpa em código
+(`stripLegacyFeatureTests`), sem devolução paga — a distinção é entre reparo de
+representação de uma resposta nova e conversão de um documento publicado, que é
+proibida. `loop/feature-tests.ts` e `featureTestNames` foram removidos; o build
+não varre a árvore atrás de nomes inventados no planejamento.
+
+`capivara-architecture/v1` (`src/contract/architecture.ts`): componentes com
+responsabilidade, áreas, dependências, contratos e arquivos; decisões de dados;
+fluxos mapeados a componentes; **infraestrutura** com runtimes, ferramentas,
+gerenciadores de pacotes, dependências (app/dev), serviços (externos/locais),
+bancos, requisitos de compatibilidade, condições para iniciar e as sondas de
+prontidão — cada item com `basis`, a autoridade da escolha, e `version` vazia
+quando nenhuma fonte a fixa; e a **divisão de fases que vale**, com os
+componentes de cada fase e a razão do tamanho. O parser conserta contando o que
+não exige julgamento (numeração por posição, forma de `dependsOn`, grafia dos
+rótulos de cobertura, sondas herdadas do esqueleto quando o arquiteto não as
+repetiu) e recusa o que exige: componente desconhecido, fluxo sem componente,
+fase sem componente, item de infraestrutura sem autoridade, dependência do
+futuro, fase acima do teto — e, acima de tudo, **cobertura perdida**: toda
+story, entidade e fluxo do esqueleto continua no `covers` de alguma fase. É
+isso que torna a reorganização segura.
+
+`capivara-planning/v3` e `capivara-environment/v3`: identidades de run, caches
+e metadados desta geração. `environment.json` continua carregando o que o build
+lê (contrato, geração, hashes, sondas) e ganha `architectureSha12` e
+`infrastructure`. O stamp do plano cita `skeleton.md` e `architecture.md`.
+Versão 0.6.0; `docs/capivara-phases-v2.md` é o documento gerado.
+
+**O `plan` em duas etapas.** Antes de qualquer fase, o **arquiteto** recebe o
+esqueleto inteiro, o pedido, as decisões e o inventário, e devolve a
+arquitetura. Um **auditor independente** a julga por cinco eixos — fidelidade
+ao produto, coerência, completude, dependências, dimensionamento e viabilidade
+— pelo mesmo protocolo de auditoria; achado volta ao arquiteto como emenda (a
+arquitetura anterior mais os achados), decisão vai ao desenvolvedor na hora, e
+esgotado o orçamento (`maxArchitectureReturns`, 2) o impasse é o mesmo do
+plano: `reiniciar`, `publicar` (com ressalva, nunca como aprovada em silêncio)
+ou `abortar`. A arquitetura aprovada é publicada em `architecture.md` e no
+estado `<run>.architecture-state.json`, com os shas do esqueleto de origem, do
+esqueleto aplicado e da autoridade.
+
+A arquitetura é então **aplicada ao esqueleto**: `skeleton.md` e o estado
+passam a carregar a divisão de fases e as sondas que ela decidiu. O esqueleto do
+`init` é a proposta; o publicado daqui em diante é o que o build e o `change`
+leem — e é por isso que é o esqueleto que muda, não eles. Cada fase recebe a
+fatia do esqueleto E a fatia da arquitetura (`architectureSliceForPhase`): os
+componentes dela inteiros, só o contrato dos que ela consome, os fluxos que os
+atravessam e a infraestrutura. O escritor ganhou a regra de escrever para um
+executor econômico — onde, o quê e o que prova, com arquivo, rota e função
+nomeados, nunca "conforme a arquitetura".
+
+**Auditoria do plano.** Aos eixos de fidelidade, conformidade, precisão e
+executabilidade entraram coerência arquitetural, dependências e economia do
+executor. Reorganização de fases deixou de ser proibida: um achado endereçado a
+`Architecture` refaz a arquitetura (dentro do orçamento), as fases cujo
+envelope e fatia não mudaram voltam do cache, e as outras são reescritas. A
+coerência ganhou uma terceira pergunta — o plano implementa a arquitetura? — e
+recebe `architecture.md`. Nenhum prompt pede, cita ou exige teste; "não exigir
+teste separado para cada frase" virou "nunca exigir teste, arquivo de teste ou
+procedimento de validação". Defeito de forma que o harness repara sozinho não
+é achado.
+
+**Recuperação orientada à conclusão**, na ordem que o pedido fixou:
+
+1. *Determinística, sem LLM.* Reparo do esqueleto (numeração, `dependsOn`,
+   rótulos de cobertura); reparo da arquitetura (idem, mais sondas herdadas);
+   `Feature tests` descartado; e os reparos de forma que já existiam.
+2. *Localizada.* Achado de contrato do self-check vai à fase em que está
+   (`faseDaLinha`, por `phaseHeading` do contrato, sem regex fora dele);
+   achado de arquitetura refaz só a arquitetura e reescreve só o que mudou.
+3. *Reaproveitamento.* A memória do plano (`capivara-plan-cache/v3`) guarda
+   esqueleto, arquitetura, fases, aprovações por auditoria, **tasks aprovadas**
+   e a **base da coerência**; a arquitetura é reaproveitada do estado quando
+   esqueleto (de origem ou aplicado) e decisões não mudaram; a chave da
+   aprovação por fase deixou de incluir a lista de tasks já aprovadas, que muda
+   conforme a memória cresce e fazia a aprovação de ontem não ser encontrada
+   hoje; o ensaio ganhou memória por lote; a coerência não é reperguntada sobre
+   um índice idêntico sob as mesmas decisões; o esqueleto do `init` é
+   reaproveitado quando o prompt não mudou.
+4. *Nova chamada só com julgamento.* Tudo acima acontece antes de qualquer
+   chamada de correção.
+5. *Provider indisponível preserva tudo.* Erro do motor (`engineError`,
+   `timedOut`) chega ao orquestrador como campo e nunca é lido como resposta;
+   indisponibilidade transitória (conexão, 502/503/504, sobrecarga) espera 5s e
+   20s e repete, no máximo duas vezes; só o silêncio ganha a segunda chance
+   automática — recusa que diz o que houve é definitiva (§115.14). Uma fase que
+   falha não derruba as irmãs: cada trabalhadora guarda o próprio erro, todas
+   terminam, o cache vai ao disco, e só então o primeiro erro sai. A memória é
+   gravada num `finally` antes de qualquer erro deixar o orquestrador.
+
+E a mudança de estratégia: duas auditorias seguidas sobre os MESMOS bytes, as
+duas reprovando, levam os pontos ao desenvolvedor (arbitragem) em vez de pagar
+a terceira devolução. Nada disso declara aprovado um documento que não foi.
+
+**`init`.** Preservado: entrevista, omissões, insistência, esqueleto, PLAN
+READY. Ganhou o cache do esqueleto, os reparos determinísticos e a recuperação
+do provider. Continua não produzindo código.
+
+### 116.3 Análise de impacto — quem lê o que mudou
+
+| o que mudou | quem lia | o que foi feito |
+|---|---|---|
+| `TaskBlock.featureTests` | `textoDaTask` (memória de tasks do plan e do build), `coverage`, `loop/feature-tests.ts`, fixtures | campo removido; `t:` sai do texto canônico (o sha de task sem Feature tests não muda); módulo do build removido; fixtures atualizadas |
+| rótulos estruturais | `languageBlock` de todo prompt, teste de arquitetura | `Feature tests` fora da lista; o marcador continua proibido fora de `contract/` |
+| stamp do plano | `preflight.ts` do build, `change` | preflight inclui `architecture.md` quando existe; `change` carimba os bytes em disco |
+| `environment.json` | `readEnvironmentPlan` (build, change) | campos extras ignorados pelo leitor; `change` carrega `architectureSha12` e `infrastructure` adiante |
+| `Skeleton.phases` e `environment` | `workflowsForPhase` (build), `change`, `readSkeletonState` | o plan republica o esqueleto com a divisão e as sondas da arquitetura; forma inalterada |
+| `PLANNING_CONTRACT` | `runIdFor`, ledger do build, `shaDaAutoridade`, cache | geração v3: nenhum verde anterior é lido |
+| `PIPELINE_STEPS`, `INIT_ARTIFACTS` | painel, `doctor`, relatório | passo "arquitetura" no painel; `doctor` reconhece o artefato novo |
+| `AgentCaller` | ponte do CLI | `engineError`/`timedOut` passam como campo |
+
+### 116.4 Compatibilidade com o build, no escopo declarado
+
+O build não foi reformulado. Ele continua lendo `project-phases.md` com o mesmo
+`parsePhases`, `skeleton.md`/estado com `readSkeletonState` e
+`workflowsForPhase`, e `environment.json` com `readEnvironmentPlan`. Os dois
+ajustes compartilhados — o input `architecture.md` no stamp do preflight e os
+campos extras do metadado — são de integridade, não de comportamento. O
+catálogo do Apêndice B roda `init` → `plan` → `build` inteiro com a arquitetura
+no meio, e a regressão 9 prova preflight, stamp fresco e metadado. O que o
+build ainda NÃO faz: o executor e o roteirista do G4 não leem
+`architecture.md` (o prompt do executor cita só `skeleton.md`); é a primeira
+tarefa da etapa do build.
+
+### 116.5 Testes
+
+`test/init/reformulacao-116.spec.ts` prova as nove propriedades pedidas:
+init retomado não repergunta nem repaga o esqueleto; o plan ainda pergunta as
+lacunas; nenhum teste nomeado é exigido e o rótulo antigo é limpo em código; a
+arquitetura divide fases sem perder cobertura e a divisão que perde é recusada
+com o defeito nomeado; defeito de contrato emenda só a fase citada e defeito de
+forma não custa chamada; arquitetura e plano reprovados nunca viram RALPH
+READY; o provider caindo preserva tudo o que já foi julgado (três tentativas,
+duas esperas, retomada com zero chamadas de arquitetura, auditoria dela e fase
+1); a migração não perde story, entidade, fluxo nem regra; o preflight do build
+lê plano, stamp e metadado novos. Mais `contract/architecture.spec.ts`,
+`prompts/architecture.spec.ts`, I-15 em `contract/phases.spec.ts`, a limpeza em
+`phase-part.spec.ts`, o `change` carimbando a arquitetura, e o catálogo com a
+coerência não reperguntada sobre índice idêntico.
+
+Os testes pegaram quatro defeitos meus antes do commit: a chave da aprovação
+por fase mudava com a memória; a coerência era reperguntada à toa; a repetição
+automática cobria erro do motor com texto (o teste da API direta exige "sem
+repetir" num corte por tokens); e a primeira rejeição em `Promise.all` saía
+com as irmãs ainda escrevendo. Cada `npm run check` desta reformulação foi
+gravado e o commit só saiu com `rc=0`: 2542 → 2556 → 2557 → 2558 → **2577
+testes em 133 arquivos**. Dois cenários do build paralelo e um do reinício do
+G4 falharam por tempo sob carga de máquina (load 13 em 4 núcleos) e passaram
+isolados e na repetição; nenhum toca o que mudou aqui.
+
+### 116.6 Limitações que ficam
+
+- O build não lê `architecture.md`: o executor e o G4 seguem com `skeleton.md`
+  e o texto da fase. As tasks nomeiam arquivo, rota e função justamente para
+  isso não custar nada até a etapa do build.
+- O `change` não atualiza a arquitetura: ele carimba a que existe e acrescenta
+  fases ao esqueleto e ao plano. `architecture.md` fica desatualizado quanto às
+  fases de mudança.
+- O auditor da arquitetura não passa pela triagem de materialidade do §115.36;
+  o orçamento de reorganizações e o impasse com o desenvolvedor são o limite.
+- O `change` ainda escreve fases sem fatia de arquitetura.
+- `maxArchitectureReturns` é um teto fixo (2) sem flag de linha de comando.
+- Nenhuma execução com modelo real foi feita nesta reformulação: as provas são
+  as reproduções com o provider falso e o catálogo. O próximo run real deve ser
+  lido em `.capivara/runs/<run>/prompts/` e `logs/` antes de culpar o modelo.
+
+### 116.7 Como medir a redução de tempo, chamadas e retrabalho
+
+Tudo sai de `events.tsv` e de `prompts/`/`logs/` do run, sem instrumentação
+nova:
+
+- **Chamadas por estágio**: contar os arquivos de `prompts/` por papel e
+  assunto; a retomada de um `plan` que chegou a RALPH READY custa zero chamadas
+  de writer, auditor e verifier (regressão 7).
+- **Retrabalho evitado**: os anúncios "reaproveitada de uma execução anterior"
+  (esqueleto, arquitetura, fase, ensaio, coerência) e "não vou repagar"
+  contam o que teria sido pago; cada um é uma chamada a menos em relação à
+  0.5.0.
+- **Reorganizações**: eventos `authoring · architecture · retry` com o número
+  da reorganização; fases reescritas depois dela são as `authoring · phase-pNN
+  · complete` sem o detalhe "reaproveitada".
+- **Correção localizada**: achados `Phase N · linha L` nos eventos de auditoria
+  e emendas só nos `phase-pNN` citados.
+- **Indisponibilidade**: eventos `retry` com "provider indisponível" e o
+  tempo entre eles; depois do diagnóstico, a retomada não repete nada do que
+  está em cache.
+- **Tempo**: o `events.tsv` traz o instante de cada transição; o relatório
+  final traz segundos e tokens por papel. A comparação justa é o mesmo pedido
+  nas duas versões, como no §26.

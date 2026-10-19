@@ -15,11 +15,46 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 | | |
 |---|---|
 | branch | `main` — é onde tudo está |
-| versão | 0.5.0 (`capivara --version`); planos antigos incompatíveis, ver §115.26 |
-| suíte | 2535 testes em 132 arquivos, `npm run check` verde |
+| versão | 0.6.0 (`capivara --version`); planos da 0.5.0 e anteriores incompatíveis, ver §116 e §115.26 |
+| suíte | 2577 testes em 133 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-19 — a reformulação do INIT e do PLAN (§116)
+
+Cinco commits numa branch própria, cada um com `npm run check` verde antes de
+sair. O que está feito e o que vem a seguir, em ordem de importância:
+
+**Feito.** O `plan` tem uma etapa de arquitetura antes das fases: o arquiteto
+decide componentes, contratos, decisões de dados, fluxos, infraestrutura (cada
+item com a autoridade da escolha) e a divisão de fases que vale; um auditor
+independente a julga; o esqueleto publicado passa a carregar essa divisão e as
+sondas dela, e cada fase recebe a fatia da arquitetura. O contrato é
+`capivara-phases/v2`, sem `Feature tests` (I-15 recusa o rótulo antigo), e a
+geração é `capivara-planning/v3`. A recuperação é orientada à conclusão:
+reparo determinístico, emenda localizada por fase, memória em disco de
+esqueleto, arquitetura, fases, aprovações por task, coerência e ensaio,
+repetição limitada para provider indisponível, erro do motor nunca lido como
+resposta, e mudança de estratégia (arbitragem) quando a emenda não muda o
+texto. As nove regressões pedidas estão em `test/init/reformulacao-116.spec.ts`.
+
+**Próximo, na etapa do build.** (1) O executor e o roteirista do G4 não leem
+`architecture.md`: o prompt do executor cita só `skeleton.md`. É a primeira
+coisa a mudar lá, e é por isso que as tasks nomeiam arquivo, rota e função.
+(2) O `change` carimba a arquitetura mas não a atualiza nem escreve fases com a
+fatia dela. (3) O auditor da arquitetura não passa pela triagem de
+materialidade. (4) Nenhum run real com a 0.6.0 ainda: o primeiro deve ser lido
+em `prompts/` e `logs/` antes de culpar o modelo — a suspeita é o harness.
+
+**Armadilhas pagas nesta reformulação.** A chave de uma aprovação não pode
+incluir o que muda com a própria memória (a lista de tasks aprovadas mudava o
+sha e a aprovação de ontem sumia). Erro do motor com texto não se repete às
+cegas: o corte por tokens e a recusa de credencial são definitivos (§115.14).
+`Promise.all` sai na primeira rejeição com as irmãs ainda escrevendo; esperar
+todas antes de propagar é o que faz a retomada custar só a fase que faltou.
+Sob carga (load 13 em 4 núcleos), dois cenários do build paralelo e um do
+reinício do G4 falham por tempo e passam isolados; não são da reformulação.
 
 Correções de planejamento e pré-requisitos (§§115.38–39): o teste_minimax
 expôs uma sonda Playwright inválida, screenshot em /dev/null. O Core agora
@@ -529,7 +564,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 1142 testes
+npm run check     # build + typecheck + 2577 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

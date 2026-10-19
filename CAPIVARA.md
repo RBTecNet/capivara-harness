@@ -54,7 +54,7 @@ Estas não são preferências. São o que mantém o produto coerente:
 
 1. **Nenhuma regex de fase fora de `packages/core/src/contract/`.** O loop não tem parser próprio: ele importa o mesmo módulo que o `init` usa para validar. É a tese do projeto e existe um teste de arquitetura que falha se for violada.
 2. **Nenhuma segunda dependência de runtime** sem mudar o plano antes.
-3. **Nunca traduzir chave de protocolo ou rótulo estrutural** — `CAPIVARA_AUDIT_STATUS`, `TASK <n>: DONE`, `## Phase`, `**Acceptance criteria:**`, `**Traces:**` e companhia são casados literalmente pelo parser.
+3. **Nunca traduzir chave de protocolo ou rótulo estrutural** — `CAPIVARA_AUDIT_STATUS`, `TASK <n>: DONE`, `## Phase`, `**Acceptance criteria:**`, `**Traces:**` e companhia são casados literalmente pelo parser. `**Feature tests:**` não é mais rótulo: o plano descreve comportamento, não testes (§116), e o parser recusa o rótulo antigo com I-15.
 4. **Todo campo novo no contrato precisa responder:** *"qual decisão do loop quebra sem ele?"*. Se a resposta for "nenhuma", o campo não existe. Superfície de contrato é superfície de falha.
 5. **`.capivara/init/` é leitura para o executor; `.capivara/runs/` é plano de controle.** Escrever no segundo invalida a tentativa.
 6. **O que é verificável em código é verificado em código.** Instruir o modelo é a última defesa, nunca a única: nove dos quinze defeitos do piloto 1 voltaram porque eu tentei resolvê-los por persuasão.
@@ -72,12 +72,20 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-Na versão 0.5.0, `npm run check` passa: build, typecheck e **2535 testes**, incluindo o catálogo de
+Na versão 0.6.0, `npm run check` passa: build, typecheck e **2577 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
+
+A 0.6.0 é a reformulação do `init` e do `plan` (§116): o `plan` decide a
+arquitetura e a infraestrutura antes de escrever fases (`architecture.md`,
+`capivara-architecture/v1`), pode reorganizar a divisão do `init` sem perder
+cobertura, e o plano deixou de prescrever testes (`capivara-phases/v2`).
+Planos, caches e aprovações da geração anterior (`capivara-planning/v2`) não
+são lidos nem convertidos. A reformulação ainda não foi exercitada com modelo
+real; as provas são o provider falso e o catálogo.
 
 Os pilotos com modelo real foram executados e medidos: `docs/medicoes/referencia.md`.
 
-`docs/capivara-phases-v1.md` é **gerado** por `npm run docs:contract` a partir do
+`docs/capivara-phases-v2.md` é **gerado** por `npm run docs:contract` a partir do
 módulo — não edite à mão; um teste falha se a página divergir do código.
 
 O gate 4 — o que abre a aplicação e percorre os fluxos declarados — existe desde

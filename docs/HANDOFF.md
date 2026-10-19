@@ -16,10 +16,25 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.6.0 (`capivara --version`); planos da 0.5.0 e anteriores incompatíveis, ver §116 e §115.26 |
-| suíte | 2577 testes em 133 arquivos, `npm run check` verde |
+| suíte | 2589 testes em 134 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-19 — o travessão no finding (§117)
+
+Um `plan` real (`teste_openrouter3`, run `init-dc741f0d7b92`) parou na sexta
+rodada com dois achados certos na mão, porque o auditor de coerência escreveu
+`CAPIVARA_FINDING: Architecture — <problema> | <correção>` — travessão no
+lugar do primeiro `|` — e o parser recusou a resposta inteira, duas vezes.
+Agora `parseAudit` lê esse caso como os três campos que ele contém, só quando
+a separação é inequívoca (travessão com espaços, localização curta e
+reconhecível, descrição e correção presentes), anuncia o conserto e nada mais
+muda: três campos não são tocados, o que é ambíguo continua inválido,
+`REJECTED` continua `REJECTED`. O caminho do achado `Architecture` até a
+reorganização já existia e é o que o teste de orquestração prova. Detalhe e
+limites na §117 do PLANO; as duas respostas reais estão em
+`test/audit/finding-travessao.spec.ts`.
 
 ## 2026-10-19 — a reformulação do INIT e do PLAN (§116)
 
@@ -564,7 +579,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 2577 testes
+npm run check     # build + typecheck + 2589 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

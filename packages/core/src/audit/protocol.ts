@@ -106,7 +106,15 @@ export interface AuditVerdict {
 }
 
 export type AuditParse =
-  | { ok: true; verdict: AuditVerdict }
+  | {
+      ok: true;
+      verdict: AuditVerdict;
+      /**
+       * O que o parser consertou sozinho, uma linha por conserto, para o
+       * orquestrador anunciar. Vazio quando a resposta já veio no protocolo.
+       */
+      applied: string[];
+    }
   | { ok: false; defects: string[] };
 
 const STATUS = /^CAPIVARA_AUDIT_STATUS:\s*(.+?)\s*$/;
@@ -152,9 +160,66 @@ export function desembrulhar(output: string): string {
     .join("\n");
 }
 
+/**
+ * O travessão no lugar do primeiro "|": o caso do `teste_openrouter3`.
+ *
+ * O auditor de coerência do run `init-dc741f0d7b92` achou dois defeitos reais
+ * — uma rota consumida duas fases antes de ser entregue, e uma contagem que
+ * nenhuma decisão autorizava — e escreveu o primeiro como
+ * `Architecture — <problema> | <correção>`. Dois campos para o parser, que
+ * recusou a resposta inteira; o auditor repetiu o hábito na segunda tentativa,
+ * e o `plan` parou com seis fases escritas e os dois achados certos na mão.
+ *
+ * É defeito de forma com toda a informação presente, e a regra do §34.8 vale:
+ * forma não custa um run. Quando um finding tem EXATAMENTE dois campos e o
+ * primeiro é `<localização> — <descrição>`, com a localização curta e
+ * reconhecível como endereço e a descrição não vazia, ele é lido como os três
+ * campos que o protocolo pede. Nada é inventado: os três textos são os que o
+ * auditor escreveu, só que separados onde ele quis separar.
+ *
+ * O que NÃO é recuperado, de propósito: três campos (já está certo), dois
+ * campos sem travessão (não há como saber onde a localização acaba), um hífen
+ * (aparece dentro de prosa e de identificadores; não é separador inequívoco),
+ * uma cabeça que é frase (vírgula, ponto-e-vírgula, mais de quatro palavras),
+ * ou uma descrição ou correção vazias.
+ */
+const TRAVESSAO = /\s[\u2014\u2013]\s/u;
+
+/** Palavras com que o protocolo e os prompts endereçam seções sem número. */
+const SECOES_CONHECIDAS =
+  /^(?:architecture|arquitetura|overview|stack|phases?|fases?|tasks?|tarefas?|components?|componentes?|contracts?|contratos?|flows?|fluxos?|infrastructure|infraestrutura|data|dados|traces|rules?|regras?|entities|entidades|workflows?|stories|story)$/iu;
+
+function localizacaoReconhecivel(where: string): boolean {
+  if (where === "" || where.length > 48) return false;
+  if (/[,;!?|]/u.test(where)) return false;
+  const palavras = where.split(/\s+/u);
+  if (palavras.length > 4) return false;
+  return (
+    palavras.length === 1 ||
+    /\d/u.test(where) ||
+    where.includes("·") ||
+    SECOES_CONHECIDAS.test(palavras[0] ?? "")
+  );
+}
+
+function recuperarTravessao(fields: readonly string[]): { fields: string[]; nota: string } | null {
+  if (fields.length !== 2) return null;
+  const [cabeca, fix] = fields as [string, string];
+  const corte = TRAVESSAO.exec(cabeca);
+  if (!corte) return null;
+  const where = cabeca.slice(0, corte.index).trim();
+  const problem = cabeca.slice(corte.index + corte[0].length).trim();
+  if (!localizacaoReconhecivel(where) || problem === "" || fix === "") return null;
+  return {
+    fields: [where, problem, fix],
+    nota: `finding em "${where}" veio com travessão no lugar do primeiro "|"; lido como localização | problema | correção, sem nova chamada`,
+  };
+}
+
 export function parseAudit(rawOutput: string): AuditParse {
   const output = desembrulhar(rawOutput);
   const defects: string[] = [];
+  const applied: string[] = [];
   const statuses: string[] = [];
   const reasons: string[] = [];
   const findings: Finding[] = [];
@@ -172,7 +237,12 @@ export function parseAudit(rawOutput: string): AuditParse {
 
     const finding = FINDING.exec(line);
     if (finding) {
-      const fields = (finding[1] ?? "").split("|").map((field) => field.trim());
+      let fields = (finding[1] ?? "").split("|").map((field) => field.trim());
+      const recuperado = recuperarTravessao(fields);
+      if (recuperado) {
+        fields = recuperado.fields;
+        applied.push(recuperado.nota);
+      }
       if (fields.length < 3 || fields.slice(0, 3).some((field) => field === "")) {
         defects.push(
           `finding incompleto: "${line.trim()}" — todo CAPIVARA_FINDING traz três campos separados por "|": onde | o que está errado | como corrigir`,
@@ -249,6 +319,7 @@ export function parseAudit(rawOutput: string): AuditParse {
   return {
     ok: true,
     verdict: { status: status as AuditStatus, findings, remarks, decisions, reason: reasons[0] ?? "" },
+    applied,
   };
 }
 

@@ -9670,3 +9670,87 @@ nova:
 - **Tempo**: o `events.tsv` traz o instante de cada transição; o relatório
   final traz segundos e tokens por papel. A comparação justa é o mesmo pedido
   nas duas versões, como no §26.
+
+## §117 — O travessão no finding: parsing recuperável nas auditorias do INIT e do PLAN
+
+### 117.1 O defeito
+
+No `teste_openrouter3`, run `init-dc741f0d7b92`, o `plan` chegou à sexta
+rodada de auditoria com seis fases escritas e parou com a mensagem "o auditor
+de project-phases.md#coerência devolveu saída inválida duas vezes". O auditor
+(Luna) tinha acertado o conteúdo nas duas vezes: uma rota (`GET
+/api/dashboard`) consumida nas fases 2 e 4 e entregue só na fase 6, contra a
+decisão confirmada; e uma contagem exibida na página de Categorias que nenhuma
+decisão autorizava. O que ele errou foi a forma: no lugar do primeiro `|`
+escreveu um travessão —
+
+```
+CAPIVARA_FINDING: Architecture — P2.T8.C1 e P4.T1.C1 consomem GET /api/dashboard, … | Mova a entrega da rota …
+```
+
+Na primeira resposta os dois findings vieram assim; na segunda, só o primeiro
+(o segundo, `P4.T1.C1 | … | …`, já estava no protocolo). O parser contou dois
+campos, recusou a linha, e com a linha recusada recusou a resposta inteira —
+inclusive o finding que estava certo. A repetição do auditor repetiu o hábito,
+e o teto de duas tentativas encerrou o run.
+
+### 117.2 A causa
+
+`parseAudit` (`src/audit/protocol.ts`) é o único ponto de interpretação do
+protocolo do auditor para o INIT e o PLAN — a auditoria de arquitetura, as
+auditorias por fase, a coerência e o ensaio passam todos por `auditCall`, que
+o chama. Ele já tolerava a embalagem (chave colada no fim de uma frase,
+indentação, marcador de lista, negrito; §34.8, caso do `MCP_teste2`), mas não
+tolerava este caso: a informação estava toda presente, separada num lugar
+diferente do que o protocolo pede. A regra que recusa um finding com menos de
+três campos é correta — sem correção o escritor não sabe o que fazer —, só que
+aqui os três campos existiam.
+
+O BUILD não lê este parser: os gates têm os seus (`verifier`, `TASK`), e não
+foram tocados.
+
+### 117.3 A recuperação
+
+Determinística, no parser, sem nova chamada. Quando um `CAPIVARA_FINDING` tem
+EXATAMENTE dois campos separados por `|` e o primeiro é
+`<localização> — <descrição>`, ele é lido como `localização | descrição |
+correção`. Os três textos são os que o auditor escreveu; nada é inventado nem
+resumido. A separação só é aceita quando é inequívoca:
+
+- o travessão (`—`, ou `–`) tem espaço dos dois lados; um hífen não serve,
+  porque aparece dentro de prosa e de identificadores (`US-1.2`);
+- a localização tem no máximo 48 caracteres e quatro palavras, sem vírgula,
+  ponto-e-vírgula, `!`, `?` ou `|`, e é reconhecível como endereço: uma só
+  palavra (`Architecture`, `Overview`), ou traz número (`Phase 3`, `P4.T1.C1`,
+  `US-1.2`), ou o separador `·` dos endereços compostos (`Phase 1 ·
+  statuses`), ou começa por uma seção que o protocolo nomeia (`components ·
+  api`, `Arquitetura`);
+- descrição e correção não vazias.
+
+Fora disso, nada muda: três campos nunca são tocados (um travessão DENTRO do
+problema fica onde está); dois campos sem travessão, cabeça que é frase,
+descrição vazia continuam inválidos; a correção que só repete o problema
+continua cobrada depois da recuperação; `REJECTED` continua `REJECTED`. O
+resultado do parse ganhou `applied: string[]` com uma nota por finding
+recuperado, e `auditCall` anuncia cada nota — é uma chamada que não foi paga,
+e o desenvolvedor vê por quê.
+
+Depois do parse, o caminho já existia e não foi reimplementado: o achado
+endereçado a `Architecture` vai para `reorganizar()` (refaz a arquitetura com
+o achado inteiro, dentro do orçamento de `maxArchitectureReturns`), e o achado
+de fase fica para a auditoria seguinte, sobre a divisão nova. Nenhum teto
+subiu; nenhuma repetição foi acrescentada.
+
+### 117.4 Testes
+
+`test/audit/finding-travessao.spec.ts`, 12 casos, com as duas respostas reais
+do Luna byte a byte (status, os dois findings e a razão): as duas são lidas;
+os dois findings preservados, com `Architecture` e `P4.T1.C1` reconhecidos e
+problema e correção intactos; `REJECTED` mantido; o round-trip por
+`formatVerdict` devolve o mesmo veredito sem nota de conserto; endereços com
+número, com `·` e seções nomeadas são reconhecidos; dois campos sem travessão,
+hífen, cabeça em frase, descrição ou correção vazia e correção que repete o
+problema continuam inválidos; e, no orquestrador com o provider falso, a
+resposta real reprova uma vez, o auditor de coerência NÃO recebe o prompt de
+reparo, o arquiteto é chamado de novo com o problema e a correção inteiros, e
+o plano fecha.

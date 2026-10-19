@@ -1233,7 +1233,11 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
       ultima = await track({ role: "auditor", stage: "audit", subject, attempt, prompt: proximoPrompt });
       const parsed = parseAudit(ultima);
-      if (parsed.ok) return parsed.verdict;
+      if (parsed.ok) {
+        // O que o parser consertou sozinho é dito: é uma chamada que não foi paga.
+        for (const nota of parsed.applied) announce(`  ${nota}`);
+        return parsed.verdict;
+      }
       if (tentativa === 2) {
         const amostra = ultima.trim().slice(0, 300).replace(/\n/g, "\n  ");
         throw new InitBlockedError(

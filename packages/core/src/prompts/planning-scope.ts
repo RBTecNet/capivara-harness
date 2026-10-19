@@ -18,7 +18,15 @@ export function planningScopeBlock(): string {
     "Describing expected functional behaviour is not a test. \"Deleting a column is refused while it",
     "still has cards\" is a criterion; \"write the test deletes_column_with_cards\" is not, and does not",
     "belong anywhere in the plan.",
+    "Test tooling — runners, browser-automation frameworks, assertion libraries — is chosen in the build,",
+    "not here: it does not enter the skeleton's stack, the infrastructure or any task, and no task names",
+    "a test file, a test directory or a test configuration. When the developer requires automated tests,",
+    "the plan keeps that as a requirement of the product (what must hold, under which conditions — for",
+    "example an isolated database) without choosing the tool.",
+    "A conflict between the document and this responsibility is a defect of the document, never a",
+    "decision for the developer: the rule is not his to suspend, and nobody asks him to.",
     "Do not reject a plan for not specifying tests. Preserve requirements explicitly requested by the",
-    "developer, including when the product itself is a testing tool.",
+    "developer, including when the product itself is a testing tool: a tool the request itself names",
+    "is the developer's choice, not the plan's.",
   ].join("\n");
 }

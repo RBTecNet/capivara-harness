@@ -17,6 +17,8 @@ export type { StampInput } from "./stamps.js";
 export type { Workflow } from "./coverage.js";
 export { checkCoverage, checkEntities, checkStories, checkWorkflows } from "./coverage.js";
 export type { CoverageSources } from "./coverage.js";
+export { checkTestPrescription, testPrescriptionHint, testPrescriptions } from "./test-prescription.js";
+export type { TestAuthority } from "./test-prescription.js";
 export { renderContractDocument } from "./doc.js";
 export { TASKS_BLOCK, assemblePhase, tasksBlock } from "./templates.js";
 export type { PhaseEnvelope } from "./templates.js";

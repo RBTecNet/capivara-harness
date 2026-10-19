@@ -9754,3 +9754,157 @@ problema continuam inválidos; e, no orquestrador com o provider falso, a
 resposta real reprova uma vez, o auditor de coerência NÃO recebe o prompt de
 reparo, o arquiteto é chamado de novo com o problema e a correção inteiros, e
 o plano fecha.
+
+## §118 — A autoridade das decisões: a regra do harness não vai a voto, e o plano não prescreve teste
+
+### 118.1 O defeito
+
+No `teste_openrouter3`, run `init-dc741f0d7b92`, o auditor da fase 5 respondeu:
+
+```
+CAPIVARA_AUDIT_STATUS: APPROVED
+CAPIVARA_DECISION: Phase 5, última tarefa | A fase deve especificar automação própria do módulo, embora as regras de planejamento proíbam requisitos de testes, arquivos de teste e estratégias de validação? | 1) Manter a automação com Vitest e Playwright, conforme a fatia da arquitetura e o pedido original. | 2) Remover os requisitos de automação da fase e deixar a comprovação do produto a cargo do avaliador.
+CAPIVARA_REASON: A última tarefa exige automação com Vitest e Playwright, conforme a arquitetura, mas as regras de planejamento proíbem prescrever testes e estratégias de validação.
+```
+
+O auditor acertou a contradição e errou o canal: uma regra do planejamento
+virou pergunta ao desenvolvedor, com a leitura que viola a regra como opção
+1. O harness piorou: `perguntaDoAuditor` marcava a primeira leitura como
+recomendada ("o auditor escreveu esta primeiro"), e a recomendada é o que um
+Enter vazio ou "use as recomendações" grava como decisão ACEITA. O
+desenvolvedor respondeu "1"; a resposta entrou nas "decisões confirmadas" que
+todo escritor e auditor recebem; e nas rodadas seguintes o auditor de
+coerência passou a exigir automação própria por módulo "conforme a decisão
+confirmada", endereçando à `Architecture` — duas reorganizações, o orçamento
+esgotado, e duas arbitrações (`Q-91`, `Q-92`) com "vale a leitura do auditor"
+recomendada, gravadas como decisões do desenvolvedor.
+
+### 118.2 A causa: a prescrição entrava no `init` e ninguém a conferia
+
+O pedido dizia, na stack, "Testes automatizados", e em persistência que "os
+testes precisam utilizar banco isolado" — exigências do produto, sem
+ferramenta. A cadeia de contaminação, documento a documento:
+
+- `skeleton.md`: `Automação de testes: Vitest e Playwright como dependências
+  locais do projeto` — a entrevista não perguntou isso; o escritor do
+  esqueleto escolheu.
+- `architecture.md`: componente `automacao` ("Configurar Vitest e Playwright
+  e executar a automação contra um banco descartável"), arquivos
+  `vitest.config.ts`, `playwright.config.ts`, `src/quality/`, e Vitest e
+  Playwright na infraestrutura com `basis: "Stack do skeleton"`.
+- `project-phases.md`: tasks "implementar a automação própria do módulo com
+  Vitest e Playwright em `src/quality/tarefas/`", arquivos
+  `src/quality/categorias/api.test.ts`, critérios que dizem quais fluxos os
+  testes executam.
+
+A única regra em código era I-15, que recusa o rótulo `**Feature tests:**`. A
+proibição de prescrever teste existia só nos prompts, e um prompt perde para
+uma "decisão confirmada". O auditor da arquitetura, que lia "never demand
+tests", não tinha o que dizer sobre uma arquitetura que os PRESCREVIA.
+
+### 118.3 A hierarquia de autoridade, em código
+
+Três categorias, e o que cada uma faz:
+
+- **Decisão do desenvolvedor** (pedido, entrevista): altera o produto. É a
+  única autoridade para nomear uma ferramenta ou um arquivo de teste — um
+  produto que É um runner de testes, ou um desenvolvedor que escreveu "use
+  Jest", continuam podendo dizê-lo.
+- **Decisão técnica interna**: o `plan` resolve pela arquitetura e pelos
+  contratos; não vira pergunta quando o contrato já responde.
+- **Regra do harness**: não é decisão de ninguém. Uma contradição com ela é
+  defeito do documento, corrigido localmente, preservando o resto.
+
+O que mudou:
+
+- **I-16** em `contract/test-prescription.ts`: `testPrescriptions(texto,
+  autoridade)` reconhece ferramenta de teste (Vitest, Jest, Playwright,
+  Cypress, pytest, PHPUnit, JUnit…), arquivo de teste (`x.test.ts`,
+  `x.spec.js`, `x.e2e.ts`), configuração (`vitest.config.ts`) e diretório
+  (`__tests__/`, `tests/…`, `e2e/…`); um termo que aparece no pedido ou numa
+  decisão da entrevista não é prescrição. "A suíte roda contra um banco
+  descartável" é comportamento e não é tocado. `checkTestPrescription`
+  aplica isso ao plano, task a task, com a linha.
+- **A autoridade** (`autoridadeDeTeste` no orquestrador): o pedido mais as
+  respostas ACEITAS da entrevista. As decisões levantadas pelo auditor, pelo
+  impasse e pelo ensaio ficam de fora — as leituras delas são escritas por um
+  modelo, e foi uma delas que no run real virou "decisão confirmada".
+- **Esqueleto**: a entrada de stack SOBRE testes que nomeia ferramenta sai
+  contando (`repairSkeleton`), e a sonda de `environment` de uma ferramenta de
+  teste também; a exigência do pedido continua nas stories e regras, onde ela
+  descreve comportamento. Uma entrada de outro componente que cita a
+  ferramenta, uma story ou uma regra que a nomeiam são defeito nomeado:
+  apagar perderia conteúdo.
+- **Arquitetura**: item de infraestrutura e arquivo em `files` saem contando,
+  com o conserto anunciado; prosa (overview, responsabilidade, contratos,
+  decisões de dados, título/goal/rationale de fase) que prescreve teste volta
+  ao arquiteto como defeito, dentro das três tentativas que ele já tem.
+- **Plano**: self-check mecânico antes do auditor, uma emenda por task, na
+  fase certa, sem gastar o orçamento do auditor; e verificação própria
+  (`testes`) no gate RALPH READY — doze verificações agora.
+- **CAPIVARA_DECISION**: em `perguntarDecisoesDoAuditor`, antes de perguntar,
+  a mesma checagem roda sobre a pergunta e as leituras. Se há prescrição de
+  teste que nenhuma fonte autoriza, a decisão não é perguntada: vira achado
+  mecânico ao escritor (I-16, com a correção e a preservação do requisito), e
+  o run segue pela emenda normal. Vale para a auditoria de arquitetura e para
+  as de fase e coerência, que passam todas por ali.
+- **Nenhuma leitura recomendada**: `perguntaDoAuditor` deixa `recommended`
+  vazio. Enter vazio e "use as recomendações" ficam DEFERRED; só número,
+  rótulo ou texto do desenvolvedor gravam decisão.
+- **Prompts** (necessários, não suficientes): o bloco de responsabilidade do
+  planejamento diz que ferramenta de teste é escolha do build e que o
+  conflito com a regra é defeito, não decisão; o canal de decisão do auditor
+  diz que uma regra do prompt não vai a voto; o auditor da arquitetura rejeita
+  arquitetura que prescreve teste; o esqueleto não nomeia ferramenta na stack
+  nem no environment.
+
+### 118.4 Análise de impacto
+
+- `parseSkeleton`/`parseArchitecture` ganharam `authority` opcional; sem ela,
+  a regra vale sem escape (o orquestrador sempre passa). Nenhum outro leitor
+  mudou de assinatura. O esqueleto gravado em `skeleton-state.json` não é
+  reparsado; um `plan` sobre um `init` da 0.6.0 que já carregue a prescrição
+  na stack a leva à arquitetura, e a arquitetura a remove da infraestrutura;
+  para limpar a stack, `capivara init --fresh`.
+- `evaluateReadiness` ganhou `testAuthority` opcional e a verificação
+  `testes`; `init.spec` passou de onze para doze verificações.
+- O BUILD não lê nada disto. `environment.json` perde itens de
+  infraestrutura de teste que nunca deveriam estar lá; o preflight continua
+  lendo `requirements`.
+- A separação PLAN/BUILD fica assim: o plano diz o que deve valer ("com
+  DATABASE_PATH apontando para um arquivo temporário, a aplicação sobe sem
+  tocar o banco do `.env`"); o build decide com que ferramenta e em que
+  arquivo provar isso.
+
+### 118.5 Testes
+
+`test/init/autoridade-118.spec.ts`, 15 casos, com a resposta real do auditor
+da fase 5: a checagem reconhece ferramenta, arquivo, configuração e diretório
+e não toca comportamento; o pedido e a entrevista são a autoridade; no plano
+aponta task, fase e linha; no esqueleto a entrada de stack e a sonda saem
+contando e a regra do banco isolado fica, a entrada de outro componente vira
+defeito, e com o pedido nomeando a ferramenta ela fica; na arquitetura a
+infraestrutura e os arquivos saem contando e o componente de automação é
+defeito; o gate reprova pela verificação própria; a decisão do auditor não
+traz leitura recomendada (Enter e "use as recomendações" não confirmam).
+Integrados, com o provider falso: (1–2) a resposta real do Luna não vira
+pergunta, a correção chega ao escritor da fase como achado mecânico com a
+regra, nada do auditor vira decisão do desenvolvedor, e o plano fecha; (3–5)
+esqueleto, arquitetura e fase contaminados são corrigidos sem perder a
+exigência do pedido, com uma emenda só na fase 2 e a divisão publicada
+intacta; (6) uma decisão genuína de produto chega ao desenvolvedor sem leitura
+recomendada e a resposta dele é gravada; e o pedido que nomeia a ferramenta
+passa sem emenda. (7–8) `npm run check`: 2604 testes em 135 arquivos, verde,
+com as suítes das §116 e §117 intactas.
+
+### 118.6 Limitações
+
+- A detecção de ferramenta é uma lista de nomes; uma ferramenta fora dela
+  passa pelo código e fica a cargo do prompt. A lista está num lugar só.
+- Um diretório de teste com nome livre (`src/quality/`) não é reconhecido
+  sozinho; no caso real ele vinha sempre acompanhado da ferramenta ou do
+  arquivo `.test.ts`, que são.
+- A arbitragem do impasse ("vale a leitura do auditor") continua recomendando
+  a leitura do auditor; ela nasce de um achado repetido, não de uma decisão
+  inventada, e não foi tocada aqui.
+- Nenhum run real depois desta correção.

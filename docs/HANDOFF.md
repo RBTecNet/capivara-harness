@@ -16,10 +16,31 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.6.0 (`capivara --version`); planos da 0.5.0 e anteriores incompatíveis, ver §116 e §115.26 |
-| suíte | 2589 testes em 134 arquivos, `npm run check` verde |
+| suíte | 2604 testes em 135 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-19 — a autoridade das decisões e a prescrição de teste (§118)
+
+No mesmo run do `teste_openrouter3`, o auditor da fase 5 viu uma task que
+exigia "automação com Vitest e Playwright" em `src/quality/…`, viu a regra do
+planejamento que proíbe prescrever teste, e perguntou ao desenvolvedor qual
+das duas valia — com "manter a automação" recomendada por ter sido escrita
+primeiro. Ele confirmou, e a partir daí as auditorias exigiram a prescrição
+como "decisão confirmada", até gastar as reorganizações da arquitetura. A
+cadeia começava antes: o pedido dizia só "testes automatizados", e o esqueleto
+inventou as ferramentas na stack; a arquitetura fez delas um componente com
+arquivos de configuração de teste; as fases herdaram. Agora a regra é um
+invariante do contrato (I-16), conferido em código nos três documentos com o
+pedido e as decisões da entrevista como única autoridade para nomear uma
+ferramenta ou um arquivo de teste: lista se separa contando (stack sobre
+testes, sonda, item de infraestrutura, arquivo em `files`), prosa volta a
+quem escreve como defeito nomeado, e no plano é emenda mecânica na task
+certa. Uma CAPIVARA_DECISION que é uma regra do harness vira esse achado em
+vez de pergunta; nenhuma leitura do auditor é recomendada; a decisão genuína
+de produto continua chegando ao desenvolvedor. Detalhe na §118 do PLANO; os
+testes em `test/init/autoridade-118.spec.ts`.
 
 ## 2026-10-19 — o travessão no finding (§117)
 
@@ -579,7 +600,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 2589 testes
+npm run check     # build + typecheck + 2604 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

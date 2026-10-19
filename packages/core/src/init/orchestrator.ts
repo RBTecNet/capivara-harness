@@ -16,7 +16,7 @@ import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parseArchitecture, parsePhaseFragment, parseSkeleton, phaseHeading, phasesFromArchitecture, renderArchitecture, renderSkeleton, requirementsFromArchitecture, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12 } from "../contract/index.js";
+import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkTestPrescription, testPrescriptionHint, testPrescriptions, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parseArchitecture, parsePhaseFragment, parseSkeleton, phaseHeading, phasesFromArchitecture, renderArchitecture, renderSkeleton, requirementsFromArchitecture, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12 } from "../contract/index.js";
 import { CoherenceMemory } from "../audit/coherence.js";
 import { applyMaterialityReview, materialityInput, materialityPrompt } from "../audit/materiality.js";
 import type { Architecture, ContractError, CoverageSources, PhasesDocument, Skeleton, StampInput } from "../contract/index.js";
@@ -1416,7 +1416,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       if (guardado !== null) announce("  esqueleto reaproveitado de uma execução anterior: o prompt não mudou");
       const saida = guardado ?? (await track({ role: "writer", stage: "authoring", subject: "skeleton", attempt: tentativa, prompt: promptDoEsqueleto }));
 
-      const lido = parseSkeleton(saida, { maxTasksPerPhase: MAX_TASKS_PER_PHASE });
+      const lido = parseSkeleton(saida, { maxTasksPerPhase: MAX_TASKS_PER_PHASE, authority: autoridadeDeTeste() });
       if (!lido.ok) {
         defeitos = lido.defects.map((defeito) => `${defeito.problem} → ${defeito.hint}`);
         announce(`  o esqueleto veio com ${defeitos.length} defeito(s) de forma; pedindo de novo com eles nomeados`);
@@ -1697,7 +1697,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       if (guardada !== null) announce("  arquitetura reaproveitada do cache: o prompt não mudou");
       const saida = guardada ?? (await track({ role: "writer", stage: "authoring", subject: "architecture", attempt: tentativa, prompt }));
 
-      const lida = parseArchitecture(saida, esqueletoDeOrigem!, { maxTasksPerPhase: MAX_TASKS_PER_PHASE });
+      const lida = parseArchitecture(saida, esqueletoDeOrigem!, { maxTasksPerPhase: MAX_TASKS_PER_PHASE, authority: autoridadeDeTeste() });
       if (!lida.ok) {
         defeitos = lida.defects.map((defeito) => `${defeito.problem} → ${defeito.hint}`);
         announce(`  a arquitetura veio com ${defeitos.length} defeito(s); pedindo de novo com eles nomeados`);
@@ -2198,6 +2198,27 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     );
   }
 
+  /**
+   * O que autoriza o plano a nomear uma ferramenta ou um arquivo de teste
+   * (I-16): o pedido e as decisões que o DESENVOLVEDOR tomou na entrevista.
+   *
+   * As decisões levantadas pelo auditor, pelo impasse e pelo ensaio ficam de
+   * fora de propósito: as leituras delas são escritas por um modelo, e foi
+   * exatamente uma delas — "manter a automação com Vitest e Playwright" — que
+   * no `teste_openrouter3` virou "decisão confirmada" e passou a exigir, nas
+   * auditorias seguintes, a prescrição que a regra proíbe.
+   */
+  function autoridadeDeTeste(): string[] {
+    const topico = (questionId: string): string => allQuestions.find((question) => question.id === questionId)?.topic ?? "";
+    const doDesenvolvedor = allAnswers.filter(
+      (answer) =>
+        answer.disposition === "ACCEPTED" &&
+        !/#(?:auditoria|standoff|ensaio)#/u.test(answer.questionId) &&
+        !/^(?:auditoria|ensaio|impasse)\b/u.test(topico(answer.questionId)),
+    );
+    return [options.request.text, ...doDesenvolvedor.map((answer) => answer.decision)];
+  }
+
   function coberturaAtual(): CoverageSources {
     return skeletonAtual ? coverageFromSkeleton(skeletonAtual) : { storyIds: [], entities: [], workflows: [] };
   }
@@ -2595,13 +2616,50 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     );
     if (novas.length === 0) return [];
 
-    announce(`  o auditor levantou ${novas.length} decisão(ões) que ninguém na mesa pode tomar; perguntando a você`);
     const decididas: Finding[] = [];
 
-    for (const [indice, decisao] of novas.entries()) {
+    /*
+     * Uma regra do harness não é decisão do desenvolvedor.
+     *
+     * No `teste_openrouter3` o auditor da fase 5 viu a contradição certa — a
+     * task prescrevia "automação com Vitest e Playwright" e a regra do
+     * planejamento proíbe prescrever teste — e a devolveu como CAPIVARA_DECISION
+     * com duas leituras: manter a prescrição ou cumprir a regra. A primeira
+     * virou "recomendada" por ter sido escrita primeiro, o desenvolvedor a
+     * confirmou, e a partir daí toda auditoria exigiu a prescrição como decisão
+     * confirmada. O auditor não tem autoridade para tornar opcional uma regra
+     * obrigatória, e o desenvolvedor não é perguntado se quer suspendê-la: a
+     * decisão vira o achado mecânico que ela já era, endereçado a quem escreve.
+     *
+     * A detecção é a mesma checagem determinística do contrato (I-16), sobre o
+     * texto da decisão e das leituras, com a mesma autoridade: o que o pedido e
+     * a entrevista nomeiam não é prescrição.
+     */
+    const autoridade = autoridadeDeTeste();
+    const perguntaveis: typeof novas = [];
+    for (const decisao of novas) {
+      const termos = testPrescriptions([decisao.decision, ...decisao.options].join("\n"), autoridade);
+      if (termos.length === 0) {
+        perguntaveis.push(decisao);
+        continue;
+      }
+      decisoesDoAuditor.add(`${decisao.where}::${decisao.decision}`.toLowerCase());
+      announce(`  o auditor levantou como decisão uma regra do planejamento (${decisao.where}: prescrição de teste); não há o que decidir — vira correção`);
+      decididas.push({
+        where: decisao.where,
+        mechanical: true,
+        problem: `I-16: o auditor apontou prescrição de teste em ${decisao.where} (${termos.join(", ")}) e a levantou como decisão; a regra não é opcional`,
+        fix: testPrescriptionHint(termos),
+      });
+    }
+    if (perguntaveis.length === 0) return decididas;
+
+    announce(`  o auditor levantou ${perguntaveis.length} decisão(ões) que ninguém na mesa pode tomar; perguntando a você`);
+
+    for (const [indice, decisao] of perguntaveis.entries()) {
       decisoesDoAuditor.add(`${decisao.where}::${decisao.decision}`.toLowerCase());
       const pergunta = perguntaDoAuditor(decisao, decisoesDoAuditor.size);
-      const resposta = await perguntarEGravar(document, pergunta, indice + 1, novas.length, attempt, "auditoria", writer);
+      const resposta = await perguntarEGravar(document, pergunta, indice + 1, perguntaveis.length, attempt, "auditoria", writer);
       if (resposta.disposition !== "ACCEPTED") continue;
       decididas.push(decisaoDoAuditorComoFinding(decisao, resposta.decision));
     }
@@ -3622,6 +3680,36 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }
 
       /*
+       * Prescrição de teste é contável (I-16) e era descoberta pelo auditor —
+       * que, no `teste_openrouter3`, a transformou numa pergunta ao
+       * desenvolvedor sobre se a regra valia. Conferida aqui, vira uma emenda
+       * mecânica na task certa, sem gastar auditor nem pedir licença para
+       * cumprir a regra. O que o pedido e a entrevista autorizam não conta.
+       */
+      if (parsed.ok) {
+        const prescritos = checkTestPrescription(parsed.document, autoridadeDeTeste());
+        if (prescritos.length > 0) {
+          const total = skeletonAtual?.phases.length ?? 0;
+          return {
+            status: "REJECTED",
+            findings: prescritos.map((erro) => {
+              const fase = faseDaLinha(content, erro.line, total);
+              return {
+                where: fase === undefined ? `linha ${erro.line}` : `Phase ${fase} · linha ${erro.line}`,
+                mechanical: true,
+                problem: `${erro.code}: ${erro.message}`,
+                fix: erro.hint,
+                ...(fase === undefined ? {} : { phase: fase }),
+              };
+            }),
+            remarks: [],
+            reason: "há task que prescreve teste, e como provar o produto é decisão do build",
+            mechanical: true,
+          };
+        }
+      }
+
+      /*
        * Task inchada é o defeito de origem: o piloto 3 saiu com 4,3 critérios por
        * task contra 2,1 a 2,5 dos três planos que construíram. Cortado aqui, o
        * teto por fase vira consequência — 15 tasks de até 4 critérios fecham em 60.
@@ -3845,6 +3933,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     const readiness = evaluateReadiness({
       plan: plano,
       architecture: arquiteturaMd,
+      testAuthority: autoridadeDeTeste(),
       // O plano é carimbado com o que ele leu: o esqueleto e a arquitetura.
       stampInputs: skeletonAtual
         ? [

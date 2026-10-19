@@ -24,6 +24,8 @@
  * produto é o avaliador do build, lendo o código entregue.
  */
 
+import { testPrescriptionHint, testPrescriptions } from "./test-prescription.js";
+import type { TestAuthority } from "./test-prescription.js";
 import { jsonDaResposta } from "./resposta.js";
 import { AREAS_VALIDAS, type Skeleton, type SkeletonPhase } from "./skeleton.js";
 import { environmentRequirements, renderEnvironmentRequirements, type EnvironmentRequirement } from "./environment.js";
@@ -169,7 +171,7 @@ function dependencies(dependsOn: string): number[] {
 export function parseArchitecture(
   source: string,
   skeleton: Skeleton,
-  limits: { maxTasksPerPhase: number },
+  limits: { maxTasksPerPhase: number; authority?: TestAuthority },
 ): ArchitectureResult {
   let parsed: unknown;
   try {
@@ -189,15 +191,40 @@ export function parseArchitecture(
   const defects: ArchitectureDefect[] = [];
   const applied: string[] = [];
 
-  const components: ArchitectureComponent[] = list(root.components).map((entry) => ({
-    name: text(entry.name),
-    responsibility: text(entry.responsibility),
-    areas: strings(entry.areas).map((area) => area.toLowerCase()).filter((area) => AREAS_VALIDAS.has(area)),
-    dependsOn: strings(entry.dependsOn),
-    contracts: strings(entry.contracts),
-    files: strings(entry.files),
-    owns: strings(entry.owns),
-  }));
+  const authority = limits.authority ?? [];
+  /*
+   * I-16 na arquitetura, nos dois modos da recuperação.
+   *
+   * O que é LISTA e se separa sem julgamento — um arquivo de teste em `files`,
+   * uma ferramenta de teste na infraestrutura — sai contando, com o conserto
+   * anunciado. O que é PROSA — um componente cuja responsabilidade é
+   * "configurar Vitest e Playwright", uma fase cujo goal é a automação — não
+   * tem como ser consertado sem decidir o que o componente passa a ser; isso
+   * volta ao arquiteto como defeito nomeado, dentro das tentativas que já tem.
+   */
+  const components: ArchitectureComponent[] = list(root.components).map((entry) => {
+    const name = text(entry.name);
+    const files = strings(entry.files);
+    const deTeste = files.filter((file) => testPrescriptions(file, authority).length > 0);
+    if (deTeste.length > 0) applied.push(`removeu de ${name || "componente sem nome"}.files ${deTeste.map((file) => `"${file}"`).join(", ")}: arquivo de teste é decisão do build (I-16)`);
+    return {
+      name,
+      responsibility: text(entry.responsibility),
+      areas: strings(entry.areas).map((area) => area.toLowerCase()).filter((area) => AREAS_VALIDAS.has(area)),
+      dependsOn: strings(entry.dependsOn),
+      contracts: strings(entry.contracts),
+      files: files.filter((file) => !deTeste.includes(file)),
+      owns: strings(entry.owns),
+    };
+  });
+  const prosaDeTeste = (rotulo: string, texto: string): void => {
+    const termos = testPrescriptions(texto, authority);
+    if (termos.length > 0) defects.push({ problem: `${rotulo} prescreve teste: ${termos.join(", ")}`, hint: testPrescriptionHint(termos) });
+  };
+  prosaDeTeste("o overview", text(root.overview));
+  for (const component of components) {
+    prosaDeTeste(`o componente ${component.name}`, [component.responsibility, ...component.contracts, ...component.owns].join("\n"));
+  }
   if (components.length === 0) {
     defects.push({ problem: "a arquitetura não declara componente nenhum", hint: "nomeie os componentes do código e a responsabilidade de cada um; sem eles as fases não têm onde escrever" });
   }
@@ -228,6 +255,7 @@ export function parseArchitecture(
   const dataDecisions = list(root.dataDecisions)
     .map((entry) => ({ subject: text(entry.subject), statement: text(entry.statement) }))
     .filter((entry) => entry.statement !== "");
+  for (const decision of dataDecisions) prosaDeTeste(`a decisão de dados "${decision.subject}"`, `${decision.subject}\n${decision.statement}`);
 
   const flows: ArchitectureFlow[] = list(root.flows)
     .map((entry) => ({
@@ -253,12 +281,18 @@ export function parseArchitecture(
   }
 
   const infraBruta = (root.infrastructure ?? {}) as Record<string, unknown>;
+  const semFerramentaDeTeste = <T extends InfrastructureItem>(grupo: string, itens: T[]): T[] =>
+    itens.filter((entrada) => {
+      if (testPrescriptions(`${entrada.name}\n${entrada.purpose}`, authority).length === 0) return true;
+      applied.push(`removeu ${entrada.name} de infrastructure.${grupo}: ferramenta de teste é decisão do build (I-16)`);
+      return false;
+    });
   const infrastructure: Infrastructure = {
     runtimes: list(infraBruta.runtimes).map(item),
-    tools: list(infraBruta.tools).map(item),
+    tools: semFerramentaDeTeste("tools", list(infraBruta.tools).map(item)),
     packageManagers: list(infraBruta.packageManagers).map(item),
-    dependencies: list(infraBruta.dependencies).map((entry) => ({ ...item(entry), kind: text(entry.kind).toLowerCase() === "dev" ? "dev" : "app" })),
-    services: list(infraBruta.services).map((entry) => ({ ...item(entry), kind: text(entry.kind).toLowerCase() === "local" ? "local" : "external" })),
+    dependencies: semFerramentaDeTeste("dependencies", list(infraBruta.dependencies).map((entry) => ({ ...item(entry), kind: text(entry.kind).toLowerCase() === "dev" ? "dev" : "app" as const }))),
+    services: semFerramentaDeTeste("services", list(infraBruta.services).map((entry) => ({ ...item(entry), kind: text(entry.kind).toLowerCase() === "local" ? "local" : "external" as const }))),
     databases: list(infraBruta.databases).map(item),
     compatibility: strings(infraBruta.compatibility),
     preconditions: strings(infraBruta.preconditions),
@@ -314,6 +348,7 @@ export function parseArchitecture(
     defects.push({ problem: "a arquitetura não declara fase nenhuma", hint: "divida o trabalho em fases: fundação primeiro, cada uma com os componentes que implementa" });
   }
   for (const phase of phases) {
+    prosaDeTeste(`a fase ${phase.number}`, [phase.title, phase.goal, phase.rationale].join("\n"));
     if (phase.title === "") defects.push({ problem: `a fase ${phase.number} não tem título`, hint: "dê à fase um título que nomeie a fatia entregue" });
     if (phase.goal === "") defects.push({ problem: `a fase ${phase.number} não tem goal`, hint: "declare o resultado observável que a fase entrega" });
     if (phase.covers.length === 0) defects.push({ problem: `a fase ${phase.number} não cobre nada`, hint: "declare as stories, entidades ou workflows que esta fase entrega" });

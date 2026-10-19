@@ -1,14 +1,14 @@
 /**
  * O gate RALPH READY.
  *
- * Dez itens, todos verdadeiros ou o run termina em NOT READY — retomável e
+ * Doze itens, todos verdadeiros ou o run termina em NOT READY — retomável e
  * dizendo exatamente o que falta. Nunca "quase pronto": um pacote quase pronto
  * entregue ao loop vira uma aplicação quase feita, descoberta fase a fase, ao
  * preço de uma chamada de modelo por descoberta.
  */
 
-import { checkCoverage, checkDesignRefs, checkStamp, parsePhases } from "../contract/index.js";
-import type { ContractError, CoverageSources, StampInput } from "../contract/index.js";
+import { checkCoverage, checkDesignRefs, checkStamp, checkTestPrescription, parsePhases } from "../contract/index.js";
+import type { ContractError, CoverageSources, StampInput, TestAuthority } from "../contract/index.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE } from "../authoring/ledger.js";
 
 /** Os artefatos que um run do ciclo publica, na ordem em que nascem. */
@@ -22,6 +22,8 @@ export interface ReadinessInput {
   /** Inputs do plano executável, para verificar o frescor do stamp. */
   stampInputs: StampInput[];
   coverage: CoverageSources;
+  /** O que autoriza o plano a nomear ferramenta ou arquivo de teste (I-16): o pedido e as decisões da entrevista. */
+  testAuthority?: TestAuthority | undefined;
   /** O auditor devolveu APPROVED sobre o plano. */
   approved: boolean;
   /** Perguntas materiais ainda não resolvidas. */
@@ -121,6 +123,15 @@ export function evaluateReadiness(input: ReadinessInput): Readiness {
     detail: coverageErrors.map((error) => `${error.message} → ${error.hint}`).join("\n"),
   });
   contractErrors = [...contractErrors, ...coverageErrors];
+
+  const testErrors = document ? checkTestPrescription(document, input.testAuthority ?? []) : [];
+  checks.push({
+    id: "testes",
+    title: "O plano não prescreve testes: ferramenta, arquivo e cenário são do build",
+    passed: document !== null && testErrors.length === 0,
+    detail: document === null ? "não há plano válido para conferir" : testErrors.map((error) => `${error.message} → ${error.hint}`).join("\n"),
+  });
+  contractErrors = [...contractErrors, ...testErrors];
 
   const designErrors = document ? checkDesignRefs(document, input.designRoot, input.designExists) : [];
   checks.push({

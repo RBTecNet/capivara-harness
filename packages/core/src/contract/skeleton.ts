@@ -21,6 +21,8 @@
  * exatamente a ausência desse acordo que produziu os impasses do piloto 3.
  */
 
+import { testPrescriptionHint, testPrescriptions } from "./test-prescription.js";
+import type { TestAuthority } from "./test-prescription.js";
 import type { CoverageSources } from "./coverage.js";
 import { jsonDaResposta } from "./resposta.js";
 import { environmentRequirements, renderEnvironmentRequirements, type EnvironmentRequirement } from "./environment.js";
@@ -150,9 +152,44 @@ function strings(value: unknown): string[] {
  * exige julgamento — fase sem meta, cobertura ausente, fase grande demais —
  * continua sendo defeito nomeado.
  */
-export function repairSkeleton(root: Record<string, unknown>): { root: Record<string, unknown>; applied: string[] } {
+export function repairSkeleton(root: Record<string, unknown>, authority: TestAuthority = []): { root: Record<string, unknown>; applied: string[] } {
   const applied: string[] = [];
   const phases = Array.isArray(root.phases) ? root.phases.map((item) => ({ ...((item ?? {}) as Record<string, unknown>) })) : [];
+
+  /*
+   * A entrada de stack que É sobre testes — "Automação de testes: Vitest e
+   * Playwright" — sai inteira: ela não carrega nada além da escolha que não é
+   * do esqueleto (I-16). A exigência do pedido de que o produto tenha testes
+   * continua nas stories e regras, que é onde ela descreve comportamento. Uma
+   * entrada de OUTRO componente que cita ferramenta de teste ("Linguagem:
+   * TypeScript, testado com Vitest") não é apagada: perderia a linguagem; ela
+   * vira defeito nomeado, abaixo.
+   */
+  const ROTULO_DE_TESTE = /\b(?:tests?|testes?|testing|qa|qualidade|automa[çc][ãa]o|e2e)\b/iu;
+  const stack = Array.isArray(root.stack)
+    ? root.stack.filter((item) => {
+        const entrada = (item ?? {}) as Record<string, unknown>;
+        const component = typeof entrada.component === "string" ? entrada.component : "";
+        const decision = typeof entrada.decision === "string" ? entrada.decision : "";
+        const termos = testPrescriptions(`${component}\n${decision}`, authority);
+        if (termos.length === 0 || !ROTULO_DE_TESTE.test(component)) return true;
+        applied.push(`removeu da stack "${component}: ${decision}": ferramenta de teste é decisão do build (I-16); a exigência de testes do pedido segue nas stories e regras`);
+        return false;
+      })
+    : root.stack;
+
+  // A sonda de prontidão de uma ferramenta de teste tem o mesmo destino.
+  const environment = Array.isArray(root.environment)
+    ? root.environment.filter((item) => {
+        const entrada = (item ?? {}) as Record<string, unknown>;
+        const technology = typeof entrada.technology === "string" ? entrada.technology : "";
+        const binary = typeof entrada.binary === "string" ? entrada.binary : "";
+        const termos = testPrescriptions(`${technology}\n${binary}`, authority);
+        if (termos.length === 0) return true;
+        applied.push(`removeu do environment a sonda de "${technology}": ferramenta de teste é decisão do build (I-16)`);
+        return false;
+      })
+    : root.environment;
 
   phases.forEach((phase, index) => {
     if (typeof phase.number === "number" && phase.number !== index + 1) {
@@ -174,7 +211,7 @@ export function repairSkeleton(root: Record<string, unknown>): { root: Record<st
     }
   });
 
-  return { root: Array.isArray(root.phases) ? { ...root, phases } : root, applied };
+  return { root: { ...root, ...(Array.isArray(root.phases) ? { phases } : {}), ...(stack === undefined ? {} : { stack }), ...(environment === undefined ? {} : { environment }) }, applied };
 }
 
 /** `none` ou `Phase N, Phase M` — a mesma forma que o plano publica. */
@@ -203,7 +240,7 @@ function canonicalCover(item: string): string {
  * o que entrega, entidade sem campo não dá para criar, dimensionamento fora do
  * teto não cabe numa sessão de agente.
  */
-export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number }): SkeletonResult {
+export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number; authority?: TestAuthority }): SkeletonResult {
   let parsed: unknown;
   try {
     parsed = jsonDaResposta(source);
@@ -214,7 +251,7 @@ export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number
     };
   }
 
-  const reparo = repairSkeleton((parsed ?? {}) as Record<string, unknown>);
+  const reparo = repairSkeleton((parsed ?? {}) as Record<string, unknown>, limits.authority ?? []);
   const root = reparo.root;
   if (root.contract !== SKELETON_CONTRACT) {
     return { ok: false, defects: [{ problem: `contrato ausente ou diferente de ${SKELETON_CONTRACT}`, hint: `declare "contract": "${SKELETON_CONTRACT}" na raiz` }] };
@@ -227,6 +264,10 @@ export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number
     .filter((item) => item.component !== "" && item.decision !== "");
   if (stack.length === 0) {
     defects.push({ problem: "a stack está vazia", hint: "declare ao menos linguagem e como a aplicação roda; o preflight verifica os pré-requisitos a partir daqui" });
+  }
+  for (const item of stack) {
+    const termos = testPrescriptions(`${item.component}\n${item.decision}`, limits.authority ?? []);
+    if (termos.length > 0) defects.push({ problem: `a stack prescreve teste em "${item.component}: ${item.decision}"`, hint: testPrescriptionHint(termos) });
   }
 
   const entities: SkeletonEntity[] = list(root.entities).map((item) => ({
@@ -254,6 +295,14 @@ export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number
   const rules: SkeletonRule[] = list(root.rules)
     .map((item) => ({ subject: text(item.subject), statement: text(item.statement) }))
     .filter((item) => item.statement !== "");
+  for (const story of stories) {
+    const termos = testPrescriptions(story.statement, limits.authority ?? []);
+    if (termos.length > 0) defects.push({ problem: `a story ${story.id} prescreve teste`, hint: testPrescriptionHint(termos) });
+  }
+  for (const rule of rules) {
+    const termos = testPrescriptions(`${rule.subject}\n${rule.statement}`, limits.authority ?? []);
+    if (termos.length > 0) defects.push({ problem: `a regra "${rule.subject}" prescreve teste`, hint: testPrescriptionHint(termos) });
+  }
 
   const phases: SkeletonPhase[] = list(root.phases).map((item, index) => ({
     number: typeof item.number === "number" ? item.number : index + 1,

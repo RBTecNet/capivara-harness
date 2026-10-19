@@ -16,10 +16,10 @@ export const PHASES_CONTRACT = "capivara-phases/v2" as const;
 
 export type InvariantCode =
   | "I-01" | "I-02" | "I-03" | "I-04" | "I-05" | "I-06" | "I-07"
-  | "I-08" | "I-09" | "I-10" | "I-11" | "I-12" | "I-13" | "I-14" | "I-15";
+  | "I-08" | "I-09" | "I-10" | "I-11" | "I-12" | "I-13" | "I-14" | "I-15" | "I-16";
 
 /** Quem verifica o invariante. O parser é puro; os demais recebem o mundo por parâmetro. */
-export type InvariantChecker = "parser" | "stamps" | "coverage" | "design-refs";
+export type InvariantChecker = "parser" | "stamps" | "coverage" | "design-refs" | "test-prescription";
 
 /**
  * Como o invariante se manifesta.
@@ -143,6 +143,13 @@ export const INVARIANTS: readonly Invariant[] = [
     title: "Nenhum rótulo `**Feature tests:**`: o plano descreve comportamento, não testes",
     rationale: "Quem decide como provar o produto é o avaliador do build, lendo o código entregue. Um teste nomeado no plano vira obrigação inventada antes de existir código, e um plano da geração anterior que o carrega é incompatível: ele é recusado, nunca convertido em silêncio.",
     checkedBy: "parser",
+    enforcement: "rejects",
+  },
+  {
+    code: "I-16",
+    title: "Nenhuma prescrição de teste: ferramenta, arquivo, diretório ou configuração de teste não entram no plano",
+    rationale: "O plano descreve o produto e o caminho de implementação; a estratégia de validação — qual ferramenta, quais arquivos, quais cenários — é do build. Um termo que o pedido ou uma decisão aceita do desenvolvedor contém não é prescrição do plano: é dele, e passa. O mesmo critério vale para a stack do esqueleto e para a infraestrutura da arquitetura, que são de onde a prescrição se propagava.",
+    checkedBy: "test-prescription",
     enforcement: "rejects",
   },
 ] as const;

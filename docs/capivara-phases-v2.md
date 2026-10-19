@@ -71,6 +71,7 @@ não é lido nem convertido: gere de novo com `capivara init --fresh` e `capivar
 | I-13 | Nenhum marcador `[NEEDS DECISION]` no documento | `parser` | `rejects` |
 | I-14 | Todo `**Design ref:**` aponta para um caminho existente sob o diretório de design | `design-refs` | `rejects` |
 | I-15 | Nenhum rótulo `**Feature tests:**`: o plano descreve comportamento, não testes | `parser` | `rejects` |
+| I-16 | Nenhuma prescrição de teste: ferramenta, arquivo, diretório ou configuração de teste não entram no plano | `test-prescription` | `rejects` |
 
 `rejects` produz um erro com o código do invariante; `behaviour` descreve como o
 parser lê o documento e é provado por teste de comportamento, sem código de erro.
@@ -96,6 +97,7 @@ caminhos —, de modo que nenhum deles toca o disco por conta própria.
 - **I-13** — Gap aberto bloqueia o RALPH READY. Mandar o loop implementar uma decisão que ninguém tomou produz código que será descartado.
 - **I-14** — Referência morta engana o executor: ele implementa por conta própria acreditando ter seguido um design que não existe.
 - **I-15** — Quem decide como provar o produto é o avaliador do build, lendo o código entregue. Um teste nomeado no plano vira obrigação inventada antes de existir código, e um plano da geração anterior que o carrega é incompatível: ele é recusado, nunca convertido em silêncio.
+- **I-16** — O plano descreve o produto e o caminho de implementação; a estratégia de validação — qual ferramenta, quais arquivos, quais cenários — é do build. Um termo que o pedido ou uma decisão aceita do desenvolvedor contém não é prescrição do plano: é dele, e passa. O mesmo critério vale para a stack do esqueleto e para a infraestrutura da arquitetura, que são de onde a prescrição se propagava.
 
 ## Campos removidos de propósito
 

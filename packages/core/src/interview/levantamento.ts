@@ -158,10 +158,19 @@ export function perguntaDoAuditor(decisao: AuditDecision, indice: number): Quest
       label: leitura,
       consequence: `O documento passa a afirmar isto, e o auditor julga por ele: ${leitura}`,
     })),
-    recommended: decisao.options[0] ?? "",
+    /*
+     * Nenhuma leitura é recomendada.
+     *
+     * A primeira era "recomendada" só por ter sido escrita primeiro — e a
+     * recomendada é o que um Enter vazio ou "use as recomendações" grava como
+     * decisão ACEITA do desenvolvedor. As duas leituras vêm do auditor; escolher
+     * entre elas é a única coisa que esta pergunta pede, e tem de ser um ato
+     * dele: um número, um rótulo ou o texto que deve valer.
+     */
+    recommended: "",
     recommendationBasis:
-      "O auditor escreveu esta primeiro. Se nenhuma das leituras servir, escreva o que deve valer — o " +
-      "texto vai inteiro para quem escreve e para quem confere.",
+      "As duas leituras são do auditor e nenhuma é recomendada: escolha uma pelo número, ou escreva o " +
+      "que deve valer — o texto vai inteiro para quem escreve e para quem confere.",
   };
 }
 

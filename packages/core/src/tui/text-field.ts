@@ -16,6 +16,8 @@ export interface TextFieldSpec {
   /** O que o Enter num campo vazio aceita; aparece apagado dentro do campo. */
   placeholder?: string;
   multiline?: boolean;
+  /** Nunca desenhar o valor de uma chave ou senha. */
+  secret?: boolean;
   /** Esc desiste do campo — na entrevista, volta para a lista de opções. */
   cancelable?: boolean;
 }
@@ -70,6 +72,7 @@ export function reduceTextField(spec: TextFieldSpec, state: TextFieldState, key:
 /** O campo desenhado; no de várias linhas, só as últimas que cabem. */
 export function renderTextField(spec: TextFieldSpec, state: TextFieldState, width: number, maxRows: number, style: Style): string[] {
   const cursor = paint("█", "cyan", style);
+  if (spec.secret) return [` ${paint("▸", "cyan", style)} ${"*".repeat(Math.min([...state.value].length, Math.max(1, width - 5)))}${cursor}`];
   if (!spec.multiline) {
     const shown = state.value === "" && spec.placeholder ? `${cursor}${paint(spec.placeholder, "gray", style)}` : `${state.value}${cursor}`;
     // Texto mais largo que o campo mostra o fim, que é onde se está digitando.

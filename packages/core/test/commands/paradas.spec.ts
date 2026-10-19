@@ -1,8 +1,22 @@
 import { describe, expect, it } from "vitest";
 
-import { paradaDeProntidao, paradaDoEstagio } from "../../src/commands/paradas.js";
+import { opcoesDoImpasse, paradaDeProntidao, paradaDoEstagio } from "../../src/commands/paradas.js";
 
 describe("parada dos estágios documentais", () => {
+  it("teto de geração orienta orçamento sem culpar a credencial", () => {
+    const parada = paradaDoEstagio(new Error("A geração de writer em phase-p01 atingiu o limite de tokens.\n\nopenrouter: a geração atingiu o limite de tokens; o documento ficou incompleto e não foi aprovado."), "plan");
+    expect(parada.natureza).toBe("modelo");
+    expect(parada.deQuem).toContain("orçamento");
+    expect(parada.paraSeguir.join(" ")).toContain("CAPIVARA_API_MAX_OUTPUT_TOKENS");
+    expect(parada.paraSeguir.join(" ")).not.toContain("credencial");
+    expect(parada.paraSeguir.join(" ")).not.toContain("troque o modelo");
+  });
+  it("processo falhou antes de responder: não atribui saída vazia ao modelo", () => {
+    const parada = paradaDoEstagio(new Error("O papel writer falhou com código 9 em skeleton.\nNode: bad option"), "init");
+    expect(parada.natureza).toBe("ambiente");
+    expect(parada.deQuem).not.toContain("o texto que ele devolveu não serve");
+    expect(parada.detalhe).toContain("bad option");
+  });
   it("cobra do modelo quando o auditor devolveu lixo, e diz o que fazer", () => {
     const parada = paradaDoEstagio(
       new Error("o auditor de project-phases.md#P6 devolveu saída inválida duas vezes: falta CAPIVARA_AUDIT\n\nO que ele respondeu:\n  ..."),
@@ -12,7 +26,8 @@ describe("parada dos estágios documentais", () => {
 
     expect(parada.natureza).toBe("modelo");
     expect(parada.oQue).toContain("devolveu saída inválida duas vezes");
-    expect(parada.custou).toContain("continuam publicadas");
+    expect(parada.custou).toContain("cache");
+    expect(parada.custou).not.toContain("continuam publicadas");
     expect(parada.paraSeguir.at(-1)).toContain("capivara plan");
     expect(parada.detalhe).toContain("O que ele respondeu");
   });
@@ -45,6 +60,22 @@ describe("parada dos estágios documentais", () => {
   });
 });
 
+describe("controles do impasse", () => {
+  it("contagem oferece controle de execução, sem pedir decisão de produto", () => {
+    const choices = opcoesDoImpasse(true);
+    expect(choices.map(choice => choice.resposta)).toEqual(["reiniciar", "publicar", "abortar"]);
+    expect(choices[0]?.choice.label).toContain("corrigir");
+    expect(choices[1]?.choice.hint).toContain("limites");
+    expect(choices.some(choice => choice.resposta === null)).toBe(false);
+  });
+
+  it("desacordo semântico continua aceitando uma decisão escrita", () => {
+    const choices = opcoesDoImpasse(false);
+    expect(choices[0]?.resposta).toBeNull();
+    expect(choices[0]?.choice.label).toContain("decisão");
+  });
+});
+
 describe("parada por prontidão", () => {
   const readiness = {
     ready: false,
@@ -55,6 +86,12 @@ describe("parada por prontidão", () => {
       { id: "c", title: "ensaio do verificador", passed: false, detail: "3 critérios bloqueados" },
     ],
   };
+
+  it("rascunho acima dos limites continua identificado como falha do modelo", () => {
+    const result = paradaDeProntidao({ ready: false, contractErrors: [], checks: [{ id: "dimensionamento", title: "Dimensionamento", passed: false, detail: "P1.T2: 5 critérios; limite 4" }] }, "plan");
+    expect(result.natureza).toBe("modelo");
+    expect(result.deQuem).toContain("sessão do modelo");
+  });
 
   it("nomeia a primeira verificação que falta e conta as outras", () => {
     const parada = paradaDeProntidao(readiness, "init", "init-1");

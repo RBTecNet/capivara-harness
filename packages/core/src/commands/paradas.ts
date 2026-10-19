@@ -9,7 +9,7 @@
  * vez de uma instrução para quem estava no terminal.
  */
 
-import type { NaturezaDaParada, Parada } from "../tui/index.js";
+import type { Choice, NaturezaDaParada, Parada } from "../tui/index.js";
 import type { Readiness } from "../init/index.js";
 
 export type Estagio = "init" | "plan" | "survey" | "change";
@@ -29,7 +29,7 @@ const COMANDO: Record<Estagio, string> = {
  */
 const PRESERVADO: Record<Estagio, string> = {
   init: "nada do que já foi publicado se perdeu; as respostas da entrevista são retomadas",
-  plan: "as fases já detalhadas continuam publicadas; o plan retoma delas",
+  plan: "o esqueleto e as fases guardadas em cache continuam disponíveis para a retomada",
   survey: "o que já foi levantado continua nos arquivos de saída",
   change: "o plano anterior não foi tocado; nenhuma fase fechada foi refeita",
 };
@@ -42,10 +42,11 @@ const PRESERVADO: Record<Estagio, string> = {
  * reescrever isto.
  */
 function natureza(mensagem: string): NaturezaDaParada {
+  if (/atingiu o limite de tokens/i.test(mensagem)) return "modelo";
   if (/Decisão do desenvolvedor: abortar/i.test(mensagem)) return "decisão";
   if (/não há esqueleto publicado|não há o que levantar|rode `capivara/i.test(mensagem)) return "decisão";
   if (/não passa no parser|inalcançável/i.test(mensagem)) return "harness";
-  if (/estourou o tempo|não respondeu|limite do harness|falhou antes de o modelo responder/i.test(mensagem)) return "ambiente";
+  if (/estourou o tempo|não respondeu|limite do harness|falhou antes de o modelo responder|O papel \w+ falhou com código \d+ em /i.test(mensagem)) return "ambiente";
   return "modelo";
 }
 
@@ -54,14 +55,31 @@ const DE_QUEM_EXTRA: Partial<Record<NaturezaDaParada, string>> = {
   modelo: "da sessão do modelo: o texto que ele devolveu não serve",
 };
 
+/** Contagem não oferece uma decisão de produto como se pudesse mudar o teto. */
+export function opcoesDoImpasse(mechanical: boolean): { choice: Choice; resposta: string | null }[] {
+  return [
+    ...(!mechanical ? [{ choice: { label: "escrever minha decisão", hint: "vira autoridade acima do auditor nos pontos do impasse" }, resposta: null }] : []),
+    { choice: { label: mechanical ? "tentar corrigir novamente" : "reiniciar", hint: mechanical ? "o escritor tenta adequar a estrutura aos limites" : "o escritor tenta corrigir de novo e o auditor reconfere" }, resposta: "reiniciar" },
+    { choice: { label: mechanical ? "publicar rascunho" : "publicar como está", ...(mechanical ? { hint: "os limites continuam obrigatórios no RALPH READY" } : {}) }, resposta: "publicar" },
+    { choice: { label: "abortar" }, resposta: "abortar" },
+  ];
+}
+
 export function paradaDoEstagio(erro: Error, estagio: Estagio, runId?: string): Parada {
   const linhas = erro.message.split("\n");
   const oQue = (linhas[0] ?? erro.message).trim();
   const detalhe = linhas.slice(1).join("\n").trim();
   const tipo = natureza(erro.message);
+  const limiteDeGeracao = /atingiu o limite de tokens/i.test(erro.message);
 
   const seguir =
-    tipo === "decisão"
+    limiteDeGeracao
+      ? [
+          "confira na evidência o teto solicitado e os tokens de saída e raciocínio informados pela API",
+          "ajuste CAPIVARA_API_MAX_OUTPUT_TOKENS ou a intensidade de raciocínio desse papel conforme o modelo aceitar",
+          `rode \`${COMANDO[estagio]}\` novamente — o cache é preservado`,
+        ]
+      : tipo === "decisão"
       ? [oQue]
       : tipo === "harness"
         ? [
@@ -75,7 +93,9 @@ export function paradaDoEstagio(erro: Error, estagio: Estagio, runId?: string): 
   return {
     natureza: tipo,
     oQue,
-    ...(DE_QUEM_EXTRA[tipo] ? { deQuem: DE_QUEM_EXTRA[tipo]! } : {}),
+    ...(limiteDeGeracao
+      ? { deQuem: "da chamada de geração: o orçamento de saída terminou antes da conclusão" }
+      : DE_QUEM_EXTRA[tipo] ? { deQuem: DE_QUEM_EXTRA[tipo]! } : {}),
     custou: PRESERVADO[estagio],
     ...(runId ? { evidencia: [`.capivara/runs/${runId}`] } : {}),
     paraSeguir: seguir,
@@ -93,11 +113,12 @@ export function paradaDoEstagio(erro: Error, estagio: Estagio, runId?: string): 
 export function paradaDeProntidao(readiness: Readiness, estagio: Estagio, runId?: string): Parada {
   const faltando = readiness.checks.filter((check) => !check.passed);
   const primeiro = faltando[0];
+  const dimensionamento = primeiro?.id === "dimensionamento";
 
   return {
-    natureza: "decisão",
+    natureza: dimensionamento ? "modelo" : "decisão",
     oQue: primeiro ? `${primeiro.title}: ${primeiro.detail.split("\n")[0] ?? ""}`.trim() : "a prontidão não foi atingida",
-    deQuem: "de ninguém: os documentos estão publicados, e falta fechar o que está acima",
+    deQuem: dimensionamento ? DE_QUEM_EXTRA.modelo! : "de ninguém: os documentos estão publicados, e falta fechar o que está acima",
     custou: PRESERVADO[estagio],
     ...(runId ? { evidencia: [`.capivara/runs/${runId}`] } : {}),
     paraSeguir: [

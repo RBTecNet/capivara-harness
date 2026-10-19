@@ -8,7 +8,7 @@
  * e a evidência do anterior não é aplicada em silêncio a um plano diferente.
  */
 
-import { mkdir, readFile, rename } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { sha12 } from "../contract/stamps.js";
@@ -44,17 +44,20 @@ import {
 import { escolhaSemRepositorio, iniciarRepositorio, isClean, isRepository, lerEscolhaDeRepositorio, renderSemRepositorio } from "./git.js";
 import { materializeSessions } from "./split.js";
 import { preflight, type PreflightWarning } from "./preflight.js";
-import { prerequisiteChoice, readPrerequisiteChoice, renderPrerequisiteChoice, resolvePrerequisites } from "./prerequisites.js";
+import { checkPrerequisites, prerequisiteChoice, readPrerequisiteChoice, renderPrerequisiteChoice, resolvePrerequisites, type PrerequisiteStatus } from "./prerequisites.js";
+import { prepareBuildEnvironment } from "./environment-prepare.js";
+import { readEnvironmentPlan } from "./environment-plan.js";
 import type { EscolhaNumerada } from "./escolha.js";
 import { resolveTestCommand } from "./testcmd.js";
-import { runPhase, type EngineCaller, type PhaseOutcome } from "./runner.js";
+import { runPhase, type EngineCaller, type EngineResult, type PhaseOutcome } from "./runner.js";
 import { runAcceptance, type AcceptanceResult, type CommandRunner } from "./acceptance.js";
 import { acceptancePrompt, installPrompt } from "../prompts/index.js";
 import type { BuildProgressListener } from "./progress.js";
 import { lerFasesFechadas, registrarFaseFechada, shaDaFase } from "./ledger.js";
 import { TasksAprovadas, tasksDaFase } from "./veredictos.js";
-import { defaultTestRunner, type TestRunner } from "./gates.js";
-import { admitirArvore, alteracoesParaCommit } from "./admissao.js";
+import { defaultTestRunner, gate0, type TestRunner } from "./gates.js";
+import { adoptPreparedDependencies } from "./prepared-dependencies.js";
+import { admitirArvore, alteracoesParaCommit, artefatosLocaisIgnorados, lerStatus } from "./admissao.js";
 import { garantiaDeAutoridade } from "./autoridade.js";
 import { conferirIsolamento } from "./isolamento.js";
 import { larguraDoPlano } from "./escalonador.js";
@@ -148,7 +151,7 @@ export interface BuildOptions {
    */
   askPrerequisite?: (rendered: string, escolha: EscolhaNumerada) => Promise<string>;
   /** Uma sessão do executor com escopo de instalar e nada mais. */
-  installPrerequisites?: (prompt: string) => Promise<void>;
+  installPrerequisites?: (prompt: string) => Promise<EngineResult | void>;
   /** Desliga a aceitação operacional final. */
   skipAcceptance?: boolean;
   acceptanceRunner?: CommandRunner;
@@ -184,6 +187,8 @@ export interface BuildOutcome {
   warnings: PreflightWarning[];
   errors: string[];
   acceptance: AcceptanceResult | null;
+  /** Sessões reais de instalação, inclusive quando nenhuma fase pôde começar. */
+  preparation?: { sessions: number; evidence: string[] };
 }
 
 /**
@@ -199,6 +204,12 @@ function quandoLocal(iso: string): string {
 }
 
 export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
+  const preparation = { sessions: 0, evidence: [] as string[] };
+  const outcome = await performBuild(options, preparation);
+  return preparation.sessions > 0 ? { ...outcome, preparation } : outcome;
+}
+
+async function performBuild(options: BuildOptions, preparation: NonNullable<BuildOutcome["preparation"]>): Promise<BuildOutcome> {
   const announce = options.announce ?? (() => undefined);
   const now = options.now ?? (() => new Date());
 
@@ -218,6 +229,15 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   }
 
   const runId = runIdFor("build", sha12(plan));
+  let declaredRequirements;
+  try {
+    const skeleton = await readFile(join(artifactPaths(options.projectRoot).init, "skeleton.md"), "utf8").catch(() => "");
+    declaredRequirements = await readEnvironmentPlan(options.projectRoot, skeleton, plan);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    announce(`erro: ${reason}`);
+    return { runId, exitCode: 1, phases: [], warnings: [], errors: [reason], acceptance: null };
+  }
 
   /*
    * "Há alguém rodando?" vem ANTES de "a árvore está limpa?".
@@ -311,6 +331,11 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     }
   }
 
+  if (repository) {
+    if (await adoptPreparedDependencies(options.projectRoot, declaredRequirements)) announce("dependências já preparadas registradas pelo Core; instalação preservada para iniciar as fases");
+    const locais = await artefatosLocaisIgnorados(options.projectRoot, (await lerStatus(options.projectRoot)).map(entrada => entrada.caminho));
+    if (locais.size > 0) announce(`${locais.size} arquivo(s) de artefatos locais ignorados já versionados diferem do HEAD; mantidos no disco, fora das alterações do produto`);
+  }
   const checked = await preflight({
     projectRoot: options.projectRoot,
     runId,
@@ -335,45 +360,108 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
    * dependência satisfeita de fato, confirmada por nova verificação e não pela
    * promessa de ninguém.
    */
-  if (!checked.ok && options.askPrerequisite !== undefined && checked.missingPrerequisites.length > 0) {
-    const resolucao = await resolvePrerequisites(checked.missingPrerequisites, {
-      choose: async (faltando) => {
-        for (;;) {
-          const perguntar = options.askPrerequisite;
-          if (!perguntar) return "abortar";
-          const escolha = readPrerequisiteChoice(await perguntar(renderPrerequisiteChoice(faltando), prerequisiteChoice(faltando)));
-          if (escolha) return escolha;
-          announce("  responda com 1, 2 ou 3.");
-        }
-      },
-      install: async (faltando) => {
-        await options.installPrerequisites?.(
-          installPrompt({
+  const missingPrerequisites = checked.ok ? checked.prerequisites.filter(item => !item.present) : checked.missingPrerequisites;
+  if (missingPrerequisites.length > 0 && (options.askPrerequisite !== undefined || (options.systemInstall === true && options.installPrerequisites !== undefined))) {
+    let resolucao: Awaited<ReturnType<typeof resolvePrerequisites>>;
+    let verifiedInstallation: PrerequisiteStatus[] | null = null;
+    try {
+      resolucao = await resolvePrerequisites(missingPrerequisites, {
+        verify: async requirements => {
+          const statuses = verifiedInstallation ?? await checkPrerequisites(requirements, { cwd: options.projectRoot, ...(options.environment ? { environment: options.environment } : {}) });
+          verifiedInstallation = null;
+          return statuses;
+        },
+        choose: async (faltando) => {
+          if (options.systemInstall === true && options.installPrerequisites !== undefined) return "instalar";
+          for (;;) {
+            const perguntar = options.askPrerequisite;
+            if (!perguntar) return "abortar";
+            const escolha = readPrerequisiteChoice(await perguntar(renderPrerequisiteChoice(faltando), prerequisiteChoice(faltando)));
+            if (escolha) return escolha;
+            announce("  responda com 1, 2 ou 3.");
+          }
+        },
+        install: async (faltando) => {
+          const prompt = installPrompt({
             language: options.language,
-            missing: faltando.map((status) => ({ technology: status.technology, binary: status.binary })),
-          }),
-        );
-      },
-      announce,
-    });
+            missing: faltando,
+          });
+          const paths = runPaths(options.projectRoot, runId);
+          await mkdir(paths.prompts, { recursive: true });
+          await mkdir(paths.logs, { recursive: true });
+          const id = `environment-install-${randomUUID()}`;
+          // Não arquivar os registros recém-criados junto dos logs do run anterior.
+          const records = join(paths.root, "preparation");
+          await mkdir(records, { recursive: true });
+          const promptPath = join(records, `${id}.md`);
+          const logPath = join(records, `${id}.json`);
+          await writeAtomic(promptPath, prompt);
+          preparation.sessions += 1;
+          preparation.evidence.push(promptPath, logPath, paths.events);
+          const metadata = { timestamp: now().toISOString(), stage: "preflight", role: "builder", root: options.projectRoot,
+            ...options.roles?.builder, attempt: preparation.sessions, prompt: promptPath, log: logPath };
+          await writeAtomic(logPath, JSON.stringify({ ...metadata, status: "started" }, null, 2));
+          await appendFile(join(paths.logs, "calls.jsonl"), `${JSON.stringify(metadata)}\n`);
+          await appendEvent(paths.events, { timestamp: now().toISOString(), stage: "preflight", subject: "environment",
+            attempt: preparation.sessions, status: "started", detail: `sessão de instalação: ${logPath}` });
+          let response: EngineResult | void;
+          try {
+            response = await options.installPrerequisites?.(prompt);
+          } catch (error) {
+            await writeAtomic(logPath, JSON.stringify({ ...metadata, status: "failed", error: error instanceof Error ? error.message : String(error) }, null, 2));
+            throw error;
+          }
+          const gate = response ? gate0(response, options.engine) : { green: true as const };
+          const canVerify = response && !gate.green && !response.timedOut && !response.engineError && !response.providerFailure && response.resultRead !== false;
+          if (canVerify) verifiedInstallation = await checkPrerequisites(faltando, { cwd: options.projectRoot, ...(options.environment ? { environment: options.environment } : {}) });
+          const recovered = verifiedInstallation !== null && verifiedInstallation.every(status => status.present);
+          await writeAtomic(logPath, JSON.stringify({ ...metadata, status: recovered ? "recovered" : gate.green ? "complete" : "failed", response: response ?? null,
+            ...(verifiedInstallation ? { readiness: verifiedInstallation } : {}) }, null, 2));
+          await appendEvent(paths.events, { timestamp: now().toISOString(), stage: "preflight", subject: "environment",
+            attempt: preparation.sessions, status: gate.green || recovered ? "complete" : "blocked", detail: recovered
+              ? `sessão terminou com código ${response!.exitCode}, mas o Core comprovou todos os requisitos; instalação reaproveitada: ${logPath}`
+              : gate.green ? `sessão entregue; comprovar prontidão: ${logPath}` : gate.cause });
+          if (recovered) announce(`instalação comprovada pelo Core apesar do código ${response!.exitCode} da sessão; seguindo sem reinstalar`);
+          if (!gate.green && !recovered) throw new Error(gate.cause);
+        },
+        announce,
+      }, 2);
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      const reason = `a preparação do ambiente falhou antes do desenvolvimento: ${error instanceof Error ? error.message : String(error)}`;
+      announce(`erro: ${reason}`);
+      return { runId, exitCode: 1, phases: [], warnings: [], errors: [reason], acceptance: null };
+    }
 
     if (!resolucao.resolved) {
       announce(`erro: ${resolucao.reason}`);
-      for (const status of resolucao.missing) announce(`  ${status.technology} não foi encontrado (${status.binary})`);
-      return { runId, exitCode: 1, phases: [], warnings: [], errors: [resolucao.reason], acceptance: null };
+      for (const status of resolucao.missing) announce(`  ${status.technology}: ${status.path ? `prontidão reprovada em ${status.cwd ?? options.projectRoot}` : `${status.binary} não está no PATH`}`);
+      return { runId, exitCode: 1, phases: [], warnings: [], errors: [`a preparação do ambiente falhou antes do desenvolvimento: ${resolucao.reason}`], acceptance: null };
     }
 
     announce(`pré-requisitos satisfeitos: ${resolucao.installed.join(", ") || "nada faltava"}`);
+    if (repository && await adoptPreparedDependencies(options.projectRoot, declaredRequirements)) announce("preparação das dependências registrada pelo Core antes dos worktrees");
+    if (checked.ok) {
+      checked.prerequisites = checked.prerequisites.map(item => resolucao.statuses.find(updated => updated.binary === item.binary && updated.technology === item.technology) ?? item);
+      checked.warnings = checked.warnings.filter(item => item.code !== "instala-sistema");
+    }
     // Sem a pergunta na segunda passada: o que faltava foi resolvido, e um build
     // que voltasse a perguntar entraria em laço.
-    const { askPrerequisite: _resolvido, ...semPergunta } = options;
-    return runBuild(semPergunta);
+    if (!checked.ok) {
+      const { askPrerequisite: _resolvido, ...semPergunta } = options;
+      return performBuild(semPergunta, preparation);
+    }
   }
 
   if (!checked.ok) {
     for (const error of checked.errors) announce(`erro: ${error}`);
     for (const error of checked.contractErrors) announce(`  linha ${error.line}: ${error.code} ${error.message} → ${error.hint}`);
     return { runId, exitCode: 1, phases: [], warnings: [], errors: checked.errors, acceptance: null };
+  }
+
+  if (missingPrerequisites.length > 0 && options.installPrerequisites === undefined && options.askPrerequisite === undefined) {
+    const reason = "não foi possível preparar os pré-requisitos antes da construção: " + missingPrerequisites.map(item => item.technology).join(", ");
+    return { runId, exitCode: 1, phases: [], warnings: checked.warnings, errors: [reason], acceptance: null };
   }
 
   if (options.systemInstall === true) {
@@ -470,6 +558,18 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       }
     }
     await writeRunState(options.projectRoot, snapshot, now);
+    const environment = await prepareBuildEnvironment(options.projectRoot, options.testRunner ?? defaultTestRunner, announce, {
+      browser: options.skipFlows !== true && options.flowRunner === undefined && (options.skeleton?.workflows.length ?? 0) > 0,
+      systemInstall: options.systemInstall === true,
+    });
+    await writeAtomic(join(paths.logs, "environment-preflight.log"), `${JSON.stringify(checked.prerequisites, null, 2)}\n\n${environment.evidence}`);
+    if (!environment.ok) {
+      const reason = `a preparação do ambiente falhou antes do desenvolvimento; nenhuma fase foi iniciada. Evidência: ${join(paths.logs, "environment-preflight.log")}\n${environment.evidence}`;
+      await writeRunState(options.projectRoot, { ...snapshot, status: "blocked", stage: "preflight" }, now);
+      announce(reason);
+      return { runId, exitCode: 1, phases: [], warnings: checked.warnings, errors: [reason], acceptance: null };
+    }
+    announce("ambiente aprovado; iniciando desenvolvimento sem repetir as sondas de prontidão nas fases");
     await materializeSessions(checked.sessions);
 
     const progress = replayEvents(await readEvents(paths.events));
@@ -679,6 +779,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         engine: execucao?.engine ?? options.engine,
         session,
         testCommand: checked.testCommand,
+        environmentApproved: true,
         resolveTest: () =>
           resolveTestCommand(arvore, {
             ...(options.explicitTestCommand !== undefined ? { explicit: options.explicitTestCommand } : {}),
@@ -705,7 +806,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         ...(options.onProgress !== undefined ? { onProgress: options.onProgress } : {}),
         ...(options.sleep !== undefined ? { sleep: options.sleep } : {}),
         now,
-        ...(execucao ? { workRoot: execucao.workRoot, worker: execucao.worker, integracaoPendente: true } : {}),
+        ...(execucao ? { workRoot: execucao.workRoot, worker: execucao.worker, integracaoPendente: true, conferirPrincipal: execucao.conferirPrincipal, ...(execucao.integrationFailure ? { integrationFailure: execucao.integrationFailure } : {}) } : {}),
       };
     };
 
@@ -822,6 +923,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       const resultado = await executarEmParalelo({
         projectRoot: options.projectRoot,
         ...(options.rebuildAll === true ? { rebuildAll: true } : {}),
+        environmentApproved: true,
         runId,
         sessions: checked.sessions,
         agentes: options.parallel.agentes,
@@ -829,6 +931,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         keepGoing: options.keepGoing === true,
         jaFechada: pularSeFechada,
         rodar: (session, execucao) => runPhase(opcoesDaFase(session, execucao)),
+        ...(options.maxVerifierRepairs !== undefined ? { maxVerifierRepairs: options.maxVerifierRepairs } : {}),
         aposIntegrar: (session) => aposVerde(session),
         esquecer: async (session) => {
           const tasks = tasksDaFase(session.markdown);
@@ -836,6 +939,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         },
         isolamento: () =>
           conferirIsolamento(options.projectRoot, {
+            worktreeSupported: true,
             commitsEnabled: checked.commitsEnabled,
             containerized: checked.testCommand?.containerized ?? false,
           }),

@@ -65,6 +65,8 @@ async function existe(caminho: string): Promise<boolean> {
 }
 
 export interface ContextoDoIsolamento {
+  /** Capacidade do Git já aprovada no preflight desta execução. */
+  worktreeSupported?: boolean;
   /** Há repositório e o build commita: sem isso não há worktree nem integração. */
   commitsEnabled: boolean;
   /** A suíte do gate 2 sobe contêineres. */
@@ -78,7 +80,7 @@ export async function conferirIsolamento(root: string, contexto: ContextoDoIsola
 
   if (!contexto.commitsEnabled) {
     impedimentos.push("sem repositório Git não há worktree: cada agente precisa da própria árvore, e o trabalho dele volta por commit");
-  } else if (!(await suportaWorktree(root))) {
+  } else if (contexto.worktreeSupported !== true && !(await suportaWorktree(root))) {
     impedimentos.push("o git desta máquina não cria worktree (exige git 2.5 ou maior)");
   }
   if (contexto.containerized === true) {

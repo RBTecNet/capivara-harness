@@ -234,6 +234,8 @@ export interface FlagsDeExecucao {
   serial?: boolean;
   /** `--worker`, repetível. */
   worker?: string[];
+  /** Ignora overrides do pool salvo: todos usam o builder desta execução. */
+  workersAsBuilder?: boolean;
 }
 
 export type OrigemDaEstrategia = "padrão" | "arquivo" | "flags";
@@ -255,6 +257,8 @@ export function resolverEstrategia(flags: FlagsDeExecucao, arquivo: LeituraDoArq
 
   if (flags.serial === true && flags.parallel !== undefined) erros.push("--serial e --parallel se contradizem; escolha um");
   if (flags.serial === true && workersDasFlags.length > 0) erros.push("--worker só vale com execução paralela");
+  if (flags.serial === true && flags.workersAsBuilder === true) erros.push("--workers-as-builder só vale com execução paralela, não com --serial");
+  if (flags.workersAsBuilder === true && workersDasFlags.length > 0) erros.push("--workers-as-builder e --worker se contradizem; escolha todos como o executor ou agentes próprios");
 
   let maximo: number | null = null;
   if (flags.parallel !== undefined) {
@@ -287,11 +291,16 @@ export function resolverEstrategia(flags: FlagsDeExecucao, arquivo: LeituraDoArq
 
   if (maximo !== null) {
     const herdados = doArquivo?.mode === "parallel" ? doArquivo.workers : [];
-    const workers = (workersDasFlags.length > 0 ? workersDasFlags : herdados).slice(0, maximo);
+    const workers = (flags.workersAsBuilder === true ? [] : workersDasFlags.length > 0 ? workersDasFlags : herdados).slice(0, maximo);
     if (workersDasFlags.length > maximo) {
       return { ok: false, erros: [`${workersDasFlags.length} --worker para no máximo ${maximo} agentes ao mesmo tempo`] };
     }
     return { ok: true, estrategia: { mode: "parallel", maxConcurrency: maximo, workers }, origem: "flags", avisos };
+  }
+
+  if (flags.workersAsBuilder === true) {
+    if (doArquivo?.mode !== "parallel") return { ok: false, erros: ["--workers-as-builder só vale com execução paralela: acrescente --parallel <n>"] };
+    return { ok: true, estrategia: { ...doArquivo, workers: [] }, origem: "flags", avisos };
   }
 
   if (workersDasFlags.length > 0) {
@@ -321,13 +330,15 @@ export function papeisDosAgentes(estrategia: EstrategiaDeExecucao, builder: Role
     const proprio = estrategia.workers[indice];
     if (!proprio) return { config: builder };
     const mesmoProvider = proprio.provider === builder.provider;
+    const mesmoModelo = mesmoProvider && (proprio.model === "" || proprio.model === builder.model);
     return {
       config: {
         ...builder,
         provider: proprio.provider,
         // Provider trocado não herda o modelo do builder: nome de modelo é de um provider só.
         model: proprio.model !== "" ? proprio.model : mesmoProvider ? builder.model : "",
-        effort: proprio.effort !== "" ? proprio.effort : mesmoProvider ? builder.effort : "",
+        // Variantes pertencem ao modelo; a mesma CLI não garante compatibilidade.
+        effort: proprio.effort !== "" ? proprio.effort : mesmoModelo ? builder.effort : "",
       },
       ...(proprio.systemInstall !== undefined ? { systemInstall: proprio.systemInstall } : {}),
     };
@@ -421,7 +432,7 @@ export async function conferirWorkspace(
 export function aceitaEffort(provider: string): boolean {
   const adaptador = CLI_ADAPTERS.find((item) => item.id === provider);
   if (!adaptador) return false;
-  const base = { projectRoot: "/projeto", platform: "linux" as const, gitDir: null, model: "", access: "workspace" as const, binary: adaptador.defaultBinary || "x", env: {}, command: "x" };
+  const base = { projectRoot: "/projeto", platform: "linux" as const, gitDir: null, model: "modelo", access: "workspace" as const, binary: adaptador.defaultBinary || "x", env: {}, command: "x" };
   return JSON.stringify(adaptador.build({ ...base, effort: "high" }).args) !== JSON.stringify(adaptador.build({ ...base, effort: "" }).args);
 }
 
@@ -437,7 +448,7 @@ export async function conferirAgentes(
     const nome = `agente ${indice + 1}`;
     const provider = agente.config.provider;
     if (isDirectProvider(provider)) {
-      erros.push(`${nome}: ${provider} é API direta e não pode construir — o executor escreve arquivos e roda comandos, e isso exige uma CLI`);
+      erros.push(`${nome}: ${provider} é API direta e não pode construir — o executor escreve arquivos e roda comandos, e isso exige uma CLI. Para usar esse modelo na implementação, escolha opencode com --model ${provider}/${agente.config.model || "<modelo>"}; a chave salva na Capivara será reaproveitada`);
       continue;
     }
     if (!isCliProvider(provider)) {

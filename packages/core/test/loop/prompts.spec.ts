@@ -35,19 +35,20 @@ describe("prompt de implementação", () => {
   // §113: quando o manifesto declara `test:e2e`, o prompt o nomeia; o comando do gate não muda.
   it("nomeia o comando de e2e do projeto, quando existe, sem trocar o do gate", () => {
     const prompt = implementPrompt({ ...base, testCommand: "npm test", e2eCommand: "npm run test:e2e" });
-    expect(prompt).toContain("Always run the suite with:\n\n    npm test");
+    expect(prompt).toContain("The harness independently runs the full suite with:\n\n    npm test");
     expect(prompt).toContain("The project's browser and end-to-end tests run with:\n\n    npm run test:e2e");
-    expect(prompt).toContain("Run them whenever you write or change one, and again before you finish.");
+    expect(prompt).toContain("inspect the project's scripts before running a duplicate suite");
     expect(fixPrompt({ ...base, testCommand: "npm test", e2eCommand: "npm run test:e2e", gate: "gate 3", cause: "x", previousWroteNothing: false })).toContain("npm run test:e2e");
     expect(implementPrompt({ ...base, testCommand: "npm test" })).not.toContain("end-to-end tests run with");
   });
 
-  it("o comando do gate é obrigatório, mas não é o único: os testes de navegador também rodam", () => {
+  it("reaproveita cobertura e deixa novos testes a cargo do validador", () => {
     const prompt = implementPrompt({ ...base, testCommand: "npm test" });
     expect(prompt).not.toContain("Do not use another runner");
     expect(prompt).toContain("This is the exact command the gate uses to validate the phase");
-    expect(prompt).toContain("its browser or end-to-end\ntests");
-    expect(prompt).toContain("Write a browser test and run it");
+    expect(prompt).toContain("relevant browser or end-to-end tests");
+    expect(prompt).toContain("concrete checks requested by the independent validator");
+    expect(prompt).not.toContain("Write a browser test and run it");
     expect(prompt).toContain("A test from an earlier phase that contradicts what this phase requires is out of date: update it.");
   });
 
@@ -132,8 +133,9 @@ describe("prompt e protocolo do verificador", () => {
     expect(verifyPrompt(context)).toContain("This phase has 3");
   });
 
-  it("na dúvida, INCOMPLETE", () => {
-    expect(verifyPrompt(context)).toContain("When in doubt, INCOMPLETE");
+  it("investiga a dúvida e só bloqueia por evidência material", () => {
+    expect(verifyPrompt(context)).toContain("Block on concrete material evidence");
+    expect(verifyPrompt(context)).not.toContain("When in doubt, INCOMPLETE");
   });
 
   it("exige todas as pendências com evidência, alteração localizada e prova de regressão", () => {
@@ -154,24 +156,10 @@ describe("prompt e protocolo do verificador", () => {
     expect(prompt).toContain("requirements actually stated");
   });
 
-  /*
-   * O inventário entra como FATO sobre nomes, não como veredito: um nome
-   * ausente pode estar coberto por um teste com outro nome. O que ele resolve é
-   * a ordem de descoberta — a fase 4 do MCP_teste gastou um ciclo por buraco,
-   * com os dois presentes desde o primeiro.
-   */
-  it("leva o inventário dos testes nomeados, dizendo quais não existem", () => {
-    const prompt = verifyPrompt({
-      ...context,
-      featureTests: [
-        { task: 6, name: "consulta_sem_sessao", found: false },
-        { task: 8, name: "consulta_vazia_e_falha", found: true },
-      ],
-    });
-
-    expect(prompt).toContain("consulta_sem_sessao");
-    expect(prompt).toContain("NAME NOT FOUND");
-    expect(prompt).toContain("may still be covered by a test written under another name");
+  it("o validador escolhe a prova sem inventário de nomes prescritos pelo plan", () => {
+    const prompt = verifyPrompt(context);
+    expect(prompt).toContain("Choose the smallest sufficient verification");
+    expect(prompt).not.toContain("NAME NOT FOUND");
   });
 
   it("sem inventário, o prompt é o de sempre — nada de seção vazia", () => {
@@ -192,6 +180,7 @@ describe("prompt e protocolo do verificador", () => {
 
   it("ignora linha que não é um veredito", () => {
     expect(parseVerification("TASK um: DONE\nTASK 1: TALVEZ")).toEqual([]);
+    expect(parseVerification("TASK 1: DONE; risk noted: criterion may be missing")).toEqual([]);
   });
 
   it("preserva toda orientação na causa do gate sem quebrar TASK legado", () => {

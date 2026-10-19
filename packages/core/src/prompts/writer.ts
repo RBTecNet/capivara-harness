@@ -6,6 +6,7 @@
  */
 
 import { languageBlock } from "./language.js";
+import { planningScopeBlock } from "./planning-scope.js";
 
 export interface WriterContext {
   language: string;
@@ -23,6 +24,7 @@ export interface WriterContext {
 
 function context(writer: WriterContext): string {
   const parts = [
+    planningScopeBlock(),
     "## The developer's original request (verbatim)",
     writer.request,
     "",

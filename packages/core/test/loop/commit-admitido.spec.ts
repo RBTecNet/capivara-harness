@@ -42,6 +42,44 @@ afterEach(async () => {
 });
 
 describe("commitAdmitido", () => {
+  it.each(["server/dist/index.js", "node_modules/pkg/index.js", "server/dist/file [1]*.js"])("preserva alteração em %s já versionado quando um novo gitignore passa a ignorá-lo", async tracked => {
+    await escrever(tracked, "versão anterior\n");
+    await escrever("server/dist/removido.js", "remover depois\n");
+    await git(["add", "-A"]);
+    await git(["commit", "-qm", "artefatos já versionados"]);
+    await escrever(".gitignore", "node_modules\ndist\n");
+    await escrever(tracked, "alteração a preservar\n");
+    await rm(join(raiz, "server/dist/removido.js"));
+    await escrever("server/dist/ignorado-novo.js", "não incluir\n");
+    await escrever("src/app.ts", "export const app = 1;\n");
+    await escrever("outro.txt", "preparado pelo usuário\n");
+    await git(["add", "outro.txt"]);
+
+    const result = await commitAdmitido(raiz, {
+      caminhos: [tracked, "server/dist/removido.js", ".gitignore", "src/app.ts"], mensagem: "recuperação",
+    });
+
+    expect(result.status).toBe("commitado");
+    expect(await git(["show", `HEAD:${tracked}`])).toBe("alteração a preservar");
+    expect(await git(["show", "HEAD:src/app.ts"])).toBe("export const app = 1;");
+    await expect(git(["cat-file", "-e", "HEAD:server/dist/removido.js"])).rejects.toThrow();
+    await expect(git(["cat-file", "-e", "HEAD:server/dist/ignorado-novo.js"])).rejects.toThrow();
+    expect(await readFile(join(raiz, "server/dist/ignorado-novo.js"), "utf8")).toBe("não incluir\n");
+    expect(await git(["diff", "--cached", "--name-only"])).toBe("outro.txt");
+  });
+
+  it("não força arquivo novo ignorado, mesmo preparado no índice do usuário", async () => {
+    await escrever(".gitignore", "dist\n");
+    await escrever("dist/novo.js", "novo ignorado\n");
+    await git(["add", "-f", "dist/novo.js"]);
+    const head = await git(["rev-parse", "HEAD"]);
+    const index = await git(["write-tree"]);
+    await expect(commitAdmitido(raiz, { caminhos: ["dist/novo.js"], mensagem: "não deve publicar" })).rejects.toThrow();
+    expect(await git(["rev-parse", "HEAD"])).toBe(head);
+    expect(await git(["write-tree"])).toBe(index);
+    expect(await readFile(join(raiz, "dist/novo.js"), "utf8")).toBe("novo ignorado\n");
+  });
+
   it("vale o conteúdo PREPARADO, não o do disco: a chave que entrou no índice bloqueia, mesmo com o disco já limpo", async () => {
     await escrever("config/app.txt", CHAVE_PRIVADA);
     const resultado = await commitAdmitido(raiz, {

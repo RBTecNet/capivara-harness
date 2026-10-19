@@ -43,6 +43,8 @@ export interface Transcript {
    * decide se a chamada valeu precisa das duas coisas separadas.
    */
   error?: true;
+  /** Recusa que exige corrigir cota/configuração, em vez de reimplementar produto. */
+  providerFailure?: "quota" | "configuration";
   /**
    * O que a sessão recusou por permissão, um item por ferramenta e programa —
    * `Bash: npm`, `Edit` —, sem argumento nenhum (§106). Ausente quando nada foi
@@ -191,12 +193,31 @@ export function parseClaudeJson(stdout: string): Transcript {
  */
 export function parseOpencodeJsonl(stdout: string): Transcript {
   const pedacos: string[] = [];
+  const mensagens = new Map<string, string[]>();
+  let ultimaMensagem: string | null = null;
+  let todasIdentificadas = true;
   let usage: TokenUsage | null = null;
+  let failure: { text: string; providerFailure?: NonNullable<Transcript["providerFailure"]> } | null = null;
 
   for (const evento of objetos(stdout)) {
+    if (evento["type"] === "error") {
+      const error = evento["error"] as Record<string, unknown> | undefined;
+      const type = typeof error?.["type"] === "string" ? error["type"] : "erro da CLI";
+      const message = typeof error?.["message"] === "string" ? error["message"].replace(/https?:\/\/\S+/g, "[link do provider]").slice(0, 2000) : "a CLI não informou a causa";
+      const providerFailure = type === "provider.no-route" ? "configuration" : type === "provider.quota" && error?.["status"] === 402 ? "quota" : undefined;
+      failure = { text: `OpenCode: ${type} — ${message}`, ...(providerFailure ? { providerFailure } : {}) };
+      continue;
+    }
     const parte = evento["part"] as Record<string, unknown> | undefined;
     if (parte?.["type"] === "text" && typeof parte["text"] === "string") {
       pedacos.push(parte["text"]);
+      const id = parte["messageID"];
+      if (typeof id === "string" && id !== "") {
+        const partes = mensagens.get(id) ?? [];
+        partes.push(parte["text"]);
+        mensagens.set(id, partes);
+        ultimaMensagem = id;
+      } else todasIdentificadas = false;
       continue;
     }
 
@@ -214,7 +235,11 @@ export function parseOpencodeJsonl(stdout: string): Transcript {
     usage = acumulado > 0 ? { ...somado, costUsd: acumulado } : somado;
   }
 
-  return pedacos.length === 0 ? { text: stdout, usage, raw: true } : { text: pedacos.join(""), usage, raw: false };
+  // OpenCode emite mensagens completas de progresso antes da resposta final.
+  // Misturá-las pode desalinhar cercas e transformar código válido em prosa.
+  if (failure) return { ...failure, usage, raw: true, error: true };
+  const resposta = todasIdentificadas && ultimaMensagem !== null ? mensagens.get(ultimaMensagem)! : pedacos;
+  return pedacos.length === 0 ? { text: stdout, usage, raw: true } : { text: resposta.join(""), usage, raw: false };
 }
 
 /** Objetos JSON, um por linha, ignorando o que não for JSON. */
@@ -389,6 +414,53 @@ export function summarizeCodexEvent(line: string): string | null {
   return null;
 }
 
+/** Telemetria do OpenCode; nenhum desses eventos constitui veredito de gate. */
+export function summarizeOpencodeEvent(line: string): string | null {
+  let event: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(line);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    event = parsed as Record<string, unknown>;
+  } catch { return null; }
+  const record = (value: unknown): Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const part = record(event.part);
+  if (event.type === "error") return "o provider reportou erro";
+  if (event.type === "step_start") return "modelo trabalhando no próximo passo";
+  if (event.type === "text" && typeof part.text === "string") return `modelo devolveu ${part.text.length} caracteres`;
+  if (event.type !== "tool_use") return null;
+  const state = record(part.state);
+  const input = record(state.input);
+  const tool = typeof part.tool === "string" ? part.tool : "";
+  const status = state.status;
+  const done = status === "completed";
+  const failed = status === "error";
+  if (!["pending", "running", "completed", "error"].includes(String(status))) return null;
+  const path = primeiraLinha(input.path ?? input.filePath).slice(0, 100);
+  if (["write", "edit", "apply_patch"].includes(tool)) {
+    return `${failed ? "falhou ao alterar arquivo" : done ? "alterou arquivo" : "alterando arquivo"}${path ? ` · ${path}` : ""}`;
+  }
+  if (["read", "glob", "grep", "list"].includes(tool)) return `${failed ? "falhou ao inspecionar" : done ? "inspecionou" : "inspecionando"}${path ? ` · ${path}` : " arquivos"}`;
+  if (["shell", "bash"].includes(tool)) {
+    // Somente programas: argumentos e valores de ambiente podem conter credenciais.
+    const command = typeof input.command === "string" ? input.command : "";
+    const programs = command.split(/&&|\|\||[;|\n]/).map(segment => resumirNegacao("shell", { command: segment }).replace(/^shell: /, "")).filter(program => program !== "cd" && program !== "shell");
+    const program = programs[0];
+    const output = typeof state.output === "string" ? state.output : "";
+    const diagnostics: string[] = [];
+    const clean = output.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "");
+    // O resumo é do runner do executor, não o julgamento independente do G2.
+    const tests = /^\s*Tests\s+([^\r\n]+)/gm;
+    const reports = [...clean.matchAll(tests)];
+    const report = reports.at(-1)?.[1] ?? "";
+    const passed = /\b(\d{1,9}) passed\b/.exec(report)?.[1];
+    const failures = /\b(\d{1,9}) failed\b/.exec(report)?.[1];
+    if (passed || failures) diagnostics.push(`testes do executor: ${[...(passed ? [`${passed} passaram`] : []), ...(failures ? [`${failures} falharam`] : [])].join(", ")}`);
+    if (/\bEADDRINUSE\b/.test(output)) diagnostics.push("porta ocupada (EADDRINUSE)");
+    return [`${failed ? "comando falhou" : done ? "comando concluído" : "executando comando"}${program ? ` · ${program}` : ""}`, ...diagnostics].join(" · ");
+  }
+  return failed ? "ferramenta reportou erro" : done ? "ferramenta concluída" : "executando ferramenta";
+}
+
 function primeiraLinha(valor: unknown): string {
   const texto = typeof valor === "string" ? valor : Array.isArray(valor) ? valor.join(" ") : "";
   const linha = texto.split("\n")[0] ?? "";
@@ -401,11 +473,16 @@ function primeiraLinha(valor: unknown): string {
  * Um chunk de stdout corta no meio de uma linha com frequência; entregar o
  * pedaço partido ao parser produziria lixo ou silêncio.
  */
-export function createLineSplitter(onLine: (line: string) => void): (chunk: string) => void {
+export function createLineSplitter(onLine: (line: string) => void, maxLineLength = 1024 * 1024): (chunk: string) => void {
   let resto = "";
+  let descartando = false;
   return (chunk) => {
     const partes = `${resto}${chunk}`.split("\n");
     resto = partes.pop() ?? "";
-    for (const parte of partes) onLine(parte);
+    for (const parte of partes) {
+      if (!descartando && parte.length <= maxLineLength) onLine(parte);
+      descartando = false;
+    }
+    if (resto.length > maxLineLength || descartando) { resto = ""; descartando = true; }
   };
 }

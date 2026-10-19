@@ -7,11 +7,17 @@
  */
 
 import { EventEmitter } from "node:events";
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import { chooseInBox, createKeyPrompter, createKeySession } from "../../src/commands/key-io.js";
 import { escolhaSemRepositorio, lerEscolhaDeRepositorio } from "../../src/loop/git.js";
 import { runWizard, runWizardDePapeis } from "../../src/commands/wizard.js";
 import { InputEndedError } from "../../src/commands/line-io.js";
+import { ensureApiCredential } from "../../src/commands/api-login.js";
+import { readCredentials, saveCredential } from "../../src/provider/credentials.js";
+import { rolesFromFlags } from "../../src/commands/options.js";
 
 const ESC = "\u001B";
 
@@ -48,6 +54,19 @@ function fakeTerminal() {
 }
 
 describe("entrada por tecla", () => {
+  it("chave de API nunca aparece no campo, nas notas nem no resumo final", async () => {
+    const t = fakeTerminal();
+    const pending = t.prompter.secret("Chave de API (oculta): ");
+    await t.teclar("sk-teste-super-secreto");
+    expect(t.tela()).not.toContain("sk-teste");
+    expect(t.tela()).toContain("***");
+    await t.teclar("\r");
+    expect(await pending).toBe("sk-teste-super-secreto");
+    t.prompter.close();
+    expect(t.tela()).not.toContain("sk-teste");
+    expect(t.tela()).toContain("(oculto)");
+    expect(t.input.raw.at(-1)).toBe(false);
+  });
   it("liga o modo raw e a marcação de colagem, e devolve os dois ao fechar", () => {
     const { input, prompter, tela } = fakeTerminal();
     expect(input.raw).toEqual([true]);
@@ -131,6 +150,50 @@ describe("entrada por tecla", () => {
 });
 
 describe("wizard por tecla", () => {
+  it("OpenRouter mostra a recusa, espera uma decisão e chega ao modelo após a troca", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "capivara-wizard-key-"));
+    const file = join(directory, "credentials.json");
+    const t = fakeTerminal();
+    const rejected = "sk-management-teste";
+    const valid = "sk-inference-teste";
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => new Response(JSON.stringify({ data: { is_management_key: (options?.headers as Record<string, string>).Authorization === `Bearer ${rejected}` } })));
+    try {
+      await saveCredential({ id: "openrouter", label: "principal", provider: "openrouter", secret: rejected, default: true, createdAt: "agora" }, file);
+      const listModels = vi.fn(async () => {
+        expect((await readCredentials(file))[0]?.secret).toBe(valid);
+        return ["provider/modelo"];
+      });
+      const pending = runWizardDePapeis({ cwd: directory, comando: "init", faltando: ["writer"], current: rolesFromFlags({ provider: "openrouter" }),
+        io: t.prompter, fileExists: async () => false, directoryExists: async () => true, listModels,
+        configureApi: (provider, io) => ensureApiCredential(provider, io, { environment: {}, credentialsFile: file }),
+      });
+      void pending.catch(() => undefined); // O finally também fecha perguntas pendentes se uma asserção falhar.
+      await vi.waitFor(() => expect(t.ultima()).toContain("Configurar esta API?"));
+      await t.teclar("1\r");
+      await t.teclar(`${rejected}\r`);
+      await vi.waitFor(() => expect(t.ultima()).toContain("Chave recusada"));
+      expect(t.ultima()).toContain("gerenciamento/provisionamento");
+      expect(t.ultima()).toContain("não pode gerar respostas");
+      expect(t.ultima()).toContain("https://openrouter.ai/settings/keys");
+      expect(t.ultima()).toContain("voltar ao provider");
+      expect(t.ultima()).toContain("digitar outra chave");
+      expect(listModels).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledOnce();
+      await t.teclar("2\r");
+      await t.teclar(`${valid}\r`);
+      await vi.waitFor(() => expect(t.ultima()).toContain("provider/modelo"));
+      await t.teclar("1\r");
+      expect((await pending)?.roles.writer).toEqual({ provider: "openrouter", model: "provider/modelo" });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(t.tela()).not.toContain(rejected);
+      expect(t.tela()).not.toContain(valid);
+    } finally {
+      t.prompter.close();
+      fetchMock.mockRestore();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("monta o MESMO comando que o roteiro de linhas, escolhendo pela lista", async () => {
     const t = fakeTerminal();
     const resultado = runWizard({
@@ -201,6 +264,49 @@ describe("modelo pela lista", () => {
       }
     },
   );
+
+  it("no build, o terminal alcança a API 10 e mostra só modelos DeepSeek via OpenCode", async () => {
+    const t = fakeTerminal();
+    const escolha = runWizardDePapeis({
+      io: t.prompter, cwd: "/projeto", comando: "build", faltando: ["builder", "verifier"],
+      fileExists: async () => false, directoryExists: async () => true,
+      listModels: async () => ["opencode/big-pickle", "deepseek/deepseek-flash"],
+      listEfforts: async () => ["none", "low", "high", "max"],
+    });
+    try {
+      await t.teclar("10");
+      await t.teclar("");
+      expect(t.ultima()).toContain("deepseek");
+      expect(t.ultima()).toContain("API via OpenCode");
+      await t.teclar("\r");
+      await t.teclar("");
+      expect(t.ultima()).toContain("deepseek/deepseek-flash");
+      expect(t.ultima()).not.toContain("big-pickle");
+      await t.teclar("\r");
+      await t.teclar("3\r");
+      await t.teclar("\r");
+      expect((await escolha)?.global).toEqual({ provider: "opencode", model: "deepseek/deepseek-flash", effort: "high" });
+    } finally { t.prompter.close(); }
+  });
+
+  it("MiniMax com provider preenchido mostra os modelos no terminal sem repetir o provider", async () => {
+    const t = fakeTerminal();
+    const config = { provider: "minimax", model: "", effort: "", credential: "", command: "" };
+    const escolha = runWizardDePapeis({
+      io: t.prompter, cwd: "/projeto", comando: "init", faltando: ["writer"],
+      current: { writer: config, auditor: config, builder: config, verifier: config },
+      fileExists: async () => false, directoryExists: async () => true,
+      listModels: async () => ["MiniMax-M3", "MiniMax-M2.7"],
+    });
+    try {
+      await t.teclar("");
+      expect(t.ultima()).toContain("MiniMax-M3");
+      expect(t.ultima()).toContain("MiniMax-M2.7");
+      expect(t.ultima()).not.toContain("Qual provider usar");
+      await t.teclar("2\r");
+      expect((await escolha)?.roles.writer).toEqual({ provider: "minimax", model: "MiniMax-M2.7" });
+    } finally { t.prompter.close(); }
+  });
 
   function papeis(t: ReturnType<typeof fakeTerminal>) {
     return runWizardDePapeis({

@@ -15,7 +15,8 @@ import type { Bloqueio } from "./admissao.js";
 import { AVISO_DO_RUNNER, dependenciasAusentes, descreverDependencias, faltaORunnerDeFluxos } from "./dependencias.js";
 import { resolveTestCommand, type TestCommand } from "./testcmd.js";
 import { splitPhases, type PhaseSession } from "./split.js";
-import { checkPrerequisites, describeMissing, detectPrerequisites, unverifiedTechnologies, type PrerequisiteStatus } from "./prerequisites.js";
+import { checkPrerequisites, describeMissing, type PrerequisiteStatus } from "./prerequisites.js";
+import { readEnvironmentPlan } from "./environment-plan.js";
 
 export interface PreflightOptions {
   projectRoot: string;
@@ -142,10 +143,14 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
     });
   }
 
-  // A stack decidida exige o quê, e o que existe nesta máquina? Descobrir aqui
-  // custa uma chamada a `which`; descobrir na terceira fase custa três sessões.
+  // Só os requisitos discriminados pelo planejamento atual entram aqui.
   const esqueletoLido = await readFile(join(init, "skeleton.md"), "utf8").catch(() => "");
-  const prerequisites = await checkPrerequisites(detectPrerequisites(esqueletoLido));
+  let prerequisites: PrerequisiteStatus[] = [];
+  try {
+    prerequisites = await checkPrerequisites(await readEnvironmentPlan(options.projectRoot, esqueletoLido, plan), { cwd: options.projectRoot, ...(options.environment ? { environment: options.environment } : {}) });
+  } catch (error) {
+    errors.push(`não foi possível aprovar os pré-requisitos do plan: ${error instanceof Error ? error.message : String(error)}`);
+  }
   const missing = describeMissing(prerequisites, options.systemInstall === true);
   const ausentes = prerequisites.filter((status) => !status.present);
   if (missing !== "") {
@@ -184,18 +189,6 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
     warnings.push({ code: "instala-dependencias", message: descreverDependencias(semDependencias) });
   }
 
-  /*
-   * O catálogo é pequeno de propósito, então ele DIZ o que deixou de fora: quem
-   * lê um preflight limpo conclui que tudo foi conferido, e silêncio aqui é a
-   * pior resposta possível.
-   */
-  const naoVerificadas = unverifiedTechnologies(esqueletoLido);
-  if (naoVerificadas.length > 0) {
-    warnings.push({
-      code: "nao-verificada",
-      message: `não verifiquei, o catálogo não reconhece: ${naoVerificadas.join(", ")}`,
-    });
-  }
 
   if (errors.length > 0) return { ok: false, errors, contractErrors: [], missingPrerequisites: ausentes };
 

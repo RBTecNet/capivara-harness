@@ -27,7 +27,7 @@ import { artifactPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
 import { sha12 } from "../contract/index.js";
 
-export const PLAN_CACHE_CONTRACT = "capivara-plan-cache/v1" as const;
+export const PLAN_CACHE_CONTRACT = "capivara-plan-cache/v2" as const;
 
 export interface PlanCache {
   contract: typeof PLAN_CACHE_CONTRACT;

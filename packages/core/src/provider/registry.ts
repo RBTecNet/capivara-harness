@@ -40,6 +40,8 @@ export interface DirectProvider {
   label: string;
   dialect: Dialect;
   endpoint: string;
+  /** Descoberta explícita quando o endereço não se deriva do endpoint de inferência. */
+  modelsEndpoint?: string;
   envKey: string;
   reasoning: ReasoningPolicy;
 }
@@ -66,12 +68,17 @@ export const DIRECT_CATALOG: readonly DirectProvider[] = [
   { id: "anthropic", label: "Claude API (Anthropic)", dialect: "anthropic-messages", endpoint: "https://api.anthropic.com/v1/messages", envKey: "ANTHROPIC_API_KEY", reasoning: OFF },
   { id: "gemini", label: "Gemini API", dialect: "openai-chat", endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", envKey: "GEMINI_API_KEY", reasoning: OFF },
   { id: "deepseek", label: "DeepSeek API", dialect: "openai-chat", endpoint: "https://api.deepseek.com/chat/completions", envKey: "DEEPSEEK_API_KEY", reasoning: OFF },
-  { id: "minimax", label: "MiniMax API", dialect: "openai-chat", endpoint: "https://api.minimax.io/v1/text/chatcompletion_v2", envKey: "MINIMAX_API_KEY", reasoning: OFF },
+  { id: "minimax", label: "MiniMax API", dialect: "openai-chat", endpoint: "https://api.minimax.io/v1/chat/completions", modelsEndpoint: "https://api.minimax.io/v1/models", envKey: "MINIMAX_API_KEY", reasoning: OFF },
   { id: "openrouter", label: "OpenRouter", dialect: "openai-chat", endpoint: "https://openrouter.ai/api/v1/chat/completions", envKey: "OPENROUTER_API_KEY", reasoning: OFF },
 ];
 
 export function isDirectProvider(id: string): id is DirectProviderId {
   return (DIRECT_PROVIDERS as readonly string[]).includes(id);
+}
+
+/** O identificador da API no catálogo do OpenCode. */
+export function opencodeProviderId(id: string): string {
+  return id === "gemini" ? "google" : id;
 }
 
 export function directProvider(id: DirectProviderId): DirectProvider {

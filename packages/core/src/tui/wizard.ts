@@ -46,7 +46,9 @@ function flagsDeExecucao(answers: WizardAnswers): string[] {
       : [
           "--parallel",
           String(answers.execution.maxConcurrency),
-          ...answers.execution.workers.flatMap((agente) => ["--worker", agenteComoFlag(agente)]),
+          ...(answers.execution.workers.length === 0
+            ? ["--workers-as-builder"]
+            : answers.execution.workers.flatMap((agente) => ["--worker", agenteComoFlag(agente)])),
         ];
   return answers.saveExecution === true ? [...flags, "--save-execution"] : flags;
 }

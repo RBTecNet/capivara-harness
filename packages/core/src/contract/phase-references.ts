@@ -17,15 +17,29 @@ export function affectedPhases(
       named.add(finding.phase);
       continue;
     }
-    const text = `${finding.where} ${finding.problem} ${finding.fix}`;
-    // O auditor de coerência usa P2.T2.C1; o auditor local também usa Phase 2
-    // ou Fase 2. Ignorar o primeiro formato mandou a correção do cron5 só para
-    // a fase 1, embora o defeito e a orientação apontassem para a fase 2.
-    for (const match of text.matchAll(/\b(?:phase|fase)\s*(\d+)\b|\bP(\d+)(?:\.T\d+(?:\.C\d+)?)?\b/gi)) {
-      const phase = Number(match[1] ?? match[2]);
-      if (phase >= 1 && phase <= total) named.add(phase);
-    }
+    const local = new Set<number>();
+    const localizar = (text: string): void => {
+      // Endereços do índice e referências em prosa compartilham o contrato.
+      for (const match of text.matchAll(/\b(?:phase|fase)\s*(\d+)\b|\bP(\d+)(?:\.T\d+(?:\.C\d+)?)?\b/gi)) {
+        const phase = Number(match[1] ?? match[2]);
+        if (phase >= 1 && phase <= total) local.add(phase);
+      }
+    };
+    localizar(finding.where);
+    // Exemplos e contratos citados na justificativa não são novos destinos.
+    if (local.size === 0) localizar(`${finding.problem} ${finding.fix}`);
+    for (const phase of local) named.add(phase);
   }
   // Sem referência utilizável, preserva o fallback conservador existente.
   return named.size > 0 ? [...named].sort((left, right) => left - right) : Array.from({ length: total }, (_, index) => index + 1);
+}
+
+export interface PlanAddress { phase: number; task: number; criterion?: number }
+
+/** Endereços explícitos do índice; não tenta adivinhar títulos ou prosa. */
+export function planAddresses(text: string): PlanAddress[] {
+  return [...text.matchAll(/\bP(\d+)\.T(\d+)(?:\.C(\d+))?\b/gi)].map(match => ({
+    phase: Number(match[1]), task: Number(match[2]),
+    ...(match[3] !== undefined ? { criterion: Number(match[3]) } : {}),
+  }));
 }

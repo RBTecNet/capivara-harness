@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runPhase, splitPhases } from "../../src/loop/index.js";
 import type { EngineCall, EngineResult, PhaseRunOptions, PhaseSession } from "../../src/loop/index.js";
 import { TasksAprovadas, tasksDaFase } from "../../src/loop/veredictos.js";
-import { runPaths } from "../../src/state/index.js";
+import { readEvents, runPaths } from "../../src/state/index.js";
 import { VALID_PHASES } from "../contract/fixture.js";
 import * as flowGates from "../../src/loop/flows.js";
 import { MARCA_DE_INSTALACAO_NODE, registrarInstalacaoNode, runtimeNode } from "../../src/loop/instalacao-node.js";
@@ -70,6 +70,246 @@ async function phase(overrides: Partial<PhaseRunOptions> = {}) {
 }
 
 describe("reparo limitado pelo verificador", () => {
+  it("entrega ao autor do G4 e à triagem os contratos já conhecidos, sem sessão de descoberta", async () => {
+    const contract = "## Regras transversais\n- API: GET /api/tarefas retorna JSON; navegação da tela: /tarefas retorna HTML";
+    await mkdir(join(projectRoot, ".capivara/init"), { recursive: true });
+    await writeFile(join(projectRoot, ".capivara/init/skeleton.md"), contract);
+    vi.spyOn(flowGates, "gate4").mockImplementation(async options => {
+      const workflow = options.workflows[0]!;
+      await options.author(workflow, [], "http://127.0.0.1:47533", { anteriores: [], bancoNovo: [], migracao: null, ajudante: "capivara-comando.ts" });
+      await options.triagem!({ workflow, script: "roteiro", failure: "HTML em json()", snapshot: "Tarefas", serverErrors: [] });
+      return { green: true, skipped: "", scripts: ["workflow-1.spec.ts"] };
+    });
+    const { outcome, calls, target } = await phase({
+      flows: { workflows: [{ number: "1", name: "Tarefas", steps: ["listar tarefas"] }], resolveStart: async () => "npm start" },
+      call: async call => ok(call.role === "builder" ? "feito" : done),
+    });
+    expect(outcome.status).toBe("complete");
+    const readers = calls.filter(call => call.prompt.includes("CAPIVARA_FLOW") || call.prompt.includes("CAPIVARA_TRIAGE"));
+    expect(readers).toHaveLength(2);
+    for (const call of readers) {
+      expect(call.prompt).toContain("GET /api/tarefas retorna JSON");
+      expect(call.prompt).toContain("/tarefas retorna HTML");
+      expect(call.prompt).toContain(target.markdown.trim());
+    }
+    expect(calls).toHaveLength(4);
+    for (const call of calls) expect(call.prompt).toContain("GET /api/tarefas retorna JSON");
+  });
+
+  it("cada sessão recebe uma porta privada sem alterar process.env", async () => {
+    const before = process.env.E2E_PORT;
+    const { calls, outcome } = await phase({ call: async input => ok(input.role === "verifier" ? done : "feito") });
+    expect(outcome.status).toBe("complete");
+    const ports = calls.map(input => input.environment?.E2E_PORT);
+    expect(ports.every(port => Number(port) > 0)).toBe(true);
+    expect(new Set(ports).size).toBe(calls.length);
+    expect(process.env.E2E_PORT).toBe(before);
+  });
+
+  it("observação não bloqueante é anunciada sem outra sessão e preserva G4 independente", async () => {
+    const messages: string[] = [];
+    const registry = await TasksAprovadas.abrir(projectRoot, RUN);
+    const note = "mais uma asserção seria útil, mas a URL final e a gravação estão corretas";
+    const g4 = vi.spyOn(flowGates, "gate4").mockResolvedValue({ green: true, skipped: "", scripts: ["workflow-1.spec.ts"] });
+    const { outcome, calls, target } = await phase({
+      maxCycles: 3,
+      aprovadas: registry,
+      announce: message => messages.push(message),
+      flows: { workflows: [{ number: "1", name: "Save", steps: ["save"] }], resolveStart: async () => "npm start" },
+      call: async call => ok(call.role === "verifier" ? `TASK 1: DONE — ADVISORY: ${note}\nTASK 2: DONE` : "feito"),
+    });
+    expect(outcome).toMatchObject({ status: "complete", cycles: 1 });
+    expect(calls.map(call => call.role)).toEqual(["builder", "verifier"]);
+    expect(g4).toHaveBeenCalledOnce();
+    expect(messages.join("\n")).toContain(`observação não bloqueante: ${note}`);
+    expect(registry.jaAprovadas(target.id, tasksDaFase(target.markdown))).toHaveLength(2);
+  });
+
+  it("observação não aprova defeito funcional e o último ciclo não anuncia retorno inexistente", async () => {
+    const { outcome, calls } = await phase({
+      maxVerifierRepairs: 0,
+      call: async call => ok(call.role === "verifier" ? `TASK 1: DONE — ADVISORY: nome de teste diferente\n${guidance.split("\n")[1]}` : "feito"),
+    });
+    expect(outcome).toMatchObject({ status: "failed", cycles: 1 });
+    expect(calls).toHaveLength(2);
+    const events = await readEvents(runPaths(projectRoot, RUN).events);
+    expect(events.some(event => event.status === "retry")).toBe(false);
+  });
+
+  it("cada nova construção registra causa completa e ação concreta do verificador", async () => {
+    const { outcome, calls } = await phase({
+      maxCycles: 2, maxVerifierRepairs: 0,
+      call: async call => ok(call.role === "verifier" ? call.attempt === 1 ? guidance : done : "feito"),
+    });
+    expect(outcome.status).toBe("complete");
+    expect(calls.filter(call => call.role === "builder")).toHaveLength(2);
+    const retries = (await readEvents(runPaths(projectRoot, RUN).events)).filter(event => event.status === "retry");
+    expect(retries).toHaveLength(1);
+    expect(retries[0]?.detail).toContain("EVIDENCE: seed.ts inserts two");
+    expect(retries[0]?.detail).toContain("FIX: insert cancelled");
+    expect(retries[0]?.detail).toContain("CHECK: npm test");
+  });
+
+  it("falha persistente do roteiro não pede ao construtor para alterar produto aprovado", async () => {
+    vi.spyOn(flowGates, "gate4").mockResolvedValue({
+      green: false, cause: "seletor não corresponde ao produto", scriptFailed: true,
+      triagem: { tipo: "ROTEIRO", evidencia: "botão existe", onde: "workflow", criterio: "saves", correcao: "corrigir seletor" },
+    });
+    const { outcome, calls } = await phase({
+      maxCycles: 3,
+      flows: { workflows: [{ number: "1", name: "Save", steps: ["save"] }], resolveStart: async () => "npm start" },
+      call: async call => ok(call.role === "verifier" ? done : "feito"),
+    });
+    expect(outcome).toMatchObject({ status: "failed", cycles: 3 });
+    expect(calls.map(call => call.role)).toEqual(["builder", "verifier"]);
+  });
+
+  it("nova correção recebe os patches já publicados em vez de restaurar o rascunho original", async () => {
+    const script = "import { test, expect } from '@playwright/test';\ntest('workflow 1', async ({ page }) => { await test.step('passo 1: save', async () => { expect(await page.title()).toBeTruthy(); }); });\nconst marcador = 'ORIGINAL';";
+    const patched = script.replace("'ORIGINAL'", "'PATCH_APLICADO'");
+    let authors = 0;
+    vi.spyOn(flowGates, "gate4").mockImplementation(async options => {
+      const workflow = options.workflows[0]!;
+      const context = { anteriores: [], bancoNovo: [], migracao: null, ajudante: "capivara-comando.ts" };
+      await options.author(workflow, [], "http://127.0.0.1:47533", context);
+      await mkdir(join(projectRoot, ".capivara/flows"), { recursive: true });
+      await writeFile(join(projectRoot, ".capivara/flows/workflow-1.spec.ts"), `${flowGates.FLOW_MARK}\n${patched}\n`);
+      await options.author(workflow, ["corrigir o próximo seletor"], "http://127.0.0.1:47533", context);
+      return { green: true, skipped: "", scripts: ["workflow-1.spec.ts"] };
+    });
+    const { outcome } = await phase({
+      flows: { workflows: [{ number: "1", name: "Save", steps: ["save"] }], resolveStart: async () => "npm start" },
+      call: async call => {
+        if (call.purpose === "flow-author") {
+          authors += 1;
+          if (authors > 1) expect(call.prompt).toContain("PATCH_APLICADO");
+          return ok(`\`\`\`ts\n${authors === 1 ? script : patched}\n\`\`\``);
+        }
+        return ok(call.role === "verifier" ? done : "feito");
+      },
+    });
+    expect(outcome.status).toBe("complete");
+    expect(authors).toBe(2);
+  });
+
+  it("recupera DONE anotado em sessão readonly no mesmo ciclo, preservando a resposta original", async () => {
+    const malformed = "TASK 1: DONE; risk noted: production startup may differ on Windows\nTASK 2: DONE";
+    const workRoot = await mkdtemp(join(projectRoot, "worktree-"));
+    let checks = 0;
+    const { outcome, calls, suiteRuns } = await phase({
+      maxCycles: 3,
+      workRoot,
+      worker: 2,
+      call: async call => ok(call.role === "verifier" ? ++checks === 1 ? malformed : done : "feito"),
+    });
+    expect(outcome).toMatchObject({ status: "complete", cycles: 1 });
+    expect(calls.map(call => [call.role, call.repair === true])).toEqual([
+      ["builder", false], ["verifier", false], ["verifier", false],
+    ]);
+    expect(suiteRuns).toBe(1);
+    expect(calls.every(call => call.root === workRoot && call.worker === 2)).toBe(true);
+    const prompt = calls[2]!.prompt;
+    expect(prompt).toContain(calls[1]!.prompt);
+    expect(prompt).toContain(JSON.stringify(malformed));
+    expect(prompt).toContain("1 de 2 tasks");
+    expect(prompt).toContain("Do not turn INCOMPLETE into DONE");
+    const paths = runPaths(projectRoot, RUN);
+    expect(await readFile(join(paths.logs, "P01.verify-1.log"), "utf8")).toContain(malformed);
+    expect(await readFile(join(paths.logs, "P01.verify-1.format-1.log"), "utf8")).toContain(done);
+    expect(await readFile(join(paths.prompts, "P01.verify-1.format-1.txt"), "utf8")).toBe(prompt);
+  });
+
+  it.each([
+    ["anotação", "TASK 1: DONE; uncertain\nTASK 2: DONE"],
+    ["resposta vazia", ""],
+    ["índice repetido", "TASK 1: DONE\nTASK 1: DONE"],
+    ["índice fora da fase", "TASK 1: DONE\nTASK 3: DONE"],
+  ])("protocolo continua inválido (%s): não reabre builder nem autoriza reparo", async (_label, malformed) => {
+    const { outcome, calls } = await phase({
+      maxCycles: 3,
+      call: async call => ok(call.role === "verifier" ? malformed : "feito"),
+    });
+    expect(outcome).toMatchObject({ status: "failed", cycles: 1, gate: "gate 3 — verificação independente" });
+    if (outcome.status !== "failed") throw new Error("deveria falhar");
+    expect(outcome.cause).toContain("O verificador devolveu protocolo inválido");
+    expect(outcome.cause).toContain("P01.verify-1.format-1.log");
+    expect(calls.map(call => call.role)).toEqual(["builder", "verifier", "verifier"]);
+    expect(calls.some(call => call.repair)).toBe(false);
+  });
+
+  it("achado material na recuperação não vira verde: exige reparo e outra avaliação independente", async () => {
+    let checks = 0;
+    const { outcome, calls, suiteRuns } = await phase({
+      call: async call => ok(call.role === "verifier" && !call.repair
+        ? ++checks === 1 ? "TASK 1: DONE; risk noted\nTASK 2: DONE" : checks === 2 ? guidance : done
+        : "feito"),
+    });
+    expect(outcome).toMatchObject({ status: "complete", cycles: 1 });
+    expect(calls.map(call => [call.role, call.repair === true])).toEqual([
+      ["builder", false], ["verifier", false], ["verifier", false], ["verifier", true], ["verifier", false],
+    ]);
+    expect(calls[3]!.prompt).toContain("FIX: insert cancelled");
+    expect(suiteRuns).toBe(2);
+  });
+
+  it.each(["timeout", "quota", "configuration", "engineError", "exitCode", "missingResult"] as const)("%s na recuperação de formato não inicia outra construção", async failure => {
+    let checks = 0;
+    const { outcome, calls } = await phase({
+      maxCycles: 3,
+      call: async call => call.role === "verifier" && ++checks > 1
+        ? failure === "timeout" ? { ...ok(), timedOut: "wall" }
+          : failure === "engineError" ? { ...ok(), engineError: true }
+          : failure === "exitCode" ? { ...ok(), exitCode: 1 }
+          : failure === "missingResult" ? { ...ok(), resultRead: false }
+          : { ...ok("recusa explícita"), engineError: true, providerFailure: failure }
+        : ok(call.role === "verifier" ? "all done" : "feito"),
+    });
+    expect(outcome).toMatchObject({ status: "failed", cycles: 1, gate: "gate 0 — engine" });
+    expect(calls.map(call => call.role)).toEqual(["builder", "verifier", "verifier"]);
+    expect(calls.some(call => call.repair)).toBe(false);
+  });
+
+  it.each([false, true])("a leitura completa após reparo restaura a memória DONE para o próximo ciclo (recuperar formato: %s)", async recoverFormat => {
+    const target = session();
+    const registry = await TasksAprovadas.abrir(projectRoot, RUN);
+    await registry.aprovar(target.id, tasksDaFase(target.markdown), [1], 1);
+    let checks = 0;
+    const { outcome, calls } = await phase({
+      maxCycles: 2,
+      aprovadas: registry,
+      call: async call => {
+        if (call.role !== "verifier" || call.repair) return ok();
+        checks += 1;
+        if (checks === 1) return ok(guidance);
+        if (recoverFormat && checks === 2) return ok("TASK 1: DONE; risk noted\nTASK 2: DONE");
+        return ok(checks === (recoverFormat ? 3 : 2)
+          ? "TASK 1: INCOMPLETE — FIX: preserve production startup; CHECK: npm test\nTASK 2: DONE" : done);
+      },
+    });
+    expect(outcome).toMatchObject({ status: "complete", cycles: 2 });
+    const prompts = calls.filter(call => call.role === "verifier" && !call.repair).map(call => call.prompt);
+    expect(prompts[0]).toContain("Already DONE");
+    expect(prompts[1]).not.toContain("Already DONE");
+    if (recoverFormat) expect(prompts[2]).not.toContain("Already DONE");
+    expect(prompts.at(-1)).toContain("Already DONE");
+    expect(prompts.at(-1)).toContain(`- task 2: ${tasksDaFase(target.markdown)[1]!.title}`);
+    expect(prompts.at(-1)).not.toContain(`- task 1: ${tasksDaFase(target.markdown)[0]!.title}`);
+  });
+
+  it.each(["quota", "configuration"] as const)("recusa %s no reparo não inicia outro construtor e mantém a causa original", async providerFailure => {
+    const { outcome, calls, suiteRuns } = await phase({
+      maxCycles: 3,
+      testRunner: async () => ({ exitCode: 1, output: "missing statuses" }),
+      call: async call => call.repair ? { ...ok("recusa explícita"), engineError: true, providerFailure } : ok(),
+    });
+    expect(outcome).toMatchObject({ status: "failed", cycles: 1 });
+    if (outcome.status !== "failed") throw new Error("deveria falhar");
+    expect(outcome.cause).toContain("missing statuses");
+    expect(outcome.cause).toContain("recusa explícita");
+    expect(calls).toHaveLength(2);
+    expect(suiteRuns).toBe(1);
+  });
+
   it("corrige a árvore e exige suíte e NOVA sessão readonly antes de fechar, sem gastar outro ciclo do builder", async () => {
     const { outcome, calls, suiteRuns } = await phase();
     expect(outcome).toMatchObject({ status: "complete", cycles: 1 });
@@ -131,12 +371,13 @@ describe("reparo limitado pelo verificador", () => {
 
   it("timeout de reparo preserva a causa inicial e não permite G3 nem autoaprovação", async () => {
     const { outcome, calls, suiteRuns } = await phase({
+      maxCycles: 3,
       testRunner: async () => ({ exitCode: 1, output: "missing statuses" }),
       call: async (call) => call.repair
         ? { ...ok(done), timedOut: "wall" }
         : ok(),
     });
-    expect(outcome).toMatchObject({ status: "failed" });
+    expect(outcome).toMatchObject({ status: "failed", cycles: 1 });
     if (outcome.status !== "failed") throw new Error("deveria falhar");
     expect(outcome.cause).toContain("missing statuses");
     expect(outcome.cause).toContain("wall");
@@ -185,7 +426,7 @@ describe("reparo limitado pelo verificador", () => {
     expect(calls.filter((call) => call.role === "builder")).toHaveLength(1);
   });
 
-  it("revalida todas as tasks e o inventário após reparo, incluindo as já aprovadas", async () => {
+  it("revalida todas as tasks após reparo sem cobrar nomes de testes planejados", async () => {
     const target = session();
     const registry = await TasksAprovadas.abrir(projectRoot, RUN);
     await registry.aprovar(target.id, tasksDaFase(target.markdown), [1], 1);
@@ -205,9 +446,10 @@ describe("reparo limitado pelo verificador", () => {
     expect(outcome.status).toBe("complete");
     const checks = calls.filter((call) => call.role === "verifier" && !call.repair);
     expect(checks[0]?.prompt).toContain("Already DONE");
-    expect(checks[0]?.prompt).toContain("NAME NOT FOUND");
+    expect(checks[0]?.prompt).not.toContain("NAME NOT FOUND");
     expect(checks[1]?.prompt).not.toContain("Already DONE");
-    expect(checks[1]?.prompt).toContain("name found in the tree");
+    expect(checks[1]?.prompt).not.toContain("name found in the tree");
+    expect(checks[1]?.prompt).toContain("Choose the smallest sufficient verification");
   });
 
   it.each([

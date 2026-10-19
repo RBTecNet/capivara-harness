@@ -15,28 +15,32 @@
  * árvore com as duas. Se o cherry-pick conflita, ou a suíte da árvore integrada
  * reprova, a integração é desfeita e a fase volta para a fila para rodar
  * SOZINHA sobre a árvore nova — e aí, por construção, não há com quem conflitar.
- * Se nem sozinha ela fecha, ela falhou como falharia no serial.
+ * Teste integrado reprovado também recebe diagnóstico e correção pelo executor,
+ * com reparo limitado pelo verificador; exclusividade não consome essa janela.
  *
  * Nada aqui é decidido por modelo. A ordem, o agente e o desfecho da integração
  * saem do escalonador, do git e da suíte.
  */
 
 import { readFile, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { writeAtomic } from "../state/atomic.js";
 import { appendEvent } from "../state/events.js";
 import { runPaths } from "../state/paths.js";
-import { admitirIntervalo, descreverBloqueios } from "./admissao.js";
+import { admitirIntervalo, alteracoesParaCommit, artefatosLocaisIgnorados, descreverBloqueios, lerStatus } from "./admissao.js";
 import { prepararAmbiente } from "./ambiente.js";
+import { criarBancosDeTeste } from "./test-databases.js";
 import { bloqueadas, dependenciasEfetivas, proximas, type EstadoNaAgenda } from "./escalonador.js";
 import { defaultTestRunner, gate2, type TestRunner } from "./gates.js";
-import { falhaDeInstalacaoNode, inspecionarInstalacaoNode, registrarInstalacaoNode } from "./instalacao-node.js";
+import { falhaDeInstalacaoNode, inspecionarInstalacaoNode, registrarInstalacaoNode, MARCA_DE_INSTALACAO_NODE } from "./instalacao-node.js";
 import type { Isolamento } from "./isolamento.js";
 import type { BuildProgressListener, WorkerProgressListener } from "./progress.js";
-import type { PhaseOutcome } from "./runner.js";
+import type { IntegrationFailure, PhaseOutcome } from "./runner.js";
 import type { PhaseSession } from "./split.js";
 import {
   abrirWorktree,
+  abrirValidacaoIntegrada,
   alteradosNaPrincipal,
   branchTemTrabalho,
   branchDaFase,
@@ -70,6 +74,9 @@ export interface ExecucaoDaFase {
   engine: string;
   systemInstall: boolean;
   preferredPort: number;
+  /** Conferência serializada com a integração; não observa cherry-pick pela metade. */
+  conferirPrincipal: () => Promise<string[]>;
+  integrationFailure?: IntegrationFailure;
 }
 
 export interface ParaleloOptions {
@@ -79,6 +86,7 @@ export interface ParaleloOptions {
   sessions: readonly PhaseSession[];
   agentes: readonly AgenteDoPool[];
   maxConcurrency: number;
+  maxVerifierRepairs?: number;
   keepGoing: boolean;
   /** Refaz explicitamente mesmo uma fase aprovada cuja integração ficou suspensa. */
   rebuildAll?: boolean;
@@ -98,8 +106,9 @@ export interface ParaleloOptions {
   /** O comando de teste da árvore principal, resolvido na hora — a fase pode tê-lo acabado de criar. */
   comandoDeTeste: () => Promise<string | null>;
   testRunner?: TestRunner;
+  environmentApproved?: boolean;
   /** Roda `npm install` e a migração do ambiente na árvore principal; substituível no teste. */
-  instalar?: (comando: string, cwd: string) => Promise<{ exitCode: number; output: string }>;
+  instalar?: TestRunner;
   systemInstall: boolean;
   /** A porta do gate 4 que o primeiro agente prefere; os seguintes, as vizinhas. */
   portaBase: number;
@@ -124,6 +133,8 @@ export interface ParaleloResultado {
   parada: { session: PhaseSession; outcome: PhaseOutcome } | null;
 }
 
+type ResultadoDaIntegracao = { desfecho: "integrada" } | { desfecho: "refazer"; motivo: string; testFailure?: true } | { desfecho: "falhou"; outcome: PhaseOutcome };
+
 function descreverFalha(outcome: PhaseOutcome): string {
   if (outcome.status === "failed") return `${outcome.gate}: ${outcome.cause}`;
   if (outcome.status === "credential-rejected") return `o provider ${outcome.engine} recusou a credencial: ${outcome.evidence}`;
@@ -147,6 +158,8 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
   const paths = runPaths(projectRoot, options.runId);
   const estados = new Map<string, EstadoNaAgenda>();
   const exclusivas = new Set<string>();
+  const recuperacoesDeTeste = new Map<string, IntegrationFailure>();
+  const passagensDeIntegracao = new Map<string, number>();
   const relatorios = new Map<string, PhaseOutcome>();
   const porId = new Map(options.sessions.map((session) => [session.id, session]));
   const naFilaDeIntegracao = filaUnica();
@@ -155,6 +168,14 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
   let parada: ParaleloResultado["parada"] = null;
   let suspenso: string | null = null;
   let fatal = false;
+  const naoVersionadosIniciais = new Set((await alteracoesParaCommit(projectRoot)).filter((e) => e.naoVersionado).map((e) => e.caminho));
+  const conferirPrincipal = (): Promise<string[]> => naFilaDeIntegracao(async () => {
+    const alterados = (await alteracoesParaCommit(projectRoot))
+      .filter((e) => !e.naoVersionado || (!naoVersionadosIniciais.has(e.caminho) && e.caminho !== `node_modules/${MARCA_DE_INSTALACAO_NODE}`))
+      .map((e) => e.caminho).sort();
+    if (alterados.length > 0) fatal = true;
+    return alterados;
+  });
   /**
    * O primeiro erro que ninguém tratou (§99). Ele não derruba o laço na hora:
    * derrubar deixava os outros agentes rodando sem lock e integrando depois de o
@@ -229,7 +250,7 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
     session: PhaseSession,
     worktree: Worktree,
     slot: number,
-  ): Promise<{ desfecho: "integrada" } | { desfecho: "refazer"; motivo: string } | { desfecho: "falhou"; outcome: PhaseOutcome }> =>
+  ): Promise<ResultadoDaIntegracao> =>
     naFilaDeIntegracao(async () => {
       /*
        * Depois de uma falha fatal a árvore principal precisa de alguém, e nada
@@ -291,7 +312,10 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
     session: PhaseSession,
     worktree: Worktree,
     slot: number,
-  ): Promise<{ desfecho: "integrada" } | { desfecho: "refazer"; motivo: string } | { desfecho: "falhou"; outcome: PhaseOutcome }> => {
+  ): Promise<ResultadoDaIntegracao> => {
+    const passagem = (passagensDeIntegracao.get(session.id) ?? 0) + 1;
+    passagensDeIntegracao.set(session.id, passagem);
+    const integrationPrefix = passagem === 1 ? session.id : `${session.id}.integration-${passagem - 1}`;
     agente(slot, "integrando", session.id);
     options.onProgress?.({ kind: "phase", id: session.id, state: "em andamento", cycle: 0, detail: "integrando" });
     /** A árvore principal tem algo que não é do integrador: para tudo, sem tocar em nada (§99). */
@@ -306,7 +330,10 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
         mensagem: `capivara: árvore principal quando a integração da ${session.id} foi reprovada (${motivo.split("\n")[0] ?? ""})`,
         pastaDeRecuperacao: pastaDeRecuperacao(session),
       });
-      if (desfeita.limpo) return { desfecho: "refazer", motivo };
+      if (desfeita.limpo) {
+        if (desfeita.recuperacao) announce(`[${session.id}] banco gerado na integração preservado fora do Git em ${desfeita.recuperacao}; a principal voltou ao estado anterior`);
+        return { desfecho: "refazer", motivo };
+      }
       /*
        * A árvore voltou a ser a de antes da integração: nada a commitar, e por
        * isso o preflight seguinte não tem o que mandar commitar. O que estava
@@ -361,7 +388,7 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
       return pararSemTocar(
         `a árvore principal tem alterações que não são do integrador (${impedimentos.join(", ")}); ` +
           `integrar por cima as sobrescreveria ou faria a suíte julgar uma árvore que não é o HEAD. ` +
-          `Nada foi tocado; o trabalho da fase está no branch ${worktree.branch}`,
+          `Nada foi tocado; as alterações da principal continuam nela. O branch da fase é ${worktree.branch}; confira seu conteúdo antes de recuperar o trabalho`,
       );
     }
     const antes = await cabeca(projectRoot);
@@ -388,18 +415,18 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
         announce(`[${session.id}] ${motivo}; instalando na árvore integrada com \`${comando}\``);
         instalacoes += 1;
         const resultado = await options.instalar!(comando, projectRoot);
-        await writeAtomic(join(paths.logs, `${session.id}.install-integracao-${instalacoes}.log`), `$ ${comando}\nexit: ${resultado.exitCode}\n${resultado.output}`);
+        await writeAtomic(join(paths.logs, `${integrationPrefix}.install-integracao-${instalacoes}.log`), `$ ${comando}\nexit: ${resultado.exitCode}\n${resultado.output}`);
         if (resultado.exitCode === 0) await registrarInstalacaoNode(projectRoot);
         return resultado;
       };
-      const instalacao = await inspecionarInstalacaoNode(projectRoot);
+      const instalacao = await inspecionarInstalacaoNode(projectRoot, options.environmentApproved ? { sondar: false } : {});
       const manifestoMudou = mexeuNasDependencias(integracao.arquivos) && instalacao.estado !== "nao-se-aplica";
       const precisaInstalar = manifestoMudou || instalacao.estado === "ausente" || instalacao.estado === "incompativel";
       if (precisaInstalar) {
         if (!options.instalar) return pararPorAmbiente(`${instalacao.motivo}; não há instalador configurado`);
         const instalado = await instalarNaPrincipal(manifestoMudou ? "a fase mexeu nas dependências" : instalacao.motivo);
         if (instalado.exitCode !== 0) {
-          const motivo = `a instalação falhou; saída completa em ${join(paths.logs, `${session.id}.install-integracao-${instalacoes}.log`)}`;
+          const motivo = `a instalação falhou; saída completa em ${join(paths.logs, `${integrationPrefix}.install-integracao-${instalacoes}.log`)}`;
           // Um lockfile incoerente é uma entrega incorreta, e não um runtime avariado.
           if (/npm (?:error|ERR!)[\s\S]*(?:package\.json and .*lock.*(?:in sync|sync)|Missing: .* from lock file|Invalid: lock file)/i.test(instalado.output)) {
             return desfazer(`${motivo}: manifesto e lockfile não estão sincronizados`);
@@ -414,71 +441,96 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
        * Sem ele, a suíte que lê o ambiente reprovava aqui o que passou lá, e a
        * fase era refeita até falhar.
        */
-      const ambiente = await prepararAmbiente(projectRoot, options.instalar);
-      for (const aviso of ambiente.anuncios) announce(`[${session.id}] árvore integrada: ${aviso}`);
-      if (ambiente.saidaDaMigracao !== "") {
-        await writeAtomic(`${paths.logs}/${session.id}.migrate-integracao.log`, ambiente.saidaDaMigracao);
-      }
+      let validation: Awaited<ReturnType<typeof abrirValidacaoIntegrada>>;
+      const validationEvidence = join(paths.root, "recuperacao", `${integrationPrefix}-suite-${randomUUID().slice(0, 12)}`);
+      try { validation = await abrirValidacaoIntegrada(projectRoot, validationEvidence); }
+      catch (error) { return pararPorAmbiente(`não foi possível preparar a cópia de validação do HEAD integrado: ${String(error)}`); }
+      const bancosDeTeste = await criarBancosDeTeste(validation.dir, options.testRunner ?? defaultTestRunner).catch(async error => {
+        await validation.fechar();
+        throw error;
+      });
+      const migrar = options.instalar ? (command: string, cwd: string) => options.instalar!(command, cwd, bancosDeTeste.environment) : undefined;
+      try {
+        const ambiente = await prepararAmbiente(validation.dir, migrar);
+        for (const aviso of ambiente.anuncios) announce(`[${session.id}] árvore integrada: ${aviso}`);
+        if (ambiente.saidaDaMigracao !== "") {
+          await writeAtomic(`${paths.logs}/${integrationPrefix}.migrate-integracao.log`, ambiente.saidaDaMigracao);
+        }
 
-      const comando = await options.comandoDeTeste();
-      let tentativa = 0;
-      let saida = "";
-      const testar: TestRunner = async (command, cwd) => {
-        const resultado = await (options.testRunner ?? defaultTestRunner)(command, cwd);
-        saida = resultado.output;
-        tentativa += 1;
-        await writeAtomic(join(paths.logs, `${session.id}.g2-integracao-${tentativa}.log`), `$ ${command}\nexit: ${resultado.exitCode}\n${resultado.output}`);
-        return resultado;
-      };
-      let g2 = await gate2(projectRoot, comando, testar, options.systemInstall);
-      if (!g2.green && await falhaDeInstalacaoNode(projectRoot, saida)) {
-        if (instalacoes === 0 && options.instalar) {
-          const reparada = await instalarNaPrincipal("G2 identificou dependência ausente ou incompatível; reparo limitado sem reconstruir a fase aprovada");
-          if (reparada.exitCode !== 0) return pararPorAmbiente(`o único reparo de dependências falhou; veja ${join(paths.logs, `${session.id}.install-integracao-${instalacoes}.log`)}`);
-          // A migração que usa o addon também deve rodar com a instalação reparada.
-          const reparo = await prepararAmbiente(projectRoot, options.instalar);
-          for (const aviso of reparo.anuncios) announce(`[${session.id}] árvore integrada: ${aviso}`);
-          if (reparo.saidaDaMigracao !== "") await writeAtomic(join(paths.logs, `${session.id}.migrate-integracao-reparo.log`), reparo.saidaDaMigracao);
-          g2 = await gate2(projectRoot, comando, testar, options.systemInstall);
-        }
-        if (!g2.green && await falhaDeInstalacaoNode(projectRoot, saida)) {
-          return pararPorAmbiente(`G2 continua sem ambiente válido após ${instalacoes} tentativa(s) de instalação; saída completa em ${join(paths.logs, `${session.id}.g2-integracao-${tentativa}.log`)}`);
-        }
-      }
-      if (!g2.green) {
-        return desfazer(`a suíte da árvore integrada reprovou: ${g2.cause.split("\n")[0] ?? ""}; saída completa em ${join(paths.logs, `${session.id}.g2-integracao-${tentativa}.log`)}`);
-      }
-      if (!g2.skipped) await registrarInstalacaoNode(projectRoot);
-      /*
-       * A árvore estava igual ao HEAD antes do cherry-pick, e a fila de
-       * integração é de uma fase por vez: um versionado alterado agora foi
-       * escrito pelo que o próprio harness rodou nela. A fase está integrada e
-       * verde — os commits ficam —, mas nada mais entra por cima de uma árvore
-       * que não é o HEAD, e o desenvolvedor sabe na hora de quem é a alteração.
-       * Nada é descartado (§102).
-       */
-      const deixados = await alteradosNaPrincipal(projectRoot);
-      if (deixados.length > 0) {
-        fatal = true;
-        sujeiraDoHarness ??= {
-          session,
-          causa:
-            `a integração da ${session.id} deixou ${deixados.join(", ")} alterado(s) na árvore principal. ` +
-            `Quem alterou foi o próprio harness — a instalação, a migração ou a suíte que ele roda na árvore integrada —, não você. ` +
-            `Os commits da fase estão no HEAD e a suíte passou; nada foi descartado. ` +
-            `Confira com \`git diff\` e descarte (\`git checkout -- ${deixados.join(" ")}\`) ou commite antes de retomar`,
+        const comando = await options.comandoDeTeste();
+        let tentativa = 0;
+        let saida = "";
+        const testar: TestRunner = async (command, cwd) => {
+          const resultado = await bancosDeTeste.runner(command, cwd);
+          saida = resultado.output;
+          tentativa += 1;
+          await writeAtomic(join(paths.logs, `${integrationPrefix}.g2-integracao-${tentativa}.log`), `$ ${command}\nexit: ${resultado.exitCode}\n${resultado.output}`);
+          return resultado;
         };
-        announce(`[${session.id}] ATENÇÃO — ${sujeiraDoHarness.causa}`);
-        // Nenhuma fase nova sai: ela trabalharia para ser recusada na integração.
-        parada ??= { session, outcome: { status: "failed", gate: "gate 2 — suíte do projeto", cause: sujeiraDoHarness.causa, cycles: 0 } };
-      }
-      const roteiros = await trazerRoteiros(worktree, projectRoot);
-      announce(
-        `[${session.id}] integrada: ${integracao.commits} commit(s) na árvore principal` +
-          `${comando ? ", suíte verde com as fases já integradas" : ""}${roteiros > 0 ? `, ${roteiros} roteiro(s) do gate 4 trazidos` : ""}`,
-      );
+        let g2 = await gate2(validation.dir, comando, testar, options.systemInstall);
+        if (!g2.green && await falhaDeInstalacaoNode(projectRoot, saida)) {
+          if (instalacoes === 0 && options.instalar) {
+            const reparada = await instalarNaPrincipal("G2 identificou dependência ausente ou incompatível; reparo limitado sem reconstruir a fase aprovada");
+            if (reparada.exitCode !== 0) return pararPorAmbiente(`o único reparo de dependências falhou; veja ${join(paths.logs, `${integrationPrefix}.install-integracao-${instalacoes}.log`)}`);
+            await validation.atualizarDependencias();
+            // A migração que usa o addon também deve rodar com a instalação reparada.
+            const reparo = await prepararAmbiente(validation.dir, migrar);
+            for (const aviso of reparo.anuncios) announce(`[${session.id}] árvore integrada: ${aviso}`);
+            if (reparo.saidaDaMigracao !== "") await writeAtomic(join(paths.logs, `${integrationPrefix}.migrate-integracao-reparo.log`), reparo.saidaDaMigracao);
+            g2 = await gate2(validation.dir, comando, testar, options.systemInstall);
+          }
+          if (!g2.green && await falhaDeInstalacaoNode(projectRoot, saida)) {
+            return pararPorAmbiente(`G2 continua sem ambiente válido após ${instalacoes} tentativa(s) de instalação; saída completa em ${join(paths.logs, `${integrationPrefix}.g2-integracao-${tentativa}.log`)}`);
+          }
+        }
+        if (!g2.green) {
+          const reverted = await desfazer(`a suíte da árvore integrada reprovou: ${g2.cause}\nSaída completa em ${join(paths.logs, `${integrationPrefix}.g2-integracao-${tentativa}.log`)}`);
+          return reverted.desfecho === "refazer" ? { ...reverted, testFailure: true } : reverted;
+        }
+        const changedSources = await validation.fontesAlteradas();
+        if (changedSources.length > 0) {
+          const reverted = await desfazer(`a suíte alterou fonte versionada durante a validação (${changedSources.join(", ")}); ela precisa passar sem modificar o código do commit. Evidência preservada em ${validationEvidence}`);
+          return reverted.desfecho === "refazer" ? { ...reverted, testFailure: true } : reverted;
+        }
+        if (!g2.skipped) await registrarInstalacaoNode(projectRoot);
+        /*
+         * A árvore estava igual ao HEAD antes do cherry-pick, e a fila de
+         * integração é de uma fase por vez: um versionado alterado agora foi
+         * escrito pelo que o próprio harness rodou nela. A fase está integrada e
+         * verde — os commits ficam —, mas nada mais entra por cima de uma árvore
+         * que não é o HEAD, e o desenvolvedor sabe na hora de quem é a alteração.
+         * Nada é descartado (§102).
+         */
+        const locais = await artefatosLocaisIgnorados(projectRoot, (await lerStatus(projectRoot)).map(entrada => entrada.caminho));
+        if (locais.size > 0) announce(`[${session.id}] ${locais.size} arquivo(s) de artefatos e dependências locais ignoradas ficaram no disco; sem incluí-los no commit nem interromper as próximas fases`);
+        const deixados = await alteradosNaPrincipal(projectRoot);
+        if (deixados.length > 0) {
+          fatal = true;
+          sujeiraDoHarness ??= {
+            session,
+            causa:
+              `a integração da ${session.id} deixou ${deixados.join(", ")} alterado(s) na árvore principal. ` +
+              `Quem alterou foi o próprio harness — a instalação, a migração ou a suíte que ele roda na árvore integrada —, não você. ` +
+              `Os commits da fase estão no HEAD e a suíte passou; nada foi descartado. ` +
+              `Confira com \`git diff\` e descarte (\`git checkout -- ${deixados.join(" ")}\`) ou commite antes de retomar`,
+          };
+          announce(`[${session.id}] ATENÇÃO — ${sujeiraDoHarness.causa}`);
+          // Nenhuma fase nova sai: ela trabalharia para ser recusada na integração.
+          parada ??= { session, outcome: { status: "failed", gate: "gate 2 — suíte do projeto", cause: sujeiraDoHarness.causa, cycles: 0 } };
+        }
+        const roteiros = await trazerRoteiros(worktree, projectRoot);
+        announce(
+          `[${session.id}] integrada: ${integracao.commits} commit(s) na árvore principal` +
+            `${comando ? ", suíte verde com as fases já integradas" : ""}${roteiros > 0 ? `, ${roteiros} roteiro(s) do gate 4 trazidos` : ""}`,
+        );
+      } finally { try { await bancosDeTeste.limpar(); } finally { await validation.fechar(); } }
     } else {
       announce(`[${session.id}] nada a integrar: a fase já estava implementada na base`);
+    }
+    // Instalação, migração e suíte podem deixar arquivos locais (p.ex. .env e
+    // coverage). Registrados dentro da fila, não parecem escrita de um agente.
+    for (const entrada of await alteracoesParaCommit(projectRoot)) {
+      if (entrada.naoVersionado) naoVersionadosIniciais.add(entrada.caminho);
     }
     return { desfecho: "integrada" };
   };
@@ -513,7 +565,7 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
           manterArvore = true;
           announce(`[${session.id}] retomando a integração do commit já aprovado ${checkpoint.commit.slice(0, 12)}; nenhuma nova sessão de construção`);
         }
-        const aberto = worktree === null ? await abrirWorktree(projectRoot, options.runId, session.id, options.environment) : null;
+        const aberto = worktree === null ? await abrirWorktree(projectRoot, options.runId, session.id, options.environment, options.environmentApproved) : null;
         if (aberto) {
           worktree = aberto.worktree;
           // abrirWorktree já guardou o commit anterior antes de recriar o branch.
@@ -554,6 +606,8 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
         engine: pool.engine,
         systemInstall: pool.systemInstall,
         preferredPort: options.portaBase + slot,
+        conferirPrincipal,
+        ...(recuperacoesDeTeste.has(session.id) ? { integrationFailure: recuperacoesDeTeste.get(session.id)! } : {}),
       });
 
       if (outcome.status === "complete" || outcome.status === "already-implemented") {
@@ -572,7 +626,18 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
           agente(slot, "livre", null, `${session.id} integrada`);
           return;
         }
-        if (integracao.desfecho === "refazer" && !exclusivas.has(session.id)) {
+        let recovery: IntegrationFailure | null = null;
+        if (integracao.desfecho === "refazer" && integracao.testFailure) {
+          const previous = recuperacoesDeTeste.get(session.id);
+          if (!previous || previous.repairBudget.used < (options.maxVerifierRepairs ?? 0)) {
+            recovery = {
+              cause: integracao.motivo, attempt: (previous?.attempt ?? 0) + 1,
+              repairByVerifier: previous !== undefined,
+              repairBudget: previous?.repairBudget ?? { used: 0 },
+            };
+          }
+        }
+        if (integracao.desfecho === "refazer" && (recovery || (!integracao.testFailure && !exclusivas.has(session.id)))) {
           /*
            * O verde não é descartado antes da nova rodada (§110): o commit
            * aprovado ganha um branch próprio, dito no evento — a retomada o acha
@@ -586,21 +651,22 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
           manterBranch = true;
           manterArvore = false;
           preservados.set(session.id, preservado);
+          if (recovery) recuperacoesDeTeste.set(session.id, recovery);
           exclusivas.add(session.id);
           estados.set(session.id, "pendente");
           await options.esquecer(session);
           await evento(
             session.id,
             "retry",
-            `${integracao.motivo}; volta à fila para rodar sozinha sobre a árvore integrada; ` +
+            `${integracao.motivo}; ${recovery ? recovery.repairByVerifier ? "o validador executará a correção" : "o validador orientará a correção pelo executor" : "volta à fila para rodar sozinha sobre a árvore integrada"}; ` +
               `o commit aprovado ${preservado.commit.slice(0, 12)} ficou no branch ${preservado.branch}`,
           );
           announce(
-            `[${session.id}] ${integracao.motivo}. A integração foi desfeita; a fase volta à fila para rodar SOZINHA sobre a árvore integrada. ` +
+            `[${session.id}] ${integracao.motivo}. A integração foi desfeita; ${recovery ? recovery.repairByVerifier ? "o validador executará o reparo no worktree" : "o validador dará diagnóstico e ação concreta ao executor" : "a fase volta à fila para rodar SOZINHA sobre a árvore integrada"}. ` +
               `O commit aprovado ${preservado.commit.slice(0, 12)} ficou no branch ${preservado.branch} (git log ${preservado.branch})`,
           );
-          options.onProgress?.({ kind: "phase", id: session.id, state: "aguardando", cycle: 0, detail: "refaz sozinha" });
-          agente(slot, "livre", null, `${session.id} conflito`);
+          options.onProgress?.({ kind: "phase", id: session.id, state: "aguardando", cycle: 0, detail: recovery ? "corrigindo teste da integração" : "refaz sozinha" });
+          agente(slot, "livre", null, `${session.id} ${recovery ? "correção de teste" : "conflito"}`);
           return;
         }
         const falha: PhaseOutcome =
@@ -698,7 +764,7 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
   };
 
   for (;;) {
-    if (parada === null && erroInesperado === null) {
+    if (parada === null && erroInesperado === null && !fatal) {
       if (options.keepGoing) {
         for (const id of bloqueadas({ fases: options.sessions, estados, exclusivas, limite: 0 })) {
           estados.set(id, "bloqueada");

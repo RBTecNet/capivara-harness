@@ -780,8 +780,25 @@ describe("gate de prontidão", () => {
     expect(readiness.checks.find((check) => check.id === "decisoes")?.passed).toBe(false);
   });
 
-  it("são exatamente nove verificações", () => {
-    expect(evaluateReadiness(base).checks).toHaveLength(9);
+  it("inclui dimensionamento entre as dez verificações", () => {
+    expect(evaluateReadiness(base).checks).toHaveLength(10);
+  });
+
+  it.each([
+    { tasks: 1, criteria: 5, passed: false, detail: "P1.T1: 5 critérios; limite 4" },
+    { tasks: 16, criteria: 1, passed: false, detail: "16 tasks; limite 15" },
+    { tasks: 15, criteria: 5, passed: false, detail: "75 critérios; limite 60" },
+    { tasks: 15, criteria: 4, passed: true, detail: "" },
+  ])("dimensionamento com $tasks tasks e $criteria critérios por task", ({ tasks, criteria, passed, detail }) => {
+    const body = Array.from({ length: tasks }, (_, index) =>
+      `- [ ] **Task:** Construir item ${index + 1}\n  - **Acceptance criteria:**\n` +
+      Array.from({ length: criteria }, (_, criterion) => `    - Condição observável ${criterion + 1}`).join("\n") +
+      "\n  - **Traces:** statuses\n",
+    ).join("\n");
+    const plan = assemblePhasesDocument({ projectName: "Teste", stamp: "<!-- inputs: skeleton.md@sha256:aaaaaaaaaaaa -->", overview: "Base", phases: [`## Phase 1: Base\n\n**Goal:** resultado · **Depends on:** none · **Covers:** statuses\n\n${body}`], openQuestions: [] });
+    const check = evaluateReadiness({ ...base, plan }).checks.find(check => check.id === "dimensionamento");
+    expect(check?.passed).toBe(passed);
+    expect(check?.detail).toContain(detail);
   });
 
   it("ensaio que não rodou não aprova por omissão", () => {

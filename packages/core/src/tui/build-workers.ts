@@ -23,6 +23,7 @@ export interface WorkerRow {
   detail: string;
   /** Desde quando o agente está na fase corrente, em ms; nulo quando livre. */
   since: number | null;
+  activity?: string;
 }
 
 const MARCA: Record<WorkerState, string> = { livre: "○", preparando: "◐", trabalhando: "●", integrando: "◆" };
@@ -41,6 +42,7 @@ export class WorkerTracker {
   apply(evento: WorkerProgress): void {
     const linha = this.linhas[evento.slot];
     if (!linha) return;
+    if (evento.phaseId !== linha.phaseId || evento.state !== "trabalhando") delete linha.activity;
     // O relógio é da fase: preparar, trabalhar e integrar a mesma fase contam juntos.
     if (evento.phaseId === null) linha.since = null;
     else if (evento.phaseId !== linha.phaseId || linha.since === null) linha.since = this.agora();
@@ -48,6 +50,12 @@ export class WorkerTracker {
     linha.phaseId = evento.phaseId;
     // O desfecho anterior só sai quando há um novo: livre sem detalhe mantém o que já se sabia.
     if (evento.detail !== "" || evento.state !== "livre") linha.detail = evento.detail;
+  }
+
+  /** O slot e a fase vêm da chamada, nunca da prosa do provider. */
+  activity(slot: number, phaseId: string, detail: string): void {
+    const row = this.linhas[slot];
+    if (row?.phaseId === phaseId && row.state === "trabalhando") row.activity = detail;
   }
 
   rows(): WorkerRow[] {
@@ -77,7 +85,7 @@ export function renderWorkerRows(rows: readonly WorkerRow[], phases: readonly Bu
     const sobre =
       linha.phaseId === null
         ? paint(linha.detail === "" ? "—" : `último: ${linha.detail}`, "gray", style)
-        : `${paint(linha.phaseId, "cyan", style)} ${fase?.title ?? ""}${fase && fase.detail && fase.detail !== fase.state ? paint(` · ${fase.detail}`, "gray", style) : ""}`;
+        : `${paint(linha.phaseId, "cyan", style)} ${linha.activity ?? fase?.title ?? ""}${fase && fase.detail && fase.detail !== fase.state ? paint(` · ${fase.detail}`, "gray", style) : ""}`;
     const cursor = selected === undefined ? "" : linha.slot === selected ? `${paint("❯", "cyan", style)} ` : "  ";
     return truncateVisible(`${cursor}${numero} ${rotulo} ${marca} ${estado} ${sobre}`, width);
   });

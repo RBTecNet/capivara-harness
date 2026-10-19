@@ -1,3 +1,4 @@
+import { certifyCurrentPlan } from "../support/current-plan.js";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +12,7 @@ beforeEach(async () => {
   projectRoot = await mkdtemp(join(tmpdir(), "capivara-build-state-"));
   await mkdir(join(projectRoot, ".capivara/init"), { recursive: true });
   await writeFile(join(projectRoot, ".capivara/init/project-phases.md"), VALID_PHASES);
+  await certifyCurrentPlan(projectRoot);
 });
 afterEach(async () => { await rm(projectRoot, { recursive: true, force: true }); });
 

@@ -15,10 +15,154 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 | | |
 |---|---|
 | branch | `main` — é onde tudo está |
-| versão | 0.4.0 (`capivara --ver`) |
-| suíte | 1496 testes em 77 arquivos, `npm run check` verde |
+| versão | 0.5.0 (`capivara --version`); planos antigos incompatíveis, ver §115.26 |
+| suíte | 2535 testes em 132 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
+
+
+Correções de planejamento e pré-requisitos (§§115.38–39): o teste_minimax
+expôs uma sonda Playwright inválida, screenshot em /dev/null. O Core agora
+redireciona só esse destino conhecido a PNG temporário real e limpa depois,
+sem alterar plano/CLI nem ignorar falha do navegador. O instalador havia
+substituído o CLI global por adaptador; restaurado o link oficial 1.51.1,
+com backup do adaptador na evidência do run. Os cinco requisitos passaram,
+com documentos do usuário intactos e sem inferência paga. Sessão com exit 1,
+resultado legível e sem recusa/timeout/erro estrutural pode ser recuperada
+somente se o Core comprovar os requisitos, reutilizando a prova uma vez.
+
+Decisão explícita: planejamento define entregas e contratos observáveis;
+validador escolhe testes. Templates não pedem Feature tests, escritores e
+revisores do plan não projetam suítes nem fases de testes por iniciativa
+própria. Parser e hashes existentes preservados; prescrições antigas são
+advisory salvo requisito explícito do usuário. Removida a varredura de nomes
+antes do G3. O verificador escolhe a menor prova suficiente e reaproveita
+resultados verdes. O executor implementa verificações concretas pedidas pelo
+validador; a revalidação completa após reparo continua ativa. Evidência real:
+/tmp/capivara-minimax-environment-proof.log. Testes focados finais: 109 verdes.
+O usuário autorizou commit de TODAS as alterações acumuladas na main.
+Check final passou build, typecheck e 2535 testes em 132 arquivos (166,68 s).
+Bundle instalado 0.5.0 recompilado às 13:52:51; caminho e versão conferidos.
+
+Correção de 19/10/2026 (§115.31): autoria e triagem do G4 recebem finalidade
+explícita, preservando os limites gerais configurados (§115.32). Uma
+falha técnica dessas sessões conserva o parcial e não abre outra construção.
+OpenCode 2 ignorava OPENCODE_PERMISSION; permissões agora também vão para a
+configuração efetiva, com leitores negando por padrão e somente ferramentas
+de leitura/busca autorizadas. Configuração e limites de modelos são preservados.
+Prompt é salvo antes da chamada; painel e calls.jsonl distinguem os papéis G4.
+Escopo dos roteiros limitado aos passos/critérios entregues, um teste por fluxo,
+sem passos extras. Reescrita recebe o roteiro atual; patch literal único da
+triagem pode corrigir um seletor sem uma nova sessão do roteirista. O Core
+confere unicidade e estrutura antes de aplicar. Provas locais sem inferência:
+config.get real confirmou as permissões novas e ausência das regras quando só
+a variável antiga era fornecida; npm run check passou 2468 testes/126 arquivos.
+Binário instalado recompilado em 0.5.0. Execução do projeto e seus modelos não
+foram reiniciados, e nenhuma chamada paga foi feita para validar a correção.
+Por decisão explícita do usuário, retirados os cortes especiais de 5/2 minutos
+(§115.32): eficiência vem do escopo, das permissões e do reaproveitamento das
+correções, preservando a política geral de supervisão. Nova regressão pela ponte
+comprova os limites configurados sem alteração para autoria e triagem. Check
+completo novamente verde (2468 testes), bundle instalado recompilado.
+
+P03 de teste_openrouter (§115.33): a terceira triagem tinha patch exato, mas o
+limite global de duas correções o descartava. Reparo agora é contado por passo
+de workflow, com janela conservadora por fluxo quando o erro não identifica o
+passo. Fonte idêntica devolvida pelo autor não roda outro navegador. Mensagem
+de ROTEIRO já identificado não pede concordância ao executor. Prompts usam
+identidade exata no filho com o nome; não texto agregado que inclui cor/data.
+Antes/depois real em cópia do parcial c5031dd: primeiro reproduziu a falha,
+depois os três CRUDs passaram em 23,1s, preservando asserções e código do produto.
+Roteiro de categorias corrigido publicado somente no cache do projeto, com
+hashes/logs em recovery/g4-categorias-e6bf03e20a2d do run build-c9958d3f064e.
+HEAD 2bd3b2e, branch parcial e ledger preservados; P03 não foi aprovada por fora.
+144 testes direcionados e check completo: 2470 testes/126 arquivos, sem chamadas
+pagas. Bundle instalado recompilado em 0.5.0; retomar build sem --fresh.
+
+P05 de teste_openrouter (§115.34): roteiro inválido e falha transitória de revisão
+agora usam os próximos ciclos configurados, sem outra construção nem repetição
+de G2/G3 aprovados. Rascunho inválido e diagnóstico seguem para a correção;
+roteiro publicado é relido para preservar patches aplicados pelo Core. Fonte
+idêntica rejeitada não abre outro navegador. Recusa permanente de credencial ou
+quota mantém parada específica. Sem novos cortes de tempo. Corrigida também a
+contradição entre exigir carregamento/indisponibilidade e proibir controle de
+GET: atraso e abort de leitura são permitidos; respostas próprias fabricadas
+continuam proibidas. Listas vazias usam dados reais no banco descartável.
+Os quatro fluxos reais passaram em 26,8s na cópia do parcial 5246953, sem modelos.
+Roteiro de dashboard validado publicado somente no cache, com evidências em
+recovery/g4-dashboard-e0f3540645c7 do run build-c9958d3f064e. HEAD, parcial e
+ledger preservados; nenhuma aprovação externa de P05. Check completo verde:
+2480 testes/126 arquivos, build e typecheck; 209 testes direcionados passaram.
+Binário instalado 0.5.0 recompilado. Retomar capivara build sem --fresh.
+
+Plan em teste_openrouter2 (§115.35): a coerência aprovou o índice na passagem
+13 e voltou a rejeitar pares intactos na 15, enquanto exemplos de outras fases
+na explicação ampliavam os destinos da emenda. Endereço agora define destino;
+prosa só localiza fase quando o endereço não resolve. Emendas recebem contratos
+atuais das fases relacionadas e preservam tasks não citadas, sem nova chamada
+por mudança lateral. Aprovação global serve de base sob as mesmas decisões;
+par intacto vira observação, mas referências alteradas, desconhecidas, novas ou
+removidas, e decisões novas, conservam a auditoria normal. O auditor precisa
+demonstrar incompatibilidade de implementação, sem confundir detalhes de
+redação com defeitos. Emendas aceitas atualizam o cache de escrita e sobrevivem
+à retomada. Orçamento não foi ampliado e não há publicação por esgotamento.
+Reproduções locais sem API: três regressões falharam antes do reparo; 131 testes
+direcionados passaram depois. Durante a análise, a pasta teste_openrouter2 foi
+limpa externamente; nenhum plano do projeto foi editado para obter aprovação.
+Check final: build, typecheck e 2494 testes/128 arquivos passaram. Duas
+expectativas antigas foram ajustadas: nova geração agora precisa pedir fresh
+quando o reparo já está no cache, e a mensagem de impasse não presume gap de
+entrevista. Binário instalado recompilado em 0.5.0 e caminho confirmado para
+packages/core/dist/cli.js. Nenhuma geração completa pela API foi executada
+nesta validação; o resultado comprovado é a correção das reproduções locais.
+
+Nova execução em teste_openrouter2 (§115.36): o processo começou às 12:01:58
+com o bundle das 11:57:33 e seu prompt salvo contém a política nova; a correção
+anterior estava incompleta, não havia executável antigo. Sem aprovação global
+prévia, o auditor continuou confundindo operações/fixtures/fases diferentes e
+interseções válidas (204 versus 200 ou 204), levantando decisões técnicas que
+alteravam a autoridade. Agora um lote independente do verifier confere esses
+bloqueios antes de devolver ou perguntar. Remoção exige fonte/citação literal
+conferida pelo Core; bloqueio real, prova inválida e decisão material permanecem.
+JSON/IDs/omissão inválidos conservam todo o veredito; citação inválida conserva
+aquele item sem perder outro parecer fundamentado. Sem rodadas próprias ou
+aumento do teto; novos logs e progresso identificam #materialidade. Política
+do auditor também distingue implementação de negócio e evita exigir novo
+teste para cada frase. Corrigida leitura de fases isoladas com sub-fases N.x,
+que perdia memória de tasks aprovadas, e a localização de emendas por sub-fase.
+Tasks omitidas sem pedido estrutural são preservadas junto da correção válida.
+Duas regressões de materialidade e duas de sub-fase falharam antes do reparo;
+93 testes direcionados passaram e outra seleção incluindo catálogo passou 101.
+Check final: build, typecheck e 2512 testes/129 arquivos passaram. Executável
+instalado 0.5.0 recompilado às 12:20:02, caminho e conteúdo verificados.
+O run real terminou RALPH READY às 12:10:55, ainda com o código anterior;
+não atribuir esse resultado à nova triagem nem pedir que refaça o plan.
+Projeto/plano preservados, sem restart/cancelamento ou chamadas pagas nossas.
+Diagnóstico guardado em /tmp/capivara-openrouter2-diagnostic-yt5i2dch.
+
+
+Correção de pré-requisitos no teste_openrouter2 (§115.37): as sessões de
+instalação criaram backend/package.json e instalaram better-sqlite3, mas a
+sonda continuava na raiz e acusava Node ausente. Agora probes Node que importam
+pacotes externos usam todos os manifestos que os declaram; builtins/runtime
+ficam na raiz. O build continua comprovando TODOS os requisitos antes das fases.
+O instalador pode criar manifesto mínimo no workspace indicado pelo plan/hint;
+o Core admite somente manifesto/lock novos dos pacotes sondados e mantém
+node_modules fora do histórico via exclusão local, sem levar código/alterações
+alheias nem mudanças em manifestos rastreados. Instalação pronta é reaproveitada.
+Respostas do provider são respeitadas; sessões, prompts, resposta e atividade
+ficam registrados desde a preparação, sem dizer custo zero após usar modelos.
+Os registros em runs/<run>/preparation sobrevivem ao arquivo dos logs antigos;
+aviso de ausência é retirado quando a prontidão passa. Regressões reproduzidas
+antes/depois incluem resolução, cota recusada, custo e retomada dos registros.
+Check final passou build, typecheck e 2526 testes/130 arquivos. Bundle instalado
+0.5.0 recompilado às 12:57:01 e caminho/conteúdo conferidos. Prova real de leitura
+com Node 25.9.0: os três requisitos passaram, SQLite carregado no backend; cópia
+isolada confirmou admissão de apenas backend/package.json e package-lock.json,
+árvore limpa e prontidão. Evidência: /tmp/capivara-real-environment-proof.log.
+Projeto atual tem nove fases, RALPH READY às 12:32:43, plan sha12 f7bb0d2b7dc6
+e skeleton sha12 47e986558006. Documentos e refs reais preservados; nenhuma
+inferência paga nem execução do desenvolvimento por nós. Basta retomar build.
 
 O ciclo de três estágios foi desenvolvido no branch `ciclo-unico` e fundido em
 `main` por fast-forward — `main` não tinha commits próprios, então o histórico é

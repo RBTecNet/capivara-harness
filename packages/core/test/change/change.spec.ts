@@ -1,3 +1,4 @@
+import { certifyCurrentPlan } from "../support/current-plan.js";
 /**
  * A mudança numa aplicação que já roda.
  *
@@ -16,6 +17,7 @@ import { ChangeBlockedError, lerResposta, runChange } from "../../src/change/ind
 
 const ESQUELETO: Skeleton = {
   contract: SKELETON_CONTRACT,
+  environment: [],
   projectName: "Locadora",
   stack: [{ component: "linguagem", decision: "TypeScript" }],
   entities: [{ name: "cliente", fields: [{ name: "id", type: "int" }], relations: [] }],
@@ -256,7 +258,9 @@ describe("o comando change", () => {
     await mkdir(join(projectRoot, ".capivara", "init"), { recursive: true });
     await mkdir(join(projectRoot, ".capivara", "handoffs"), { recursive: true });
     await writeFile(join(projectRoot, ".capivara/init/project-phases.md"), PLANO, "utf8");
+    await certifyCurrentPlan(projectRoot);
     await writeFile(join(projectRoot, ".capivara/init/skeleton.md"), "# Locadora — Skeleton\n", "utf8");
+    await certifyCurrentPlan(projectRoot);
     await writeFile(join(projectRoot, "package.json"), '{"name":"locadora"}', "utf8");
 
     const { writeRequestState, writeSkeletonState } = await import("../../src/init/index.js");
@@ -320,13 +324,19 @@ describe("o comando change", () => {
     const shasAntes = antes.sessions.map((sessao) => shaDaFase(sessao.markdown));
 
     const { call } = modelo([DELTA, TASKS]);
-    await runChange({ projectRoot, language: "pt", request: "editar clientes", call });
+    const outcome = await runChange({ projectRoot, language: "pt", request: "editar clientes", call });
 
     const depois = splitPhases(await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8"), projectRoot, "build-y");
     if (!depois.ok) throw new Error("plano republicado inválido");
 
     expect(depois.sessions.slice(0, 2).map((sessao) => shaDaFase(sessao.markdown))).toEqual(shasAntes);
     expect(depois.sessions).toHaveLength(3);
+    const { readEnvironmentPlan } = await import("../../src/loop/environment-plan.js");
+    await expect(readEnvironmentPlan(projectRoot,
+      await readFile(join(projectRoot, ".capivara/init/skeleton.md"), "utf8"),
+      await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8"),
+    )).resolves.toEqual(ESQUELETO.environment);
+    expect(outcome.written).toContain(join(projectRoot, ".capivara/init/environment.json"));
   });
 
   it("a pergunta vai à tela antes de virar fase, e a resposta volta ao planejador", async () => {

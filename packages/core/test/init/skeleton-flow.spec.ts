@@ -126,7 +126,7 @@ describe("caminho por esqueleto", () => {
     const steps = skeletonPath();
     steps.unshift({
       match: { role: "writer", stage: "authoring", subject: "skeleton" },
-      respond: { stdout: '{"contract":"capivara-skeleton/v1","phases":[]}' },
+      respond: { stdout: '{"contract":"capivara-skeleton/v2","phases":[]}' },
       repeat: true,
     });
     await expect(run(steps)).rejects.toThrow(InitBlockedError);
@@ -140,7 +140,7 @@ describe("caminho por esqueleto", () => {
       respond: {
         stdout: () => {
           vez += 1;
-          return vez === 1 ? '{"contract":"capivara-skeleton/v1","phases":[]}' : SKELETON;
+          return vez === 1 ? '{"contract":"capivara-skeleton/v2","phases":[]}' : SKELETON;
         },
       },
       repeat: true,

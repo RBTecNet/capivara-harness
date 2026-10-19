@@ -7,8 +7,8 @@
  *
  * Esgotado o teto, o run NÃO desiste em silêncio nem aceita o documento: ele
  * para e mostra ao desenvolvedor, lado a lado, o que o auditor rejeita e o que o
- * escritor insiste em fazer. Na prática isso é quase sempre um gap de entrevista
- * disfarçado de desacordo, e uma resposta humana resolve.
+ * escritor insiste em fazer. O teto esgotado sinaliza falta de convergência;
+ * sozinho ele não prova que uma decisão de produto esteja faltando.
  */
 
 import type { AuditVerdict, Finding } from "./protocol.js";
@@ -38,7 +38,10 @@ export type AuditAction =
 
 export interface Standoff {
   document: string;
+  /** Rejeições semânticas do auditor; não inclui o self-check. */
   returns: number;
+  mechanical: boolean;
+  mechanicalChecks: number;
   /** O que o auditor rejeita na versão atual do documento. */
   auditorInsists: Finding[];
   /** Marcas dos findings que já tinham aparecido em tentativa anterior. */
@@ -165,7 +168,7 @@ export function writerDid(history: readonly AuditAttempt[]): string[] {
     const agora = new Set(attempt.verdict.findings.map(fingerprint));
 
     if (!anterior) {
-      return `tentativa ${attempt.attempt}: escreveu o documento; o auditor apontou ${apontados} ponto(s)`;
+      return `tentativa ${attempt.attempt}: escreveu o documento; ${attempt.verdict.mechanical ? "o self-check" : "o auditor"} apontou ${apontados} ponto(s)`;
     }
 
     if (anterior.contentSha === attempt.contentSha) {
@@ -217,24 +220,29 @@ export function nextAuditAction(state: AuditCycleState): AuditAction {
     standoff: {
       document: state.document,
       returns,
+      mechanical: last.verdict.mechanical === true,
+      mechanicalChecks: mechanical,
       auditorInsists: persistentFindings(state.history),
       repeated: repeatedFindings(state.history),
       writerDid: writerDid(state.history),
       question:
         last.verdict.mechanical === true
           ? `O self-check devolveu ${state.document} ${mechanical} vezes e a forma não fechou. ` +
-            "Isso não é desacordo: é dimensionamento que o escritor não consegue resolver reescrevendo no lugar. O que vale?"
+            "Isso não é desacordo nem decisão de produto: o modelo não adequou a estrutura aos limites. " +
+            "É possível repetir a correção ou interromper e trocar o modelo do writer. Publicar rascunho não dispensa os limites de prontidão."
           : `O auditor devolveu ${state.document} ${returns} vezes e o escritor não fechou o ponto. ` +
-            "Isso costuma ser um gap de entrevista disfarçado de desacordo. O que vale?",
+            "A correção não convergiu dentro do orçamento. Confira os pontos acima; isso, por si só, não indica uma decisão de produto pendente.",
     },
   };
 }
 
 export function renderStandoff(standoff: Standoff): string {
   const lines: string[] = [
-    `Impasse em ${standoff.document} após ${standoff.returns} devoluções.`,
+    standoff.mechanical
+      ? `O modelo não adequou a estrutura de ${standoff.document} após ${standoff.mechanicalChecks} verificações mecânicas.`
+      : `Impasse em ${standoff.document} após ${standoff.returns} devoluções.`,
     "",
-    "O auditor insiste em:",
+    standoff.mechanical ? "O self-check aponta:" : "O auditor insiste em:",
   ];
   for (const finding of standoff.auditorInsists) {
     // O ponto que sobreviveu a reescritas é o que provavelmente não se resolve

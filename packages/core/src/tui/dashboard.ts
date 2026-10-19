@@ -66,6 +66,8 @@ export interface Activity {
   kind: "modelo" | "você" | "parado" | "pausado";
   detail: string;
   sinceSeconds: number;
+  /** Tempo desde o último evento real do provider; não é o pulso da interface. */
+  lastEventSeconds?: number;
 }
 
 export interface DashboardModel {
@@ -270,7 +272,7 @@ function activityLine(model: DashboardModel): string {
 
   const pulso = SPINNER[(model.frame ?? 0) % SPINNER.length] ?? "⠋";
   const detalhe = activity.detail === "" ? "" : ` ${activity.detail}`;
-  return paint(`${pulso}${detalhe} — há ${tempo} nesta chamada`, ACTIVITY_TONE.modelo, style);
+  return paint(`${pulso}${detalhe} — há ${tempo} nesta chamada${activity.lastEventSeconds === undefined ? "" : ` · último evento há ${duration(activity.lastEventSeconds)}`}`, ACTIVITY_TONE.modelo, style);
 }
 
 interface Layout {

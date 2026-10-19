@@ -92,9 +92,8 @@ export function descreverDependencias(ausentes: readonly DependenciaAusente[]): 
     `as dependências declaradas em ${ausentes.map((item) => `\`${item.manifesto}\``).join(" e ")} não estão instaladas: ` +
       `não existe ${ausentes.map((item) => `\`${item.pasta}/\``).join(" nem ")}.`,
     "",
-    `O executor instala na primeira sessão — ${ausentes.map((item) => `\`${item.comando}\``).join(", ")} — e a suíte só roda depois disso.`,
-    "Se a CLI dele recusar o comando, o gate 2 vai reprovar por falta de pacote, e não por defeito do código:",
-    "aí o remédio é instalar à mão, ou usar uma CLI cujo executor possa executar.",
+    `O harness prepara antes do desenvolvimento — ${ausentes.map((item) => `\`${item.comando}\``).join(", ")} — e só inicia as fases depois disso.`,
+    "Se a preparação falhar, a parada ocorre antes do primeiro executor, não por defeito do código.",
   ].join("\n");
 }
 
@@ -129,13 +128,12 @@ export async function faltaORunnerDeFluxos(projectRoot: string, esqueleto: strin
  * quando o gate pediu o outro.
  */
 export async function faltaOPacoteDoRunner(projectRoot: string): Promise<boolean> {
-  return !(await existe(join(projectRoot, "node_modules", "@playwright", "test")));
+  return !(await existe(join(projectRoot, "node_modules", "@playwright", "test"))) && !(await existe(join(projectRoot, ".capivara/node_modules/@playwright/test")));
 }
 
 export const AVISO_DO_RUNNER = [
   "o gate 4 abre a aplicação com `@playwright/test`, e ele não está instalado neste projeto.",
   "",
-  "O executor instala quando o gate pedir, e isso custa um ciclo da fase em que acontecer.",
-  "Para evitá-lo, declare `@playwright/test` como dependência de desenvolvimento antes de começar",
-  "— ou rode com `--no-flows`, se não quiser que a aplicação seja aberta.",
+  "O harness prepara o runner e verifica Chromium antes do desenvolvimento, sem gastar ciclo da fase.",
+  "Use `--no-flows` se não quiser que a aplicação seja aberta.",
 ].join("\n");

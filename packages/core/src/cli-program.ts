@@ -8,6 +8,9 @@ import { Command } from "commander";
 import { listProviders, renderProviderList } from "./commands/providers.js";
 import { diagnose, renderDiagnosis } from "./commands/doctor.js";
 import { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
+import { FLOW_REVIEWS } from "./provider/flow-review.js";
+import { ensureApiCredential, registerApiLogin } from "./commands/api-login.js";
+import { createPrivateLineInput } from "./commands/private-input.js";
 import { BUILD_ROLES, INIT_ROLES, describeRoles, renderUnresolved, rolesFromFlags, unresolvedRoles, type CliRoleFlags } from "./commands/options.js";
 import {
   InitBlockedError,
@@ -51,7 +54,7 @@ import {
   supportsTrueColor,
 } from "./tui/index.js";
 import type { Choice, EntradaDeTeclado, InterviewInput, Janela, Parada, SaidaDeTela } from "./tui/index.js";
-import { paradaDeProntidao, paradaDoEstagio, type Estagio } from "./commands/paradas.js";
+import { opcoesDoImpasse, paradaDeProntidao, paradaDoEstagio, type Estagio } from "./commands/paradas.js";
 import { runWizard, runWizardDePapeis, runWizardDoPedido } from "./commands/wizard.js";
 import { InputEndedError, createLineIO } from "./commands/line-io.js";
 import { chooseInBox, createKeyPrompter, createKeySession } from "./commands/key-io.js";
@@ -69,7 +72,7 @@ import { box } from "./tui/dashboard.js";
 import { renderSelect, type SelectSpec } from "./tui/select.js";
 import type { WizardIO } from "./commands/wizard.js";
 import type { LineIO } from "./commands/line-io.js";
-import { isCliProvider, listarEfforts, listarModelos } from "./provider/index.js";
+import { isCliProvider, isDirectProvider, listarEfforts, listarModelos } from "./provider/index.js";
 import type { RoleName } from "./provider/index.js";
 import { runIdFor, runPaths, safeProjectPath, writeAtomic } from "./state/index.js";
 import { sha12 } from "./contract/index.js";
@@ -143,12 +146,7 @@ function abrirEntradaDoWizard(subtitulo: string): { io: WizardIO; close: () => v
     });
     return { io: teclas, close: () => teclas.close(), teclas: true };
   }
-  const terminal = createInterface({ input: stdin, output: stdout });
-  return {
-    io: createLineIO(terminal, (texto) => void stdout.write(texto), { interactive: stdin.isTTY === true }),
-    close: () => terminal.close(),
-    teclas: false,
-  };
+  return { ...createPrivateLineInput(stdin, stdout), teclas: false };
 }
 
 /**
@@ -221,7 +219,8 @@ async function completarPapeis<T extends CliRoleFlags>(comando: string, faltando
       cwd: process.cwd(),
       comando,
       faltando: faltando as RoleName[],
-      listModels: (providerId) => listarModelos(providerId),
+      current: rolesFromFlags(flags),
+      listModels: (providerId) => listarModelos(providerId, process.env, undefined, (message) => entrada.io.write(`${message}\n`)),
       listEfforts: (providerId, model) => listarEfforts(providerId, model),
       ...mundoDoWizard(),
     });
@@ -251,6 +250,7 @@ function mundoDoWizard() {
   const cliente = (url: string) => createMcpClient(resolveMcpEndpoint(url)!, { timeoutSeconds: 15 });
   const defaultMcpUrl = configuredMcpUrl();
   return {
+    configureApi: ensureApiCredential,
     /*
      * O wizard conecta de verdade para listar os projetos. Perguntar o nome do
      * projeto num campo livre deixaria o erro de digitação para o run descobrir;
@@ -535,6 +535,7 @@ function estagioInterativo(options: {
       // A janela de log recebe o que a CLI conta enquanto trabalha; sem isso o
       // terminal fica com cara de travado durante minutos.
       onActivity: (line) => {
+        progress.modelActivity(`${quem}: ${line}`);
         progress.note(`${quem}: ${line}`);
         repaint();
       },
@@ -542,11 +543,12 @@ function estagioInterativo(options: {
     progress.charge(response.usage);
     repaint();
     if (engenharia && (response.timedOut || response.engineError || response.exitCode !== 0)) {
-      throw new PromptEngineerError(`O escritor falhou em ${chamada.stage}${response.timedOut ? ` (${response.timedOut})` : ` (código ${response.exitCode})`}.`);
+      throw new PromptEngineerError(`O escritor falhou em ${chamada.stage}${response.timedOut ? ` (${response.timedOut})` : ` (código ${response.exitCode})`}.\n${response.stderr || response.stdout}`);
     }
     return {
-      stdout: response.stdout,
+      stdout: response.exitCode !== 0 ? [response.stdout, response.stderr].filter(Boolean).join("\n") : response.stdout,
       exitCode: response.exitCode,
+      ...(response.partialOutput ? { partialOutput: response.partialOutput } : {}),
       ...(response.usage
         ? {
             usage: {
@@ -663,8 +665,12 @@ function estagioInterativo(options: {
    * Sem terminal não há a quem perguntar, e o orquestrador já sabe parar com o
    * impasse na tela quando ninguém decide.
    */
-  const decideStandoff: InitOptions["decideStandoff"] = async (rendered: string) => {
+  const decideStandoff: InitOptions["decideStandoff"] = async (rendered, context) => {
     progress.waitingForDeveloper();
+    const mechanical = context?.mechanical === true;
+    const title = mechanical ? "MODELO · estrutura fora dos limites" : "IMPASSE · precisa da sua decisão";
+    const label = mechanical ? "a estrutura que o modelo não adequou" : "o impasse do auditor";
+    const inputPrompt = mechanical ? '> ("reiniciar", "publicar" rascunho ou "abortar") ' : '> (responda, ou "publicar" para aceitar como está) ';
     /*
      * Por tecla, as quatro saídas do impasse viram lista (§94), e cada uma
      * devolve a palavra que o orquestrador já reconhece. A decisão escrita
@@ -672,17 +678,12 @@ function estagioInterativo(options: {
      */
     if (live.enabled && teclas) {
       const texto = rendered.split("\n").filter((line) => !line.startsWith("Comandos:"));
-      const saidas: { choice: Choice; resposta: string | null }[] = [
-        { choice: { label: "escrever minha decisão", hint: "vira autoridade acima do auditor nos pontos do impasse" }, resposta: null },
-        { choice: { label: "reiniciar", hint: "o escritor tenta corrigir de novo e o auditor reconfere" }, resposta: "reiniciar" },
-        { choice: { label: "publicar como está" }, resposta: "publicar" },
-        { choice: { label: "abortar" }, resposta: "abortar" },
-      ];
+      const saidas = opcoesDoImpasse(mechanical);
       return live.suspend(async () => {
         try {
           for (;;) {
             const indice = await chooseInBox(teclas, {
-              title: "IMPASSE · precisa da sua decisão",
+              title,
               text: texto,
               choices: saidas.map((saida) => saida.choice),
               write: (text) => void stdout.write(text),
@@ -697,19 +698,19 @@ function estagioInterativo(options: {
         } catch (error) {
           if (!(error instanceof InputEndedError)) throw error;
           teclas.close();
-          return await perguntar("", "o impasse do auditor");
+          return await perguntar(inputPrompt, label);
         }
       });
     }
     if (live.enabled) {
-      progress.asking({ title: "IMPASSE · precisa da sua decisão", body: rendered.split("\n") });
+      progress.asking({ title, body: rendered.split("\n") });
       repaint();
       live.release();
       progress.asking(null);
-      return perguntar(paint('  ▸ sua decisão (ou "publicar" para aceitar como está): ', "cyan", style()), "o impasse do auditor");
+      return perguntar(paint(inputPrompt, "cyan", style()), label);
     }
     stdout.write(`\n${rendered}\n`);
-    return perguntar('> (responda, ou "publicar" para aceitar como está) ', "o impasse do auditor");
+    return perguntar(inputPrompt, label);
   };
 
   return {
@@ -890,8 +891,25 @@ export function createProgram(): Command {
     .helpOption("-h, --help", "mostra esta ajuda");
 
   registerConfigCommand(program);
+  registerApiLogin(program);
 
   const providers = program.command("providers").description("Inspeciona os modelos disponíveis");
+  providers.command("models <provider>").description("Lista os modelos de uma API ou CLI sem iniciar uma tarefa")
+    .option("--json", "emite uma lista JSON")
+    .action(async (provider: string, options: { json?: boolean }) => {
+      if (!isCliProvider(provider) && !isDirectProvider(provider)) {
+        process.stderr.write("Provider desconhecido. Use capivara providers list para consultar os disponíveis.\n");
+        process.exitCode = 2;
+        return;
+      }
+      const models = await listarModelos(provider, process.env, undefined, (message) => void process.stderr.write(`${message}\n`));
+      if (options.json) stdout.write(`${JSON.stringify(models)}\n`);
+      else if (models.length > 0) stdout.write(`${models.join("\n")}\n`);
+      if (models.length === 0) {
+        process.stderr.write(`Não foi possível listar modelos de ${provider}. Você pode informar um identificador com --model <id>.\n`);
+        process.exitCode = 2;
+      }
+    });
   providers
     .command("list")
     .description("Lista os providers e o estado de configuração de cada um")
@@ -943,7 +961,7 @@ export function createProgram(): Command {
       if (missing.length > 0) {
         const completo = await completarPapeis("prompt-engineer", missing, escolhas);
         if (completo === null) {
-          announce(renderUnresolved("prompt-engineer", missing));
+          announce(renderUnresolved("prompt-engineer", missing, roles));
           process.exitCode = 2;
           return;
         }
@@ -1047,7 +1065,7 @@ export function createProgram(): Command {
     if (semProvider.length > 0) {
       const completo = await completarPapeis("change", semProvider, escolhas);
       if (completo === null) {
-        stdout.write(`${renderUnresolved("change", semProvider)}\n`);
+        stdout.write(`${renderUnresolved("change", semProvider, roles)}\n`);
         process.exitCode = 2;
         return;
       }
@@ -1189,7 +1207,7 @@ export function createProgram(): Command {
     if (semProvider.length > 0) {
       const completo = await completarPapeis("survey", semProvider, escolhas);
       if (completo === null) {
-        stdout.write(`${renderUnresolved("survey", semProvider)}\n`);
+        stdout.write(`${renderUnresolved("survey", semProvider, roles)}\n`);
         process.exitCode = 2;
         return;
       }
@@ -1348,7 +1366,7 @@ export function createProgram(): Command {
     if (semProvider.length > 0) {
       const completo = await completarPapeis("init", semProvider, escolhas);
       if (completo === null) {
-        stdout.write(`${renderUnresolved("init", semProvider)}\n`);
+        stdout.write(`${renderUnresolved("init", semProvider, configured)}\n`);
         process.exitCode = 2;
         return;
       }
@@ -1538,7 +1556,7 @@ export function createProgram(): Command {
     if (semProvider.length > 0) {
       const completo = await completarPapeis("plan", semProvider, escolhas);
       if (completo === null) {
-        stdout.write(`${renderUnresolved("plan", semProvider)}\n`);
+        stdout.write(`${renderUnresolved("plan", semProvider, roles)}\n`);
         process.exitCode = 2;
         return;
       }
@@ -1659,16 +1677,17 @@ export function createProgram(): Command {
       .option("--mcp-project <nome>", "de qual projeto da base vêm as skills")
       .option("--serial", "uma fase por vez — o padrão; vence o que estiver em .capivara/execucao.json")
       .option("--parallel <n>", "até n fases ao mesmo tempo (2 a 8), cada uma num git worktree próprio")
+      .option("--workers-as-builder", "todos os agentes usam o executor atual, substituindo os agentes salvos no projeto")
       .option(
         "--worker <spec>",
-        "um agente do pool paralelo: provider=codex,model=…,effort=…,system-install=no (repetível; sem ele, o agente é o builder)",
+        "um agente do pool paralelo: provider=codex,model=…,effort=…,system-install=no (repetível; substitui os agentes salvos)",
         (valor: string, anteriores: string[]) => [...anteriores, valor],
         [] as string[],
       )
       .option("--save-execution", "grava a estratégia desta execução em .capivara/execucao.json, para as próximas")
       .option("--no-dashboard", "não desenha o painel; só as linhas de progresso"),
     ["builder", "verifier"],
-  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; maxVerifierRepairs: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean; flows?: boolean; rebuildAll?: boolean; git?: boolean; mcp?: string; mcpProject?: string; dashboard?: boolean; serial?: boolean; parallel?: string; worker?: string[]; saveExecution?: boolean }) => {
+  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; maxVerifierRepairs: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean; flows?: boolean; rebuildAll?: boolean; git?: boolean; mcp?: string; mcpProject?: string; dashboard?: boolean; serial?: boolean; parallel?: string; worker?: string[]; workersAsBuilder?: boolean; saveExecution?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const requestedRepairs = Number(flags.maxVerifierRepairs);
     if (!Number.isSafeInteger(requestedRepairs) || requestedRepairs < 0 || requestedRepairs > 10) {
@@ -1682,7 +1701,7 @@ export function createProgram(): Command {
     if (semProvider.length > 0) {
       const completo = await completarPapeis("build", semProvider, escolhas);
       if (completo === null) {
-        stdout.write(`${renderUnresolved("build", semProvider)}\n`);
+        stdout.write(`${renderUnresolved("build", semProvider, roles)}\n`);
         process.exitCode = 2;
         return;
       }
@@ -1706,6 +1725,7 @@ export function createProgram(): Command {
         ...(flags.serial === true ? { serial: true } : {}),
         ...(flags.parallel !== undefined ? { parallel: flags.parallel } : {}),
         ...((flags.worker ?? []).length > 0 ? { worker: flags.worker } : {}),
+        ...(flags.workersAsBuilder === true ? { workersAsBuilder: true } : {}),
       },
       roles,
       systemInstall: flags.systemInstall !== false,
@@ -2167,6 +2187,9 @@ export function createProgram(): Command {
                 });
               }),
             installPrerequisites: async (prompt: string) => {
+              const started = Date.now();
+              painelBuild.beginCall("preparação do ambiente");
+              repaintBuild();
               const bridge = createAgentBridge({
                 projectRoot,
                 runId: "build",
@@ -2175,7 +2198,16 @@ export function createProgram(): Command {
                 limits: DEFAULT_LIMITS,
                 systemInstall: flags.systemInstall !== false,
               });
-              await bridge({ role: "builder", stage: "preflight", prompt });
+              const response = await bridge({ role: "builder", stage: "preflight", prompt,
+                onActivity: line => {
+                  painelBuild.modelActivity(`preparação: ${line}`, started);
+                  painelBuild.note(`preparação: ${line}`);
+                  repaintBuild();
+                },
+              });
+              painelBuild.charge(response.usage);
+              repaintBuild();
+              return response;
             },
           }
         : {}),
@@ -2216,6 +2248,7 @@ export function createProgram(): Command {
         const agente = call.worker !== undefined ? execucao.agentes[call.worker] : undefined;
         const bridge = createAgentBridge({
           projectRoot: call.root ?? projectRoot,
+          ...(call.environment ? { environment: call.environment } : {}),
           runId: "build",
           language,
           roles: agente ? { ...roles, builder: agente.config } : roles,
@@ -2223,7 +2256,8 @@ export function createProgram(): Command {
           systemInstall: agente ? agente.systemInstall : flags.systemInstall !== false,
         });
         // O número é do agente, e só o executor é de um agente: o verificador é um só.
-        const quem = `${call.role === "builder" && call.worker !== undefined ? `agente ${call.worker + 1}` : call.repair ? "verificador em reparo" : call.role} · ${call.phase.id}`;
+        const review = call.purpose ? FLOW_REVIEWS[call.purpose] : null;
+        const quem = `${review ? review.label : call.role === "builder" && call.worker !== undefined ? `agente ${call.worker + 1}` : call.repair ? "verificador em reparo" : call.role} · ${call.phase.id}`;
         // A pausa segura AQUI: nenhuma sessão de agente fica pela metade.
         await pausa.wait(() => {
           painelBuild.paused(`antes de ${quem} · p retoma`);
@@ -2234,7 +2268,7 @@ export function createProgram(): Command {
         painelBuild.beginCall(quem);
         repaintBuild();
         const slot = logsDosAgentes && call.worker !== undefined ? call.worker : null;
-        const papel = `${call.role === "builder" ? "executor" : "verificador"} · ${call.phase.id} · tentativa ${call.attempt}`;
+        const papel = `${review?.label ?? (call.role === "builder" ? "executor" : "verificador")} · ${call.phase.id} · tentativa ${call.attempt}`;
         if (slot !== null) marcarNoLog(slot, papel, true);
         const comecou = Date.now();
         let resposta: Awaited<ReturnType<typeof bridge>>;
@@ -2243,14 +2277,17 @@ export function createProgram(): Command {
             const effective = call.role === "builder" && agente ? agente.config : roles[call.role];
             await appendFile(join(pastaDosLogs, "calls.jsonl"), `${JSON.stringify({
               timestamp: new Date().toISOString(), role: call.role, repair: call.repair === true,
+              purpose: call.purpose ?? null, wallSeconds: DEFAULT_LIMITS.wallSeconds,
               phase: call.phase.id, attempt: call.attempt, worker: call.worker ?? null,
               provider: effective.provider, model: effective.model, effort: effective.effort,
               root: call.root ?? projectRoot, node: process.version, abi: process.versions.modules,
+              e2ePort: call.environment?.E2E_PORT ?? null,
             })}\n`).catch(() => undefined);
           }
           resposta = await bridge({
             role: call.role,
-            stage: call.repair ? "repair" : "implement",
+            stage: call.purpose ?? (call.repair ? "repair" : "implement"),
+            ...(call.purpose ? { purpose: call.purpose } : {}),
             ...(call.repair === true ? { repair: true } : {}),
             prompt: call.prompt,
             ...(slot !== null
@@ -2264,7 +2301,12 @@ export function createProgram(): Command {
             // Sem isto o terminal fica com cara de travado durante os minutos em
             // que a sessão do executor trabalha.
             onActivity: (line) => {
+              painelBuild.modelActivity(`${quem}: ${line}`, comecou);
               painelBuild.note(`${quem}: ${line}`);
+              if (slot !== null) {
+                agentesNaTela?.activity(slot, call.phase.id, line);
+                eventoDoAgente(slot, `${call.phase.id} · ${line}`);
+              }
               repaintBuild();
             },
           });
@@ -2321,7 +2363,7 @@ export function createProgram(): Command {
       resultado = await runWizard({
         io: entrada.io,
         cwd: process.cwd(),
-        listModels: (providerId) => listarModelos(providerId),
+        listModels: (providerId) => listarModelos(providerId, process.env, undefined, (message) => entrada.io.write(`${message}\n`)),
         listEfforts: (providerId, model) => listarEfforts(providerId, model),
         /*
          * O wizard conecta de verdade para listar os projetos. Perguntar o nome

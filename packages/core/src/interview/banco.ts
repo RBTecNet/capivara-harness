@@ -186,8 +186,10 @@ export function regrasDeBanco(decisao: DecisaoDeBanco): SkeletonRule[] {
        * zero.
        */
       statement:
-        "toda a conexão do banco — host, porta, usuário, senha e nome da base — é lida de variáveis de " +
-        "ambiente, carregadas de um arquivo `.env` na raiz; o `.env` é o ÚNICO arquivo do projeto que pode " +
+        (decisao === "embutido"
+          ? "o caminho do arquivo do banco é lido de uma variável de ambiente, carregada de um arquivo `.env` na raiz; "
+          : "toda a conexão do banco — host, porta, usuário, senha e nome da base — é lida de variáveis de ambiente, carregadas de um arquivo `.env` na raiz; ") +
+        "o `.env` é o ÚNICO arquivo do projeto que pode " +
         "conter credencial e está listado no `.gitignore` desde a primeira fase. Nenhum outro arquivo da " +
         "árvore — código, configuração, documento, exemplo, script, teste ou log — contém senha, token ou " +
         "string de conexão real, e isso se confere abrindo os arquivos",
@@ -202,7 +204,12 @@ export function regrasDeBanco(decisao: DecisaoDeBanco): SkeletonRule[] {
     {
       subject: "o exemplo precisa RODAR",
       statement:
-        "copiar o `.env.example` para `.env` tem de deixar a aplicação de pé e utilizável sem mais nenhuma " +
+        decisao === "embutido"
+          ? "copiar o `.env.example` para `.env` deixa a aplicação de pé sem serviço externo, usando um arquivo " +
+            "local persistente criado pelo próprio projeto, que conserva os dados entre reinicializações; " +
+            "testes e fluxos fornecem pela mesma variável de ambiente outro arquivo temporário, criado e " +
+            "destruído pela própria execução, sem tocar o banco normal da aplicação nem alterar o `.env` do desenvolvedor"
+          : "copiar o `.env.example` para `.env` tem de deixar a aplicação de pé e utilizável sem mais nenhuma " +
         "configuração: ele aponta para o banco descartável, nunca para um servidor de mentira. As variáveis do " +
         "servidor de produção ficam documentadas ali ao lado, comentadas ou claramente opcionais — quem for " +
         "usar o servidor preenche e descomenta. É esse arquivo que sobe a aplicação para os testes de fluxo, e " +

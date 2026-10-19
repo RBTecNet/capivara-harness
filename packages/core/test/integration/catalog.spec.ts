@@ -1,3 +1,4 @@
+import { certifyCurrentPlan } from "../support/current-plan.js";
 /**
  * O catálogo obrigatório de cenários (Apêndice B do plano).
  *
@@ -143,6 +144,7 @@ async function publishPlan(
     openQuestions: [],
   });
   await writeFile(join(projectRoot, ".capivara/init/project-phases.md"), plan, "utf8");
+  await certifyCurrentPlan(projectRoot);
   const split = splitPhases(plan, projectRoot, runIdFor("build", sha12(plan)));
   if (!split.ok) throw new Error("plano de teste inválido");
   return { phases: split.sessions.length, tasks: split.sessions.map((session) => session.taskCount) };
@@ -789,7 +791,8 @@ describe("B-35 · impasse do auditor", () => {
     expect(doAuditor).toEqual([...doAuditor].sort((a, b) => a - b));
     expect(new Set(doAuditor).size).toBe(doAuditor.length);
     expect(doAuditor.length).toBeGreaterThanOrEqual(6);
-    expect(agent.calls.some((call) => call.role === "verifier")).toBe(false);
+    expect(agent.calls.some((call) => call.role === "verifier" && call.stage === "verify")).toBe(false);
+    expect(agent.calls.some((call) => call.subject === "project-phases.md#materialidade")).toBe(true);
     await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).rejects.toThrow();
   });
 });
@@ -865,6 +868,7 @@ describe("B-39 · a causa aparece uma vez só", () => {
   it("o erro de preflight não é anunciado e reimpresso", async () => {
     await mkdir(join(projectRoot, ".capivara", "init"), { recursive: true });
     await writeFile(join(projectRoot, ".capivara/init/project-phases.md"), "isto não é um plano", "utf8");
+    await certifyCurrentPlan(projectRoot);
 
     const avisos: string[] = [];
     const outcome = await runBuild({
@@ -1287,7 +1291,8 @@ describe("B-40 · não-resposta não vira autoridade", () => {
  * correção, com uma causa que fala de fluxo e não de teste de unidade.
  */
 const ESQUELETO: Skeleton = {
-  contract: "capivara-skeleton/v1",
+  contract: "capivara-skeleton/v2",
+  environment: [],
   projectName: "Pousada",
   stack: [{ component: "linguagem", decision: "TypeScript 5.8" }],
   entities: [],

@@ -1,3 +1,4 @@
+import { certifyCurrentPlan } from "../support/current-plan.js";
 /**
  * O build paralelo de ponta a ponta, com Git de verdade (§97).
  *
@@ -9,7 +10,7 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MARCA_DO_HARNESS, runBuild, type EngineCall, type EngineResult } from "../../src/loop/index.js";
@@ -77,6 +78,10 @@ async function existe(caminho: string): Promise<boolean> {
   return stat(caminho).then(() => true, () => false);
 }
 
+/** Integração valida HEAD destacado; cenários abaixo também injetam escritas
+ * externas explícitas na principal para manter a cobertura da guarda/rollback. */
+const validacaoIntegrada = (cwd: string): boolean => basename(dirname(cwd)).startsWith("capivara-integrated-check-");
+
 beforeEach(async () => {
   projectRoot = await mkdtemp(join(tmpdir(), "capivara-paralelo-"));
   cache = await mkdtemp(join(tmpdir(), "capivara-paralelo-cache-"));
@@ -85,6 +90,7 @@ beforeEach(async () => {
   await git(["config", "user.email", "teste@localhost"]);
   await mkdir(join(projectRoot, ".capivara", "init"), { recursive: true });
   await writeFile(join(projectRoot, ".capivara", "init", "project-phases.md"), PLANO, "utf8");
+  await certifyCurrentPlan(projectRoot);
   await git(["add", "-A"]);
   await git(["commit", "-q", "-m", "docs: plano"]);
 });
@@ -160,6 +166,52 @@ async function construir(passo: Passo, extra: Partial<BuildOptions> = {}) {
 }
 
 describe("build paralelo", () => {
+  it.each(["builder", "verifier"] as const)("escrita na principal pelo %s interrompe antes da próxima chamada e preserva o trabalho", async (role) => {
+    await writeFile(join(projectRoot, "existente.txt"), "original\n");
+    await git(["add", "existente.txt"]);
+    await git(["commit", "-q", "-m", "base existente"]);
+    const calls: EngineCall[] = [];
+    const { outcome, anuncios } = await construir({ escreve: {} }, {
+      keepGoing: true,
+      call: async (call) => {
+        calls.push(call);
+        if (call.role === "builder") await writeFile(join(call.root!, "trabalho-isolado.txt"), "no worktree\n");
+        if (call.role === role) {
+          await writeFile(join(projectRoot, "escrita-fora.txt"), "preservar\n");
+          await writeFile(join(projectRoot, "existente.txt"), "alteração fora\n");
+        }
+        return { exitCode: 0, stdout: call.role === "builder" ? "feito" : "TASK 1: DONE", stderr: "", timedOut: null };
+      },
+    });
+    expect(outcome.exitCode).toBe(2);
+    expect(calls.map((c) => c.role)).toEqual(role === "builder" ? ["builder"] : ["builder", "verifier"]);
+    expect(anuncios.join("\n")).toContain("PARADA DE ISOLAMENTO");
+    expect(anuncios.join("\n")).toContain("escrita-fora.txt");
+    expect(anuncios.join("\n")).toContain("existente.txt");
+    expect(await readFile(join(projectRoot, "existente.txt"), "utf8")).toBe("alteração fora\n");
+    expect(await readFile(join(projectRoot, "escrita-fora.txt"), "utf8")).toBe("preservar\n");
+    expect(await git(["log", "--format=%s"])).not.toContain("feat(phase-");
+    const branch = `capivara/${runIdFor("build", sha12(PLANO))}/P01`;
+    expect(await git(["show", `${branch}:trabalho-isolado.txt`])).toBe("no worktree");
+    expect(await git(["ls-tree", "-r", "--name-only", branch])).not.toContain("escrita-fora.txt");
+  });
+
+  it("o reparo que escreve na principal para antes de receber outra avaliação", async () => {
+    const calls: EngineCall[] = [];
+    const { outcome, anuncios } = await construir({ escreve: {} }, {
+      maxVerifierRepairs: 1,
+      call: async (call) => {
+        calls.push(call);
+        if (call.repair) await writeFile(join(projectRoot, "reparo-fora.txt"), "preservar\n");
+        else if (call.role === "builder") await writeFile(join(call.root!, "parcial.txt"), "parcial\n");
+        return { exitCode: 0, stdout: call.role === "verifier" ? "TASK 1: INCOMPLETE — falta comportamento" : "feito", stderr: "", timedOut: null };
+      },
+    });
+    expect(outcome.exitCode).toBe(2);
+    expect(calls.map((c) => [c.role, c.repair === true])).toEqual([["builder", false], ["verifier", false], ["verifier", true]]);
+    expect(anuncios.join("\n")).toContain("PARADA DE ISOLAMENTO");
+    expect(await readFile(join(projectRoot, "reparo-fora.txt"), "utf8")).toBe("preservar\n");
+  });
   it("fases independentes rodam ao mesmo tempo, cada uma no seu worktree, e o histórico sai um commit por fase", async () => {
     const { outcome, engine, anuncios } = await construir({ escreve: ESCRITAS, demora: { P02: 80, P03: 80 } });
 
@@ -273,7 +325,7 @@ describe("build paralelo", () => {
       explicitTestCommand: "npm test",
       // Só a árvore principal reprova a combinação — nenhum worktree vê o defeito.
       testRunner: async (_command, cwd) =>
-        cwd === projectRoot && (await existe(join(cwd, "relatorio.txt"))) ? { exitCode: 1, output: "FAIL" } : { exitCode: 0, output: "ok" },
+        validacaoIntegrada(cwd) && (await existe(join(cwd, "relatorio.txt"))) ? { exitCode: 1, output: "FAIL" } : { exitCode: 0, output: "ok" },
       parallel: {
         maxConcurrency: 2,
         agentes: [
@@ -380,7 +432,7 @@ describe("build paralelo — auditoria (§99)", () => {
   /** A integração da P03 reprova, e a suíte deixa na árvore o que `extra` disser — o cenário do rollback. */
   function suiteQueReprovaAP03(extra: () => Promise<void> = async () => undefined, antesDaP03: () => Promise<void> = async () => undefined) {
     return async (_comando: string, cwd: string): Promise<{ exitCode: number; output: string }> => {
-      if (cwd !== projectRoot) return VERDE;
+      if (!validacaoIntegrada(cwd)) return VERDE;
       if (!(await existe(join(cwd, "relatorio.txt")))) {
         await antesDaP03();
         return VERDE;
@@ -408,7 +460,7 @@ describe("build paralelo — auditoria (§99)", () => {
 
     expect(outcome.exitCode, anuncios.join("\n")).toBe(0);
     expect(anuncios.some((linha) => linha.includes("a suíte da árvore integrada reprovou"))).toBe(false);
-    expect((await readFile(join(projectRoot, ".env"), "utf8")).startsWith(MARCA_DO_HARNESS)).toBe(true);
+    expect(await existe(join(projectRoot, ".env"))).toBe(false);
   });
 
   it("B2: a fase que para num gate não deixa aprovação de código que saiu da árvore", async () => {
@@ -421,6 +473,9 @@ describe("build paralelo — auditoria (§99)", () => {
     ].join("\n");
     const plano = PLANO.replace(FASE(2, "Cadastro", "Phase 1"), `${FASE(2, "Cadastro", "Phase 1")}${segunda}\n`);
     await commitar({ ".capivara/init/project-phases.md": plano }, "plano com duas tasks na P2");
+    await certifyCurrentPlan(projectRoot);
+    await git(["add", ".capivara/init/environment.json"]);
+    await git(["commit", "-qm", "metadado do plano atual"]);
 
     const primeiro = await construir({ escreve: ESCRITAS, veredito: { P02: "TASK 1: DONE\nTASK 2: INCOMPLETE — falta o resto" } });
     expect(primeiro.outcome.exitCode, primeiro.anuncios.join("\n")).toBe(2);
@@ -439,7 +494,7 @@ describe("build paralelo — auditoria (§99)", () => {
       { escreve: ESCRITAS, demora: { P02: 20, P03: 150 } },
       {
         testRunner: async (_comando, cwd) =>
-          cwd === projectRoot && (await existe(join(cwd, "relatorio.txt"))) ? { exitCode: 1, output: "FAIL" } : VERDE,
+          validacaoIntegrada(cwd) && (await existe(join(cwd, "relatorio.txt"))) ? { exitCode: 1, output: "FAIL" } : VERDE,
       },
     );
     expect(outcome.errors.join("\n")).toContain("mesmo rodando sozinha");
@@ -455,7 +510,7 @@ describe("build paralelo — auditoria (§99)", () => {
       {
         // A suíte da principal deixa um relatório que ninguém versionou.
         testRunner: async (_comando, cwd) => {
-          if (cwd === projectRoot) await escreverNaPrincipal("coverage/report.txt", "da suíte integrada\n");
+          if (validacaoIntegrada(cwd)) await escreverNaPrincipal("coverage/report.txt", "da suíte integrada\n");
           return VERDE;
         },
       },
@@ -481,7 +536,7 @@ describe("build paralelo — auditoria (§99)", () => {
          * --keep` recusa por causa do primeiro.
          */
         testRunner: async (_comando, cwd) => {
-          if (cwd !== projectRoot || !(await existe(join(cwd, "relatorio.txt")))) return VERDE;
+          if (!validacaoIntegrada(cwd) || !(await existe(join(cwd, "relatorio.txt")))) return VERDE;
           await escreverNaPrincipal("coverage/report.txt", "da suíte integrada\n");
           await escreverNaPrincipal("saida-da-suite.log", "FAIL relatorio.spec\n");
           return { exitCode: 1, output: "FAIL" };
@@ -599,7 +654,7 @@ describe("build paralelo — auditoria (§99)", () => {
       {
         // A integração da P02 fica fatal (M1); a da P03, sozinha, passaria.
         testRunner: async (_comando, cwd) => {
-          if (cwd !== projectRoot) return VERDE;
+          if (!validacaoIntegrada(cwd)) return VERDE;
           if ((await existe(join(cwd, "cadastro.txt"))) && !(await existe(join(cwd, "relatorio.txt")))) {
             await escreverNaPrincipal("coverage/report.txt", "da suíte integrada\n");
             return { exitCode: 1, output: "FAIL" };
@@ -695,6 +750,7 @@ describe("build paralelo — auditoria (§99)", () => {
     await git(["commit", "-q", "-m", "chore: init fora do histórico"]);
     const base = await git(["rev-parse", "HEAD"]);
     await writeFile(join(projectRoot, ".capivara", "init", "skeleton.md"), "# esqueleto\n", "utf8");
+    await certifyCurrentPlan(projectRoot);
 
     const vistos: { fase: string; existe: boolean; gravavel: boolean; escreveu: boolean }[] = [];
     const engine = motor({ escreve: ESCRITAS });
@@ -751,7 +807,7 @@ describe("build paralelo — auditoria (§99)", () => {
     const comandos: { command: string; cwd: string }[] = [];
     // A suíte que reescreve um arquivo versionado — só na árvore principal, durante a integração da P01.
     const suite = async (cwd: string): Promise<void> => {
-      if (cwd === projectRoot && (await existe(join(cwd, "base.txt")))) await writeFile(join(cwd, "base.txt"), "reescrito pela suíte\n", "utf8");
+      if (validacaoIntegrada(cwd) && (await existe(join(cwd, "base.txt")))) await writeFile(join(projectRoot, "base.txt"), "reescrito pela suíte\n", "utf8");
     };
     const { outcome, engine, anuncios } = await construir({ escreve: ESCRITAS }, { testRunner: npmFalso(comandos, suite) });
 
@@ -803,17 +859,21 @@ describe("build paralelo — fundação do gate 4 e verde preservado (§110)", (
 
   async function usarLeque(comStart: boolean): Promise<void> {
     await writeFile(join(projectRoot, ".capivara", "init", "project-phases.md"), PLANO_LEQUE, "utf8");
+    await certifyCurrentPlan(projectRoot);
     if (comStart) await writeFile(join(projectRoot, "package.json"), COM_START, "utf8");
     await git(["add", "-A"]);
     await git(["commit", "-q", "-m", "docs: plano em leque"]);
   }
 
   /** O executor de cada fase escreve o seu arquivo; quem ouve que falta `start`, o cria. */
-  function motorDoLeque() {
+  function motorDoLeque(fasesJuntas: readonly string[] = []) {
     const intervalos = new Map<string, { inicio: number; fim: number }[]>();
     const avisados: string[] = [];
     let ativos = 0;
     let pico = 0;
+    const iniciadas = new Set<string>();
+    let liberar!: () => void;
+    const barreira = new Promise<void>((resolve) => { liberar = resolve; });
     const call = async (chamada: EngineCall): Promise<EngineResult> => {
       if (chamada.role === "verifier") {
         if (chamada.prompt.includes("You write ONE Playwright script")) {
@@ -835,6 +895,14 @@ describe("build paralelo — fundação do gate 4 e verde preservado (§110)", (
       const inicio = Date.now();
       ativos += 1;
       pico = Math.max(pico, ativos);
+      if (fasesJuntas.includes(chamada.phase.id)) {
+        iniciadas.add(chamada.phase.id);
+        if (fasesJuntas.every((fase) => iniciadas.has(fase))) liberar();
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error(`as fases ${fasesJuntas.join(", ")} não começaram juntas`)), 5000);
+          void barreira.then(() => { clearTimeout(timer); resolve(); });
+        });
+      }
       if (chamada.prompt.includes("This project does NOT declare that entrypoint yet")) {
         avisados.push(chamada.phase.id);
         await writeFile(join(raiz, "package.json"), COM_START, "utf8");
@@ -878,7 +946,7 @@ describe("build paralelo — fundação do gate 4 e verde preservado (§110)", (
 
   it("sem start: só uma fase prepara a fundação, sozinha, e as outras com fluxo saem depois, em paralelo", async () => {
     await usarLeque(false);
-    const engine = motorDoLeque();
+    const engine = motorDoLeque(["P03", "P04"]);
     const { outcome, anuncios } = await construirLeque(engine);
 
     expect(outcome.exitCode, anuncios.join("\n")).toBe(0);
@@ -902,7 +970,7 @@ describe("build paralelo — fundação do gate 4 e verde preservado (§110)", (
 
   it("com start: nada é preparado, e as três fases com fluxo correm juntas", async () => {
     await usarLeque(true);
-    const engine = motorDoLeque();
+    const engine = motorDoLeque(["P02", "P03", "P04"]);
     const { outcome, anuncios } = await construirLeque(engine);
 
     expect(outcome.exitCode, anuncios.join("\n")).toBe(0);

@@ -10,6 +10,7 @@ export {
   directProvider,
   isCliProvider,
   isDirectProvider,
+  opencodeProviderId,
 } from "./registry.js";
 export type {
   CliProvider,
@@ -23,6 +24,8 @@ export type {
 } from "./registry.js";
 export { buildInvocation, limitsFor } from "./adapters.js";
 export type { Invocation, InvocationContext } from "./adapters.js";
+export { FLOW_REVIEWS } from "./flow-review.js";
+export type { FlowReviewPurpose } from "./flow-review.js";
 export { killTree, runProvider } from "./supervisor.js";
 export type { RunOptions, RunResult, SupervisorLimits, TimeoutKind } from "./supervisor.js";
 export { mask, redact } from "./redact.js";
@@ -39,7 +42,7 @@ export {
 } from "./credentials.js";
 export type { CredentialRecord, SafeCredential } from "./credentials.js";
 export { createLineSplitter, parseAgyJson, parseCursorJson,
-  parseClaudeJson, parseCodexJsonl, parseOpencodeJsonl, readTranscript, resumirNegacao, summarizeCodexEvent } from "./transcript.js";
+  parseClaudeJson, parseCodexJsonl, parseOpencodeJsonl, readTranscript, resumirNegacao, summarizeCodexEvent, summarizeOpencodeEvent } from "./transcript.js";
 export type { TokenUsage, Transcript, TranscriptKind } from "./transcript.js";
 export { CLI_ADAPTERS, cliAdapter, contratoDoWorkspace } from "./cli/index.js";
 export type { ContratoDoWorkspace } from "./cli/index.js";

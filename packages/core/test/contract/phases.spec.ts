@@ -72,6 +72,25 @@ describe("parsePhases — documento válido", () => {
     expect(parsed(source).phases[0]?.tasks[1]?.traces).toEqual(["US-1.2", "statuses"]);
   });
 
+  it.each(["", "  ", "\t"])("preserva todos os campos com linhas vazias %j entre título, rótulos e itens", (blank) => {
+    const source = VALID_PHASES.replace(/^( +-.+)$/gm, `${blank}\n$1\n${blank}`);
+    const actual = parsed(source);
+    const fields = (document: PhasesDocument) => document.phases.map(phase => phase.tasks.map(({ line: _line, ...task }) => task));
+    expect(fields(actual)).toEqual(fields(parsed(VALID_PHASES)));
+    expect(actual.phases[0]?.markdown).toContain(source.split("## Phase 1:")[1]!.split("## Phase 2:")[0]!.trim());
+  });
+
+  it.each([
+    { field: "criteria", remove: "  - **Acceptance criteria:**\n    - A tabela users existe com email único e timestamps", code: "I-08" },
+    { field: "traces", remove: "  - **Traces:** US-1.1, users, workflow 1", code: "I-09" },
+  ])("não empresta $field da task seguinte quando o campo está realmente ausente", ({ remove, code }) => {
+    const source = VALID_PHASES.replace(remove, "").replace(/^( +-.+)$/gm, "\n$1\n");
+    const result = parsePhases(source);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toEqual([expect.objectContaining({ code, message: expect.stringContaining("task 1 da Phase 1") })]);
+  });
+
   it("nunca lança, mesmo com entrada absurda", () => {
     for (const source of ["", "\n\n\n", "texto solto", "## Phase", "- [ ] **Task:**"]) {
       expect(() => parsePhases(source)).not.toThrow();

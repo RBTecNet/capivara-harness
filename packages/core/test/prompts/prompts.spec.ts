@@ -190,7 +190,7 @@ describe("ausência de artefato de design", () => {
 describe("o esqueleto pensa o produto uma vez, a fase vê só a fatia", () => {
   it("o esqueleto é a única vez que alguém olha o produto inteiro", () => {
     expect(esqueleto).toContain("ONLY time anyone looks at the whole product at once");
-    expect(esqueleto).toContain("capivara-skeleton/v1");
+    expect(esqueleto).toContain("capivara-skeleton/v2");
   });
 
   it("o esqueleto declara o dimensionamento como restrição da sessão de agente", () => {
@@ -303,6 +303,15 @@ describe("ensaio do verificador", () => {
     const prompt = rehearsalPrompt({ language: "português do Brasil", request: "x", decisions: [], upstream: [], criteria });
     expect(prompt).toContain("Answer OBSERVABLE");
     expect(prompt).toContain("is your problem");
+  });
+
+  it("ensaio não confunde prova futura no repositório com ausência de arquivos agora", () => {
+    const prompt = rehearsalPrompt({ language: "português do Brasil", request: "x", decisions: [], upstream: [], criteria });
+    expect(prompt).toContain("Earlier phases are implemented before their dependants");
+    expect(prompt).toContain("Git baseline");
+    expect(prompt).toContain("reading an existing .env.example is OBSERVABLE");
+    expect(prompt).toContain("actual contradiction with a confirmed decision");
+    expect(prompt).toContain("Those are audit questions, not UNOBSERVABLE verdicts");
   });
 
   it("as decisões confirmadas entram como autoridade sobre o que existe", () => {

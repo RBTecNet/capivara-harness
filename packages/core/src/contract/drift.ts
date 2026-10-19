@@ -13,6 +13,7 @@
 
 import { parsePhases } from "./phases.js";
 import type { PhaseBlock, TaskBlock } from "./phases.js";
+import { planAddresses } from "./phase-references.js";
 
 /**
  * Lê uma fase solta, cercando-a do mínimo que o parser exige.
@@ -36,6 +37,8 @@ export function parsePhaseFragment(phaseMarkdown: string): PhaseBlock | null {
     original !== null && original !== 1
       ? phaseMarkdown
           .replace(/^(##\s+Phase\s+)\d+(\s*:)/m, "$11$2")
+          .replace(/^(###\s+Phase\s+)(\d+)(\.\d+\s*:)/gm, (whole, prefix: string, major: string, suffix: string) =>
+            Number(major) === original ? `${prefix}1${suffix}` : whole)
           // Numa fase solta não há fase anterior a que se referir.
           .replace(/(\*\*Depends on:\*\*\s*)[^·\n]*?(\s*(?:·|$))/m, "$1none$2")
       : phaseMarkdown;
@@ -43,7 +46,7 @@ export function parsePhaseFragment(phaseMarkdown: string): PhaseBlock | null {
   const lido = parsePhases(envelope);
   const fase = lido.ok ? (lido.document.phases[0] ?? null) : null;
   return fase !== null && original !== null && original !== 1
-    ? { ...fase, number: original, ...(dependencia !== undefined ? { dependsOn: dependencia } : {}) }
+    ? { ...fase, number: original, subPhases: fase.subPhases.map(section => ({ ...section, phase: original })), ...(dependencia !== undefined ? { dependsOn: dependencia } : {}) }
     : fase;
 }
 
@@ -101,4 +104,52 @@ export function checkRewriteDrift(input: DriftInput): string[] {
   }
 
   return desvios;
+}
+
+/** Mantém os bytes das tasks que não pertencem a uma emenda endereçada. */
+export function preserveUnaddressedTasks(before: string, after: string, phase: number, findings: DriftInput["findings"]): string {
+  const targets = new Set<number>();
+  const parsed = parsePhaseFragment(before);
+  for (const finding of findings) {
+    if (/divid|consolid|redistribu|\bsplit\b|\bmerge\b|renumber/i.test(finding.fix)) return after;
+    const addresses = planAddresses(finding.where).filter(address => address.phase === phase);
+    if (addresses.length === 0) {
+      const sections = [...finding.where.matchAll(/\b(?:phase|fase)\s+(\d+)\.(\d+)\b/gi)].filter(match => Number(match[1]) === phase);
+      const matched = new Set<number>();
+      for (const section of sections) {
+        const position = parsed?.subPhases.findIndex(entry => entry.number === Number(section[2])) ?? -1;
+        if (!parsed || position < 0) continue;
+        const start = parsed.subPhases[position]!.line;
+        const end = parsed.subPhases[position + 1]?.line ?? Infinity;
+        for (const task of parsed.tasks.filter(task => task.line > start && task.line < end)) matched.add(task.index);
+      }
+      if (matched.size === 0) return after;
+      for (const task of matched) targets.add(task);
+    }
+    for (const address of addresses) targets.add(address.task);
+  }
+  if (targets.size === 0) return after;
+  const blocks = (source: string): { start: number; end: number; text: string; title: string }[] => {
+    const markers = [...source.matchAll(/^- \[[ xX]\] \*\*Task:\*\* (.+)$/gm)];
+    return markers.map((marker, index) => {
+      const start = marker.index;
+      const next = markers[index + 1]?.index ?? source.length;
+      const heading = /^#{2,3} /m.exec(source.slice(start, next));
+      const end = heading ? start + heading.index : next;
+      return { start, end, text: source.slice(start, end), title: marker[1]!.trim() };
+    });
+  };
+  const original = blocks(before);
+  const candidate = blocks(after);
+  if ([...targets].some(task => task < 1 || task > original.length)) return after;
+  let result = before;
+  for (let index = original.length - 1; index >= 0; index -= 1) {
+    if (!targets.has(index + 1)) continue;
+    const block = original[index]!;
+    const matching = candidate.filter(entry => entry.title === block.title);
+    const correction = original.length === candidate.length ? candidate[index] : matching.length === 1 ? matching[0] : undefined;
+    if (!correction) continue;
+    result = result.slice(0, block.start) + correction.text + result.slice(block.end);
+  }
+  return result;
 }

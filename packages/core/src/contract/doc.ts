@@ -43,9 +43,10 @@ export function renderContractDocument(): string {
   for (const line of GRAMMAR_BLOCK) lines.push(line);
   lines.push("```");
   lines.push("");
-  lines.push("`**Feature tests:**` e `**Design ref:**` são opcionais: o primeiro é exigido de");
-  lines.push("tasks com lógica de negócio e o segundo de tasks de tela, e essa exigência");
-  lines.push("pertence ao auditor, não ao parser. Os rótulos são casados literalmente e nunca");
+  lines.push("O planejamento descreve entregas e critérios observáveis. O validador escolhe");
+  lines.push("as verificações durante o build. `**Feature tests:**` é lido em planos existentes");
+  lines.push("como sugestão, sem obrigar nomes ou arquivos. `**Design ref:**` é opcional e");
+  lines.push("só aponta para artefato de design existente. Os rótulos são literais e nunca");
   lines.push("são traduzidos; a indentação dos sub-itens é livre.");
   lines.push("");
 

@@ -26,6 +26,7 @@
 
 import type { TaskBlock } from "../contract/index.js";
 import { sha12 } from "../contract/index.js";
+import { PLANNING_CONTRACT } from "../contract/environment.js";
 
 /**
  * O texto da task, canônico.
@@ -59,7 +60,7 @@ export function chaveDaTask(task: TaskBlock, autoridade: string): string {
  * honesta de reauditar — e a única forma de NÃO reauditar o resto.
  */
 export function shaDaAutoridade(decisoes: readonly string[]): string {
-  return sha12([...decisoes].sort().join("\n"));
+  return sha12(`${PLANNING_CONTRACT}\n${[...decisoes].sort().join("\n")}`);
 }
 
 export class TasksJulgadas {

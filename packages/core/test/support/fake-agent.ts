@@ -152,7 +152,11 @@ export const PHASE_3 = `## Phase 3: Editar a reserva
 
 /** Um esqueleto coerente com PHASE_1 e PHASE_2, para o caminho novo. */
 export const SKELETON = JSON.stringify({
-  contract: "capivara-skeleton/v1",
+  contract: "capivara-skeleton/v2",
+  environment: [
+    { technology: "Node.js", binary: "node", systemLevel: false, checkArgs: ["--version"] },
+    { technology: "PostgreSQL", binary: "psql", systemLevel: true, checkArgs: ["--version"] },
+  ],
   projectName: "Pousada",
   stack: [
     { component: "Linguagem", decision: "Node 22 com TypeScript" },
@@ -180,8 +184,22 @@ export function skeletonPath(): ScriptStep[] {
     { match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: PHASE_1 }, repeat: true },
     { match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 }, repeat: true },
     { match: { role: "auditor", stage: "audit" }, respond: { stdout: approve() }, repeat: true },
+    materialityKeeps(),
     rehearsalApproves(),
   ];
+}
+
+/** Os roteiros antigos conservam todos os bloqueios; cada caso novo pode revisar explicitamente. */
+export function materialityKeeps(): ScriptStep {
+  return {
+    match: { role: "verifier", stage: "audit", subject: "project-phases.md#materialidade" },
+    respond: { stdout: call => {
+      const marker = "## Review input (JSON)\n";
+      const input = JSON.parse(call.prompt.slice(call.prompt.indexOf(marker) + marker.length)) as { items: { id: string }[] };
+      return JSON.stringify({ reviews: input.items.map(item => ({ id: item.id, disposition: "KEEP" })) });
+    } },
+    repeat: true,
+  };
 }
 
 /**

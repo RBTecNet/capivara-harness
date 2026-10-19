@@ -17,7 +17,7 @@
  * Isso é inferência entre dois documentos, não conferência de forma.
  */
 
-import { CLI_PROVIDERS, DIRECT_PROVIDERS, resolveRoles, ROLE_NAMES } from "../provider/index.js";
+import { CLI_PROVIDERS, DIRECT_PROVIDERS, resolveRoles, ROLE_NAMES, isDirectProvider } from "../provider/index.js";
 import type { RoleConfig, RoleName, RoleOverrides } from "../provider/index.js";
 
 export interface CliRoleFlags {
@@ -75,9 +75,9 @@ export function describeRoles(roles: Record<RoleName, RoleConfig>): { role: stri
 export const INIT_ROLES = ["writer", "auditor", "verifier"] as const satisfies readonly RoleName[];
 export const BUILD_ROLES = ["builder", "verifier"] as const satisfies readonly RoleName[];
 
-/** Papéis necessários ao comando que ficaram sem provider resolvido. */
+/** API direta precisa também de modelo explícito; CLIs podem usar o default. */
 export function unresolvedRoles(roles: Record<RoleName, RoleConfig>, needed: readonly RoleName[]): RoleName[] {
-  return needed.filter((role) => roles[role].provider.trim() === "");
+  return needed.filter((role) => roles[role].provider.trim() === "" || (isDirectProvider(roles[role].provider) && roles[role].model.trim() === ""));
 }
 
 /**
@@ -88,7 +88,20 @@ export function unresolvedRoles(roles: Record<RoleName, RoleConfig>, needed: rea
  * só então morreu com um stack trace do Node. Diagnóstico que aparece depois do
  * trabalho começar é diagnóstico tarde demais, e stack trace não é mensagem.
  */
-export function renderUnresolved(command: string, missing: readonly RoleName[]): string {
+export function renderUnresolved(command: string, missing: readonly RoleName[], roles?: Record<RoleName, RoleConfig>): string {
+  const modelOnly = missing.filter((role) => roles && isDirectProvider(roles[role].provider) && roles[role].model.trim() === "");
+  if (modelOnly.length > 0 && modelOnly.length < missing.length) {
+    return `${renderUnresolved(command, missing.filter((role) => !modelOnly.includes(role)))}\n\n${renderUnresolved(command, modelOnly, roles)}`;
+  }
+  if (modelOnly.length > 0 && modelOnly.length === missing.length) {
+    return [
+      `capivara ${command}: falta escolher o modelo de API para: ${modelOnly.map((role) => `${role} (${roles![role].provider})`).join(", ")}.`,
+      "API direta exige modelo explícito. A chave de API não seleciona um modelo.",
+      `Use --model <id> ou ${modelOnly.map((role) => `--${role}-model <id>`).join(", ")}.`,
+      ...[...new Set(modelOnly.map((role) => roles![role].provider))].map((provider) => `Veja os modelos com: capivara providers models ${provider}`),
+      "Em um terminal interativo, execute o mesmo comando para escolher pela lista.",
+    ].join("\n");
+  }
   return [
     `capivara ${command} não tem provider para: ${missing.join(", ")}`,
     "",

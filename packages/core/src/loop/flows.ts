@@ -19,14 +19,16 @@
  */
 
 import { execFile } from "node:child_process";
-import { createServer } from "node:net";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, readdir, writeFile, stat } from "node:fs/promises";
+import { join, resolve as resolvePath } from "node:path";
 import type { SkeletonWorkflow } from "../contract/index.js";
 import { extractFlowScript, lerTriagem, stepLabel, type Triagem } from "../prompts/index.js";
 import { comandoDeMigracao } from "./ambiente.js";
 import { FLOW_HELPER, VARIAVEL_DO_INICIO, bancosDeclarados, criarAmbienteDaPassagem, renderFlowHelper } from "./passagem.js";
 import { runtimeEnvironment } from "../provider/runtime-env.js";
+import { portaLivre } from "./ports.js";
+import { invalidFlowNetwork } from "./flow-network.js";
+export { portaLivre } from "./ports.js";
 
 /** Onde os roteiros moram, relativo à raiz do projeto. */
 export const FLOWS_DIR = join(".capivara", "flows");
@@ -93,21 +95,6 @@ export const FLOW_PORT = 47533;
  * existia antes com número fixo, e continua existindo — a diferença é que agora
  * a colisão é improvável em vez de garantida por qualquer órfão.
  */
-export async function portaLivre(preferida = FLOW_PORT): Promise<number> {
-  const tentar = async (porta: number): Promise<number | null> =>
-    await new Promise((resolve) => {
-      const servidor = createServer();
-      servidor.once("error", () => resolve(null));
-      servidor.listen(porta, "127.0.0.1", () => {
-        const endereco = servidor.address();
-        const escolhida = typeof endereco === "object" && endereco ? endereco.port : porta;
-        servidor.close(() => resolve(escolhida));
-      });
-    });
-
-  return (await tentar(preferida)) ?? (await tentar(0)) ?? preferida;
-}
-
 /** `workflow 2` e `workflow 2.1` viram nomes de arquivo estáveis. */
 export function flowScriptName(workflowNumber: string): string {
   return `workflow-${workflowNumber.trim().replace(/[^0-9A-Za-z.]+/g, "-")}.spec.ts`;
@@ -165,10 +152,18 @@ export function checkFlowScript(
   }
 
   const steps = [...script.matchAll(/test\s*\.\s*step\s*\(/g)].length;
-  if (steps < workflow.steps.length) {
+  if (steps !== workflow.steps.length) {
     defects.push({
       problem: `o fluxo tem ${workflow.steps.length} passos e o roteiro declara ${steps} test.step`,
       hint: "um test.step por passo declarado, na ordem",
+    });
+  }
+
+  const cases = [...script.matchAll(/(?<![\w$.])test\s*\(/g)].length;
+  if (cases !== 1) {
+    defects.push({
+      problem: `o roteiro declara ${cases} caso de teste para um único fluxo`,
+      hint: "somente um test para este fluxo; remova cenários adicionais e preserve os passos contratados",
     });
   }
 
@@ -243,15 +238,10 @@ export function checkFlowScript(
    * certo, e foi recusado em todas as tentativas de todos os ciclos. URL absoluta
    * para outro host é de terceiro; relativa, glob ou local é do produto.
    */
-  const interceptaOProduto = [...script.matchAll(/page\s*\.\s*route\s*\(\s*['"`]([^'"`]*)['"`]/g)].some(([, alvo = ""]) => {
-    const absoluta = /^https?:\/\/([^/:]+)/i.exec(alvo);
-    if (absoluta) return /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/i.test(absoluta[1] ?? "");
-    return /\/api\/|localhost|127\.0\.0\.1/i.test(alvo);
-  });
-  if (interceptaOProduto) {
+  if (invalidFlowNetwork(script)) {
     defects.push({
       problem: "o roteiro intercepta o backend do próprio produto",
-      hint: "o gate existe para exercitar o produto de verdade; só um serviço de terceiro pode ser substituído",
+      hint: "não fabricar respostas com fulfill/HAR. Para carregamento, segure e libere GET com continue; para indisponibilidade, aborte somente GET. Lista vazia e contagens usam dados reais da passagem; só serviço de terceiro pode ter resposta substituída",
     });
   }
 
@@ -445,6 +435,7 @@ export function faltaORunner(output: string, exitCode: number): boolean {
     // é defeito do produto, e foi assim que a fase 3 do MCP_teste foi mandada
     // instalar um Playwright que já estava instalado.
     /Cannot find (module|package) ['"`]?@playwright\/test/i,
+    /Cannot find module ['"`][^'"`\n]*[\\/]@playwright[\\/]test[\\/]cli\.js/i,
     /Please install @playwright\/test/i,
     // O navegador, que é metade do runner: sem ele nada abre.
     /npx playwright install/i,
@@ -455,15 +446,19 @@ export function faltaORunner(output: string, exitCode: number): boolean {
 /**
  * Playwright, rodado pelo loop.
  *
- * `npx --no-install` é deliberado: instalar por conta própria, no meio de um
- * gate, esconderia do operador que o projeto não declarou a dependência. Sem o
- * runner, o gate diz o que falta e quem instala é o executor, como no gate 2.
+ * Resolve apenas a ferramenta já preparada no preflight. Nenhuma instalação
+ * implícita durante o gate. A instalação privada é a mais próxima dos roteiros
+ * e deve fornecer também o CLI, evitando duas versões do Playwright no processo.
  */
-export const defaultFlowRunner: FlowRunner = async (projectRoot, scripts, env = {}) =>
-  new Promise((resolve) => {
+export const defaultFlowRunner: FlowRunner = async (projectRoot, scripts, env = {}) => {
+  projectRoot = resolvePath(projectRoot);
+  const local = join(projectRoot, "node_modules/@playwright/test/cli.js");
+  const tools = join(projectRoot, ".capivara/node_modules/@playwright/test/cli.js");
+  const cli = await stat(tools).then(() => tools, () => local);
+  return new Promise((resolve) => {
     const child = execFile(
-      "npx",
-      ["--no-install", "playwright", "test", "--config", FLOW_CONFIG, ...scripts],
+      process.execPath,
+      [cli, "test", "--config", FLOW_CONFIG, ...scripts],
       { cwd: join(projectRoot, FLOWS_DIR), maxBuffer: 32 * 1024 * 1024, env: runtimeEnvironment({ ...process.env, ...env, CI: "1" }) },
       (error, stdout, stderr) => {
         const saida = `${stdout}${stderr}`;
@@ -474,6 +469,7 @@ export const defaultFlowRunner: FlowRunner = async (projectRoot, scripts, env = 
     );
     child.stdin?.end();
   });
+};
 
 /** Os roteiros já escritos, em ordem estável — a regressão das fases anteriores. */
 export async function existingFlowScripts(projectRoot: string): Promise<string[]> {
@@ -548,6 +544,8 @@ export interface FlowGateOptions {
   preferredPort?: number;
   /** Tentativas de redação por fluxo, contando a primeira. */
   maxDrafts?: number;
+  /** O próximo ciclo substitui estes roteiros antes de executá-los outra vez. */
+  rejectedScripts?: readonly string[];
   announce?: (message: string) => void;
 }
 
@@ -589,8 +587,8 @@ export function causaDaTriagem(triagem: Triagem, rastro: string): string {
       : triagem.tipo === "CRITERIO"
         ? "O gate 4 reprovou e a triagem diz que o CRITÉRIO não decide o caso. Vale esta leitura, que ficou " +
           "registrada em .capivara/decisoes-do-build.md para o desenvolvedor revisar:"
-        : "O gate 4 reprovou e a triagem diz que o defeito é do ROTEIRO, que o harness já reescreveu uma vez " +
-          "nesta passagem. Se você concorda, responda com CAPIVARA_ROTEIRO_ERRADO e o motivo:";
+        : "O gate 4 identificou um defeito no ROTEIRO. A implementação deve ser preservada; " +
+          "a correção abaixo pertence ao teste do harness:";
   return [
     titulo,
     "",
@@ -838,11 +836,12 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
       aEscrever.push(workflow);
       continue;
     }
-    if (daFase && checkFlowScript(existente, workflow).length > 0) aEscrever.push(workflow);
+    if (options.rejectedScripts?.includes(workflow.number) || (daFase && checkFlowScript(existente, workflow).length > 0)) aEscrever.push(workflow);
   }
 
   for (const workflow of aEscrever) {
     const arquivo = join(pasta, flowScriptName(workflow.number));
+    const anterior = options.rejectedScripts?.includes(workflow.number) ? await readFile(arquivo, "utf8").catch(() => null) : null;
     let rejeitado: string[] = [];
     let gravado = false;
     const tentativas = options.maxDrafts ?? 2;
@@ -852,6 +851,7 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
       );
       const script = extractFlowScript(await options.author(workflow, rejeitado, baseUrl, passagemDe(workflow)));
       const defeitos = checkFlowScript(script, workflow);
+      if (anterior !== null && comMarca(script) === anterior) defeitos.push({ problem: "o roteirista devolveu o mesmo roteiro que já falhou", hint: "aplique o diagnóstico recebido antes de devolver o arquivo; não repetir o mesmo teste" });
       if (defeitos.length === 0) {
         await writeFile(arquivo, comMarca(script), "utf8");
         gravado = true;
@@ -865,7 +865,10 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
         green: false,
         cause:
           `o roteiro do workflow ${workflow.number} (${workflow.name}) não passou na conferência estrutural ` +
-          `em ${tentativas} tentativas:\n${rejeitado.map((linha) => `- ${linha}`).join("\n")}`,
+          `em ${tentativas} tentativas:\n${rejeitado.map((linha) => `- ${linha}`).join("\n")}` +
+          "\nIsto é do harness, não da implementação: o roteirista não entregou um roteiro válido.",
+        scriptFailed: true,
+        falharam: [workflow.number],
       };
     }
   }
@@ -963,22 +966,33 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
     workflows: readonly SkeletonWorkflow[],
     motivo: string[],
     naoDefinidos: readonly string[] = [],
-  ): Promise<void> => {
+  ): Promise<string[]> => {
     const tentativas = options.maxDrafts ?? 2;
+    const falhas: string[] = [];
     for (const workflow of workflows) {
       const arquivo = join(pasta, flowScriptName(workflow.number));
+      const existente = await readFile(arquivo, "utf8").catch(() => null);
       let rejeitado = [...motivo];
+      let problemas = ["nenhuma correção executável foi entregue"];
       for (let tentativa = 1; tentativa <= tentativas; tentativa += 1) {
         const script = extractFlowScript(await options.author(workflow, rejeitado, baseUrl, passagemDe(workflow)));
         const defeitos = checkFlowScript(script, workflow, naoDefinidos);
         if (defeitos.length === 0) {
+          if (comMarca(script) === existente) {
+            problemas = ["o roteirista não alterou o roteiro que acabou de falhar; não repetir o mesmo teste"];
+            break;
+          }
           await writeFile(arquivo, comMarca(script), "utf8");
+          problemas = [];
           break;
         }
-        rejeitado = [...rejeitado, ...defeitos.map((defect) => `${defect.problem} — ${defect.hint}`)];
+        problemas = defeitos.map((defect) => `${defect.problem} — ${defect.hint}`);
+        rejeitado = [...rejeitado, ...problemas];
         announce(`  a reescrita do roteiro do fluxo ${workflow.number} voltou com defeito: ${defeitos[0]?.problem ?? ""}`);
       }
+      if (problemas.length > 0) falhas.push(`workflow ${workflow.number}: ${problemas.join("; ")}`);
     }
+    return falhas;
   };
 
   if (options.roteiroContestado) {
@@ -1016,7 +1030,12 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   if (run.exitCode !== 0 && run.toolMissing !== true && ehFalhaDoRoteiro(run.output)) {
     announce("o roteiro falhou por conta própria (seletor ambíguo ou erro de escrita); reescrevendo");
 
-    await reescrever(alvos(fluxosQueFalharam(run.output, ordem)), [`o roteiro anterior falhou assim:\n${tail(run.output, 25)}`], nomesNaoDefinidos(run.output));
+    const falhas = await reescrever(alvos(fluxosQueFalharam(run.output, ordem)), [`o roteiro anterior falhou assim:\n${tail(run.output, 25)}`], nomesNaoDefinidos(run.output));
+    if (falhas.length > 0) return {
+      green: false, scriptFailed: true, output: run.output,
+      falharam: fluxosQueFalharam(run.output, ordem),
+      cause: `O roteirista não entregou uma correção executável. Isto é do harness; não executar de novo o roteiro antigo nem devolver o produto ao executor.\n${falhas.join("\n")}`,
+    };
 
     run = await rodar();
     if (run.exitCode !== 0 && ehFalhaDoRoteiro(run.output)) {
@@ -1107,8 +1126,8 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
      * Antes do executor, a triagem: de quem é esta falha?
      *
      * ROTEIRO é resolvido aqui, sem gastar ciclo: o roteiro é reescrito com o
-     * retrato da página e o motivo, e a passagem roda de novo — UMA vez por
-     * chamada do gate. PRODUTO e CRITERIO chegam ao executor como correção, não
+     * retrato da página e o motivo, e a passagem roda de novo — até duas correções
+     * por passo declarado. PRODUTO e CRITERIO chegam ao executor como correção, não
      * como rastro.
      */
     const triar = async (corrida: FlowRun): Promise<{ triagem: Triagem; workflow: SkeletonWorkflow } | null> => {
@@ -1136,21 +1155,73 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
     };
 
     let triada = await triar(run);
-    if (triada?.triagem.tipo === "ROTEIRO") {
-      const retrato = (await retratosDaFalha(options.projectRoot)).get(flowScriptName(triada.workflow.number)) ?? "";
-      announce(`o roteiro do fluxo ${triada.workflow.number} é que está errado; reescrevendo sem gastar ciclo do executor`);
-      await reescrever(
-        [triada.workflow],
-        [
-          `a triagem leu a falha e diz que o ROTEIRO está errado, não o produto: ${triada.triagem.correcao}`,
-          ...(triada.triagem.evidencia !== "" ? [`evidência: ${triada.triagem.evidencia}`] : []),
-          ...(retrato !== "" ? [`a página, no instante da falha, era esta — escreva contra ela:\n${retrato}`] : []),
-        ],
-        nomesNaoDefinidos(run.output),
-      );
+    const correcoesDoRoteiro = new Set<string>();
+    const correcoesPorPasso = new Map<string, number>();
+    let passoEmFalha = "";
+    while (triada?.triagem.tipo === "ROTEIRO") {
+      const numero = Number(/›\s*passo\s+(\d+)(?:\s*:|\s*$)/im.exec(run.output)?.[1]);
+      const passo = Number.isSafeInteger(numero) && numero >= 1 && numero <= triada.workflow.steps.length ? numero : null;
+      passoEmFalha = passo === null ? `fluxo ${triada.workflow.number} (passo não identificado)` : `passo ${passo} do fluxo ${triada.workflow.number}`;
+      const endereco = JSON.stringify([triada.workflow.number, passo]);
+      const tentativas = correcoesPorPasso.get(endereco) ?? 0;
+      if (tentativas >= 2) break;
+      const chave = JSON.stringify([endereco, triada.triagem.onde, triada.triagem.correcao]);
+      if (correcoesDoRoteiro.has(chave)) break;
+      correcoesDoRoteiro.add(chave);
+      correcoesPorPasso.set(endereco, tentativas + 1);
+      const caminhoDoRoteiro = join(pasta, flowScriptName(triada.workflow.number));
+      const antesDaCorrecao = await readFile(caminhoDoRoteiro, "utf8");
+      let patchAplicado = false;
+      const patch = triada.triagem.patch;
+      if (patch) {
+        const arquivo = join(pasta, flowScriptName(triada.workflow.number));
+        const anterior = await readFile(arquivo, "utf8");
+        const posicao = anterior.indexOf(patch.before);
+        if (posicao >= 0 && anterior.indexOf(patch.before, posicao + 1) === -1) {
+          const corrigido = anterior.slice(0, posicao) + patch.after + anterior.slice(posicao + patch.before.length);
+          if (checkFlowScript(corrigido, triada.workflow, nomesNaoDefinidos(run.output)).length === 0) {
+            await writeFile(arquivo, corrigido, "utf8");
+            patchAplicado = true;
+            announce(`correção pontual do roteiro do fluxo ${triada.workflow.number} aplicada; nenhuma nova chamada ao roteirista`);
+          }
+        }
+      }
+      if (!patchAplicado) {
+        const retrato = (await retratosDaFalha(options.projectRoot)).get(flowScriptName(triada.workflow.number)) ?? "";
+        announce(`o roteiro do fluxo ${triada.workflow.number} é que está errado; reescrevendo sem gastar ciclo do executor`);
+        const falhas = await reescrever(
+          [triada.workflow],
+          [
+            `a triagem leu a falha e diz que o ROTEIRO está errado, não o produto: ${triada.triagem.correcao}`,
+            ...(triada.triagem.evidencia !== "" ? [`evidência: ${triada.triagem.evidencia}`] : []),
+            ...(retrato !== "" ? [`a página, no instante da falha, era esta — escreva contra ela:\n${retrato}`] : []),
+          ],
+          nomesNaoDefinidos(run.output),
+        );
+        if (falhas.length > 0) return {
+          green: false, scriptFailed: true, output: run.output,
+          falharam: fluxosQueFalharam(run.output, ordem), triagem: triada.triagem,
+          cause: `O roteirista não entregou uma correção executável. Isto é do harness; não executar de novo o roteiro antigo nem devolver o produto ao executor.\n${falhas.join("\n")}`,
+        };
+      }
+      if (await readFile(caminhoDoRoteiro, "utf8") === antesDaCorrecao) return {
+        green: false, scriptFailed: true, output: run.output,
+        falharam: fluxosQueFalharam(run.output, ordem), triagem: triada.triagem,
+        cause: `O roteirista não alterou o roteiro que já falhou no ${passoEmFalha}. Isto é do harness; ` +
+          `não repetir o mesmo teste nem reconstruir o produto.\n${causaDaTriagem(triada.triagem, tail(run.output))}`,
+      };
       run = await rodar();
       if (run.exitCode === 0) return { green: true, skipped: "", scripts, output: run.output };
       triada = await triar(run);
+    }
+
+    if (triada?.triagem.tipo === "ROTEIRO") {
+      return {
+        green: false, scriptFailed: true, output: run.output,
+        falharam: fluxosQueFalharam(run.output, ordem), triagem: triada.triagem,
+        cause: `O roteiro continua incorreto após ${correcoesDoRoteiro.size} correção(ões); a falha está no ${passoEmFalha}. Isto é do harness: ` +
+          `não pedir ao executor que altere produto aprovado por causa deste roteiro.\n${causaDaTriagem(triada.triagem, tail(run.output))}`,
+      };
     }
 
     /*

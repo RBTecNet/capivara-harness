@@ -18,6 +18,8 @@
  */
 
 import { languageBlock } from "./language.js";
+import { planningScopeBlock } from "./planning-scope.js";
+import { MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE } from "../authoring/ledger.js";
 
 export interface AmendContext {
   language: string;
@@ -26,13 +28,20 @@ export interface AmendContext {
   findings: { where: string; problem: string; fix: string }[];
   /** O pedido do desenvolvedor, verbatim. Ausente mantém o comportamento antigo. */
   request?: string;
+  /** Autoridade atual, inclusive respostas obtidas durante auditoria e ensaio. */
+  decisions?: string[];
+  slice?: string;
+  phaseNumber?: number;
+  grammar?: string;
   /** O que a tentativa anterior mudou sem ter sido pedido, quando houve. */
   drift?: string[];
+  relatedPhases?: readonly string[];
 }
 
 export function amendPhasePrompt(context: AmendContext): string {
   return [
     languageBlock(context.language),
+    planningScopeBlock(),
     "",
     "You are amending a phase of an execution plan. You are not writing one.",
     ...(context.request
@@ -54,6 +63,30 @@ export function amendPhasePrompt(context: AmendContext): string {
         ]
       : []),
     "",
+    ...(context.decisions ? [
+      "## Confirmed decisions",
+      "These are ACCEPTED answers, including decisions made after the skeleton. Where a decision",
+      "and the slice disagree, the confirmed decision wins. Do not reopen or undo it.",
+      ...context.decisions.map(decision => `- ${decision}`),
+      "",
+    ] : []),
+    ...(context.slice ? ["## This phase's slice", context.slice, ""] : []),
+    ...(context.relatedPhases?.length ? [
+      "## Related phases (read-only)",
+      "These are the CURRENT contracts named by the findings. Reuse their exports, paths and types.",
+      "They are references, not output: return only the phase being amended. Keep its other tasks unchanged.",
+      ...context.relatedPhases,
+      "",
+    ] : []),
+    ...(context.grammar ? [
+      "## Task grammar and limits",
+      `You are correcting phase ${context.phaseNumber}. Return only its tasks; the harness owns its envelope.`,
+      `At most ${MAX_TASKS_PER_PHASE} tasks in this phase and ${MAX_CRITERIA_PER_TASK} criteria per task.`,
+      "Keep the structural labels byte-exact. Do not introduce an extra level of sub-phase numbering.",
+      "The following is a grammar example, not an extra task to include:",
+      context.grammar,
+      "",
+    ] : []),
     "## What you must return",
     "The phase below, complete, with the corrections applied and NOTHING else changed.",
     "",

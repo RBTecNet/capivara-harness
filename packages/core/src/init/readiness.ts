@@ -1,7 +1,7 @@
 /**
  * O gate RALPH READY.
  *
- * Nove itens, todos verdadeiros ou o run termina em NOT READY — retomável e
+ * Dez itens, todos verdadeiros ou o run termina em NOT READY — retomável e
  * dizendo exatamente o que falta. Nunca "quase pronto": um pacote quase pronto
  * entregue ao loop vira uma aplicação quase feita, descoberta fase a fase, ao
  * preço de uma chamada de modelo por descoberta.
@@ -9,6 +9,7 @@
 
 import { checkCoverage, checkDesignRefs, checkStamp, parsePhases } from "../contract/index.js";
 import type { ContractError, CoverageSources, StampInput } from "../contract/index.js";
+import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE } from "../authoring/ledger.js";
 
 /** Os artefatos que um run do ciclo publica, na ordem em que nascem. */
 export const INIT_ARTIFACTS = ["skeleton.md", "project-phases.md"] as const;
@@ -76,6 +77,22 @@ export function evaluateReadiness(input: ReadinessInput): Readiness {
   if (parsed && !parsed.ok) contractErrors = parsed.errors;
 
   const document = parsed?.ok === true ? parsed.document : null;
+
+  const dimensionamento = document?.phases.flatMap(phase => {
+    const criteria = phase.tasks.reduce((total, task) => total + task.acceptanceCriteria.length, 0);
+    return [
+      ...(phase.tasks.length > MAX_TASKS_PER_PHASE ? [`Phase ${phase.number}: ${phase.tasks.length} tasks; limite ${MAX_TASKS_PER_PHASE}`] : []),
+      ...(criteria > MAX_CRITERIA_PER_PHASE ? [`Phase ${phase.number}: ${criteria} critérios; limite ${MAX_CRITERIA_PER_PHASE}`] : []),
+      ...phase.tasks.filter(task => task.acceptanceCriteria.length > MAX_CRITERIA_PER_TASK)
+        .map(task => `P${phase.number}.T${task.index}: ${task.acceptanceCriteria.length} critérios; limite ${MAX_CRITERIA_PER_TASK}`),
+    ];
+  }) ?? [];
+  checks.push({
+    id: "dimensionamento",
+    title: "As fases e tarefas respeitam os limites de dimensionamento",
+    passed: document !== null && dimensionamento.length === 0,
+    detail: document === null ? "não há plano válido para conferir" : dimensionamento.join("\n"),
+  });
 
   const stampErrors = document ? checkStamp(document, input.stampInputs) : [];
   checks.push({

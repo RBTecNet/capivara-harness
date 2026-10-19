@@ -32,16 +32,16 @@ executa não podem divergir.
 - [ ] **Task:** <o que construir>
   - **Acceptance criteria:**
     - <condição concreta e validável>
-  - **Feature tests:** <nome do teste → a regra de negócio que ele afirma>
   - **Design ref:** <caminho sob o diretório de design>
   - **Traces:** US-1.1, users, workflow 2
 
 ## Open Questions
 ```
 
-`**Feature tests:**` e `**Design ref:**` são opcionais: o primeiro é exigido de
-tasks com lógica de negócio e o segundo de tasks de tela, e essa exigência
-pertence ao auditor, não ao parser. Os rótulos são casados literalmente e nunca
+O planejamento descreve entregas e critérios observáveis. O validador escolhe
+as verificações durante o build. `**Feature tests:**` é lido em planos existentes
+como sugestão, sem obrigar nomes ou arquivos. `**Design ref:**` é opcional e
+só aponta para artefato de design existente. Os rótulos são literais e nunca
 são traduzidos; a indentação dos sub-itens é livre.
 
 ## Invariantes

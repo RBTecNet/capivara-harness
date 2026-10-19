@@ -88,7 +88,7 @@ async function addonIncompativel(pasta: string, sonda: (caminho: string) => Prom
 
 export async function inspecionarInstalacaoNode(
   projectRoot: string,
-  opcoes: { runtime?: RuntimeNode; sondar?: (caminho: string) => Promise<string> } = {},
+  opcoes: { runtime?: RuntimeNode; sondar?: false | ((caminho: string) => Promise<string>) } = {},
 ): Promise<InstalacaoNode> {
   const manifesto = await identidadeDoManifesto(projectRoot);
   if (manifesto === null) return { estado: "nao-se-aplica", motivo: "sem package.json" };
@@ -113,7 +113,7 @@ export async function inspecionarInstalacaoNode(
   }
   // Um npm rebuild externo pode manter a marca e trocar só o binário nativo.
   // A identidade confere o ambiente; a sonda limitada confere a ABI instalada.
-  const addon = await addonIncompativel(pasta, opcoes.sondar ?? sondarAddon, { restantes: 16, ate: Date.now() + 4_000 });
+  const addon = opcoes.sondar === false ? null : await addonIncompativel(pasta, opcoes.sondar ?? sondarAddon, { restantes: 16, ate: Date.now() + 4_000 });
   if (addon) return { estado: "incompativel", motivo: `addon compilado para outra ABI Node: ${addon}` };
   return { estado: "compativel", motivo: marca?.versao === 1 ? "instalação conferida para este runtime e manifesto" : "instalação anterior sem incompatibilidade conhecida" };
 }

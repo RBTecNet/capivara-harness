@@ -8,6 +8,7 @@
  */
 
 import { languageBlock } from "./language.js";
+import { functionalAcceptanceBlock, proportionateChecksBlock } from "./acceptance-policy.js";
 
 export interface BuilderContext {
   language: string;
@@ -17,6 +18,7 @@ export interface BuilderContext {
   /** Os testes de navegador do projeto, quando o manifesto os declara (§113). Não é o do gate 2. */
   e2eCommand?: string;
   phaseMarkdown: string;
+  sharedContract?: string;
   /**
    * As skills desta fase, já escolhidas por área e materializadas no disco.
    *
@@ -185,13 +187,13 @@ export function testBlock(context: BuilderContext): string {
   const lines = [
     "",
     "## This project's test command",
-    "Always run the suite with:",
+    "The harness independently runs the full suite with:",
     "",
     `    ${context.testCommand}`,
     "",
-    "This is the exact command the gate uses to validate the phase: before you finish, it has to pass.",
-    "Run anything else the project offers to check your work as well — its browser or end-to-end",
-    "tests, a single file, a watch mode. Write a browser test and run it; one that never ran is a guess.",
+    "This is the exact command the gate uses to validate the phase after your handoff.",
+    "Use focused checks for changed code and relevant browser or end-to-end tests. Do not add a watch mode.",
+    "Reuse existing browser coverage and implement concrete checks requested by the independent validator; do not design a speculative test suite.",
     "A test from an earlier phase that contradicts what this phase requires is out of date: update it.",
   ];
   if (context.containerized) {
@@ -205,11 +207,47 @@ export function testBlock(context: BuilderContext): string {
       "",
       `    ${context.e2eCommand}`,
       "",
-      "Run them whenever you write or change one, and again before you finish. The gate's command",
-      "above does not run them, so this is the only time they run before the verifier reads them.",
+      "Run them when affected and not already covered: inspect the project's scripts before running a duplicate suite.",
     );
   }
   return lines.join("\n");
+}
+
+export function processBlock(): string {
+  return [
+    "",
+    "## Processes started by this session or its tests",
+    "Every server started for verification must be cleaned up, including when startup or an assertion fails.",
+    "Start the actual executable directly, or use a dedicated process group and terminate that group.",
+    "Killing an npm/npx wrapper does not guarantee its server child exits. In Node tests, prefer",
+    "process.execPath with the local entrypoint instead of spawning npx as the server owner.",
+    "Use try/finally or teardown to stop your own server, and await its exit before restarting on the same port.",
+    "Prefer an OS-assigned free port. Never kill unrelated processes by name or by occupied port.",
+    "A persistence test must still restart the actual application and verify the stored data; do not",
+    "remove that assertion, skip the test or leave a watcher/server running to get a green result.",
+    "",
+  ].join("\n");
+}
+
+/** O executor entrega a implementação; os gates independentes julgam se ela basta. */
+export function completionBlock(): string {
+  return [
+    "",
+    "## Finish and hand off to independent verification",
+    functionalAcceptanceBlock(),
+    proportionateChecksBlock(),
+    "Implement every acceptance criterion and its required positive and negative test cases.",
+    "After the relevant checks pass, finish using this role's required output protocol so the harness can run its independent gates.",
+    "Do not keep inventing new verification infrastructure after completing the phase.",
+    "Mutation-testing frameworks, driver interception, loader monkey-patching and persistent test telemetry",
+    "are outside this task unless an explicit requirement or an independent finding makes them necessary.",
+    "A statement that tests must use an isolated database requires correct isolation and evidence of it;",
+    "it does not by itself require a system that detects every hypothetical malicious test.",
+    "If a focused check reveals a real defect against a criterion, fix it and rerun the affected checks.",
+    "Never drop a requirement, weaken an assertion or skip a failing test to finish sooner.",
+    "Your tests and completion marker are evidence for the gates, not approval of the phase.",
+    "",
+  ].join("\n");
 }
 
 export function implementPrompt(context: BuilderContext): string {
@@ -217,9 +255,12 @@ export function implementPrompt(context: BuilderContext): string {
     languageBlock(context.language),
     "",
     "You are a senior developer implementing one phase of this project.",
+    ...(context.sharedContract ? ["## Published shared contracts", context.sharedContract] : []),
     "",
     discoveryPreamble(),
     testBlock(context),
+    processBlock(),
+    completionBlock(),
     "",
     "## Dependencies and network",
     "You may install dependencies and download scaffolding with the project's package manager.",
@@ -246,10 +287,10 @@ export function implementPrompt(context: BuilderContext): string {
     "",
     "For each item:",
     "1. Write the complete code. No TODO, no placeholder, no stub.",
-    "2. Create the tests the task lists, following the project's test framework.",
-    "3. Run the suite with the project's test command.",
-    "4. When a test fails, fix the code and run it again.",
-    "5. Move to the next item only when its tests pass.",
+    "2. Reuse or add focused tests for the task's required behaviour, following the project's framework.",
+    "3. Run the relevant focused checks for that change, not the complete suite for every item.",
+    "4. Fix an actual product failure; correct a demonstrably wrong test expectation while preserving its public scenario.",
+    "5. Preserve passing work and proceed once the affected behaviour is verified.",
     "A test must assert the behaviour and failure mode the acceptance criterion actually names.",
     "A matching test name or an alert's existence is not enough: when the criterion requires a",
     "localized network error, reject the real fetch or use `route.abort()` and assert the message;",
@@ -258,9 +299,9 @@ export function implementPrompt(context: BuilderContext): string {
     "## Mandatory rules",
     "- Use the commands, the test runner and the tooling the project already adopted.",
     "- Tests, fixtures and factories create every dependency they need.",
-    "- Class, file and method names follow exactly what the phase describes.",
+    "- Preserve required entrypoints and public contracts; equivalent internal names or structure do not justify rework.",
     "- Never skip an item marked [ ].",
-    "- At the end, verify that the whole suite passes.",
+    "- Finish after relevant regression checks; the harness runs the complete suite independently.",
     "",
     "When the phase is genuinely finished, end your answer with this line, alone:",
     BUILDER_COMPLETE_MARKER,
@@ -280,9 +321,12 @@ export function fixPrompt(context: FixContext): string {
     languageBlock(context.language),
     "",
     "You are a senior developer completing a partially implemented phase.",
+    ...(context.sharedContract ? ["## Published shared contracts", context.sharedContract] : []),
     "",
     discoveryPreamble(),
     testBlock(context),
+    processBlock(),
+    completionBlock(),
     flowStartBlock(context),
     "",
     "## Situation",
@@ -302,7 +346,7 @@ export function fixPrompt(context: FixContext): string {
     "  is a localized error, assert the displayed message/language, not just the presence of an alert.",
     "- Do not weaken assertions, skip checks, or substitute an easier scenario to obtain a green test.",
     "- Leave no TODO, no placeholder and no skipped test.",
-    "- Run the project's test suite at the end and make sure it passes.",
+    "- Run focused checks for the actual fix and hand off for the harness's independent full suite.",
     "",
     `## Why it failed (${context.gate})`,
     "````",
@@ -354,6 +398,8 @@ export function acceptancePrompt(context: BuilderContext & { cause: string; atte
     "",
     discoveryPreamble(),
     testBlock(context),
+    processBlock(),
+    completionBlock(),
     "",
     "## Situation",
     "Every phase is implemented and the test suite is green, but the product failed operational",
@@ -383,7 +429,7 @@ export function acceptancePrompt(context: BuilderContext & { cause: string; atte
 export interface InstallContext {
   language: string;
   /** O que falta, com o executável que prova a presença. */
-  missing: { technology: string; binary: string }[];
+  missing: readonly { technology: string; binary: string; checkArgs?: string[]; installHint?: string; evidence?: string }[];
 }
 
 /**
@@ -401,23 +447,32 @@ export function installPrompt(context: InstallContext): string {
   return [
     languageBlock(context.language),
     "",
-    "You are installing system prerequisites on this machine, and doing nothing else.",
+    "You are preparing the declared prerequisites, and doing nothing else.",
     "",
     "## What is missing",
-    ...context.missing.map((item) => `- ${item.technology} — proven present when \`which ${item.binary}\` finds it`),
+    ...context.missing.flatMap(item => [
+      `- ${item.technology} — readiness check (executable and arguments, no shell): ${JSON.stringify([item.binary, ...(item.checkArgs ?? [])])}`,
+      ...(item.installHint ? [`  preparation: ${item.installHint}`] : []),
+      ...(item.evidence ? [`  failed readiness evidence: ${item.evidence}`] : []),
+    ]),
     "",
     "## Your entire task",
     "Install exactly those, using the package manager this system already uses. Start whatever",
     "service each one needs to be usable. Then stop.",
+    "For a project npm dependency, use the workspace named by the plan/preparation hint. You may create",
+    "a missing minimal package.json containing only the listed dependencies, then install them there.",
+    "Keep existing dependency versions and application files intact. Do not move Git refs or commit.",
     "",
     "## What you must not do",
     "- Do not install anything that is not on the list above, however useful it looks.",
-    "- Do not create, edit or delete any file of the project. Not a config, not a fixture, not a",
-    "  migration. The project has not started being built yet.",
+    "- Apart from that minimal dependency manifest and its generated lock/node_modules, do not create,",
+    "  edit or delete project files: no source, config, fixture or migration.",
     "- Do not implement, scaffold or prepare any part of the application.",
     "- Do not change global configuration beyond what installing these requires.",
+    "- Never replace, wrap or patch a third-party CLI to make a readiness check pass. If the check",
+    "  itself is invalid, report its exact failure and stop; do not change the tool being checked.",
     "",
-    "Your report is not evidence: when you finish, the harness runs `which` again and that is what",
+    "Your report is not evidence: when you finish, the harness repeats the declared readiness check and that is what",
     "decides. Say plainly what you installed and what failed, including the command that failed.",
   ].join("\n");
 }

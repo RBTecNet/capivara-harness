@@ -25,6 +25,16 @@ describe("provider por papel", () => {
     expect(unresolvedRoles(roles, BUILD_ROLES)).toEqual([]);
   });
 
+  it("API com provider mas sem modelo ainda exige escolha; CLIs podem usar o padrão", () => {
+    const roles = rolesFromFlags({ provider: "deepseek", auditorModel: "modelo-fixo" });
+    expect(unresolvedRoles(roles, INIT_ROLES)).toEqual(["writer", "verifier"]);
+    expect(unresolvedRoles(rolesFromFlags({ provider: "deepseek", model: "modelo-api" }), INIT_ROLES)).toEqual([]);
+    const message = renderUnresolved("init", ["writer", "verifier"], roles);
+    expect(message).toContain("falta escolher o modelo");
+    expect(message).toContain("providers models deepseek");
+    expect(message).not.toContain("não tem provider");
+  });
+
   it("o init não exige executor, e o build não exige escritor", () => {
     expect(unresolvedRoles(rolesFromFlags({ builderProvider: "codex" }), BUILD_ROLES)).toEqual(["verifier"]);
     expect(unresolvedRoles(rolesFromFlags({ provider: "codex" }), INIT_ROLES)).toEqual([]);

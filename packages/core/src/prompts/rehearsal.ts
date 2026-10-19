@@ -27,6 +27,7 @@
 
 import type { PhasesDocument } from "../contract/index.js";
 import { languageBlock } from "./language.js";
+import { planningScopeBlock } from "./planning-scope.js";
 import { desgrudarChaves } from "../contract/protocolo.js";
 
 export const REHEARSAL_HEADER = "CAPIVARA_REHEARSAL";
@@ -79,6 +80,7 @@ export function rehearsalPrompt(context: RehearsalContext): string {
 
   return [
     languageBlock(context.language),
+    planningScopeBlock(),
     "",
     REHEARSAL_HEADER,
     "",
@@ -131,6 +133,15 @@ export function rehearsalPrompt(context: RehearsalContext): string {
     "- Doubt about whether the criterion can be OBSERVED at all is your problem. Say so.",
     "- A criterion that depends on code, files, routes, schemas or tests that do not exist yet is",
     "  OBSERVABLE: that is exactly what the phase is going to create.",
+    "- Earlier phases are implemented before their dependants. Their files and the Git baseline",
+    "  are available to the build verifier. Comparing the foundation before and after a module,",
+    "  checking imports, or reading an existing .env.example is OBSERVABLE. The lack of an exact",
+    "  list of every future foundation file here is not evidence of impossibility.",
+    "- You judge the possibility of proof, not which phase owns a file or whether a technique is",
+    "  your preferred implementation. Those are audit questions, not UNOBSERVABLE verdicts.",
+    "- UNSATISFIABLE requires an actual contradiction with a confirmed decision. Cite that decision;",
+    "  missing detail, an illustrative example, or an implementation choice left open is not a",
+    "  decision denying the criterion. For a criterion on another repository file, inspection is proof.",
     "",
     "## The developer's prompt",
     context.request,

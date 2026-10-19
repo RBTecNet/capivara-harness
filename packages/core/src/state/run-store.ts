@@ -9,13 +9,14 @@
 
 import { readFile } from "node:fs/promises";
 import { sha12 } from "../contract/stamps.js";
+import { PLANNING_CONTRACT } from "../contract/environment.js";
 import { writeAtomic } from "./atomic.js";
 import { runPaths } from "./paths.js";
 
 export const RUN_CONTRACT = "capivara-run/v1" as const;
 
 /** `survey` levanta uma aplicação existente; não constrói nem documenta produto novo. */
-export type RunCommand = "init" | "build" | "survey";
+export type RunCommand = "init" | "plan" | "build" | "survey";
 
 export type RunStage =
   | "preflight"
@@ -119,5 +120,5 @@ export async function readRunState(projectRoot: string, runId: string): Promise<
  * a um plano diferente.
  */
 export function runIdFor(command: RunCommand, identity: string): string {
-  return `${command}-${sha12(identity)}`;
+  return `${command}-${sha12(command === "survey" ? identity : `${PLANNING_CONTRACT}\n${identity}`)}`;
 }

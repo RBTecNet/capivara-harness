@@ -20,14 +20,16 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { sha12 } from "../contract/stamps.js";
-import { adicionarExatamente, admitirArvore, admitirIntervalo, alteracoesParaCommit, commitAdmitido, lerStatus, type Bloqueio } from "./admissao.js";
+import { adicionarExatamente, admitirArvore, admitirIntervalo, alteracoesParaCommit, artefatosLocaisIgnorados, lerStatus, commitAdmitido, type Bloqueio } from "./admissao.js";
 import { FLOW_RESULTS, FLOWS_DIR } from "./flows.js";
-import { inspecionarInstalacaoNode, MARCA_DE_INSTALACAO_NODE } from "./instalacao-node.js";
+import { inspecionarInstalacaoNode } from "./instalacao-node.js";
+import { bancosDeclarados } from "./passagem.js";
+import { semearAmbiente } from "./ambiente.js";
 
 const run = promisify(execFile);
 const GRANDE = { maxBuffer: 64 * 1024 * 1024 };
@@ -90,6 +92,86 @@ async function copiarPasta(origem: string, destino: string): Promise<void> {
   } catch {
     await cp(origem, destino, { recursive: true, verbatimSymlinks: true, force: true });
   }
+}
+
+/** O mesmo HEAD integrado, com arquivos e configuração descartáveis para a suíte. */
+export async function abrirValidacaoIntegrada(projectRoot: string, recovery: string): Promise<{
+  dir: string;
+  atualizarDependencias: () => Promise<void>;
+  fontesAlteradas: () => Promise<string[]>;
+  fechar: () => Promise<void>;
+}> {
+  const parent = await mkdtemp(join(tmpdir(), "capivara-integrated-check-"));
+  const dir = join(parent, "project");
+  const atualizarDependencias = async (): Promise<void> => {
+    const { stdout } = await run("git", ["ls-files", "-z", "--", "package.json", "**/package.json"], { cwd: dir, ...GRANDE });
+    const modules = new Set(["node_modules", ...stdout.split("\0").filter(Boolean).map(path => join(dirname(path), "node_modules"))]);
+    for (const path of modules) {
+      if (!(await existe(join(projectRoot, path)))) continue;
+      await rm(join(dir, path), { recursive: true, force: true });
+      await mkdir(dirname(join(dir, path)), { recursive: true });
+      await copiarPasta(join(projectRoot, path), join(dir, path));
+    }
+  };
+  try {
+    await git(projectRoot, ["worktree", "add", "-q", "--detach", dir, "HEAD"]);
+    await atualizarDependencias();
+    // Não copiar .env real: um teste que remove overrides não pode acabar no
+    // banco/servidor do usuário. O contrato público configura esta cópia.
+    await semearAmbiente(dir);
+  } catch (error) {
+    await git(projectRoot, ["worktree", "remove", "--force", dir]).catch(() => undefined);
+    await rm(parent, { recursive: true, force: true });
+    throw error;
+  }
+  const initial = new Set((await lerStatus(dir)).map(entry => entry.caminho));
+  const expectedHead = await git(dir, ["rev-parse", "HEAD"]);
+  const fontesAlteradas = async (): Promise<string[]> => {
+    const paths = await alteradosNaPrincipal(dir);
+    if ((await git(dir, ["rev-parse", "HEAD"])) !== expectedHead) {
+      paths.push("HEAD da cópia de validação", ...(await git(dir, ["diff", "--name-only", expectedHead, "HEAD"])).split("\n").filter(Boolean));
+    }
+    return [...new Set(paths)].sort();
+  };
+  const envSnapshot = new Map<string, string>();
+  for (const name of await readdir(dir)) if (name === ".env" || name.startsWith(".env.")) {
+    envSnapshot.set(name, await hashDoArquivo(join(dir, name)));
+  }
+  const databasePaths: string[] = [];
+  for (const value of Object.values(await bancosDeclarados(dir))) {
+    const path = relative(dir, resolve(dir, value));
+    if (path && path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path)) {
+      for (const suffix of ["", "-journal", "-wal", "-shm"]) databasePaths.push(path + suffix);
+    }
+  }
+  return {
+    dir, atualizarDependencias,
+    fontesAlteradas,
+    fechar: async () => {
+      const changed = await fontesAlteradas();
+      const candidates = new Set([
+        ...changed,
+        ...(await lerStatus(dir)).filter(entry => entry.naoVersionado && !initial.has(entry.caminho)).map(entry => entry.caminho),
+        ...databasePaths,
+      ]);
+      for (const name of await readdir(dir)) if (name === ".env" || name.startsWith(".env.")) {
+        if (envSnapshot.get(name) !== await hashDoArquivo(join(dir, name))) candidates.add(name);
+      }
+      const present: string[] = [];
+      for (const path of candidates) if (!path.split(/[\\/]/).includes("node_modules") && await existe(join(dir, path))) present.push(path);
+      try {
+        await copiarComProva(dir, present, recovery);
+        if (present.length || changed.length) {
+          await mkdir(recovery, { recursive: true });
+          await writeFile(join(recovery, "manifest.json"), JSON.stringify({ sourcesChanged: changed, files: await Promise.all(present.map(async path => ({ path, sha256: await hashDoArquivo(join(recovery, path)) }))) }, null, 2) + "\n");
+        }
+      } catch (error) {
+        throw new Error(`não retirei a cópia de validação ${dir}: falhou a preservação em ${recovery}: ${String(error)}`);
+      }
+      await git(projectRoot, ["worktree", "remove", "--force", dir]);
+      await rm(parent, { recursive: true, force: true });
+    },
+  };
 }
 
 /**
@@ -209,10 +291,31 @@ export async function abrirWorktree(
   runId: string,
   phaseId: string,
   environment: NodeJS.ProcessEnv = process.env,
+  environmentApproved = false,
 ): Promise<{ worktree: Worktree; copiado: string[]; naoCopiado: string[]; retomado: ParcialRetomado | null }> {
   const base = await git(projectRoot, ["rev-parse", "HEAD"]);
   const branch = branchDaFase(runId, phaseId);
   const dir = join(pastaDosWorktrees(projectRoot, runId, environment), phaseId);
+  let artefatosRecuperados: { pasta: string; presentes: string[]; removidos: string[] } | null = null;
+  if (await existe(dir)) {
+    const existingBranch = await git(dir, ["branch", "--show-current"]).catch(() => "");
+    if (existingBranch !== branch) throw new Error(`a pasta ${dir} não está no branch esperado; foi preservada sem limpeza`);
+    const gerados = [...await artefatosLocaisIgnorados(dir, (await lerStatus(dir)).map(entry => entry.caminho))];
+    // Guardar bytes fora do commit do produto antes de remover uma árvore interrompida.
+    if (gerados.length > 0) {
+      const pasta = join(projectRoot, ".capivara/runs", runId, "recuperacao", `${phaseId}-artefatos-${Date.now()}`);
+      const presentes: string[] = [], removidos: string[] = [];
+      for (const path of gerados) (await existe(join(dir, path)) ? presentes : removidos).push(path);
+      if (presentes.length > 0) await copiarComProva(dir, presentes, pasta);
+      artefatosRecuperados = { pasta, presentes, removidos };
+    }
+    const recovered = await guardarParcial(
+      { dir, branch, base },
+      `wip(${phaseId}): recuperação de árvore interrompida antes da retomada`,
+      join(projectRoot, ".capivara", "runs", runId, "recuperacao", `${phaseId}-interrompida-${Date.now()}`),
+    );
+    if (recovered.preservarArvore) throw new Error(`o parcial de ${phaseId} não pôde ser guardado; a árvore ${dir} foi preservada: ${recovered.motivo ?? "falha de recuperação"}`);
+  }
   const sobra = await guardarSobra(projectRoot, branch);
   await limparSobra(projectRoot, dir, branch);
   await mkdir(join(dir, ".."), { recursive: true });
@@ -228,7 +331,7 @@ export async function abrirWorktree(
 
   const copiado: string[] = [];
   const naoCopiado: string[] = [];
-  for (const pasta of [join(".capivara", "skills"), FLOWS_DIR]) {
+  for (const pasta of [join(".capivara", "skills"), join(".capivara", "node_modules"), FLOWS_DIR]) {
     if (!(await existe(join(projectRoot, pasta)))) continue;
     await mkdir(join(dir, pasta, ".."), { recursive: true });
     await copiarPasta(join(projectRoot, pasta), join(dir, pasta));
@@ -257,7 +360,7 @@ export async function abrirWorktree(
     copiado.push(arquivo);
   }
   if ((await existe(join(projectRoot, "node_modules"))) && !(await existe(join(dir, "node_modules")))) {
-    const instalacao = await inspecionarInstalacaoNode(projectRoot);
+    const instalacao = await inspecionarInstalacaoNode(projectRoot, environmentApproved ? { sondar: false } : {});
     if (instalacao.estado === "incompativel") {
       naoCopiado.push(`node_modules: ${instalacao.motivo}`);
     } else {
@@ -266,6 +369,12 @@ export async function abrirWorktree(
     }
   }
 
+  if (artefatosRecuperados) {
+    const foraDeDependencias = (path: string): boolean => !path.split("/").includes("node_modules");
+    const paths = artefatosRecuperados.presentes.filter(foraDeDependencias);
+    if (paths.length > 0) await copiarComProva(artefatosRecuperados.pasta, paths, dir);
+    for (const path of artefatosRecuperados.removidos.filter(foraDeDependencias)) await rm(join(dir, path), { force: true });
+  }
   return { worktree: { dir, branch, base }, copiado, naoCopiado, retomado };
 }
 
@@ -482,7 +591,7 @@ export async function desfazerIntegracao(projectRoot: string, antes: string): Pr
 
 /** Os caminhos do `git status`, sem o plano de controle; `alterados` são os versionados. */
 async function situacaoDaPrincipal(projectRoot: string): Promise<{ alterados: string[]; naoVersionados: string[] }> {
-  const entradas = (await lerStatus(projectRoot)).filter((entrada) => !(entrada.naoVersionado && entrada.caminho === `node_modules/${MARCA_DE_INSTALACAO_NODE}`));
+  const entradas = await alteracoesParaCommit(projectRoot);
   return {
     alterados: entradas.filter((entrada) => !entrada.naoVersionado).map((entrada) => entrada.caminho),
     naoVersionados: entradas.filter((entrada) => entrada.naoVersionado).map((entrada) => entrada.caminho),
@@ -548,16 +657,39 @@ export async function desfazerSemApagar(
   projectRoot: string,
   antes: string,
   opcoes: { naoVersionadosAntes: readonly string[]; guardarEm: string; mensagem: string; pastaDeRecuperacao: string },
-): Promise<{ limpo: true } | { limpo: false; arquivos: string[]; guardado: string; recuperacao: string | null }> {
+): Promise<{ limpo: true; recuperacao?: string; arquivosPreservados?: string[] } | { limpo: false; arquivos: string[]; guardado: string; recuperacao: string | null }> {
+  const jaEstavam = new Set(opcoes.naoVersionadosAntes);
+  const bancosLocais = new Set<string>();
+  for (const value of Object.values(await bancosDeclarados(projectRoot))) {
+    const local = relative(resolve(projectRoot), resolve(projectRoot, value));
+    if (!local || local === ".." || local.startsWith(`..${sep}`) || isAbsolute(local)) continue;
+    for (const suffix of ["", "-journal", "-wal", "-shm"]) bancosLocais.add(local.split(sep).join("/") + suffix);
+  }
+  const preservarExpostos = async (): Promise<string[]> => {
+    // O reset pode remover o .gitignore da fase e expor dados que o status
+    // anterior não via. Só bancos declarados novos, nunca fontes ou dados antigos.
+    const { naoVersionados } = await situacaoDaPrincipal(projectRoot);
+    const exposed = naoVersionados.filter(path => bancosLocais.has(path) && !jaEstavam.has(path));
+    await copiarComProva(projectRoot, exposed, opcoes.pastaDeRecuperacao);
+    for (const path of exposed) {
+      if (await hashDoArquivo(join(projectRoot, path)) !== await hashDoArquivo(join(opcoes.pastaDeRecuperacao, path))) throw new Error(`não removi ${path}: mudou depois da cópia de recuperação`);
+      await rm(join(projectRoot, path));
+    }
+    return exposed;
+  };
+  let revertida = false;
   try {
     await desfazerIntegracao(projectRoot, antes);
-    return { limpo: true };
+    revertida = true;
   } catch {
     // O `--keep` recusou: há alteração no caminho. Segue para guardar e limpar.
   }
+  if (revertida) {
+    const exposed = await preservarExpostos();
+    return { limpo: true, ...(exposed.length > 0 ? { recuperacao: opcoes.pastaDeRecuperacao, arquivosPreservados: exposed } : {}) };
+  }
 
   const { alterados, naoVersionados } = await situacaoDaPrincipal(projectRoot);
-  const jaEstavam = new Set(opcoes.naoVersionadosAntes);
   const novos = naoVersionados.filter((caminho) => !jaEstavam.has(caminho));
   const sensiveis = new Set((await admitirArvore(projectRoot, alterados)).map((bloqueio) => bloqueio.caminho));
   const noCommit = alterados.filter((caminho) => !sensiveis.has(caminho));
@@ -615,7 +747,8 @@ export async function desfazerSemApagar(
   // 4. Só agora: a árvore volta a ser a de antes da integração.
   await git(projectRoot, ["reset", "-q", "--hard", antes]);
   for (const caminho of novos) await rm(join(projectRoot, caminho), { force: true });
-  return { limpo: false, arquivos: [...alterados, ...novos].sort(), guardado, recuperacao };
+  const exposed = await preservarExpostos();
+  return { limpo: false, arquivos: [...new Set([...alterados, ...novos, ...exposed])].sort(), guardado, recuperacao: recuperacao ?? (exposed.length > 0 ? opcoes.pastaDeRecuperacao : null) };
 }
 
 /**
@@ -663,14 +796,20 @@ export async function alteradosNaPrincipal(projectRoot: string): Promise<string[
  * alterado, e a fase seguinte, verde, foi barrada como se o desenvolvedor o
  * tivesse editado.
  *
- * Com lockfile, `npm ci`: instala exatamente o que o lockfile diz e nunca
+ * Com lockfile não ignorado, `npm ci`: instala exatamente o que o lockfile diz e nunca
  * escreve nele — e falha se ele não fechar com o `package.json`, que é defeito
  * da fase e deve reprovar a integração. Sem lockfile, `--no-package-lock`: o
- * `npm install` não cria um arquivo que a fase não trouxe.
+ * `npm install` não cria um arquivo que a fase não trouxe. Um lockfile local
+ * ignorado pelo Git também não é entrega da fase e pode estar desatualizado
+ * só na principal. --no-package-lock não o lê nem o reescreve (§115.4).
  */
 export async function comandoDeInstalacao(projectRoot: string): Promise<string> {
   for (const lockfile of ["package-lock.json", "npm-shrinkwrap.json"]) {
-    if (await existe(join(projectRoot, lockfile))) return "npm ci --no-audit --no-fund --engine-strict";
+    if (!(await existe(join(projectRoot, lockfile)))) continue;
+    // check-ignore não considera arquivos rastreados. Sem Git, seu erro mantém
+    // o lockfile como autoridade, em vez de ignorá-lo por falta de informação.
+    const ignorado = await git(projectRoot, ["check-ignore", "--quiet", "--", lockfile]).then(() => true, () => false);
+    if (!ignorado) return "npm ci --no-audit --no-fund --engine-strict";
   }
   return "npm install --no-audit --no-fund --no-package-lock --engine-strict";
 }

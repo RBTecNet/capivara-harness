@@ -20,6 +20,55 @@ const falhou = (id: string, gate: string, cause: string, cycles = 3): PhaseRepor
 });
 
 describe("relatório do build", () => {
+  it("bloqueio de isolamento não afirma gates verdes nem manda publicar arquivos como se fossem sensíveis", () => {
+    const report = relatorioDoBuild(build({ phases: [{ id: "P01", title: "fundação", outcome: { status: "commit-blocked", bloqueios: [{ caminho: "server/data/app.db", motivo: "árvore principal alterada durante trabalho isolado" }], cause: "a árvore principal mudou durante o trabalho em worktree", cycles: 1 } }] }));
+    if (report.tipo !== "parada") throw new Error("esperava parada");
+    expect(report.parada.oQue).not.toContain("passou nos gates");
+    expect(report.parada.deQuem).not.toContain("sensível");
+    expect(report.parada.paraSeguir.join(" ")).not.toContain("git add -A");
+    expect(report.parada.paraSeguir.join(" ")).not.toContain(".gitignore");
+  });
+  it("preparo do ambiente que falhou antes da primeira fase não é uma decisão pendente", () => {
+    const report = relatorioDoBuild(build({ exitCode: 1, errors: ["a preparação do ambiente falhou antes do desenvolvimento; nenhuma fase foi iniciada. Evidência: logs/environment-preflight.log\nCannot find module"] }));
+    if (report.tipo !== "parada") throw new Error("esperava parada");
+    expect(report.parada.natureza).toBe("ambiente");
+    expect(report.parada.custou).toContain("nenhuma sessão gasta");
+    expect(report.parada.evidencia?.[0]).toContain("environment-preflight.log");
+    expect(report.parada.paraSeguir.join(" ")).toContain("capivara build");
+  });
+
+  it.each(["nada foi julgado por mérito", "Isto é do harness", "O runner de testes do projeto NÃO ESTÁ INSTALADO"])("protocolo inválido de G3 é falha da sessão do modelo, mesmo com texto citado: %s", quoted => {
+    const cause = `O verificador devolveu protocolo inválido após uma recuperação somente-leitura. Resposta inválida: ${quoted}`;
+    const report = relatorioDoBuild(build({ phases: [falhou("P01", "gate 3 — verificação independente", cause, 1)], errors: [cause] }));
+    if (report.tipo !== "parada") throw new Error("esperava parada");
+    expect(report.parada.natureza).toBe("modelo");
+  });
+  it.each(["cota financeira ou teto de tokens solicitado", "configuração de modelo/variante"])("recusa do provider por %s é ambiente e não reprovação do produto", motivo => {
+    const cause = `recusa do provider por ${motivo}; a chamada não entregou resultado e não será repetida automaticamente.\ncausa real`;
+    const report = relatorioDoBuild(build({ phases: [falhou("P01", "gate 0 — engine", cause, 1)], errors: [cause] }));
+    if (report.tipo !== "parada") throw new Error("esperava parada");
+    expect(report.parada.natureza).toBe("ambiente");
+    expect(report.parada.paraSeguir.join(" ")).toContain("ainda precisa passar pelos gates");
+    expect(report.parada.paraSeguir.join(" ")).toContain("modelo/variante");
+    expect(report.parada.paraSeguir.join(" ")).not.toContain("nada no seu código precisa mudar");
+  });
+
+  it("limite de duração da chamada é ambiente, sem culpar o produto ou o modelo", () => {
+    const cause = "a chamada ao engine opencode passou do tempo máximo (wall) e foi encerrada — é limite do harness, não defeito do produto.";
+    const report = relatorioDoBuild(build({ phases: [falhou("P01", "gate 0 — engine", cause, 1)], errors: [cause] }));
+    if (report.tipo !== "parada") throw new Error("esperava parada");
+    expect(report.parada.natureza).toBe("ambiente");
+    expect(report.parada.paraSeguir.join(" ")).toContain("ainda precisa passar pelos gates");
+    expect(report.parada.paraSeguir.join(" ")).not.toContain("nada no seu código precisa mudar");
+  });
+  it("erro do próprio roteiro é atribuído ao harness, preservando o produto", () => {
+    const cause = "o roteiro não passou na conferência estrutural. Isto é do harness, não da implementação";
+    const report = relatorioDoBuild(build({ phases: [falhou("P01", "gate 4 — fluxos na aplicação", cause, 1)], errors: [cause] }));
+    if (report.tipo !== "parada") throw new Error("esperava parada");
+    expect(report.parada.natureza).toBe("harness");
+    expect(report.parada.paraSeguir[0]).toContain("preserve a implementação");
+  });
+
   it("cobra do ambiente quando o gate disse que o runner não está instalado", () => {
     const causa = "O runner de testes do projeto NÃO ESTÁ INSTALADO neste ambiente: 'npm test' terminou com código 127.\nSaída: ...";
     const relatorio = relatorioDoBuild(

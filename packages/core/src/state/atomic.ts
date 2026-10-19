@@ -27,12 +27,12 @@ async function syncDirectory(directory: string): Promise<void> {
   }
 }
 
-export async function writeAtomic(path: string, content: string): Promise<void> {
+export async function writeAtomic(path: string, content: string, options: { mode?: number } = {}): Promise<void> {
   const directory = dirname(path);
   await mkdir(directory, { recursive: true });
   const temporary = join(directory, `.${basename(path)}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`);
   try {
-    const handle = await open(temporary, "wx");
+    const handle = await open(temporary, "wx", options.mode);
     try {
       await handle.writeFile(content, "utf8");
       await handle.sync();

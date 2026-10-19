@@ -15,6 +15,7 @@
  */
 
 import { languageBlock } from "./language.js";
+import { flowScopeBlock, functionalAcceptanceBlock, interfaceContractBlock, transientStateBlock } from "./acceptance-policy.js";
 
 export const TRIAGE_HEADER = "CAPIVARA_TRIAGE";
 
@@ -26,11 +27,13 @@ export interface Triagem {
   onde: string;
   criterio: string;
   correcao: string;
+  patch?: { before: string; after: string };
 }
 
 export interface TriageContext {
   language: string;
   phaseMarkdown: string;
+  sharedContract?: string;
   workflow: { number: string; name: string; steps: string[] };
   /** O roteiro que falhou, inteiro. */
   script: string;
@@ -54,10 +57,14 @@ export function triagePrompt(context: TriageContext): string {
     "before anyone spends a cycle on it. You only read: never write, edit, create or delete a file.",
     "",
     "You may read the product's source to confirm what you see.",
+    "Do not run commands, tests, servers, browser probes or installations in this session.",
+    "Use the supplied failure, snapshot, script and source. Do not create auxiliary files or investigate the test environment.",
+    flowScopeBlock(),
     "",
     `## The flow — workflow ${context.workflow.number}: ${context.workflow.name}`,
     "",
     ...passos,
+    interfaceContractBlock(context.sharedContract),
     "",
     "## The phase — what the product owes",
     "",
@@ -87,6 +94,10 @@ export function triagePrompt(context: TriageContext): string {
       : []),
     "",
     "## How to decide",
+    functionalAcceptanceBlock(),
+    transientStateBlock(true),
+    "If pending-state observation starts after the response or page load, classify this as ROTEIRO;",
+    "a fast successful response is not evidence that the loading state is missing from the product.",
     "",
     "- PRODUTO — the product does not do what an acceptance criterion of the phase or a step of the",
     "  flow requires: it saves and forgets, it answers an error, the user cannot reach the action.",
@@ -111,6 +122,12 @@ export function triagePrompt(context: TriageContext): string {
     "CAPIVARA_CORRECAO: <exactly what to change — in the product for PRODUTO, in the script for ROTEIRO,",
     "  the recommended reading for CRITERIO>",
     "```",
+    "",
+    "For ROTEIRO only, when the correction is a precise local substitution, append one line:",
+    'CAPIVARA_PATCH: {"before":"<exact unique code from the failed script>","after":"<replacement code>"}',
+    "Use valid single-line JSON with escaped newlines. The before snippet must occur exactly once.",
+    "Keep every required step and working assertion. Do not add a scenario or modify the product.",
+    "This avoids another authoring call. Omit the patch when a local substitution cannot express the correction.",
   ].join("\n");
 }
 
@@ -130,5 +147,15 @@ export function lerTriagem(output: string): Triagem | null {
   const correcao = campo("CORRECAO");
   if (correcao === "") return null;
 
-  return { tipo, evidencia: campo("EVIDENCIA"), onde: campo("ONDE"), criterio: campo("CRITERIO"), correcao };
+  let patch: Triagem["patch"];
+  if (tipo === "ROTEIRO") {
+    try {
+      const parsed: unknown = JSON.parse(campo("PATCH"));
+      if (parsed !== null && typeof parsed === "object" && "before" in parsed && "after" in parsed &&
+        typeof parsed.before === "string" && parsed.before.trim() && typeof parsed.after === "string" && parsed.before !== parsed.after) {
+        patch = { before: parsed.before, after: parsed.after };
+      }
+    } catch { /* patch opcional inválido não invalida a triagem nem muda o roteiro */ }
+  }
+  return { tipo, evidencia: campo("EVIDENCIA"), onde: campo("ONDE"), criterio: campo("CRITERIO"), correcao, ...(patch ? { patch } : {}) };
 }

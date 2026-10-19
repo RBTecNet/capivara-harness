@@ -10,8 +10,10 @@
  * para qualquer usuário da máquina e esbarraria no limite de `argv`.
  */
 
+import { resolve } from "node:path";
 import { ROLES, type RoleConfig, type RoleName } from "./roles.js";
 import { decideReasoning, directProvider, isCliProvider, isDirectProvider } from "./registry.js";
+import type { DirectApiInvocation } from "./direct-api.js";
 import { cliAdapter } from "./cli/index.js";
 import type { TranscriptKind } from "./transcript.js";
 import type { SupervisorLimits } from "./supervisor.js";
@@ -39,6 +41,8 @@ export interface InvocationContext {
 }
 
 export interface Invocation {
+  /** Requisição HTTP nativa; quando presente, não há subprocesso. */
+  directApi?: DirectApiInvocation;
   command: string;
   args: string[];
   env: NodeJS.ProcessEnv;
@@ -98,6 +102,8 @@ function baseEnvironment(role: RoleName, config: RoleConfig, context: Invocation
   const definition = ROLES[role];
   return {
     ...runtimeEnvironment(context.environment ?? process.env),
+    // OpenCode 2 escolhe PWD antes de process.cwd() e faz chdir para ele.
+    PWD: resolve(context.projectRoot),
     CAPIVARA_ROLE: role,
     CAPIVARA_PROJECT_ROOT: context.projectRoot,
     CAPIVARA_RUN_ID: context.runId,
@@ -139,7 +145,8 @@ export function buildInvocation(role: RoleName, config: RoleConfig, context: Inv
     const reasoning = decideReasoning(provider, effort);
     return {
       command: process.execPath,
-      args: ["--capivara-direct-api"],
+      args: [],
+      directApi: { provider, model, reasoning },
       env: {
         ...env,
         CAPIVARA_DIRECT_ENDPOINT: provider.endpoint,

@@ -13,21 +13,25 @@
  */
 
 import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { affectedPhases, assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parsePhaseFragment, parseSkeleton, renderSkeleton, sliceForPhase, normalizePhasePart, parsePhases, sha12 } from "../contract/index.js";
+import { affectedPhases, assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parsePhaseFragment, parseSkeleton, renderSkeleton, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12 } from "../contract/index.js";
+import { CoherenceMemory } from "../audit/coherence.js";
+import { applyMaterialityReview, materialityInput, materialityPrompt } from "../audit/materiality.js";
 import type { ContractError, CoverageSources, PhasesDocument, Skeleton, StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
-import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
+import type { AuditAttempt, AuditVerdict, Finding, Remark, Standoff } from "../audit/index.js";
 import { tasksBlock } from "../contract/templates.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, isRepairable, publish, repairDeterministically, stripAllMarkers, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, decisaoDeBanco, isNonAnswer, leituraInsistente, naoObjetivos, perguntaDeLacuna, perguntaDoBanco, perguntaInsistente, regrasDeBanco, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, suposicaoDelegada, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Assumption, Question } from "../interview/index.js";
-import { amendPhasePrompt, assessRehearsal, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
+import { amendPhasePrompt, assessRehearsal, auditRetryPrompt, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
 import type { AskedQuestion, CriterionRef, RehearsalResult, WriterContext } from "../prompts/index.js";
 import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEvents, runIdFor, runPaths, writeAtomic, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
 import { detectRateLimit, planWait } from "../loop/ratelimit.js";
+import { renderEnvironmentPlan } from "../loop/environment-plan.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
 import { decisoesComoMemorias, renderLibraryBlock, type McpDocument, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { INIT_ARTIFACTS, evaluateReadiness } from "./readiness.js";
@@ -58,13 +62,15 @@ export interface AgentCall {
 }
 
 export type AgentCaller = (call: AgentCall) => Promise<{
+  /** Exclusivamente para evidência; não entra no documento nem no parser. */
+  partialOutput?: string;
   stdout: string;
   exitCode: number;
   /** Tokens da chamada, quando a CLI os reporta. Ausente é "não medido". */
   usage?: { inputTokens: number; outputTokens: number; costUsd?: number };
 }>;
 export type AskDeveloper = (question: Question, index: number, total: number) => Promise<string>;
-export type DecideStandoff = (rendered: string) => Promise<string>;
+export type DecideStandoff = (rendered: string, context?: Standoff) => Promise<string>;
 
 export interface InitOptions {
   projectRoot: string;
@@ -321,7 +327,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   await ensureArtifactTree(options.projectRoot);
   const state = createRunState({
     runId,
-    command: "init",
+    command: options.stage === "plan" ? "plan" : "init",
     language: options.language,
     now,
     ...(options.roles ? { roles: options.roles } : {}),
@@ -344,8 +350,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * `subject` carrega `.md`, `#` e `/` — `project-phases.md#P2` viraria caminho
    * com pasta inexistente. Tudo o que não é identificador vira `-`.
    */
-  const arquivoDaChamada = (call: AgentCall, tentativa: number): string =>
-    `${call.stage}.${call.subject.replace(/[^A-Za-z0-9_.-]+/g, "-")}.${call.role}.${call.attempt ?? 1}-${tentativa}`;
+  const arquivoDaChamada = (call: AgentCall, tentativa: number, id: string): string =>
+    `${call.stage}.${call.subject.replace(/[^A-Za-z0-9_.-]+/g, "-")}.${call.role}.${call.attempt ?? 1}-${tentativa}.${id}`;
 
   const track = async (call: AgentCall): Promise<string> => {
     let esperas = 0;
@@ -366,9 +372,14 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
        * Gravar não pode derrubar a chamada que já foi paga: falha aqui é
        * silenciosa de propósito.
        */
-      const arquivo = arquivoDaChamada(call, tentativa);
+      // Lotes paralelos e retomadas têm os mesmos assunto/papel/tentativa.
+      // A identidade da evidência é de cada requisição, inclusive após espera.
+      const arquivo = arquivoDaChamada(call, tentativa, randomUUID());
       await writeAtomic(join(paths.prompts, `${arquivo}.txt`), call.prompt).catch(() => undefined);
       await writeAtomic(join(paths.logs, `${arquivo}.log`), response.stdout).catch(() => undefined);
+      if (response.partialOutput) {
+        await writeAtomic(join(paths.logs, `${arquivo}.partial.txt`), response.partialOutput).catch(() => undefined);
+      }
 
       const cost = costs.get(call.role) ?? { role: call.role, calls: 0, inputTokens: null, outputTokens: null, milliseconds: 0 };
       cost.calls += 1;
@@ -425,6 +436,17 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         announce(`  ${call.role} saiu com código ${response.exitCode} sem escrever nada em ${call.subject}; tentando uma segunda vez`);
         await event(call.stage, call.subject, "retry", `saída vazia com código ${response.exitCode}`, call.attempt);
         continue;
+      }
+
+      if (/a geração atingiu o limite de tokens/i.test(response.stdout)) {
+        throw new InitBlockedError([
+          `A geração de ${call.role} em ${call.subject} atingiu o limite de tokens.`,
+          "",
+          "O que o provider respondeu:",
+          recorte(response.stdout),
+          "",
+          "O esqueleto e as fases guardadas em cache continuam disponíveis; o texto parcial não foi aprovado.",
+        ].join("\n"), runId);
       }
 
       throw new InitBlockedError(
@@ -533,6 +555,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * task que mudou não arrasta as outras catorze de volta ao julgamento.
    */
   const tasksJulgadas = new TasksJulgadas();
+  const coerencia = new CoherenceMemory();
 
   /*
    * O que este run já escreveu e já teve aprovado, guardado em disco.
@@ -883,7 +906,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     const fases = parsed.document.phases;
     const base = auditBase(writer, upstream);
 
-    const digest = enumerateCriteria(parsed.document)
+    const criteria = enumerateCriteria(parsed.document);
+    const digest = criteria
       .map((criterion) => `${criterion.address} [${criterion.taskTitle}] ${criterion.text}`)
       .join("\n");
 
@@ -981,15 +1005,19 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             return veredicto;
           });
         }),
-      () =>
-        auditCall("project-phases.md#coerência", attempt, () =>
+      async () => {
+        const changed = coerencia.changed(criteria, autoridade);
+        const verdict = await auditCall("project-phases.md#coerência", attempt, () =>
           coherencePrompt({
             ...base,
             upstream: skeletonAtual ? [{ name: "skeleton.md", content: renderSkeleton(skeletonAtual) }] : upstream,
             digest,
             totalPhases: fases.length,
+            ...(changed ? { changedSinceApproval: changed } : {}),
           }),
-        ),
+        );
+        return coerencia.reconcile(verdict, criteria, autoridade);
+      },
     ];
 
     const veredictos: AuditVerdict[] = [];
@@ -1019,9 +1047,43 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
     announce(`  auditoria em ${aReauditar.length - reaproveitadas.length} fase(s) + coerência: ${findings.length} finding(s)`);
 
-    return findings.length > 0
+    const original: AuditVerdict = findings.length > 0
       ? { status: "REJECTED", findings, remarks: remarksDoPlano, decisions: decisoesDoPlano, reason: veredictos.find((v) => v.reason)?.reason ?? "há defeito no plano" }
       : { status: "APPROVED", findings: [], remarks: remarksDoPlano, decisions: decisoesDoPlano, reason: "" };
+    if (findings.length === 0 && decisoesDoPlano.length === 0) return original;
+
+    const input = materialityInput(original, {
+      request: options.request.text, decisions: writer.decisions, phases: fases,
+      ...(skeletonAtual ? { skeleton: renderSkeleton(skeletonAtual) } : {}),
+    });
+    relatarFase({ kind: "documento", etapa: "triagem dos bloqueios" });
+    announce(`  conferindo a materialidade de ${input.items.length} bloqueio(s)/decisão(ões) antes de gastar outra escrita`);
+    await event("audit", "project-phases.md#materialidade", "started", `${input.items.length} item(s)`, attempt);
+    const output = await track({ role: "verifier", stage: "audit", subject: "project-phases.md#materialidade", attempt, prompt: materialityPrompt(input) });
+    const review = applyMaterialityReview(original, input, output);
+    if (review.defects.length > 0) {
+      announce("  parecer sem prova válida na triagem: o bloqueio correspondente continua valendo");
+    }
+    announce(`  triagem: ${review.advisory} ponto(s) não bloqueante(s); ${review.verdict.findings.length} defeito(s) e ${review.verdict.decisions?.length ?? 0} decisão(ões) mantidos`);
+    await event("audit", "project-phases.md#materialidade", "complete",
+      `${review.advisory} observação(ões); ${review.verdict.findings.length} defeito(s) mantido(s)`
+      + (review.defects.length ? `; pareceres não aplicados: ${review.defects.join("; ")}` : ""), attempt);
+    // A base global pode ser confirmada pela triagem, mesmo com defeito local
+    // ainda aberto. Os vereditos originais permanecem nas transcrições.
+    if (original.findings.some(finding => finding.phase === undefined)
+      && !review.verdict.findings.some(finding => finding.phase === undefined)
+      && (review.verdict.decisions?.length ?? 0) === 0) {
+      coerencia.reconcile({ ...review.verdict, status: "APPROVED", findings: [] }, criteria, autoridade);
+    }
+    for (const fase of fases) {
+      if (!original.findings.some(finding => finding.phase === fase.number) || review.verdict.findings.some(finding => finding.phase === fase.number)) continue;
+      fasesAprovadas.add(sha12(fase.markdown.trim()));
+      memoria.guardarAprovacao(promptDaFase(fase));
+      const lido = parsePhaseFragment(fase.markdown);
+      if (lido !== null) tasksJulgadas.aprovar(lido.tasks, autoridade);
+      relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
+    }
+    return review.verdict;
   }
 
   /**
@@ -1034,8 +1096,10 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    */
   async function auditCall(subject: string, attempt: number, prompt: () => string): Promise<AuditVerdict> {
     let ultima = "";
+    const original = prompt();
+    let proximoPrompt = original;
     for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
-      ultima = await track({ role: "auditor", stage: "audit", subject, attempt, prompt: prompt() });
+      ultima = await track({ role: "auditor", stage: "audit", subject, attempt, prompt: proximoPrompt });
       const parsed = parseAudit(ultima);
       if (parsed.ok) return parsed.verdict;
       if (tentativa === 2) {
@@ -1050,6 +1114,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           runId,
         );
       }
+      proximoPrompt = auditRetryPrompt(original, ultima, parsed.defects);
     }
     throw new InitBlockedError("inalcançável", runId);
   }
@@ -1069,6 +1134,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     if (estagio === "plan") {
       const emDisco = await readFile(join(artifactPaths(options.projectRoot).init, "skeleton.md"), "utf8").catch(() => "");
       const guardado = await readSkeletonState(options.projectRoot, runId);
+      if (emDisco.trim() !== "" && !guardado) {
+        throw new InitBlockedError("esqueleto ausente ou incompatível com a Capivara 0.5.0. Gere novamente com `capivara init --fresh` e depois `capivara plan --fresh`; os arquivos existentes são preservados.", runId);
+      }
       if (emDisco.trim() === "" || !guardado) {
         throw new InitBlockedError(
           "não há esqueleto publicado neste projeto. Rode `capivara init` primeiro: é ele que produz as fases.",
@@ -1340,6 +1408,17 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
     // Cada fase vê a sua fatia, e só ela. É a troca que corta a reconstrução do
     // projeto inteiro em toda chamada.
+    const promptDeFase = (number: number): string => phaseFromSlicePrompt({
+      language: options.language,
+      request: options.request.text,
+      slice: sliceForPhase(esqueleto, number),
+      phaseNumber: number,
+      totalPhases: esqueleto.phases.length,
+      decisions: depoisDoEsqueleto(),
+      grammar: tasksBlock(number),
+      maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
+      maxTasksPerPhase: MAX_TASKS_PER_PHASE,
+    });
     const fases = new Array<string>(esqueleto.phases.length).fill("");
     const fila = esqueleto.phases.map((fase, posicao) => ({ fase, posicao }));
     // O esqueleto sabe quantas tasks cada fase aloca; a tela passa a saber também.
@@ -1379,27 +1458,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
            * Uma segunda tentativa custa uma chamada. Descobrir no gate custa o
            * run.
            */
-          const promptDaFase = phaseFromSlicePrompt({
-            language: options.language,
-            request: options.request.text,
-            slice: sliceForPhase(esqueleto, fase.number),
-            phaseNumber: fase.number,
-            totalPhases: esqueleto.phases.length,
-            /*
-             * O que foi decidido DEPOIS do esqueleto.
-             *
-             * A insistência acima fecha decisões que o esqueleto não pôde
-             * refletir — ele já estava escrito. Sem elas aqui, a fase nasce sem a
-             * decisão, o auditor a cobra, e uma reescrita é gasta em algo que o
-             * escritor teria acertado de primeira.
-             */
-            decisions: depoisDoEsqueleto(),
-            // O molde de uma TASK. O envelope da fase é montado em código, do
-            // esqueleto: pedi-lo ao modelo só criava mais uma coisa a errar.
-            grammar: tasksBlock(fase.number),
-            maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
-            maxTasksPerPhase: MAX_TASKS_PER_PHASE,
-          });
+          const promptDaFase = promptDeFase(fase.number);
 
           /*
            * Já escrita por este mesmo prompt? Então ela não mudou, e a chamada
@@ -1484,7 +1543,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
     const writerDoPlano = writerContext([]);
     relatarFase({ kind: "documento", etapa: "lacunas" });
-    const semGaps = await closeGaps("project-phases.md", planoAutorado(esqueleto, fases), writerDoPlano);
+    const semGaps = await closeGaps("project-phases.md", planoAutorado(esqueleto, fases, promptDeFase), writerDoPlano);
     plano = semGaps.content;
 
     relatarFase({ kind: "documento", etapa: "auditoria" });
@@ -1532,7 +1591,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * escreveu a fase — é o que mantém a fase corrigida coerente com o que ela
    * podia ver quando nasceu.
    */
-  function planoAutorado(esqueleto: Skeleton, fases: string[]): Authored {
+  function planoAutorado(esqueleto: Skeleton, fases: string[], promptDeFase: (number: number) => string): Authored {
     const montar = (partes: string[]): string =>
       assemblePhasesDocument({
         projectName: esqueleto.projectName,
@@ -1582,19 +1641,36 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               // não há emenda de auditoria que o mude. Mandar a fase inteira era
               // devolver ao modelo a chance de estragar o que ele não escreveu.
               const anterior = extractTasks(proximas[numero - 1] ?? "").tasks;
+              const destaFase = findings.filter(finding => affectedPhases([finding], partes.length).includes(numero));
+              const relacionadas = new Set(destaFase.flatMap(finding => affectedPhases([finding], partes.length)));
               const saida = await track({
                 role: "writer",
                 stage: "authoring",
                 subject: `phase-p${String(numero).padStart(2, "0")}`,
                 attempt,
-                prompt: amendPhasePrompt({ language: options.language, request: options.request.text, current: anterior, findings }),
+                prompt: amendPhasePrompt({
+                  language: options.language,
+                  request: options.request.text,
+                  current: anterior,
+                  findings: destaFase,
+                  relatedPhases: [...relacionadas].filter(number => number !== numero).map(number => partes[number - 1] ?? ""),
+                  decisions: allAnswers.filter(answer => answer.disposition === "ACCEPTED").map(answer => answer.decision),
+                  slice: sliceForPhase(esqueleto, numero),
+                  phaseNumber: numero,
+                  grammar: tasksBlock(numero),
+                }),
               });
 
               const limpa = stripDeadDesignRefs(repairDeterministically(saida).content, designExiste);
               for (const conserto of limpa.applied) announce(`    fase ${numero}: ${conserto}`);
 
               const envelope = { number: fase.number, title: fase.title, goal: fase.goal, dependsOn: fase.dependsOn, covers: fase.covers, areas: fase.areas };
-              const candidato = assemblePhase(envelope, extractTasks(limpa.content).tasks).trim();
+              const candidato = preserveUnaddressedTasks(
+                partes[numero - 1] ?? "",
+                assemblePhase(envelope, extractTasks(limpa.content).tasks).trim(),
+                numero,
+                destaFase,
+              );
 
               /*
                * Emenda que destrói a fase não entra no documento.
@@ -1613,6 +1689,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               const recusa = emendaInutil(candidato, proximas[numero - 1] ?? "");
               if (recusa === null) {
                 proximas[numero - 1] = candidato;
+                memoria.guardarFase(promptDeFase(numero), candidato);
                 continue;
               }
 
@@ -1622,6 +1699,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           }),
         );
 
+        await memoria.fechar();
         return autorado(proximas);
       },
     });
@@ -2875,7 +2953,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         await event("audit", document, "blocked", "teto de devoluções esgotado", attempt);
         if (!options.decideStandoff) throw new InitBlockedError(rendered, runId);
 
-        const decision = (await options.decideStandoff(rendered)).trim();
+        const decision = (await options.decideStandoff(rendered, action.standoff)).trim();
         const normalized = decision.toLowerCase();
 
         if (normalized.startsWith("publicar")) return { content, remarks: verdict.remarks, authored };
@@ -2895,6 +2973,10 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           announce(`  reiniciando correção e auditoria de ${document}; aprovação continua obrigatória`);
           authored = await authored.rewrite(action.standoff.auditorInsists, attempt + 1);
           continue;
+        }
+
+        if (action.standoff.mechanical) {
+          throw new InitBlockedError(`${rendered}\n\nUma decisão escrita não dispensa os limites mecânicos. Use reiniciar, publicar ou abortar.`, runId);
         }
 
         /*
@@ -3224,39 +3306,26 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }
     }
 
-    for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
-      const output = await track({
-        role: "auditor",
-        stage: "audit",
-        subject: document,
-        attempt,
-        prompt: auditorPrompt({
-          language: options.language,
-          document,
-          executable: document === "project-phases.md",
-          request: options.request.text,
-          decisions: writer.decisions,
-          dispositions: allAnswers.map((answer) => `${answer.questionId} ${answer.disposition}`),
-          upstream,
-          // Ressalva que atravessa a cadeia sem ser resolvida vira defeito que o
-          // loop paga: no piloto 2, "a ausência de dependências não é
-          // explicitada" custou três ciclos e parou o run três fases depois.
-          upstreamRemarks: remarks.map((entry) => ({
-            document: entry.document,
-            where: entry.remark.where,
-            observation: entry.remark.observation,
-          })),
-          content,
-        }),
-      });
-      const parsed = parseAudit(output);
-      // Saída inválida repete SÓ o auditor, sobre a mesma evidência.
-      if (parsed.ok) return parsed.verdict;
-      if (tentativa === 2) {
-        throw new InitBlockedError(`o auditor de ${document} devolveu saída inválida duas vezes: ${parsed.defects.join("; ")}`, runId);
-      }
-    }
-    throw new InitBlockedError("inalcançável", runId);
+    return await auditCall(document, attempt, () =>
+      auditorPrompt({
+        language: options.language,
+        document,
+        executable: document === "project-phases.md",
+        request: options.request.text,
+        decisions: writer.decisions,
+        dispositions: allAnswers.map((answer) => `${answer.questionId} ${answer.disposition}`),
+        upstream,
+        // Ressalva que atravessa a cadeia sem ser resolvida vira defeito que o
+        // loop paga: no piloto 2, "a ausência de dependências não é
+        // explicitada" custou três ciclos e parou o run três fases depois.
+        upstreamRemarks: remarks.map((entry) => ({
+          document: entry.document,
+          where: entry.remark.where,
+          observation: entry.remark.observation,
+        })),
+        content,
+      }),
+    );
   }
 
   return await concluir();
@@ -3303,10 +3372,13 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     });
 
     const tasks = parsedPhases.ok ? parsedPhases.document.phases.reduce((total, phase) => total + phase.tasks.length, 0) : 0;
+    if (readiness.ready && skeletonAtual) {
+      await publish(options.projectRoot, [{ name: "environment.json", content: renderEnvironmentPlan(skeletonAtual, plano) }]);
+    }
 
     const report: InitReport = {
       ready: readiness.ready,
-      published: INIT_ARTIFACTS.map((name) => `${artifactPaths(options.projectRoot).init}/${name}`),
+      published: [...INIT_ARTIFACTS, ...(readiness.ready ? ["environment.json"] : [])].map((name) => `${artifactPaths(options.projectRoot).init}/${name}`),
       phases: parsedPhases.ok ? parsedPhases.document.phases.length : 0,
       tasks,
       mvpCutPhase: parsedPhases.ok ? parsedPhases.document.phases.length : 0,

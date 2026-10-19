@@ -26,6 +26,8 @@ import type { BuildOutcome, PhaseReport } from "./build.js";
  * alguém reescrever o texto sem reescrever isto aqui.
  */
 const MARCAS_DE_AMBIENTE = [
+  /recusa do provider por/i,
+  /limite do harness/i,
   /NÃO ESTÁ INSTALADO neste ambiente/i,
   /Isto é do ambiente, não do seu código/i,
   /não está instalado/i,
@@ -84,6 +86,8 @@ function naturezaDaFase(fase: PhaseReport): NaturezaDaParada {
   // cujo código ninguém chegou a julgar.
   if (fase.outcome.status === "credential-rejected") return "ambiente";
   if (fase.outcome.status !== "failed") return "produto";
+  if (fase.outcome.cause.startsWith("O verificador devolveu protocolo inválido")) return "modelo";
+  if (/Isto é do harness|defeito do harness/i.test(fase.outcome.cause)) return "harness";
   if (ehDoAmbiente(fase.outcome.cause)) return "ambiente";
   return fase.outcome.gate.startsWith("gate 0") ? "modelo" : "produto";
 }
@@ -130,7 +134,24 @@ function comoSeguir(natureza: NaturezaDaParada, fase: PhaseReport | null): strin
     ? `rode \`capivara build\` — retoma de ${fase.id}, sem refazer as fases já fechadas`
     : "rode `capivara build` — as fases já fechadas não são refeitas";
 
+  if (fase?.outcome.status === "failed" && /recusa do provider por/i.test(fase.outcome.cause)) {
+    return [
+      "confira a configuração de modelo/variante ou o teto de saída e a cota da chave, conforme a recusa acima",
+      "o parcial está preservado e ainda precisa passar pelos gates; a recusa não inicia outra chamada automaticamente",
+      retoma,
+    ];
+  }
+  if (fase?.outcome.status === "failed" && /limite do harness/i.test(fase.outcome.cause)) {
+    return [
+      "a sessão atingiu o limite; o parcial está preservado e ainda precisa passar pelos gates",
+      "confira a atividade na evidência antes de decidir retomar; não foi iniciada outra chamada longa automaticamente",
+      retoma,
+    ];
+  }
+
   switch (natureza) {
+    case "harness":
+      return ["a verificação falhou por conta própria; preserve a implementação e confira o roteiro na evidência", retoma];
     case "ambiente":
       return ["resolva a dependência de ambiente apontada acima; nada no seu código precisa mudar", retoma];
     case "modelo":
@@ -163,19 +184,37 @@ export function relatorioDoBuild(outcome: BuildOutcome, contexto: ContextoDaPara
   }
 
   /*
-   * Código 1 não é falha: é um passo fora de ordem. Dizer "PAROU — defeito" para
-   * quem esqueceu de rodar o init manda a pessoa procurar um problema que não
-   * existe.
+   * Código 1 é uma parada antes das fases: pode ser preparo do ambiente falhado
+   * ou um passo fora de ordem. Dizer "PAROU — defeito" para quem esqueceu de
+   * rodar o init manda a pessoa procurar um problema que não existe.
    */
   if (outcome.exitCode === 1) {
     const causa = outcome.errors[0] ?? "o build não pôde começar";
+    const custoDoPreparo = outcome.preparation?.sessions
+      ? `${outcome.preparation.sessions} sessão(ões) de preparação; nenhuma fase iniciada nesta execução`
+      : "nenhuma sessão gasta — o build nem começou";
+    if (causa.startsWith("a preparação do ambiente falhou antes do desenvolvimento")) {
+      return {
+        tipo: "parada",
+        parada: {
+          natureza: "ambiente",
+          oQue: resumo(causa),
+          deQuem: "da preparação do ambiente: a instalação ou a checagem de prontidão falhou antes das fases",
+          custou: custoDoPreparo,
+          evidencia: outcome.preparation?.evidence.length ? [...new Set(outcome.preparation.evidence)] : [join(".capivara", "runs", outcome.runId, "logs", "environment-preflight.log")],
+          paraSeguir: ["consulte a falha de instalação ou inicialização na evidência", "rode `capivara build` depois da correção — as fases já fechadas não são refeitas"],
+          ...(detalhe(causa) !== "" ? { detalhe: detalhe(causa) } : {}),
+        },
+      };
+    }
     return {
       tipo: "parada",
       parada: {
         natureza: "decisão",
         oQue: resumo(causa),
         deQuem: "de ninguém: falta uma etapa antes desta",
-        custou: "nenhuma sessão gasta — o build nem começou",
+        custou: custoDoPreparo,
+        ...(outcome.preparation?.evidence.length ? { evidencia: [...new Set(outcome.preparation.evidence)] } : {}),
         paraSeguir: [resumo(causa).includes("capivara init") ? "rode `capivara init` e depois `capivara plan`" : "resolva o que está acima e rode `capivara build`"],
         ...(detalhe(causa) !== "" ? { detalhe: detalhe(causa) } : {}),
       },
@@ -214,6 +253,20 @@ export function relatorioDoBuild(outcome: BuildOutcome, contexto: ContextoDaPara
    */
   if (fase.outcome.status === "commit-blocked") {
     const caminhos = fase.outcome.bloqueios.map((bloqueio) => bloqueio.caminho);
+    if (fase.outcome.bloqueios.some(bloqueio => bloqueio.motivo === "árvore principal alterada durante trabalho isolado")) {
+      return {
+        tipo: "parada",
+        parada: {
+          natureza: "decisão",
+          oQue: `${fase.id} parou por alteração na árvore principal durante trabalho isolado: ${caminhos.join(", ")}`,
+          deQuem: "a guarda detectou alteração fora do worktree; essa conferência não determina quem escreveu",
+          custou: gasto,
+          evidencia: evidenciaDaFase(outcome.runId, fase),
+          paraSeguir: ["confira os caminhos indicados e a evidência; o trabalho isolado continua preservado", "depois de resolver a alteração externa, rode `capivara build`"],
+          detalhe: fase.outcome.cause,
+        },
+      };
+    }
     // Referência movida pelo agente (§101): não há arquivo a ignorar — há um commit de fora a examinar.
     if (fase.outcome.bloqueios.some((bloqueio) => bloqueio.motivo.includes("movid"))) {
       return {

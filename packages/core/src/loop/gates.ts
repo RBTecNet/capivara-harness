@@ -11,10 +11,13 @@
  * G4 — os fluxos declarados, percorridos na aplicação de pé (ver flows.ts)
  */
 
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import { BUILDER_COMPLETE_MARKER, parseVerification } from "../prompts/index.js";
 import type { TaskVerdict } from "../prompts/index.js";
 import { runtimeEnvironment } from "../provider/runtime-env.js";
+import { killTree } from "../provider/supervisor.js";
+import { portaLivre } from "./ports.js";
 
 export type GateName =
   | "gate 0 — engine"
@@ -43,11 +46,15 @@ const green: GateResult = { green: true };
  * resultado. Perguntar pelo fato, e não pelo nome do provider, cobre todas.
  */
 export function gate0(
-  result: { exitCode: number; stdout: string; stderr: string; timedOut: string | null; resultRead?: boolean; engineError?: boolean },
+  result: { exitCode: number; stdout: string; stderr: string; timedOut: string | null; resultRead?: boolean; engineError?: boolean; providerFailure?: "quota" | "configuration" },
   engine: string,
 ): GateResult {
   if (result.timedOut) {
     return { green: false, gate: "gate 0 — engine", cause: `${explicarTimeout(result.timedOut, engine)} Últimas linhas:\n${tail(result.stdout || result.stderr)}` };
+  }
+  if (result.providerFailure) {
+    const motivo = result.providerFailure === "quota" ? "cota financeira ou teto de tokens solicitado" : "configuração de modelo/variante";
+    return { green: false, gate: "gate 0 — engine", cause: `recusa do provider por ${motivo}; a chamada não entregou resultado e não será repetida automaticamente.\n${tail(result.stdout || result.stderr)}` };
   }
   if (result.engineError === true) {
     return { green: false, gate: "gate 0 — engine", cause: `o engine ${engine} reportou a volta como erro. Últimas linhas:\n${tail(result.stdout)}` };
@@ -103,22 +110,36 @@ export interface TestRun {
   output: string;
 }
 
-export type TestRunner = (command: string, projectRoot: string) => Promise<TestRun>;
+export type TestRunner = (command: string, projectRoot: string, environment?: NodeJS.ProcessEnv) => Promise<TestRun>;
 
-/** Roda a suíte com stdin fechado: um runner que anexa stdin travaria o loop. */
-export const defaultTestRunner: TestRunner = async (command, projectRoot) =>
-  new Promise((resolve) => {
-    const child = execFile(
-      "bash",
-      ["-c", command],
-      { cwd: projectRoot, maxBuffer: 32 * 1024 * 1024, env: runtimeEnvironment() },
-      (error, stdout, stderr) => {
-        const code = error && typeof (error as { code?: number }).code === "number" ? (error as { code: number }).code : error ? 1 : 0;
-        resolve({ exitCode: code, output: `${stdout}${stderr}` });
-      },
-    );
-    child.stdin?.end();
+/** Grupo exclusivo: a suíte não deixa servidores vivos entre verificações. */
+export const defaultTestRunner: TestRunner = async (command, projectRoot, environment = {}) => {
+  const port = await portaLivre(0);
+  return new Promise((resolve) => {
+    const child = spawn("bash", ["-c", command], { cwd: projectRoot, detached: true, stdio: ["ignore", "pipe", "pipe"], env: runtimeEnvironment({ ...process.env, ...environment, E2E_PORT: String(port) }) });
+    let stdout = "";
+    let stderr = "";
+    const decoders = { out: new StringDecoder("utf8"), err: new StringDecoder("utf8") };
+    let bytes = 0;
+    let exceeded = false;
+    let failed = false;
+    const cleanup = (): void => { if (child.pid !== undefined) killTree(child.pid, "SIGKILL"); };
+    const absorb = (chunk: Buffer, stream: "out" | "err"): void => {
+      const remaining = Math.max(0, 32 * 1024 * 1024 - bytes);
+      bytes += chunk.length;
+      const text = decoders[stream].write(chunk.subarray(0, remaining));
+      if (stream === "out") stdout += text;
+      else stderr += text;
+      if (bytes > 32 * 1024 * 1024 && !exceeded) { exceeded = true; cleanup(); }
+    };
+    child.stdout.on("data", (chunk: Buffer) => absorb(chunk, "out"));
+    child.stderr.on("data", (chunk: Buffer) => absorb(chunk, "err"));
+    // exit acontece mesmo quando netos mantêm pipes abertos; recolhê-los permite close.
+    child.on("exit", cleanup);
+    child.on("error", () => { failed = true; cleanup(); });
+    child.on("close", (code) => resolve({ exitCode: exceeded || failed ? 1 : code ?? 1, output: `${stdout}${decoders.out.end()}${stderr}${decoders.err.end()}${exceeded ? "\n[capivara] a saída da suíte excedeu 32 MiB" : ""}` }));
   });
+};
 
 /**
  * Código 127 é "comando não encontrado", não "teste falhou".
@@ -130,7 +151,11 @@ export const defaultTestRunner: TestRunner = async (command, projectRoot) =>
  * isso a ele.
  */
 function ferramentaAusente(exitCode: number, output: string): boolean {
-  return exitCode === 127 || /command not found|comando n[ãa]o encontrado|No such file or directory/i.test(output);
+  if (exitCode === 0) return false;
+  if (exitCode === 127) return true;
+  // ENOENT de stat/open num teste já iniciado é defeito do cenário, não do
+  // launcher. Só diagnósticos explícitos do shell autorizam pedir instalação.
+  return /(?:^|\n)(?:\/?[^\n:]*\b(?:sh|bash|zsh):[^\n]*(?:command not found|comando n[ãa]o encontrado|not found|No such file or directory)|\s*[\w@./-]+:\s*(?:command not found|comando n[ãa]o encontrado)\b)/i.test(output);
 }
 
 /** G2 — a suíte do projeto, rodada PELO LOOP, fora da sessão do agente. */

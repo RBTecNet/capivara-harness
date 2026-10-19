@@ -16,8 +16,8 @@
  *    com esse argv. Um wizard que executa por um caminho e ensina outro mente.
  */
 
-import { CLI_PROVIDERS, DIRECT_PROVIDERS, ROLES, ROLE_NAMES } from "../provider/index.js";
-import type { RoleName } from "../provider/index.js";
+import { CLI_PROVIDERS, DIRECT_PROVIDERS, ROLES, ROLE_NAMES, isDirectProvider, opencodeProviderId } from "../provider/index.js";
+import type { RoleName, RoleConfig } from "../provider/index.js";
 import { readChoice, renderChoices, renderCommand, roleHint, toArgv } from "../tui/index.js";
 import type { Choice, WizardAnswers } from "../tui/index.js";
 import { createLineIO } from "./line-io.js";
@@ -31,6 +31,7 @@ import { aceitaEffort, MAX_AGENTES, MIN_AGENTES_PARALELOS, type AgenteConfigurad
  * mesma pergunta sai numerada, que é o que pipes e testes respondem.
  */
 export type WizardIO = LineIO & {
+  secret?: (prompt: string) => Promise<string>;
   select?: (title: string, choices: readonly Choice[], defaultIndex: number, keepLabel?: string) => Promise<number>;
   multiline?: (title: string) => Promise<string>;
 };
@@ -50,6 +51,8 @@ export interface WizardDeps {
    * devolvendo vazio, faz a pergunta voltar a ser o nome digitado.
    */
   listModels?: (providerId: string) => Promise<string[]>;
+  /** Oferece cadastrar a chave antes de consultar uma API ainda não configurada. */
+  configureApi?: (provider: string, io: WizardIO) => Promise<boolean>;
   /**
    * Se o projeto já registra qual pedido o `init` usou.
    *
@@ -62,10 +65,10 @@ export interface WizardDeps {
   /**
    * Os níveis de raciocínio que um modelo aceita, quando a CLI informa.
    *
-   * Ausente, ou devolvendo vazio, faz o wizard oferecer a lista genérica — que
-   * é o que ele fazia antes, menos o `minimal` que ninguém aceitava.
+   * Ausente ou null permite a lista genérica. Uma lista vazia confirma que o
+   * modelo não oferece variantes e deixa apenas o padrão do modelo.
    */
-  listEfforts?: (providerId: string, model: string) => Promise<string[]>;
+  listEfforts?: (providerId: string, model: string) => Promise<string[] | null>;
   /**
    * Os projetos de uma base documental, para escolher pelo número.
    *
@@ -127,9 +130,20 @@ const EFFORTS_GENERICOS: Choice[] = [
 ];
 
 const PROVIDERS: Choice[] = [
-  ...CLI_PROVIDERS.map((id) => ({ label: id, hint: id === "custom" ? "adapter próprio" : "usa a CLI instalada nesta máquina" })),
+  ...CLI_PROVIDERS.map((id) => ({ label: id, hint: id === "custom" ? "adapter próprio" : id === "opencode" ? "CLI com edição e shell; também usa modelos de API, como DeepSeek" : "usa a CLI instalada nesta máquina" })),
   ...DIRECT_PROVIDERS.map((id) => ({ label: id, hint: "API direta; exige credencial" })),
 ];
+
+const PROVIDERS_DE_AGENTE: Choice[] = PROVIDERS.map((opcao) => isDirectProvider(opcao.label)
+  ? { label: opcao.label, hint: "API via OpenCode; usa sua chave e permite edição e shell" }
+  : opcao);
+function providersParaPapel(role: RoleName): readonly Choice[] {
+  return ROLES[role].requiresCli ? PROVIDERS_DE_AGENTE : PROVIDERS;
+}
+
+function explicarExecutor(io: WizardIO): void {
+  io.write("Escolha uma CLI ou um provider de API. No executor, as APIs usam o OpenCode para edição e shell; a chave salva será reaproveitada.\n");
+}
 
 /**
  * A entrada acabou antes das respostas.
@@ -286,14 +300,27 @@ export function filtrarModelos(modelos: string[], filtro: string): string[] {
  * recomeçar o wizard.
  */
 async function escolherModelo(
-  io: WizardIO,
+  deps: WizardDeps,
   providerId: string,
   rotulo: string,
   listar: (providerId: string) => Promise<string[]>,
 ): Promise<{ modelo: string } | "voltar"> {
+  const { io } = deps;
+  const api = isDirectProvider(providerId);
+  if (api && deps.configureApi && !(await deps.configureApi(providerId, io))) return "voltar";
   const modelos = await listar(providerId).catch(() => []);
 
   if (modelos.length === 0) {
+    if (api) {
+      io.write(`${providerId} não retornou uma lista de modelos. Informe o identificador exato ou volte ao provider.\n`);
+      if (io.select && await choose(io, rotulo, [{ label: "digitar identificador do modelo" }, { label: "voltar ao provider" }], 0) === 1) return "voltar";
+      for (;;) {
+        const digitado = await text(io, `${rotulo} (obrigatório; 0 volta ao provider): `);
+        if (digitado === "0") return "voltar";
+        if (digitado !== "") return { modelo: digitado };
+        io.write("Informe um modelo explícito para este provider.\n");
+      }
+    }
     const digitado = await text(io, `\n${rotulo} (vazio usa o padrão do provider): `);
     return { modelo: digitado };
   }
@@ -357,6 +384,26 @@ async function escolherModelo(
     // Nome digitado vale mesmo fora da lista: a CLI pode conhecer o que ela não lista.
     return { modelo: resposta };
   }
+}
+
+/** Resolve a API escolhida para a CLI com ferramentas, mostrando essa decisão. */
+async function escolherProviderModelo(
+  deps: WizardDeps,
+  provider: string,
+  rotulo: string,
+  precisaDeFerramentas: boolean,
+): Promise<{ provider: string; modelo: string } | "voltar"> {
+  const viaOpenCode = precisaDeFerramentas && isDirectProvider(provider);
+  const listar = deps.listModels ?? (async () => []);
+  const prefixo = `${opencodeProviderId(provider)}/`;
+  if (viaOpenCode) deps.io.write(`${provider} será usado via OpenCode, com edição e shell.\n`);
+  const choice = await escolherModelo(deps, provider, viaOpenCode ? `${rotulo} (${provider} via OpenCode)` : rotulo,
+    viaOpenCode ? async () => (await listar("opencode")).filter((model) => model.startsWith(prefixo)) : listar);
+  if (choice === "voltar") return choice;
+  return {
+    provider: viaOpenCode ? "opencode" : provider,
+    modelo: viaOpenCode && !choice.modelo.startsWith(prefixo) ? `${prefixo}${choice.modelo}` : choice.modelo,
+  };
 }
 
 /**
@@ -583,13 +630,17 @@ async function perguntarPapeis(deps: WizardDeps, usados: readonly RoleName[]): P
   const { io } = deps;
   const global: EscolhaDePapeis["global"] = {};
   const roles: EscolhaDePapeis["roles"] = {};
+  const precisaDeFerramentas = usados.some((role) => ROLES[role].requiresCli);
+  const providersGlobais = precisaDeFerramentas ? PROVIDERS_DE_AGENTE : PROVIDERS;
+  if (precisaDeFerramentas) explicarExecutor(io);
 
   // O laço existe para o `0` da escolha de modelo ter para onde voltar.
   let provider = "codex";
   for (;;) {
-    provider = PROVIDERS[await choose(io, "Qual provider usar em todos os papéis?", PROVIDERS, 0)]?.label ?? "codex";
-    const escolha = await escolherModelo(io, provider, "Modelo", deps.listModels ?? (async () => []));
+    provider = providersGlobais[await choose(io, "Qual provider usar em todos os papéis?", providersGlobais, 0)]?.label ?? "codex";
+    const escolha = await escolherProviderModelo(deps, provider, "Modelo", precisaDeFerramentas);
     if (escolha === "voltar") continue;
+    provider = escolha.provider;
     if (escolha.modelo !== "") global.model = escolha.modelo;
     break;
   }
@@ -616,22 +667,23 @@ async function perguntarPapeis(deps: WizardDeps, usados: readonly RoleName[]): P
       const role = fila.shift();
       if (!role) break;
       const definition = ROLES[role];
+      const providersDoPapel = providersParaPapel(role);
       const escolhido = await choose(
         io,
         `${definition.label} — ${roleHint(role, definition.requiresCli)}`,
-        PROVIDERS,
+        providersDoPapel,
         manterPadrao,
         `Enter mantém ${provider}`,
       );
       if (escolhido === manterPadrao) continue;
-      const providerDoPapel = PROVIDERS[escolhido]?.label ?? provider;
-      const proprio: { provider?: string; model?: string } = { provider: providerDoPapel };
-      const escolha = await escolherModelo(io, providerDoPapel, `Modelo do ${role}`, deps.listModels ?? (async () => []));
+      const providerDoPapel = providersDoPapel[escolhido]?.label ?? provider;
+      const escolha = await escolherProviderModelo(deps, providerDoPapel, `Modelo do ${role}`, definition.requiresCli);
       // Voltar aqui é voltar à escolha de provider DESTE papel.
       if (escolha === "voltar") {
         fila.unshift(role);
         continue;
       }
+      const proprio: { provider?: string; model?: string } = { provider: escolha.provider };
       if (escolha.modelo !== "") proprio.model = escolha.modelo;
       roles[role] = proprio;
     }
@@ -646,17 +698,16 @@ async function perguntarPapeis(deps: WizardDeps, usados: readonly RoleName[]): P
  * dizer; senão, a lista genérica. Vazio é desligado.
  */
 async function escolherEffort(deps: WizardDeps, provider: string, model: string, titulo: string): Promise<string> {
-  const aceitos = model ? await (deps.listEfforts ?? (async () => []))(provider, model).catch(() => []) : [];
+  const aceitos = model ? await (deps.listEfforts ?? (async () => null))(provider, model).catch(() => null) : null;
+  const none = aceitos?.includes("none") === true;
+  const padrao = provider === "opencode" && aceitos !== null && !none ? "padrão do modelo" : "desligado";
   const opcoes: Choice[] =
-    aceitos.length > 0
-      ? [{ label: "desligado", hint: `${model} aceita: ${aceitos.join(", ")}` }, ...aceitos.map((nivel) => ({ label: nivel }))]
+    aceitos !== null
+      ? [{ label: padrao, hint: aceitos.length ? `${model} aceita: ${aceitos.join(", ")}` : "este modelo não declara variantes de raciocínio" }, ...aceitos.filter((nivel) => nivel !== "none").map((nivel) => ({ label: nivel }))]
       : EFFORTS_GENERICOS;
-  const effort = opcoes[await choose(deps.io, titulo, opcoes, 0)]?.label ?? "desligado";
-  return effort === "desligado" ? "" : effort;
+  const index = await choose(deps.io, titulo, opcoes, 0);
+  return index === 0 ? (none ? "none" : "") : opcoes[index]?.label ?? "";
 }
-
-/** Só CLI constrói: o executor escreve arquivos e roda comandos (§97). */
-const PROVIDERS_DE_AGENTE: Choice[] = PROVIDERS.filter((opcao) => (CLI_PROVIDERS as readonly string[]).includes(opcao.label));
 
 /**
  * O passo "Estratégia de execução" do build (§97).
@@ -743,9 +794,10 @@ async function perguntarExecucao(
         indice += 1;
         continue;
       }
-      const provider = PROVIDERS_DE_AGENTE[escolhido]?.label ?? builder.provider;
-      const modelo = await escolherModelo(io, provider, `Modelo do agente ${indice + 1}`, deps.listModels ?? (async () => []));
+      const providerEscolhido = PROVIDERS_DE_AGENTE[escolhido]?.label ?? builder.provider;
+      const modelo = await escolherProviderModelo(deps, providerEscolhido, `Modelo do agente ${indice + 1}`, true);
       if (modelo === "voltar") continue;
+      const provider = modelo.provider;
       const effort = aceitaEffort(provider) ? await escolherEffort(deps, provider, modelo.modelo, `Intensidade do agente ${indice + 1}?`) : "";
       const restrito = await yesNo(io, `Manter o agente ${indice + 1} dentro do workspace, sem instalar pacotes do sistema?`, false);
       workers.push({ provider, model: modelo.modelo, effort, ...(restrito ? { systemInstall: false } : {}) });
@@ -781,7 +833,7 @@ export async function runWizardDoPedido(deps: WizardDeps & { comando: string }):
 }
 
 export async function runWizardDePapeis(
-  deps: WizardDeps & { comando: string; faltando: readonly RoleName[] },
+  deps: WizardDeps & { comando: string; faltando: readonly RoleName[]; current?: Record<RoleName, RoleConfig> },
 ): Promise<EscolhaDePapeis | null> {
   const { io } = deps;
   const quais = deps.faltando.join(", ");
@@ -789,6 +841,31 @@ export async function runWizardDePapeis(
   io.write("O resto do comando está mantido; responda só isto.\n");
 
   try {
+    if (deps.current && deps.faltando.some((role) => deps.current![role].provider !== "")) {
+      const roles: EscolhaDePapeis["roles"] = {};
+      for (const role of deps.faltando) {
+        if (roles[role]) continue;
+        const configured = deps.current[role];
+        let provider = configured.provider;
+        const providersDoPapel = providersParaPapel(role);
+        let model: string;
+        for (;;) {
+          if (!provider) provider = providersDoPapel[await choose(io, `Provider do ${role}`, providersDoPapel, 0)]?.label ?? "codex";
+          const choice = await escolherProviderModelo(deps, provider, `Modelo do ${role} (${provider})`, ROLES[role].requiresCli);
+          if (choice === "voltar") { provider = ""; continue; }
+          provider = choice.provider;
+          model = choice.modelo;
+          break;
+        }
+        roles[role] = { provider, ...(model ? { model } : {}) };
+        // Uma API global sem modelo deixa vários papéis iguais pendentes.
+        // Só esses recebem a escolha; os já configurados nem estão na fila.
+        for (const other of deps.faltando) {
+          if (ROLES[other].requiresCli === ROLES[role].requiresCli && configured.provider && deps.current[other].provider === configured.provider && !deps.current[other].model) roles[other] = roles[role];
+        }
+      }
+      return { global: {}, roles };
+    }
     return await perguntarPapeis(deps, deps.faltando);
   } catch (error) {
     // Ctrl-D ou entrada encerrada: quem desistiu de responder recebe a mensagem

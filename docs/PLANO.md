@@ -7501,3 +7501,1943 @@ integrações com Git real. Na pasta principal do `teste_luna`, as dependências
 também foram reinstaladas com Node 24.22.0 e `npm ci --engine-strict`; o módulo
 nativo do SQLite carregou nesse runtime e a instalação ficou compatível. Essa
 verificação não executou novamente a P07 nem alterou seus commits aprovados.
+
+## §115 — Diretório efetivo e configuração das APIs no wizard
+
+O `teste_opencode2` mostrou que `cwd` sozinho não garante o diretório da sessão:
+o OpenCode 2.0.32 lê `process.env.PWD` antes de `process.cwd()` e faz `chdir`
+para esse valor. A ponte deve entregar `PWD` absoluto igual ao `cwd` em todas
+as invocações. O teste reproduz esse consumo de PWD, com a principal diferente
+do worktree, tanto na implementação quanto na avaliação e no reparo.
+
+No paralelo, antes e depois de cada chamada, conferir a árvore principal na
+mesma fila exclusiva usada pelo integrador. Assim uma integração legítima não
+parece escrita externa. Alterações versionadas e novos arquivos de produto
+interrompem a fase antes de outra chamada ou aprovação; não há limpeza nem
+commit desses arquivos. Não atribuir a autoria quando há agentes concorrentes.
+O diagnóstico distingue o trabalho no worktree do que ficou na principal e
+não promete um branch com trabalho que ele não contém.
+
+Ao escolher uma API direta, o wizard verifica primeiro se existe credencial
+salva ou variável de ambiente do provider. Sem nenhuma, oferece configurar a
+chave ou voltar. A entrada é oculta, inclusive no resumo do terminal, e o store
+é privado desde o primeiro byte. O mesmo cadastro fica disponível em
+`capivara login` e `capivara config add api`. A chave nunca entra no comando
+equivalente. API exige modelo explícito; listagem indisponível oferece digitar
+o identificador ou voltar, sem lista vazia nem modelo padrão inexistente.
+
+Os caminhos completo e de preenchimento de papéis usam a mesma configuração.
+Providers de API continuam limitados aos papéis de leitura: não oferecem um
+executor nem sessão de reparo com ferramentas. Testes não usam credenciais reais.
+
+Validação: `npm run check` passou com build, tipos e 2.141 testes em 112 arquivos,
+sob Node 24.22.0. A CLI compilada também cadastrou uma chave fictícia num store
+temporário e a exibiu como configurada em `providers list`, sem revelar a chave.
+A reprodução com OpenCode 2.0.32 confirmou o diretório efetivo antes e depois da
+correção, sem inferência. O build completo do projeto experimental não foi retomado.
+
+### §115.1 — API com provider preenchido ainda pode estar sem modelo
+
+O seletor completo lista os modelos DeepSeek com a chave salva, tanto em TTY
+quanto por linhas. O atalho de comando, porém, considerava resolvido um papel
+que tivesse apenas provider. Para API direta, modelo vazio também deve abrir
+o seletor, mantendo o provider, os demais papéis e as flags que já foram dadas.
+Papéis pendentes com o mesmo provider podem compartilhar uma escolha de modelo;
+um papel que já tem modelo não é alterado. Sem TTY, explicar qual modelo falta
+e como informá-lo, sem chegar à ponte nem fazer uma chamada de inferência.
+
+A listagem de API deixa de esconder falta de credencial, HTTP e falhas de rede
+como ausência de modelos. O diagnóstico contém status e causa segura, nunca
+corpo da resposta nem chave. `capivara providers models <provider>` exercita o
+mesmo caminho do wizard e permite conferir a listagem sem iniciar uma tarefa.
+
+Validação: `npm run check` passou com 2.149 testes em 113 arquivos. Com a chave
+DeepSeek salva, a API real respondeu HTTP 200 e retornou `deepseek-flash` e
+`deepseek-v4-pro`. A CLI compilada mostrou ambos no wizard por linhas, no
+painel TTY, no comando novo de listagem e no seletor do comando direto sem
+`--model`. Os seletores foram cancelados antes da execução; não houve inferência.
+
+### §115.2 — O wizard não oferece um executor sem ferramentas
+
+O build com `deepseek` global demonstrou uma escolha impossível: a listagem
+funcionou, mas uma API direta não executa as ferramentas do builder (D-21).
+Quando os papéis usados incluem builder, a escolha global oferece apenas CLIs.
+O mesmo limite vale para o ajuste separado do builder e para o wizard curto.
+Os papéis de leitura continuam podendo escolher APIs diretas. O wizard explica
+como usar um modelo de API na implementação por uma CLI, sem trocar provider
+ou permissões silenciosamente nem iniciar um tool loop novo no Core.
+
+O OpenCode reaproveita as chaves salvas na Capivara. Sua descoberta usa um
+servidor privado e recebe as variáveis dos providers reconhecidos; uma sessão
+recebe apenas a chave salva do provider do modelo escolhido (`deepseek/...`,
+por exemplo). Variáveis já presentes no ambiente são preservadas, salvo seleção
+explícita de credencial. Nenhuma chave é copiada para a configuração do OpenCode,
+impressa ou posta em argv. Outras CLIs não recebem chaves adicionais do store.
+
+A listagem OpenCode 2 usa `api model.list --standalone`: o JSON observado contém
+`data[].providerID`, `id` e `variants[].id`. Os mesmos dados dão os identificadores
+e os níveis de raciocínio reais. Uma lista de variantes vazia significa que o
+modelo não oferece variantes; informação indisponível é representada por null
+e permite o fallback genérico. Quando a CLI declara `none`, desligar raciocínio
+envia essa variante; sem ela, omitir a variante se chama padrão do modelo.
+
+O preflight continua recusando API direta como executor e explica o caminho
+via OpenCode. Essa recusa não altera o perfil salvo nem começa uma fase.
+
+Validação: `npm run check` passou com 2.158 testes em 113 arquivos. A descoberta
+real no OpenCode 2.0.32, com a chave salva, retornou 76 modelos, incluindo
+`deepseek/deepseek-flash` e `deepseek/deepseek-v4-pro`; as variantes DeepSeek
+foram `none`, `low`, `high` e `max`. Uma sessão real do builder com o Flash,
+pela ponte compilada, escreveu e leu um marcador num worktree descartável.
+Mesmo herdando PWD da principal, o marcador ficou só no worktree; a chamada
+terminou com código 0 e resultado legível. O teste usou a chave pelo ambiente,
+sem copiar credenciais para arquivos. O build do projeto experimental não foi
+reiniciado e suas alterações anteriores continuam preservadas.
+
+### §115.3 — APIs continuam visíveis na escolha do executor
+
+Ocultar os providers de API na escolha do build fez a interface parecer perder
+essas integrações. A lista mantém os mesmos doze providers e sua numeração.
+Nos papéis com ferramentas e nos agentes paralelos, cada API informa no próprio
+item que será usada via OpenCode. Ao escolhê-la, o wizard oferece configurar a
+chave, lista somente os modelos desse provider descobertos pelo OpenCode e gera
+explicitamente `provider=opencode` com o identificador completo do modelo.
+O caminho manual exige modelo e acrescenta o prefixo do provider; não permite
+herdar acidentalmente um modelo padrão de outra API. Gemini usa o prefixo google
+do OpenCode. A chave Gemini salva também é resolvida quando o modelo usa google.
+
+Análise de impacto: a escolha global, os ajustes por papel, os workers e o wizard
+curto leem as mesmas opções e precisam da mesma resolução. Papéis de leitura
+continuam usando APIs diretas. Os dados persistidos e o preflight permanecem no
+contrato existente: executor e workers têm provider CLI, sem alterar memórias,
+caches, plano do projeto nem argumentos já completos de um comando direto.
+Regressões devem cobrir a escolha da API nas quatro entradas, cadastro recusado,
+filtragem, modelo manual obrigatório e preservação de APIs nos papéis de leitura.
+
+Validação: build, typecheck e suíte completa passaram, com 2.166 testes em 113
+arquivos. O teste do terminal por teclas escolhe a opção 10 e confirma a lista
+filtrada e o modelo/effort enviados ao executor. Na CLI instalada, o wizard real
+no projeto experimental mostrou os doze providers e os dois modelos DeepSeek,
+montando `build --provider opencode --model deepseek/deepseek-flash --effort high
+--parallel 3`. A execução foi recusada no último passo de propósito; nenhum
+build nem chamada de inferência foi iniciado.
+
+### §115.4 — Lockfile local ignorado não é a entrega da fase
+
+No `teste_opencode2`, o DeepSeek concluiu P02 e aprovou P03 nos gates da
+worktree. A integração de P03 falhou no `npm ci`: o projeto ignora
+`package-lock.json` deliberadamente, e o lockfile local antigo da principal
+não continha as novas dependências. O contrato da instalação deve distinguir
+esse arquivo local da entrega versionada, sem exigir do modelo um arquivo que
+a política do projeto exclui do Git.
+
+Análise de impacto: `comandoDeInstalacao` é compartilhado pela preparação do
+runner serial e da worktree e pela instalação da árvore integrada. Para um
+lockfile existente e ignorado pelo Git, instalar sem ler nem gravar lockfile
+(`npm install --no-package-lock`). Lockfiles rastreados, inclusive quando
+casam com uma regra de ignore, continuam usando `npm ci`. Fora de Git ou com
+consulta indisponível, preservar o comportamento conservador anterior.
+Nenhum manifesto, ignore, lockfile, memória ou branch do produto é modificado
+por essa decisão. Testar a seleção, o caso versionado e uma integração real
+de Git com lockfile local obsoleto que não é parte do commit da fase.
+
+Validação: `npm run check` passou com 2.171 testes em 113 arquivos. Numa cópia
+isolada do commit P03 `0facf4d13e8c`, o lockfile local da principal reproduziu
+o EUSAGE e as seis dependências ausentes do `npm ci`. Com o comando corrigido,
+a instalação real passou sob Node 24.22.0, assim como os 44 testes do backend,
+os 37 do frontend e o build dos dois. O lockfile permaneceu byte a byte igual
+e a cópia continuou sem alterações versionadas. A principal original seguiu
+limpa em `00f6e52` (P02 integrada), e o branch da P03 foi preservado; o build
+completo não foi reiniciado nem foram feitas novas chamadas de modelo.
+
+### §115.5 — MiniMax lista os modelos pela API
+
+A listagem de MiniMax estava desabilitada por uma suposição antiga de que o
+provider não oferecia descoberta. A documentação oficial atual declara
+`GET https://api.minimax.io/v1/models`, e a chave salva respondeu HTTP 200 com
+oito identificadores reais. A referência é a [listagem oficial do MiniMax](https://platform.minimax.io/docs/api-reference/models/openai/list-models).
+O catálogo declara esse endpoint de descoberta
+explicitamente, pois ele não se deriva do endpoint legado de inferência.
+
+Análise de impacto: o novo endpoint opcional é consumido apenas pela descoberta
+de modelos. Wizard completo, preenchimento de papéis e comando `providers models`
+usam o mesmo caminho, com autenticação e diagnóstico já existentes. Demais APIs
+mantêm seus endpoints atuais. No executor, MiniMax continua usando o catálogo e
+as variantes reais do OpenCode, com chave salva passada pelo ambiente somente
+ao provider escolhido. Sem chave, continua oferecendo cadastro; erro da API
+continua exibindo a causa segura e permitindo voltar ou informar modelo manual.
+Nenhuma chave, fase, memória ou configuração do projeto muda com a consulta.
+
+Validação: `npm run check` passou com 2.178 testes em 113 arquivos. A CLI
+instalada retornou os oito modelos reais pelo comando de listagem, usando a
+chave salva. O wizard real de init mostrou os oito identificadores da API; o
+de build mostrou os sete modelos habilitados no catálogo OpenCode para o
+provider minimax. Para MiniMax-M3, a CLI declarou as variantes none e thinking,
+sem oferecer high. Os dois wizards foram cancelados antes da execução; houve
+apenas descoberta, sem inferência. Os testes cobrem segredo no header, store
+salvo, HTTP 401, seleção por teclas, papéis de leitura e executor via OpenCode.
+
+### §115.6 — Executar a API, não uma flag fictícia do Node
+
+Os init de `teste_minimax` e `teste_openrouter` encerraram com código 9, antes
+de qualquer requisição. A invocação de API direta ainda era um esboço que
+executava `node --capivara-direct-api`, flag inexistente. A descoberta não
+exercitava esse caminho. A implementação passa a realizar HTTP com fetch nativo,
+sem subprocesso, SDK novo ou ferramentas de escrita para papéis de leitura.
+MiniMax usa o endpoint OpenAI compatível atual `/v1/chat/completions`.
+
+Análise de impacto: `buildInvocation` declara uma chamada de API explícita e
+`runProvider` a executa, mantendo o contrato de retorno usado na ponte de todos
+os estágios. Writer, auditor e avaliação do verifier podem receber texto; builder
+e reparo com ferramentas continuam exigindo CLI. Não há migração de providers
+nem de memórias. OpenAI Chat Completions e Anthropic Messages têm serializadores
+e leitores próprios; texto final é separado de reasoning/thinking. Raciocínio
+segue o catálogo e é desligado explicitamente sem effort, sem fallback pago
+silencioso. Modelo que não aceita desligar deve recusar com diagnóstico.
+
+A requisição respeita o limite de parede, cancelamento e teto de bytes. Chave
+vai apenas no header apropriado, sem redirects, argv ou arquivos; callbacks,
+erros e respostas passam pelo redator. HTTP, rede, credencial ausente, JSON
+inválido, conteúdo vazio e geração truncada retornam diagnóstico legível,
+distinto de uma resposta válida do modelo. Uso de tokens acompanha o retorno.
+Init e plan preservam stderr nas falhas e as classificam como falha da chamada,
+em vez de atribuir saída vazia à qualidade do modelo. Testar os dois dialetos,
+erros e limites, os seis providers, ponte com chave salva e uma requisição real
+de geração pequena, além da listagem.
+
+A validação completa também expôs uma prova de concorrência dependente de uma
+janela de 80 ms para três worktrees abrirem. O provider falso desse teste deve
+esperar as chamadas esperadas chegarem a uma barreira com timeout, antes de
+concluir qualquer uma. Isso confirma concorrência real sem depender da rapidez
+do Git nesta máquina e sem modificar o escalonador do produto.
+
+Validação: build, typecheck e suíte completa passaram com 2.204 testes em 115
+arquivos. Pela ponte compilada, uma geração real MiniMax-M3 retornou o texto
+exato solicitado com código 0, 182 tokens de entrada, 6 de saída e zero de
+raciocínio. DeepSeek Flash também respondeu corretamente por HTTP direto.
+O teste real OpenRouter chegou à API e recebeu HTTP 401 `User not found`:
+diagnóstico de credencial agora legível, distinto do antigo erro 9 local.
+Os testes da CLI exercitam init de MiniMax e OpenRouter e comprovam que o
+diagnóstico HTTP chega à parada e ao arquivo de evidência sem expor chaves.
+Nenhum init completo nem build de projeto foi reiniciado durante a correção.
+
+### §115.7 — OpenRouter distingue chave de geração e de gerenciamento
+
+A chave cadastrada pelo wizard autentica em `GET /api/v1/key` (HTTP 200), mas
+tem `is_management_key: true` e `is_provisioning_key: true`. Chaves desse tipo
+administram credenciais e não executam completions. A listagem pública de
+modelos retorna o mesmo catálogo sem chave; por isso não valida acesso à geração.
+O HTTP 401 `User not found` observado na geração não prova que a chave esteja
+inválida: neste caso a autenticação funciona e a categoria da chave é inadequada.
+
+Análise de impacto: `ensureApiCredential` é usado no wizard completo, atalho de
+papéis e configuração de API. Para OpenRouter, ele verifica a chave salva ou de
+ambiente no endpoint oficial de metadados antes da listagem e execução. Uma
+chave de gerenciamento ou expirada oferece substituição no próprio wizard;
+a chave nova só é salva após validação. Credenciais existentes permanecem
+intactas ao cancelar ou falhar a consulta. Timeout, rede e HTTP 5xx oferecem
+tentar novamente ou voltar, sem assumir que a chave precisa ser trocada.
+Outros providers mantêm seu fluxo. A consulta não gera texto, não cobra tokens,
+não lista nem cria outras chaves e não registra metadados pessoais ou segredos.
+
+Referências: [metadados da chave atual](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-key)
+e [limitação de chaves de gerenciamento](https://openrouter.ai/blog/tutorials/team-spend-controls-setup/).
+
+Validação: `npm run check` passou com 2.220 testes em 116 arquivos. No wizard
+compilado, a chave existente foi identificada como gerenciamento e recebeu a
+opção de substituição na própria tela; cancelar manteve o arquivo de credenciais
+byte a byte igual e não iniciou execução. Os testes comprovam a troca por uma
+chave de geração antes de listar modelos, rejeição de chave administrativa nova,
+preservação ao cancelar, repetição após HTTP 500 e ausência de segredos na saída.
+Nenhuma chave foi criada, revogada ou substituída na conta ou no store real.
+
+### §115.8 — Substituição de chave sem repetição automática
+
+A rejeição de uma chave digitada não pode reabrir o campo oculto imediatamente.
+O usuário deve escolher explicitamente entre voltar ao provider (padrão) e
+digitar outra chave, com o motivo da recusa visível na recuperação. Reenviar uma
+chave já recusada nesta configuração não refaz a consulta de rede. Uma chave
+válida continua sendo salva e permite escolher o modelo normalmente.
+
+Análise de impacto: o fluxo compartilhado atende wizard completo, seleção de
+papéis e configuração de API. O retorno falso continua significando voltar,
+sem listar modelos ou iniciar uma chamada com credencial incompatível. Não
+muda o formato do store, a seleção de credenciais ou o transporte de geração.
+Chaves antigas permanecem intactas até uma substituta válida ser salva. A
+validação de caracteres também exige escolha explícita após recusa; a repetição
+de uma consulta indisponível já exige escolha e permanece separada da troca.
+Testar cancelamento na recuperação por linha e cursor, repetição da mesma chave
+sem nova consulta, recuperação com chave válida e preservação do store.
+O terminal corta notas longas por linha; os diagnósticos de gerenciamento e as
+instruções de troca devem usar linhas curtas para manter causa e endereço
+visíveis. Verificar também as molduras efetivamente desenhadas pelo prompter.
+
+Validação: quatro regressões falharam com a repetição automática e passaram
+após a correção. O teste de terminal também encontrou o motivo cortado e agora
+confirma causa e endereço visíveis, decisão explícita, ausência de nova consulta
+para a mesma chave e avanço até a seleção de modelo com uma substituta válida.
+`npm run check` passou com 2.225 testes em 116 arquivos, build e typecheck.
+O binário instalado aponta para o bundle recompilado. Nenhuma credencial real
+foi alterada e nenhuma geração de modelo foi iniciada nesta correção.
+
+### §115.9 — Convergência do plan observado em teste_minimax
+
+O plan de 18/10 chegou a dez rodadas de auditoria/emenda e terminou NOT READY.
+A emenda recebia pedido e findings de todas as fases, mas não a fatia do
+esqueleto, as decisões aceitas ou a gramática/tetos que orientaram a escrita.
+Uma resposta perdeu o fechamento `**` de Acceptance criteria e foi descartada
+inteira por I-08, embora os critérios estivessem presentes. Os lotes paralelos
+do ensaio ainda sobrescreviam o mesmo arquivo de prompt e resposta.
+
+Corrigir o contexto da emenda com a fatia da própria fase, decisões aceitas
+atuais (inclusive arbitragem), gramática e tetos comuns. Findings com alvo
+conhecido chegam apenas às fases afetadas; achados globais continuam globais.
+Recuperar fechamento de negrito ausente em rótulo estrutural conhecido, dentro
+da normalização do contrato, sem inventar critério, trace ou decisão. Forma
+sem conteúdo continua reprovada. Não flexibilizar o gate nem aprovar documento
+por silêncio ou impasse.
+
+Cada chamada de init/plan terá identificador próprio na evidência, além de
+etapa, assunto, papel e tentativa. Isso preserva todos os lotes, repetições e
+execuções retomadas. O runId e o formato das memórias não mudam. O metadado
+command deve distinguir plan de init, mantendo o mesmo runId que liga os dois.
+
+O ensaio recebe instrução explícita para julgar a possibilidade de prova no
+repositório após implementação, inclusive leitura da fundação e comparação com
+Git. A ausência desses arquivos agora e a falta de enumeração de cada arquivo
+futuro não tornam o critério impossível. Divergência de preferência ou cobrança
+de técnica pertence à auditoria, não à observabilidade. Contradição comprovada
+com decisão continua bloqueante; não descartar automaticamente os vereditos.
+
+Análise de impacto: escrita, emenda, auditoria e ensaio compartilham as mesmas
+decisões e contrato; a recuperação sintática atende escrita e emenda. Os hashes
+de auditoria já incluem o texto corrigido e a autoridade atual; não há migração
+ou apagamento de caches. Nomes de evidência não são chave de cache nem entrada
+do executor; adaptar o teste da CLI que abria um nome fixo. Cobrir decisão nova
+chegando à emenda, isolamento dos findings por fase, rótulo malformado preservando
+conteúdo, falta real de critério ainda recusada, lotes e retomadas sem perder
+evidências. Reproduzir localmente o I-08 com a resposta capturada, sem chamar API
+nem reiniciar o projeto do usuário durante o reparo.
+
+### §115.10 — Regras de banco embutido não exigem conexão de servidor
+
+A auditoria de teste_minimax cobrou host, porta, usuário e senha para SQLite
+porque o harness acrescentava essa regra de servidor a qualquer banco. Também
+exigia que o `.env.example` da aplicação persistente apontasse diretamente para
+o banco descartável dos testes, provocando disputa sobre o caminho padrão.
+
+Para a escolha embutido, a configuração exigida é o caminho do arquivo por
+ambiente. O exemplo inicializa um arquivo local persistente da aplicação sem
+serviço externo; testes e fluxos fornecem outro caminho temporário e o destroem
+ao terminar, sem tocar o `.env` nem o banco normal. Bancos de servidor mantêm
+suas regras de conexão e origem. As demais garantias comuns permanecem.
+
+Análise de impacto: `regrasDeBanco` acrescenta regras depois do parser do init;
+isso muda novos esqueletos e os hashes derivados deles. Não editar esqueletos
+publicados nem decisões antigas silenciosamente. O teste atual teve sua pasta
+`.capivara` removida externamente durante a investigação e recomeçará pelo init.
+Cobrir os três tipos de origem, ausência de credenciais fictícias em SQLite,
+persistência do exemplo e isolamento do arquivo temporário dos testes.
+
+Validação de §115.9–§115.10: build, typecheck e suíte completa passaram com
+2.234 testes em 116 arquivos. As regressões comprovam decisão aceita durante
+auditoria chegando à emenda, separação dos findings, aproveitamento da correção
+com negrito malformado e preservação de cada lote, complemento e retomada.
+Os testes de banco verificam conexão de servidor preservada, configuração de
+arquivo para banco embutido e publicação das regras corretas no novo init.
+No bundle compilado, a reprodução do rótulo observado mudou de I-08 para
+nenhum erro, alterando somente o fechamento `**`. O registro original completo
+já não estava disponível após a remoção externa da pasta de controle do teste.
+O comando instalado usa o bundle recompilado. Nenhuma API foi chamada, nenhum
+artefato do projeto do usuário foi editado e nenhum teste real foi reiniciado.
+
+### §115.11 — Falha mecânica do escritor não é decisão de produto
+
+O OpenRouter de teste_openrouter respondeu às seis chamadas de escrita, mas a
+fundação oscilou entre 12, 17, 20, 21, 18 e 16 tasks. A última resposta ainda
+tem duas tasks com cinco critérios. Os prompts já declaram os limites de 15
+tasks e quatro critérios, a fatia e as decisões aceitas. Nenhum auditor foi
+chamado: o self-check rejeitou antes. O bloqueio é correto; a apresentação não.
+
+O impasse mostrava zero devoluções porque só contava as do auditor, chamava o
+self-check de auditor e oferecia uma decisão de produto para resolver contagem.
+Preservar contagens separadas e mostrar o total das verificações mecânicas
+quando elas esgotam o orçamento. Identificar a falha como estrutura que o
+modelo não adequou. No terminal, oferecer controles de repetir a correção,
+publicar rascunho e interromper; texto livre não vira autoridade para dispensar
+limites. Publicar rascunho não altera o gate de prontidão.
+
+Análise de impacto: `Standoff` é produzido pelo ciclo e consumido pelo relatório
+e callback da CLI; o callback ganha contexto opcional mantendo compatibilidade
+com callers que recebem só texto. Arbitragem semântica mantém suas opções e
+contagem. Ajustar a promessa de preservação do plan: fases guardadas em cache
+continuam disponíveis; isso não significa plano final já publicado. Não mudar
+tetos, orçamento, cache, artefatos do usuário nem a execução em andamento.
+Testar contagem mecânica e mista, mensagem e opções corretas, controles sem
+registrar decisão, bloqueio de texto livre em contagem e regressões semânticas.
+
+A regressão de publicação expôs que RALPH READY não repetia os tetos do
+self-check: um rascunho com cinco critérios por task podia ser aprovado após
+publicação explícita. Acrescentar a verificação de dimensionamento ao gate
+final, usando os mesmos três limites (tasks/fase, critérios/task e critérios/
+fase), sem alterar o parser ou inventar erro de contrato. Publicar permite
+guardar o rascunho; não o declara pronto. Cobrir os três limites e o fluxo
+completo de publicação explícita após reprovação mecânica.
+
+Validação: `npm run check` passou com 2.243 testes em 116 arquivos, build e
+typecheck. A regressão da contagem falhou antes do reparo; a de publicação
+revelou e confirmou o fechamento do bypass de dimensionamento. O bundle
+compilado reavaliou a última resposta real do OpenRouter: NOT READY somente
+por 16 tasks na fase 1 e cinco critérios nas tasks 4 e 8. Nenhuma API foi
+chamada e a execução em andamento e os artefatos de teste_openrouter não foram
+alterados. As mudanças de apresentação valem nas próximas execuções do binário
+instalado, que já foi recompilado.
+
+### §115.12 — Resposta final do OpenCode e falha do roteirista no gate 4
+
+Em teste_minimax, P01 passou pelo julgamento das 12 tasks e foi devolvida duas
+vezes por roteiro com zero passos. A reprodução do JSONL prova que as quatro
+respostas finais tinham cinco test.step; o leitor concatenava mensagens de
+progresso com a resposta final, desalinhando cercas de código. Preservar partes
+da mesma mensagem, mas entregar somente a última mensagem identificada por
+messageID. Sem identificadores, manter a concatenação legada; tokens e custo
+continuam somando toda a sessão. Nenhuma mudança nos demais providers.
+
+O último roteiro também veio com stamp HTML na primeira linha do bloco TS:
+convertê-lo em comentário de linha, sem alterar o código/asserts. Não aceitar
+roteiro ausente ou relaxar a cobertura de passos.
+
+Falha estrutural após o orçamento do roteirista deve ser scriptFailed, com o
+workflow identificado. Ao esgotar a correção do próprio roteiro, interromper a
+fase como defeito do harness, preservando o trabalho, em vez de gastar outro
+ciclo do construtor. Erro real do produto continua chegando ao construtor.
+Gravar causa mesmo antes de existir saída do Playwright. Cada chamada de
+roteirista guarda prompt e resposta separados, com ciclo e identificador; o
+contexto da passagem não deve virar `[object Object]` no nome do arquivo.
+
+Análise de impacto: a leitura do OpenCode atende todos os papéis; testar partes
+da mesma mensagem, múltiplas mensagens, transcritos legados, saída crua e uso
+somado. Gate 4 conserva toda validação e a política de uma correção própria do
+roteiro; falha de roteiro não deve mudar produto nem virar verde. O encerramento
+antecipado reutiliza a preservação de parcial e relata o ciclo realmente gasto.
+Não alterar fases, critérios, scheduler, worktree nem processo do usuário.
+Reproduzir as sessões reais offline e executar regressões de providers/gate/loop.
+
+Validação: build, typecheck e suíte completa passaram com 2.249 testes em 116
+arquivos. Os dois testes iniciais falharam no leitor e no stamp antes do reparo.
+Na reprodução das sessões reais, as quatro rejeições de zero passos passaram
+a cinco passos, sem defeito estrutural e com sintaxe TypeScript válida; as três
+demais respostas mantiveram cinco passos válidos. O teste integrado comprova
+um construtor, duas tentativas de roteiro, nenhuma abertura de navegador e
+parada no ciclo 1 quando o roteiro continua inválido, com código preservado,
+prompts/logs distintos e causa gravada. Fragmentos legados, mensagens multipart,
+tokens/custo e os outros providers mantiveram suas regressões verdes.
+
+A execução antiga terminou durante a investigação com seletor ambíguo no
+roteiro: `getByText('Total de tarefas')` também encontra `Abrir total de tarefas`.
+Isso ainda precisa ser corrigido pelo roteirista e reexecutado no navegador;
+a reprodução estrutural não demonstra que o fluxo inteiro passou. Nenhuma
+chamada de API, alteração no projeto/worktree ou reinício do build foi feito
+nesta correção. O binário instalado foi recompilado para a próxima execução.
+
+### §115.13 — Repetição do auditor com diagnóstico do protocolo
+
+Em teste_openrouter, P1 e P2 responderam APPROVED com CAPIVARA_FINDING;
+alguns findings também trocaram os separadores `|` por `/`. A segunda chamada
+recebeu o mesmo prompt da primeira, sem o defeito apontado pelo parser ou a
+resposta recusada. A rejeição é correta; a recuperação cega desperdiça a única
+tentativa de correção. Não inferir aprovação de finding vazio, não converter
+finding em remark e não escolher status por conta própria.
+
+Na segunda tentativa, preservar o prompt original e acrescentar diagnóstico,
+resposta anterior e instruções concretas para reemitir o veredito completo:
+APPROVED omite findings (inclusive placeholders); defeito material exige
+REJECTED com três campos separados por `|`. Não mudar evidência, escopo,
+independência nem o teto de duas chamadas. Unificar a repetição das auditorias
+por fase/coerência e do caminho por documento.
+
+Análise de impacto: o parser e os gates permanecem estritos; somente a chamada
+de recuperação muda. O primeiro prompt continua idêntico, portanto as chaves
+de aprovação e escrita em cache e o sha da autoridade não mudam. A aprovação
+só é gravada após resposta válida. Todas as chamadas continuam com evidência
+própria. Testar os dois escopos do plano, findings incompatíveis com aprovação,
+separadores errados, correção válida e persistência da falha após duas chamadas.
+Não reiniciar API nem alterar o projeto do usuário para validar o reparo.
+
+Validação: as três regressões de recuperação falharam antes do reparo; o caso
+de bloqueio permaneceu verde. Depois, 117 testes de auditoria, ciclo em dois
+estágios e cache passaram. `npm run check` concluiu build, typecheck e 2.253
+testes em 116 arquivos. O bundle recompilado reproduziu offline as quatro
+respostas reais inválidas de P1/P2: todas continuam recusadas, e a recuperação
+inclui prompt original, resposta anterior e cada defeito do parser. Nenhuma
+chamada real de API foi feita e teste_openrouter não foi alterado. O comando
+instalado aponta para o bundle atualizado; o modelo ainda precisa responder
+novamente e resolver os findings semânticos, inclusive os da coerência.
+
+### §115.14 — Teto de geração não é falha de credencial
+
+O plan de teste_openrouter recebeu `finish_reason: length` na terceira escrita
+de P1, após cerca de dez minutos. O adapter enviava 32.768 tokens fixos; o log
+guardou somente uma frase, sem modelo, effort, uso ou texto parcial. Não há
+evidência para atribuir o consumo a raciocínio ou documento. A tela classificou
+como ambiente e mandou verificar credencial, embora a geração tenha ocorrido.
+
+Manter 32.768 como padrão. Permitir ajuste explícito para APIs diretas pela
+variável `CAPIVARA_API_MAX_OUTPUT_TOKENS`, inteiro positivo seguro, validado
+antes do HTTP. Aplicar ao campo equivalente de cada dialect sem alterar
+thinking/effort. Não aumentar orçamento, reduzir esforço ou repetir geração
+automaticamente. O provider pode recusar um teto acima do suportado pelo modelo.
+
+No corte, manter saída inválida, código não zero e texto final vazio. Informar
+modelo, effort, teto enviado, motivo e tokens de entrada/saída/raciocínio quando
+presentes; dados ausentes continuam desconhecidos. Preservar texto visível
+parcial sanitizado em arquivo separado `.partial.txt`, nunca como documento,
+findings, cache ou fonte para retomada automática. Não guardar raciocínio interno.
+Classificar a parada como geração incompleta e orientar ajuste de orçamento ou
+effort no mesmo modelo, preservando o cache, sem culpar a credencial.
+
+Análise de impacto: `runDirectApi` atende todos os papéis de texto e APIs; os
+campos padrão e os demais erros permanecem iguais. A variável só é interpretada
+na API nativa, não muda o executor OpenCode/CLI. O parcial sobe pelo supervisor,
+bridge e caller documental exclusivamente para evidência; stdout com erro
+continua diagnóstico. Não alimentar detectRateLimit com texto parcial. O
+orquestrador mantém custos da chamada rejeitada, falha sem nova cobrança e não
+publica/cacheia o parcial. Cobrir dialects, config inválida sem HTTP, consumo de
+raciocínio, segredo removido, classificação e evidência pela CLI. Não chamar a
+API real ou alterar teste_openrouter para validar.
+
+Referência de semântica do orçamento: OpenRouter, Reasoning tokens and
+max_tokens: https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+
+Validação: os 15 casos novos falharam antes do reparo. Depois, os 52 testes
+de API, parada e integração com a CLI passaram; `npm run check` concluiu build,
+typecheck e 2.268 testes em 116 arquivos. Os testes mantêm o teto padrão nos
+seis providers, validam configuração antes de HTTP e preservam consumo, parcial
+sanitizado separado e falha sem publicação ou repetição. A CLI instalada já
+aponta para o bundle recompilado. Não houve chamada real de API, alteração
+em teste_openrouter ou aumento de orçamento automático. A distribuição do
+consumo na chamada antiga permanece desconhecida: os dados foram descartados
+naquela execução e não podem ser reconstruídos do log.
+
+### §115.15 — Atividade do OpenCode no painel e contenção da suíte
+
+No build de teste_openrouter, G0 aguardava uma sessão viva: o executor escrevia
+arquivos e corrigia testes. `createAgentBridge` resumia somente codex-jsonl;
+os eventos OpenCode ficavam no log cru sem chegar ao painel. Mesmo no caminho
+com resumo, o callback atualizava só o histórico, mantendo AGORA e Atividade
+com a descrição inicial durante toda a sessão.
+
+Resumir o JSONL real do OpenCode: passos, ferramentas e estados, arquivos,
+resultado de comandos/testes e erros. Não exibir reasoning, conteúdo de arquivos,
+corpos arbitrários, argumentos sensíveis ou JSON inteiro. Diagnósticos
+determinísticos como EADDRINUSE podem ser destacados; contagens de testes são
+as reportadas pelo executor, nunca aprovação dos gates. Preservar o parser de
+resposta final e a contabilidade. Resumos são telemetria, sem poder no scheduler.
+
+Atualizar AGORA, Atividade e os eventos do agente certo em serial e paralelo;
+manter o tempo da chamada e mostrar há quanto tempo chegou o último evento.
+Indicar que G0 aguarda a conclusão do executor. Eventos não alteram gates ou
+aprovação de tasks. Filtrar segredos e controles de terminal antes da interface.
+O mesmo bridge atende init/plan, que também recebem a atividade do OpenCode.
+
+Os testes de persistência gerados iniciavam `npx ts-node` e matavam o wrapper,
+deixando o Node filho vivo e causando EADDRINUSE na reinicialização. Não matar
+processos da sessão ativa por porta, nome ou cwd. Orientar o executor, inclusive
+em reparos, a iniciar o binário real ou gerenciar grupo próprio, aguardar saída
+e limpar em finally, preservando a verificação de persistência.
+
+Mitigação mecânica no G2: o runner da suíte, que hoje usa execFile sem grupo,
+passa a criar grupo próprio e recolher descendentes desse grupo quando o comando
+termina, em sucesso e falha. Preservar stdin fechado, cwd, ambiente Node,
+códigos/saída e teto de 32 MiB; não impor timeout novo. A aceitação e G4 já têm
+contenção de grupos e não mudam. Isso evita vazamento entre verificações;
+limpar durante o próprio teste ainda cabe à implementação do teste gerado.
+
+Análise de impacto: callbacks de observação não podem mudar resposta nem
+derrubar provider. Resumos e parciais têm limite; repetição por progresso não
+vira nova chamada. O painel mantém o relógio e eventos separados por agente,
+sem afirmar que silêncio é travamento. Não alterar contratos, fases, critérios,
+cache, orçamento, modelo ou execução existente. Regressões devem provar resumo
+dos eventos reais, transmissão incremental antes do fim pela ponte, segurança,
+relógios, atribuição por agente e contenção com um processo alheio preservado.
+
+Validação: a regressão pela ponte falhou antes do resumo OpenCode; as duas de
+contenção falharam antes do grupo próprio, deixando as portas dos fixtures
+ocupadas. Com o reparo, 172 testes direcionados passaram. `npm run check`
+concluiu build, typecheck e 2.286 testes em 118 arquivos. A reprodução offline
+do log real produziu 347 resumos, incluindo a rodada de 64 testes aprovados,
+sem mudar resposta final ou gates. Os testes cobrem transmissão em chunks antes
+de a sessão terminar, descarte de linha excessiva, argumentos privados,
+relógios separados, atividade do agente certo e liberação de servidor tanto
+em sucesso quanto código 7, preservando outro servidor fora do grupo.
+
+As orientações de recursos também chegam à correção de aceitação e ao reparo
+do verificador, não só à implementação inicial. A contenção do G2 não elimina
+bugs de reinicialização dentro de uma sessão OpenCode: o teste gerado ainda
+precisa encerrar seu próprio filho antes de iniciar o seguinte. O binário
+instalado foi recompilado. A execução já aberta conserva o código antigo;
+nenhum projeto/worktree, processo dela ou chamada real de modelo foi alterado.
+
+### §115.16 — Cancelar encerra o provider; retomada preserva árvore interrompida
+
+O usuário cancelou build-0d614b0876f0 após 51 minutos. O processo Capivara saiu,
+mas o OpenCode destacado e seu servidor privado permaneceram vivos, iniciando
+novas ferramentas. O log já tinha 75 testes verdes; faltava o executor encerrar
+a sessão. O supervisor só tratava AbortSignal, que o binário não ligava a
+SIGINT/SIGTERM. O servidor standalone e ferramentas também criam grupos próprios.
+
+No binário, SIGINT/SIGTERM devem encerrar as invocações ativas antes de sair,
+com código 130/143. Registrar chamadas no supervisor e remover o registro ao
+terminarem. Matar o grupo próprio de cada CLI; para OpenCode standalone,
+acrescentar um identificador aleatório por invocação e recolher, em Linux,
+somente processos do usuário com esse mesmo identificador herdado. Não usar
+nome, porta ou cwd como autoridade. A API direta termina com o processo; não
+prometer que o servidor remoto devolve créditos de uma chamada já aceita.
+Timeout/AbortSignal também recolhem os grupos separados do OpenCode. Bibliotecas
+importadas não devem instalar handlers de sinal por conta própria.
+
+Interrupção abrupta deixa arquivos novos sem commit no worktree. abrirWorktree
+só preservava commits anteriores antes de remover a sobra: a retomada apagaria
+essa P01. Antes de limpar um worktree existente, guardar alterações não
+commitadas pela mesma política de admissão/recuperação de guardarParcial. Se a
+guarda não for comprovada, abortar a reabertura preservando a árvore. O parcial
+continua sem aprovação, não entra na principal e volta aos gates normalmente.
+
+Análise de impacto: sinais do binário não viram nova chamada nem aprovação.
+Não alterar modelo, duração máxima, G0 ou contrato de fases. Locks de processo
+morto continuam recuperados pelo mecanismo existente. A guarda segue a política
+de segredos e não altera o HEAD integrado; falha de disco/Git nunca autoriza
+limpeza. Testar ausência de resposta nova após cancelamento, filhos em grupos
+separados, processo alheio preservado, invocações finalizadas removidas do
+registro e retomada de arquivos novos/modificados sem commit.
+
+Na recuperação desta execução, 18 processos identificados pelo ambiente da
+sessão antiga foram encerrados; a checagem seguinte encontrou zero restantes.
+Não foi feita chamada de modelo nem integração do trabalho parcial.
+
+Validação: as duas regressões falharam antes do reparo (servidor privado vivo
+após AbortSignal e arquivos não commitados apagados na reabertura). Depois,
+21 testes direcionados passaram. `npm run check` concluiu build, typecheck e
+2.290 testes em 120 arquivos, incluindo o binário real cancelado por SIGINT
+e SIGTERM com códigos 130/143 e servidor privado encerrado. O processo externo
+do teste permaneceu vivo. A retomada preservou arquivo modificado e arquivo
+novo sem alterar o HEAD integrado.
+
+Na recuperação real, guardarParcial salvou a P01 no commit `cf44b13`, branch
+`capivara/build-0d614b0876f0/P01`; a principal permaneceu em `3fe3c9e`.
+Após comprovar que o dono original do lock estava morto, foi acrescentado um
+evento blocked de cancelamento e atualizado o snapshot, sem marcar nenhum gate
+ou fase como aprovado. O lock antigo fica para a quarentena automática normal.
+O binário instalado foi recompilado. Nenhum teste de aplicação ou chamada paga
+foi iniciado para fazer a recuperação ou validar esta correção.
+
+### §115.17 — Timeout de sessão não inicia outra hora de construção
+
+Em teste_openrouter, qwen3.8-flash teve 75 testes verdes às 20h09, mas expandiu
+a garantia de isolamento para 13 scripts de mutação e instrumentação interna
+de better-sqlite3. Às 21h07, o teto wall de 3.600s encerrou o executor. O loop
+abriu automaticamente outro ciclo, cujo prompt carregava a última mensagem
+de progresso sobre um mutante como parte da causa. A sessão seguinte voltou à
+mesma investigação apesar de 88 testes verdes. O plano exige isolamento, não
+um framework de mutação/telemetria da suíte. G2/G3 ainda não haviam julgado nada.
+
+Timeout marcado pelo supervisor (first-output, idle ou wall) deve encerrar a
+fase preservando o parcial, sem abrir automaticamente outra chamada longa ao
+construtor. Vale para executor, verificação e reparo assistido: falha técnica
+da sessão do verificador não é ordem para reimplementar produto. Permanecem o
+teto atual e os ciclos normais para defeitos de produto/veredito. Rate limit
+conserva sua política separada. O relatório deve atribuir o limite ao ambiente
+da chamada, não a defeito do modelo/produto, com o ciclo efetivamente gasto.
+
+Nos prompts de escrita/reparo, delimitar o ponto de entrega: cobrir todos os
+critérios e cenários negativos exigidos, rodar verificações pertinentes e
+devolver ao verificador independente. Não inventar framework de mutação,
+interceptação de drivers ou nova infraestrutura de observabilidade sem
+requisito explícito ou finding que o justifique. Não diminuir critérios,
+remover asserções ou aceitar a palavra do executor como aprovação.
+
+Análise de impacto: o novo freio só lê timedOut do supervisor e mantém a
+finalização/preservação já existente. Não interpretar texto livre para decidir
+parada e não fazer testes do executor substituírem G2/G3. A mensagem final de
+progresso continua como evidência, sem ganhar autoridade de requisito. Não
+mudar modelo, fase publicada, orçamento, timeout ou processo em andamento.
+Regredir timeout nos três tipos e nos três papéis, distinguindo erro comum de
+G0 e rejeição real de G2/G3 que continuam com correção automática.
+
+Validação: as regressões de timeout falharam antes da mudança. A suíte final
+`npm run check` concluiu build, typecheck e 2.296 testes em 120 arquivos.
+Cobertura inclui os três tipos no executor, timeout do verificador e do reparo,
+precedência sobre texto de rate limit no parcial e orientação de retomada sem
+afirmar que o produto já está correto. O binário instalado foi recompilado.
+
+O usuário cancelou novamente a execução antiga: nenhum processo da sessão
+permaneceu. A pasta de teste passou a conter apenas docs, sem .git/.capivara;
+não foi recriado esse estado. Os arquivos sobreviventes da P01 foram guardados
+e relidos em arquivo privado de recuperação, fora do projeto, excluindo
+node_modules e o ponteiro .git inválido. Não houve chamada de modelo, retomada
+ou aprovação de fase. As novas instruções de encerramento ainda precisam ser
+avaliadas em uma próxima execução real; não garantem convergência do modelo.
+
+### §115.18 — Parâmetros do OpenRouter e recusa explícita antes de construir
+
+No build-022eba66528c, Kimi K3 foi recusado com HTTP 402: a CLI pediu 256.000
+tokens de saída, além do máximo que a cota da chave comportava. GLM-5.3-prime
+foi recusado com provider.no-route por receber a variante none inexistente.
+Os agentes com modelo próprio e effort vazio herdavam o effort do builder
+apenas por usarem a mesma CLI, mesmo quando trocavam de modelo. Cada recusa
+consumiu três ciclos; nenhum modelo chegou a implementar o produto.
+
+O effort herdado depende do mesmo provider E modelo. Modelo próprio diferente,
+sem effort próprio, usa o padrão daquele modelo; variante explicitamente
+declarada continua intacta. Isso vale para agentes de qualquer CLI e não
+reescreve estratégia salva ou plano. Agente sem configuração continua sendo
+o builder completo; modelo igual conserva a herança anterior.
+
+Chamadas OpenRouter via OpenCode recebem teto de saída por resposta, em vez
+de reservar a capacidade máxima anunciada pelo modelo. Padrão 16.384 tokens;
+OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX explícito do operador tem precedência
+e deve ser inteiro positivo seguro. Não aplicar o padrão a outros providers,
+não mudar o teto da API documental, não elevar limite da chave nem fazer
+inferência paga para validar. Confirmar o parâmetro com a CLI instalada contra
+servidor HTTP local sem credenciais reais; não basta observar o ambiente.
+Na 2.0.32 instalada, a variável sozinha foi ignorada, enquanto o campo
+provider.openrouter.models[id].limit.output alterou o parâmetro HTTP. Consultar
+model.list com o mesmo ambiente, conservar context/input e limitar output ao
+menor entre o teto e o limite declarado. Aplicar a sobreposição apenas no
+ambiente da chamada; conservar as demais opções. Consulta/configuração inválida
+impede inferência, sem fallback silencioso para os 256.000 tokens.
+
+O parser do OpenCode reconhece eventos error separados de mensagens text e
+preserva a causa legível sem republicar o corpo HTTP aninhado. Recusas
+estruturadas de cota financeira (provider.quota/402) ou configuração
+(provider.no-route) param a fase após a chamada, em executor, verificação e
+reparo; não viram pedido para corrigir produto nem nova sessão automática.
+429 mantém sua política de espera; texto semelhante numa mensagem normal do
+modelo não classifica recusa. Mesmo com texto/marker anterior, um erro explícito
+posterior não pode aprovar a chamada.
+
+Análise de impacto: procurar consumidores de effort do pool, transcript,
+BridgeResponse/EngineResult, G0 e classificação final. Um novo fato estruturado
+de recusa decide parar em vez de tentar construir novamente; não muda contrato
+de fases, hashes, caches ou gates de produto. Cobrir herança com modelo trocado,
+modelo igual e effort explícito, teto/precedência/validação, parser com erro
+após progresso, 402/no-route nos papéis e 429 separado. Regredir antes do reparo.
+
+Validação: dez regressões de herança/parser/repetição falharam antes da correção.
+Depois, 185 testes direcionados passaram. `npm run check` concluiu build,
+typecheck e 2.321 testes em 121 arquivos; o binário instalado foi recompilado.
+Também foi verificado que a estratégia real salva contém effort vazio para os
+três agentes GLM: nenhuma edição desse arquivo é necessária.
+
+Prova com OpenCode 2.0.32 real e a ponte completa contra servidor HTTP local:
+Kimi K3 com none e GLM-5.3-prime com effort vazio enviaram
+max_completion_tokens=16384, receberam PONG simulado e concluíram com código 0.
+Nenhuma credencial real ou inferência paga foi usada. O teste de configuração
+isolada também confirmou que options.maxTokens/maxOutputTokens não mudam esse
+parâmetro; limit.output com o contexto preservado o modifica. A consulta de
+metadados usa o mesmo supervisor para não reintroduzir processo órfão no
+cancelamento. Não havia processos ativos da execução do usuário; seus logs,
+estratégia, fontes publicadas e worktree não foram alterados ou retomados.
+
+### §115.19 — Todos como o executor substitui os agentes salvos
+
+O wizard gerava --parallel 3 sem --worker ao escolher todos como o executor.
+O resolvedor tratava a ausência de workers como herdar os agentes do arquivo.
+No teste_openrouter o builder era DeepSeek, mas os três agentes ficaram no
+GLM-5.3-prime salvo, e calls.jsonl confirmou a chamada efetiva com GLM. O painel
+mostrava corretamente a configuração errada que chegava ao executor.
+
+A escolha de pool vazio no wizard deve viajar de forma explícita no comando
+impresso/executado: --workers-as-builder. Essa flag limpa apenas os overrides
+de agentes desta execução e exige modo paralelo, vindo de --parallel ou do
+arquivo válido. Contradiz --worker e --serial; falha antes de chamar modelo.
+Sem a nova flag, --parallel sozinho mantém a compatibilidade de herdar o pool
+salvo. A versão do arquivo não muda: workers vazio já significa todos iguais
+ao builder atual, inclusive em execuções futuras com outro modelo.
+
+Com --save-execution a estratégia resolvida vazia substitui a salva; sem ele,
+o arquivo anterior fica intacto e somente a execução atual usa o executor.
+O mesmo caminho resolve rótulos do dashboard, snapshot dos papéis e chamadas.
+Não corrigir apenas texto da UI nem modificar uma execução já aberta.
+
+Análise de impacto: toArgv/renderCommand, parsing Commander, FlagsDeExecucao,
+resolverEstrategia, prepararExecucao, persistência e papeisDosAgentes. Não
+alterar escalonamento, gates, fases, hashes ou modelos por inferência. Regredir
+antes da mudança com estratégia antiga, escolha todos, salvar/não salvar,
+entrada digitada/seleção interativa, conflitos e preservação da opção manter
+agentes salvos. Conferir a configuração efetiva usada pelo dashboard e bridge,
+sem consumir API real.
+
+Validação: oito regressões falharam antes do reparo. Depois, os 120 testes
+direcionados passaram, incluindo comando gerado e parseado pelo Commander,
+configuração dos três agentes, rótulos do dashboard e argumentos/ambiente
+destinados à CLI. Salvar persiste workers vazio e herda um novo modelo na
+próxima execução; não salvar conserva o arquivo antigo byte a byte. A seleção
+interativa por teclado e a entrada numérica transmitem a mesma flag.
+
+O binário real também foi executado em pasta descartável com pool antigo:
+aceitou a flag e gravou workers vazio antes de parar por documentação ausente,
+sem chamar modelo. `npm run check` concluiu build, typecheck e 2.329 testes em
+121 arquivos. O binário instalado está recompilado. Nenhum processo, estratégia
+salva ou trabalho parcial do teste_openrouter foi modificado; uma sessão já
+iniciada continua com a configuração anterior até ser encerrada pelo usuário.
+
+### §115.20 — Falha de teste na integração volta ao executor e ao validador
+
+Na P01 do teste_openrouter, o verificador aprovou 14 tasks e G4 passou, mas
+G2 integrado encontrou teste que exigia web/dist/index.html sem preparar o
+build. A fundação já era exclusiva por não haver start; exclusividade foi
+confundida com recuperação esgotada, parando na primeira integração reprovada.
+O diagnóstico ainda perdia a saída real ao reduzir g2.cause à primeira linha.
+
+Teste vermelho é entrada do ciclo de correção, não encerramento imediato.
+Após rollback seguro de G2 integrado, reaplicar o parcial num worktree e pedir
+ao validador somente-leitura causa, evidência, arquivo, ação concreta e comando
+de regressão. Entregar esse diagnóstico junto à saída completa ao executor.
+Se a correção não resolver, usar sessão de escrita do validador, seguida de
+G2, nova sessão de G3 e G4; só integrar após repetir G2 na principal. Nunca
+aprovar pelo relatório do reparador, copiar dist do worktree para ocultar o
+defeito, remover teste ou afrouxar asserções.
+
+A recuperação desta falha tardia tem uma devolução ao executor e o orçamento
+configurado de reparos pelo verificador, compartilhado entre suas passagens.
+Cada passagem executa uma correção e os gates; não renova três ciclos a cada
+reintegração. Reparo já gasto em outro achado durante a construção não elimina
+essa oportunidade para uma falha nova vista somente na integração. Com reparo
+desligado ou provider apenas de leitura, não conceder escrita silenciosamente.
+Timeout, recusa de provider, falta de ambiente irrecuperável, escrita na
+principal ou falha de preservação continuam paradas técnicas, sem novas sessões.
+
+Separar exclusividade de agendamento da recuperação por conflito/G2. Preservar
+as regras existentes para conflitos de merge; ser fundação exclusiva não
+impede devolver um teste reprovado. Cada recuperação possui prefixo próprio de
+evidência, sem sobrescrever prompts/logs anteriores. Incluir a saída real na
+causa final, e não apenas um caminho ou cabeçalho genérico.
+
+Análise de impacto: integrarNaFila/desfazer, checkpoints de ambiente, preservação
+do parcial, tasks aprovadas, rodar/runPhase, permissões da bridge e logs. O
+validador escreve apenas no worktree e só na chamada repair=true. O integrador
+continua a ser o único que altera a principal. Regredir antes do reparo com
+fundação exclusiva, executor corrigindo, executor que só aquece artefato e
+validador aplicando correção durável, orçamento compartilhado, erro persistente,
+timeout/recusa, G3 independente depois de reparo e gates integrados obrigatórios.
+
+Validação: com a classificação nova de G2 desligada, as seis regressões
+originais falharam, inclusive a fundação exclusiva parando sem devolução.
+Com o reparo, 134 testes direcionados passaram. A suíte final ampliada inclui
+nove cenários novos com Git, worktrees, npm test e asserção reais: correção
+durável pelo executor; executor que só aquece dist e reparo posterior pelo
+validador; G2 local ainda vermelho e reparo sem nova integração; defeito
+persistente; reparo desligado; timeout e cota recusada em diagnóstico e reparo.
+Nos sucessos, houve novo G3 somente-leitura e G2 na principal. Nos fracassos,
+o parcial ficou no branch, o HEAD integrado permaneceu na base e o orçamento
+não foi renovado. O log do primeiro teste reprovado permaneceu intacto.
+
+`npm run check` concluiu build, typecheck e 2.338 testes em 122 arquivos.
+O binário instalado foi recompilado. Os testes usam modelos simulados e não
+consomem API; o teste_openrouter não foi alterado ou retomado automaticamente.
+
+### §115.21 — Recuperar protocolo de G3 sem reabrir construção ou perder convergência
+
+No build-022eba66528c, P01 recebeu 14 declarações DONE, mas a primeira veio
+com `DONE; risk noted: ...`. O parser estrito contou só 13 e parou. Antes disso,
+um reparo deixou verificarTudo ligado para sempre: as verificações seguintes
+ignoraram a memória das tasks aprovadas e encontraram outro achado a cada ciclo.
+
+Saída de G3 com cobertura, índices ou formato inválidos recebe uma única nova
+chamada somente-leitura do mesmo verificador, no mesmo ciclo e árvore. Manter
+o parser estrito, os requisitos originais e a resposta bruta em logs distintos.
+O prompt de recuperação inclui a resposta anterior como dado citado e o defeito
+mecânico; cabe ao modelo decidir DONE ou INCOMPLETE pela evidência, sem apagar
+um defeito material para satisfazer o formato. Não autorizar escrita, consumir
+reparo nem enviar erro de protocolo ao executor como defeito do produto.
+
+Se a segunda resposta continuar inválida, parar como falha da sessão do modelo,
+sem abrir outro ciclo de construção. Timeout/recusa na recuperação conserva a
+parada técnica. Uma resposta válida INCOMPLETE segue o ciclo normal de correção.
+Após cada reparo, exigir uma avaliação independente completa; quando ela trouxer
+um veredito estruturalmente válido, encerrar verificarTudo e guardar seus DONE.
+As próximas verificações usam a memória novamente. Cada novo reparo revoga essa
+memória e exige outra leitura completa; reaberturas explícitas continuam valendo.
+
+Análise de impacto: gate3/parseVerification, prompts do verificador, chamarLeitor,
+permissões e limites, logs por passagem, TasksAprovadas e naturezaDaFase. Não
+alterar gramática das fases, hashes, critérios, gates de sucesso ou orçamento de
+reparos. Regredir antes da mudança com DONE anotado, resposta ainda inválida,
+achado real após recuperação, timeout/recusa e convergência após leitura completa.
+
+Validação: onze regressões falharam antes do reparo. Depois, 210 testes
+direcionados passaram, incluindo recuperação da integração com Git/worktrees
+e testes reais. A suíte final cobre recuperação readonly no mesmo agente e
+árvore, preservação dos dois logs, resposta ainda inválida sem novo builder,
+achado material exigindo reparo, timeout/recusa/erro/resultado ausente, retorno
+da memória após revisão completa (inclusive com recuperação de formato) e
+classificação da parada sem interpretar o texto citado como diagnóstico válido.
+O parser continua rejeitando DONE com anotação por ponto e vírgula.
+
+`npm run check` concluiu build, typecheck e 2.355 testes em 122 arquivos.
+O comando instalado aponta para o binário recompilado. Não houve consumo de
+API nem alteração ou retomada automática do teste_openrouter.
+
+### §115.22 — Retomada com arquivos versionados que passaram a ser ignorados
+
+O erro de 01:07 UTC com 256.000 tokens é histórico anterior ao §115.18.
+As retomadas de 03:40 e 03:41 UTC pararam antes de qualquer nova inferência:
+guardarParcial falhou em git add. O HEAD já continha node_modules e dist;
+o worktree gerou .gitignore e modificou arquivos nessas pastas. Git add -A
+com caminhos literais explícitos recusou os diretórios agora ignorados, mesmo
+com os arquivos já versionados. O erro ficou reduzido ao comando, sem stderr.
+
+Preparar caminhos já presentes no índice selecionado com git add -u; preparar
+os demais com git add -A, mantendo a lista literal e delimitada por NUL.
+O índice selecionado é o temporário de commitAdmitido, nunca o índice do usuário
+por inferência. Não usar -f: arquivo novo ignorado continua fora do commit,
+inclusive quando outro índice já o preparou. Não remover pastas geradas ou
+descartar alterações para destravar a retomada. Preservar admissão sobre os
+objetos, índice temporário, compare-and-swap de HEAD e só sincronizar caminhos
+publicados no índice do chamador. O modo -u da recuperação integrada permanece.
+
+Análise de impacto: adicionarExatamente é compartilhado por commit inicial,
+commit de fase, guarda do parcial e rollback integrado. Regredir com Git real,
+arquivo versionado agora ignorado modificado/removido, fonte nova, outro arquivo
+novo ignorado, nomes literais, índice do chamador independente e reabertura do
+worktree interrompido sem integrar na principal. Nenhum requisito, gate, hash,
+credencial ou limite financeiro muda. Validar sem inferência paga.
+
+Validação: quatro regressões falharam antes do reparo; depois, 43 testes
+direcionados passaram com Git real, inclusive admissão, autoridade e recuperação
+da integração. Arquivos versionados agora ignorados foram atualizados/removidos,
+fontes novas foram preservadas e outros arquivos ignorados não foram incluídos.
+O parcial interrompido foi reaberto sem publicar na principal; o índice do
+usuário continuou independente. `npm run check` concluiu build, typecheck e
+2.360 testes em 122 arquivos. O binário instalado foi recompilado.
+
+O log antigo de OpenCode foi relido pelo parser atual: reconheceu provider.quota
+sem publicar o corpo HTTP ou o link privado da chave. Nova prova com a ponte
+atual e a CLI real contra HTTP local confirmou max_completion_tokens=16384
+para Kimi K3 e GLM-5.3-prime, com PONG simulado. Não houve inferência paga,
+mudança na chave, alteração na principal ou retomada automática do teste real.
+
+### §115.23 — Dependências locais ignoradas não são alterações do produto
+
+P01 do teste_openrouter fechou e entrou em 6887d32: G2 integrado passou com
+29 testes de servidor, 43 de interface e 6 de navegador. A instalação regravou
+três metadados de compilação do better-sqlite3 e Vitest regravou seu cache.
+Os quatro estavam versionados desde o commit inicial, apesar de node_modules
+agora constar do .gitignore. §102 parou o build por essas alterações locais.
+
+Tratar arquivos dentro de diretórios node_modules ignorados pela política Git
+atual como ambiente local também em repositórios legados que os versionaram.
+Conferir com check-ignore --no-index, respeitando exceções explícitas. Aplicar
+o mesmo recorte a preflight, seleção de commits/parciais, conferência da
+principal e verificação depois da integração. Não apagar/restaurar arquivos,
+não esconder flags no índice, não retirar arquivos do histórico ou criar
+commits com tempos de teste e caminhos absolutos da instalação. O status bruto
+do Git continua disponível; anunciar essa condição na retomada e na integração.
+
+Isto não se aplica a fontes, manifestos, lockfiles, snapshots fora de
+node_modules, dist ou dependência explicitamente mantida fora do ignore.
+Alterações nesses arquivos continuam barrando a integração como em §102.
+Na criação de repositório pelo harness, acrescentar node_modules/ ao exclude
+local de Git antes do commit inicial; não escrever/sobrescrever o .gitignore
+do produto. Regras explícitas do projeto continuam tendo precedência.
+
+Análise de impacto: lerStatus permanece bruto; alteracoesParaCommit concentra
+o recorte do produto e alimenta isClean, commits, guarda do parcial e situação
+da principal. As três leituras de isolamento no paralelo usam esse mesmo
+recorte. treeSignature continua sendo sinal amplo, sem poder de aprovação.
+Admissão dos objetos, refs, G2/G3/G4, ledger e hashes do plano não mudam.
+Regredir antes do reparo com cache versionado ignorado, continuidade da fase
+seguinte, retomada já suja somente por dependências, commit sem esses deltas,
+Git inicial sem ignore, exceção explícita e fonte alterada ainda bloqueada.
+
+Validação: onze regressões falharam antes do reparo. Depois, 84 testes
+direcionados passaram, incluindo duas integrações sucessivas com caches
+versionados, conferência da principal, índice do usuário preservado e §102
+continuando a parar quando a suíte altera código. A suíte ampliada verifica
+nomes literais com espaços/curingas/quebras e a precedência da exceção explícita
+do projeto sobre o exclude local do repositório criado pelo harness.
+
+`npm run check` concluiu build, typecheck e 2.373 testes em 123 arquivos.
+O comando instalado foi recompilado. Conferência somente-leitura no projeto
+real confirmou isClean=true para o produto, os quatro deltas de Git intactos,
+HEAD inalterado em 6887d32 e P01 fechada com o hash do plano atual. Não houve
+alteração de arquivos do projeto, descarte, commit, mudança de índice por
+configuração oculta, chamada de modelo ou retomada automática do teste real.
+
+### §115.24 — Aprovação pelo funcionamento e custo proporcional de verificação
+
+Direção explícita do usuário: cada devolução custa tempo e dinheiro. As
+verificações devem demonstrar que a aplicação funciona, sem bloquear por
+preferências internas, testes redundantes ou expectativa errada de roteiro.
+Esta orientação substitui a reprovação automática por dúvida do verificador.
+
+G3 bloqueia por funcionalidade exigida ausente, comportamento incorreto,
+falha de persistência/validação/segurança ou requisito operacional não entregue,
+com evidência concreta. Julgar a URL final após o cliente compartilhado, não
+um fragmento isolado; aceitar implementação equivalente. Nome de teste, pasta,
+camada preferida, asserção adicional e robustez hipotética não justificam retorno
+quando o comportamento já está demonstrado. Usar DONE — ADVISORY: <observação>
+para essas sugestões: formato já aceito pelo parser. O Core anuncia e preserva
+essas observações sem sessão extra, reparo ou devolução. Não converter INCOMPLETE
+em DONE por heurística textual; defeito material continua vermelho. Ausência
+de evidência sobre função essencial exige investigação, não aprovação cega.
+
+Executor e reparador usam regressões focadas durante as mudanças. O Core
+continua rodando a suíte completa independentemente em G2 e após integração.
+Não exigir da sessão uma nova suíte completa só para repetir o que acabou de
+passar, nem e2e separado se o mesmo comando já o executou. Preservar cenários
+de falha reais; corrigir teste acoplado à implementação para verificar o mesmo
+comportamento público é permitido, mas remover/ignorar caso ou esconder erro não.
+
+G4: estado transitório pode terminar antes de page.goto voltar; nunca exigir
+atraso artificial no produto para satisfazer o teste. Preparar a observação no
+roteiro antes da ação; se a resposta rápida impedir provar o estado pendente,
+verificar esse estado em teste focado controlado e manter no fluxo real a
+verificação do resultado final, sem simular sucesso do backend. A triagem deve
+classificar a expectativa temporal incorreta como ROTEIRO, não PRODUTO.
+
+Corrigir até dois achados distintos de roteiro na mesma passagem sem consumir
+ciclo do executor, com limite fechado e sem repetir a mesma correção. Se o
+roteiro continuar errado, parar como falha do harness preservando a evidência,
+sem mandar o executor mudar produto correto. PRODUTO mantém reparo e gates;
+CRITERIO mantém a decisão registrada. Não ignorar G2 vermelho, retirar G4,
+aprovar placeholders, alterar critérios publicados ou renovar orçamentos.
+
+Análise de impacto: prompts de construção/reparo/G3/roteiro/triagem, memória
+DONE, parser TASK existente, retorno de gate4 e falhaDoRoteiro. Gates funcionais,
+isolamento de fonte e Git, admissões, hashes, fases publicadas e credenciais
+continuam. Regredir antes da mudança com observação sem novo modelo, observação
+ao lado de defeito real, dois erros distintos de roteiro, erro persistente sem
+novo builder, e cobertura das regras funcionais e de economia nos prompts.
+Execuções em andamento conservam o código que já carregaram; não interrompê-las.
+
+Complemento explícito do usuário: economizar tempo/dinheiro é prioridade e
+todo retorno à construção precisa de causa clara e justificável. Ampliar o
+recorte de ambiente para saídas geradas que a política Git manda ignorar:
+dist, build, coverage, caches, relatórios de navegador e saídas compiladas
+comuns; fontes, manifestos, lockfiles, bancos e diretórios não ignorados ficam
+protegidos. O status bruto e os bytes locais permanecem intactos. O roteiro
+gerado é responsabilidade da Capivara: gerar, executar e corrigir com o erro
+real antes de culpar o produto. Falha persistente classificada como ROTEIRO
+nunca autoriza retorno ao executor. Registrar a causa completa de um retorno
+real à construção e não anunciar retry quando o orçamento já acabou.
+
+Validação intermediária: 206 testes direcionados passaram. O check completo
+passou build/typecheck e 2.398 testes, mas revelou uma regressão na recuperação
+de um dist versionado agora ignorado: o recorte de produto não pode descartar
+bytes de uma árvore interrompida. Preservar esses artefatos localmente antes
+de recriar o worktree, sem incorporá-los ao commit do produto.
+
+### §115.25 — Ambiente aprovado antes de construir e contrato entregue ao G4
+
+Direção do usuário: o planejamento discrimina os pré-requisitos de execução;
+o build verifica e resolve o ambiente antes de iniciar desenvolvimento. A
+aprovação vale para esta execução: não repetir sondas de runtime/addons por
+fase, ciclo, cópia de worktree ou integração. Manifesto novo e migração nova
+exigem materialização do código entregue, não uma nova aprovação de ambiente.
+Falha de preparo para antes da construção, sem gastar ciclo de implementação.
+
+O esqueleto pode declarar environment: lista de technology, binary,
+systemLevel, checkArgs e installHint. checkArgs é uma lista de argumentos de
+uma sonda finita de prontidão (versão/serviço), executada sem shell, nunca a
+suíte do produto. O plan publica environment.json com a identidade do
+skeleton.md e os requisitos declarados, complementados pelo catálogo legado.
+Sem o campo, planos anteriores continuam usando o catálogo; documento novo
+inválido ou de outro esqueleto é erro antes do executor. A ausência não deve
+ser tratada como aprovação das tecnologias desconhecidas. Não inventar versões
+ou serviços não escolhidos; não incluir código futuro nas sondas de ambiente.
+
+O Core prepara dependências já declaradas antes da primeira fase e registra
+a evidência e a aprovação no run. Worktrees recebem cópias independentes da
+instalação aprovada. Durante desenvolvimento compara-se apenas a identidade
+de manifesto/lockfile/runtime para materializar uma alteração efetiva, sem
+reexecutar sondas de prontidão. Erro concreto do loader ainda permite reparar
+a instalação: não é pretexto para repetir testes preventivos nem reconstruir
+produto aprovado. Não remover testes funcionais, migrações do produto ou a
+verificação do comportamento em uma cópia limpa.
+
+No teste real, skeleton.md já declarava /api/tarefas e P01 a base /api, mas o
+autor de G4 recebia apenas os passos do workflow. Entregar diretamente stack,
+regras compartilhadas e critérios da fase tanto ao roteirista quanto à
+triagem. O plano declara caminhos de navegação, endpoints completos, métodos,
+formato de resposta e composição da base do cliente nas regras transversais;
+não deduzir endpoint pelo nome da tela. O roteiro observa exatamente método e
+pathname da API e exclui navegação HTML antes de chamar json(). A evidência
+do contrato fica junto do prompt de cada chamada, sem nova sessão só para
+redescobrir informação que o plano já tem.
+
+O navegador do harness também é pré-requisito: com G4 real habilitado, preparar
+@playwright/test e Chromium e provar abertura/fechamento headless antes do
+executor. Reusar a instalação do projeto quando existe; caso contrário usar
+.capivara/node_modules, sem alterar manifesto ou lockfile do produto. Copiar
+essa ferramenta para os worktrees e resolver seu CLI explicitamente, sem
+instalação implícita durante G4. Runner de navegador injetado nos testes
+dispensa essa preparação real. Nova versão de ferramenta é alteração efetiva
+de dependência, não motivo para repetir sondas sem mudança.
+
+Evidência adicional do run atual: P02 passou G4 no worktree, mas G2 da
+integração recebeu 404 e ECONNREFUSED e o servidor registrou EADDRINUSE na
+porta 3100. O próprio playwright.config.ts aceita E2E_PORT; sessões paralelas
+não recebiam valores diferentes. Alocar porta efêmera por processo de suíte
+e por chamada de agente, passando E2E_PORT no ambiente privado sem mutar
+process.env global. O plano e os prompts indicam essa variável para os testes
+do projeto, sem portas fixas compartilhadas. Alocação de recurso não é nova
+sonda de prontidão. Regredir com dois processos reais concorrentes e servidor
+alheio intacto, sem API de modelo.
+
+Análise de impacto: leitura/renderização do esqueleto e cache entre init/plan,
+publicação de metadado de ambiente, preflight e instalação inicial, propagação
+de aprovação para serial/paralelo/worktree, prompts de fases/G4/triagem. Sem
+alterar gramática de fases, hashes de fases existentes, ledger ou autoridade
+Git. Regressões antes dos reparos: prontidão falha com binário presente,
+requisito desconhecido declarado, instalação antes de qualquer builder,
+falha de preparo com zero builders, sonda de addon somente no início,
+contrato com /api explícito no prompt real do G4 e na triagem.
+
+Validação final de §115.24–25: regressões de prontidão, publicação do plan,
+repasse do contrato, recuperação de artefato local e concorrência falharam
+antes dos respectivos reparos. Os 141 testes direcionados finais passaram,
+inclusive catálogo completo init → build com provider falso. As quatro
+chamadas de construção/G3/roteiro/triagem recebem a mesma regra concreta de
+API sem uma sessão extra para redescobri-la. Sondas declaradas rodam antes
+das fases, falha de instalação tem zero builders, e dois processos de teste
+usam portas diferentes preservando um servidor alheio e process.env.
+
+O primeiro check amplo encontrou perda do dist local na retomada; reparada
+com cópia comprovada fora do commit de produto. Um check seguinte encontrou
+variáveis parciais eliminando PATH; reparado preservando o ambiente herdado.
+O check final concluiu build, typecheck e **2.415 testes em 125 arquivos**.
+O executável instalado aponta para o bundle recompilado. Validação somente
+local, sem inferência paga, alteração do projeto real ou retomada automática
+da execução que o usuário já havia iniciado.
+
+### §115.26 — Capivara 0.5.0: ruptura explícita do planejamento anterior
+
+O usuário revogou expressamente a compatibilidade mantida em §115.25: planos
+anteriores não devem ser executados pela nova versão. Subir root/workspace,
+lockfile e binário de 0.4.0 para 0.5.0. Não publicar pacote nem alterar projetos
+reais para fazer essa atualização local.
+
+O novo esqueleto usa capivara-skeleton/v2 e exige environment, inclusive lista
+vazia quando não há pré-requisito externo. Não aceitar v1, preencher requisito
+por catálogo legado nem converter um esqueleto antigo silenciosamente.
+O plan publica environment.json capivara-environment/v2 somente após RALPH
+READY, vinculando os bytes de skeleton.md e project-phases.md e a geração
+capivara-planning/v2. A versão do executável é registrada para diagnóstico;
+compatibilidade é decidida pela geração do contrato, não por futuras correções
+patch do binário. Ausência, formato antigo ou hash divergente bloqueiam o
+build antes de Git, instalação, navegador e qualquer chamada de modelo.
+
+Mensagem de bloqueio orienta gerar novamente com capivara init --fresh e
+capivara plan --fresh, preservando código, dados, arquivos e evidências do
+projeto. Flags de Git, flows, retomada e rebuild não dispensam o contrato.
+plan/change também recusam esqueleto antigo antes de inferência; change de
+plano atual renova os metadados depois de publicar sua alteração aprovada.
+
+Separar a identidade de runs init/plan/build por capivara-planning/v2; a de
+survey não muda. O cache de fases planejadas e as chaves de aprovação de
+auditoria e ledger usam a nova geração. Nenhum verde anterior autoriza pular
+fase do plano novo, mesmo que o texto da fase seja idêntico. Arquivos antigos
+ficam no disco, sem limpeza destrutiva nem migração implícita de aprovação.
+
+Análise de impacto: parser/prompts do esqueleto e estado entre init/plan;
+publicação final, preflight e entrada do build; change; identidades dos runs,
+cache de planejamento, autoridade auditada e ledger. A gramática das tasks
+continua a mesma e não ganha parser paralelo. Atualizar fixtures para planos
+atuais completos; manter fixtures antigas explícitas nos testes de rejeição.
+Regredir antes da mudança com ausência e v1 de metadado, plano alterado sem
+novo metadado, v1 de esqueleto, plan/change antigos com zero chamadas de
+modelo e caches antigos não reaproveitados. Conferir versões sincronizadas,
+check completo e capivara --version após recompilar, sem inferência paga.
+
+Validação: seis regressões falharam antes da implementação. A cobertura final
+inclui treze cenários da ruptura: ausência/v1 de metadado, plano/esqueleto
+divergente, geração errada, JSON inválido, esqueleto v1 ou sem environment,
+plan/change sem inferência, bloqueio antes de criar Git e isolamento das
+identidades de runs, ledger e cache. O change atual renova o metadado e
+preserva as chaves das fases que não mudou dentro desta geração.
+
+O check completo concluiu build, typecheck e **2.428 testes em 126 arquivos**.
+O único ajuste depois do primeiro check foi atualizar uma expectativa de
+cache v1 para v2, reforçar o caso de contrato desconhecido e conferir o relato
+do metadado escrito pelo change. Root, workspace e lockfile estão em 0.5.0;
+o executável instalado foi recompilado e `capivara --version` confirmou 0.5.0.
+Não houve inferência paga, publicação remota, alteração nem reinício de projeto
+real. Código, dados e evidências antigos foram preservados.
+
+### §115.27 — Linhas em branco não encerram uma task
+
+No teste_openrouter, as sete tasks da fase 5 já declaravam critérios e Traces.
+O parser encerrava a task na primeira linha em branco entre o título e os
+campos, gerando quatorze I-08/I-09 falsos, duas reescritas e um impasse indevido.
+Espaçamento em Markdown não é ausência de requisito nem decisão do usuário.
+
+O parser único deve ignorar linhas vazias, inclusive com espaços e tabs, dentro
+da task. Seus campos continuam associados até a próxima task ou um heading que
+encerre o bloco. Não inventar critérios, copiar Traces de outra task, remover
+texto nem dispensar I-08/I-09 quando os campos realmente estiverem ausentes.
+
+Análise de impacto: parsePhases serve init/plan, auditoria mecânica, ensaio,
+change e build; corrigir nessa autoridade, sem parser paralelo. O cache guarda
+Markdown e o caminho de retomada usa o mesmo parser: preservá-lo, sem mudar
+prompts ou chaves e sem invalidar fases e aprovações já pagas. A normalização
+existente de listas de Feature tests continua preservando todos os testes.
+
+Antes do reparo, regredir leitura com linhas vazias entre título, rótulos e
+itens, preservação dos campos, isolamento entre tasks e rejeição de campos
+realmente ausentes. Conferir também montagem após extractTasks e retomada de
+fase em cache. Reproduzir a resposta real localmente, sem inferência nem escrita
+no projeto em execução, e recompilar o executável instalado.
+
+Validação: oito regressões falharam antes do reparo e passaram depois. O check
+completo passou com build, typecheck e **2.436 testes em 126 arquivos**. As três
+respostas reais da fase 5 passam na leitura corrigida com sete tasks e vinte
+critérios cada. As cinco fases em cache (46 tasks) também passam no parser,
+sem alterar os bytes do cache. O binário instalado foi recompilado em 0.5.0;
+retomar com capivara plan, sem --fresh, mantém o trabalho já escrito. A sessão
+que estava aberta precisa ser encerrada para carregar o parser novo. Nenhuma
+inferência paga, publicação ou alteração no projeto real foi feita.
+
+### §115.28 — Caminhos absolutos e reparo específico do navegador no preflight
+
+O build real recebeu projectRoot relativo. O preflight instalou Playwright na
+pasta privada, mas passou `.capivara/node_modules/@playwright/test` a require,
+que o tratou como nome de pacote. Essa falha de resolução disparou indevidamente
+install --with-deps, atingindo uma pendência de configuração do dpkg. O runner
+do G4 também compunha CLI relativo e depois mudava o cwd para .capivara/flows.
+
+Resolver projectRoot para absoluto antes de construir caminhos da sonda e do
+CLI do G4. Manter a prioridade da ferramenta privada e usar a mesma instalação
+para sonda, download e execução. Não alterar manifesto nem lockfile do produto.
+Falha de inicialização não autoriza instalar pacotes do sistema indiscriminados:
+download Chromium somente para executável ausente; bibliotecas do sistema só
+para diagnóstico explícito de dependência ausente e com systemInstall. Após
+download bem-sucedido, sondar novamente; se faltarem bibliotecas, permitir uma
+instalação específica delas e uma última sonda. Falha de módulo/código ou erro
+desconhecido deve preservar o diagnóstico sem invocar apt/dpkg ou reinstalar.
+
+Análise de impacto: preparo antes da primeira fase, comandos shell e quoting,
+CLI executado no cwd dos roteiros, classificação e evidência da parada. Falha
+desse preparo é ambiente, não falta de decisão do operador; manter zero sessões
+de modelo e apontar environment-preflight.log. Não mudar identidade do plano,
+cache ou aprovações. Testar caminhos relativos com espaço/apóstrofo executando
+uma sonda real com pacote simulado, CLI real simulado a partir de cwd diferente,
+download necessário, dependência ausente com/sem permissão e erro de módulo sem
+instalação. Validar falha antes do reparo, recompilar e executar o check completo.
+
+Validação: oito casos falharam antes do reparo; os 114 testes direcionados de
+ambiente, parada e fluxos passaram depois. O check completo concluiu build,
+typecheck e **2.444 testes em 126 arquivos**. Uma reprodução isolada com raiz
+`.` e Node v25.9.0 usou o Playwright real já instalado em teste_openrouter:
+Chromium abriu e fechou com uma sonda, sem instalar pacotes ou chamar modelos.
+O projeto real, seus planos e caches foram preservados. O executável instalado
+aponta para o bundle recompilado em 0.5.0; retomar com capivara build, sem
+regenerar o planejamento. A pendência externa de configuração do dpkg não foi
+alterada nem necessária para essa checagem bem-sucedida do navegador.
+
+### §115.29 — Banco descartável no G2 e reversão que preserva saídas ignoradas
+
+No build-c9958d3f064e, a migração executada pelo harness criou
+server/data/app.db na principal. Um teste exigia ausência desse arquivo e
+reprovou a integração. O reset --keep retirou o .gitignore recém-integrado,
+mas deixou o banco, antes ignorado. A guarda então o tratou como escrita externa
+e a tela chamou o banco de sensível e afirmou que os gates haviam passado.
+
+Migração e G2 devem receber o mesmo banco temporário por passagem, por chaves
+de arquivo declaradas em .env.example/.env, tanto no runner serial/worktree
+quanto na suíte integrada. Não trocar process.env global, apagar banco local,
+instalar ambiente outra vez nem dispensar validação funcional. Descartar apenas
+o diretório temporário pertencente à passagem, inclusive na falha. Continuar
+sem migrar .env pertencente ao usuário. O executor e o verificador recebem a
+regra: testes usam dados próprios e não exigem que banco/cache local preexistente
+esteja ausente; verificam que não o alteraram.
+
+A reversão deve preservar fora do Git, com prova de conteúdo, bancos de arquivo
+declarados e seus journals que ficarem expostos depois do retorno ao HEAD antigo,
+somente quando não constavam dos não versionados anteriores. Arquivos anteriores
+e dados fora da raiz não são removidos. Não ignorar todo .db globalmente nem
+enfraquecer a guarda de fontes e referências. Essa preservação de saída local
+não é um motivo para reconstruir uma fase; registrar o destino da recuperação.
+
+Análise de impacto: TestRunner aceita ambiente opcional por processo; runner
+compartilha-o entre migração e G2, inclusive reparos; integrador faz o mesmo e
+limpa na saída; reset rápido e caminho de recuperação completo cobrem a mudança
+de .gitignore. Bloqueio de isolamento tem mensagem própria, sem afirmar gates
+verdes ou arquivo sensível e sem mandar git add -A. Manter os bloqueios reais
+de segredo, escrita externa em fonte e movimentação de referências.
+
+Regredir antes do reparo com migração/teste em banco temporário, duas passagens
+isoladas, dados locais preservados, reversão expondo banco ignorado e próximo
+executor alcançado após G2 reprovado; testar diagnóstico de isolamento. Conferir
+check completo e binário recompilado. No projeto afetado, preservar com hash o
+banco vazio criado pelo harness em recuperação local, sem alterar commits ou
+chamar modelos, para que a retomada não carregue esse efeito da execução antiga.
+
+Validação: quatro regressões reproduziram a falha antes do reparo. A cobertura
+adicionada tem seis cenários: banco privado na fase, integração inicial e sua
+recuperação após suíte reprovada, rollback expondo banco ignorado, preservação
+de dados anteriores/fontes externas e diagnóstico de isolamento. Os testes
+direcionados passaram; o check completo concluiu build, typecheck e **2.450
+testes em 126 arquivos**. Executável instalado recompilado em 0.5.0.
+
+O commit real aprovado d9da09687093 foi extraído para diretório temporário,
+com dependências copiadas e Node v25.9.0. Sem alterar código, migrando no banco
+privado e rodando npm test: **25 testes do backend e 47 do frontend passaram**,
+sem criar server/data/app.db na árvore. A cópia temporária foi removida.
+Nenhuma inferência paga ou instalação foi necessária para essa prova.
+
+Na execução real pausada, o banco residual tinha as três tabelas vazias e
+nenhum processo o mantinha aberto. Foi copiado com prova SHA256 e removido
+da posição residual, preservado em
+.capivara/runs/build-c9958d3f064e/recovery/harness-database-a949e3ccf4bd/server/data/app.db,
+com manifest.json contendo origem, hash e evidência da migração. Código,
+planos, credenciais e referências Git não foram alterados. Retomar o build
+sem --fresh; não é necessário o commit manual recomendado pela tela antiga.
+
+### §115.30 — A suíte integrada não escreve na árvore principal
+
+A P02 deixou .env.backup-teste-3236491 na principal: o teste fazia backup de
+.env e chamava statSync de um banco ausente antes do try/finally. O G2 chamou
+esse ENOENT de runner ausente. A reversão não retirou o backup, e a guarda
+impediu o executor de receber a correção. O .env também ficou modificado pelo
+teste. Conter só o banco (§115.29) não continha os demais efeitos da suíte.
+
+O integrador valida o HEAD recém-integrado numa cópia de trabalho destacada,
+fora da árvore principal e do diretório que a suíte descobre como projeto.
+Reutilizar por cópia as dependências já preparadas, inclusive dos workspaces,
+sem instalar novamente por causa desse isolamento. Sem links de dependências
+para a principal. Configuração de teste é semeada do exemplo público na cópia;
+migração e G2 compartilham os bancos temporários já definidos. Arquivos de
+execução anteriores, ignorados e bancos do usuário não são copiados como código.
+O .env da validação é semeado do exemplo público; não copiar credenciais reais
+nem seus caminhos absolutos de banco para um teste que pode remover overrides.
+
+Se a suíte deixar arquivos, copiar com hash os não versionados novos e versões
+alteradas da configuração para recuperação local fora do Git antes de retirar
+o checkout de validação. Não publicar nem imprimir conteúdo de .env/backups.
+Alteração de fonte versionada na cópia reprova a validação: o verde não pode
+aprovar uma árvore diferente do commit integrado. Preservar essas alterações
+para diagnóstico, desfazer a integração reprovada e encaminhar a causa real ao
+executor/validador pelo orçamento existente. A guarda da principal continua
+detectando escritas externas; não liberar .env* globalmente nem arquivos reais.
+
+ENOENT ao abrir/stat de um dado dentro de uma suíte já iniciada é falha de
+teste, não falta do runner. Classificar ferramenta ausente somente por código
+127 ou diagnóstico de lançamento/shell inequívoco, e nunca em comando verde.
+Orientar os papéis a aceitar a ausência no snapshot de arquivo opcional e a
+envolver toda preparação em try/finally, inclusive backup e snapshot.
+
+Análise de impacto: fila de integração, cópias de dependências/cache, ambiente
+de teste, evidências de G2, preservação do checkout e reversão, mocks que antes
+dependiam de escrever na principal e classificação do gate. A suíte ainda
+valida a combinação exata de commits integrados; não há nova sessão de modelo
+nem repetição extra da suíte. Não alterar geração de plano ou ledger.
+Regredir ENOENT de arquivo versus shell ausente, teste que altera .env e deixa
+backup antes de falhar, retorno ao executor, preservação de evidência e detecção
+de fonte alterada. No projeto real pausado, guardar com hash ambos os .env e
+o backup; restaurar somente a cópia original comprovada do harness, preservando
+P01 e os branches da P02. Não executar modelos ou reconstruir P01.
+
+Validação: três cenários reproduziram o defeito antes da correção. Foram
+adicionadas quatro regressões e ampliado o cenário de recuperação da integração
+para deixar backup e .env adulterado. Os 104 testes direcionados passaram.
+O primeiro check amplo encontrou somente uma expectativa antiga de semear .env
+na principal; atualizada exclusivamente no cenário paralelo. O check final
+concluiu build, typecheck e **2.454 testes em 126 arquivos**. Binário instalado
+recompilado, mantendo versão 0.5.0 e geração do planejamento.
+
+O teste real defeituoso da P02 foi reproduzido no checkout isolado: ENOENT
+correto, backup preservado fora do Git e configuração da principal intacta.
+Na cópia local do parcial, corrigidos somente server/testes/banco.test.ts e
+server/testes/apoio/env-raiz.ts: snapshot nulo para arquivo ausente, toda a
+preparação protegida pelo finally, nenhuma troca de journal no banco original
+e restauração de .env a partir de bytes em memória, sem backup solto na raiz.
+O npm test real passou com **50 testes de backend e 59 de frontend**. Um segundo
+cenário focado passou nove testes com SQLite preexistente contendo dados,
+preservando bytes e mtime. Não houve inferência paga nem instalação.
+
+O .env original foi reconhecido pelo backup ser byte a byte a marca do harness
+mais o .env.example atual. Ambas as versões foram guardadas com SHA256 em
+.capivara/runs/build-c9958d3f064e/recovery/env-test-0dfd9f79108c; a versão original
+foi restaurada e o backup residual retirado da raiz. O commit local 739c71d52801
+com os dois testes corrigidos foi colocado no branch parcial da P02 para ser
+reaplicado e revalidado na retomada. O parcial antigo 6c785fd e o aprovado
+anterior 79121c0 continuam referenciados. HEAD a44fb287aba6, P01, plano e ledger
+não foram alterados; P02 não foi marcada como concluída. Cópias temporárias
+retiradas após a transferência dos objetos e a preservação das evidências.
+
+### §115.31 — Revisões do G4 têm escopo definido e chamadas proporcionais
+
+Na P02, o produto já tinha nove tasks aprovadas, mas uma correção de seletor
+virou mais de 27 minutos de sondas de Playwright dentro da sessão do roteirista.
+O limite de duas reescritas não limitava o trabalho dentro de cada chamada.
+Além disso, OpenCode 2 não lê OPENCODE_PERMISSION: somente a variável antiga
+estava sendo definida, e o papel anunciado como leitor escreveu arquivos e
+executou comandos. A CLI local confirmou config.get lendo permission de
+OPENCODE_CONFIG_CONTENT sem nenhuma inferência.
+
+Roteirista e triagem continuam usando o modelo do verificador, mas a chamada
+declara sua finalidade: flow-author ou flow-triage. A finalidade serve para
+identificar o trabalho e suas permissões; não reduz o tempo configurado da
+sessão. Os cortes de cinco/dois minutos inicialmente implementados foram
+retirados por decisão do usuário (§115.32). Não reduzir o tempo de implementação,
+verificação normal ou reparo do verificador.
+Timeout/recusa dessas sessões é falha técnica, não defeito do produto: preservar
+evidência e parcial, sem repetir o roteiro antigo, gerar outro rascunho por
+timeout ou gastar outro ciclo de construção.
+
+OpenCode recebe as permissões na configuração que a versão 2 realmente lê,
+preservando provider/modelos/limites e outras opções. Manter a variável antiga
+para compatibilidade. Leitores negam por padrão, permitem somente leitura e
+busca de arquivos, e não recebem shell, escrita, subagentes ou MCP arbitrários.
+Executor e reparo explícito mantêm seu acesso de execução já autorizado.
+Configuração inline inválida falha antes de chamar o modelo, sem expor conteúdo.
+
+O prompt distingue trabalho da sessão e código do roteiro: o autor lê fontes e
+devolve texto; quem sobe servidor, executa testes e instala ferramentas é o
+harness. Uma correção recebe o roteiro existente inteiro mais o diagnóstico,
+preserva os passos e asserções válidos e não reinicia a investigação. A triagem
+usa evidências fornecidas e fontes, sem executar sondas. Especificar que cada
+seletor pertence à sua região real, sem forçar links de navegação para main.
+
+Painel, atividade e calls.jsonl distinguem roteirista G4 de triagem G4; salvar
+o prompt antes de aguardar a resposta e registrar início e fim
+da revisão, inclusive falha técnica. Não alterar geração do plano, identidade
+dos roteiros, caches ou aprovações. Não interferir numa execução já aberta.
+
+Análise de impacto: EngineCall → ponte do CLI → limites do supervisor e invocação
+OpenCode; papéis documentais irmãos; cache de modelos/limite OpenRouter;
+G4 autor/triagem e propagação G0; prompts e logs anteriores à resposta; painel
+e eventos serial/paralelo. Regressões antes do reparo: permissão efetiva na
+configuração, preservação de opções, limites configurados preservados, roteiro
+anterior no prompt e timeout de autor/triagem sem outro executor nem runner.
+
+Escopo do G4: somente os fluxos atribuídos à fase e regressões já entregues,
+com resultados observáveis que os passos/critérios publicados exigem. O
+contrato global informa fatos e URLs; não autoriza cobrar funcionalidades de
+fases futuras. Não converter cada detalhe visual, mensagem intermediária,
+estrutura DOM ou convenção interna numa nova condição de aceite. Não duplicar
+testes de unidade, ambiente ou casos de borda já cobertos quando o fluxo pede
+apenas a operação normal. Uma falha precisa apontar o passo/critério realmente
+não atendido; expectativa inventada é ROTEIRO. Conferir antes do navegador que
+há somente um caso de teste por fluxo e exatamente os passos declarados, sem
+cenários extras. Correções preservam a cobertura exigida e não abrem nova
+campanha de testes. Manter casos de borda e verificações de segurança quando
+expressamente requeridos pelo fluxo/critérios, sem dispensar funcionalidade.
+
+Para uma correção pontual, a triagem pode devolver CAPIVARA_PATCH com JSON de
+before/after literais. Somente ROTEIRO pode fornecer esse patch. O Core aplica
+quando before não vazio ocorre exatamente uma vez no roteiro e a substituição
+mantém a conferência estrutural; o restante do arquivo permanece idêntico. Isso
+economiza a chamada ao roteirista. Patch inválido, ambíguo ou inaplicável não
+altera o roteiro e usa a reescrita limitada existente, sem nova investigação.
+Guardar o patch no log da triagem, anunciar a aplicação e manter os dois limites
+de correções distintas e de estrutura, sem afrouxar os critérios funcionais.
+
+Validação: onze casos falharam antes das correções de finalidade, permissões,
+prompt, escopo e timeout. A regressão do patch reproduziu a chamada redundante
+ao roteirista; cobertura adicional confirma fallback sem alterar o roteiro em
+substituição ambígua ou fora da estrutura contratada. Os 251 testes direcionados
+passaram; npm run check concluiu build, tipos e **2.468 testes em 126 arquivos**
+em 116,53s de suíte. Mantida versão 0.5.0, sem invalidar planos ou fases aprovadas.
+
+A CLI OpenCode 2 instalada confirmou config.get em HOME/config/cache privados:
+somente OPENCODE_PERMISSION produziu zero regras; o adaptador corrigido forneceu
+nove regras efetivas para leitura e uma para execução. Nenhuma inferência foi
+feita nessas consultas. O executável instalado aponta para o bundle recompilado;
+nenhuma execução real foi iniciada, cancelada ou reiniciada pelo reparo, e não
+houve consumo de API paga. A conclusão do projeto real continua dependendo da
+retomada do build; esta validação prova a contenção e o fluxo do harness.
+
+### §115.32 — Eficiência do G4 não é um corte de sessão aos cinco minutos
+
+O usuário rejeitou expressamente encerrar o roteirista aos cinco minutos: isso
+troca uma espera por outra parada e não resolve o desperdício. Retirar o teto
+especial de autoria/triagem introduzido no §115.31, inclusive dos anúncios,
+painel e metadados. Identificar a finalidade sem usá-la para encurtar a sessão.
+Preservar a política geral de supervisão já configurada e o tratamento de uma
+falha técnica real, sem atribuí-la ao produto nem abrir outra construção.
+
+A redução de custo vem das correções de causa mantidas: impedir comandos e
+escritas no leitor, limitar roteiros ao que foi entregue, não acrescentar
+cenários, fornecer o roteiro anterior e o diagnóstico exato, aplicar patch
+literal seguro sem outra reescrita e reaproveitar os roteiros válidos.
+
+Análise de impacto: FLOW_REVIEWS continua metadado de papel para EngineCall,
+ponte, painel e eventos; deixa de ser uma política de tempo. limitsFor recebe
+somente a invocação e os limites configurados. calls.jsonl registra o mesmo
+limite que o supervisor usa. Documentação não anuncia mais cortes 300s/120s.
+Regredir pela ponte real de chamadas com supervisor simulado: ambos os papéis
+mantêm os limites informados e preservam zero (desligado), tanto em CLI que
+transmite quanto em CLI que responde só no fim. Não fazer inferências pagas.
+
+Validação: os dois casos pela ponte falharam antes do reparo porque o supervisor
+recebia 300s mesmo com o limite geral desligado. Após remover a política especial,
+ambos os papéis preservam 0, 900 e 3600s, com a adaptação de primeira saída/idle
+normal para CLI sem streaming. Os 251 testes direcionados passaram, incluindo
+permissões, patch sem nova chamada, escopo e falha técnica sem reconstrução.
+O check completo passou build, tipos e **2.468 testes em 126 arquivos**, em
+157,66s de suíte. Bundle instalado recompilado em 0.5.0 e conferido: finalidade
+não carrega mais wallSeconds; supervisão mantém os valores configurados e o
+leitor mantém suas permissões. Nenhuma chamada paga ou execução real iniciada.
+
+### §115.33 — Correções do roteiro por passo e identidade exata dos itens
+
+Na P03 de teste_openrouter, o produto teve as nove tasks aprovadas. A primeira
+correção preparou os dados inexistentes no banco descartável; a segunda tentou
+desambiguar nomes por prefixo e introduziu regex ancorado no texto inteiro de
+um item que também contém cor e data. A terceira triagem já entregava o patch
+correto, mas o teto global de duas correções descartou essa resposta e parou.
+
+O orçamento de reparo do roteiro pertence ao passo que falhou, identificado
+pelo workflow e pelo passo declarado no erro do Playwright. Até duas correções
+por passo, sem reiniciar o orçamento de um mesmo passo por alterar mensagem,
+linha ou redação da triagem. Passos diferentes não consomem a possibilidade de
+corrigir aquele que a passagem acaba de alcançar. Sem passo reconhecido,
+continuar com a janela conservadora de duas por fluxo. Não aumentar ciclos do
+executor nem impor limite de cinco minutos. Um patch literal válido da triagem
+já recebida deve ser aproveitado dentro da janela do passo correspondente.
+
+Não rodar de novo um roteiro byte a byte idêntico ao que acabou de falhar.
+Preservar o diagnóstico e classificar ausência de alteração como falha da
+correção do roteiro, sem novo navegador nem ciclo de produto. Guardas de patch
+único, estrutura, passos obrigatórios e limite de tentativas por rascunho ficam.
+O texto da parada não deve pedir concordância do executor para um diagnóstico
+que o harness já identificou como seu: exibir a falha e sua correção diretamente.
+
+Autor e triagem devem selecionar a identidade pelo texto exato do elemento
+filho que a exibe, usando filter({has: page.getByText(nome,{exact:true})}) ou
+seletor equivalente comprovado na fonte. hasText por string é uma busca parcial
+sem distinção de caixa; /^nome$/ em um contêiner não identifica o nome quando
+há metadados. Conferir todas as ocorrências da mesma estratégia, incluindo
+edição e exclusão. Preparar os dados exigidos por um fluxo na passagem nova,
+sem exigir que um banco descartável já contenha registros. Não inventar novos
+critérios nem mudar DOM, texto, delays ou código do produto para o teste passar.
+
+Análise de impacto: laço G4 de triagem/patch/reescrita, reconhecimento dos passos
+de workflow (não gramática de fase), mensagens de falha, prompts de ambos os
+leitores, regressões já publicadas e cache de roteiros. Preservar a geração do
+plano, ledger e fases fechadas. Regressão antes do reparo para três correções
+distribuídas entre dois passos (patch pronto na terceira triagem), mesmo passo
+esgotando sua janela e reescrita idêntica sem outra execução. Reproduzir o
+roteiro real em cópia descartável do parcial, com dados privados e sem modelos;
+publicar somente o roteiro corrigido no cache após comprovar os fluxos, com
+cópia/hashes da evidência anterior. Não aprovar fases nem mover refs do projeto.
+
+Validação: os dois casos novos falharam antes do reparo, demonstrando patch
+descartado após duas correções globais e navegador repetindo roteiro idêntico.
+As simulações de reparo existentes passaram a devolver seletores alterados,
+para testar uma correção real em vez de fazer um runner falso aprovar o mesmo
+arquivo. Os 144 testes direcionados passaram, incluindo a janela de duas para
+o mesmo passo com diagnósticos diferentes e a passagem à triagem de produto.
+O check completo concluiu build, tipos e **2.470 testes em 126 arquivos**
+(98,00s de suíte). Binário instalado recompilado, versão 0.5.0 preservada.
+
+O parcial c5031dddcd6389b46a8678855da63728ff3c7c1d foi extraído para cópia
+descartável, com dependências copiadas e Node v25.9.0 compatível com seu módulo
+SQLite. Reconstruído o roteiro que falhou a partir da resposta do autor e dos
+dois patches registrados: falha reproduzida no seletor de nome, dois fluxos
+passaram. Corrigidas somente as buscas pela identidade dos nomes para filho
+exato, inclusive caixa e nomes por prefixo, preservando todos os expect e os
+cinco passos. Mesmos três fluxos reais: **3 passed (23.1s)**, sem alterar produto
+ou acrescentar casos. Banco e diretório pessoal temporários em cada passagem.
+
+O workflow-2.spec.ts corrigido foi publicado no cache .capivara/flows do projeto
+pausado. Antes/depois, logs e manifest com SHA256 preservados em
+.capivara/runs/build-c9958d3f064e/recovery/g4-categorias-e6bf03e20a2d.
+Conferência estrutural contra o esqueleto guardado confirma os cinco passos.
+HEAD 2bd3b2e, parcial c5031dd e hash do ledger permaneceram iguais. Nenhuma fase
+foi aprovada por fora, nenhuma chamada paga foi feita e nenhum build real foi
+reiniciado. A cópia descartável foi retirada após preservar a evidência.
+
+### §115.34 — Falha do G4 corrige no próximo ciclo, sem reconstruir a entrega
+
+Direção explícita do usuário: acertar no primeiro ciclo é meta de eficiência,
+não condição para continuar. Uma falha corrigível não encerra a fase quando
+ainda há ciclos configurados. Na P05, dois rascunhos inválidos fizeram o runner
+parar pelo ramo falhaDoRoteiro, embora G2 e G3 aprovados pudessem ser mantidos.
+
+Usar os ciclos disponíveis para recuperar o G4 automaticamente. Em falha do
+roteiro, incrementar o ciclo visível e corrigir somente os roteiros reprovados,
+preservando código, G2/G3 e regressões válidas. Guardar o último rascunho e o
+diagnóstico para a próxima chamada, mesmo se o script não pôde ser publicado.
+O ciclo seguinte não executa a mesma versão que falhou: exigir a substituição
+dos roteiros indicados antes de abrir o navegador. Não chamar builder para
+alterar produto aprovado por defeito do seu instrumento de verificação.
+
+Falha transitória de sessão da revisão também pode usar o próximo ciclo para
+repetir só essa revisão, preservando suas evidências. Credencial recusada,
+quota/configuração permanente, violação de isolamento e autoridade continuam
+paradas específicas; não gastar novas chamadas numa condição que não mudou.
+Esgotamento real dos ciclos configurados encerra com evidência de todas as
+tentativas. Sem novos cortes por tempo e sem publicar ou aprovar sem os gates.
+
+O workflow 4 exige estados de carregamento e falha da API. A regra antiga
+proibia toda interceptação e contradizia esse requisito. Permitir controlar
+somente leituras para observar atraso ou indisponibilidade: page.route com
+continue/fallback/fetch da resposta real e abort de GET. Não fabricar respostas
+do backend do produto com fulfill, routeFromHAR, service worker ou equivalente;
+continuar proibindo simular sucesso de CRUD, listas vazias ou contagens.
+Preparar/remover dados pela API real no banco descartável para testar vazio.
+Exibir indisponibilidade com abort da leitura e observar o carregamento antes
+de liberá-la. Terceiro explicitamente externo pode continuar sendo substituído.
+Diagnóstico deve explicar essa alternativa ao modelo, em vez de só proibir.
+
+Conferir o corpo da chamada de rota, inclusive URLs variáveis, para distinguir
+controle de rede de resposta fabricada. Não confundir ações em outra rota ou
+texto/comentário com uma resposta simulada. Registrar o último rascunho completo
+na correção, preservar todos os passos e os caminhos reais de dados.
+
+Análise de impacto: G4 validação inicial/reescrita/cache, runner com recuperação
+exclusiva de roteiro e contagem do ciclo, falhas técnicas de leitores, dashboard
+e evidências por tentativa, contrato de roteiro e estados transitórios, testes
+que esperavam parada imediata. Regressões antes da correção: primeiro ciclo
+inválido seguido de segundo verde sem outro builder/G2/G3; esgotamento após os
+ciclos configurados; retomada recebendo rascunho/causa; atraso/abort aceitos e
+fulfill próprio rejeitado em URL variável. Validar quatro fluxos reais em cópia
+do parcial P05, sem modelos nem alterações em código/refs/ledger do projeto.
+
+O rascunho guardado em memória é somente o estruturalmente inválido, que ainda
+não pode ser publicado. Quando o autor entrega fonte válida, o arquivo passa a
+ser a referência: a correção seguinte lê também os patches já aplicados pelo
+Core, sem restaurar uma versão antiga. Se a falha não identifica o workflow,
+o próximo ciclo exige reescrita dos candidatos, em vez de repetir o cache
+reprovado. O campo interno rejectedScripts existe para essa decisão do gate.
+
+Validação em 19/10/2026: quatro regressões falharam antes do reparo; outra
+reproduziu o rascunho antigo sobrepondo patch publicado antes da correção da
+memória. Depois, 209 testes direcionados passaram. O primeiro check completo
+identificou uma expectativa antiga de parada no ciclo 1; corrigida para os
+três ciclos configurados. Check final: build, typecheck e 2480 testes em 126
+arquivos passaram. Casos cobrem recuperação no ciclo 2 sem builder/G2/G3 extras,
+esgotamento real, evidências/rascunhos por tentativa e recusa permanente sem
+repetições inúteis. Nenhum corte especial de tempo foi acrescentado.
+
+Cópia isolada do parcial P05 52469534c1241d42447b2683b65bb02c07a9ddfb:
+os quatro workflows passaram em navegador real em 26,8s. Dashboard compara
+contagens com a API, navega sem recarregar e verifica estados declarados nas
+quatro páginas; usa GET atrasado/abortado e remove dados pela API no banco
+descartável. Não fabrica resposta nem altera o produto. Roteiro validado salvo
+somente em .capivara/flows/workflow-4.spec.ts do projeto teste_openrouter;
+rascunhos anteriores, log e hashes preservados no run build-c9958d3f064e em
+recovery/g4-dashboard-e0f3540645c7. HEAD 92a1a35, ref parcial e ledger
+conferidos sem alteração na publicação do cache. Nenhuma aprovação de fase ou
+execução paga; binário instalado recompilado em 0.5.0.
+
+### §115.35 — Plan corrige o ponto sem reabrir o que já aprovou
+
+Incidente teste_openrouter2, run init-ee50c5623684: quinze passagens de auditoria
+terminaram em impasse. A coerência aprovou o índice na passagem 13 e reprovou
+na 15 relações entre critérios que não mudaram nas emendas 14/15. Alguns pontos
+eram exigências de redação (classe com propriedades versus objeto descrito por
+essas propriedades; criar página definitiva versus substituir a provisória),
+sem demonstrar uma implementação impossível. Outro achado localizou P1, mas
+exemplos de fases 3/5 na explicação abriram emendas também nessas fases. O
+escritor da emenda recebia só a própria fase, sem os contratos dos outros
+endereços que precisava conciliar. A emenda ainda não atualizava o cache de
+escrita: retomar podia ressuscitar o texto anterior ao reparo.
+
+O endereço do finding define os destinos; referências na explicação são
+fallback apenas quando o endereço não localiza fase nenhuma. O campo phase
+de quem chamou continua tendo precedência. A emenda recebe o texto atual das
+outras fases explicitamente relacionadas, como referência de leitura; não
+escreve nessas fontes. Com endereços exatos de tasks, o Core preserva as tasks
+não citadas na própria fase, sem pagar uma nova chamada por mudanças laterais.
+Correções estruturais de divisão/consolidação conservam o caminho existente.
+
+A coerência continua lendo o índice inteiro, mas uma aprovação anterior com
+as mesmas decisões fixa a base. O prompt identifica critérios alterados e
+exige evidência de mudança para reabrir uma relação aprovada. Um finding cujo
+endereço contém somente critérios/tasks ainda idênticos à base aprovada vira
+observação, sem devolução. Exige ao menos duas referências válidas, todas
+resolvidas; endereço desconhecido, critério novo/alterado, decisão alterada ou
+asserção de escopo não relacionada preservam a auditoria normal. Uma mudança
+que torna duas regras antigas incompatíveis deve citar também a regra mudada.
+Não declarar como impossível o que pode coexistir: request pode usar fetch por
+dentro, ApiError pode ter code/message/fields e uma página definitiva pode
+substituir uma provisória. Cobrar somente incompatibilidade observável ou
+capacidade não autorizada, mantendo os bloqueios reais.
+
+Cada emenda aceita atualiza a entrada do cache correspondente ao prompt atual
+de escrita; retomar preserva o conserto e a autoridade que o motivou. Não
+aumentar o teto de devoluções nem publicar por esgotamento para ocultar loop.
+O impasse não deve afirmar que há um gap de entrevista sem evidência: distinguir
+falha de convergência de uma decisão de produto pendente.
+
+Análise de impacto: referência de fases compartilhada por entrevistas/emendas,
+escopo mecânico das tasks e correções estruturais, auditoria global paralela à
+local, identidade de autoridade e cache entre execuções, prompt e relatórios
+de impasse. Provas antes/depois: exemplo de fase na explicação não vira alvo;
+outra fase chega como contexto; task não citada conserva seus bytes; reparo
+sobrevive à retomada; par aprovado idêntico não consome devolução; alteração de
+qualquer referência ou das decisões volta a poder bloquear. Sem chamadas pagas
+nem edição de planos do usuário para fazê-los passar.
+
+Validação em 19/10/2026: três regressões falharam antes da mudança (destinos
+incluindo exemplos P3/P5, par global reaberto até impasse e emenda sem contexto).
+Depois, 131 testes direcionados passaram; uma segunda seleção, incluindo a
+retomada com decisões e o protocolo do impasse, passou 129 testes. Proteção de
+tasks cobre a estrutura preservada; divisão/consolidação explícitas continuam
+usando a validação existente. Memória global mantém rejeição quando há critério
+alterado, adicionado ou removido, decisão nova, referência desconhecida, ausência
+de par ou ausência de aprovação anterior. Em veredito misto só o par intacto
+vira ressalva, preservando os achados sobre regras mudadas.
+
+O primeiro check completo passou 2492 testes e identificou duas expectativas
+antigas: escrita obrigatória na retomada mesmo após emenda em cache, e texto
+atribuindo o impasse a gap de entrevista. O cenário de nova geração passou a
+pedir fresh explicitamente; a retomada normal tem regressão própria garantindo
+que conserva a emenda sem nova autoria. Check final: build, typecheck e 2494
+testes em 128 arquivos passaram. Executável instalado 0.5.0 recompilado e
+verificado. Nenhuma chamada paga, alteração de plano do usuário ou aprovação
+externa. A pasta teste_openrouter2 foi limpa externamente durante a análise;
+as transcrições foram lidas antes disso. Não houve nova geração completa pela
+API: as provas desta correção são as reproduções locais do comportamento.
+
+### §115.36 — Demonstrar o bloqueio antes de devolver ou pedir decisão no plan
+
+A nova execução de teste_openrouter2 começou às 12:01:58 de 19/10/2026, após
+o bundle compilado às 11:57:33; o prompt novo consta da chamada real. Não era
+problema de instalação. A correção anterior cobria a reabertura de pares já
+aprovados, mas a coerência desta execução ainda não aprovara nada. Ela passou
+a bloquear compatibilidades: DELETE 204 contra alternativa 200 ou 204; erro de
+GET contra validação de POST; banco vazio num cenário contra persistência em
+outro; página/componente inicial contra sua evolução em outra fase. As falsas
+decisões técnicas alteravam a autoridade e ainda invalidavam a memória.
+
+Antes de devolver achados semânticos ou apresentar decisões do auditor do plan,
+uma revisão independente pelo papel verifier confere a materialidade em lote.
+Ela recebe o pedido, as decisões e somente as fases referenciadas pelos itens;
+não escreve plano nem produto. Descartar um bloqueio exige razão e citação
+literal verificável dessas fontes. Registro sem fonte válida conserva aquele
+bloqueio/decisão; não descarta os outros pareceres fundamentados. Omissão, ID
+desconhecido, duplicação e JSON inválido conservam o veredito inteiro. Falha
+dessa revisão nunca aprova o plano. Uma chamada por passagem,
+sem ciclos próprios de reescrita ou aumento do orçamento. Falhas de cancelamento,
+credencial/quota e controle de execução continuam a ter o tratamento próprio.
+
+A revisão distingue escopo, momento, operação, conjunto de valores permitido
+e evolução por fase. Se uma implementação pode satisfazer ambas as condições,
+não há contradição. Um detalhe técnico com escolha compatível dentro das fontes
+não exige arbitragem do usuário. Negócio material ainda indefinido, obrigações
+mutuamente impossíveis no mesmo cenário e funcionalidade exigida ausente
+continuam bloqueios/decisões. Critério pode ser demonstrado pela implementação
+ou pelo comportamento; não exigir um teste adicional para cada detalhe da
+descrição, nem tornar critério o modo como o teste tem de se organizar.
+Self-check mecânico, prontidão, limites e ensaio mantêm suas verificações.
+
+O formato interno dessa revisão identifica cada finding/decision, conserva-o
+ou o transforma em observação com evidência. Esse campo decide se o loop gasta
+outra escrita/pergunta; não é campo do plano executável. Não publicar documento
+por teto esgotado nem forjar aprovação do auditor. A auditoria registra seu
+veredito original; o relatório informa os pontos considerados não bloqueantes.
+
+Análise de impacto: agregação local/global antes da entrevista de auditoria,
+cache e autoridade, protocolo da revisão e fontes exatas, calls/logs/painel,
+falha/cancelamento de sessão, testes com verificador roteirizado. Regredir o
+caso antes de qualquer aprovação global, a falsa decisão técnica e o bloqueio
+funcional legítimo; fonte inventada/omissão/saída inválida não removem bloqueio.
+Preservar as transcrições reais em cópia de diagnóstico, sem editar o projeto
+ou reiniciar/cancelar sua execução por fora e sem chamadas pagas de validação.
+
+Na busca dos consumidores da forma dos achados, localizaram-se dois caminhos
+irmãos: o auditor real também cita sub-fase (`Phase 1.6`), que deve localizar
+as tasks pela fronteira da sub-fase; e parsePhaseFragment normalizava a fase
+isolada N para 1 sem normalizar suas sub-fases N.x, perdendo a memória de tasks
+aprovadas. Normalizar também esses cabeçalhos e devolver seus números originais,
+sem aceitar sub-fase de outra fase. Preservar tasks não citadas inclusive quando
+uma emenda não estrutural omite outra task; extrair só a correção endereçada,
+sem apagar a task omitida ou pedir nova chamada por isso.
+
+Validação em 19/10/2026: dois cenários falharam antes da triagem — auditor
+global que nunca aprova por falsa incompatibilidade e pergunta sobre técnica
+que chegava ao usuário. Dois outros reproduziram perda de sub-fases em fragmento
+posterior à primeira fase e perda da task omitida. Depois, 93 testes direcionados
+passaram; seleção com catálogo passou 101. O primeiro check completo apontou
+apenas uma expectativa antiga de que o verifier não seria chamado em nenhum
+estágio no impasse: agora a triagem existe, mas o ensaio final ainda não roda
+antes de aprovação. A asserção foi separada por estágio. Check final passou
+build, typecheck e 2512 testes em 129 arquivos. Provas incluem preservação de
+bloqueio funcional/decisão material, fontes inventadas, duplicação/omissão/JSON
+inválido e aproveitamento de parecer fundamentado em resposta parcialmente
+inválida, sem outra sessão. A coerência confirmada pela triagem pode fixar a
+base global mesmo havendo um defeito local ainda pendente.
+
+O auditor original também recebeu a distinção entre técnica e negócio, entre
+operações/cenários/momentos diferentes e entre descrição e critérios de aceite;
+não deve exigir teste separado para cada frase. Bundle instalado 0.5.0
+recompilado às 12:20:02; caminho ~/.local/bin/capivara e presença da triagem no
+bundle conferidos. Cópia do diagnóstico: /tmp/capivara-openrouter2-diagnostic-yt5i2dch.
+Nenhuma chamada paga, edição de plano do usuário ou execução reiniciada por nós.
+O run real publicou o plan e marcou RALPH READY às 12:10:55, antes deste reparo:
+o resultado já alcançado deve ser preservado e não prova a nova triagem em API.
+Plano publicado com sha256 874911b6ae56bec77bd7f85197cb0852915dea38a46c3c52b429fcbc8294a43d.
+
+### §115.37 — Preparar e verificar os requisitos no workspace correto
+
+O usuário confirmou o erro: duas sessões de instalação às 12:40/12:41 e uma
+mensagem dizendo que node não está no PATH. A leitura inicial mostrou projeto
+vazio; depois dessas sessões surgiu backend/package.json declarando
+better-sqlite3 ^11.10.0 e backend/node_modules. Sonda real com Node 25.9.0
+nesse backend abriu SQLite em memória e executou select 1 com sucesso. O
+pacote foi instalado: o harness o procurava na raiz, não no workspace backend.
+O relatório dizia nenhuma sessão gasta porque as chamadas ocorriam antes do
+registro do build e o callback de instalação descartava a resposta do provider.
+
+Direção confirmada: o plan discrimina requisitos, o build instala e comprova
+TODOS antes de iniciar desenvolvimento. Não dispensar nem postergar essa sonda.
+Para probes Node que importam pacotes externos, localizar os manifestos do
+projeto que os declaram e executar o mesmo checkArgs nesses diretórios. Não
+usar ferramentas privadas do harness como prova nem tentar pastas arbitrárias
+até achar um resultado verde. Com múltiplos donos declarados, todos passam.
+Sem manifesto ainda, a instalação focada pode criar o manifesto mínimo de
+dependências no diretório declarado pelo plano/hint, sem código de aplicação;
+a reverificação descobre o manifesto e carrega o pacote de verdade. Probes de
+runtime, builtins ou serviços continuam no diretório original. Nenhuma alteração
+de skeleton, plan, hashes ou contratos já aprovados para contornar a falha.
+
+Distinguir executável ausente de executável encontrado com prontidão reprovada.
+Exibir cwd e evidência real. Gravar prompt, resposta, estado e número das sessões
+de preparação antes da primeira chamada; não dizer custo zero depois de usar
+modelos. Resultado não zero/quota/configuração recusada da instalação precisa
+ser respeitado, sem fingir que a chamada serviu e gastar outra à toa.
+
+Preparação pode deixar manifestos mínimos antes do primeiro worktree. O Core
+reconhece apenas manifestos novos cujas únicas dependências são os pacotes
+explicitamente sondados, e lock correspondente; ignora node_modules como
+artefato local e publica essa preparação por sua própria admissão Git. Não
+commitar código, alteração prévia em manifesto rastreado ou arquivo alheio.
+Reaproveitar essa preparação ao retomar após falha, inclusive no caso real em
+que não havia log. O executor instalador não move refs e não implementa a fase.
+
+Análise de impacto: resolução de probes, instalação/reverificação antes do lock,
+manifestos de monorepo e dados do usuário, árvore limpa para worktrees, Core como
+único dono dos commits, callbacks/resultados de provider, diagnóstico e custo
+da parada. Regressões antes/depois: pacote declarado no backend passa sem outra
+instalação; projeto vazio instala uma vez e só inicia builder depois da sonda;
+loader recusado continua bloqueando; custo/evidência não somem; preparação nova
+é admitida sem levar fonte ou alteração alheia. Prova real somente de leitura
+com o SQLite já instalado. Nenhuma nova chamada paga de validação.
+
+
+Validação §115.37: as duas regressões iniciais de resolução/instalação
+falharam antes do reparo. O custo ausente e a recusa de cota também falharam
+antes; depois passaram. A revisão da retomada revelou outras três regressões
+reproduzidas antes da correção: aviso de ausência sobrevivendo à instalação,
+registros recém-criados arquivados junto de logs antigos e custo zero numa
+parada de configuração posterior à instalação. Registros de preparação agora
+ficam em runs/<run>/preparation, preservados nas retomadas; o custo acompanha o
+resultado e o aviso resolvido é retirado. Provas focadas: 86 testes na seleção
+inicial e 53 na seleção final de ambiente/admissão/parada. Primeiro check
+completo: build + typecheck + 2525 testes/130 arquivos; novo check obrigatório
+após os ajustes finais está em /tmp/capivara-environment-verified-check.log.
+
+Sonda de leitura no teste_openrouter2 com Node 25.9.0 comprovou os três
+requisitos e nove fases, carregando better-sqlite3 no backend. Uma cópia
+isolada dos mesmos arquivos comprovou admissão de backend/package.json e seu
+package-lock.json, árvore limpa e todas as sondas verdes. O ensaio inicial com
+node_modules simbolicamente ligado foi descartado: Git trata aquele link como
+arquivo, diferente da instalação real em diretório; repetido com cópia real de
+29 MB, passou. Evidência: /tmp/capivara-real-environment-proof.log. A árvore e
+refs do usuário não foram alteradas; plan/skeleton mantêm sha256
+f7bb0d2b7dc6dde619bb4ffcbad8ed31d796c118f7442c715e7101468d68a13b e
+47e986558006a3fe1137f4408c092da8f054c64ecbc53a4664f7d545e34664a3.
+Não rodamos o desenvolvimento nem fizemos inferência paga para validar.
+
+Check final §115.37 concluído: build, typecheck e 2526 testes em 130 arquivos
+passaram (113,29 s de suíte). Executável instalado 0.5.0 recompilado às
+12:57:01; symlink e funções novas no bundle conferidos. Os documentos do
+usuário continuam intactos; a retomada é capivara build, sem refazer o plan.
+
+### §115.38 — Pré-requisito útil, sonda válida e recuperação da instalação
+
+No teste_minimax, o planejamento inventou `playwright screenshot ... /dev/null`
+como prontidão. O CLI oficial exige extensão de imagem; a sessão instalou as
+ferramentas, substituiu o CLI global por um adaptador e terminou com exit 1.
+O Core parou sem comprovar o estado final. O usuário reforçou: testar apenas o
+que importa, sem inventar obstáculos técnicos para aprovar a aplicação.
+
+O plan deve declarar somente ferramentas necessárias à stack/desenvolvimento,
+não inventar requisitos para viabilizar suas próprias sondas. Compiladores e
+dependências locais não precisam de instalações globais por conveniência.
+Ferramentas de navegador exclusivas do G4 pertencem à preparação privada do
+harness; não exigir outro Playwright global. Pré-requisito não é teste de
+produto. Instalação nunca altera CLI de terceiro para satisfazer uma sonda.
+
+Para aproveitar planos aprovados, corrigir mecanicamente somente o destino
+inválido conhecido de screenshot Playwright em /dev/null: executar a mesma
+navegação/captura real num PNG temporário exclusivo, limpar em finally e
+registrar argumentos efetivos. Não mudar plan, skeleton, hashes, CLI global
+nem contornar falha real de navegador. Provas de outros comandos inalteradas.
+
+Exit não zero de sessão de instalação não prova ambiente ausente. Quando há
+resultado e não há timeout/erro estrutural/recusa de cota ou configuração, o
+Core verifica os requisitos faltantes de fato, uma vez: se prontos, registra
+recuperação e segue sem outra chamada paga; se ainda faltam, mantém a falha.
+Não promover a palavra do modelo a evidência. Recusas e interrupções continuam
+preservadas sem repetição paga automática. Custo/log da sessão não desaparecem.
+
+Impacto pesquisado: requisitos derivados do skeleton/environment.json, probes
+em workspaces, pré-instalação antes dos worktrees, gate0 usado pelas fases,
+callback/resultados e evidência de preparação, timeout e recusas definitivas.
+Gate0 de implementação e seus limites não mudam. Regressões obrigatórias antes
+do reparo: exit 1 com requisitos comprovados não bloqueia; exit 1 com requisito
+ausente bloqueia; cota continua bloqueando mesmo com pacote em disco; captura
+real deve receber PNG temporário e limpeza deve ocorrer também na falha.
+Restaurar o link do CLI oficial substituído pelo instalador, com backup do
+adaptador e sem apagar evidência. Validar sem inferência paga.
+
+### §115.39 — Planejamento define entrega; validador escolhe a prova
+
+Decisão explícita do usuário: planejamento não se preocupa com testes; ele
+planeja. Quem define as verificações necessárias é o validador. O plan fixa
+capacidades, contratos, dependências e critérios observáveis do produto. Não
+prescreve arquivos, identificadores, quantidade ou organização de testes, nem
+cria tasks/fases de testes por iniciativa própria. Requisito explícito do
+usuário continua sendo autoridade, inclusive se o próprio produto for teste.
+
+Retirar a prescrição de testes dos templates e prompts de escrita/auditoria
+do plan. O campo histórico Feature tests continua legível para preservar os
+planos já aprovados e suas chaves, mas não vira obrigação de implementação.
+O build deixa de varrer a árvore atrás dos nomes inventados no planejamento.
+O verificador escolhe a menor prova suficiente do comportamento entregue,
+reaproveita G2/evidências existentes, só pede nova cobertura para risco concreto
+sem prova e explica cenário, resultado e falha material. Ausência de nome,
+arquivo, contagem ou formato de teste não reprova funcionalidade correta.
+G4 continua restrito aos fluxos entregues; não surge uma suíte exaustiva nova.
+
+Impacto: templates/documentação gerada do contrato; parser e seus consumidores;
+writer/auditor/ensaio do plano; prompts G3 e inventário mecânico; memória de
+tasks/sha e retomada; reparo pelo verificador já existente. Sem mudar hashes
+ou reescrever planos dos usuários, nem desativar suíte funcional ou prova de
+funcionamento. Testes de política antes/depois devem pegar instruções antigas.
+
+
+Validação §§115.38–39: regressão de instalação com exit 1 e requisito pronto
+falhou antes do reparo; depois passou. Instalação ainda incompleta e recusa de
+cota continuam bloqueadas. Regressões de responsabilidade do plan falharam
+antes: os templates exigiam nomes de testes e o prompt mandava defini-los.
+Após remoção, 175 testes direcionados passaram; seleção final passou 72.
+Uma execução do check foi interrompida ao identificar uma expectativa antiga
+que exigia do executor a criação automática de teste de navegador; a asserção
+foi alinhada à decisão do usuário antes da nova suíte completa.
+
+No teste_minimax, restaurado o link oficial de playwright 1.51.1. O adaptador
+anterior foi preservado em
+.capivara/runs/build-20e34c5ee6da/preparation/playwright-cli-adapter.backup.cjs.
+A sonda corrigida abriu Chromium e capturou PNG de verdade, sem alterar o CLI
+nem os documentos. Os cinco pré-requisitos passaram e o plan tem seis fases.
+Evidência: /tmp/capivara-minimax-environment-proof.log. Nenhuma chamada paga
+nem execução do desenvolvimento durante a validação.
+
+O usuário pediu commit de todas as alterações na main ao concluir. O commit
+inclui o trabalho acumulado da versão 0.5.0, com check completo antes de
+registrar. Não foi solicitado push.
+
+
+Check final §§115.38–39: build, typecheck e 2535 testes em 132 arquivos
+passaram (166,68 s). Uma segunda expectativa antiga de inventário após reparo
+foi corrigida preservando a revalidação de todas as tasks. Executável instalado
+0.5.0 recompilado às 13:52:51. Log: /tmp/capivara-main-final-check.log.
+Commit de todas as alterações acumuladas autorizado pelo usuário na main.

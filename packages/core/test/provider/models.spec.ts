@@ -11,13 +11,62 @@
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { saveCredential } from "../../src/provider/credentials.js";
+import { DIRECT_CATALOG } from "../../src/provider/registry.js";
 import { CLAUDE_FAMILIES, MODEL_LISTINGS, cliDisponivel, listarEfforts, listarModelos } from "../../src/provider/index.js";
 
 let directory: string | undefined;
 afterEach(async () => {
+  vi.restoreAllMocks();
   if (directory) await rm(directory, { recursive: true, force: true });
   directory = undefined;
+});
+
+describe("modelos por API", () => {
+  it.each(DIRECT_CATALOG)("$id: consulta a API com a chave no header e lê data[].id", async (provider) => {
+    const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ data: [{ id: "modelo-1" }, { id: "modelo-1" }, { id: "modelo-2" }, {}, { id: "nome com espaços" }] })));
+    const key = "sk-api-key-apenas-teste";
+    const models = await listarModelos(provider.id, { [provider.envKey]: key, CAPIVARA_CONFIG_DIR: "/caminho/sem/credenciais" });
+    expect(models).toEqual(["modelo-1", "modelo-2"]);
+    const [url, request] = fetcher.mock.calls[0]!;
+    expect(String(url)).toBe(provider.modelsEndpoint ?? provider.endpoint.replace(/(?:chat\/completions|messages)$/, "models"));
+    expect(String(url)).not.toContain(key);
+    expect(request?.headers).toMatchObject(provider.id === "anthropic" ? { "x-api-key": key, "anthropic-version": "2023-06-01" } : { Authorization: `Bearer ${key}` });
+    expect(request?.redirect).toBe("error");
+  });
+
+  it.each(["deepseek", "minimax"])("%s usa a chave recém-salva no mesmo store do wizard", async (provider) => {
+    directory = await mkdtemp(join(tmpdir(), "capivara-models-api-"));
+    const file = join(directory, "credentials.json");
+    await saveCredential({ id: "teste", label: "teste", provider, secret: "sk-salva-teste", default: true, createdAt: "agora" }, file);
+    const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"data":[{"id":"modelo-teste"}]}'));
+    expect(await listarModelos(provider, { CAPIVARA_CONFIG_DIR: directory })).toEqual(["modelo-teste"]);
+    expect(fetcher.mock.calls[0]?.[1]?.headers).toEqual({ Authorization: "Bearer sk-salva-teste" });
+  });
+
+  it.each([401, 429, 500])("HTTP %s degrada para nome manual sem expor a resposta", async (status) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("corpo com informação privada", { status }));
+    const messages: string[] = [];
+    expect(await listarModelos("deepseek", { DEEPSEEK_API_KEY: "sk-fake-test", CAPIVARA_CONFIG_DIR: "/ausente" }, undefined, (message) => messages.push(message))).toEqual([]);
+    expect(messages.join("")).toContain(`HTTP ${status}`);
+    expect(messages.join("")).not.toContain("corpo com informação privada");
+    expect(messages.join("")).not.toContain("sk-fake-test");
+  });
+
+  it.each(["TimeoutError", "TypeError"])("diagnostica %s sem expor texto da exceção", async (name) => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(Object.assign(new Error("sk-chave-que-nao-pode-aparecer"), { name }));
+    const messages: string[] = [];
+    expect(await listarModelos("deepseek", { DEEPSEEK_API_KEY: "sk-fake-test", CAPIVARA_CONFIG_DIR: "/ausente" }, undefined, (message) => messages.push(message))).toEqual([]);
+    expect(messages.join("")).toContain(name === "TimeoutError" ? "esgotou" : "verifique a conexão");
+    expect(messages.join("")).not.toContain("sk-chave");
+  });
+
+  it("sem credencial não faz requisição de listagem", async () => {
+    const fetcher = vi.spyOn(globalThis, "fetch");
+    expect(await listarModelos("deepseek", { CAPIVARA_CONFIG_DIR: "/ausente" })).toEqual([]);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
 });
 
 async function fakeCli(name: string, output: string): Promise<string> {
@@ -174,9 +223,29 @@ describe("os níveis de raciocínio que o modelo de fato aceita", () => {
     expect(MODEL_LISTINGS.codex?.efforts?.("não é JSON")).toEqual({});
   });
 
-  it("CLI que não informa níveis devolve vazio, sem erro", async () => {
+  it("CLI que não informa níveis devolve null, distinguindo de modelo sem variantes", async () => {
     const { listarEfforts } = await import("../../src/provider/index.js");
-    expect(await listarEfforts("opencode", "qualquer-modelo")).toEqual([]);
-    expect(await listarEfforts("claude", "opus")).toEqual([]);
+    expect(await listarEfforts("opencode", "qualquer-modelo", { CAPIVARA_OPENCODE_BIN: "/cli-ausente" })).toBeNull();
+    expect(await listarEfforts("claude", "opus")).toBeNull();
+  });
+});
+
+describe.skipIf(process.platform === "win32")("OpenCode com a chave de API salva na Capivara", () => {
+  it("a descoberta recebe a chave pelo ambiente e usa o servidor privado; níveis vêm do JSON real da CLI", async () => {
+    directory = await mkdtemp(join(tmpdir(), "capivara-opencode-api-models-"));
+    const file = join(directory, "credentials.json");
+    await saveCredential({ id: "deepseek", label: "principal", provider: "deepseek", secret: "sk-api-teste-opencode", default: true, createdAt: "agora" }, file);
+    const binary = join(directory, "opencode.mjs");
+    await writeFile(binary, `#!${process.execPath}\nif (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(["api", "model.list", "--standalone"])) process.exit(2);\nconst data = process.env.DEEPSEEK_API_KEY === "sk-api-teste-opencode" ? [
+      {id: "deepseek-flash", providerID: "deepseek", variants: [{id:"none"}, {id:"low"}, {id:"high"}, {id:"max"}]},
+      {id: "sem-variantes", providerID: "deepseek", variants: []},
+      {id: "oculto", providerID: "deepseek", enabled: false, variants: []}
+    ] : [];\nconsole.log(JSON.stringify({location: {directory: process.cwd()}, data}));\n`);
+    await chmod(binary, 0o755);
+    const env = { ...process.env, CAPIVARA_CONFIG_DIR: directory, CAPIVARA_OPENCODE_BIN: binary, DEEPSEEK_API_KEY: "" };
+    expect(await listarModelos("opencode", env)).toEqual(["deepseek/deepseek-flash", "deepseek/sem-variantes"]);
+    expect(await listarEfforts("opencode", "deepseek/deepseek-flash", env)).toEqual(["none", "low", "high", "max"]);
+    expect(await listarEfforts("opencode", "deepseek/sem-variantes", env)).toEqual([]);
+    expect(await listarEfforts("opencode", "deepseek/inexistente", env)).toBeNull();
   });
 });

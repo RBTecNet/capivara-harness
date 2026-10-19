@@ -1,3 +1,4 @@
+import { certifyCurrentPlan } from "../support/current-plan.js";
 /**
  * Só o Core registra e publica no Git (§101).
  *
@@ -207,6 +208,7 @@ describe("o agente que mexe no Git — serial", () => {
   beforeEach(async () => {
     await repositorio();
     await escrever(".capivara/init/project-phases.md", PLANO);
+    await certifyCurrentPlan(projectRoot);
     await git(["add", "-A"]);
     await git(["commit", "-q", "-m", "docs: plano"]);
   });
@@ -268,6 +270,7 @@ describe("o agente que mexe no Git — paralelo", () => {
   beforeEach(async () => {
     await repositorio();
     await escrever(".capivara/init/project-phases.md", PLANO);
+    await certifyCurrentPlan(projectRoot);
     await git(["add", "-A"]);
     await git(["commit", "-q", "-m", "docs: plano"]);
   });

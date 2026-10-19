@@ -44,6 +44,7 @@ import { changePrompt, phaseFromSlicePrompt } from "../prompts/index.js";
 import { inspectProject, summarizeInventory } from "../init/inventory.js";
 import { readRequestState, readSkeletonState, writeSkeletonState } from "../init/index.js";
 import { runIdFor } from "../state/run-store.js";
+import { readEnvironmentPlan, renderEnvironmentPlan } from "../loop/environment-plan.js";
 import { artifactPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
 
@@ -180,6 +181,8 @@ export async function runChange(options: ChangeOptions): Promise<ChangeOutcome> 
         "Para uma aplicação que a capivara não construiu, rode `capivara survey` e depois `capivara init` — é o init que produz o esqueleto.",
     );
   }
+  try { await readEnvironmentPlan(options.projectRoot, esqueletoBruto, planoAtual); }
+  catch (error) { throw new ChangeBlockedError(error instanceof Error ? error.message : String(error)); }
 
   /*
    * O esqueleto vem do ESTADO, não do markdown.
@@ -310,6 +313,7 @@ export async function runChange(options: ChangeOptions): Promise<ChangeOutcome> 
 
   await writeAtomic(caminhoEsqueleto, skeletonMarkdown);
   await writeAtomic(caminhoPlano, plano);
+  await writeAtomic(join(paths.init, "environment.json"), renderEnvironmentPlan(aplicada.skeleton, plano));
   // O estado do esqueleto é atualizado no MESMO lugar de onde veio: é por ele
   // que o `plan` e um `change` seguinte encontram o que já foi combinado.
   await writeSkeletonState(options.projectRoot, runIdFor("init", pedido!.sha12), aplicada.skeleton);
@@ -320,6 +324,6 @@ export async function runChange(options: ChangeOptions): Promise<ChangeOutcome> 
     novas: aplicada.novas,
     aplicados: aplicada.aplicados,
     avisos: aplicada.avisos,
-    written: [caminhoEsqueleto, caminhoPlano],
+    written: [caminhoEsqueleto, caminhoPlano, join(paths.init, "environment.json")],
   };
 }

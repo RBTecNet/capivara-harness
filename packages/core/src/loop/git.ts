@@ -12,8 +12,8 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readdir, readFile, stat } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { appendFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { dirname, join, relative, resolve } from "node:path";
 import { admitirArvore, alteracoesParaCommit, commitAdmitido, descreverBloqueios, lerStatus, orientacaoDeBloqueio, type Bloqueio } from "./admissao.js";
 import { renderEscolhaNumerada, type EscolhaNumerada } from "./escolha.js";
 import { promisify } from "node:util";
@@ -107,6 +107,11 @@ export async function iniciarRepositorio(
   try {
     await run("git", ["init", "-q"], { cwd: projectRoot });
     await garantirIdentidade(projectRoot);
+    // Instalação local não entra no primeiro snapshot antes de existir .gitignore.
+    // O exclude local tem precedência menor que as regras explícitas do projeto.
+    const exclude = resolve(projectRoot, (await run("git", ["rev-parse", "--git-path", "info/exclude"], { cwd: projectRoot })).stdout.trim());
+    await mkdir(dirname(exclude), { recursive: true });
+    await appendFile(exclude, "\n# Capivara: dependências locais\nnode_modules/\n");
 
     /*
      * Árvore que já tem trabalho precisa do commit inicial, e não por capricho: o

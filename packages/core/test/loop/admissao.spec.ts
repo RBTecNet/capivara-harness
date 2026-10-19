@@ -1,3 +1,4 @@
+import { certifyCurrentPlan } from "../support/current-plan.js";
 /**
  * A política de admissão dos commits automáticos (§100).
  *
@@ -250,6 +251,7 @@ const ESCRITAS: Record<string, Escrita[]> = {
 async function prepararProjeto(): Promise<void> {
   await repositorio();
   await escrever(".capivara/init/project-phases.md", PLANO);
+  await certifyCurrentPlan(projectRoot);
   await git(["add", "-A"]);
   await git(["commit", "-q", "-m", "docs: plano"]);
 }
@@ -356,7 +358,8 @@ describe("build paralelo", () => {
     expect((await git(["log", "--format=%s"])).split("\n").filter((linha) => linha.startsWith("feat(phase-"))).toHaveLength(3);
     expect(await arquivosNoHistorico()).not.toContain(".env");
     expect(await arquivosNoHistorico()).toContain(".env.example");
-    expect((await readFile(join(projectRoot, ".env"), "utf8")).startsWith(MARCA_DO_HARNESS)).toBe(true);
+    // A suíte integrada configura a cópia, preservando a árvore principal.
+    expect(await existe(join(projectRoot, ".env"))).toBe(false);
   });
 
   it(".env não ignorado num worktree: nem o branch da fase nem a principal recebem o arquivo, e ele não se perde", async () => {

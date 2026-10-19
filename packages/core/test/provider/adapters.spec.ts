@@ -20,6 +20,39 @@ const config = (overrides: Partial<RoleConfig> = {}): RoleConfig => ({
 });
 
 describe("sandbox por papel — a fronteira mais delicada", () => {
+  it("OpenCode 2: configura leitores na configuração efetiva, negando ferramentas não previstas", () => {
+    for (const role of ["writer", "auditor", "verifier"] as const) {
+      const invocation = buildInvocation(role, config({ provider: "opencode" }), {
+        ...context, environment: { OPENCODE_CONFIG_CONTENT: JSON.stringify({ provider: { local: { options: { baseURL: "http://localhost:9999" } } }, permission: { "*": "allow" } }) },
+      });
+      const effective = JSON.parse(invocation.env.OPENCODE_CONFIG_CONTENT!);
+      expect(effective.provider.local.options.baseURL).toBe("http://localhost:9999");
+      const rules = effective.permission;
+      for (const tool of ["shell", "write", "apply_patch", "task", "rea_execute", "unknown_tool"]) {
+        expect(rules[tool] ?? rules["*"], `${role}: ${tool}`).toBe("deny");
+      }
+      for (const tool of ["read", "glob", "grep"]) expect(rules[tool], `${role}: ${tool}`).toBe("allow");
+    }
+  });
+
+  it("OpenCode 2: mantém execução e reparo autorizados na configuração efetiva", () => {
+    for (const role of ["builder", "verifier"] as const) {
+      const invocation = buildInvocation(role, config({ provider: "opencode" }), {
+        ...context, ...(role === "verifier" ? { verifierRepair: true } : {}),
+        environment: { OPENCODE_CONFIG_CONTENT: '{"permission":{"*":"deny"},"provider":{"local":{"models":{"x":{"limit":{"output":16384}}}}}}' },
+      });
+      const effective = JSON.parse(invocation.env.OPENCODE_CONFIG_CONTENT!);
+      expect(effective.permission).toEqual({ "*": "allow" });
+      expect(effective.provider.local.models.x.limit.output).toBe(16384);
+    }
+  });
+
+  it.each(["{ segredo", "null", "[]"])("OpenCode: configuração inválida %s falha sem expor seu conteúdo", raw => {
+    expect(() => buildInvocation("verifier", config({ provider: "opencode" }), {
+      ...context, environment: { OPENCODE_CONFIG_CONTENT: raw },
+    })).toThrow(/^OPENCODE_CONFIG_CONTENT incompatível; nenhuma inferência foi enviada$/);
+  });
+
   it("codex: papéis read-only recebem --sandbox read-only", () => {
     for (const role of ROLE_NAMES.filter((name) => ROLES[name].permission === "read-only")) {
       const invocation = buildInvocation(role, config(), context);
@@ -56,6 +89,22 @@ describe("sandbox por papel — a fronteira mais delicada", () => {
     const invocation = buildInvocation("verifier", config({ provider: "opencode" }), context);
     expect(invocation.env.OPENCODE_PERMISSION).toContain('"edit":"deny"');
     expect(invocation.env.OPENCODE_PERMISSION).toContain('"external_directory":"deny"');
+  });
+
+  it("opencode 2: usa o cwd e o servidor privado, sem flags removidas", () => {
+    const invocation = buildInvocation("writer", config({ provider: "opencode", model: "opencode/big-pickle" }), context);
+    expect(invocation.cwd).toBe(context.projectRoot);
+    expect(invocation.args).toEqual(["run", "--standalone", "--format", "json", "--model", "opencode/big-pickle"]);
+  });
+
+  it("opencode 2: a intensidade faz parte do identificador do modelo", () => {
+    const invocation = buildInvocation("writer", config({ provider: "opencode", model: "opencode/gpt-6-sol", effort: "high" }), context);
+    expect(invocation.args).toEqual(["run", "--standalone", "--format", "json", "--model", "opencode/gpt-6-sol#high"]);
+  });
+
+  it("opencode 2: intensidade sem modelo explícito recebe diagnóstico", () => {
+    expect(() => buildInvocation("writer", config({ provider: "opencode", model: "", effort: "high" }), context))
+      .toThrow("o OpenCode exige um modelo explícito");
   });
 
   /*
@@ -216,7 +265,16 @@ describe("ambiente da invocação", () => {
     for (const adapter of CLI_ADAPTERS) {
       const invocation = buildInvocation("builder", config({ provider: adapter.id, command: "/bin/adapter" }), context);
       expect(invocation.cwd, adapter.id).toBe(context.projectRoot);
+      expect(invocation.env.PWD, adapter.id).toBe(context.projectRoot);
     }
+  });
+  it("substitui o PWD herdado também nas avaliações e no reparo", () => {
+    for (const role of ROLE_NAMES) {
+      const invocation = buildInvocation(role, config({ provider: "opencode" }), { ...context, environment: { PWD: "/arvore-principal" } });
+      expect(invocation.env.PWD).toBe(invocation.cwd);
+    }
+    const repair = buildInvocation("verifier", config({ provider: "opencode" }), { ...context, verifierRepair: true, environment: { PWD: "/principal" } });
+    expect(repair.env.PWD).toBe(repair.cwd);
   });
 });
 

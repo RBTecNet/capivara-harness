@@ -11,6 +11,8 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { withApiCredentials } from "../provider/credentials.js";
+import { withOpenRouterOutputLimit } from "../provider/cli/opencode-limits.js";
 import {
   buildInvocation,
   createLineSplitter,
@@ -20,8 +22,11 @@ import {
   runProvider,
   selectCredential,
   summarizeCodexEvent,
+  summarizeOpencodeEvent,
+  redact,
 } from "../provider/index.js";
-import type { RoleConfig, RoleName, SupervisorLimits, TokenUsage } from "../provider/index.js";
+import type { FlowReviewPurpose, RoleConfig, RoleName, SupervisorLimits, TokenUsage } from "../provider/index.js";
+import { sanitizarTerminal } from "../tui/sanitize.js";
 
 export interface AgentBridgeOptions {
   projectRoot: string;
@@ -32,10 +37,12 @@ export interface AgentBridgeOptions {
   credentialsFile?: string;
   /** Permite ao executor instalar pré-requisitos de sistema. */
   systemInstall?: boolean;
+  environment?: Record<string, string>;
 }
 
 export interface BridgeRequest {
   role: RoleName;
+  purpose?: FlowReviewPurpose;
   /** Sessão de reparo explícita do verificador, separada da avaliação somente leitura. */
   repair?: boolean;
   stage: string;
@@ -51,6 +58,8 @@ export interface BridgeRequest {
 }
 
 export interface BridgeResponse {
+  /** Evidência de geração incompleta; nunca é stdout válido. */
+  partialOutput?: string;
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -69,6 +78,7 @@ export interface BridgeResponse {
   resultRead?: boolean;
   /** A CLI declarou a volta como erro, em vez de simplesmente não responder. */
   engineError?: boolean;
+  providerFailure?: "quota" | "configuration";
   /**
    * O que a sessão recusou por permissão, só ferramenta e programa (§106).
    * Ausente quando nada foi recusado, ou quando a CLI não conta.
@@ -101,6 +111,9 @@ function pastaDosTemporarios(ambiente: NodeJS.ProcessEnv): string {
 
 export function createAgentBridge(options: AgentBridgeOptions): (request: BridgeRequest) => Promise<BridgeResponse> {
   return async (request) => {
+    if (request.purpose && (request.role !== "verifier" || request.repair)) {
+      throw new Error("a revisão do G4 só se aplica ao verificador somente leitura");
+    }
     const config = options.roles[request.role];
     const stored = await readCredentials(options.credentialsFile);
     const credential = selectCredential(stored, config.provider, config.credential);
@@ -118,12 +131,17 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
      * invocação, que pergunta ao Git onde está o repositório.
      */
     await mkdir(options.projectRoot, { recursive: true });
+    const scopedEnvironment = options.environment ? { ...process.env, ...options.environment } : process.env;
+    const environment = config.provider === "opencode"
+      ? await withOpenRouterOutputLimit(config.model, withApiCredentials(stored, scopedEnvironment, [config.model.split("/")[0] ?? ""], config.credential), options.projectRoot)
+      : options.environment ? scopedEnvironment : undefined;
     const invocation = buildInvocation(request.role, config, {
       projectRoot: options.projectRoot,
       gitDir: await diretorioDoGit(options.projectRoot),
       runId: options.runId,
       stage: request.stage,
       language: options.language,
+      ...(environment ? { environment } : {}),
       ...(request.repair === true ? { verifierRepair: true } : {}),
       ...(options.systemInstall !== undefined ? { systemInstall: options.systemInstall } : {}),
       ...(credential ? { secret: credential.secret } : {}),
@@ -134,11 +152,13 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
      * sentido para CLI que fala em eventos; para as demais, não há o que contar
      * antes do resultado.
      */
+    const resumir = invocation.transcript === "codex-jsonl" ? summarizeCodexEvent
+      : invocation.transcript === "opencode-jsonl" ? summarizeOpencodeEvent : null;
     const observador =
-      request.onActivity && invocation.transcript === "codex-jsonl"
+      request.onActivity && resumir
         ? createLineSplitter((line) => {
-            const resumo = summarizeCodexEvent(line);
-            if (resumo) request.onActivity?.(resumo);
+            const resumo = resumir(line);
+            if (resumo) request.onActivity?.(sanitizarTerminal(redact(resumo, invocation.env)).replace(/\n/g, " ").slice(0, 240));
           })
         : null;
 
@@ -172,13 +192,18 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
     const transcript = invocation.transcript ? readTranscript(invocation.transcript, result.stdout) : null;
 
     return {
-      exitCode: result.exitCode,
+      exitCode: result.exitCode === 0 && transcript?.error ? 1 : result.exitCode,
       stdout: transcript ? transcript.text : result.stdout,
       stderr: result.stderr,
       timedOut: result.timedOut,
       ...(transcript?.usage ? { usage: transcript.usage } : {}),
+      ...(result.usage ? { usage: result.usage } : {}),
+      ...(result.partialOutput ? { partialOutput: result.partialOutput } : {}),
+      ...(result.resultRead !== undefined ? { resultRead: result.resultRead } : {}),
+      ...(result.engineError ? { engineError: true } : {}),
       ...(transcript ? { resultRead: !transcript.raw } : {}),
       ...(transcript?.error === true ? { engineError: true } : {}),
+      ...(transcript?.providerFailure ? { providerFailure: transcript.providerFailure } : {}),
       ...(transcript?.negacoes ? { negacoes: transcript.negacoes } : {}),
     };
   };

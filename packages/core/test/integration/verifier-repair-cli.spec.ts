@@ -1,3 +1,4 @@
+import { certifyCurrentPlan } from "../support/current-plan.js";
 /** O build real, da flag padrão ao adapter, aos gates e ao snapshot final. */
 import { execFile } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -98,6 +99,7 @@ if (role === "builder") {
     adapterLog = join(scenario, "adapter-calls.jsonl");
     await mkdir(join(projectRoot, ".capivara", "init"), { recursive: true });
     await writeFile(join(projectRoot, ".capivara", "init", "project-phases.md"), PLAN);
+    await certifyCurrentPlan(projectRoot);
     await writeFile(join(projectRoot, "package.json"), JSON.stringify({ private: true, scripts: { test: "node check.cjs" } }));
     await writeFile(join(projectRoot, "check.cjs"), `const assert = require("node:assert/strict");
 const fs = require("node:fs");

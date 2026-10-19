@@ -79,6 +79,69 @@ export const CLI_ADAPTERS = [codexAdapter, claudeAdapter, opencodeAdapter, agyAd
 É só isso. `capivara doctor`, o wizard, `capivara providers list`, a validação de
 flags e as mensagens de erro leem todos dessa lista.
 
+## OpenCode 2
+
+O adaptador usa o contrato de `opencode run --help` da versão 2.0.32.
+Essa versão removeu `--dir` e `--variant`: enviar qualquer uma delas encerra
+a CLI com código 1 e imprime a ajuda antes de chamar o modelo. O diretório
+vem do `cwd` já definido pela ponte, e a intensidade é enviada no formato
+`--model provider/model#variant`. Intensidade sem modelo explícito recebe
+um diagnóstico antes de abrir o processo.
+
+Cada chamada usa `--standalone`, que cria um servidor privado, para receber
+o ambiente e as permissões daquela sessão. O prompt continua no stdin e a
+saída continua sendo JSONL; uma chamada real com a versão 2.0.32 confirmou
+a resposta de texto em `part.text`.
+
+**Permissão efetiva na versão 2.** `OPENCODE_PERMISSION` sozinho é ignorado.
+O adaptador grava `permission` em `OPENCODE_CONFIG_CONTENT`, preservando as
+demais opções (inclusive modelos e seus limites). Mantém a variável antiga
+somente para compatibilidade. Leitores negam por padrão e liberam `read`,
+`glob`, `grep` e `list`; shell, escrita e MCP arbitrário ficam negados.
+Executor e reparo explícito recebem `permission: {"*":"allow"}` na configuração
+efetiva. Conferência local por `api --standalone config.get`, sem inferência.
+Autoria e triagem do G4 mantêm os limites gerais configurados. Sua finalidade
+identifica a sessão no painel e na evidência, sem impor um corte especial.
+
+**O diretório inclui `PWD`.** A 2.0.32 faz `chdir` para `process.env.PWD`
+antes de criar a sessão. Apenas configurar o `cwd` do processo não basta:
+a ponte também substitui `PWD` pela raiz absoluta recebida. Validado com a CLI
+real numa principal e num worktree descartáveis: com PWD herdado a sessão abriu
+a principal; com PWD alinhado abriu o worktree. A prova usa um modelo inexistente
+para observar a criação da sessão sem inferência nem consumo de tokens.
+
+**Modelos de API com ferramentas.** Para construir com DeepSeek, escolha o
+provider `opencode` e um modelo como `deepseek/deepseek-flash`. A descoberta
+consulta `opencode api model.list --standalone`: os campos `providerID`, `id` e
+`variants[].id` dão os modelos e as variantes reais, incluindo `none` quando
+disponível. A chave salva na Capivara acompanha a descoberta pelo ambiente; a
+sessão recebe apenas a chave salva do provider do modelo escolhido. Isso não
+grava credenciais na configuração do OpenCode nem injeta chaves em outras CLIs.
+
+**Teto por resposta no OpenRouter.** A 2.0.32 pode pedir 256.000 tokens de
+saída e receber HTTP 402 pela cota da chave, antes de gerar qualquer código.
+A ponte consulta os limites do modelo escolhido e sobrepõe somente
+`provider.openrouter.models[id].limit.output` no `OPENCODE_CONFIG_CONTENT` da
+chamada: menor entre 16.384 e o limite declarado. Contexto, entrada e demais
+opções são preservados. `OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX`, inteiro positivo
+seguro, permite escolher outro teto explicitamente. A variável sozinha foi
+ignorada pela CLI instalada; a sobreposição foi comprovada no pedido HTTP real
+contra servidor local. Outros providers e o teto da API documental não mudam.
+Se os limites não puderem ser conferidos, a ponte impede inferência em vez de
+voltar silenciosamente ao teto excessivo. A consulta usa o supervisor, inclusive
+para timeout e cancelamento de seu servidor privado.
+
+Variantes pertencem ao modelo: um agente com outro modelo da mesma CLI e
+effort vazio usa o padrão do próprio modelo. Não herda `none` de um Kimi, por
+exemplo, ao escolher GLM sem essa variante. Uma variante explicitamente
+configurada é conservada.
+
+Eventos JSONL `error` prevalecem sobre texto de progresso ou marker anterior.
+O parser entrega a mensagem legível, sem copiar o corpo HTTP aninhado; 402 de
+`provider.quota` e `provider.no-route` param o build após a chamada, inclusive
+no verificador e no reparo, sem iniciar outro construtor. 429 continua sujeito
+à política de espera. A recusa não é aprovação nem reprovação da implementação.
+
 ## Execução sem aprovação (§112)
 
 O executor e a sessão explícita de reparo recebem o bypass em `workspace` e
@@ -90,7 +153,7 @@ O executor e a sessão explícita de reparo recebem o bypass em `workspace` e
 | Codex | `--dangerously-bypass-approvals-and-sandbox` |
 | Cursor | `--force --approve-mcps --sandbox disabled --trust` |
 | AGY | `--mode accept-edits --dangerously-skip-permissions`, sem `--sandbox` |
-| OpenCode | `--auto` e `OPENCODE_PERMISSION={"*":"allow"}`; não tem sandbox próprio |
+| OpenCode | `--auto` e `permission: {"*":"allow"}` na configuração inline; não tem sandbox próprio |
 
 No OpenCode, enumerar apenas `edit`, `bash`, `task` e `external_directory`
 deixava permissões como `read`, `webfetch`, ferramentas MCP e `doom_loop`

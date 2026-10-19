@@ -1,10 +1,13 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { prepararExecucao } from "../../src/commands/execucao.js";
-import { ARQUIVO_DE_EXECUCAO, gravarArquivoDeExecucao } from "../../src/config/execucao.js";
-import { resolveRoles } from "../../src/provider/index.js";
+import { ARQUIVO_DE_EXECUCAO, gravarArquivoDeExecucao, type FlagsDeExecucao } from "../../src/config/execucao.js";
+import { resolveRoles, buildInvocation } from "../../src/provider/index.js";
+import { createProgram } from "../../src/cli-program.js";
+import { rolesFromFlags } from "../../src/commands/options.js";
+import { toArgv } from "../../src/tui/wizard.js";
 import { renderDashboard, type DashboardModel } from "../../src/tui/dashboard.js";
 import { WorkerTracker, renderWorkerRows } from "../../src/tui/build-workers.js";
 
@@ -22,6 +25,33 @@ afterEach(async () => {
 });
 
 describe("a execução que o CLI entrega ao build", () => {
+  it.each([true, false])("argv do wizard troca modelo no pool e no processo com salvar=%s", async saveExecution => {
+    await gravarArquivoDeExecucao(raiz, { mode: "parallel", maxConcurrency: 3, workers: [{ provider: "opencode", model: "openrouter/antigo", effort: "high" }] });
+    const original = await readFile(join(raiz, ARQUIVO_DE_EXECUCAO), "utf8");
+    const answers = { command: "build" as const, global: { provider: "opencode", model: "openrouter/novo", effort: "none" }, roles: {}, execution: { mode: "parallel" as const, maxConcurrency: 3, workers: [] }, saveExecution };
+    const command = createProgram().commands.find(c => c.name() === "build")!;
+    const parsed = command.parseOptions(toArgv(answers).slice(1));
+    expect(parsed.unknown).toEqual([]);
+    const flags = command.opts<FlagsDeExecucao & { provider: string; model: string; effort: string; saveExecution?: boolean }>();
+    const prepared = await prepararExecucao({ projectRoot: raiz, flags, roles: rolesFromFlags(flags), systemInstall: true, instalado });
+    if (!prepared.ok) throw new Error(prepared.erros.join("\n"));
+    expect(prepared.agentes.map(a => a.config.model)).toEqual(Array(3).fill("openrouter/novo"));
+    const tracker = new WorkerTracker(prepared.agentes.map(a => a.label));
+    expect(tracker.rows().every(row => row.label.includes("openrouter/novo"))).toBe(true);
+    for (const agent of prepared.agentes) {
+      const invocation = buildInvocation("builder", agent.config, { projectRoot: raiz, runId: "build-test", stage: "implement", language: "pt-BR", environment: {} });
+      expect(invocation.env.CAPIVARA_MODEL).toBe("openrouter/novo");
+      expect(invocation.args).toContain("openrouter/novo#none");
+    }
+    if (flags.saveExecution) await gravarArquivoDeExecucao(raiz, prepared.estrategia);
+    if (!saveExecution) expect(await readFile(join(raiz, ARQUIVO_DE_EXECUCAO), "utf8")).toBe(original);
+    else {
+      expect(JSON.parse(await readFile(join(raiz, ARQUIVO_DE_EXECUCAO), "utf8")).workers).toEqual([]);
+      const next = await prepararExecucao({ projectRoot: raiz, flags: {}, roles: resolveRoles({ global: { provider: "opencode", model: "openrouter/proximo" }, roles: {} }), systemInstall: true, instalado });
+      expect(next.ok && next.agentes.every(a => a.config.model === "openrouter/proximo")).toBe(true);
+    }
+  });
+
   it("projeto sem nada é serial e não diz nada a mais — o build de sempre", async () => {
     const preparada = await prepararExecucao({ projectRoot: raiz, flags: {}, roles: ROLES, systemInstall: true, instalado });
     expect(preparada).toMatchObject({ ok: true, estrategia: { mode: "serial" }, origem: "padrão", agentes: [], resumo: [] });

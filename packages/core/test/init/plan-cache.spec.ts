@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { MemoriaDoPlano, planCachePath, readPlanCache } from "../../src/init/plan-cache.js";
 import { ensureArtifactTree } from "../../src/state/index.js";
+import { sha12 } from "../../src/contract/index.js";
 
 let projectRoot = "";
 
@@ -107,7 +108,7 @@ describe("memória do plano", () => {
   it("contrato desconhecido é ignorado, não interpretado", async () => {
     await writeFile(
       planCachePath(projectRoot, "init-1"),
-      JSON.stringify({ contract: "capivara-plan-cache/v2", runId: "init-1", escritas: { x: "## Phase 1" } }),
+      JSON.stringify({ contract: "capivara-plan-cache/v999", runId: "init-1", escritas: { [sha12("p")]: "## Phase 1" } }),
       "utf8",
     );
     const memoria = await MemoriaDoPlano.abrir(projectRoot, "init-1");
@@ -119,6 +120,6 @@ describe("memória do plano", () => {
     const memoria = await MemoriaDoPlano.abrir(projectRoot, "init-1");
     memoria.guardarFase("p", "## Phase 1");
     await memoria.fechar();
-    expect(JSON.parse(await readFile(planCachePath(projectRoot, "init-1"), "utf8")).contract).toBe("capivara-plan-cache/v1");
+    expect(JSON.parse(await readFile(planCachePath(projectRoot, "init-1"), "utf8")).contract).toBe("capivara-plan-cache/v2");
   });
 });

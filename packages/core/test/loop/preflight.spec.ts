@@ -1,3 +1,4 @@
+import { certifyCurrentPlan } from "../support/current-plan.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,6 +23,7 @@ const git = { repository: true, clean: true };
 
 async function plan(content = VALID_PHASES): Promise<void> {
   await writeFile(join(projectRoot, ".capivara/init/project-phases.md"), content, "utf8");
+  await certifyCurrentPlan(projectRoot);
 }
 
 describe("divisor de fases", () => {
@@ -201,7 +203,7 @@ describe("o projeto sem as dependências instaladas", () => {
 
     if (!resultado.ok) throw new Error(`não devia bloquear: ${resultado.errors.join("; ")}`);
     const aviso = resultado.warnings.find((entrada) => entrada.code === "instala-dependencias");
-    expect(aviso?.message).toContain("O executor instala na primeira sessão");
+    expect(aviso?.message).toContain("O harness prepara antes do desenvolvimento");
   });
 
   it("com as dependências instaladas, não há aviso nenhum", async () => {

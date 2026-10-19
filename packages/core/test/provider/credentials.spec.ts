@@ -1,7 +1,8 @@
 import { mkdtemp, rm, stat } from "node:fs/promises";
+import * as files from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   mask,
   readCredentials,
@@ -12,6 +13,12 @@ import {
   toSafe,
 } from "../../src/provider/index.js";
 import type { CredentialRecord } from "../../src/provider/index.js";
+import { withApiCredentials } from "../../src/provider/credentials.js";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...original, open: vi.fn(original.open) };
+});
 
 let workspace = "";
 let file = "";
@@ -22,6 +29,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.mocked(files.open).mockReset();
+  vi.restoreAllMocks();
   await rm(workspace, { recursive: true, force: true });
 });
 
@@ -44,6 +53,24 @@ describe("armazenamento", () => {
   it("o arquivo fica com permissão 0600", async () => {
     await saveCredential(record(), file);
     expect((await stat(file)).mode & 0o777).toBe(0o600);
+  });
+
+  it("o temporário já é privado antes de escrever a chave", async () => {
+    const { open } = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+    const observed: number[] = [];
+    vi.mocked(files.open).mockImplementation(async (...args) => {
+      const handle = await open(...args);
+      if (args[1] === "wx") {
+        const write = handle.writeFile.bind(handle);
+        vi.spyOn(handle, "writeFile").mockImplementation(async (...writeArgs) => {
+          observed.push((await handle.stat()).mode & 0o777);
+          return write(...writeArgs);
+        });
+      }
+      return handle;
+    });
+    await saveCredential(record(), file);
+    expect(observed).toEqual([0o600]);
   });
 
   it("só uma credencial por provider fica como default", async () => {
@@ -82,6 +109,31 @@ describe("seleção", () => {
 
   it("não cruza credencial entre providers", () => {
     expect(selectCredential(records, "minimax", "")).toBeNull();
+  });
+});
+
+describe("chaves salvas para subprocessos OpenCode", () => {
+  it("modelo google resolve a chave Gemini salva", () => {
+    const records = [record({ provider: "gemini", secret: "gemini-key-de-teste" }), record()];
+    const env = withApiCredentials(records, {}, ["google"]);
+    expect(env.GEMINI_API_KEY).toBe("gemini-key-de-teste");
+    expect(env.DEEPSEEK_API_KEY).toBeUndefined();
+  });
+
+  it("injeta só o provider selecionado e não modifica o ambiente original", () => {
+    const environment = { PATH: "/bin" };
+    const records = [record(), record({ id: "outro", provider: "openai", secret: "sk-outro-teste" })];
+    const env = withApiCredentials(records, environment, ["deepseek"]);
+    expect(env.DEEPSEEK_API_KEY).toBe(record().secret);
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+    expect(environment).toEqual({ PATH: "/bin" });
+    expect(withApiCredentials(records, {}, ["opencode"]).DEEPSEEK_API_KEY).toBeUndefined();
+  });
+
+  it("preserva a chave do ambiente; seletor explícito escolhe a chave salva", () => {
+    const environment = { DEEPSEEK_API_KEY: "sk-do-ambiente" };
+    expect(withApiCredentials([record()], environment, ["deepseek"]).DEEPSEEK_API_KEY).toBe("sk-do-ambiente");
+    expect(withApiCredentials([record()], environment, ["deepseek"], record().id).DEEPSEEK_API_KEY).toBe(record().secret);
   });
 });
 

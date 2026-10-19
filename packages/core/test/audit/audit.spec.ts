@@ -137,7 +137,8 @@ describe("ciclo de devolução", () => {
     const texto = renderStandoff(action.standoff);
     expect(texto).toContain("O auditor insiste em:");
     expect(texto).toContain("O escritor fez:");
-    expect(texto).toContain("gap de entrevista");
+    expect(texto).toContain("A correção não convergiu dentro do orçamento");
+    expect(texto).not.toContain("gap de entrevista");
   });
 
   it("findings equivalentes não são contados duas vezes no impasse", () => {
@@ -367,6 +368,13 @@ describe("defeito mecânico tem orçamento próprio", () => {
     expect(action.action).toBe("ask-developer");
     if (action.action !== "ask-developer") return;
     expect(action.standoff.question).toContain("não é desacordo");
+    expect(action.standoff.mechanical).toBe(true);
+    expect(action.standoff.mechanicalChecks).toBe(3);
+    const rendered = renderStandoff(action.standoff);
+    expect(rendered).toContain("3 verificações mecânicas");
+    expect(rendered).not.toContain("após 0 devoluções");
+    expect(rendered).toContain("O self-check aponta:");
+    expect(rendered).not.toContain("O que vale?");
   });
 
   it("o teto do auditor continua valendo para desacordo de verdade", () => {

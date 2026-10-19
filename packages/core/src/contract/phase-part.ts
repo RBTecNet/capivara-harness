@@ -34,6 +34,8 @@ const LIST_LABEL = /^-?\s*\*\*(Acceptance criteria|Feature tests|Traces|Design r
 /** Um item simples de lista, que não é outro rótulo nem uma task. */
 const SIMPLE_ITEM = /^-\s+(?!\[[ xX]\])(?!\*\*(?:Acceptance criteria|Feature tests|Traces|Design ref):)(\S.*)$/;
 const NAKED_LABEL = /^(\s*)(\*\*(?:Acceptance criteria|Feature tests|Traces|Design ref):\*\*.*)$/;
+/** Rótulo conhecido com zero ou um asterisco de fechamento, em vez de dois. */
+const UNCLOSED_LABEL = /^([ \t]*(?:-[ \t]+)?\*\*(?:Acceptance criteria|Feature tests|Traces|Design ref):)\*?([ \t].*|)$/;
 /** Um heading de fase com qualquer número, para reconhecer o número errado. */
 const OUTRA_FASE = /^##\s+Phase\s+(\d+)\s*:/;
 
@@ -289,7 +291,20 @@ export function extractTasks(markdown: string): { tasks: string; applied: string
   const traduzidos = canonicalWorkflowTraces(lines.join("\n"));
   if (traduzidos.applied) applied.push("traduziu de volta a referência de workflow nos Traces");
 
-  const rotulos = repairMissingBullets(traduzidos.content);
+  let inTask = false;
+  let closedLabels = 0;
+  const closed = traduzidos.content.split("\n").map(line => {
+    if (TASK_LINE.test(line)) inTask = true;
+    else if (/^#{1,3}\s/.test(line)) inTask = false;
+    if (!inTask) return line;
+    const label = UNCLOSED_LABEL.exec(line);
+    if (!label) return line;
+    closedLabels += 1;
+    return `${label[1]}**${label[2]}`;
+  }).join("\n");
+  if (closedLabels > 0) applied.push(`fechou o negrito de ${closedLabels} rótulo(s) estrutural(is) de task`);
+
+  const rotulos = repairMissingBullets(closed);
   if (rotulos.applied > 0) applied.push(`devolveu o traço a ${rotulos.applied} rótulo(s) de task escritos na margem`);
 
   const listas = repairLabelLists(rotulos.content);

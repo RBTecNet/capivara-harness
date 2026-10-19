@@ -106,6 +106,7 @@ export class HarnessProgress {
     detail: "preparando",
     desde: Date.now(),
   };
+  private ultimoEventoDoModelo: number | null = null;
   private quadro = 0;
   private pergunta: { title: string; body: string[] } | null = null;
   private projeto: string;
@@ -213,9 +214,18 @@ export class HarnessProgress {
 
   /** Chamando o provider: é a espera mais longa e a que mais parece travamento. */
   beginCall(detail: string): void {
+    this.ultimoEventoDoModelo = null;
     const trabalhando = this.options.command === "prompt-engineer";
     this.atividade = { kind: "modelo", detail: trabalhando ? `modelo trabalhando · ${detail}` : detail, desde: this.now().getTime() };
     if (trabalhando) this.situacao = { label: "modelo trabalhando", state: "em andamento" };
+  }
+
+  /** Atividade real, mantendo separado o relógio da chamada e o do último evento. */
+  modelActivity(detail: string, callStartedAt?: number): void {
+    if (this.atividade.kind !== "modelo" || this.situacao.state === "concluído") return;
+    this.atividade.detail = detail;
+    if (callStartedAt !== undefined) this.atividade.desde = callStartedAt;
+    this.ultimoEventoDoModelo = this.now().getTime();
   }
 
   /** A vez é do desenvolvedor: a tela precisa dizer isso com todas as letras. */
@@ -358,9 +368,11 @@ export class HarnessProgress {
     return [
       ...(corrente ? [{ label: "Fase", value: `${corrente.id} · ${corrente.title}` }] : []),
       ...(corrente && corrente.detail !== "" ? [{ label: "Situação", value: corrente.detail }] : []),
-      ...(gateCorrente ? [{ label: "Gate", value: gateCorrente }] : []),
+      ...(gateCorrente ? [{ label: "Gate", value: gateCorrente === "G0" ? "G0 · aguardando o executor concluir a sessão" : gateCorrente }] : []),
       { label: "Etapa", value: this.etapa },
       { label: "Atividade", value: this.atividade.detail },
+      ...(this.atividade.kind === "modelo" && this.ultimoEventoDoModelo !== null
+        ? [{ label: "Último evento", value: `há ${Math.max(0, Math.floor((this.now().getTime() - this.ultimoEventoDoModelo) / 1000))}s` }] : []),
       { label: "Último erro", value: this.ultimoErro === "" ? "—" : this.ultimoErro },
     ];
   }
@@ -396,6 +408,7 @@ export class HarnessProgress {
         kind: this.atividade.kind,
         detail: this.atividade.detail,
         sinceSeconds: Math.max(0, Math.round((this.now().getTime() - this.atividade.desde) / 1000)),
+        ...(this.ultimoEventoDoModelo !== null ? { lastEventSeconds: Math.max(0, Math.floor((this.now().getTime() - this.ultimoEventoDoModelo) / 1000)) } : {}),
       },
       frame: this.quadro,
       ...(this.options.roles !== undefined ? { roles: this.options.roles } : {}),

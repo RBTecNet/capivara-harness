@@ -39,6 +39,26 @@ describe("a pergunta de banco", () => {
 });
 
 describe("as regras que a escolha implica", () => {
+  it("banco embutido configura o caminho do arquivo, sem inventar uma conexão de servidor", () => {
+    const config = regrasDeBanco("embutido").find(rule => rule.subject === "configuração do banco");
+    expect(config?.statement).toContain("caminho do arquivo");
+    expect(config?.statement).toContain("variável de ambiente");
+    expect(config?.statement).not.toContain("host, porta, usuário, senha");
+    expect(config?.statement).toContain(".gitignore");
+    for (const origin of ["informado", "instalado"] as const) {
+      expect(regrasDeBanco(origin).find(rule => rule.subject === "configuração do banco")?.statement).toContain("host, porta, usuário, senha");
+    }
+  });
+
+  it("exemplo de banco embutido persiste dados; testes e fluxos fornecem outro arquivo temporário", () => {
+    const rules = regrasDeBanco("embutido");
+    const example = rules.find(rule => rule.subject === "o exemplo precisa RODAR")?.statement;
+    expect(example).toContain("persistente");
+    expect(example).toContain("outro arquivo temporário");
+    expect(example).toContain("sem tocar o banco normal");
+    expect(rules.find(rule => rule.subject === "banco dos testes")?.statement).toContain("nenhum teste lê, escreve ou migra");
+  });
+
   it("escreve as quatro regras comuns em qualquer banco", () => {
     for (const decisao of ["embutido", "informado", "instalado"] as const) {
       const regras = regrasDeBanco(decisao);

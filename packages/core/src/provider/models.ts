@@ -19,6 +19,8 @@
 import { execFile } from "node:child_process";
 import { promisify, stripVTControlCharacters } from "node:util";
 import { CLI_ADAPTERS } from "./cli/index.js";
+import { directProvider, isDirectProvider } from "./registry.js";
+import { credentialsPath, readCredentials, selectCredential, withApiCredentials } from "./credentials.js";
 
 const run = promisify(execFile);
 
@@ -77,6 +79,23 @@ function porSeparador(separador?: RegExp): (stdout: string) => string[] {
 /** Um identificador de modelo: sem espaço, e não uma frase em prosa. */
 const IDENTIFICADOR = /^[a-z0-9][a-z0-9._:/-]*$/i;
 
+interface OpenCodeModel {
+  id: string;
+  providerID: string;
+  enabled?: boolean;
+  variants?: { id?: unknown }[];
+}
+
+/** Contrato observado no OpenCode 2.0.32: api model.list --standalone. */
+function opencodeModels(stdout: string): OpenCodeModel[] | null {
+  try {
+    const body: unknown = JSON.parse(stdout);
+    const data = Array.isArray(body) ? body : (body as { data?: unknown } | null)?.data;
+    if (!Array.isArray(data)) return null;
+    return data.filter((model): model is OpenCodeModel => typeof model?.id === "string" && typeof model?.providerID === "string" && model.enabled !== false && IDENTIFICADOR.test(model.id) && IDENTIFICADOR.test(model.providerID));
+  } catch { return null; }
+}
+
 export const MODEL_LISTINGS: Record<string, ModelListing> = {
   /*
    * O codex responde JSON e marca quais modelos ele quer que apareçam. Respeitar
@@ -103,6 +122,7 @@ export const MODEL_LISTINGS: Record<string, ModelListing> = {
         const mapa: Record<string, string[]> = {};
         for (const modelo of objeto.models ?? []) {
           if (typeof modelo.slug !== "string") continue;
+          if (!Array.isArray(modelo.supported_reasoning_levels)) continue;
           mapa[modelo.slug] = (modelo.supported_reasoning_levels ?? [])
             .map((nivel) => nivel.effort)
             .filter((nivel): nivel is string => typeof nivel === "string");
@@ -116,7 +136,17 @@ export const MODEL_LISTINGS: Record<string, ModelListing> = {
   claude: { command: [], parse: () => CLAUDE_FAMILIES },
   // A linha inteira é o identificador; separar por espaço aceitava avisos
   // como "Available models" como se "Available" fosse um modelo.
-  opencode: { command: ["models"], parse: porSeparador() },
+  opencode: {
+    command: ["api", "model.list", "--standalone"],
+    parse: (stdout) => {
+      const models = opencodeModels(stdout);
+      return models ? models.map((model) => `${model.providerID}/${model.id}`) : porSeparador()(stdout);
+    },
+    efforts: (stdout) => Object.fromEntries((opencodeModels(stdout) ?? []).filter((model) => Array.isArray(model.variants)).map((model) => [
+      `${model.providerID}/${model.id}`,
+      [...new Set(model.variants!.map((variant) => variant?.id).filter((id): id is string => typeof id === "string" && IDENTIFICADOR.test(id)))],
+    ])),
+  },
   agy: { command: ["models"], parse: porSeparador(/\t/) },
   cursor: { command: ["models"], parse: porSeparador(/ - /) },
 };
@@ -141,7 +171,42 @@ export async function cliDisponivel(providerId: string, env: NodeJS.ProcessEnv =
  * está instalada" ou "respondeu algo que não entendo". Quem chamou decide o que
  * fazer, e no caso do wizard é voltar a pedir o nome digitado.
  */
-export async function listarModelos(providerId: string, env: NodeJS.ProcessEnv = process.env): Promise<string[]> {
+export async function listarModelos(
+  providerId: string,
+  env: NodeJS.ProcessEnv = process.env,
+  credentialsFile?: string,
+  onDiagnostic?: (message: string) => void,
+): Promise<string[]> {
+  if (isDirectProvider(providerId)) {
+    const provider = directProvider(providerId);
+    const secret = selectCredential(await readCredentials(credentialsFile ?? credentialsPath(undefined, env)), providerId, "")?.secret || env[provider.envKey];
+    if (!secret) {
+      onDiagnostic?.(`${providerId}: nenhuma chave encontrada nesta configuração. Use capivara login ${providerId}.`);
+      return [];
+    }
+    const endpoint = provider.modelsEndpoint ?? provider.endpoint.replace(/(?:chat\/completions|messages)$/, "models");
+    const headers: Record<string, string> = provider.dialect === "anthropic-messages"
+      ? { "x-api-key": secret, "anthropic-version": "2023-06-01" }
+      : { Authorization: `Bearer ${secret}` };
+    try {
+      const response = await fetch(endpoint, { headers, signal: AbortSignal.timeout(TIMEOUT_MS), redirect: "error" });
+      if (!response.ok) {
+        const reason = response.status === 401 || response.status === 403 ? "a API recusou a credencial ou o acesso" : response.status === 429 ? "a API limitou as consultas; tente novamente depois" : "a API não conseguiu retornar os modelos";
+        onDiagnostic?.(`${providerId}: HTTP ${response.status} ao listar modelos — ${reason}.`);
+        return [];
+      }
+      const body = await response.json() as { data?: { id?: unknown }[] };
+      if (!Array.isArray(body?.data)) {
+        onDiagnostic?.(`${providerId}: a API respondeu sem uma lista de modelos reconhecível.`);
+        return [];
+      }
+      return [...new Set(body.data.map((m) => m?.id).filter((id): id is string => typeof id === "string" && IDENTIFICADOR.test(id)))];
+    } catch (error) {
+      const timeout = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+      onDiagnostic?.(`${providerId}: ${timeout ? "o tempo de consulta dos modelos esgotou" : "não foi possível consultar os modelos; verifique a conexão e tente novamente"}.`);
+      return [];
+    }
+  }
   const listagem = MODEL_LISTINGS[providerId];
   if (!listagem) return [];
   if (listagem.command.length === 0) return listagem.parse("");
@@ -151,7 +216,8 @@ export async function listarModelos(providerId: string, env: NodeJS.ProcessEnv =
   const binary = env[adapter?.binaryEnv ?? ""]?.trim() || adapter?.defaultBinary || providerId;
 
   try {
-    const { stdout } = await run(binary, listagem.command, { env, timeout: TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+    const childEnv = providerId === "opencode" ? withApiCredentials(await readCredentials(credentialsFile ?? credentialsPath(undefined, env)), env) : env;
+    const { stdout } = await run(binary, listagem.command, { env: childEnv, timeout: TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
     return [...new Set(listagem.parse(stdout))];
   } catch {
     return [];
@@ -159,28 +225,26 @@ export async function listarModelos(providerId: string, env: NodeJS.ProcessEnv =
 }
 
 /**
- * Os níveis de raciocínio que este modelo aceita, ou lista vazia quando não dá
- * para saber.
- *
- * Vazio significa "pergunte de outro jeito": quem chamou volta a oferecer a
- * lista genérica, porque uma CLI que não informa não é uma CLI sem níveis.
+ * null significa informação indisponível; [] é um modelo conhecido sem variantes.
  */
 export async function listarEfforts(
   providerId: string,
   modelo: string,
   env: NodeJS.ProcessEnv = process.env,
-): Promise<string[]> {
+  credentialsFile?: string,
+): Promise<string[] | null> {
   const listagem = MODEL_LISTINGS[providerId];
-  if (!listagem?.efforts || listagem.command.length === 0) return [];
-  if (!(await cliDisponivel(providerId, env))) return [];
+  if (!listagem?.efforts || listagem.command.length === 0) return null;
+  if (!(await cliDisponivel(providerId, env))) return null;
 
   const adapter = CLI_ADAPTERS.find((entrada) => entrada.id === providerId);
   const binary = env[adapter?.binaryEnv ?? ""]?.trim() || adapter?.defaultBinary || providerId;
 
   try {
-    const { stdout } = await run(binary, listagem.command, { env, timeout: TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
-    return listagem.efforts(stdout)[modelo] ?? [];
+    const childEnv = providerId === "opencode" ? withApiCredentials(await readCredentials(credentialsFile ?? credentialsPath(undefined, env)), env, [modelo.split("/")[0] ?? ""]) : env;
+    const { stdout } = await run(binary, listagem.command, { env: childEnv, timeout: TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+    return listagem.efforts(stdout)[modelo] ?? null;
   } catch {
-    return [];
+    return null;
   }
 }

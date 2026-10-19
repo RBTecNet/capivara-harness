@@ -66,6 +66,60 @@ async function portaDaConfig(): Promise<number> {
 }
 
 describe("a conferência do roteiro, antes de abrir navegador nenhum", () => {
+  it("permite observar atraso e indisponibilidade de GET sem fabricar resposta", () => {
+    const script = roteiroBom().replace("await page.goto('/');", `
+      await page.route('**/api/interpretar', async route => {
+        if (route.request().method() !== 'GET') { await route.continue(); return; }
+        await liberarLeitura;
+        await route.abort('failed');
+      });
+      await page.goto('/');`);
+    expect(checkFlowScript(script, WORKFLOW)).toEqual([]);
+  });
+
+  it("URL variável não permite fabricar listas, erro ou sucesso do backend", () => {
+    const script = roteiroBom().replace("await page.goto('/');", `
+      const recurso = '**/api/interpretar';
+      await page.route(recurso, async route => { await route.fulfill({ status: 200, body: '[]' }); });
+      await page.goto('/');`);
+    expect(checkFlowScript(script, WORKFLOW).some(d => d.problem.includes("backend"))).toBe(true);
+  });
+
+  it("controle de GET não se confunde com fulfill de terceiro nem texto de exemplo", () => {
+    const script = roteiroBom().replace("await page.goto('/');", `
+      await page.route('**/api/interpretar', async route => {
+        // route.fulfill é proibido aqui
+        const exemplo = 'route.fulfill({ body: [] })';
+        await route.continue();
+      });
+      await page.route('https://terceiro.example/api/cep', route => route.fulfill({ status: 200, body: '{}' }));
+      await page.goto('/');`);
+    expect(checkFlowScript(script, WORKFLOW)).toEqual([]);
+  });
+
+  it("callback nomeado tem sua própria política, sem herdar a resposta simulada de outro handler", () => {
+    const script = roteiroBom().replace("await page.goto('/');", `
+      const leitura = async route => { await route.continue(); };
+      const terceiro = route => route.fulfill({ body: '{}' });
+      await page.route('**/api/interpretar', leitura);
+      await page.route('https://terceiro.example/api/cep', terceiro);
+      await page.goto('/');`);
+    expect(checkFlowScript(script, WORKFLOW)).toEqual([]);
+    expect(checkFlowScript(script.replace("'**/api/interpretar', leitura", "'**/api/interpretar', terceiro"), WORKFLOW).some(d => d.problem.includes("backend"))).toBe(true);
+  });
+
+  it("abort sem proteção de GET não pode interromper gravações do produto", () => {
+    const script = roteiroBom().replace("await page.goto('/');", "await page.route('**/api/interpretar', route => route.abort()); await page.goto('/');");
+    expect(checkFlowScript(script, WORKFLOW).some(d => d.problem.includes("backend"))).toBe(true);
+  });
+
+  it("recusa cenários e passos extras fora do fluxo contratado", () => {
+    const extraTest = `${roteiroBom()}\ntest('cenário inventado', async ({ page }) => { await expect(page).toHaveTitle('outro'); });`;
+    expect(checkFlowScript(extraTest, WORKFLOW).map(d => d.problem).join(" ")).toContain("caso de teste");
+    const extraStep = roteiroBom().replace(/\n\}\);$/, "\nawait test.step('passo 4: cenário inventado', async () => { expect(await page.title()).toBeTruthy(); });\n});");
+    expect(checkFlowScript(extraStep, WORKFLOW).map(d => d.problem).join(" ")).toContain("declara 4 test.step");
+  });
+
   it("aceita o roteiro que cita todo passo e afirma algo em cada um", () => {
     expect(checkFlowScript(roteiroBom(), WORKFLOW)).toEqual([]);
   });
@@ -254,6 +308,8 @@ describe("o gate", () => {
 
     if (resultado.green) throw new Error("deveria reprovar");
     expect(resultado.cause).toContain("não passou na conferência estrutural");
+    expect(resultado.scriptFailed).toBe(true);
+    expect(resultado.falharam).toEqual([WORKFLOW.number]);
     expect(rodou, "roteiro reprovado não chega a rodar").toBe(false);
   });
 
@@ -558,7 +614,8 @@ describe("o gate", () => {
       projectRoot,
       author: async () => {
         escritas += 1;
-        return `\`\`\`ts\n${roteiroBom()}\n\`\`\``;
+        const roteiro = escritas === 1 ? roteiroBom() : roteiroBom().replace("page.title()", "page.getByRole('main').textContent()");
+        return `\`\`\`ts\n${roteiro}\n\`\`\``;
       },
       runner: async () => {
         execucoes += 1;
@@ -576,10 +633,15 @@ describe("o gate", () => {
   });
 
   it("roteiro que falha por si mesmo duas vezes reprova dizendo de quem é o defeito", async () => {
+    let escritas = 0;
     const resultado = await gate4({
       ...base,
       projectRoot,
-      author: async () => `\`\`\`ts\n${roteiroBom()}\n\`\`\``,
+      author: async () => {
+        escritas += 1;
+        const roteiro = escritas === 1 ? roteiroBom() : roteiroBom().replace("page.title()", "page.getByRole('main').textContent()");
+        return `\`\`\`ts\n${roteiro}\n\`\`\``;
+      },
       runner: async () => ({ exitCode: 1, output: "Error: strict mode violation: resolved to 3 elements" }),
     });
 
@@ -1218,6 +1280,50 @@ describe("a reescrita não repete o nome que o erro apontou", () => {
  * "Salvar registro" que o roteiro procurava.
  */
 describe("a triagem decide de quem é a falha, antes do executor", () => {
+  it("aproveita a terceira triagem quando os patches corrigem passos diferentes", async () => {
+    await comRoteiro();
+    const file = join(projectRoot, FLOWS_DIR, flowScriptName(WORKFLOW.number));
+    await writeFile(file, (await readFile(file, "utf8")) + "\nconst versaoDoSeletor = 'v0';\n");
+    let triages = 0;
+    let runs = 0;
+    let drafts = 0;
+    const result = await gate4({
+      projectRoot, workflows: [WORKFLOW], startCommand: "npm start",
+      author: async () => { drafts += 1; return bloco(); },
+      triagem: async () => {
+        const version = triages++;
+        return veredito("ROTEIRO").replace("procurar o botão Salvar", `corrigir seletor v${version}`) +
+          `\nCAPIVARA_PATCH: ${JSON.stringify({ before: `const versaoDoSeletor = 'v${version}';`, after: `const versaoDoSeletor = 'v${version + 1}';` })}`;
+      },
+      runner: async () => {
+        runs += 1;
+        const step = runs === 1 ? 1 : 2;
+        return runs < 4 ? { ...FALHOU, output: FALHOU.output.replace("› passo 1", `› passo ${step}: ${WORKFLOW.steps[step - 1]}`) } : verde;
+      },
+    });
+    expect(result.green).toBe(true);
+    expect(runs).toBe(4);
+    expect(triages).toBe(3);
+    expect(drafts).toBe(0);
+    expect(await readFile(file, "utf8")).toContain("'v3'");
+  });
+
+  it("roteirista que devolve o arquivo idêntico não provoca nova execução do navegador", async () => {
+    await comRoteiro();
+    let runs = 0;
+    let drafts = 0;
+    const result = await gate4({
+      projectRoot, workflows: [WORKFLOW], startCommand: "npm start",
+      author: async () => { drafts += 1; return bloco(); },
+      triagem: async () => veredito("ROTEIRO"),
+      runner: async () => { runs += 1; return FALHOU; },
+    });
+    expect(result.green).toBe(false);
+    expect(runs).toBe(1);
+    expect(drafts).toBe(1);
+    if (!result.green) expect(result.cause).toContain("não alterou");
+  });
+
   const CONTEXTO = [
     "# Test info",
     "",
@@ -1239,7 +1345,10 @@ describe("a triagem decide de quem é a falha, antes do executor", () => {
       "  1) [workflow-2] › workflow-2.spec.ts:8:5 › passo 1\n" +
       "    waiting for getByRole('button', { name: 'Salvar registro' })\n  1 failed",
   };
-  const bloco = (): string => `\`\`\`ts\n${roteiroBom()}\n\`\`\``;
+  const bloco = (correcao = 0): string => {
+    const script = correcao === 0 ? roteiroBom() : roteiroBom().replace("page.title()", `page.getByText('seletor ${correcao}', { exact: true }).textContent()`);
+    return `\`\`\`ts\n${script}\n\`\`\``;
+  };
   const veredito = (tipo: string): string =>
     [
       `CAPIVARA_TRIAGEM: ${tipo}`,
@@ -1309,7 +1418,7 @@ describe("a triagem decide de quem é a falha, antes do executor", () => {
       startCommand: "npm start",
       author: async (_workflow, rejeitado) => {
         motivos.push(rejeitado);
-        return bloco();
+        return bloco(1);
       },
       triagem: async () => veredito("ROTEIRO"),
       runner: async () => {
@@ -1328,6 +1437,100 @@ describe("a triagem decide de quem é a falha, antes do executor", () => {
     expect(motivos[0]?.join("\n")).toContain('button "Salvar"');
   });
 
+  it.each(["valid", "ambiguous", "out-of-scope"] as const)("patch pontual %s poupa a reescrita somente quando aplicável e preserva a estrutura", async kind => {
+    await comRoteiro();
+    const file = join(projectRoot, FLOWS_DIR, flowScriptName(WORKFLOW.number));
+    const original = await readFile(file, "utf8");
+    const before = kind === "ambiguous" ? "await page.goto('/');" : "expect(await page.title()).toBeTruthy();";
+    const unique = original.replace(before, "await expect(page.getByRole('main')).toBeVisible();");
+    // A instrução pontual precisa identificar exatamente uma ocorrência.
+    const old = kind === "ambiguous" ? original : unique;
+    await writeFile(file, old);
+    const patch = kind === "out-of-scope"
+      ? { before: "await expect(page.getByRole('main')).toBeVisible();", after: "await test.step('passo 4: inventado', async () => { expect(await page.title()).toBeTruthy(); });" }
+      : { before: kind === "valid" ? "page.getByRole('main')" : before, after: kind === "valid" ? "page.getByRole('navigation')" : "await page.goto('/outro');" };
+    let authors = 0;
+    let runs = 0;
+    const result = await gate4({
+      projectRoot, workflows: [WORKFLOW], startCommand: "npm start",
+      author: async () => { authors += 1; expect(await readFile(file, "utf8")).toBe(old); return bloco(1); },
+      triagem: async () => `${veredito("ROTEIRO")}\nCAPIVARA_PATCH: ${JSON.stringify(patch)}`,
+      runner: async () => ++runs === 1 ? FALHOU : verde,
+    });
+    expect(result.green).toBe(true);
+    expect(runs).toBe(2);
+    expect(authors).toBe(kind === "valid" ? 0 : 1);
+    if (kind === "valid") expect(await readFile(file, "utf8")).toBe(old.replace(patch.before, patch.after));
+  });
+
+  it("corrige dois defeitos distintos do roteiro antes de devolver qualquer coisa ao executor", async () => {
+    await comRoteiro();
+    let runs = 0;
+    let drafts = 0;
+    let triages = 0;
+    const result = await gate4({
+      projectRoot, workflows: [WORKFLOW], startCommand: "npm start",
+      author: async () => { drafts += 1; return bloco(drafts); },
+      triagem: async () => { triages += 1; return veredito("ROTEIRO").replace("procurar o botão Salvar", `correção distinta ${triages}`); },
+      runner: async () => ++runs <= 2 ? FALHOU : verde,
+    });
+    expect(result.green).toBe(true);
+    expect(drafts).toBe(2);
+    expect(runs).toBe(3);
+    expect(triages).toBe(2);
+  });
+
+  it("mesma correção de roteiro não renova sessões e é classificada como falha do harness", async () => {
+    await comRoteiro();
+    let drafts = 0;
+    let runs = 0;
+    const result = await gate4({
+      projectRoot, workflows: [WORKFLOW], startCommand: "npm start",
+      author: async () => { drafts += 1; return bloco(1); },
+      triagem: async () => veredito("ROTEIRO"),
+      runner: async () => { runs += 1; return FALHOU; },
+    });
+    expect(result.green).toBe(false);
+    if (result.green) throw new Error("deveria reprovar somente o roteiro");
+    expect(result.scriptFailed).toBe(true);
+    expect(result.cause).toContain("Isto é do harness");
+    expect(drafts).toBe(1);
+    expect(runs).toBe(2);
+  });
+
+  it.each([false, true])("reescrita não executável não roda novamente o roteiro antigo (erro técnico: %s)", async technical => {
+    await comRoteiro();
+    let drafts = 0;
+    let runs = 0;
+    const result = await gate4({
+      projectRoot, workflows: [WORKFLOW], startCommand: "npm start",
+      author: async () => { drafts += 1; return "```ts\nconsole.log('incompleto');\n```"; },
+      triagem: async () => veredito("ROTEIRO"),
+      runner: async () => { runs += 1; return technical ? { ...FALHOU, output: FALHOU.output + "\nReferenceError: registro is not defined" } : FALHOU; },
+    });
+    if (result.green) throw new Error("deveria reprovar somente o roteiro");
+    expect(result.scriptFailed).toBe(true);
+    expect(result.cause).toContain("correção executável");
+    expect(drafts).toBe(2);
+    expect(runs).toBe(1);
+  });
+
+  it("o mesmo passo mantém a janela de duas mesmo com diagnósticos de redação diferente", async () => {
+    await comRoteiro();
+    let drafts = 0;
+    let triages = 0;
+    const result = await gate4({
+      projectRoot, workflows: [WORKFLOW], startCommand: "npm start",
+      author: async () => { drafts += 1; return bloco(drafts); },
+      triagem: async () => { triages += 1; return veredito("ROTEIRO").replace("procurar o botão Salvar", `correção distinta ${triages}`); },
+      runner: async () => FALHOU,
+    });
+    if (result.green) throw new Error("deveria reprovar somente o roteiro");
+    expect(result.scriptFailed).toBe(true);
+    expect(drafts).toBe(2);
+    expect(triages).toBe(3);
+  });
+
   it("reescreve uma vez por chamada: a segunda falha vai ao executor com a nova triagem", async () => {
     await comRoteiro();
     let reescritas = 0;
@@ -1338,7 +1541,7 @@ describe("a triagem decide de quem é a falha, antes do executor", () => {
       startCommand: "npm start",
       author: async () => {
         reescritas += 1;
-        return bloco();
+        return bloco(1);
       },
       triagem: async () => {
         triagens += 1;

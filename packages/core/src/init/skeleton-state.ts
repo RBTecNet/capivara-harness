@@ -17,7 +17,7 @@
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { SKELETON_CONTRACT, type Skeleton } from "../contract/index.js";
+import { SKELETON_CONTRACT, environmentRequirements, type Skeleton } from "../contract/index.js";
 import { artifactPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
 
@@ -32,7 +32,9 @@ export async function writeSkeletonState(projectRoot: string, runId: string, ske
 export async function readSkeletonState(projectRoot: string, runId: string): Promise<Skeleton | null> {
   try {
     const parsed = JSON.parse(await readFile(skeletonPath(projectRoot, runId), "utf8")) as Partial<Skeleton>;
-    return parsed.contract === SKELETON_CONTRACT ? (parsed as Skeleton) : null;
+    if (parsed.contract !== SKELETON_CONTRACT) return null;
+    environmentRequirements(parsed.environment);
+    return parsed as Skeleton;
   } catch {
     return null;
   }

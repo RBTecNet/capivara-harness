@@ -10,6 +10,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { writeAtomic } from "../state/atomic.js";
 import { mask } from "./redact.js";
+import { DIRECT_CATALOG, opencodeProviderId } from "./registry.js";
 
 export const CREDENTIALS_CONTRACT = "capivara-credentials/v1" as const;
 
@@ -37,8 +38,8 @@ interface CredentialFile {
   credentials: CredentialRecord[];
 }
 
-export function credentialsPath(home = homedir()): string {
-  return join(home, ".config", "capivara", "credentials.json");
+export function credentialsPath(home = homedir(), environment: NodeJS.ProcessEnv = process.env): string {
+  return join(environment.CAPIVARA_CONFIG_DIR?.trim() || join(home, ".config", "capivara"), "credentials.json");
 }
 
 export async function readCredentials(path = credentialsPath()): Promise<CredentialRecord[]> {
@@ -54,7 +55,7 @@ export async function readCredentials(path = credentialsPath()): Promise<Credent
 export async function writeCredentials(records: CredentialRecord[], path = credentialsPath()): Promise<void> {
   const file: CredentialFile = { contract: CREDENTIALS_CONTRACT, credentials: records };
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await writeAtomic(path, `${JSON.stringify(file, null, 2)}\n`);
+  await writeAtomic(path, `${JSON.stringify(file, null, 2)}\n`, { mode: 0o600 });
   await chmod(path, 0o600);
 }
 
@@ -101,4 +102,21 @@ export function selectCredential(
     return ofProvider.find((record) => record.id === selector || record.label === selector) ?? null;
   }
   return ofProvider.find((record) => record.default) ?? ofProvider[0] ?? null;
+}
+
+/** Ambiente de um subprocesso OpenCode; não grava nem altera o ambiente do harness. */
+export function withApiCredentials(
+  records: CredentialRecord[],
+  environment: NodeJS.ProcessEnv,
+  providers: readonly string[] = DIRECT_CATALOG.map((provider) => provider.id),
+  selector = "",
+): NodeJS.ProcessEnv {
+  const env = { ...environment };
+  for (const provider of DIRECT_CATALOG) {
+    if (!providers.includes(provider.id) && !providers.includes(opencodeProviderId(provider.id))) continue;
+    if (!selector && env[provider.envKey]?.trim()) continue;
+    const credential = selectCredential(records, provider.id, selector);
+    if (typeof credential?.secret === "string" && credential.secret.trim()) env[provider.envKey] = credential.secret;
+  }
+  return env;
 }

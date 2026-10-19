@@ -12,6 +12,7 @@
  */
 
 import { languageBlock } from "./language.js";
+import { flowScopeBlock, interfaceContractBlock, transientStateBlock } from "./acceptance-policy.js";
 
 export interface FlowWorkflowContext {
   number: string;
@@ -24,8 +25,11 @@ export interface FlowAuthorContext {
   workflow: FlowWorkflowContext;
   /** Onde a aplicação vai estar de pé quando o roteiro rodar. */
   baseUrl: string;
+  sharedContract?: string;
+  phaseMarkdown?: string;
   /** O que o gate recusou na tentativa anterior, quando houve uma. */
   rejected?: string[];
+  previousScript?: string;
   /**
    * A passagem em que o roteiro vai rodar: quem roda antes, o que começa vazio,
    * e o ajudante para o que não é interface. Sem isto o roteirista escreve para
@@ -64,10 +68,16 @@ export function flowPrompt(context: FlowAuthorContext): string {
     "",
     "You may read the real source — pages, templates, components, routes — to find the actual",
     "selectors. Read the product, never guess the markup.",
+    "Do not run commands, tests, servers, browser probes or installations in this session.",
+    "Do not create temporary scripts or delegate work. The harness executes the returned script once it is ready.",
+    "The runtime instructions below describe the returned script, never actions for your authoring session.",
+    flowScopeBlock(),
+    transientStateBlock(true),
     "",
     `## The flow — workflow ${workflow.number}: ${workflow.name}`,
     "",
     ...passos,
+    interfaceContractBlock(context.sharedContract, context.phaseMarkdown),
     "",
     "## The script",
     "",
@@ -104,7 +114,8 @@ export function flowPrompt(context: FlowAuthorContext): string {
           ...passagem.anteriores.map((anterior) => `- workflow ${anterior.number} — ${anterior.name} (\`${anterior.arquivo}\`)`),
           "",
           "Read their scripts to know that state: a password they changed, a record they created. Never",
-          "undo it, and never depend on a flow that is not in this list.",
+          "depend on a flow that is not in this list. Preserve prerequisite state until the steps needing it are done.",
+          "A declared empty-state step may remove this pass's test data through the real API; never fabricate an empty response.",
         ]
       : [
           "Your flow is the FIRST of the pass: nothing ran before it, and it must set up whatever it needs.",
@@ -164,8 +175,12 @@ export function flowPrompt(context: FlowAuthorContext): string {
     "- No `test.skip`, no `test.fixme`, no `.only`.",
     "- Every step is EXECUTED. No assertion on a constant (`expect(false)`, `expect(true)`), no",
     "  `CAPIVARA_REMARK` and no \"pending\" annotation in place of a step: a step you did not run fails.",
-    "- Never intercept or stub the product's own backend. The point is to exercise it for real.",
-    "  A third-party service the product calls out to may be stubbed, and only that.",
+    "- Never fabricate the product backend's responses with fulfill, HAR or stubs, including success, empty lists or counters.",
+    "  Test empty lists by removing the test's data through the real API in this disposable pass.",
+    "  To observe loading, hold a GET then continue it to the real backend; arrange the observation before navigation.",
+    "  To observe API unavailability, page.route may abort a GET. Check request.method() === 'GET'; continue every other method.",
+    "  The returned script may control these reads; this does not authorize running commands in your authoring session.",
+    "  A third-party service the product calls out to may have responses stubbed, and only that.",
     "",
     "What the assertions are for: a step must FAIL when the product cannot do it. Asserting that",
     "a button exists proves markup; asserting what happens after it is clicked proves the flow.",
@@ -178,6 +193,12 @@ export function flowPrompt(context: FlowAuthorContext): string {
     "`getByRole(\"alert\")` matches two elements and Playwright refuses it. Anchor each locator to",
     "the region it belongs to — `page.getByRole(\"main\")`, the form, the dialog — or narrow it by",
     "accessible name. A locator that matches twice fails on a product that is working.",
+    "Navigation belongs to its actual navigation region; do not search sidebar links inside main.",
+    ...(context.previousScript ? [
+      "", "## Existing script — repair this file, do not start over", "",
+      "Preserve the working steps and assertions. Apply only the supplied correction; do not add new checks.",
+      "```ts", context.previousScript.trim(), "```",
+    ] : []),
     ...(context.rejected && context.rejected.length > 0
       ? [
           "",
@@ -202,5 +223,6 @@ export function extractFlowScript(output: string): string {
   const blocos = [...output.matchAll(/```(?:ts|typescript|js|javascript)?\s*\n([\s\S]*?)```/g)];
   if (blocos.length === 0) return "";
   // O último: um modelo que mostra o antes e o depois põe o resultado por último.
-  return (blocos[blocos.length - 1]?.[1] ?? "").trim();
+  return (blocos[blocos.length - 1]?.[1] ?? "").trim()
+    .replace(/^<!--[ \t]*inputs:[^\n]*-->(?=\r?\n|$)/, stamp => `// ${stamp}`);
 }

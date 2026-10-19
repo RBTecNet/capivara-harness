@@ -9,6 +9,7 @@
  */
 
 import { languageBlock } from "./language.js";
+import { planningScopeBlock } from "./planning-scope.js";
 
 const AUTHORITY = [
   "## Authority order",
@@ -35,6 +36,7 @@ export interface SkeletonContext {
 export function skeletonPrompt(context: SkeletonContext): string {
   return [
     languageBlock(context.language),
+    planningScopeBlock(),
     "",
     "You are designing the execution skeleton of a product. You produce structured data, not prose.",
     "",
@@ -49,6 +51,22 @@ export function skeletonPrompt(context: SkeletonContext): string {
     "This is the ONLY time anyone looks at the whole product at once. Each phase is written later",
     "seeing only its own slice of what you produce here, so whatever must be agreed across phases",
     "has to be decided by you, now.",
+    "",
+    "## Development environment — declared before implementation",
+    "List every required runtime, package manager, compiler, external service and browser tool in environment.",
+    "environment is mandatory in capivara-skeleton/v2. Use [] only when there is no external prerequisite; never omit it or use an older contract.",
+    "Each entry names technology, binary, systemLevel and checkArgs for a finite read-only readiness check (exit 0 means ready); installHint says how to prepare it.",
+    "Use argument arrays, never shell pipelines. Check chosen version compatibility and actual service readiness where relevant, not only executable presence.",
+    "Declare only prerequisites needed by the chosen product stack, never tools needed just to satisfy a probe.",
+    "Use project-local compilers and dependencies; do not require global installations for convenience.",
+    "Browser tooling used exclusively by the harness flow gate is prepared privately by the harness; do not require another global playwright CLI.",
+    "Do not use screenshot-to-/dev/null probes: they fail because the destination has no image extension.",
+    "Read secrets from environment without printing values. Never embed credentials in requirements or probe output.",
+    "Do not probe application code that has not been built yet. Do not invent services or compatibility promises.",
+    "The build prepares and approves this environment before development; phases must not recreate these checks as feature tests.",
+    "The harness assigns E2E_PORT per test process and model session. Project browser-test configuration must read it, so parallel phases and integration never share a hardcoded port.",
+    "For HTTP products, shared rules must enumerate navigation paths separately from complete API endpoints, HTTP methods, response formats and the shared client's base prefix.",
+    "The executor and independent workflow author receive these exact rules. Never leave either to guess an endpoint from a screen name.",
     "",
     "## The shared vocabulary is the part that cannot be vague",
     "If phase 3 creates a field and phase 7 reads it, they never see each other. They agree only",
@@ -87,9 +105,10 @@ export function skeletonPrompt(context: SkeletonContext): string {
     "## Shape",
     "Return only JSON, no fence, no preamble:",
     "{",
-    '  "contract": "capivara-skeleton/v1",',
+    '  "contract": "capivara-skeleton/v2",',
     '  "projectName": "…",',
     '  "stack": [ { "component": "Linguagem", "decision": "TypeScript 5.8" } ],',
+    '  "environment": [ { "technology": "Node.js compatível com a stack escolhida", "binary": "node", "systemLevel": false, "checkArgs": ["--version"], "installHint": "Instalar a versão escolhida na stack" } ],',
     '  "entities": [ { "name": "cartoes", "fields": [ { "name": "titulo", "type": "text, obrigatório" } ],',
     '                  "relations": ["pertence a colunas"] } ],',
     '  "stories": [ { "id": "US-1.1", "statement": "…" } ],',
@@ -182,6 +201,7 @@ export interface PhaseFromSliceContext {
 export function phaseFromSlicePrompt(context: PhaseFromSliceContext): string {
   return [
     languageBlock(context.language),
+    planningScopeBlock(),
     "",
     `You are writing phase ${context.phaseNumber} of ${context.totalPhases}, and only it.`,
     "",
@@ -211,6 +231,9 @@ export function phaseFromSlicePrompt(context: PhaseFromSliceContext): string {
     "- Never assert the presence of something the skeleton says does not exist. A criterion demanding",
     "  what cannot exist can never be proven: the verifier looks, does not find, and rejects a phase",
     "  that was correct.",
+    "- Environment readiness is approved once by build preflight. Do not generate feature tests for runtime versions, installed tools or external-service availability.",
+    "  A new dependency or migration is application setup, not a reason to repeat already-approved environment probes.",
+    "- Copy the shared API method, complete endpoint and response shape into the relevant criteria. Keep screen navigation paths distinct from API paths.",
     "",
     "## The set with no edge",
     "A criterion says something is true of a SET of things, and that set has to have an edge you can",
@@ -254,7 +277,7 @@ export function phaseFromSlicePrompt(context: PhaseFromSliceContext): string {
     "invented default looks like a decision, gets built, and nobody ever learns it was a guess.",
     "",
     "The marker ADDS a line; it never replaces one. The task still carries its acceptance criteria,",
-    "its feature tests and its traces — written for the part that IS decided. A task that is only a",
+    "and its traces — written for the part that IS decided. A task that is only a",
     "marker is a task the contract rejects, and it takes the whole plan down with it.",
     "",
     "Keep them few. One phase with several open decisions usually means you stopped writing and",
@@ -278,24 +301,6 @@ export function phaseFromSlicePrompt(context: PhaseFromSliceContext): string {
     "",
     "## Grammar of a task",
     context.grammar,
-    "",
-    /*
-     * O nome do teste é procurado na árvore, e essa regra vivia só no leitor.
-     *
-     * `featureTestNames` extrai o nome antes da seta e o procura no código: é a
-     * única parte do gate 3 que não depende da atenção de um modelo variar entre
-     * um ciclo e o seguinte. Só que ele aceita apenas o que PARECE nome — sem
-     * espaços, de três caracteres para cima — e descarta o resto em silêncio. Uma
-     * fase que escreve "cobertura dos três estados" em vez de
-     * `cobertura_dos_tres_estados` perde a conferência mecânica inteira, e nada
-     * avisa: a verificação simplesmente deixa de existir para aquela task.
-     */
-    "`Feature tests` names are IDENTIFIERS, not descriptions: `cadastro_sem_cpf_recusado`, not",
-    "\"rejects a registration with no CPF\". The harness searches the code for each of those names, and",
-    "that search is the one part of verification that does not depend on a model's attention. A name",
-    "with spaces in it is silently ignored — the check disappears for that task and nothing says so.",
-    "So: lowercase, words joined by `_`, no spaces and no accents, then `->`, then the business rule",
-    "it asserts, in plain words.",
     "",
     "`Design ref` is the one optional field, and it is USUALLY ABSENT. It points at an artifact the",
     "developer put in the design directory by hand — a mockup, a spec, a screenshot — and that",

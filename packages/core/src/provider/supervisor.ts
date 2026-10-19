@@ -12,8 +12,12 @@
  */
 
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import type { Invocation } from "./adapters.js";
 import { redact } from "./redact.js";
+import { runDirectApi } from "./direct-api.js";
+import type { TokenUsage } from "./transcript.js";
 
 export type TimeoutKind = "first-output" | "idle" | "wall";
 
@@ -31,6 +35,12 @@ export interface SupervisorLimits {
 }
 
 export interface RunResult {
+  /** Texto visível incompleto, sanitizado, exclusivamente para evidência separada. */
+  partialOutput?: string;
+  /** API direta já devolve texto final e uso, sem envelope de CLI. */
+  usage?: TokenUsage;
+  resultRead?: boolean;
+  engineError?: boolean;
   exitCode: number;
   stdout: string;
   stderr: string;
@@ -55,6 +65,33 @@ export interface RunOptions {
   onOutput?: (chunk: string, stream: "out" | "err") => void;
 }
 
+const activeProviders = new Set<(signal: NodeJS.Signals) => void>();
+
+/** O binário chama isto antes de sair por SIGINT/SIGTERM; importar não instala handlers. */
+export function interruptActiveProviders(): void {
+  for (const stop of activeProviders) { try { stop("SIGKILL"); } catch { /* outras invocações também precisam encerrar */ } }
+}
+
+/** OpenCode standalone cria grupos separados; somente a marca desta invocação autoriza recolhê-los. */
+function signalPrivateOpenCode(scope: string, signal: NodeJS.Signals): void {
+  if (process.platform !== "linux") return;
+  let entries: string[];
+  try { entries = readdirSync("/proc"); } catch { return; }
+  for (const entry of entries) {
+    if (!/^\d+$/.test(entry) || Number(entry) === process.pid) continue;
+    try {
+      const root = `/proc/${entry}`;
+      if (statSync(root).uid !== process.getuid?.()) continue;
+      const before = readFileSync(`${root}/stat`, "utf8");
+      const start = before.slice(before.lastIndexOf(")") + 2).split(" ")[19];
+      if (!readFileSync(`${root}/environ`, "utf8").split("\0").includes(`CAPIVARA_INVOCATION_ID=${scope}`)) continue;
+      const current = readFileSync(`${root}/stat`, "utf8");
+      if (current.slice(current.lastIndexOf(")") + 2).split(" ")[19] !== start) continue;
+      process.kill(Number(entry), signal);
+    } catch { /* processo terminou, mudou de identidade ou não é acessível */ }
+  }
+}
+
 /** Mata o grupo de processos; cai no pid isolado quando o grupo não existe. */
 export function killTree(pid: number, signal: NodeJS.Signals): void {
   try {
@@ -69,16 +106,23 @@ export function killTree(pid: number, signal: NodeJS.Signals): void {
 }
 
 export async function runProvider(options: RunOptions): Promise<RunResult> {
+  if (options.invocation.directApi) return runDirectApi(options);
   const { invocation, prompt, limits } = options;
   const startedAt = Date.now();
   const grace = limits.graceMilliseconds ?? 2000;
+  const privateScope = invocation.transcript === "opencode-jsonl" || invocation.env.CAPIVARA_PROVIDER === "opencode" ? randomUUID() : null;
 
   const child = spawn(invocation.command, invocation.args, {
-    env: invocation.env,
+    env: privateScope ? { ...invocation.env, CAPIVARA_INVOCATION_ID: privateScope } : invocation.env,
     cwd: invocation.cwd,
     stdio: ["pipe", "pipe", "pipe"],
     detached: true,
   });
+  const signalOwned = (signal: NodeJS.Signals): void => {
+    if (child.pid !== undefined) killTree(child.pid, signal);
+    if (privateScope) signalPrivateOpenCode(privateScope, signal);
+  };
+  activeProviders.add(signalOwned);
 
   let stdout = "";
   let stderr = "";
@@ -98,9 +142,9 @@ export async function runProvider(options: RunOptions): Promise<RunResult> {
     if (settled) return;
     timedOut = kind ?? timedOut;
     if (child.pid === undefined) return;
-    killTree(child.pid, "SIGTERM");
+    signalOwned("SIGTERM");
     const hard = setTimeout(() => {
-      if (child.pid !== undefined) killTree(child.pid, "SIGKILL");
+      signalOwned("SIGKILL");
     }, grace);
     hard.unref();
     timers.add(hard);
@@ -167,6 +211,9 @@ export async function runProvider(options: RunOptions): Promise<RunResult> {
   });
 
   settled = true;
+  // close do wrapper pode vir antes dos filhos em grupos distintos.
+  if (timedOut || truncated || options.signal?.aborted) signalOwned("SIGKILL");
+  activeProviders.delete(signalOwned);
   clearTimers();
   options.signal?.removeEventListener("abort", onAbort);
 

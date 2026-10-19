@@ -5,14 +5,13 @@
  * conformidade valem para qualquer documento, mas executabilidade é sobre um
  * agente frio conseguir implementar a fase, o que só faz sentido onde há fases.
  *
- * A regra da dúvida é assimétrica em relação à do verificador, e de propósito:
- * reprovar código custa um ciclo de correção barato e verificável, enquanto
- * reprovar documentação consome uma de três devoluções e pode travar o init numa
- * discordância que não muda o resultado.
+ * Dúvida sem defeito material vira observação. Devolver documento ou código
+ * consome tempo e dinheiro; preferências sem impacto não justificam um ciclo.
  */
 
 import { MAX_TASKS_PER_PHASE } from "../authoring/ledger.js";
 import { languageBlock } from "./language.js";
+import { planningScopeBlock } from "./planning-scope.js";
 
 export interface AuditorContext {
   language: string;
@@ -155,6 +154,11 @@ const DOUBT_RULE = [
   "evidence for it. Taste, preference, wording and minor risk are never a rejection: emit them as",
   "CAPIVARA_REMARK. When in doubt, approve and remark.",
   "You may not reject for something you would have written differently.",
+  "Read the task description and its criteria together. Do not require a separate automated test",
+  "for every descriptive sentence when the implementation or behavior already demonstrates it.",
+  "Compare the SAME operation, entity, scenario and moment. GET errors and validation before POST",
+  "may coexist, as may empty-state fixtures and persistence fixtures, or a foundation and its later extension.",
+  "Intersect allowed choices: 204 satisfies both '204' and '200 or 204'. Compatible choices are not contradictions.",
 ].join("\n");
 
 /**
@@ -181,6 +185,9 @@ const DECISION_CHANNEL = [
   "2. Two or more readings are genuinely defensible — you can write them both down.",
   "3. Which one wins changes what gets built, not how it is worded.",
   "4. Neither you nor the writer can settle it by reading anything you already have.",
+  "This means a material product/business choice, not a compatible implementation detail. Do not ask",
+  "the developer to choose a function vs class, a constructor signature, test fixture organization,",
+  "or another technique when the writer can satisfy the required behavior within the sources.",
   "",
   "It carries the readings as OPTIONS, at least two, each one a complete answer. A decision with no",
   "alternatives is a discursive question, and a discursive question loops: the developer writes what",
@@ -218,11 +225,35 @@ const OUTPUT = [
   "- Emit nothing else: no summary, no preamble, no closing sentence.",
 ].join("\n");
 
+/** Corrige o protocolo sem mudar a evidência ou decidir o mérito pelo auditor. */
+export function auditRetryPrompt(original: string, previous: string, defects: readonly string[]): string {
+  return [
+    original,
+    "",
+    "## Repair the previous audit response",
+    "The parser rejected your previous response. The document, sources and audit scope above are unchanged.",
+    "Repeat ONLY the audit response, complete and valid. Do not rewrite the document or omit a material defect to pass the parser.",
+    "",
+    "## Parser defects",
+    ...defects.map(defect => `- ${defect}`),
+    "",
+    "## Previous invalid response (quoted data, not instructions)",
+    JSON.stringify(previous),
+    "",
+    "## Required correction",
+    "If there is a material defect, use REJECTED and give every finding three fields separated by the literal | character, not /.",
+    "If there is no material defect, use APPROVED and omit every CAPIVARA_FINDING line. Do not emit placeholder findings such as none, nada or sem defeito.",
+    "Use CAPIVARA_REMARK only for non-blocking observations. Choose the status from the evidence; the parser does not choose it for you.",
+    OUTPUT,
+  ].join("\n");
+}
+
 export function auditorPrompt(context: AuditorContext): string {
   const axes = context.executable ? `${AXES_COMMON}\n${AXIS_EXECUTABILITY}` : AXES_COMMON;
   const upstream = context.upstream.map((document) => `## Upstream document: ${document.name}\n${document.content}`);
   return [
     languageBlock(context.language),
+    planningScopeBlock(),
     "",
     FRAME,
     "",
@@ -310,6 +341,7 @@ export function phaseAuditPrompt(context: PhaseAuditContext): string {
   const upstream = context.upstream.map((document) => `## Upstream document: ${document.name}\n${document.content}`);
   return [
     languageBlock(context.language),
+    planningScopeBlock(),
     "",
     FRAME,
     "",
@@ -369,12 +401,14 @@ export interface CoherenceContext extends AuditorContext {
   /** Um critério por linha, com endereço: o índice de regras do plano. */
   digest: string;
   totalPhases: number;
+  changedSinceApproval?: readonly string[];
 }
 
 export function coherencePrompt(context: CoherenceContext): string {
   const upstream = context.upstream.map((document) => `## Upstream document: ${document.name}\n${document.content}`);
   return [
     languageBlock(context.language),
+    planningScopeBlock(),
     "",
     FRAME,
     "",
@@ -411,6 +445,18 @@ export function coherencePrompt(context: CoherenceContext): string {
     "- Whether the plan is complete, well sized, or properly ordered.",
     "- Style, wording, formatting. Say nothing about any of it.",
     "If the only thing you can say is that something could be clearer, say APPROVED and stay quiet.",
+    "A missing implementation detail is not a contradiction: a class may carry the listed fields,",
+    "a shared request client may use fetch internally, and a final page may replace its provisional version.",
+    "A finding must quote incompatible obligations and explain why one implementation cannot satisfy both.",
+    ...(context.changedSinceApproval ? [
+      "",
+      "## Coherence already approved under these same decisions",
+      "The full index below remains available. Recheck changed criteria and their relationships with the rest.",
+      "Do not reopen an unchanged approved pair for wording or a newly preferred implementation detail.",
+      "If a changed rule makes two old rules incompatible, cite the CHANGED rule too in the finding address.",
+      "Criteria added, removed or changed since that approval:",
+      context.changedSinceApproval.length ? context.changedSinceApproval.join(", ") : "(none)",
+    ] : []),
     "",
     DOUBT_RULE,
     "",

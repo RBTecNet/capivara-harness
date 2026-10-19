@@ -23,8 +23,9 @@
 
 import type { CoverageSources } from "./coverage.js";
 import { jsonDaResposta } from "./resposta.js";
+import { environmentRequirements, renderEnvironmentRequirements, type EnvironmentRequirement } from "./environment.js";
 
-export const SKELETON_CONTRACT = "capivara-skeleton/v1" as const;
+export const SKELETON_CONTRACT = "capivara-skeleton/v2" as const;
 
 export interface SkeletonStack {
   /** O que o componente é: linguagem, banco, interface, testes. */
@@ -98,6 +99,8 @@ export interface Skeleton {
   contract: typeof SKELETON_CONTRACT;
   projectName: string;
   stack: SkeletonStack[];
+  /** Sondas de prontidão executadas pelo build antes das fases. Obrigatórias nesta geração. */
+  environment: EnvironmentRequirement[];
   entities: SkeletonEntity[];
   stories: SkeletonStory[];
   workflows: SkeletonWorkflow[];
@@ -230,11 +233,15 @@ export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number
   // Os não-objetivos vêm da entrevista, não do escritor. Aceitos na leitura para
   // que um esqueleto retomado do estado ou de um zip não os perca.
   const nonGoals = strings(root.nonGoals);
+  let environment: EnvironmentRequirement[] = [];
+  try { environment = environmentRequirements(root.environment); }
+  catch (error) { defects.push({ problem: error instanceof Error ? error.message : String(error), hint: "declare environment com sondas de prontidão; use [] apenas se não houver pré-requisito externo" }); }
 
   const skeleton: Skeleton = {
     contract: SKELETON_CONTRACT,
     projectName: text(root.projectName) || "Projeto",
     stack,
+    environment,
     entities,
     stories,
     workflows,
@@ -303,6 +310,9 @@ export function sliceForPhase(skeleton: Skeleton, phaseNumber: number): string {
     }
   }
 
+  linhas.push("", "## Ambiente aprovado antes da construção", ...renderEnvironmentRequirements(skeleton.environment),
+    "O build aprova estas sondas uma vez antes do desenvolvimento. Não transformá-las em testes de cada fase.");
+
   if (stories.length > 0) {
     linhas.push("", "## Stories desta fase");
     for (const story of stories) linhas.push(`- ${story.id}: ${story.statement}`);
@@ -336,6 +346,7 @@ export function renderSkeleton(skeleton: Skeleton): string {
     "## Stack",
     ...skeleton.stack.map((item) => `- ${item.component}: ${item.decision}`),
     "",
+    "## Ambiente de desenvolvimento", ...renderEnvironmentRequirements(skeleton.environment), "",
     "## Entidades",
   ];
 

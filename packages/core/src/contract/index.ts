@@ -1,4 +1,6 @@
 export { INVARIANTS, PHASES_CONTRACT, invariant } from "./invariants.js";
+export { ENVIRONMENT_CONTRACT, PLANNING_CONTRACT, PLANNING_UPGRADE, environmentRequirements } from "./environment.js";
+export type { EnvironmentRequirement } from "./environment.js";
 export type { Invariant, InvariantChecker, InvariantCode, InvariantEnforcement } from "./invariants.js";
 export { checkDesignRefs, parsePhases } from "./phases.js";
 export type {
@@ -31,8 +33,8 @@ export {
 export type { PhasesDocumentParts } from "./templates.js";
 export { canonicalDependsOn, canonicalWorkflowTraces, phaseDependencies, extractTasks, joinPhaseMetadata, repairInlineCriteria, repairLabelLists, repairMissingBullets, normalizePhasePart } from "./phase-part.js";
 export type { NormalizedPart, PhasePartExpectation } from "./phase-part.js";
-export { checkRewriteDrift, parsePhaseFragment } from "./drift.js";
-export { affectedPhases } from "./phase-references.js";
+export { checkRewriteDrift, parsePhaseFragment, preserveUnaddressedTasks } from "./drift.js";
+export { affectedPhases, planAddresses } from "./phase-references.js";
 export { featureTestNames } from "./feature-tests.js";
 export type { NamedFeatureTest } from "./feature-tests.js";
 export type { DriftInput } from "./drift.js";

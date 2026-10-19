@@ -2,6 +2,11 @@
 
 Do prompt à aplicação final, em três comandos.
 
+Versão **0.5.0**: planejamentos de versões anteriores são incompatíveis.
+Em projetos existentes, gere novamente com `capivara init --fresh` e depois
+`capivara plan --fresh` antes de executar o build. Código, dados e evidências
+existentes são preservados; aprovações da geração anterior não são reutilizadas.
+
 ```bash
 capivara init "um sistema de reservas para uma pousada de 8 quartos"
 capivara plan
@@ -232,6 +237,21 @@ critério impossível de observar para aqui, e não três ciclos de correção a
 Termina em `RALPH READY` ou em `NOT READY` dizendo exatamente o que falta. Nunca
 "quase pronto".
 
+APIs diretas usam um teto de **32.768 tokens de saída por chamada**. Para ajustar
+esse teto explicitamente, defina `CAPIVARA_API_MAX_OUTPUT_TOKENS` com um inteiro
+positivo antes do comando. Exemplo, para um modelo que aceite 65.536 tokens:
+
+```bash
+CAPIVARA_API_MAX_OUTPUT_TOKENS=65536 capivara plan
+```
+
+O teto pode incluir raciocínio e texto final, conforme o provider. Aumentá-lo
+permite maior consumo; a Capivara mantém o padrão até você escolher outro valor.
+Se a geração for cortada, ela para sem repetir automaticamente e grava o consumo
+informado pela API no diagnóstico. No `init` e no `plan`, o texto visível
+incompleto fica em `.partial.txt`, separado do documento e do cache. Isso não
+muda os limites das CLIs.
+
 ### `capivara build`
 
 Cada fase usa sessões separadas de construção e validação. Por fase, cinco gates:
@@ -244,6 +264,18 @@ Cada fase usa sessões separadas de construção e validação. Por fase, cinco 
 | G3 | um verificador independente, read-only, task a task |
 | G4 | os fluxos do esqueleto, percorridos **na aplicação de pé** |
 
+Enquanto G0 aguarda o executor concluir, o painel mostra a atividade reportada
+pelo Codex ou OpenCode: arquivos, comandos e resultados de testes, com o tempo
+desde o último evento. No paralelo, a atividade aparece no agente correspondente.
+Testes executados dentro da sessão são informação de progresso; G2 continua
+rodando sua verificação independente. Ao terminar a suíte do G2, o harness
+encerra os processos que ficaram no grupo dessa execução.
+
+Ctrl+C encerra as invocações ativas. No OpenCode standalone em Linux, isso
+inclui o servidor privado e filhos identificados por uma marca da chamada,
+mesmo em grupos separados. Na retomada, alterações sem commit do worktree são
+guardadas como parcial antes da limpeza; a fase volta aos gates normalmente.
+
 Os quatro primeiros leem; o G4 abre o produto e clica. Cada fluxo declarado no
 esqueleto vira um roteiro Playwright, escrito por uma sessão que não implementou
 a fase, guardado em `.capivara/flows/` e executado pelo loop — e como ele fica no
@@ -251,8 +283,8 @@ projeto, o fluxo da fase 2 continua sendo percorrido na fase 7. `--no-flows`
 desliga o gate.
 
 Todos verdes com a árvore suja → um commit por fase. Todos verdes com a árvore
-limpa → a fase já estava implementada. Qualquer um vermelho → sessão nova com a
-**causa real**, nunca "os testes falharam".
+limpa → a fase já estava implementada. Defeito funcional vermelho recebe a
+**causa real** para correção; erro do roteiro do harness é corrigido no próprio G4.
 
 Esgotados os ciclos, o loop para e é retomável: `capivara build` de novo continua
 de onde parou, sem refazer o que já ficou verde.
@@ -260,6 +292,36 @@ de onde parou, sem refazer o que já ficou verde.
 O verificador informa, para cada pendência, a evidência, como corrigir e qual
 teste ou comando confirma a correção. Ele deve cobrir todos os critérios da
 tarefa, incluindo o comportamento e a mensagem apresentados em falhas reais.
+
+A aprovação prioriza funcionamento e custo: implementação equivalente é aceita,
+e sugestões de cobertura ou organização aparecem como observações não bloqueantes.
+Durante a construção, os agentes recebem orientação para usar verificações focadas;
+G2 continua rodando a suíte completa independentemente. Uma nova construção registra
+o motivo completo da devolução. Defeitos reais de funcionalidade, dados e segurança
+continuam exigindo correção.
+
+Roteiros do G4 são gerados, executados e corrigidos pelo harness, com até duas
+correções distintas de roteiro por passagem. Erro persistente de roteiro não pede
+ao executor que altere produto aprovado. Um carregamento que terminou antes de o
+teste começar a observá-lo exige ajustar o teste, sem atrasar artificialmente o produto.
+O roteirista e a triagem recebem as regras compartilhadas do esqueleto e os critérios
+da fase: endpoints, métodos e base do cliente já publicados não precisam ser adivinhados
+a partir do nome da tela.
+
+O `plan` publica `environment.json` com os pré-requisitos e sondas de prontidão
+declarados no esqueleto. O `build` verifica e prepara o ambiente antes de iniciar
+as fases, incluindo dependências existentes e Chromium quando G4 está habilitado.
+A aprovação vale para a execução: as fases não repetem essas sondas. Dependência
+ou migração criada pelo código continua sendo instalada/aplicada quando necessário.
+O build exige o metadado atual vinculado ao plano e ao esqueleto; não há fallback
+para planos antigos nem conversão automática pelo catálogo da stack.
+
+Se a resposta de verificação vier com formato ou cobertura inválidos, o Core
+pede uma correção somente leitura no mesmo ciclo, preservando a resposta original.
+Isso não consome um reparo nem envia o executor para alterar código por erro de
+protocolo. Após um reparo, uma revisão completa renova os vereditos; as tasks
+aprovadas voltam a ser lembradas nas rodadas seguintes, mantendo a possibilidade
+de reabrir uma regressão real.
 
 Com um verificador via CLI, o build também permite uma sessão de reparo por
 fase, por padrão. Nessa sessão separada, o verificador pode corrigir código,
@@ -271,12 +333,28 @@ valores de 1 a 10 definem o orçamento por fase. Com API direta, o verificador
 fornece orientação, e o construtor continua responsável pelas alterações.
 `--no-system-install` também se aplica aos reparos do verificador.
 
+Se um teste falhar somente na integração, a fase volta ao ciclo de correção:
+o validador lê o erro completo e entrega ao executor a causa, a evidência, o
+arquivo a alterar e o comando de regressão. Se a devolução não resolver, uma
+sessão de reparo do validador pode corrigir a entrega no worktree. Essa falha
+nova tem uma devolução ao executor e o orçamento configurado de reparos,
+compartilhado entre as passagens de recuperação. Todos os gates são exigidos
+novamente, inclusive a suíte da árvore integrada; um teste vermelho não vira
+aprovação nem encerra imediatamente a recuperação. Uma fase que já roda
+sozinha por preparar a fundação também recebe essa oportunidade.
+
 Dependências Node são conferidas pelo runtime e pelos manifestos/lockfiles.
 Uma instalação incompatível é preparada novamente com o runtime do harness,
 respeitando `engines`. No paralelo, falhas desse ambiente na integração têm
 reparo limitado e log completo; se persistirem, o commit aprovado é preservado
 para retomar a integração, sem reconstruir a fase. Logs de cada chamada em
 `calls.jsonl` registram papel, modelo, agente e se houve reparo.
+
+Artefatos gerados e dependências locais que o projeto manda ignorar ficam
+fora das alterações do produto, mesmo em históricos antigos que as versionaram.
+Isso inclui `node_modules`, `dist`, cobertura, caches e relatórios. Os arquivos ficam
+intactos no disco; fontes, lockfiles e dependências explicitamente fora do ignore
+continuam sujeitos às conferências de alteração e integração.
 
 ## Os quatro papéis
 
@@ -309,12 +387,52 @@ custom. APIs diretas: `openai`, `anthropic`, `gemini`, `deepseek`, `minimax`,
 capivara providers list
 ```
 
+Ao escolher uma API sem chave no wizard, a Capivara oferece configurá-la antes
+de listar os modelos. A chave é digitada num campo oculto e fica salva para as
+próximas execuções. Também é possível configurar diretamente:
+
+```bash
+capivara login deepseek
+# ou: capivara config add api deepseek
+capivara providers models deepseek
+capivara providers models minimax
+```
+
+Uma chave já definida na variável de ambiente do provider também é reconhecida.
+Se a API não retornar uma lista, o wizard permite digitar o identificador exato
+do modelo ou voltar ao provider.
+
+No OpenRouter, o wizard verifica se a chave permite geração antes de listar os
+modelos. Chaves de gerenciamento oferecem substituição ali mesmo; use uma chave
+de API criada em [OpenRouter → Keys](https://openrouter.ai/settings/keys).
+
+Em comandos diretos com `--provider deepseek` e sem `--model`, um terminal
+interativo abre a escolha do modelo sem pedir novamente o provider. Falhas na
+consulta mostram a causa (credencial, HTTP ou conexão) antes da opção manual.
+
 O papel `builder` exige uma CLI: ele escreve arquivos e roda comandos, e as CLIs
 já resolvem sandbox, edição e shell. Os outros três só leem e devolvem texto, e
 funcionam em qualquer provider.
 
-O prompt viaja sempre por stdin e o segredo sempre pelo ambiente. Nenhum dos dois
-aparece em `argv`, onde ficariam visíveis em `ps`.
+No wizard do `build`, as APIs continuam na lista após `custom`, identificadas
+como **API via OpenCode**. Escolha `deepseek` para ver somente seus modelos;
+o comando equivalente usa `opencode` e `deepseek/deepseek-flash`. A chave cadastrada com
+`capivara login deepseek` é reaproveitada na descoberta e na execução, sem ser
+copiada para arquivos do OpenCode. Os níveis de raciocínio vêm da própria CLI.
+
+```bash
+capivara build --provider opencode --model deepseek/deepseek-flash --effort high --parallel 3 --workers-as-builder
+```
+
+“Todos como o executor” substitui os agentes antigos do projeto, mesmo sem
+salvar a estratégia. O comando equivalente inclui `--workers-as-builder` para
+que o modelo efetivo corresponda à escolha. Com `--save-execution`, as próximas
+execuções também usam todos os agentes como o executor atual. `--parallel`
+sozinho conserva os agentes salvos; `--worker` permite definir um pool próprio.
+
+Nas CLIs, o prompt viaja por stdin e a chave pelo ambiente. Nas APIs diretas,
+o cliente HTTP nativo envia o prompt no corpo e a chave no header de autenticação.
+Nenhum dos dois aparece em `argv`, onde ficariam visíveis em `ps`.
 
 ## Árvore de artefatos
 

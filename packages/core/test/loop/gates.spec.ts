@@ -162,6 +162,17 @@ describe("G1 — sinal, não veredito", () => {
 });
 
 describe("G2 — a suíte roda fora da sessão do agente", () => {
+  it("ENOENT ao fotografar dado opcional dentro de teste é teste vermelho, não runner ausente", async () => {
+    const result = await gate2(projectRoot, "npm test", async () => ({ exitCode: 1, output: "RUN v3.1.4\nFAIL testes/banco.test.ts\nError: ENOENT: no such file or directory, stat '/projeto/server/data/app.db'\n at fotografarArquivo" }));
+    expect(result.green).toBe(false);
+    expect((result as { toolMissing?: boolean }).toolMissing).toBeUndefined();
+    if (!result.green) expect(result.cause).toContain("fotografarArquivo");
+  });
+
+  it("comando verde não vira ferramenta ausente por citar erro tratado", async () => {
+    const result = await gate2(projectRoot, "npm test", async () => ({ exitCode: 0, output: "ENOENT: no such file or directory (erro esperado)\n3 passed" }));
+    expect(result.green).toBe(true);
+  });
   it("verde quando o comando sai com zero", async () => {
     const result = await gate2(projectRoot, "npm test", async () => ({ exitCode: 0, output: "3 passed" }));
     expect(result.green).toBe(true);

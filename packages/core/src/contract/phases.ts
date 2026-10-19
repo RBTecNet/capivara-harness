@@ -261,11 +261,11 @@ export function parsePhases(source: string): ParseResult {
 
     if (!task) continue;
 
-    if (trimmed === "") {
-      task = null;
-      inCriteria = false;
-      continue;
-    }
+    // Markdown permite linhas vazias entre itens da mesma lista. Encerrar aqui
+    // fazia campos presentes desaparecerem e gerava I-08/I-09 falsos. A próxima
+    // task e os headings acima já delimitam o bloco, inclusive na leitura do
+    // cache; preservar também inCriteria permite espaçar os itens dos critérios.
+    if (trimmed === "") continue;
 
     if (trimmed === CRITERIA_LABEL) {
       inCriteria = true;

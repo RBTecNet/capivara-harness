@@ -128,6 +128,36 @@ describe("transcrito do claude", () => {
 });
 
 describe("transcrito do opencode", () => {
+  it("sem identificadores preserva a concatenação legada e sem texto preserva a saída crua", () => {
+    const output = [
+      { part: { type: "text", text: "parte " } },
+      { part: { type: "text", messageID: "final", text: "final" } },
+    ].map(event => JSON.stringify(event)).join("\n");
+    expect(parseOpencodeJsonl(output).text).toBe("parte final");
+    expect(parseOpencodeJsonl("erro da CLI")).toMatchObject({ text: "erro da CLI", raw: true });
+  });
+
+  it("a resposta final não incorpora cercas de mensagens de progresso", () => {
+    const messages = [
+      { type: "text", part: { type: "text", messageID: "progress", text: "Exemplo provisório:\n```ts\nconst x = 1;" } },
+      { type: "text", part: { type: "text", messageID: "final", text: "```ts\nimport {test, expect} from '@playwright/test';\n" } },
+      { type: "text", part: { type: "text", messageID: "final", text: "test('fluxo', async () => {});\n```" } },
+    ];
+    expect(parseOpencodeJsonl(messages.map(event => JSON.stringify(event)).join("\n")).text).toBe(messages[1]!.part.text + messages[2]!.part.text);
+  });
+
+  it("soma o uso de todas as mensagens mesmo entregando só a resposta final", () => {
+    const events = [
+      { type: "text", part: { type: "text", messageID: "progress", text: "Vou inspecionar" } },
+      { type: "step_finish", part: { tokens: { input: 5, output: 7 }, cost: 0.01 } },
+      { type: "text", part: { type: "text", messageID: "final", text: "resposta final" } },
+      { type: "step_finish", part: { tokens: { input: 11, output: 13 }, cost: 0.02 } },
+    ];
+    const result = parseOpencodeJsonl(events.map(event => JSON.stringify(event)).join("\n"));
+    expect(result.text).toBe("resposta final");
+    expect(result.usage).toMatchObject({ inputTokens: 16, outputTokens: 20, costUsd: 0.03 });
+  });
+
   it("junta as partes de texto na ordem", () => {
     const lido = parseOpencodeJsonl(OPENCODE);
     expect(lido.text).toBe("# Documento\n\ncorpo");
@@ -147,6 +177,38 @@ describe("transcrito do opencode", () => {
   it("dois passos somam, porque a chamada é uma só", () => {
     const dois = [OPENCODE, OPENCODE].join("\n");
     expect(parseOpencodeJsonl(dois).usage?.inputTokens).toBe(16746);
+  });
+});
+
+describe("recusas estruturadas do OpenCode", () => {
+  it.each([
+    ["provider.quota", 402, "quota"],
+    ["provider.no-route", undefined, "configuration"],
+  ] as const)("%s prevalece sobre progresso e marker sem publicar o corpo HTTP", (type, status, providerFailure) => {
+    const stdout = [
+      JSON.stringify({ type: "text", part: { type: "text", text: "CAPIVARA_BUILDER_STATUS: COMPLETE" } }),
+      JSON.stringify({ type: "error", error: { type, status, message: "recusa explícita", response: { body: "detalhes privados" } } }),
+    ].join("\n");
+    const result = parseOpencodeJsonl(stdout);
+    expect(result).toMatchObject({ error: true, raw: true, providerFailure });
+    expect(result.text).toContain("recusa explícita");
+    expect(result.text).not.toContain("detalhes privados");
+    expect(result.text).not.toContain("CAPIVARA_BUILDER_STATUS: COMPLETE");
+  });
+
+  it("429 e erros desconhecidos são erros da CLI sem classificação de recusa permanente", () => {
+    for (const error of [{ type: "provider.quota", status: 429 }, { type: "provider.network", status: 503 }]) {
+      const result = parseOpencodeJsonl(JSON.stringify({ type: "error", error: { ...error, message: "rate limit" } }));
+      expect(result.error).toBe(true);
+      expect(result.providerFailure).toBeUndefined();
+    }
+  });
+
+  it("texto comum com o nome da recusa não vira erro estruturado", () => {
+    const result = parseOpencodeJsonl(JSON.stringify({ type: "text", part: { type: "text", text: "Teste provider.quota HTTP 402" } }));
+    expect(result.error).toBeUndefined();
+    expect(result.providerFailure).toBeUndefined();
+    expect(result.raw).toBe(false);
   });
 });
 

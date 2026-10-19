@@ -29,7 +29,6 @@ export const GRAMMAR_BLOCK: readonly string[] = [
   "- [ ] **Task:** <o que construir>",
   "  - **Acceptance criteria:**",
   "    - <condição concreta e validável>",
-  "  - **Feature tests:** <nome do teste → a regra de negócio que ele afirma>",
   "  - **Design ref:** <caminho sob o diretório de design>",
   "  - **Traces:** US-1.1, users, workflow 2",
   "",
@@ -47,7 +46,6 @@ export const PHASE_BLOCK: readonly string[] = [
   "- [ ] **Task:** <what to build>",
   "  - **Acceptance criteria:**",
   "    - <concrete, validatable condition>",
-  "  - **Feature tests:** <test name -> the business rule it asserts>",
   "  - **Design ref:** <path under the design directory>",
   "  - **Traces:** <US-N.M / entity / workflow>",
 ];
@@ -97,7 +95,6 @@ export const TASKS_BLOCK: readonly string[] = [
   "- [ ] **Task:** <what to build>",
   "  - **Acceptance criteria:**",
   "    - <concrete, validatable condition>",
-  "  - **Feature tests:** <test name -> the business rule it asserts>",
   "  - **Traces:** <US-N.M / entity / workflow>",
 ];
 

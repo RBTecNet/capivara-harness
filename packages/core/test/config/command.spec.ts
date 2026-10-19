@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerConfigCommand } from "../../src/commands/config.js";
 import { createProgram } from "../../src/cli-program.js";
 import { buildMcpConnection, globalConfigPath, readGlobalConfig, saveMcpConnection } from "../../src/config/global.js";
+import { credentialsPath, readCredentials } from "../../src/provider/credentials.js";
 
 let directory: string;
 let environment: NodeJS.ProcessEnv;
@@ -48,6 +49,20 @@ afterEach(async () => {
 });
 
 describe("capivara config", () => {
+  it("o menu de API usa a mesma fila do pipe, salva em store privado e não exibe a chave", async () => {
+    const output = await invoke("5\n4\nsk-api-menu-apenas-teste\n");
+    const path = credentialsPath(undefined, environment);
+    expect((await readCredentials(path))[0]).toMatchObject({ provider: "deepseek", secret: "sk-api-menu-apenas-teste" });
+    expect(output).not.toContain("sk-api-menu");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("config add api aceita o provider sem colocar a chave nos argumentos", async () => {
+    const output = await invoke("sk-api-atalho-apenas-teste\n", ["config", "add", "api", "deepseek"]);
+    expect((await readCredentials(credentialsPath(undefined, environment)))[0]?.provider).toBe("deepseek");
+    expect(output).toContain("Chave de API");
+    expect(output).not.toContain("sk-api-atalho");
+  });
   it("registra menu e atalho sem exigir provider ou token por argumento", () => {
     const config = createProgram().commands.find((command) => command.name() === "config");
     expect(config).toBeDefined();

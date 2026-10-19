@@ -1,34 +1,17 @@
 /** Configuração global do harness, sem chamadas a providers ou ao servidor MCP. */
 import { createInterface } from "node:readline";
 import { isIP } from "node:net";
-import { Writable, type Readable } from "node:stream";
+import type { Writable, Readable } from "node:stream";
 import type { Command } from "commander";
 import { buildMcpConnection, getDefaultMcpConnection, globalConfigPath, readGlobalConfig, removeMcpConnection, saveMcpConnection, setDefaultMcpConnection, type GlobalConfig } from "../config/global.js";
 import { createLineIO, InputEndedError } from "./line-io.js";
+import { PromptOutput } from "./private-input.js";
+import { configureApi, configureApiWithIO } from "./api-login.js";
 
 export interface ConfigCommandOptions {
   input?: Readable;
   output?: Writable;
   environment?: NodeJS.ProcessEnv;
-}
-
-/** Todo eco do readline passa aqui; tokens e entrada antecipada ficam ocultos. */
-class PromptOutput extends Writable {
-  echo = false;
-  readonly isTTY = true;
-  readonly columns: number;
-
-  constructor(private readonly target: Writable) {
-    super();
-    this.columns = (target as Writable & { columns?: number }).columns ?? 80;
-  }
-
-  override _write(chunk: Buffer, encoding: BufferEncoding, callback: (error?: Error | null) => void): void {
-    // Decide antes de enfileirar no destino, sem reavaliar echo num callback
-    // futuro que poderia pertencer a outra pergunta.
-    if (this.echo) this.target.write(chunk, encoding);
-    callback();
-  }
 }
 
 function suggestedPort(address: string): number {
@@ -80,10 +63,15 @@ async function configure(options: ConfigCommandOptions, direct = false): Promise
     const path = globalConfigPath(environment);
     let choice = "1";
     if (!direct) {
-      write("Configuração do Capivara\n\n  1) Adicionar MCP\n  2) Listar MCPs\n  3) Definir MCP padrão\n  4) Remover MCP\n  0) Sair\n\n");
+      write("Configuração do Capivara\n\n  1) Adicionar MCP\n  2) Listar MCPs\n  3) Definir MCP padrão\n  4) Remover MCP\n  5) Configurar API\n  0) Sair\n\n");
       choice = (await ask("Opção [1]: ")).trim() || "1";
     }
     if (choice === "0") return;
+    if (choice === "5") {
+      // Reutiliza a fila: um segundo readline perderia respostas já coladas.
+      await configureApiWithIO({ ...io, secret: (prompt) => ask(prompt, true) }, { environment });
+      return;
+    }
     if (["2", "3", "4"].includes(choice)) {
       const config = await readGlobalConfig(path);
       if (config.mcp.servers.length === 0) { write("Nenhum MCP configurado. Use capivara config para adicionar.\n"); return; }
@@ -102,7 +90,7 @@ async function configure(options: ConfigCommandOptions, direct = false): Promise
       }
       return;
     }
-    if (choice !== "1") { write("Opção inválida. Escolha 1, 2, 3, 4 ou 0 em capivara config.\n"); process.exitCode = 2; return; }
+    if (choice !== "1") { write("Opção inválida. Escolha 1, 2, 3, 4, 5 ou 0 em capivara config.\n"); process.exitCode = 2; return; }
 
     const address = (await ask("Endereço do MCP (host ou URL): ")).trim();
     const suggested = suggestedPort(address);
@@ -132,8 +120,10 @@ async function configure(options: ConfigCommandOptions, direct = false): Promise
 }
 
 export function registerConfigCommand(program: Command, options: ConfigCommandOptions = {}): void {
-  const config = program.command("config").description("Configura conexões MCP globais, usadas em todos os projetos").action(async () => { await configure(options); });
-  config.command("add").description("Adiciona uma conexão global")
-    .command("mcp").description("Pergunta endereço, porta e token do MCP")
+  const config = program.command("config").description("Configura conexões MCP e chaves de API globais").action(async () => { await configure(options); });
+  const add = config.command("add").description("Adiciona uma conexão global");
+  add.command("mcp").description("Pergunta endereço, porta e token do MCP")
     .action(async () => { await configure(options, true); });
+  add.command("api [provider]").description("Configura uma chave de API com entrada oculta")
+    .action(async (provider?: string) => { await configureApi(provider, options); });
 }

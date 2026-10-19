@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executarEmParalelo, type ParaleloOptions } from "../../src/loop/paralelo.js";
 import { MARCA_DE_INSTALACAO_NODE, registrarInstalacaoNode, runtimeNode } from "../../src/loop/instalacao-node.js";
 import { runPaths } from "../../src/state/paths.js";
+import { comandoDeInstalacao } from "../../src/loop/worktree.js";
 
 const run = promisify(execFile);
 const ABI = "The module 'sqlite.node' was compiled against a different Node.js version using NODE_MODULE_VERSION 141. This version of Node.js requires NODE_MODULE_VERSION 137.";
@@ -56,6 +57,86 @@ function opcoes(extra: Partial<ParaleloOptions> = {}) {
 }
 
 describe("ambiente da árvore integrada", () => {
+  it("cache ignorado já versionado não interrompe a integração nem a fase seguinte", async () => {
+    const generated = ["node_modules/better-sqlite3/build/Makefile", "server/node_modules/.vite/vitest/results.json"];
+    for (const path of generated) {
+      await mkdir(join(raiz, path, ".."), { recursive: true });
+      await writeFile(join(raiz, path), "versão legada\n");
+      await git(["add", "-f", "--", path]);
+    }
+    await git(["commit", "-qm", "dependências versionadas anteriormente"]);
+    const cenario = opcoes();
+    cenario.options.sessions = [cenario.options.sessions[0]!, { ...cenario.options.sessions[0]!, id: "P08", number: 8 }];
+    cenario.rodar.mockImplementation(async (session, execucao) => {
+      expect(await execucao.conferirPrincipal()).toEqual([]);
+      const file = `entrega-${session.id}.txt`;
+      await writeFile(join(execucao.workRoot, file), "entrega aprovada\n");
+      await git(["add", "--", file], execucao.workRoot);
+      await git(["commit", "-qm", `feat: ${session.id}`], execucao.workRoot);
+      return { status: "complete", committed: true, message: "entregue", cycles: 1 };
+    });
+    let checks = 0;
+    cenario.testRunner.mockImplementation(async () => {
+      checks += 1;
+      for (const path of generated) await writeFile(join(raiz, path), `gerado pela suíte ${checks}\n`);
+      return { exitCode: 0, output: "suite completa" };
+    });
+    const result = await executarEmParalelo(cenario.options);
+    expect(result.parada, cenario.anuncios.join("\n")).toBeNull();
+    expect(cenario.rodar).toHaveBeenCalledTimes(2);
+    expect(cenario.testRunner).toHaveBeenCalledTimes(2);
+    expect(await git(["log", "-2", "--format=%s"])).toBe("feat: P08\nfeat: P07");
+    expect(await git(["show", `HEAD:${generated[0]}`])).toBe("versão legada");
+    expect(await readFile(join(raiz, generated[0]!), "utf8")).toBe("gerado pela suíte 2\n");
+    expect(cenario.anuncios.join("\n")).toContain("dependências locais ignoradas");
+  });
+
+  it.each(["package-lock.json", "npm-shrinkwrap.json"])("lockfile %s ignorado não vira autoridade da instalação", async (lockfile) => {
+    await git(["rm", "--cached", "package-lock.json"]);
+    await rm(join(raiz, "package-lock.json"));
+    await writeFile(join(raiz, lockfile), "lockfile local obsoleto");
+    await writeFile(join(raiz, ".gitignore"), `node_modules/\n.capivara/\n${lockfile}\n`);
+    expect(await comandoDeInstalacao(raiz)).toBe("npm install --no-audit --no-fund --no-package-lock --engine-strict");
+    expect(await readFile(join(raiz, lockfile), "utf8")).toBe("lockfile local obsoleto");
+  });
+
+  it("lockfile rastreado continua usando ci mesmo casando com o ignore", async () => {
+    await writeFile(join(raiz, ".gitignore"), "node_modules/\npackage-lock.json\n");
+    expect(await comandoDeInstalacao(raiz)).toBe("npm ci --no-audit --no-fund --engine-strict");
+  });
+
+  it("sem Git mantém ci para um lockfile existente; sem lockfile instala sem criá-lo", async () => {
+    expect(await comandoDeInstalacao(cache)).toBe("npm install --no-audit --no-fund --no-package-lock --engine-strict");
+    await writeFile(join(cache, "package-lock.json"), "lockfile");
+    expect(await comandoDeInstalacao(cache)).toBe("npm ci --no-audit --no-fund --engine-strict");
+  });
+
+  it("integra manifesto novo com lockfile ignorado antigo sem refazer a fase aprovada", async () => {
+    await git(["rm", "--cached", "package-lock.json"]);
+    await writeFile(join(raiz, ".gitignore"), "node_modules/\n.capivara/\npackage-lock.json\n");
+    await git(["add", ".gitignore"]);
+    await git(["commit", "-qm", "política sem lockfile versionado"]);
+    const lockAntes = await readFile(join(raiz, "package-lock.json"), "utf8");
+    const cenario = opcoes();
+    const original = cenario.options.rodar;
+    cenario.options.rodar = async (session, execucao) => {
+      await writeFile(join(execucao.workRoot, "package.json"), '{"dependencies":{"sqlite":"1","router":"2"}}');
+      await git(["add", "package.json"], execucao.workRoot);
+      return original(session, execucao);
+    };
+    cenario.instalar.mockImplementation(async (command) => command.startsWith("npm ci")
+      ? { exitCode: 1, output: "npm error Missing: router@2 from lock file" }
+      : { exitCode: 0, output: "dependências instaladas sem usar lockfile local" });
+    const resultado = await executarEmParalelo(cenario.options);
+    expect(resultado.parada).toBeNull();
+    expect(cenario.instalar).toHaveBeenCalledExactlyOnceWith("npm install --no-audit --no-fund --no-package-lock --engine-strict", raiz);
+    expect(cenario.rodar).toHaveBeenCalledOnce();
+    expect(cenario.testRunner).toHaveBeenCalledOnce();
+    expect(await readFile(join(raiz, "package-lock.json"), "utf8")).toBe(lockAntes);
+    expect(await git(["status", "--porcelain"])).toBe("");
+    expect(await git(["log", "--format=%s", "-1"])).toBe("feat: entrega");
+  });
+
   it("runtime mudou sem alterar manifesto: não copia instalação antiga e instala antes de G2", async () => {
     await registrarInstalacaoNode(raiz, { ...runtimeNode(), node: "v25.9.0", abi: "runtime-antigo" });
     let copiou = true;

@@ -27,6 +27,38 @@ function evento(partial: Partial<ProgressEvent>): ProgressEvent {
 }
 
 describe("painel do harness", () => {
+  it("atividade real atualiza AGORA sem zerar o tempo da chamada ou avançar gates", () => {
+    let time = Date.parse("2026-10-18T00:00:00Z");
+    const p = progresso(() => new Date(time));
+    p.beginCall("agente 1 · P01");
+    time += 30_000;
+    p.modelActivity("agente 1 · P01: alterou arquivo · backend/src/server.ts");
+    time += 5_000;
+    const model = p.model();
+    expect(model.activity).toMatchObject({ detail: "agente 1 · P01: alterou arquivo · backend/src/server.ts", sinceSeconds: 35, lastEventSeconds: 5 });
+    expect(model.work?.find(field => field.label === "Último evento")?.value).toBe("há 5s");
+    const rendered = renderDashboard({ ...model, width: 160, height: 50 });
+    expect(rendered).toContain("alterou arquivo");
+    expect(rendered).toContain("último evento há");
+    expect(model.pipeline.every(step => step.state === "aguardando")).toBe(true);
+    p.paused("pausa segura");
+    p.modelActivity("evento tardio");
+    expect(p.model().activity).toMatchObject({ kind: "pausado", detail: "pausa segura" });
+    p.beginCall("agente 2 · P02");
+    expect(p.model().activity.lastEventSeconds).toBeUndefined();
+  });
+
+  it("o evento de outra chamada paralela usa o relógio de quem o emitiu", () => {
+    const started = Date.parse("2026-10-18T00:00:00Z");
+    let time = started;
+    const p = progresso(() => new Date(time));
+    p.beginCall("agente 1");
+    time += 20_000;
+    p.beginCall("agente 2");
+    time += 10_000;
+    p.modelActivity("agente 1: executando comando", started);
+    expect(p.model().activity).toMatchObject({ sinceSeconds: 30, lastEventSeconds: 0 });
+  });
   it("começa com todos os passos do ciclo aguardando", () => {
     const model = progresso().model();
     expect(model.pipeline).toHaveLength(PIPELINE_STEPS.length);

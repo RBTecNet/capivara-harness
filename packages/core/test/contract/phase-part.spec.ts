@@ -275,6 +275,36 @@ describe("o envelope é do harness, as tasks são do modelo", () => {
     expect(lido.ok, lido.ok ? "" : lido.errors.map((e) => `${e.code} ${e.message}`).join("; ")).toBe(true);
   });
 
+  it("lê a resposta com linhas em branco e Feature tests em lista, sem perder conteúdo", () => {
+    const resposta = [
+      "- [ ] **Task:** Implementar o dashboard",
+      "",
+      "  - **Acceptance criteria:**",
+      "",
+      "    - GET /api/dashboard retorna contagens reais do SQLite",
+      "",
+      "    - O cliente obterContagens usa GET /api/dashboard",
+      "",
+      "  - **Feature tests:**",
+      "    - contagens_insercao → contagens refletem inserções via API",
+      "    - contagens_exclusao → exclusão diminui a contagem",
+      "",
+      "  - **Traces:** US-4.1, workflow 4, tarefas",
+    ].join("\n");
+    const { tasks: extraidas } = extractTasks(resposta);
+    const fase = assemblePhase({ ...envelope, number: 1, dependsOn: "none" }, extraidas);
+    const result = parsePhases(`# Teste — Project Phases\n\n<!-- inputs: skeleton.md@sha256:aaaaaaaaaaaa -->\n\n${fase}`);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.phases[0]?.tasks[0]).toMatchObject({
+      title: "Implementar o dashboard",
+      acceptanceCriteria: ["GET /api/dashboard retorna contagens reais do SQLite", "O cliente obterContagens usa GET /api/dashboard"],
+      featureTests: ["contagens_insercao → contagens refletem inserções via API", "contagens_exclusao → exclusão diminui a contagem"],
+      traces: ["US-4.1", "workflow 4", "tarefas"],
+    });
+    expect(result.document.phases[0]?.markdown.trim()).toBe(fase.trim());
+  });
+
   it("heading que o modelo escreveu apesar de tudo é descartado, não corrigido", () => {
     // Não importa que número ele tenha posto: aquela linha não é usada.
     const comLixo = `Claro! Aqui vai:\n\n## Phase 9: Nome Errado\n\n**Goal:** errado\n\n${tasks}`;
@@ -304,6 +334,24 @@ describe("o envelope é do harness, as tasks são do modelo", () => {
 });
 
 describe("critérios colados na linha do rótulo", () => {
+  it("recupera fechamento de negrito perdido sem alterar o conteúdo dos campos", () => {
+    const raw = "- [ ] **Task:** Validar categoria\n  - **Acceptance criteria:\n    - Nome duplicado retorna 400\n  - **Feature tests:* nome_unico -> rejeita duplicata\n  - **Traces: categorias";
+    const normalized = extractTasks(raw);
+    expect(normalized.tasks).toBe(raw.replace("**Acceptance criteria:", "**Acceptance criteria:**").replace("**Feature tests:* ", "**Feature tests:** ").replace("**Traces: ", "**Traces:** "));
+    const parsed = parsePhases(`# Teste — Project Phases\n\n<!-- inputs: skeleton.md@sha256:000000000000 -->\n\n${assemblePhase({ number: 1, title: "Categorias", goal: "valida", dependsOn: "none", covers: ["categorias"] }, normalized.tasks)}`);
+    expect(parsed.ok, parsed.ok ? "" : JSON.stringify(parsed.errors)).toBe(true);
+    expect(extractTasks(normalized.tasks).tasks).toBe(normalized.tasks);
+  });
+
+  it("não inventa critério quando só o rótulo existe, nem trata prosa como campo", () => {
+    const raw = "- [ ] **Task:** Validar\n  - **Acceptance criteria:\n  - **Traces:** categorias\n  - Uma explicação sobre **Acceptance criteria: sem instrução";
+    const normalized = extractTasks(raw);
+    expect(normalized.tasks).toContain("Uma explicação sobre **Acceptance criteria: sem instrução");
+    const parsed = parsePhases(`# Teste — Project Phases\n\n<!-- inputs: skeleton.md@sha256:000000000000 -->\n\n${assemblePhase({ number: 1, title: "Base", goal: "g", dependsOn: "none", covers: ["categorias"] }, normalized.tasks)}`);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.errors.some(error => error.code === "I-08")).toBe(true);
+  });
+
   it("o ponto e vírgula que a lista usou vira a quebra dos itens", () => {
     const { content, applied } = repairInlineCriteria(
       "- **Acceptance criteria:** a tabela existe; o índice existe; o seed roda",

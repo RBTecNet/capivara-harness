@@ -165,8 +165,32 @@ export async function lerStatus(root: string, pathspec: readonly string[] = ["."
   return entradas;
 }
 
+const PASTAS_GERADAS = new Set(["node_modules", "dist", "build", "coverage", ".cache", ".vite", ".next", ".nuxt", ".turbo", "test-results", "playwright-report", "target", "__pycache__", ".pytest_cache"]);
+
+/** Saídas locais, inclusive legadas no índice, que a política Git manda ignorar. */
+export async function artefatosLocaisIgnorados(root: string, caminhos: readonly string[]): Promise<Set<string>> {
+  const candidatas = [...new Set(caminhos.filter(caminho => caminho.split("/").slice(0, -1).some(parte => PASTAS_GERADAS.has(parte)) || caminho.endsWith(".tsbuildinfo")))];
+  if (candidatas.length === 0) return new Set();
+  return new Promise(resolve => {
+    // --stdin evita ARG_MAX e -z conserva nomes com espaços, curingas ou quebras.
+    // Sem --no-index, o Git esconderia justamente os ignorados já versionados.
+    const child = execFile("git", ["check-ignore", "--no-index", "-z", "--stdin"], { cwd: root, ...GRANDE }, (erro, stdout) => {
+      // Falha na consulta conserva TODOS os caminhos como alterações do produto.
+      if (erro && erro.code !== 1) { resolve(new Set()); return; }
+      resolve(new Set(stdout.split("\0").filter(Boolean)));
+    });
+    child.stdin?.on("error", () => { /* a saída do processo decide; não ocultar erro de Git */ });
+    child.stdin?.end(`${candidatas.join("\0")}\0`);
+  });
+}
+
+/** Mantém a consulta específica de dependências para quem precisa desse recorte. */
+export async function dependenciasLocaisIgnoradas(root: string, caminhos: readonly string[]): Promise<Set<string>> {
+  return artefatosLocaisIgnorados(root, caminhos.filter(caminho => caminho.split("/").slice(0, -1).includes("node_modules")));
+}
+
 /**
- * O que um `git add -A` levaria, menos o `.env` que o PRÓPRIO harness criou.
+ * Alterações do produto: sem dependências locais ignoradas ou `.env` do harness.
  *
  * O §46 manda o harness semear o `.env` a partir do `.env.example` para os
  * gates rodarem. Esse arquivo é do harness — a marca na primeira linha diz —, e
@@ -179,7 +203,8 @@ export async function lerStatus(root: string, pathspec: readonly string[] = ["."
 export async function alteracoesParaCommit(root: string, pathspec?: readonly string[]): Promise<EntradaDoStatus[]> {
   const entradas = await lerStatus(root, pathspec);
   const doHarness = await ambienteEhDescartavel(root);
-  return entradas.filter((entrada) => !(entrada.naoVersionado && (
+  const locais = await artefatosLocaisIgnorados(root, entradas.map(entrada => entrada.caminho));
+  return entradas.filter((entrada) => !locais.has(entrada.caminho) && !(entrada.naoVersionado && (
     (doHarness && entrada.caminho === ARQUIVO_DE_AMBIENTE) || entrada.caminho === `node_modules/${MARCA_DE_INSTALACAO_NODE}`
   )));
 }
@@ -201,12 +226,28 @@ export async function adicionarExatamente(
   const pasta = await mkdtemp(join(tmpdir(), "capivara-pathspec-"));
   try {
     const lista = join(pasta, "caminhos");
-    await writeFile(lista, `${caminhos.join("\0")}\0`);
-    await run("git", ["add", modo, `--pathspec-from-file=${lista}`, "--pathspec-file-nul"], {
+    const opcoes = {
       cwd: root,
       env: { ...env, GIT_LITERAL_PATHSPECS: "1" },
       ...GRANDE,
-    });
+    };
+    let lotes: { modo: "-A" | "-u"; caminhos: readonly string[] }[] = [{ modo, caminhos }];
+    if (modo === "-A") {
+      // Um .gitignore novo pode ignorar o pai de arquivos já versionados.
+      // -A com esses caminhos explícitos falha; -u conserva suas alterações e
+      // remoções. Consultar ESTE índice (inclusive o temporário), sem usar -f.
+      const { stdout } = await run("git", ["ls-files", "--cached", "-z"], opcoes);
+      const versionados = new Set(stdout.split("\0").filter(Boolean));
+      lotes = [
+        { modo: "-u", caminhos: caminhos.filter(caminho => versionados.has(caminho)) },
+        { modo: "-A", caminhos: caminhos.filter(caminho => !versionados.has(caminho)) },
+      ];
+    }
+    for (const lote of lotes) {
+      if (lote.caminhos.length === 0) continue;
+      await writeFile(lista, `${lote.caminhos.join("\0")}\0`);
+      await run("git", ["add", lote.modo, `--pathspec-from-file=${lista}`, "--pathspec-file-nul"], opcoes);
+    }
   } finally {
     await rm(pasta, { recursive: true, force: true });
   }

@@ -117,6 +117,20 @@ describe("precedência", () => {
     });
   });
 
+  it.each([{}, { parallel: "2" }])("todos como o builder limpa overrides salvos com flags %j", flags => {
+    const original = JSON.stringify(ARQUIVO_PARALELO);
+    expect(resolverEstrategia({ ...flags, workersAsBuilder: true }, ARQUIVO_PARALELO)).toMatchObject({
+      ok: true, origem: "flags", estrategia: { mode: "parallel", maxConcurrency: flags.parallel ? 2 : 3, workers: [] },
+    });
+    expect(JSON.stringify(ARQUIVO_PARALELO)).toBe(original);
+  });
+
+  it("todos como o builder exige paralelo e não pode contradizer workers próprios", () => {
+    expect(resolverEstrategia({ workersAsBuilder: true }, AUSENTE)).toMatchObject({ ok: false });
+    expect(resolverEstrategia({ workersAsBuilder: true, serial: true }, ARQUIVO_PARALELO)).toMatchObject({ ok: false });
+    expect(resolverEstrategia({ workersAsBuilder: true, parallel: "2", worker: ["codex"] }, ARQUIVO_PARALELO)).toMatchObject({ ok: false });
+  });
+
   it("arquivo vence o padrão", () => {
     expect(resolverEstrategia({}, ARQUIVO_PARALELO)).toMatchObject({ ok: true, origem: "arquivo", estrategia: { mode: "parallel" } });
   });
@@ -150,6 +164,16 @@ describe("precedência", () => {
 });
 
 describe("os agentes do pool", () => {
+  it("modelo próprio usa seu padrão, sem herdar a variante de outro modelo da mesma CLI", () => {
+    const builder = { ...BUILDER, provider: "opencode", model: "openrouter/moonshotai/kimi-k3", effort: "none" };
+    const agentes = papeisDosAgentes({ mode: "parallel", maxConcurrency: 3, workers: [
+      { provider: "opencode", model: "openrouter/z-ai/glm-5.3-prime", effort: "" },
+      { provider: "opencode", model: "openrouter/moonshotai/kimi-k3", effort: "" },
+      { provider: "opencode", model: "openrouter/z-ai/glm-5.3-prime", effort: "high" },
+    ] }, builder);
+    expect(agentes.map(a => a.config.effort)).toEqual(["", "none", "high"]);
+  });
+
   it("agente sem configuração própria é o builder; o declarado substitui só o que declara", () => {
     const agentes = papeisDosAgentes(
       { mode: "parallel", maxConcurrency: 3, workers: [{ provider: "codex", model: "", effort: "low" }, { provider: "claude", model: "", effort: "" }] },
@@ -184,6 +208,7 @@ describe("os agentes do pool", () => {
 
   it("intensidade ignorada pela CLI é limitação dita, e não erro", async () => {
     expect(aceitaEffort("codex")).toBe(true);
+    expect(aceitaEffort("opencode")).toBe(true);
     expect(aceitaEffort("cursor")).toBe(false);
     const conferencia = await conferirAgentes([{ config: { ...BUILDER, provider: "cursor", effort: "high" } }, { config: BUILDER }], async () => true);
     expect(conferencia.erros).toEqual([]);

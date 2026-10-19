@@ -13,10 +13,14 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { renderEscolhaNumerada, type EscolhaNumerada } from "./escolha.js";
+import type { EnvironmentRequirement } from "../contract/environment.js";
+import { runtimeEnvironment } from "../provider/runtime-env.js";
+import { packagesInReadinessProbe, probeManifests } from "./prerequisite-workspace.js";
+import { prepareReadinessProbe } from "./readiness-probe.js";
 
 const run = promisify(execFile);
 
-export interface Prerequisite {
+export interface Prerequisite extends EnvironmentRequirement {
   /** Como a tecnologia aparece na documentação. */
   technology: string;
   /** Executável que prova a presença dela. */
@@ -68,15 +72,37 @@ export function detectPrerequisites(skeleton: string): Prerequisite[] {
 export interface PrerequisiteStatus extends Prerequisite {
   present: boolean;
   path: string | null;
+  evidence?: string;
+  /** Onde a sonda de prontidão foi executada; não é o caminho do executável. */
+  cwd?: string;
 }
 
-export async function checkPrerequisites(prerequisites: readonly Prerequisite[]): Promise<PrerequisiteStatus[]> {
+export async function checkPrerequisites(prerequisites: readonly Prerequisite[], options: { cwd?: string; environment?: NodeJS.ProcessEnv } = {}): Promise<PrerequisiteStatus[]> {
   const statuses: PrerequisiteStatus[] = [];
   for (const prerequisite of prerequisites) {
-    const path = await run("which", [prerequisite.binary])
+    const settings = { ...(options.cwd ? { cwd: options.cwd } : {}), env: runtimeEnvironment({ ...process.env, ...options.environment }), timeout: 5_000, maxBuffer: 64 * 1024 };
+    const path = await run("which", [prerequisite.binary], settings)
       .then(({ stdout }) => stdout.trim() || null)
       .catch(() => null);
-    statuses.push({ ...prerequisite, present: path !== null, path });
+    if (path !== null && (prerequisite.checkArgs?.length ?? 0) > 0) {
+      const owners = await probeManifests(options.cwd ?? process.cwd(), packagesInReadinessProbe(prerequisite));
+      const directories = owners.length ? owners.map(owner => owner.directory) : [options.cwd ?? process.cwd()];
+      const checks = [];
+      for (const cwd of directories) {
+        const probe = await prepareReadinessProbe(prerequisite);
+        try {
+          const checked = await run(path, probe.args, { ...settings, cwd })
+            .then(({ stdout, stderr }) => ({ present: true, evidence: `${stdout}${stderr}`.trim() }))
+            .catch((error: unknown) => ({ present: false, evidence: error instanceof Error ? error.message : String(error) }));
+          checks.push({ ...checked, cwd, evidence: `${probe.annotation}${checked.evidence}` });
+        } finally {
+          await probe.cleanup();
+        }
+      }
+      statuses.push({ ...prerequisite, path, present: checks.every(check => check.present),
+        ...(directories.length === 1 ? { cwd: directories[0]! } : {}),
+        evidence: checks.map(check => `cwd: ${check.cwd}\n${check.evidence}`).join("\n\n") });
+    } else statuses.push({ ...prerequisite, present: path !== null, path });
   }
   return statuses;
 }
@@ -86,8 +112,8 @@ export function describeMissing(statuses: readonly PrerequisiteStatus[], systemI
   if (missing.length === 0) return "";
   const list = missing.map((status) => `${status.technology} (${status.binary})`).join(", ");
   return systemInstallAllowed
-    ? `a stack decidida exige ${list}, ausente(s) nesta máquina; o executor tem permissão de sistema e vai instalar`
-    : `a stack decidida exige ${list}, ausente(s) nesta máquina. Instale, ou rode com --allow-system-install para o executor instalar`;
+    ? `a stack decidida exige ${list}, ausente(s) ou sem prontidão nesta máquina; preparar antes de iniciar o desenvolvimento`
+    : `a stack decidida exige ${list}, ausente(s) ou sem prontidão nesta máquina. Instale, ou rode com --allow-system-install para preparar antes do desenvolvimento`;
 }
 
 /**
@@ -129,6 +155,7 @@ function resumir(decisao: string): string {
 export type PrerequisiteChoice = "instalar" | "verificar" | "abortar";
 
 export interface ResolutionIO {
+  verify?: (requirements: readonly Prerequisite[]) => Promise<PrerequisiteStatus[]>;
   /** Mostra a situação e devolve a escolha do desenvolvedor. */
   choose: (missing: readonly PrerequisiteStatus[]) => Promise<PrerequisiteChoice>;
   /** Uma sessão focada do executor, com escopo de instalar e nada mais. */
@@ -137,7 +164,7 @@ export interface ResolutionIO {
 }
 
 export type Resolution =
-  | { resolved: true; installed: string[] }
+  | { resolved: true; installed: string[]; statuses: PrerequisiteStatus[] }
   | { resolved: false; reason: string; missing: PrerequisiteStatus[] };
 
 /**
@@ -160,7 +187,7 @@ export async function resolvePrerequisites(
 
   for (let rodada = 1; rodada <= maxRounds; rodada += 1) {
     const faltando = atual.filter((status) => !status.present);
-    if (faltando.length === 0) return { resolved: true, installed: instalados };
+    if (faltando.length === 0) return { resolved: true, installed: instalados, statuses: atual };
 
     const escolha = await io.choose(faltando);
     if (escolha === "abortar") {
@@ -177,19 +204,23 @@ export async function resolvePrerequisites(
     }
 
     // A palavra de quem instalou não conta: pergunta-se ao sistema.
-    const reverificados = await checkPrerequisites(faltando);
+    const reverificados = await (io.verify ?? checkPrerequisites)(faltando);
     for (const status of reverificados) {
       if (status.present) {
         instalados.push(status.technology);
         io.announce(`  ${status.technology} encontrado em ${status.path}`);
       } else {
-        io.announce(`  ${status.technology} continua ausente (${status.binary} não está no PATH)`);
+        io.announce(status.path
+          ? `  ${status.technology}: executável encontrado em ${status.path}, mas a prontidão falhou${status.cwd ? ` em ${status.cwd}` : ""}`
+          : `  ${status.technology} continua ausente (${status.binary} não está no PATH)`);
+        if (status.path && status.evidence) io.announce(`    ${status.evidence}`);
       }
     }
     atual = [...atual.filter((status) => status.present), ...reverificados];
   }
 
   const faltando = atual.filter((status) => !status.present);
+  if (faltando.length === 0) return { resolved: true, installed: instalados, statuses: atual };
   return {
     resolved: false,
     reason: `os pré-requisitos continuaram ausentes depois de ${maxRounds} tentativas`,

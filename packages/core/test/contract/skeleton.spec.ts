@@ -15,6 +15,7 @@ const LIMITES = { maxTasksPerPhase: 15 };
 
 const COMPLETO = {
   contract: SKELETON_CONTRACT,
+  environment: [],
   projectName: "Quadro Kanban",
   stack: [
     { component: "Linguagem", decision: "TypeScript 5.8" },
@@ -40,6 +41,21 @@ const COMPLETO = {
 const comoTexto = (valor: unknown): string => JSON.stringify(valor);
 
 describe("leitura do esqueleto", () => {
+  it("preserva sondas concretas de ambiente no contrato e no markdown", () => {
+    const environment = [{ technology: "Node compatível", binary: "node", systemLevel: false, checkArgs: ["-e", "if (+process.versions.node.split('.')[0] < 22) process.exit(1)"], installHint: "Node 22 ou superior" }];
+    const parsed = parseSkeleton(comoTexto({ ...COMPLETO, environment }), LIMITES);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.skeleton).toHaveProperty("environment", environment);
+    expect(renderSkeleton(parsed.skeleton)).toContain("Node compatível");
+    expect(renderSkeleton(parsed.skeleton)).toContain("process.versions.node");
+    expect(sliceForPhase(parsed.skeleton, 1)).toContain("Ambiente aprovado antes da construção");
+  });
+
+  it("não deixa uma declaração inválida de ambiente sumir silenciosamente", () => {
+    expect(parseSkeleton(comoTexto({ ...COMPLETO, environment: [{ technology: "Node", binary: "node", checkArgs: "--version" }] }), LIMITES).ok).toBe(false);
+  });
+
   it("lê um esqueleto completo", () => {
     const lido = parseSkeleton(comoTexto(COMPLETO), LIMITES);
     expect(lido.ok).toBe(true);

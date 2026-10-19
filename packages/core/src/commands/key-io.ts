@@ -311,6 +311,7 @@ export async function chooseInBox(
 }
 
 export interface KeyPrompter extends LineIO {
+  secret: (prompt: string) => Promise<string>;
   /** A lista com cursor; devolve o índice escolhido, ou `defaultIndex` na linha de manter. */
   select: (title: string, choices: readonly Choice[], defaultIndex: number, keepLabel?: string) => Promise<number>;
   /** O campo de várias linhas; termina com uma linha só com `.` ou Ctrl-D. */
@@ -387,6 +388,13 @@ export function createKeyPrompter(options: KeyPrompterOptions): KeyPrompter {
   };
 
   const prompter: KeyPrompter = {
+    secret: (prompt) => {
+      const spec: TextFieldSpec = { label: prompt, secret: true };
+      return ask(prompt, async () => (await session.text(spec, (state) => {
+        current = { kind: "text", spec, state };
+        draw();
+      })) ?? "", () => "(oculto)");
+    },
     write: (text) => {
       if (finished) {
         write(text);

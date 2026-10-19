@@ -3,6 +3,19 @@ import { sanitizarTerminal } from "../../src/tui/sanitize.js";
 import { LogDoAgente, LogsDosAgentes, descreverEventoDoAgente, descreverProgressoDaFase } from "../../src/tui/worker-logs.js";
 import { abrirPainel, reduzirPainel, renderPainelDoAgente, type ConteudoDoPainel, type EstadoDoPainel, type Medidas } from "../../src/tui/worker-log-panel.js";
 import { WorkerTracker, renderWorkerRows, teclaNaCaixaDeAgentes, type WorkerRow } from "../../src/tui/build-workers.js";
+
+it("atividade respeita slot e fase, aparece na linha e desaparece ao liberar o agente", () => {
+  const tracker = new WorkerTracker(["modelo-a", "modelo-b"]);
+  tracker.apply({ slot: 0, phaseId: "P01", state: "trabalhando", detail: "" });
+  tracker.apply({ slot: 1, phaseId: "P02", state: "trabalhando", detail: "" });
+  tracker.activity(0, "P02", "não pertence a este agente");
+  expect(tracker.rows()[0]!.activity).toBeUndefined();
+  tracker.activity(0, "P01", "testes do executor: 62 passaram, 2 falharam");
+  expect(tracker.rows()[1]!.activity).toBeUndefined();
+  expect(renderWorkerRows(tracker.rows(), [], 160, { enabled: false })[0]).toContain("62 passaram");
+  tracker.apply({ slot: 0, phaseId: null, state: "livre", detail: "P01 integrada" });
+  expect(tracker.rows()[0]!.activity).toBeUndefined();
+});
 import type { Key } from "../../src/tui/keys.js";
 
 const ESC = "\u001B";

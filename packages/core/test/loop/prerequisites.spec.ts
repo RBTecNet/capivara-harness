@@ -1,3 +1,4 @@
+import { certifyCurrentPlan } from "../support/current-plan.js";
 import { describe, expect, it } from "vitest";
 import {
   checkPrerequisites,
@@ -54,7 +55,7 @@ describe("mensagem do que falta", () => {
   const faltando = [{ technology: "PostgreSQL", binary: "psql", systemLevel: true, present: false, path: null }];
 
   it("com instalação de sistema ligada, é aviso e diz quem vai instalar", () => {
-    expect(describeMissing(faltando, true)).toContain("o executor tem permissão de sistema e vai instalar");
+    expect(describeMissing(faltando, true)).toContain("preparar antes de iniciar o desenvolvimento");
   });
 
   it("com ela desligada, diz o que fazer", () => {
@@ -289,6 +290,7 @@ describe("um build só reclama da árvore depois de saber que ninguém está esc
     await mkdir(join(projectRoot, ".capivara", "init"), { recursive: true });
     const plano = "# X — Project Phases\n\n<!-- inputs: skeleton.md@sha256:aaaaaaaaaaaa -->\n\n## Overview\n\ntexto\n";
     await writeFile(join(projectRoot, ".capivara/init/project-phases.md"), plano, "utf8");
+    await certifyCurrentPlan(projectRoot);
 
     // Alguém já está rodando este mesmo plano.
     const lock = await acquireLock({ projectRoot, runId: runIdFor("build", sha12(plano)), command: "build" });

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -28,6 +28,147 @@ function session(): PhaseSession {
 }
 
 const ok = (stdout = "feito"): EngineResult => ({ exitCode: 0, stdout, stderr: "", timedOut: null });
+
+it.each(["quota", "configuration"] as const)("recusa permanente %s do roteirista não gasta os próximos ciclos", async providerFailure => {
+  const target = session();
+  let reviews = 0;
+  const outcome = await runPhase({
+    projectRoot, runId: RUN, language: "pt-BR", engine: "opencode", session: target,
+    testCommand: null, commitsEnabled: false, maxCycles: 3,
+    flows: { workflows: [{ number: "4", name: "Navegação", steps: ["abre a aplicação"] }], resolveStart: async () => "npm start", runner: async () => { throw new Error("não abrir navegador sem roteiro"); } },
+    call: async call => {
+      if (call.role === "builder") { await writeFile(join(projectRoot, "produto.ts"), "export const pronto = true;\n"); return ok("CAPIVARA_BUILDER_STATUS: COMPLETE"); }
+      if (call.purpose) { reviews += 1; return { ...ok("recusa permanente"), exitCode: 1, providerFailure, engineError: true }; }
+      return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
+    },
+  });
+  expect(outcome).toMatchObject({ status: "failed", gate: "gate 0 — engine", cycles: 1 });
+  expect(reviews).toBe(1);
+});
+
+it.each(["roteiro", "timeout"] as const)("G4 recupera %s no segundo ciclo preservando builder, G2 e G3 aprovados", async failure => {
+  const target = session();
+  const calls: EngineCall[] = [];
+  let authors = 0;
+  let suites = 0;
+  let browsers = 0;
+  const invalid = "```ts\n// rascunho sem passos\nconst faltou = 'roteiro';\n```";
+  const valid = "```ts\nimport { test, expect } from '@playwright/test';\ntest('workflow 4', async ({ page }) => { await test.step('passo 1: abre a aplicação', async () => { await page.goto('/'); await expect(page.getByRole('main')).toBeVisible(); }); });\n```";
+  const outcome = await runPhase({
+    projectRoot, runId: RUN, language: "pt-BR", engine: "opencode", session: target,
+    testCommand: { command: "npm test", source: "teste", containerized: false }, commitsEnabled: false, maxCycles: 3,
+    testRunner: async () => { suites += 1; return { exitCode: 0, output: "1 passed" }; },
+    flows: { workflows: [{ number: "4", name: "Navegação", steps: ["abre a aplicação"] }], resolveStart: async () => "npm start",
+      runner: async () => { browsers += 1; return { exitCode: 0, output: "1 passed" }; } },
+    call: async call => {
+      calls.push(call);
+      if (call.role === "builder") { await writeFile(join(projectRoot, "produto.ts"), "export const pronto = true;\n"); return ok("CAPIVARA_BUILDER_STATUS: COMPLETE"); }
+      if (call.purpose === "flow-author") {
+        authors += 1;
+        if (failure === "timeout" && authors === 1) return { exitCode: 124, stdout: "", stderr: "rede interrompida", timedOut: "wall" };
+        if (failure === "roteiro" && authors <= 2) return ok(invalid);
+        expect(call.attempt).toBe(2);
+        if (failure === "roteiro") {
+          expect(call.prompt).toContain("const faltou");
+          expect(call.prompt).toContain("conferência estrutural");
+        }
+        return ok(valid);
+      }
+      return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
+    },
+  });
+  expect(outcome).toMatchObject({ status: "complete", cycles: 2 });
+  expect(calls.filter(call => call.role === "builder")).toHaveLength(1);
+  expect(calls.filter(call => call.role === "verifier" && !call.purpose)).toHaveLength(1);
+  expect(suites).toBe(1);
+  expect(browsers).toBe(1);
+  const events = await readEvents(runPaths(projectRoot, RUN).events);
+  expect(events.some(event => event.status === "retry" && event.detail.includes("roteiro"))).toBe(true);
+});
+
+it.each(["flow-author", "flow-triage"] as const)("timeout persistente de %s usa os ciclos disponíveis sem reconstruir o produto", async purpose => {
+  const target = session();
+  const calls: EngineCall[] = [];
+  let browsers = 0;
+  const notices: string[] = [];
+  const outcome = await runPhase({
+    projectRoot, runId: RUN, language: "pt-BR", engine: "opencode", session: target,
+    testCommand: null, commitsEnabled: false, maxCycles: 3, announce: line => notices.push(line),
+    flows: {
+      workflows: [{ number: "4", name: "Navegação", steps: ["abre a aplicação"] }],
+      resolveStart: async () => "npm start",
+      runner: async () => { browsers += 1; return { exitCode: 1, output: "  1) [workflow-4] › workflow-4.spec.ts:1:1 › workflow 4\nError: expect(locator).toBeVisible() failed\n1 failed" }; },
+    },
+    call: async call => {
+      calls.push(call);
+      if (call.role === "builder") {
+        await writeFile(join(projectRoot, "produto.ts"), "export const pronto = true;\n");
+        return ok("CAPIVARA_BUILDER_STATUS: COMPLETE");
+      }
+      const author = call.prompt.includes("CAPIVARA_FLOW");
+      const triage = call.prompt.includes("CAPIVARA_TRIAGE");
+      if (author || triage) {
+        const paths = runPaths(projectRoot, RUN);
+        const prompts = await readdir(paths.prompts).catch(() => []);
+        const header = author ? "CAPIVARA_FLOW" : "CAPIVARA_TRIAGE";
+        expect(await Promise.all(prompts.map(name => readFile(join(paths.prompts, name), "utf8")))).toEqual(expect.arrayContaining([expect.stringContaining(header)]));
+        if ((purpose === "flow-author" && author) || (purpose === "flow-triage" && triage)) {
+          return { exitCode: 124, stdout: "sessão interrompida", stderr: "", timedOut: "wall" };
+        }
+        return ok("```ts\nimport { test, expect } from '@playwright/test';\ntest('workflow 4', async ({ page }) => { await test.step('passo 1: abre a aplicação', async () => { await page.goto('/'); await expect(page.getByRole('main')).toBeVisible(); }); });\n```");
+      }
+      return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
+    },
+  });
+  expect(outcome).toMatchObject({ status: "failed", gate: "gate 0 — engine", cycles: 3 });
+  expect(calls.filter(call => call.role === "builder")).toHaveLength(1);
+  expect(calls.filter(call => call.purpose === purpose)).toHaveLength(3);
+  expect(browsers).toBe(purpose === "flow-author" ? 0 : 3);
+  expect(notices.join("\n")).toContain("G4");
+  const logs = await readdir(runPaths(projectRoot, RUN).logs);
+  const reviewLogs = logs.filter(name => name.includes(purpose === "flow-author" ? ".flow-4-" : ".triagem-"));
+  expect(reviewLogs).toHaveLength(3);
+  expect(await readFile(join(runPaths(projectRoot, RUN).logs, reviewLogs[0]!), "utf8")).toContain("sessão interrompida");
+  expect(await readFile(join(projectRoot, "produto.ts"), "utf8")).toContain("pronto = true");
+});
+
+it("falha estrutural do roteirista não gasta outro ciclo do construtor e preserva cada evidência", async () => {
+  const target = session();
+  let builders = 0;
+  let authors = 0;
+  let browsers = 0;
+  const outcome = await runPhase({
+    projectRoot, runId: RUN, language: "pt-BR", engine: "opencode", session: target,
+    testCommand: null, commitsEnabled: false, maxCycles: 3,
+    flows: { workflows: [{ number: "4", name: "Navegação", steps: ["abre a aplicação"] }], resolveStart: async () => "npm start", runner: async () => { browsers += 1; return { exitCode: 0, output: "1 passed" }; } },
+    call: async call => {
+      if (call.role === "builder") {
+        builders += 1;
+        await writeFile(join(projectRoot, "produto.ts"), "export const pronto = true;\n");
+        return ok("CAPIVARA_BUILDER_STATUS: COMPLETE");
+      }
+      if (call.prompt.includes("CAPIVARA_FLOW")) {
+        authors += 1;
+        return ok(`\`\`\`ts\nconsole.log('rascunho ${authors}');\n\`\`\``);
+      }
+      return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
+    },
+  });
+  expect(outcome.status).toBe("failed");
+  if (outcome.status !== "failed") throw new Error("esperava falha do roteirista");
+  expect(outcome.cycles).toBe(3);
+  expect(builders).toBe(1);
+  expect(authors).toBe(6);
+  expect(browsers).toBe(0);
+  expect(await readFile(join(projectRoot, "produto.ts"), "utf8")).toContain("pronto = true");
+  const paths = runPaths(projectRoot, RUN);
+  const logs = await readdir(paths.logs);
+  expect(logs.some(name => name.includes("[object Object]"))).toBe(false);
+  const authorLogs = logs.filter(name => name.startsWith(`${target.id}.flow-4-`));
+  expect(authorLogs).toHaveLength(6);
+  for (const name of authorLogs) expect(await readFile(join(paths.prompts, name.replace(/\.log$/, ".txt")), "utf8")).toContain("CAPIVARA_FLOW");
+  expect(await readFile(join(paths.logs, `${target.id}.flow-run-1.log`), "utf8")).toContain("Isto é do harness");
+});
 
 interface Scenario {
   builder?: (call: EngineCall) => Promise<EngineResult>;
@@ -74,6 +215,44 @@ async function phase(scenario: Scenario) {
 }
 
 describe("ciclo de fase — caminho verde", () => {
+  it.each(["quota", "configuration"] as const)("recusa %s do executor preserva a árvore sem outra chamada", async providerFailure => {
+    const { outcome, calls } = await phase({ maxCycles: 3, builder: async () => ({ ...ok("recusa do provider"), engineError: true, providerFailure }) });
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 0 — engine", cycles: 1 });
+    expect(calls).toHaveLength(1);
+    expect(await readFile(join(projectRoot, "fase-1.ts"), "utf8")).toContain("x = 1");
+    const events = await readEvents(runPaths(projectRoot, RUN).events);
+    expect(events.some(event => event.status === "retry")).toBe(false);
+  });
+
+  it.each(["quota", "configuration"] as const)("recusa %s do verificador não pede reimplementação", async providerFailure => {
+    const { outcome, calls } = await phase({ maxCycles: 3, verifier: async () => ({ ...ok("recusa do provider"), engineError: true, providerFailure }) });
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 0 — engine", cycles: 1 });
+    expect(calls.map(c => c.role)).toEqual(["builder", "verifier"]);
+  });
+
+  it.each(["wall", "idle", "first-output"])("timeout %s preserva o parcial e não inicia outro ciclo de construção", async timedOut => {
+    const { outcome, calls } = await phase({ maxCycles: 3, builder: async () => ({ exitCode: 124, stdout: "Continuarei investigando um mutante. CAPIVARA_BUILDER_STATUS: COMPLETE", stderr: "", timedOut }) });
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 0 — engine", cycles: 1 });
+    expect(calls.filter(call => call.role === "builder")).toHaveLength(1);
+    expect(calls.filter(call => call.role === "verifier")).toHaveLength(0);
+    expect(await readFile(join(projectRoot, "fase-1.ts"), "utf8")).toContain("x = 1");
+    const events = await readEvents(runPaths(projectRoot, RUN).events);
+    expect(events.at(-1)?.status).toBe("blocked");
+    expect(events.some(event => event.status === "retry")).toBe(false);
+  });
+
+  it("timeout do verificador não vira nova sessão do construtor", async () => {
+    const { outcome, calls } = await phase({ maxCycles: 3, verifier: async () => ({ exitCode: 124, stdout: "Investigando critérios", stderr: "", timedOut: "wall" }) });
+    expect(outcome).toMatchObject({ status: "failed", cycles: 1 });
+    expect(calls.filter(call => call.role === "builder")).toHaveLength(1);
+    expect(calls.filter(call => call.role === "verifier")).toHaveLength(1);
+  });
+
+  it("timeout confirmado não vira repetição por texto de rate limit na resposta parcial", async () => {
+    const { outcome, calls } = await phase({ builder: async () => ({ exitCode: 124, stdout: "rate limit exceeded HTTP 429", stderr: "", timedOut: "wall" }) });
+    expect(outcome).toMatchObject({ status: "failed", cycles: 1 });
+    expect(calls).toHaveLength(1);
+  });
   it("fecha a fase quando os quatro gates ficam verdes", async () => {
     const { outcome } = await phase({});
     expect(outcome.status).toBe("complete");

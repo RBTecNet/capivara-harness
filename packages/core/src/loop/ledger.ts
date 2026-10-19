@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { artifactPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
 import { sha12 } from "../contract/stamps.js";
+import { PLANNING_CONTRACT } from "../contract/environment.js";
 
 export interface FaseFechada {
   id: string;
@@ -37,7 +38,7 @@ function caminho(projectRoot: string): string {
 }
 
 export function shaDaFase(markdown: string): string {
-  return sha12(markdown.trim());
+  return sha12(`${PLANNING_CONTRACT}\n${markdown.trim()}`);
 }
 
 export async function lerFasesFechadas(projectRoot: string): Promise<FaseFechada[]> {

@@ -78,7 +78,7 @@ describe("as dependências declaradas estão instaladas?", () => {
     const texto = descreverDependencias([{ manifesto: "package.json", pasta: "node_modules", comando: "npm install" }]);
 
     expect(texto).toContain("não estão instaladas");
-    expect(texto).toContain("O executor instala na primeira sessão");
+    expect(texto).toContain("O harness prepara antes do desenvolvimento");
     expect(texto).toContain("não por defeito do código");
   });
 
@@ -117,7 +117,7 @@ describe("o runner que o gate 4 usa", () => {
   });
 
   it("o aviso diz o custo e as duas saídas", () => {
-    expect(AVISO_DO_RUNNER).toContain("custa um ciclo");
+    expect(AVISO_DO_RUNNER).toContain("sem gastar ciclo");
     expect(AVISO_DO_RUNNER).toContain("--no-flows");
   });
 });

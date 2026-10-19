@@ -20,6 +20,16 @@ const workflow: SkeletonWorkflow = {
 const prompt = flowPrompt({ language: "português do Brasil", workflow, baseUrl: "http://127.0.0.1:47533" });
 
 describe("o prompt do roteiro", () => {
+  it("reparo recebe o roteiro atual e restringe a sessão a devolver a correção necessária", () => {
+    const previousScript = "// roteiro publicado\nawait navegarPelasTarefas();";
+    const repair = flowPrompt({ language: "pt-BR", workflow, baseUrl: "http://127.0.0.1:47533", previousScript, rejected: ["o link está na sidebar"] });
+    expect(repair).toContain(previousScript);
+    expect(repair).toContain("Do not run commands, tests, servers, browser probes or installations in this session");
+    expect(repair).toContain("Preserve the working steps and assertions");
+    expect(repair).toContain("Do not add scenarios, edge cases or assertions beyond the declared steps and acceptance criteria");
+    expect(repair).toContain("Navigation belongs to its actual navigation region");
+  });
+
   it("leva o fluxo inteiro, passo a passo", () => {
     for (const step of workflow.steps) expect(prompt).toContain(step);
     expect(prompt).toContain("Gerar linha cron com IA");
@@ -37,7 +47,8 @@ describe("o prompt do roteiro", () => {
 
   it("proíbe o que a conferência recusa", () => {
     expect(prompt).toContain("test.skip");
-    expect(prompt).toContain("Never intercept or stub the product's own backend");
+    expect(prompt).toContain("Never fabricate the product backend's responses");
+    expect(prompt).toContain("abort a GET");
     expect(prompt).toContain("At least one `expect(...)` inside each step");
   });
 
@@ -60,6 +71,10 @@ describe("o prompt do roteiro", () => {
 });
 
 describe("ler o roteiro de dentro da resposta", () => {
+  it("stamp HTML acidental vira comentário TypeScript sem mudar o código", () => {
+    expect(extractFlowScript("```ts\n<!-- inputs: workflow=4 -->\nconst texto = '<!-- exemplo -->';\n```")).toBe("// <!-- inputs: workflow=4 -->\nconst texto = '<!-- exemplo -->';");
+  });
+
   const script = "import { test } from '@playwright/test';\ntest('x', async () => {});";
 
   it("aceita o bloco cercado, com ou sem prosa em volta", () => {

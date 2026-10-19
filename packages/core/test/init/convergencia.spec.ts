@@ -213,6 +213,11 @@ describe("a emenda vai para a fase do achado, e só para ela", () => {
       respond: { stdout: "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: coerente" },
       repeat: true,
     });
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "architecture" },
+      respond: { stdout: "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: coerente" },
+      repeat: true,
+    });
 
     const agent = fakeAgent(steps);
     const { outcome } = await (async () => {

@@ -12,11 +12,13 @@ import type { ContractError, CoverageSources, StampInput } from "../contract/ind
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE } from "../authoring/ledger.js";
 
 /** Os artefatos que um run do ciclo publica, na ordem em que nascem. */
-export const INIT_ARTIFACTS = ["skeleton.md", "project-phases.md"] as const;
+export const INIT_ARTIFACTS = ["skeleton.md", "architecture.md", "project-phases.md"] as const;
 
 export interface ReadinessInput {
   /** O plano executável publicado; vazio significa que não há plano. */
   plan: string;
+  /** A arquitetura publicada; vazia significa que o plano foi escrito sem ela. */
+  architecture: string;
   /** Inputs do plano executável, para verificar o frescor do stamp. */
   stampInputs: StampInput[];
   coverage: CoverageSources;
@@ -61,6 +63,14 @@ export function evaluateReadiness(input: ReadinessInput): Readiness {
     detail: publicado ? "" : "project-phases.md não foi publicado — rode `capivara plan`",
   });
 
+  const comArquitetura = input.architecture.trim() !== "";
+  checks.push({
+    id: "arquitetura",
+    title: "A arquitetura e a infraestrutura estão publicadas",
+    passed: comArquitetura,
+    detail: comArquitetura ? "" : "architecture.md não foi publicado — o plano precisa da arquitetura que o escreveu; rode `capivara plan`",
+  });
+
   const parsed = publicado ? parsePhases(input.plan) : null;
 
   checks.push({
@@ -97,7 +107,7 @@ export function evaluateReadiness(input: ReadinessInput): Readiness {
   const stampErrors = document ? checkStamp(document, input.stampInputs) : [];
   checks.push({
     id: "frescor",
-    title: "O stamp do plano cita o esqueleto que ele de fato leu",
+    title: "O stamp do plano cita o esqueleto e a arquitetura que ele de fato leu",
     passed: document !== null && stampErrors.length === 0,
     detail: stampErrors.map((error) => `${error.message} → ${error.hint}`).join("\n"),
   });

@@ -207,7 +207,9 @@ describe("init ponta a ponta — caminho feliz", () => {
     const { outcome } = await run(happyPath());
     const events = await readEvents(runPaths(projectRoot, outcome.runId).events);
     const publicados = events.filter((event) => event.stage === "publish" && event.status === "complete");
-    expect(publicados.map((event) => event.subject)).toEqual(["skeleton", "project-phases.md"]);
+    // O esqueleto é publicado duas vezes: pelo init, e pelo plan com a divisão
+    // de fases e as sondas que a arquitetura decidiu (§116).
+    expect(publicados.map((event) => event.subject)).toEqual(["skeleton", "architecture", "skeleton", "project-phases.md"]);
   });
 
   /*
@@ -753,6 +755,7 @@ describe("timeout do provider", () => {
 describe("gate de prontidão", () => {
   const base = {
     plan: PLANO,
+    architecture: "# Pousada — Arquitetura e infraestrutura",
     stampInputs: [],
     coverage: { storyIds: [], entities: [], workflows: [] },
     approved: true,
@@ -777,8 +780,14 @@ describe("gate de prontidão", () => {
     expect(readiness.checks.find((check) => check.id === "decisoes")?.passed).toBe(false);
   });
 
-  it("inclui dimensionamento entre as dez verificações", () => {
-    expect(evaluateReadiness(base).checks).toHaveLength(10);
+  it("inclui dimensionamento e arquitetura entre as onze verificações", () => {
+    expect(evaluateReadiness(base).checks).toHaveLength(11);
+  });
+
+  it("plano sem arquitetura publicada é NOT READY, dizendo o que rodar", () => {
+    const readiness = evaluateReadiness({ ...base, architecture: "" });
+    expect(readiness.ready).toBe(false);
+    expect(readiness.checks.find((check) => check.id === "arquitetura")?.detail).toContain("architecture.md");
   });
 
   it.each([

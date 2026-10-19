@@ -9,5 +9,6 @@
 
 export const PIPELINE_STEPS = [
   { id: "skeleton", label: "esqueleto do produto" },
+  { id: "architecture", label: "arquitetura e infraestrutura" },
   { id: "project-phases.md", label: "plano executável" },
 ] as const;

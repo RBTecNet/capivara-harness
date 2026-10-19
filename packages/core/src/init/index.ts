@@ -13,6 +13,8 @@ export type { PlanOptions } from "./plan.js";
 export { evaluatePlanReadiness, renderPlanReadiness } from "./plan-readiness.js";
 export type { PlanCheck, PlanReadiness, PlanReadinessInput } from "./plan-readiness.js";
 export { readSkeletonState, writeSkeletonState } from "./skeleton-state.js";
+export { readArchitectureState, writeArchitectureState } from "./architecture-state.js";
+export type { ArchitectureState } from "./architecture-state.js";
 export { baseRegistrada, readRequestState, writeRequestState } from "./request-state.js";
 export { MemoriaDoPlano, PLAN_CACHE_CONTRACT, planCachePath, readPlanCache, writePlanCache } from "./plan-cache.js";
 export type { PlanCache } from "./plan-cache.js";

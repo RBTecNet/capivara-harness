@@ -283,7 +283,9 @@ describe("reprovação mecânica não é decisão de produto", () => {
     })).rejects.toThrow("Uma decisão escrita não dispensa os limites mecânicos");
     expect(paradaDoEstagio(new Error(rendered), "plan").natureza).toBe("modelo");
     expect(rendered).not.toContain("após 0 devoluções");
-    expect(agent.calls.filter(call => call.role === "auditor")).toHaveLength(0);
+    // O auditor do PLANO não é chamado: o impasse mecânico vem antes dele. A
+    // auditoria da arquitetura é outra etapa, e acontece antes de haver fases.
+    expect(agent.calls.filter(call => call.role === "auditor" && call.subject !== "architecture")).toHaveLength(0);
     const handoff = await readHandoff(projectRoot, initialized.outcome.runId, "project-phases.md");
     expect(handoff?.answers.some(answer => answer.decision.includes(decision)) ?? false).toBe(false);
     await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"))).rejects.toThrow();

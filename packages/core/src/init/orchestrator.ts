@@ -16,17 +16,17 @@ import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { affectedPhases, assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parsePhaseFragment, parseSkeleton, renderSkeleton, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12 } from "../contract/index.js";
+import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parseArchitecture, parsePhaseFragment, parseSkeleton, phaseHeading, phasesFromArchitecture, renderArchitecture, renderSkeleton, requirementsFromArchitecture, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12 } from "../contract/index.js";
 import { CoherenceMemory } from "../audit/coherence.js";
 import { applyMaterialityReview, materialityInput, materialityPrompt } from "../audit/materiality.js";
-import type { ContractError, CoverageSources, PhasesDocument, Skeleton, StampInput } from "../contract/index.js";
+import type { Architecture, ContractError, CoverageSources, PhasesDocument, Skeleton, StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark, Standoff } from "../audit/index.js";
 import { tasksBlock } from "../contract/templates.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, isRepairable, publish, repairDeterministically, stripAllMarkers, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, decisaoDeBanco, isNonAnswer, leituraInsistente, naoObjetivos, perguntaDeLacuna, perguntaDoBanco, perguntaInsistente, regrasDeBanco, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, suposicaoDelegada, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Assumption, Question } from "../interview/index.js";
-import { amendPhasePrompt, assessRehearsal, auditRetryPrompt, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
+import { amendPhasePrompt, architectPrompt, architectureAuditPrompt, assessRehearsal, auditRetryPrompt, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
 import type { AskedQuestion, CriterionRef, RehearsalResult, WriterContext } from "../prompts/index.js";
 import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEvents, runIdFor, runPaths, writeAtomic, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
@@ -43,6 +43,7 @@ import { MemoriaDoPlano } from "./plan-cache.js";
 import type { PlanProgressListener } from "./progress.js";
 import { evaluatePlanReadiness, renderPlanReadiness } from "./plan-readiness.js";
 import { readSkeletonState, writeSkeletonState } from "./skeleton-state.js";
+import { readArchitectureState, writeArchitectureState } from "./architecture-state.js";
 import { writeRequestState } from "./request-state.js";
 import type { Readiness } from "./readiness.js";
 import type { DeveloperRequest } from "./request.js";
@@ -68,6 +69,16 @@ export type AgentCaller = (call: AgentCall) => Promise<{
   exitCode: number;
   /** Tokens da chamada, quando a CLI os reporta. Ausente é "não medido". */
   usage?: { inputTokens: number; outputTokens: number; costUsd?: number };
+  /**
+   * A CLI declarou a volta como erro do MOTOR, não como resposta.
+   *
+   * Só o build olhava isto (gate 0). No init e no plan uma CLI que falhava antes
+   * de responder virava "o modelo devolveu texto inválido" e gastava tentativas
+   * pedindo correção de forma a quem nunca respondeu (HANDOFF §16).
+   */
+  engineError?: boolean;
+  /** O limite do harness que encerrou a chamada, quando foi isso. */
+  timedOut?: string | null;
 }>;
 export type AskDeveloper = (question: Question, index: number, total: number) => Promise<string>;
 export type DecideStandoff = (rendered: string, context?: Standoff) => Promise<string>;
@@ -124,6 +135,13 @@ export interface InitOptions {
   /** Rodadas para fechar defeito mecânico, separadas do teto do auditor. */
   maxMechanicalRounds?: number;
   /**
+   * Quantas vezes a arquitetura pode ser refeita por achado — do auditor da
+   * arquitetura ou de um achado do plano endereçado a `Architecture`.
+   * Refazer a arquitetura reorganiza fases; o que não mudou de envelope é
+   * reaproveitado do cache, então o custo é só das fases que mudaram.
+   */
+  maxArchitectureReturns?: number;
+  /**
    * Onde o run começa e termina.
    *
    * `init` produz o esqueleto e para em PLAN READY; `plan` lê o esqueleto de
@@ -174,6 +192,18 @@ function driftBetween(antes: string, depois: string, findings: readonly Finding[
 
 /** Quantas esperas por chamada antes de desistir: duas janelas de reset bastam. */
 const MAX_ESPERAS_POR_CHAMADA = 2;
+
+/**
+ * Indisponibilidade transitória do provider, como a CLI a descreve.
+ *
+ * Conexão derrubada, gateway fora, sobrecarga: nada disso diz uma palavra sobre
+ * o conteúdo, e a mesma chamada costuma passar segundos depois. O que já está
+ * em disco não se perde de qualquer forma; o que se perde sem esta espera é o
+ * run — e com ele a retomada manual de quem estava no terminal.
+ */
+const INDISPONIBILIDADE = /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed|network error|\b50[234]\b|bad gateway|gateway time-?out|overloaded|temporarily unavailable|service unavailable|server error/i;
+/** As esperas entre repetições por indisponibilidade, em segundos. Curtas e finitas. */
+const ESPERAS_POR_INDISPONIBILIDADE = [5, 20] as const;
 
 /** Quantas tasks há neste markdown. Zero é resposta inválida do escritor. */
 /** Há decisão pendente no texto? O marcador é o contrato entre escritor e entrevista. */
@@ -319,6 +349,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const maxParallelParts = Math.max(1, options.maxParallelParts ?? 3);
   const maxCriteriosPorLote = Math.max(1, options.maxCriteriaPerRehearsalBatch ?? 20);
   const maxMechanicalRounds = Math.max(1, options.maxMechanicalRounds ?? 3);
+  const maxArchitectureReturns = Math.max(0, options.maxArchitectureReturns ?? 2);
   const esperar = options.sleep ?? ((seconds: number) => new Promise<void>((resolve) => setTimeout(resolve, seconds * 1000)));
   const providerDoPapel = (role: AgentCall["role"]): string => options.providers?.[role] ?? "default";
 
@@ -355,6 +386,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
   const track = async (call: AgentCall): Promise<string> => {
     let esperas = 0;
+    let indisponibilidades = 0;
 
     for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
       const startedAt = Date.now();
@@ -408,9 +440,37 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         continue;
       }
 
-      if (response.exitCode === 0) return response.stdout;
+      /*
+       * Motor que falhou não é resposta.
+       *
+       * Com envelope, a CLI diz quando a volta foi erro dela — credencial,
+       * sessão que não subiu, limite do harness. Esse texto não pode chegar a
+       * um parser como se fosse o que o modelo escreveu: vira "JSON inválido",
+       * "fase sem task", "auditoria sem status", e cada um desses gasta uma
+       * tentativa de correção de forma com quem nunca chegou a responder.
+       */
+      const falhouNoMotor = response.engineError === true || (typeof response.timedOut === "string" && response.timedOut !== "");
+      if (response.exitCode === 0 && !falhouNoMotor) return response.stdout;
 
-      const estouro = response.exitCode === 124;
+      const estouro = response.exitCode === 124 || (typeof response.timedOut === "string" && response.timedOut !== "");
+
+      /*
+       * Provider fora do ar espera e repete, dentro de um limite curto.
+       *
+       * É o irmão do limite de uso logo acima: lá a CLI diz quando voltar; aqui
+       * ela só diz que não conseguiu. Duas esperas curtas cobrem o soluço
+       * comum; o que passar disso é diagnóstico retomável, com o texto da CLI.
+       */
+      const transitorio = !estouro && INDISPONIBILIDADE.test(response.stdout);
+      if (transitorio && indisponibilidades < ESPERAS_POR_INDISPONIBILIDADE.length) {
+        const segundos = ESPERAS_POR_INDISPONIBILIDADE[indisponibilidades]!;
+        indisponibilidades += 1;
+        announce(`  o provider de ${call.role} respondeu indisponível em ${call.subject}; aguardando ${segundos}s antes de repetir (${indisponibilidades}/${ESPERAS_POR_INDISPONIBILIDADE.length})`);
+        await event(call.stage, call.subject, "retry", `provider indisponível: ${recorte(response.stdout, 2).trim()}`, call.attempt);
+        await esperar(segundos);
+        tentativa -= 1; // indisponibilidade não é defeito de resposta: não gasta a tentativa.
+        continue;
+      }
       if (estouro && tentativa === 1) {
         announce(`  a chamada de ${call.role} em ${call.subject} estourou o tempo; tentando uma segunda vez`);
         await event(call.stage, call.subject, "retry", "timeout do provider", call.attempt);
@@ -432,9 +492,13 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
        * respondeu. Uma só, e a segunda falha vale pelo que ela for.
        */
       const mudo = response.stdout.trim() === "";
-      if (mudo && tentativa === 1) {
-        announce(`  ${call.role} saiu com código ${response.exitCode} sem escrever nada em ${call.subject}; tentando uma segunda vez`);
-        await event(call.stage, call.subject, "retry", `saída vazia com código ${response.exitCode}`, call.attempt);
+      if ((mudo || falhouNoMotor) && tentativa === 1 && !estouro) {
+        announce(
+          mudo
+            ? `  ${call.role} saiu com código ${response.exitCode} sem escrever nada em ${call.subject}; tentando uma segunda vez`
+            : `  a CLI de ${call.role} declarou erro do motor em ${call.subject}; tentando uma segunda vez`,
+        );
+        await event(call.stage, call.subject, "retry", mudo ? `saída vazia com código ${response.exitCode}` : "erro do motor da CLI", call.attempt);
         continue;
       }
 
@@ -459,7 +523,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               `    capivara init ... --${call.role}-model <modelo>`,
             ].join("\n")
           : [
-              `O papel ${call.role} falhou com código ${response.exitCode} em ${call.subject}.`,
+              falhouNoMotor && response.exitCode === 0
+                ? `A CLI de ${call.role} declarou erro do motor em ${call.subject}, duas vezes.`
+                : `O papel ${call.role} falhou com código ${response.exitCode} em ${call.subject}.`,
               "",
               /*
                * O que a CLI disse é a única pista de por que ela saiu.
@@ -554,17 +620,19 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * valendo: fase inteira intacta não volta à fila. Isto é o degrau abaixo — uma
    * task que mudou não arrasta as outras catorze de volta ao julgamento.
    */
-  const tasksJulgadas = new TasksJulgadas();
-  const coerencia = new CoherenceMemory();
-
   /*
    * O que este run já escreveu e já teve aprovado, guardado em disco.
    *
    * O `fasesAprovadas` acima continua existindo e é o mesmo fato dito de outro
    * jeito — ele evita reauditar DENTRO de uma execução; a memória evita
-   * reescrever e reauditar ENTRE execuções.
+   * reescrever e reauditar ENTRE execuções. Desde o §116 ela também guarda o
+   * esqueleto, a arquitetura, as tasks aprovadas uma a uma e a base da
+   * coerência: uma retomada depois de o provider cair recomeça de onde parou.
    */
   const memoria = await MemoriaDoPlano.abrir(options.projectRoot, runId, options.fresh === true);
+  const tasksJulgadas = new TasksJulgadas(memoria.tasksAprovadas());
+  const coerencia = new CoherenceMemory();
+  coerencia.importar(memoria.coerenciaGuardada());
   const relatarFase: PlanProgressListener = options.onPhaseProgress ?? ((): void => undefined);
 
   const allAnswers: Answer[] = [];
@@ -576,6 +644,13 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   let rehearsal: { blocked: string[] } | undefined;
   /** Presente apenas no caminho por esqueleto; é dele que sai a cobertura. */
   let skeletonAtual: Skeleton | null = null;
+  /** O esqueleto como o `init` o publicou: é dele que a arquitetura é derivada. */
+  let esqueletoDeOrigem: Skeleton | null = null;
+  /** A arquitetura que vale para este plano, e o markdown dela como foi publicado. */
+  let arquiteturaAtual: Architecture | null = null;
+  let arquiteturaMd = "";
+  /** Quantas vezes a arquitetura foi refeita por achado neste run. */
+  let reorganizacoes = 0;
 
   /*
    * Um caminho só: uma leitura do produto inteiro, depois cada fase vendo a sua
@@ -925,7 +1000,12 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * pergunta dela é global por natureza — e ela é uma chamada, não N.
      */
     const fatia = (numero: number): { name: string; content: string }[] =>
-      skeletonAtual ? [{ name: "fatia do esqueleto", content: sliceForPhase(skeletonAtual, numero) }] : upstream;
+      skeletonAtual
+        ? [
+            { name: "fatia do esqueleto", content: sliceForPhase(skeletonAtual, numero) },
+            ...(arquiteturaAtual ? [{ name: "fatia da arquitetura", content: architectureSliceForPhase(arquiteturaAtual, numero) }] : []),
+          ]
+        : upstream;
 
     const aReauditar = fases.filter((fase) => !fasesAprovadas.has(sha12(fase.markdown.trim())));
     for (const fase of fases.filter((fase) => fasesAprovadas.has(sha12(fase.markdown.trim())))) {
@@ -995,9 +1075,12 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               fasesAprovadas.add(sha12(fase.markdown.trim()));
               memoria.guardarAprovacao(promptDaFase(fase));
               // Fase aprovada é TASK aprovada, uma a uma: é o que sobrevive à
-              // próxima emenda, que vai mudar só uma delas.
+              // próxima emenda, que vai mudar só uma delas — e à próxima execução.
               const lido = parsePhaseFragment(fase.markdown);
-              if (lido !== null) tasksJulgadas.aprovar(lido.tasks, autoridade);
+              if (lido !== null) {
+                tasksJulgadas.aprovar(lido.tasks, autoridade);
+                memoria.guardarTasksAprovadas(tasksJulgadas.chaves());
+              }
               relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
             } else {
               relatarFase({ kind: "audit", number: fase.number, state: "devolvida", findings: veredicto.findings.length });
@@ -1010,13 +1093,20 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         const verdict = await auditCall("project-phases.md#coerência", attempt, () =>
           coherencePrompt({
             ...base,
-            upstream: skeletonAtual ? [{ name: "skeleton.md", content: renderSkeleton(skeletonAtual) }] : upstream,
+            upstream: skeletonAtual
+              ? [
+                  { name: "skeleton.md", content: renderSkeleton(skeletonAtual) },
+                  ...(arquiteturaMd !== "" ? [{ name: "architecture.md", content: arquiteturaMd }] : []),
+                ]
+              : upstream,
             digest,
             totalPhases: fases.length,
             ...(changed ? { changedSinceApproval: changed } : {}),
           }),
         );
-        return coerencia.reconcile(verdict, criteria, autoridade);
+        const reconciliado = coerencia.reconcile(verdict, criteria, autoridade);
+        memoria.guardarCoerencia(coerencia.exportar());
+        return reconciliado;
       },
     ];
 
@@ -1054,7 +1144,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
     const input = materialityInput(original, {
       request: options.request.text, decisions: writer.decisions, phases: fases,
-      ...(skeletonAtual ? { skeleton: renderSkeleton(skeletonAtual) } : {}),
+      ...(skeletonAtual ? { skeleton: `${renderSkeleton(skeletonAtual)}${arquiteturaMd === "" ? "" : `\n\n${arquiteturaMd}`}` } : {}),
     });
     relatarFase({ kind: "documento", etapa: "triagem dos bloqueios" });
     announce(`  conferindo a materialidade de ${input.items.length} bloqueio(s)/decisão(ões) antes de gastar outra escrita`);
@@ -1074,13 +1164,17 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       && !review.verdict.findings.some(finding => finding.phase === undefined)
       && (review.verdict.decisions?.length ?? 0) === 0) {
       coerencia.reconcile({ ...review.verdict, status: "APPROVED", findings: [] }, criteria, autoridade);
+      memoria.guardarCoerencia(coerencia.exportar());
     }
     for (const fase of fases) {
       if (!original.findings.some(finding => finding.phase === fase.number) || review.verdict.findings.some(finding => finding.phase === fase.number)) continue;
       fasesAprovadas.add(sha12(fase.markdown.trim()));
       memoria.guardarAprovacao(promptDaFase(fase));
       const lido = parsePhaseFragment(fase.markdown);
-      if (lido !== null) tasksJulgadas.aprovar(lido.tasks, autoridade);
+      if (lido !== null) {
+        tasksJulgadas.aprovar(lido.tasks, autoridade);
+        memoria.guardarTasksAprovadas(tasksJulgadas.chaves());
+      }
       relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
     }
     return review.verdict;
@@ -1135,7 +1229,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       const emDisco = await readFile(join(artifactPaths(options.projectRoot).init, "skeleton.md"), "utf8").catch(() => "");
       const guardado = await readSkeletonState(options.projectRoot, runId);
       if (emDisco.trim() !== "" && !guardado) {
-        throw new InitBlockedError("esqueleto ausente ou incompatível com a Capivara 0.5.0. Gere novamente com `capivara init --fresh` e depois `capivara plan --fresh`; os arquivos existentes são preservados.", runId);
+        throw new InitBlockedError("esqueleto ausente ou incompatível com a Capivara 0.6.0. Gere novamente com `capivara init --fresh` e depois `capivara plan --fresh`; os arquivos existentes são preservados.", runId);
       }
       if (emDisco.trim() === "" || !guardado) {
         throw new InitBlockedError(
@@ -1257,22 +1351,28 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     let esqueleto: Skeleton | null = null;
     let defeitos: string[] = [];
     for (let tentativa = 1; tentativa <= 3; tentativa += 1) {
-      const saida = await track({
-        role: "writer",
-        stage: "authoring",
-        subject: "skeleton",
-        attempt: tentativa,
-        prompt: skeletonPrompt({
-          language: options.language,
-          request: options.request.text,
-          decisions: decisoes,
-          assumptions: suposicoes,
-          inventory: inventoryText,
-          maxTasksPerPhase: MAX_TASKS_PER_PHASE,
-          maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
-          ...(defeitos.length > 0 ? { defects: defeitos } : {}),
-        }),
+      const promptDoEsqueleto = skeletonPrompt({
+        language: options.language,
+        request: options.request.text,
+        decisions: decisoes,
+        assumptions: suposicoes,
+        inventory: inventoryText,
+        maxTasksPerPhase: MAX_TASKS_PER_PHASE,
+        maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
+        ...(defeitos.length > 0 ? { defects: defeitos } : {}),
       });
+
+      /*
+       * O esqueleto que este mesmo prompt já produziu não é pago de novo.
+       *
+       * O `init` retomado depois de uma falha — provider fora, processo morto
+       * entre a publicação e a gravação do estado — tinha todas as respostas em
+       * disco e repagava a chamada do esqueleto assim mesmo. A chave é a mesma
+       * das fases: o prompt, que carrega pedido, decisões e tetos.
+       */
+      const guardado = memoria.esqueletoEscrito(promptDoEsqueleto);
+      if (guardado !== null) announce("  esqueleto reaproveitado de uma execução anterior: o prompt não mudou");
+      const saida = guardado ?? (await track({ role: "writer", stage: "authoring", subject: "skeleton", attempt: tentativa, prompt: promptDoEsqueleto }));
 
       const lido = parseSkeleton(saida, { maxTasksPerPhase: MAX_TASKS_PER_PHASE });
       if (!lido.ok) {
@@ -1280,6 +1380,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         announce(`  o esqueleto veio com ${defeitos.length} defeito(s) de forma; pedindo de novo com eles nomeados`);
         continue;
       }
+      for (const conserto of lido.applied) announce(`    esqueleto: ${conserto}`);
 
       /*
        * O gate é a autoridade sobre o que é um esqueleto executável, então o
@@ -1295,7 +1396,12 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       );
 
       esqueleto = lido.skeleton;
-      if (executaveis.length === 0) break;
+      if (executaveis.length === 0) {
+        // Só o esqueleto que PASSOU no gate entra na memória: uma resposta que
+        // o gate recusou merece outra chamada, não a mesma resposta de novo.
+        if (guardado === null) memoria.guardarEsqueleto(promptDoEsqueleto, saida);
+        break;
+      }
 
       defeitos = executaveis.map((check) => `${check.title} — ${check.detail}`);
       announce(`  o esqueleto não passa no gate em ${executaveis.length} ponto(s); pedindo de novo com eles nomeados`);
@@ -1369,12 +1475,14 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   }
 
   /**
-   * O segundo estágio: cada fase ganha tasks, critérios e testes.
+   * O segundo estágio: a arquitetura, e então cada fase com tasks e critérios.
    *
-   * Cada uma vê só a sua fatia — a stack, o que ela cobre, e as regras
-   * transversais. O que precisava ser acordado entre elas já foi, no esqueleto.
+   * A arquitetura é a chamada que olha o produto inteiro e concentra o raciocínio
+   * arquitetural — componentes, contratos, infraestrutura e a divisão de fases
+   * que vale. Cada fase vê a sua fatia do esqueleto E a sua fatia da arquitetura:
+   * o que precisava ser acordado entre elas já foi, antes de qualquer task.
    */
-  async function detalharFases(esqueleto: Skeleton): Promise<InitOutcome> {
+  async function detalharFases(esqueletoDoInit: Skeleton): Promise<InitOutcome> {
     /*
      * O que o `init` deixou aberto é perguntado antes da primeira fase.
      *
@@ -1406,19 +1514,284 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         .filter((answer) => answer.disposition === "ACCEPTED" && !antesDaInsistencia.has(answer.decision))
         .map((answer) => answer.decision);
 
+    /*
+     * A arquitetura vem antes de qualquer fase, e é dela que sai a divisão de
+     * fases que vale. O esqueleto do init é a proposta; o publicado daqui em
+     * diante carrega a divisão e as sondas decididas pela arquitetura — é o que
+     * o build e o `change` leem, e por isso é o esqueleto que muda, não eles.
+     */
+    esqueletoDeOrigem = esqueletoDoInit;
+    relatarFase({ kind: "documento", etapa: "arquitetura" });
+    const arquitetura = await arquitetar();
+    skeletonAtual = await aplicarArquitetura(arquitetura);
+    arquiteturaAtual = arquitetura;
+
     // Cada fase vê a sua fatia, e só ela. É a troca que corta a reconstrução do
     // projeto inteiro em toda chamada.
     const promptDeFase = (number: number): string => phaseFromSlicePrompt({
       language: options.language,
       request: options.request.text,
-      slice: sliceForPhase(esqueleto, number),
+      slice: sliceForPhase(skeletonAtual!, number),
+      ...(arquiteturaAtual ? { architecture: architectureSliceForPhase(arquiteturaAtual, number) } : {}),
       phaseNumber: number,
-      totalPhases: esqueleto.phases.length,
+      totalPhases: skeletonAtual!.phases.length,
       decisions: depoisDoEsqueleto(),
       grammar: tasksBlock(number),
       maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
       maxTasksPerPhase: MAX_TASKS_PER_PHASE,
     });
+
+    const fases = await escreverFases(promptDeFase);
+
+    plano = montarPlano(fases, unresolved({
+      round: maxInterviewRounds,
+      questions: allQuestions,
+      answers: allAnswers,
+      assumptions: [],
+      maxRounds: maxInterviewRounds,
+    }).map((item) => `${item.topic}: ${item.statement}`));
+
+    const writerDoPlano = writerContext([]);
+    relatarFase({ kind: "documento", etapa: "lacunas" });
+    const semGaps = await closeGaps("project-phases.md", planoAutorado(fases, promptDeFase), writerDoPlano);
+    plano = semGaps.content;
+
+    relatarFase({ kind: "documento", etapa: "auditoria" });
+    const verdict = await auditLoop("project-phases.md", semGaps, writerDoPlano, []);
+    plano = verdict.content;
+    planoAprovado = true;
+    remarks.push(...verdict.remarks.map((remark) => ({ document: "project-phases.md", remark })));
+
+    relatarFase({ kind: "documento", etapa: "ensaio do verificador" });
+    const final = await rehearse(verdict.authored, writerDoPlano, []);
+    plano = final.content;
+
+    await publish(options.projectRoot, [{ name: "project-phases.md", content: final.content }]);
+    await event("publish", "project-phases.md", "complete");
+
+    return await concluir();
+  }
+
+  /** O plano montado em código, do esqueleto e da arquitetura que valem agora. */
+  function montarPlano(partes: readonly string[], openQuestions: readonly string[]): string {
+    const esqueleto = skeletonAtual!;
+    return assemblePhasesDocument({
+      projectName: esqueleto.projectName,
+      stamp: buildStamp([
+        { name: "skeleton.md", content: renderSkeleton(esqueleto) },
+        ...(arquiteturaMd !== "" ? [{ name: "architecture.md", content: arquiteturaMd }] : []),
+      ]),
+      overview: `${esqueleto.phases.length} fases, fundação primeiro. O MVP fecha na fase ${esqueleto.mvpCutPhase}.`,
+      phases: [...partes],
+      openQuestions: [...openQuestions],
+    });
+  }
+
+  /** O prompt do arquiteto, sempre sobre o esqueleto de ORIGEM e as decisões de agora. */
+  function promptDoArquiteto(extras: { defects?: string[]; previous?: { architecture: string; findings: Finding[] } } = {}): string {
+    return architectPrompt({
+      language: options.language,
+      request: options.request.text,
+      skeleton: renderSkeleton(esqueletoDeOrigem!),
+      decisions: allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision),
+      assumptions: allAssumptions.map((assumption) => `${assumption.topic}: ${assumption.statement} (${assumption.basis})`),
+      inventory: inventoryText,
+      maxTasksPerPhase: MAX_TASKS_PER_PHASE,
+      maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
+      ...(extras.defects && extras.defects.length > 0 ? { defects: extras.defects } : {}),
+      ...(extras.previous ? { previous: extras.previous } : {}),
+    });
+  }
+
+  /** O esqueleto com a divisão de fases e as sondas que a arquitetura decidiu. */
+  function comArquitetura(arquitetura: Architecture): Skeleton {
+    return {
+      ...esqueletoDeOrigem!,
+      phases: phasesFromArchitecture(arquitetura),
+      mvpCutPhase: arquitetura.mvpCutPhase,
+      environment: requirementsFromArchitecture(arquitetura),
+    };
+  }
+
+  /**
+   * A arquitetura deste plano: desenhada, auditada e publicada — ou reaproveitada.
+   *
+   * Reaproveitada quando o estado em disco foi derivado deste mesmo esqueleto
+   * (de origem ou já aplicado) sob as mesmas decisões: nada do que decide a
+   * arquitetura mudou, e a chamada seria paga para receber o que já está lá.
+   */
+  async function arquitetar(): Promise<Architecture> {
+    const autoridade = shaDaAutoridade(allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision));
+    const shaDoEsqueleto = sha12(renderSkeleton(esqueletoDeOrigem!));
+
+    const guardada = options.fresh === true ? null : await readArchitectureState(options.projectRoot, runId);
+    if (
+      guardada &&
+      guardada.authoritySha12 === autoridade &&
+      (guardada.sourceSkeletonSha12 === shaDoEsqueleto || guardada.appliedSkeletonSha12 === shaDoEsqueleto)
+    ) {
+      announce("  arquitetura reaproveitada de uma execução anterior: esqueleto e decisões não mudaram");
+      await event("authoring", "architecture", "complete", "reaproveitada: esqueleto e decisões não mudaram");
+      await publicarArquitetura(guardada.architecture, autoridade);
+      return guardada.architecture;
+    }
+
+    await event("authoring", "architecture", "started");
+    const desenhada = await desenharArquitetura({});
+    const auditada = await auditarArquitetura(desenhada);
+    await publicarArquitetura(auditada, autoridade);
+    return auditada;
+  }
+
+  /**
+   * Uma arquitetura que passa no contrato, em até três tentativas com os
+   * defeitos nomeados — e reaproveitada do cache quando o prompt não mudou.
+   */
+  async function desenharArquitetura(extras: { defects?: string[]; previous?: { architecture: string; findings: Finding[] } }): Promise<Architecture> {
+    let defeitos = extras.defects ?? [];
+    for (let tentativa = 1; tentativa <= 3; tentativa += 1) {
+      const prompt = promptDoArquiteto({ ...extras, ...(defeitos.length > 0 ? { defects: defeitos } : {}) });
+      const guardada = memoria.arquiteturaEscrita(prompt);
+      if (guardada !== null) announce("  arquitetura reaproveitada do cache: o prompt não mudou");
+      const saida = guardada ?? (await track({ role: "writer", stage: "authoring", subject: "architecture", attempt: tentativa, prompt }));
+
+      const lida = parseArchitecture(saida, esqueletoDeOrigem!, { maxTasksPerPhase: MAX_TASKS_PER_PHASE });
+      if (!lida.ok) {
+        defeitos = lida.defects.map((defeito) => `${defeito.problem} → ${defeito.hint}`);
+        announce(`  a arquitetura veio com ${defeitos.length} defeito(s); pedindo de novo com eles nomeados`);
+        await event("authoring", "architecture", "retry", defeitos.join("; "), tentativa);
+        continue;
+      }
+      for (const conserto of lida.applied) announce(`    arquitetura: ${conserto}`);
+      if (guardada === null) memoria.guardarArquitetura(prompt, saida);
+      return lida.architecture;
+    }
+    throw new InitBlockedError(
+      [
+        `a arquitetura veio inválida três vezes: ${defeitos.join("; ")}`,
+        "",
+        "O esqueleto e as decisões continuam em disco; nada se perdeu. Verifique o modelo do papel writer e rode `capivara plan` de novo.",
+      ].join("\n"),
+      runId,
+    );
+  }
+
+  /**
+   * A auditoria independente da arquitetura.
+   *
+   * Achado volta ao arquiteto como emenda — a arquitetura anterior mais os
+   * achados — dentro do orçamento de reorganizações. Decisão vai ao
+   * desenvolvedor na hora. Esgotado o orçamento, o impasse é o mesmo do plano:
+   * quem decide é o desenvolvedor, e uma arquitetura reprovada nunca é
+   * declarada aprovada por cansaço.
+   */
+  async function auditarArquitetura(desenhada: Architecture): Promise<Architecture> {
+    let atual = desenhada;
+    const history: AuditAttempt[] = [];
+    let developerRuled = false;
+    const writer = writerContext([]);
+
+    for (let attempt = 1; ; attempt += 1) {
+      const md = renderArchitecture(atual, esqueletoDeOrigem!);
+      const promptDeAuditoria = architectureAuditPrompt({
+        language: options.language,
+        request: options.request.text,
+        decisions: writer.decisions,
+        skeleton: renderSkeleton(esqueletoDeOrigem!),
+        architecture: md,
+        maxTasksPerPhase: MAX_TASKS_PER_PHASE,
+      });
+      if (memoria.jaAprovada(promptDeAuditoria)) {
+        announce("  arquitetura aprovada numa execução anterior, com a mesma auditoria; não vou repagar");
+        return atual;
+      }
+
+      await event("audit", "architecture", "started", "", attempt);
+      const verdict = await auditCall("architecture", attempt, () => promptDeAuditoria);
+      const doAuditor = await perguntarDecisoesDoAuditor("architecture.md", verdict, attempt, writer);
+      const findings = [...doAuditor, ...verdict.findings];
+
+      if (findings.length === 0) {
+        memoria.guardarAprovacao(promptDeAuditoria);
+        remarks.push(...verdict.remarks.map((remark) => ({ document: "architecture.md", remark })));
+        announce(`  arquitetura aprovada${verdict.remarks.length > 0 ? ` com ${verdict.remarks.length} ressalva(s)` : ""}`);
+        await event("audit", "architecture", "complete", "aprovada", attempt);
+        return atual;
+      }
+
+      history.push({ attempt, verdict: { ...verdict, findings }, contentSha: sha12(md) });
+      announce(`  auditoria da arquitetura devolveu ${findings.length} achado(s)`);
+      await event("audit", "architecture", "retry", findings.map((finding) => finding.problem).join("; "), attempt);
+
+      if (developerRuled) {
+        announce(`  publicando a arquitetura sob a decisão do desenvolvedor; ${findings.length} achado(s) viram ressalva`);
+        remarks.push(...findings.map((finding) => ({ document: "architecture.md", remark: { where: finding.where, observation: `${finding.problem} (mantido por decisão do desenvolvedor)` } })));
+        return atual;
+      }
+
+      if (reorganizacoes >= maxArchitectureReturns) {
+        const standoff = nextAuditAction({ document: "architecture.md", history, maxReturns: 0, maxMechanical: 1 });
+        if (standoff.action !== "ask-developer") throw new InitBlockedError("inalcançável", runId);
+        const rendered = renderStandoff(standoff.standoff);
+        await event("audit", "architecture", "blocked", "orçamento de reorganizações esgotado", attempt);
+        if (!options.decideStandoff) throw new InitBlockedError(rendered, runId);
+        const decision = (await options.decideStandoff(rendered, standoff.standoff)).trim();
+        const normalized = decision.toLowerCase();
+        if (normalized.startsWith("publicar") || isNonAnswer(decision)) {
+          announce(`  arquitetura publicada como está; ${findings.length} achado(s) viram ressalva`);
+          remarks.push(...findings.map((finding) => ({ document: "architecture.md", remark: { where: finding.where, observation: `${finding.problem} (${normalized.startsWith("publicar") ? "mantido por decisão do desenvolvedor" : "o auditor insistiu e ninguém decidiu: segue em aberto"})` } })));
+          return atual;
+        }
+        if (normalized.startsWith("abortar")) throw new InitBlockedError(`${rendered}\n\nDecisão do desenvolvedor: abortar`, runId);
+        if (normalized !== "reiniciar") {
+          developerRuled = true;
+          await recordDeveloperDecision("architecture.md", findings, decision);
+          findings.unshift({ where: "Architecture", problem: "o auditor e o arquiteto não convergiram", fix: `o desenvolvedor decidiu e esta decisão é a autoridade, acima do auditor: ${decision}` });
+        }
+        history.length = 0;
+      }
+
+      reorganizacoes += 1;
+      announce(`  refazendo a arquitetura com os achados (${reorganizacoes}/${maxArchitectureReturns})`);
+      atual = await desenharArquitetura({ previous: { architecture: JSON.stringify(atual), findings } });
+    }
+  }
+
+  /** `architecture.md` e o estado dela em disco; idempotente. */
+  async function publicarArquitetura(arquitetura: Architecture, autoridade: string): Promise<void> {
+    arquiteturaMd = renderArchitecture(arquitetura, esqueletoDeOrigem!);
+    await publish(options.projectRoot, [{ name: "architecture.md", content: arquiteturaMd }]);
+    await writeArchitectureState(options.projectRoot, runId, {
+      architecture: arquitetura,
+      sourceSkeletonSha12: sha12(renderSkeleton(esqueletoDeOrigem!)),
+      appliedSkeletonSha12: sha12(renderSkeleton(comArquitetura(arquitetura))),
+      authoritySha12: autoridade,
+    });
+    await event("publish", "architecture", "complete", `${arquitetura.components.length} componente(s), ${arquitetura.phases.length} fase(s)`);
+    announce(`  arquitetura: ${arquitetura.components.length} componente(s), ${arquitetura.phases.length} fase(s), ${arquitetura.infrastructure.requirements.length} sonda(s) de prontidão`);
+  }
+
+  /** O esqueleto publicado passa a carregar a divisão de fases e as sondas da arquitetura. */
+  async function aplicarArquitetura(arquitetura: Architecture): Promise<Skeleton> {
+    const esqueleto = comArquitetura(arquitetura);
+    const origem = esqueletoDeOrigem!;
+    const mesmaDivisao =
+      origem.phases.length === esqueleto.phases.length &&
+      origem.phases.every((fase, posicao) => JSON.stringify(fase) === JSON.stringify(esqueleto.phases[posicao]));
+    if (!mesmaDivisao) announce(`  a arquitetura reorganizou as fases: ${origem.phases.length} do init → ${esqueleto.phases.length}`);
+    await publish(options.projectRoot, [{ name: "skeleton.md", content: renderSkeleton(esqueleto) }]);
+    await writeSkeletonState(options.projectRoot, runId, esqueleto);
+    await event("publish", "skeleton", "complete", `${esqueleto.phases.length} fase(s) com a arquitetura aplicada`);
+    return esqueleto;
+  }
+
+  /**
+   * As fases escritas, cada uma da sua fatia — reaproveitadas do cache quando o
+   * prompt não mudou. Serve à primeira escrita e à reescrita depois de uma
+   * reorganização: a fase cujo envelope e fatia não mudaram custa zero.
+   */
+  async function escreverFases(promptDeFase: (number: number) => string): Promise<string[]> {
+    const esqueleto = skeletonAtual!;
     const fases = new Array<string>(esqueleto.phases.length).fill("");
     const fila = esqueleto.phases.map((fase, posicao) => ({ fase, posicao }));
     // O esqueleto sabe quantas tasks cada fase aloca; a tela passa a saber também.
@@ -1445,19 +1818,6 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           await event("authoring", marca, "started");
           relatarFase({ kind: "authoring", number: fase.number, state: "corrente" });
 
-          /*
-           * Fase sem task é resposta inválida, não resultado.
-           *
-           * O sinal sempre existiu — `extractTasks` devolve "não achei task
-           * nenhuma" — e era anunciado e ignorado. No piloto 7, duas das três
-           * fases foram publicadas vazias porque a CLI encerrou a volta sem
-           * texto, e o log disse "fase 1 pronta" para as duas. O plano seguiu
-           * para a auditoria, para o ensaio e para o gate, que o reprovou por
-           * I-07 — muitas chamadas depois de o defeito ser conhecível.
-           *
-           * Uma segunda tentativa custa uma chamada. Descobrir no gate custa o
-           * run.
-           */
           const promptDaFase = promptDeFase(fase.number);
 
           /*
@@ -1473,6 +1833,15 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             continue;
           }
 
+          /*
+           * Fase sem task é resposta inválida, não resultado.
+           *
+           * O sinal sempre existiu — `extractTasks` devolve "não achei task
+           * nenhuma" — e era anunciado e ignorado. No piloto 7, duas das três
+           * fases foram publicadas vazias porque a CLI encerrou a volta sem
+           * texto, e o log disse "fase 1 pronta" para as duas. Uma segunda
+           * tentativa custa uma chamada. Descobrir no gate custa o run.
+           */
           let tarefas: { tasks: string; applied: string[] } = { tasks: "", applied: [] };
           for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
             const saida = await track({
@@ -1498,7 +1867,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           if (contaTasks(tarefas.tasks) === 0) {
             throw new InitBlockedError(
               `a fase ${fase.number} voltou sem nenhuma task em duas tentativas. ` +
-                "O escritor não produziu conteúdo — verifique o provider e o modelo desse papel antes de rodar de novo.",
+                "O escritor não produziu conteúdo — verifique o provider e o modelo desse papel antes de rodar de novo. " +
+                "As fases já escritas e a arquitetura continuam em cache.",
               runId,
             );
           }
@@ -1523,43 +1893,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * exatamente o que aconteceu duas vezes no `assitencia`.
      */
     await memoria.fechar();
-
-    const documento = assemblePhasesDocument({
-      projectName: esqueleto.projectName,
-      stamp: buildStamp([{ name: "skeleton.md", content: renderSkeleton(esqueleto) }]),
-      overview: `${esqueleto.phases.length} fases, fundação primeiro. O MVP fecha na fase ${esqueleto.mvpCutPhase}.`,
-      phases: fases,
-      openQuestions: unresolved({
-        round: maxInterviewRounds,
-        questions: allQuestions,
-        answers: allAnswers,
-        assumptions: [],
-        maxRounds: maxInterviewRounds,
-      }).map((item) => `${item.topic}: ${item.statement}`),
-    });
-
-    plano = documento;
-    skeletonAtual = esqueleto;
-
-    const writerDoPlano = writerContext([]);
-    relatarFase({ kind: "documento", etapa: "lacunas" });
-    const semGaps = await closeGaps("project-phases.md", planoAutorado(esqueleto, fases, promptDeFase), writerDoPlano);
-    plano = semGaps.content;
-
-    relatarFase({ kind: "documento", etapa: "auditoria" });
-    const verdict = await auditLoop("project-phases.md", semGaps, writerDoPlano, []);
-    plano = verdict.content;
-    planoAprovado = true;
-    remarks.push(...verdict.remarks.map((remark) => ({ document: "project-phases.md", remark })));
-
-    relatarFase({ kind: "documento", etapa: "ensaio do verificador" });
-    const final = await rehearse(verdict.authored, writerDoPlano, []);
-    plano = final.content;
-
-    await publish(options.projectRoot, [{ name: "project-phases.md", content: final.content }]);
-    await event("publish", "project-phases.md", "complete");
-
-    return await concluir();
+    return fases;
   }
 
   /**
@@ -1583,27 +1917,45 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     };
   }
 
+  /** Um achado endereçado à arquitetura: pede reorganização de fases, não emenda de uma. */
+  function ehDeArquitetura(finding: Finding): boolean {
+    return /^\s*(?:architecture|arquitetura)\b/i.test(finding.where);
+  }
+
   /**
-   * O plano montado, com a forma de emendar a fase que a auditoria citar.
+   * O plano montado, com a forma de emendar o que a auditoria citar.
+   *
+   * Dois destinos. Um achado endereçado a `Architecture` refaz a arquitetura —
+   * é a única forma de dividir, fundir ou reordenar fases — e as fases cujo
+   * envelope e fatia não mudaram voltam do cache sem custo. Qualquer outro
+   * achado emenda a fase que ele nomeia, da MESMA fatia que a escreveu.
    *
    * Sem isto a devolução não tinha o que reescrever: o plano voltava idêntico e o
-   * ciclo virava impasse com zero devoluções. A emenda nasce da MESMA fatia que
-   * escreveu a fase — é o que mantém a fase corrigida coerente com o que ela
-   * podia ver quando nasceu.
+   * ciclo virava impasse com zero devoluções.
    */
-  function planoAutorado(esqueleto: Skeleton, fases: string[], promptDeFase: (number: number) => string): Authored {
-    const montar = (partes: string[]): string =>
-      assemblePhasesDocument({
-        projectName: esqueleto.projectName,
-        stamp: buildStamp([{ name: "skeleton.md", content: renderSkeleton(esqueleto) }]),
-        overview: `${esqueleto.phases.length} fases, fundação primeiro. O MVP fecha na fase ${esqueleto.mvpCutPhase}.`,
-        phases: partes,
-        openQuestions: [],
-      });
-
+  function planoAutorado(fases: string[], promptDeFase: (number: number) => string): Authored {
     const autorado = (partes: string[]): Authored => ({
-      content: montar(partes),
+      content: montarPlano(partes, []),
       rewrite: async (findings, attempt, opcoes) => {
+        const deArquitetura = findings.filter(ehDeArquitetura);
+        const deFase = findings.filter((finding) => !ehDeArquitetura(finding));
+
+        if (deArquitetura.length > 0) {
+          if (reorganizacoes < maxArchitectureReturns) {
+            const novas = await reorganizar(deArquitetura, promptDeFase);
+            /*
+             * Depois de uma reorganização os números de fase podem ter mudado, e
+             * um achado de fase da divisão anterior não tem mais endereço. Eles
+             * não são perdidos: a auditoria reconfere tudo o que não está
+             * aprovado pelo texto, e o que ainda valer volta com endereço novo.
+             */
+            if (deFase.length > 0) announce(`  ${deFase.length} achado(s) de fase ficam para a próxima auditoria, sobre a divisão nova`);
+            return autorado(novas);
+          }
+          announce(`  ${deArquitetura.length} achado(s) pedem reorganização, e o orçamento de ${maxArchitectureReturns} reorganização(ões) acabou; eles seguem para a sua arbitragem`);
+          if (deFase.length === 0) return autorado(partes);
+        }
+
         /*
          * O fallback de "todas as fases" é certo para uns achados e destrutivo
          * para outros.
@@ -1619,14 +1971,15 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
          * o achado é de UMA fase pede `somenteNomeadas` e, se ninguém souber dizer
          * qual, o harness não reescreve nada — e diz que não soube.
          */
-        const alvos = affectedPhases(findings, partes.length);
-        const semReferencia = alvos.length === partes.length && !findings.some((finding) => finding.phase !== undefined);
+        const alvos = affectedPhases(deFase, partes.length);
+        const semReferencia = alvos.length === partes.length && !deFase.some((finding) => finding.phase !== undefined);
         if (opcoes?.somenteNomeadas === true && semReferencia) {
           announce("  não consegui localizar a fase destes achados; não vou reescrever o plano inteiro por isso");
           return autorado(partes);
         }
         announce(`  emendando ${alvos.length} de ${partes.length} fase(s)`);
         const proximas = [...partes];
+        const esqueleto = skeletonAtual!;
 
         const fila = [...alvos];
         await Promise.all(
@@ -1641,7 +1994,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               // não há emenda de auditoria que o mude. Mandar a fase inteira era
               // devolver ao modelo a chance de estragar o que ele não escreveu.
               const anterior = extractTasks(proximas[numero - 1] ?? "").tasks;
-              const destaFase = findings.filter(finding => affectedPhases([finding], partes.length).includes(numero));
+              const destaFase = deFase.filter(finding => affectedPhases([finding], partes.length).includes(numero));
               const relacionadas = new Set(destaFase.flatMap(finding => affectedPhases([finding], partes.length)));
               const saida = await track({
                 role: "writer",
@@ -1656,6 +2009,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
                   relatedPhases: [...relacionadas].filter(number => number !== numero).map(number => partes[number - 1] ?? ""),
                   decisions: allAnswers.filter(answer => answer.disposition === "ACCEPTED").map(answer => answer.decision),
                   slice: sliceForPhase(esqueleto, numero),
+                  ...(arquiteturaAtual ? { architecture: architectureSliceForPhase(arquiteturaAtual, numero) } : {}),
                   phaseNumber: numero,
                   grammar: tasksBlock(numero),
                 }),
@@ -1677,14 +2031,10 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
                *
                * No `assitencia` o escritor, sem decisão para fechar um achado,
                * respondeu com uma CARTA — quatro perguntas de múltipla escolha
-               * para o desenvolvedor, "responda 1A, 2A, 3A, 4A" — e uma única
-               * task sem critério nem trace. Ninguém jamais leria aquela carta:
-               * o que sai da emenda vai direto para o documento. A fase de nove
+               * para o desenvolvedor — e uma única task sem critério nem trace.
+               * O que sai da emenda vai direto para o documento. A fase de nove
                * tasks virou um toco, o contrato reprovou por I-08 e I-09, e as
                * três rodadas foram gastas assim, em cinco fases ao mesmo tempo.
-               *
-               * O prompt PROMETIA esta conferência — "this is checked
-               * mechanically after you answer" — e ela nunca tinha sido escrita.
                */
               const recusa = emendaInutil(candidato, proximas[numero - 1] ?? "");
               if (recusa === null) {
@@ -1705,6 +2055,27 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     });
 
     return autorado(fases);
+  }
+
+  /**
+   * A reorganização: a arquitetura refeita com os achados, auditada, aplicada ao
+   * esqueleto, e as fases reescritas — as que não mudaram de envelope nem de
+   * fatia voltam do cache. É o que permite dividir, fundir e reordenar fases no
+   * meio da auditoria sem repagar o que já estava certo.
+   */
+  async function reorganizar(findings: readonly Finding[], promptDeFase: (number: number) => string): Promise<string[]> {
+    reorganizacoes += 1;
+    announce(`  ${findings.length} achado(s) pedem reorganização das fases; refazendo a arquitetura (${reorganizacoes}/${maxArchitectureReturns})`);
+    await event("authoring", "architecture", "retry", findings.map((finding) => finding.problem).join("; "), reorganizacoes);
+    relatarFase({ kind: "documento", etapa: "reorganização das fases" });
+
+    const refeita = await desenharArquitetura({ previous: { architecture: JSON.stringify(arquiteturaAtual), findings: [...findings] } });
+    const auditada = await auditarArquitetura(refeita);
+    const autoridade = shaDaAutoridade(allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision));
+    await publicarArquitetura(auditada, autoridade);
+    skeletonAtual = await aplicarArquitetura(auditada);
+    arquiteturaAtual = auditada;
+    return await escreverFases(promptDeFase);
   }
 
   /**
@@ -2220,6 +2591,23 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     return escolhida;
   }
 
+  /**
+   * Em que fase está esta linha do documento montado.
+   *
+   * O heading de cada fase é texto literal do contrato (`phaseHeading`), não
+   * regex: vale a última fase cujo heading começa antes do fim da linha.
+   */
+  function faseDaLinha(documento: string, linha: number, total: number): number | undefined {
+    if (linha <= 0 || total <= 0) return undefined;
+    const fim = documento.split("\n").slice(0, linha).join("\n").length;
+    let escolhida: number | undefined;
+    for (let numero = 1; numero <= total; numero += 1) {
+      const inicio = documento.indexOf(phaseHeading(numero));
+      if (inicio >= 0 && inicio <= fim) escolhida = numero;
+    }
+    return escolhida;
+  }
+
   /** Marca como fechados os marcadores cuja pergunta já tem resposta aceita. */
   function registrarLacunasFechadas(): void {
     const aceitas = new Set(
@@ -2560,6 +2948,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           ...upstream,
           ...(fase ? [{ name: "a fase de onde estes critérios vêm", content: fase.markdown }] : []),
           ...(skeletonAtual ? [{ name: "fatia do esqueleto desta fase", content: sliceForPhase(skeletonAtual, numero) }] : []),
+          ...(arquiteturaAtual ? [{ name: "fatia da arquitetura desta fase", content: architectureSliceForPhase(arquiteturaAtual, numero) }] : []),
         ];
       };
       const assessment = await judgeAll(criteria, writer, contextoDaFase, round);
@@ -2637,7 +3026,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           fix:
             ruling === "UNSATISFIABLE"
               ? `reescreva esse critério para afirmar o que é verdade segundo as decisões — inclusive a ausência, quando for o caso. Mexa só nele; o resto da fase está aprovado. O critério atual é: "${criterion.text}"`
-              : `troque esse critério por uma condição observável: um arquivo, um comando e sua saída, um teste nomeado, um campo presente. Mexa só nele; o resto da fase está aprovado. O critério atual é: "${criterion.text}"`,
+              : `troque esse critério por uma condição observável: um arquivo, um comando e sua saída, uma rota e sua resposta, um campo presente. Mexa só nele; o resto da fase está aprovado. O critério atual é: "${criterion.text}"`,
         })),
         maxAuditReturns + round + 1,
       );
@@ -2701,7 +3090,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
                 `verdade segundo as decisões — inclusive a ausência, quando for o caso. Mexa só nele; o resto da ` +
                 `fase está aprovado. O critério atual é: "${criterion.text}"`
               : `o desenvolvedor confirmou a leitura do verificador: troque esse critério por uma condição ` +
-                `observável — um arquivo, um comando e sua saída, um teste nomeado, um campo presente. Mexa só ` +
+                `observável — um arquivo, um comando e sua saída, uma rota e sua resposta, um campo presente. Mexa só ` +
                 `nele; o resto da fase está aprovado. O critério atual é: "${criterion.text}"`,
       });
     }
@@ -2875,7 +3264,25 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
       history.push({ attempt, verdict, contentSha: sha12(content) });
 
-      const action = nextAuditAction({ document, history, maxReturns: maxAuditReturns, maxMechanical: maxMechanicalRounds });
+      /*
+       * Emenda que não mudou o texto não vai ser emendada de novo.
+       *
+       * Duas auditorias seguidas sobre os MESMOS bytes, as duas reprovando, dizem
+       * que o escritor não sabe o que fazer com o achado — ou que a emenda foi
+       * recusada por destruir a fase. Pagar a terceira devolução é reencenar a
+       * mesma conversa; a estratégia muda: os pontos vão ao desenvolvedor agora,
+       * com o orçamento de arbitragem de sempre.
+       */
+      const anterior = history.at(-2);
+      const semAvanco =
+        anterior !== undefined &&
+        anterior.contentSha === sha12(content) &&
+        anterior.verdict.status === "REJECTED" &&
+        verdict.status === "REJECTED" &&
+        verdict.mechanical !== true;
+      if (semAvanco) announce("  a emenda não mudou o texto e o auditor reprovou de novo; insistir não resolve — levando os pontos a você");
+
+      const action = nextAuditAction({ document, history, maxReturns: semAvanco ? 0 : maxAuditReturns, maxMechanical: maxMechanicalRounds });
       if (action.action === "publish") return { content, remarks: verdict.remarks, authored };
 
       if (action.action === "ask-developer" && developerRuled) {
@@ -3257,16 +3664,29 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         }
 
         if (doEscritor.length > 0) {
+          /*
+           * Cada defeito de contrato vai à FASE em que está.
+           *
+           * Com `where: linha N` e sem fase, `affectedPhases` mandava a emenda para
+           * todas — e reescrever todas derruba as aprovações já pagas (HANDOFF). O
+           * harness sabe a resposta: a última fase cujo heading precede a linha.
+           */
+          const total = skeletonAtual?.phases.length ?? 0;
           return {
             status: "REJECTED",
-            findings: doEscritor.map((error) => ({
-              where: `linha ${error.line}`,
-              mechanical: true,
-              problem: `${error.code}: ${error.message}`,
-              fix: error.hint,
-            })),
+            findings: doEscritor.map((error) => {
+              const fase = faseDaLinha(content, error.line, total);
+              return {
+                where: fase === undefined ? `linha ${error.line}` : `Phase ${fase} · linha ${error.line}`,
+                mechanical: true,
+                problem: `${error.code}: ${error.message}`,
+                fix: error.hint,
+                ...(fase === undefined ? {} : { phase: fase }),
+              };
+            }),
             remarks: [],
             reason: "o plano não passa no contrato",
+            mechanical: true,
           };
         }
       }
@@ -3352,9 +3772,14 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
     const readiness = evaluateReadiness({
       plan: plano,
-      // O plano é carimbado com o que ele leu, e o que ele leu é o esqueleto:
-      // é o único upstream que existe no ciclo.
-      stampInputs: skeletonAtual ? [{ name: "skeleton.md", content: renderSkeleton(skeletonAtual) }] : [],
+      architecture: arquiteturaMd,
+      // O plano é carimbado com o que ele leu: o esqueleto e a arquitetura.
+      stampInputs: skeletonAtual
+        ? [
+            { name: "skeleton.md", content: renderSkeleton(skeletonAtual) },
+            ...(arquiteturaMd !== "" ? [{ name: "architecture.md", content: arquiteturaMd }] : []),
+          ]
+        : [],
       coverage,
       approved: planoAprovado,
       unresolvedQuestions: needsDecisionMarkers({
@@ -3373,7 +3798,13 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
     const tasks = parsedPhases.ok ? parsedPhases.document.phases.reduce((total, phase) => total + phase.tasks.length, 0) : 0;
     if (readiness.ready && skeletonAtual) {
-      await publish(options.projectRoot, [{ name: "environment.json", content: renderEnvironmentPlan(skeletonAtual, plano) }]);
+      await publish(options.projectRoot, [{
+        name: "environment.json",
+        content: renderEnvironmentPlan(skeletonAtual, plano, {
+          ...(arquiteturaMd !== "" ? { architectureSha12: sha12(arquiteturaMd) } : {}),
+          ...(arquiteturaAtual ? { infrastructure: arquiteturaAtual.infrastructure } : {}),
+        }),
+      }]);
     }
 
     const report: InitReport = {

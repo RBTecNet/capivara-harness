@@ -172,11 +172,48 @@ export const SKELETON = JSON.stringify({
   mvpCutPhase: 2,
 });
 
-/** Roteiro do caminho por esqueleto: uma leitura do produto, depois as fases. */
+/**
+ * Uma arquitetura coerente com o SKELETON: dois componentes, um fluxo, a
+ * mesma divisão de fases que o init propôs. É o que o `plan` desenha antes de
+ * escrever qualquer fase (§116).
+ */
+export const ARCHITECTURE = JSON.stringify({
+  contract: "capivara-architecture/v1",
+  overview: "Um serviço Node com camada de dados e camada HTTP no mesmo processo.",
+  components: [
+    { name: "dados", responsibility: "migrações, seeds e acesso às tabelas", areas: ["dados"], dependsOn: [], contracts: ["módulo db: query(sql, params) → linhas"], files: ["src/db.ts"], owns: ["statuses", "reservations"] },
+    { name: "api", responsibility: "rotas HTTP das reservas", areas: ["backend"], dependsOn: ["dados"], contracts: ["POST /reservas → 201 {id}", "POST /reservas com datas sobrepostas → 409"], files: ["src/api/reservas.ts"], owns: [] },
+  ],
+  dataDecisions: [{ subject: "reservations.id", statement: "inteiro autoincremento" }],
+  flows: [{ workflow: "1", components: ["api", "dados"], notes: "" }],
+  infrastructure: {
+    runtimes: [{ name: "Node.js", version: "22", purpose: "executar a aplicação", basis: "stack do esqueleto: Node 22 com TypeScript" }],
+    tools: [{ name: "TypeScript", version: "", purpose: "tipagem", basis: "stack do esqueleto" }],
+    packageManagers: [{ name: "npm", version: "", purpose: "dependências", basis: "padrão do runtime Node.js" }],
+    dependencies: [{ name: "pg", version: "", kind: "app", purpose: "cliente PostgreSQL", basis: "banco decidido: PostgreSQL 16" }],
+    services: [],
+    databases: [{ name: "PostgreSQL", version: "16", purpose: "persistência", basis: "stack do esqueleto: PostgreSQL 16" }],
+    compatibility: ["Node 22 ou superior"],
+    preconditions: ["PostgreSQL acessível pela DATABASE_URL do .env"],
+  },
+  phases: [
+    { number: 1, title: "Fundação de dados", goal: "migrations e seeds existem", dependsOn: "none", covers: ["statuses", "reservations"], areas: ["dados"], components: ["dados"], taskCount: 2, rationale: "tudo depende das tabelas" },
+    { number: 2, title: "Criar reserva", goal: "o hóspede cria uma reserva", dependsOn: "Phase 1", covers: ["US-1.1", "workflow 1"], areas: ["backend"], components: ["api"], taskCount: 2, rationale: "um componente, um contrato fixo" },
+  ],
+  mvpCutPhase: 2,
+});
+
+/** O passo do arquiteto, para roteiros que montam o caminho à mão. */
+export function architectureStep(): ScriptStep {
+  return { match: { role: "writer", stage: "authoring", subject: "architecture" }, respond: { stdout: ARCHITECTURE }, repeat: true };
+}
+
+/** Roteiro do caminho por esqueleto: uma leitura do produto, a arquitetura, depois as fases. */
 export function skeletonPath(): ScriptStep[] {
   return [
     { match: { role: "writer", stage: "interview" }, respond: { stdout: NO_QUESTIONS }, repeat: true },
     { match: { role: "writer", stage: "authoring", subject: "skeleton" }, respond: { stdout: SKELETON }, repeat: true },
+    architectureStep(),
     { match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: PHASE_1 }, repeat: true },
     { match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 }, repeat: true },
     { match: { role: "auditor", stage: "audit" }, respond: { stdout: approve() }, repeat: true },

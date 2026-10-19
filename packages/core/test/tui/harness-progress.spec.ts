@@ -90,7 +90,7 @@ describe("painel do harness", () => {
   it("assunto com sufixo de gaps ainda aponta para o passo", () => {
     const p = progresso();
     p.apply(evento({ stage: "interview", subject: "project-phases.md:gaps", status: "retry" }));
-    expect(p.model().pipeline[1]?.state).toBe("em andamento");
+    expect(p.model().pipeline[2]?.state).toBe("em andamento");
   });
 
   it("devolução conta como correção", () => {
@@ -104,7 +104,7 @@ describe("painel do harness", () => {
     const p = progresso();
     p.apply(evento({ stage: "authoring", status: "blocked", subject: "project-phases.md" }));
     expect(p.model().status.state).toBe("falhou");
-    expect(p.model().pipeline[1]?.state).toBe("falhou");
+    expect(p.model().pipeline[2]?.state).toBe("falhou");
   });
 
   it("RALPH READY fecha a situação", () => {

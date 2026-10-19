@@ -120,6 +120,6 @@ describe("memória do plano", () => {
     const memoria = await MemoriaDoPlano.abrir(projectRoot, "init-1");
     memoria.guardarFase("p", "## Phase 1");
     await memoria.fechar();
-    expect(JSON.parse(await readFile(planCachePath(projectRoot, "init-1"), "utf8")).contract).toBe("capivara-plan-cache/v2");
+    expect(JSON.parse(await readFile(planCachePath(projectRoot, "init-1"), "utf8")).contract).toBe("capivara-plan-cache/v3");
   });
 });

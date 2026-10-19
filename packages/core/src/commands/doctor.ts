@@ -138,15 +138,17 @@ export async function diagnose(options: DoctorOptions): Promise<Diagnosis[]> {
   found.push({
     area: "projeto",
     item: "documentação",
-    health: missing.length === 0 ? "ok" : semEsqueleto && missing.length === 1 ? "ausente" : "aviso",
+    // "ausente" só quando o esqueleto falta e algo foi publicado sem ele: nada
+    // publicado é passo pendente, não quebra.
+    health: missing.length === 0 ? "ok" : semEsqueleto && missing.length < INIT_ARTIFACTS.length ? "ausente" : "aviso",
     detail:
       missing.length === 0
-        ? "o esqueleto e o plano executável estão publicados"
+        ? "o esqueleto, a arquitetura e o plano executável estão publicados"
         : missing.length === INIT_ARTIFACTS.length
           ? "nenhum artefato ainda: rode `capivara init`"
           : semEsqueleto
             ? "o plano existe sem o esqueleto que ele diz ter lido: rode `capivara init` de novo"
-            : "o esqueleto está publicado e o plano não: rode `capivara plan`",
+            : `o esqueleto está publicado e ${missing.includes("architecture.md") ? "a arquitetura e o plano" : "o plano"} não: rode \`capivara plan\``,
   });
 
   return found;

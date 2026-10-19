@@ -9,6 +9,18 @@ export class CoherenceMemory {
   private authority: string | undefined;
   private approved = new Map<string, string>();
 
+  /** O estado, para a memória em disco; `null` enquanto nada foi aprovado. */
+  exportar(): { authority: string; approved: Record<string, string> } | null {
+    return this.authority === undefined ? null : { authority: this.authority, approved: Object.fromEntries(this.approved) };
+  }
+
+  /** A base aprovada numa execução anterior, sob a autoridade de então. */
+  importar(estado: { authority: string; approved: Record<string, string> } | null): void {
+    if (!estado) return;
+    this.authority = estado.authority;
+    this.approved = new Map(Object.entries(estado.approved));
+  }
+
   changed(criteria: readonly Criterion[], authority: string): string[] | undefined {
     if (this.authority !== authority) return undefined;
     const current = new Map(criteria.map(criterion => [criterion.address, signature(criterion)]));

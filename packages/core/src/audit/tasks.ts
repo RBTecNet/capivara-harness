@@ -63,7 +63,17 @@ export function shaDaAutoridade(decisoes: readonly string[]): string {
 }
 
 export class TasksJulgadas {
-  private readonly aprovadas = new Set<string>();
+  private readonly aprovadas: Set<string>;
+
+  /** Semeada com as chaves de uma execução anterior: aprovação paga não se repaga. */
+  constructor(chaves: readonly string[] = []) {
+    this.aprovadas = new Set(chaves);
+  }
+
+  /** As chaves que valem agora, para quem as guarda em disco. */
+  chaves(): string[] {
+    return [...this.aprovadas];
+  }
 
   /** As tasks desta fase que já passaram, sob a autoridade de agora. */
   jaAprovadas(tasks: readonly TaskBlock[], autoridade: string): TaskBlock[] {

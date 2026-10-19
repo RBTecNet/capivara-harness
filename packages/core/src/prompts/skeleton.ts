@@ -63,7 +63,7 @@ export function skeletonPrompt(context: SkeletonContext): string {
     "Do not use screenshot-to-/dev/null probes: they fail because the destination has no image extension.",
     "Read secrets from environment without printing values. Never embed credentials in requirements or probe output.",
     "Do not probe application code that has not been built yet. Do not invent services or compatibility promises.",
-    "The build prepares and approves this environment before development; phases must not recreate these checks as feature tests.",
+    "The build prepares and approves this environment before development; phases must not recreate these checks as tasks.",
     "The harness assigns E2E_PORT per test process and model session. Project browser-test configuration must read it, so parallel phases and integration never share a hardcoded port.",
     "For HTTP products, shared rules must enumerate navigation paths separately from complete API endpoints, HTTP methods, response formats and the shared client's base prefix.",
     "The executor and independent workflow author receive these exact rules. Never leave either to guess an endpoint from a screen name.",
@@ -186,6 +186,14 @@ export interface PhaseFromSliceContext {
   /** O teto que o harness conta e recusa. Passar dele é defeito só ele pode fechar. */
   maxTasksPerPhase: number;
   /**
+   * A fatia da arquitetura desta fase: componentes, contratos, infraestrutura.
+   *
+   * É o que deixa a fase simples para um executor econômico: as decisões de
+   * onde e como o código se organiza já foram tomadas, e a task só precisa
+   * nomeá-las. Opcional porque o `change` ainda escreve fases sem arquitetura.
+   */
+  architecture?: string;
+  /**
    * Decisões fechadas DEPOIS de o esqueleto existir.
    *
    * O esqueleto é escrito das decisões e por isso as carrega — na stack, nas
@@ -231,9 +239,23 @@ export function phaseFromSlicePrompt(context: PhaseFromSliceContext): string {
     "- Never assert the presence of something the skeleton says does not exist. A criterion demanding",
     "  what cannot exist can never be proven: the verifier looks, does not find, and rejects a phase",
     "  that was correct.",
-    "- Environment readiness is approved once by build preflight. Do not generate feature tests for runtime versions, installed tools or external-service availability.",
+    "- Environment readiness is approved once by build preflight. Do not write tasks that re-check runtime versions, installed tools or external-service availability.",
     "  A new dependency or migration is application setup, not a reason to repeat already-approved environment probes.",
     "- Copy the shared API method, complete endpoint and response shape into the relevant criteria. Keep screen navigation paths distinct from API paths.",
+    "- A criterion describes behaviour, never a test: no test file, test name, test count or validation procedure.",
+    "  How the product is proven is decided later, by the build's evaluator, over the real code.",
+    "",
+    "## Writing for an economical executor",
+    "The executor of this phase may be a small model with a short context, reading only this phase",
+    "and the repository. Write so that it never has to decide anything architectural:",
+    "- every task says WHERE (the component, file or module from the architecture slice), WHAT",
+    "  (the behaviour) and what observable condition proves it;",
+    "- when the slice fixes a contract — a route, a function signature, a shape, a path — the task",
+    "  and its criteria state it literally, never \"as defined in the architecture\";",
+    "- a task never asks the executor to choose a library, a storage strategy or a layout: the slice",
+    "  decided, and where it is silent you pick the simplest choice consistent with it and write it",
+    "  down in the task. Only a BUSINESS decision nobody took becomes [NEEDS DECISION];",
+    "- order the tasks so that each one can be implemented with the previous ones in place.",
     "",
     "## The set with no edge",
     "A criterion says something is true of a SET of things, and that set has to have an edge you can",
@@ -327,5 +349,15 @@ export function phaseFromSlicePrompt(context: PhaseFromSliceContext): string {
       : []),
     "## This phase's slice",
     context.slice,
+    ...(context.architecture
+      ? [
+          "",
+          "## This phase's architecture slice",
+          "The components this phase implements, the contracts it must honour and the ones it may",
+          "consume from earlier phases, and the infrastructure the build prepares. Write the tasks",
+          "against these components; name their files, routes and functions in the task text.",
+          context.architecture,
+        ]
+      : []),
   ].join("\n");
 }

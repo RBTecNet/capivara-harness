@@ -31,6 +31,8 @@ export interface AmendContext {
   /** Autoridade atual, inclusive respostas obtidas durante auditoria e ensaio. */
   decisions?: string[];
   slice?: string;
+  /** A fatia da arquitetura desta fase: componentes, contratos e infraestrutura. */
+  architecture?: string;
   phaseNumber?: number;
   grammar?: string;
   /** O que a tentativa anterior mudou sem ter sido pedido, quando houve. */
@@ -71,6 +73,15 @@ export function amendPhasePrompt(context: AmendContext): string {
       "",
     ] : []),
     ...(context.slice ? ["## This phase's slice", context.slice, ""] : []),
+    ...(context.architecture
+      ? [
+          "## This phase's architecture slice",
+          "The components, contracts and infrastructure this phase implements or consumes. A correction",
+          "that contradicts a contract here is wrong even when it closes the finding.",
+          context.architecture,
+          "",
+        ]
+      : []),
     ...(context.relatedPhases?.length ? [
       "## Related phases (read-only)",
       "These are the CURRENT contracts named by the findings. Reuse their exports, paths and types.",
@@ -91,7 +102,7 @@ export function amendPhasePrompt(context: AmendContext): string {
     "The phase below, complete, with the corrections applied and NOTHING else changed.",
     "",
     "Every task the findings do not name comes back byte-identical: same title, same criteria, same",
-    "feature tests, same traces, same order. Do not reword what is already correct. Do not improve",
+    "traces, same order. Do not reword what is already correct. Do not improve",
     "anything you were not asked to improve, and never add, drop, merge or renumber tasks on your",
     "own initiative.",
     "",

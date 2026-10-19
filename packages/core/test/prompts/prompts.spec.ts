@@ -738,7 +738,7 @@ describe("a emenda pode fazer o que o achado pede", () => {
  * Criar fase não é jogada que ele tenha — é a mesma lição do §52, que eu tinha
  * ensinado ao self-check mecânico e não ao auditor, que a inventou por conta.
  */
-describe("o auditor não pede cirurgia de fase", () => {
+describe("o auditor manda a cirurgia de fase para a arquitetura, não para quem escreve uma fase", () => {
   const prompt = phaseAuditPrompt({
     language: "português do Brasil",
     request: "um sistema",
@@ -754,14 +754,26 @@ describe("o auditor não pede cirurgia de fase", () => {
     totalPhases: 16,
   });
 
-  it("diz que as fases não são dele", () => {
-    expect(prompt).toContain("THE PHASES THEMSELVES ARE NOT YOURS TO CHANGE");
-    expect(prompt).toContain("Never ask for a phase to");
+  it("diz que as fases são da arquitetura e que quem reescreve uma fase não cria, divide nem reordena", () => {
+    expect(prompt).toContain("The phases are decided by the ARCHITECTURE");
+    expect(prompt).toContain("cannot create, split, merge, renumber or reorder");
   });
 
-  it("nomeia as correções que existem de verdade", () => {
+  it("dá o endereço `Architecture` para recomendar reorganização, e diz o que acontece com o que não mudou", () => {
+    expect(prompt).toContain("CAPIVARA_FINDING: Architecture |");
+    expect(prompt).toContain("phases whose");
+    expect(prompt).toContain("envelope did not change keep the work already written for them");
+  });
+
+  it("nomeia as correções que existem dentro da fase", () => {
     expect(prompt).toContain("consolidate tasks that deliver the same capability");
     expect(prompt).toContain("demanded IN THE PHASE that already covers it");
+  });
+
+  it("julga coerência arquitetural, dependências e economia do executor, sem exigir teste", () => {
+    for (const eixo of ["5. ARCHITECTURAL COHERENCE", "6. DEPENDENCIES", "7. EXECUTOR ECONOMY"]) expect(prompt).toContain(eixo);
+    expect(prompt).toContain("Never require a test, a test file, a test");
+    expect(prompt).not.toContain("Feature tests");
   });
 
   it("dá o caminho quando o defeito é do esqueleto: decisão do desenvolvedor, não achado", () => {

@@ -1,12 +1,24 @@
-/** Planeja o produto; a escolha da prova cabe à validação da entrega. */
+/**
+ * O que o planejamento é, e o que ele não é — prefixado em todo prompt do
+ * `init` e do `plan`.
+ *
+ * Decisão do desenvolvedor (§115.39, §116): o planejamento define o produto e
+ * o caminho de implementação; quem decide como provar o produto é o avaliador
+ * do build, lendo o código entregue. Um teste nomeado antes de existir código
+ * é uma obrigação inventada, e a geração anterior do contrato pagou por isso.
+ */
 export function planningScopeBlock(): string {
   return [
     "## Planning responsibility",
-    "Testing belongs to the build validator. Plan product capabilities, contracts, dependencies and observable acceptance criteria.",
-    "Do not prescribe test files, names, counts or test-only phases. Do not design a test suite during planning.",
-    "Acceptance criteria describe how the delivered product must behave, not which tests must exist.",
-    "Do not reject a plan because it does not specify tests. The validator chooses sufficient evidence after inspecting the delivered code.",
-    "Preserve requirements explicitly requested by the developer, including when the product itself is a testing tool.",
-    "Legacy test prescriptions in existing plans are advisory; they do not create extra product requirements.",
+    "The plan describes the product to build: capabilities, components and their contracts,",
+    "dependencies, infrastructure and observable acceptance criteria.",
+    "It never prescribes tests: no test files, test names, test counts, test-only tasks or phases,",
+    "validation procedures or test strategies. How the delivered product is proven is decided later,",
+    "by the build's evaluator, reading the real code.",
+    "Describing expected functional behaviour is not a test. \"Deleting a column is refused while it",
+    "still has cards\" is a criterion; \"write the test deletes_column_with_cards\" is not, and does not",
+    "belong anywhere in the plan.",
+    "Do not reject a plan for not specifying tests. Preserve requirements explicitly requested by the",
+    "developer, including when the product itself is a testing tool.",
   ].join("\n");
 }

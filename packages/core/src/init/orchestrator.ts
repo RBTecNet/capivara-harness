@@ -667,7 +667,19 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * aplicação funciona — e custava oito vezes mais para entregar um plano três
    * vezes maior. O critério de aceite é um só: o loop consegue executar.
    */
-  return await buildFromSkeleton();
+  /*
+   * A memória vai ao disco ANTES de qualquer erro sair daqui.
+   *
+   * As gravações do cache entram numa fila assíncrona, e um run que morre no
+   * meio — provider fora na fase 2 com a fase 1 recém-escrita — saía com a
+   * gravação da fase 1 ainda na fila. O `finally` é o que torna verdade a frase
+   * "nada do que já foi feito se perdeu" que toda parada promete.
+   */
+  try {
+    return await buildFromSkeleton();
+  } finally {
+    await memoria.fechar();
+  }
 
   async function interview(document: string, upstream: { name: string; content: string }[]) {
     const questions: Question[] = [];
@@ -1051,7 +1063,18 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       });
     };
 
-    const reaproveitadas = aReauditar.filter((fase) => memoria.jaAprovada(promptDaFase(fase)));
+    /*
+     * A chave da aprovação é o prompt SEM a lista de tasks já aprovadas.
+     *
+     * Essa lista muda conforme a memória cresce — vazia na primeira auditoria,
+     * cheia na retomada — e com ela mudaria o sha, e a aprovação paga ontem não
+     * seria encontrada hoje. O que decide o veredito é a fase, a fatia e as
+     * decisões; é isso que entra na chave.
+     */
+    const chaveDeAprovacao = (fase: { number: number; markdown: string }): string =>
+      phaseAuditPrompt({ ...base, upstream: fatia(fase.number), phaseMarkdown: fase.markdown, phaseNumber: fase.number, totalPhases: fases.length });
+
+    const reaproveitadas = aReauditar.filter((fase) => memoria.jaAprovada(chaveDeAprovacao(fase)));
     for (const fase of reaproveitadas) {
       fasesAprovadas.add(sha12(fase.markdown.trim()));
       relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
@@ -1079,7 +1102,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             // Aprovada é fato do run: o texto exato que passou não volta à fila.
             if (veredicto.findings.length === 0) {
               fasesAprovadas.add(sha12(fase.markdown.trim()));
-              memoria.guardarAprovacao(promptDaFase(fase));
+              memoria.guardarAprovacao(chaveDeAprovacao(fase));
               // Fase aprovada é TASK aprovada, uma a uma: é o que sobrevive à
               // próxima emenda, que vai mudar só uma delas — e à próxima execução.
               const lido = parsePhaseFragment(fase.markdown);
@@ -1096,6 +1119,15 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         }),
       async () => {
         const changed = coerencia.changed(criteria, autoridade);
+        /*
+         * Índice idêntico ao aprovado, sob as mesmas decisões: a resposta já é
+         * conhecida. Reperguntar não acrescenta rigor, acrescenta variância — e
+         * numa retomada acrescentaria uma chamada paga por nada.
+         */
+        if (changed !== undefined && changed.length === 0) {
+          announce("  coerência aprovada numa execução anterior sobre o mesmo índice e as mesmas decisões; não vou repagar");
+          return { status: "APPROVED" as const, findings: [], remarks: [], decisions: [], reason: "índice idêntico ao já aprovado" };
+        }
         const verdict = await auditCall("project-phases.md#coerência", attempt, () =>
           coherencePrompt({
             ...base,
@@ -1175,7 +1207,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     for (const fase of fases) {
       if (!original.findings.some(finding => finding.phase === fase.number) || review.verdict.findings.some(finding => finding.phase === fase.number)) continue;
       fasesAprovadas.add(sha12(fase.markdown.trim()));
-      memoria.guardarAprovacao(promptDaFase(fase));
+      memoria.guardarAprovacao(chaveDeAprovacao(fase));
       const lido = parsePhaseFragment(fase.markdown);
       if (lido !== null) {
         tasksJulgadas.aprovar(lido.tasks, autoridade);
@@ -1805,6 +1837,17 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       kind: "planned",
       phases: esqueleto.phases.map((fase) => ({ number: fase.number, title: fase.title, tasks: fase.taskCount })),
     });
+    /*
+     * Uma fase que falha não derruba as irmãs que estão terminando.
+     *
+     * Com `Promise.all`, a primeira rejeição saía daqui com as outras
+     * trabalhadoras ainda no meio da escrita — e a fase que elas terminavam um
+     * instante depois nunca chegava ao cache, porque ninguém esperava por ela.
+     * Cada trabalhadora guarda o próprio erro; o primeiro sai só depois de
+     * TODAS acabarem e de o cache ir ao disco. É isso que faz a retomada custar
+     * só a fase que faltou.
+     */
+    const erros: unknown[] = [];
     await Promise.all(
       Array.from({ length: Math.min(maxParallelParts, fila.length) }, async () => {
         for (;;) {
@@ -1812,6 +1855,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           if (!proxima) return;
           const { fase, posicao } = proxima;
           const marca = `phase-p${String(fase.number).padStart(2, "0")}`;
+          try {
 
           /*
            * A fase avisa que começou, não só que terminou.
@@ -1887,18 +1931,23 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           relatarFase({ kind: "authoring", number: fase.number, state: "pronta" });
           announce(`  fase ${fase.number} pronta`);
           await event("authoring", marca, "complete");
+          } catch (erro) {
+            erros.push(erro);
+            return;
+          }
         }
       }),
     );
 
     /*
-     * As fases vão ao disco ANTES da auditoria.
+     * As fases vão ao disco ANTES da auditoria — e antes de qualquer erro sair.
      *
      * É a parte cara e é a que costuma matar o run: se o cache só fosse gravado
      * no fim, um impasse de auditoria levaria junto as horas de escrita — que foi
      * exatamente o que aconteceu duas vezes no `assitencia`.
      */
     await memoria.fechar();
+    if (erros.length > 0) throw erros[0];
     return fases;
   }
 
@@ -3182,11 +3231,23 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       criteria,
     });
 
+    /*
+     * Lote já ensaiado com tudo observável, sob este mesmo prompt — mesma fase,
+     * mesma fatia, mesmas decisões —, não é pago de novo: é a mesma regra das
+     * aprovações de auditoria, no papel que faltava.
+     */
+    if (memoria.jaAprovada(prompt)) {
+      announce(`  ensaio de ${criteria.length} critério(s) reaproveitado de uma execução anterior`);
+      return { blocking: [], unrehearsed: [] };
+    }
     const verdicts = parseRehearsal(
       await track({ role: "verifier", stage: "verify", subject: "project-phases.md", attempt: round, prompt }),
     );
     let assessment = assessRehearsal(criteria, verdicts);
-    if (assessment.unrehearsed.length === 0) return assessment;
+    if (assessment.unrehearsed.length === 0) {
+      if (assessment.blocking.length === 0) memoria.guardarAprovacao(prompt);
+      return assessment;
+    }
 
     const corrective = [
       prompt,
@@ -3200,6 +3261,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       await track({ role: "verifier", stage: "verify", subject: "project-phases.md", attempt: round, prompt: corrective }),
     );
     assessment = assessRehearsal(criteria, [...verdicts, ...completed]);
+    if (assessment.unrehearsed.length === 0 && assessment.blocking.length === 0) memoria.guardarAprovacao(prompt);
     return assessment;
   }
 

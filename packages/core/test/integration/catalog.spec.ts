@@ -518,6 +518,11 @@ describe("B-08 a B-12 · auditoria", () => {
       match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2", attempt: 1 },
       respond: { stdout: reject("Phase 2", "critério não verificável", "use um limite numérico observável") },
     });
+    // E a emenda MUDA o texto da fase 2: é o que faz o índice de critérios mudar.
+    steps.unshift({
+      match: { role: "writer", stage: "authoring", subject: "phase-p02", attempt: 2 },
+      respond: { stdout: PHASE_2.replace("Uma reserva nova nasce com status pendente", "Uma reserva nova nasce com status pendente e data de criação") },
+    });
 
     const { outcome, agent } = await init(steps);
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
@@ -530,10 +535,23 @@ describe("B-08 a B-12 · auditoria", () => {
     expect(agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-phases.md#P2").length).toBeGreaterThan(1);
 
     /*
-     * E a pergunta global continua sendo feita toda rodada: é a coerência que
-     * pega a contradição que nasce quando uma fase muda.
+     * E a pergunta global é feita de novo quando o índice MUDA: é a coerência
+     * que pega a contradição que nasce quando uma fase muda. Índice idêntico ao
+     * já aprovado, sob as mesmas decisões, não é reperguntado (§116).
      */
     expect(agent.calls.filter((call) => call.subject === "project-phases.md#coerência").length).toBeGreaterThan(1);
+  });
+
+  it("índice idêntico ao já aprovado, sob as mesmas decisões, não volta à coerência", async () => {
+    const steps = happyPath();
+    // A fase 2 é devolvida uma vez e a emenda devolve o MESMO texto: nada muda no índice.
+    steps.unshift({
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2", attempt: 1 },
+      respond: { stdout: reject("Phase 2", "critério não verificável", "use um limite numérico observável") },
+    });
+    const { outcome, agent } = await init(steps);
+    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+    expect(agent.calls.filter((call) => call.subject === "project-phases.md#coerência")).toHaveLength(1);
   });
 
   it("B-10 teto de devoluções esgotado para e pergunta ao desenvolvedor", async () => {

@@ -21,7 +21,6 @@ const PLAN = assemblePhasesDocument({
 - [ ] **Task:** Gravar o conteúdo de app.txt
   - **Acceptance criteria:**
     - O arquivo app.txt contém exatamente correto
-  - **Feature tests:** app_conteudo → compara o conteúdo completo
   - **Traces:** US-1.1, app`],
   openQuestions: [],
 });

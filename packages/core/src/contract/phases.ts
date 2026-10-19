@@ -1,5 +1,5 @@
 /**
- * ★ AUTORIDADE ÚNICA da gramática `capivara-phases/v1`.
+ * ★ AUTORIDADE ÚNICA da gramática `capivara-phases/v2`.
  *
  * `capivara init` valida o documento com `parsePhases`. `capivara build` divide
  * o documento em sessões com o MESMO `parsePhases`, lendo `PhaseBlock.markdown`.
@@ -32,7 +32,6 @@ export interface TaskBlock {
   done: boolean;
   title: string;
   acceptanceCriteria: string[];
-  featureTests: string[];
   designRef: string | null;
   traces: string[];
   line: number;
@@ -95,12 +94,17 @@ const METADATA =
   /\*\*Goal:\*\*\s*(.*?)\s*·\s*\*\*Depends on:\*\*\s*(.*?)\s*·\s*\*\*Covers:\*\*\s*(.*?)\s*(?:·\s*\*\*Areas:\*\*\s*(.*?)\s*)?$/;
 const TASK = /^- \[([ xX])\] \*\*Task:\*\* (\S.*)$/;
 const CRITERIA_LABEL = "- **Acceptance criteria:**";
-const FEATURE_TESTS = /^- \*\*Feature tests:\*\* (\S.*)$/;
+/*
+ * O rótulo da geração anterior. O plano descreve comportamento, não testes:
+ * quem o encontra está lendo um documento `capivara-phases/v1`, e ele é
+ * recusado com I-15 em vez de convertido em silêncio.
+ */
+const LEGACY_FEATURE_TESTS = /^-?\s*\*\*Feature tests:\*\*/;
 const DESIGN_REF = /^- \*\*Design ref:\*\* (\S.*)$/;
 const TRACES = /^- \*\*Traces:\*\* (\S.*)$/;
 const CRITERION = /^- (\S.*)$/;
 /** Um rótulo de task sem conteúdo na linha: introduz uma lista, não afirma nada. */
-const STRUCTURAL_ONLY = /^-?\s*\*\*(?:Acceptance criteria|Feature tests|Traces|Design ref):\*\*\s*$/;
+const STRUCTURAL_ONLY = /^-?\s*\*\*(?:Acceptance criteria|Traces|Design ref):\*\*\s*$/;
 const NEEDS_DECISION = "[NEEDS DECISION]";
 
 interface PhaseDraft {
@@ -242,6 +246,17 @@ export function parsePhases(source: string): ParseResult {
 
     const trimmed = raw.trim();
 
+    if (LEGACY_FEATURE_TESTS.test(trimmed)) {
+      errors.push({
+        code: "I-15",
+        line,
+        message: "a task declara `**Feature tests:**`, rótulo da geração anterior do contrato",
+        hint: "o plano descreve comportamento em critérios de aceite; remova a linha — quem decide como provar o produto é o avaliador do build. Um plano antigo precisa ser gerado de novo com `capivara plan --fresh`",
+      });
+      inCriteria = false;
+      continue;
+    }
+
     const taskMatch = TASK.exec(trimmed);
     if (taskMatch) {
       task = {
@@ -249,7 +264,6 @@ export function parsePhases(source: string): ParseResult {
         done: (taskMatch[1] ?? " ").toLowerCase() === "x",
         title: (taskMatch[2] ?? "").trim(),
         acceptanceCriteria: [],
-        featureTests: [],
         designRef: null,
         traces: [],
         line,
@@ -269,13 +283,6 @@ export function parsePhases(source: string): ParseResult {
 
     if (trimmed === CRITERIA_LABEL) {
       inCriteria = true;
-      continue;
-    }
-
-    const featureTests = FEATURE_TESTS.exec(trimmed);
-    if (featureTests) {
-      task.featureTests.push((featureTests[1] ?? "").trim());
-      inCriteria = false;
       continue;
     }
 
@@ -300,11 +307,11 @@ export function parsePhases(source: string): ParseResult {
       /*
        * Rótulo estrutural nunca é critério.
        *
-       * `- **Feature tests:**` sem texto na mesma linha não casa com o rótulo
-       * inline, e caía aqui: virava um critério de aceitação que não afirma nada
-       * sobre o sistema. No piloto 6 foram exatamente os 20 critérios que o
-       * ensaio reprovou como UNOBSERVABLE — o verificador estava certo, e o
-       * defeito era desta leitura.
+       * `- **Traces:**` sem texto na mesma linha não casa com o rótulo inline, e
+       * caía aqui: virava um critério de aceitação que não afirma nada sobre o
+       * sistema. No piloto 6 foram exatamente os 20 critérios que o ensaio
+       * reprovou como UNOBSERVABLE — o verificador estava certo, e o defeito era
+       * desta leitura.
        */
       if (STRUCTURAL_ONLY.test(trimmed)) {
         inCriteria = false;

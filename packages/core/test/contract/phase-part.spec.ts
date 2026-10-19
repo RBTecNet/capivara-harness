@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assemblePhase, canonicalDependsOn, repairInlineCriteria, repairLabelLists, repairMissingBullets, canonicalWorkflowTraces, extractTasks, joinPhaseMetadata, normalizePhasePart, parsePhaseFragment, parsePhases } from "../../src/contract/index.js";
+import { assemblePhase, canonicalDependsOn, repairInlineCriteria, repairLabelLists, repairMissingBullets, canonicalWorkflowTraces, extractTasks, joinPhaseMetadata, normalizePhasePart, parsePhaseFragment, parsePhases, stripLegacyFeatureTests } from "../../src/contract/index.js";
 
 const FASE = [
   "## Phase 2: Cadastro de hóspedes",
@@ -145,7 +145,6 @@ describe("metadados da fase numa linha só", () => {
     "- [ ] **Task:** Montar a paleta",
     "  - **Acceptance criteria:**",
     "    - a paleta existe num arquivo só",
-    "  - **Feature tests:** paleta → existe",
     "  - **Traces:** US-1.10",
     "",
   ].join("\n");
@@ -202,7 +201,6 @@ describe("fase certa, número errado", () => {
     "- [ ] **Task:** Criar a migration",
     "  - **Acceptance criteria:**",
     "    - A tabela existe",
-    "  - **Feature tests:** migra → a tabela existe",
     "  - **Traces:** reservas",
   ].join("\n");
 
@@ -248,7 +246,6 @@ describe("o envelope é do harness, as tasks são do modelo", () => {
     "- [ ] **Task:** Implementar a busca por título",
     "  - **Acceptance criteria:**",
     "    - A busca ignora maiúsculas e acentos",
-    "  - **Feature tests:** busca_titulo → encontra ignorando caixa",
     "  - **Traces:** US-1.2",
   ].join("\n");
 
@@ -275,7 +272,7 @@ describe("o envelope é do harness, as tasks são do modelo", () => {
     expect(lido.ok, lido.ok ? "" : lido.errors.map((e) => `${e.code} ${e.message}`).join("; ")).toBe(true);
   });
 
-  it("lê a resposta com linhas em branco e Feature tests em lista, sem perder conteúdo", () => {
+  it("lê a resposta com linhas em branco e Traces em lista, sem perder conteúdo", () => {
     const resposta = [
       "- [ ] **Task:** Implementar o dashboard",
       "",
@@ -285,11 +282,10 @@ describe("o envelope é do harness, as tasks são do modelo", () => {
       "",
       "    - O cliente obterContagens usa GET /api/dashboard",
       "",
-      "  - **Feature tests:**",
-      "    - contagens_insercao → contagens refletem inserções via API",
-      "    - contagens_exclusao → exclusão diminui a contagem",
-      "",
-      "  - **Traces:** US-4.1, workflow 4, tarefas",
+      "  - **Traces:**",
+      "    - US-4.1",
+      "    - workflow 4",
+      "    - tarefas",
     ].join("\n");
     const { tasks: extraidas } = extractTasks(resposta);
     const fase = assemblePhase({ ...envelope, number: 1, dependsOn: "none" }, extraidas);
@@ -299,7 +295,6 @@ describe("o envelope é do harness, as tasks são do modelo", () => {
     expect(result.document.phases[0]?.tasks[0]).toMatchObject({
       title: "Implementar o dashboard",
       acceptanceCriteria: ["GET /api/dashboard retorna contagens reais do SQLite", "O cliente obterContagens usa GET /api/dashboard"],
-      featureTests: ["contagens_insercao → contagens refletem inserções via API", "contagens_exclusao → exclusão diminui a contagem"],
       traces: ["US-4.1", "workflow 4", "tarefas"],
     });
     expect(result.document.phases[0]?.markdown.trim()).toBe(fase.trim());
@@ -335,9 +330,9 @@ describe("o envelope é do harness, as tasks são do modelo", () => {
 
 describe("critérios colados na linha do rótulo", () => {
   it("recupera fechamento de negrito perdido sem alterar o conteúdo dos campos", () => {
-    const raw = "- [ ] **Task:** Validar categoria\n  - **Acceptance criteria:\n    - Nome duplicado retorna 400\n  - **Feature tests:* nome_unico -> rejeita duplicata\n  - **Traces: categorias";
+    const raw = "- [ ] **Task:** Validar categoria\n  - **Acceptance criteria:\n    - Nome duplicado retorna 400\n  - **Design ref:* design/categorias.md\n  - **Traces: categorias";
     const normalized = extractTasks(raw);
-    expect(normalized.tasks).toBe(raw.replace("**Acceptance criteria:", "**Acceptance criteria:**").replace("**Feature tests:* ", "**Feature tests:** ").replace("**Traces: ", "**Traces:** "));
+    expect(normalized.tasks).toBe(raw.replace("**Acceptance criteria:", "**Acceptance criteria:**").replace("**Design ref:* ", "**Design ref:** ").replace("**Traces: ", "**Traces:** "));
     const parsed = parsePhases(`# Teste — Project Phases\n\n<!-- inputs: skeleton.md@sha256:000000000000 -->\n\n${assemblePhase({ number: 1, title: "Categorias", goal: "valida", dependsOn: "none", covers: ["categorias"] }, normalized.tasks)}`);
     expect(parsed.ok, parsed.ok ? "" : JSON.stringify(parsed.errors)).toBe(true);
     expect(extractTasks(normalized.tasks).tasks).toBe(normalized.tasks);
@@ -412,8 +407,8 @@ describe("rótulo de task escrito sem o traço", () => {
     expect(content).toBe("  - **Traces:** US-1.1");
   });
 
-  it("vale para os quatro rótulos de task", () => {
-    for (const rotulo of ["Acceptance criteria", "Feature tests", "Traces", "Design ref"]) {
+  it("vale para os três rótulos de task", () => {
+    for (const rotulo of ["Acceptance criteria", "Traces", "Design ref"]) {
       expect(repairMissingBullets(`  **${rotulo}:** x`).content.trim().startsWith("- ")).toBe(true);
     }
   });
@@ -458,15 +453,16 @@ describe("rótulo de task escrito sem o traço", () => {
 });
 
 describe("rótulo escrito como lista, e rótulo que nunca é critério", () => {
-  it("cada item da lista vira uma linha própria do rótulo", () => {
-    const { content, applied } = repairLabelLists(
-      ["- **Feature tests:**", "  - reserva_expira → some depois de 2 dias", "  - multa_calculada → R$ 0,50 por dia"].join("\n"),
-    );
+  it("a lista de Traces vira UMA linha com vírgulas: o parser lê a última linha do rótulo", () => {
+    const { content, applied } = repairLabelLists(["- **Traces:**", "  - US-1.1", "  - reservations"].join("\n"));
     expect(applied).toBe(1);
-    expect(content.split("\n")).toEqual([
-      "  - **Feature tests:** reserva_expira → some depois de 2 dias",
-      "  - **Feature tests:** multa_calculada → R$ 0,50 por dia",
-    ]);
+    expect(content.split("\n")).toEqual(["  - **Traces:** US-1.1, reservations"]);
+  });
+
+  it("cada item de uma lista de Design ref vira uma linha própria do rótulo", () => {
+    const { content, applied } = repairLabelLists(["- **Design ref:**", "  - design/a.md"].join("\n"));
+    expect(applied).toBe(1);
+    expect(content.split("\n")).toEqual(["  - **Design ref:** design/a.md"]);
   });
 
   it("os critérios de aceite ficam de fora: ali a lista é a forma certa", () => {
@@ -485,8 +481,7 @@ describe("rótulo escrito como lista, e rótulo que nunca é critério", () => {
       "- [ ] **Task:** Criar a reserva",
       "  - **Acceptance criteria:**",
       "    - a reserva nasce ativa",
-      "  - **Feature tests:**",
-      "    - reserva_nasce → nasce ativa",
+      "  - **Design ref:**",
       "  - **Traces:** US-4.1",
     ].join("\n");
 
@@ -507,8 +502,52 @@ describe("rótulo escrito como lista, e rótulo que nunca é critério", () => {
     if (lido.ok) {
       const task = lido.document.phases[0]?.tasks[0];
       expect(task?.acceptanceCriteria).toEqual(["a reserva nasce ativa"]);
-      expect(task?.acceptanceCriteria.join(" ")).not.toContain("Feature tests");
-      expect(task?.featureTests).toEqual(["reserva_nasce → nasce ativa"]);
+      expect(task?.acceptanceCriteria.join(" ")).not.toContain("Design ref");
+      expect(task?.designRef).toBeNull();
     }
+  });
+});
+
+/*
+ * O escritor que emite `Feature tests` por hábito não errou nada que mereça uma
+ * devolução paga: o contrato v2 não tem o campo, e a linha sai em código. Só a
+ * saída FRESCA do escritor é limpa; o parser continua recusando o rótulo num
+ * documento publicado (I-15).
+ */
+describe("Feature tests na saída fresca do escritor é descartado em código", () => {
+  it("remove a linha inline e a lista que o rótulo vazio introduz, e o que sobra passa no contrato", () => {
+    const tasks = [
+      "- [ ] **Task:** Criar a reserva",
+      "  - **Acceptance criteria:**",
+      "    - a reserva nasce ativa",
+      "  - **Feature tests:** reserva_nasce → nasce ativa; reserva_dupla → recusada",
+      "  - **Traces:** US-4.1",
+      "",
+      "- [ ] **Task:** Cancelar a reserva",
+      "  - **Acceptance criteria:**",
+      "    - a reserva cancelada some da agenda",
+      "  - **Feature tests:**",
+      "    - cancela_reserva → some da agenda",
+      "    - cancela_duas_vezes → erro",
+      "  - **Traces:** US-4.2",
+    ].join("\n");
+
+    const { tasks: limpas, applied } = extractTasks(tasks);
+    expect(limpas).not.toContain("Feature tests");
+    expect(limpas).not.toContain("cancela_reserva");
+    expect(applied.join(" ")).toContain("Feature tests");
+
+    const lido = parsePhases(
+      `# X — Project Phases\n\n<!-- inputs: skeleton.md@sha256:aaaaaaaaaaaa -->\n\n${assemblePhase({ number: 1, title: "Base", goal: "g", dependsOn: "none", covers: ["US-4.1"] }, limpas)}`,
+    );
+    expect(lido.ok, lido.ok ? "" : lido.errors.map((e) => `${e.code} ${e.message}`).join("; ")).toBe(true);
+    if (lido.ok) {
+      expect(lido.document.phases[0]?.tasks.map((task) => task.acceptanceCriteria)).toEqual([["a reserva nasce ativa"], ["a reserva cancelada some da agenda"]]);
+      expect(lido.document.phases[0]?.tasks.map((task) => task.traces)).toEqual([["US-4.1"], ["US-4.2"]]);
+    }
+  });
+
+  it("não toca em nada quando o rótulo não aparece", () => {
+    expect(stripLegacyFeatureTests("- [ ] **Task:** X\n  - **Traces:** a")).toEqual({ content: "- [ ] **Task:** X\n  - **Traces:** a", applied: 0 });
   });
 });

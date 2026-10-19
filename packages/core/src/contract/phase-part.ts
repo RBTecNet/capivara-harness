@@ -30,12 +30,22 @@ const SUB_PHASE = /^###\s+Phase\s+\d+\.\d+\s*:/;
 const INLINE_CRITERIA = /^-\s*\*\*Acceptance criteria:\*\*\s+(\S.*)$/;
 /** Um rótulo de task na margem, sem o traço que o faz item de lista. */
 /** Um rótulo de task sozinho na linha, que introduz uma lista abaixo. */
-const LIST_LABEL = /^-?\s*\*\*(Acceptance criteria|Feature tests|Traces|Design ref):\*\*\s*$/;
+const LIST_LABEL = /^-?\s*\*\*(Acceptance criteria|Traces|Design ref):\*\*\s*$/;
 /** Um item simples de lista, que não é outro rótulo nem uma task. */
-const SIMPLE_ITEM = /^-\s+(?!\[[ xX]\])(?!\*\*(?:Acceptance criteria|Feature tests|Traces|Design ref):)(\S.*)$/;
-const NAKED_LABEL = /^(\s*)(\*\*(?:Acceptance criteria|Feature tests|Traces|Design ref):\*\*.*)$/;
+const SIMPLE_ITEM = /^-\s+(?!\[[ xX]\])(?!\*\*(?:Acceptance criteria|Traces|Design ref):)(\S.*)$/;
+const NAKED_LABEL = /^(\s*)(\*\*(?:Acceptance criteria|Traces|Design ref):\*\*.*)$/;
 /** Rótulo conhecido com zero ou um asterisco de fechamento, em vez de dois. */
-const UNCLOSED_LABEL = /^([ \t]*(?:-[ \t]+)?\*\*(?:Acceptance criteria|Feature tests|Traces|Design ref):)\*?([ \t].*|)$/;
+const UNCLOSED_LABEL = /^([ \t]*(?:-[ \t]+)?\*\*(?:Acceptance criteria|Traces|Design ref):)\*?([ \t].*|)$/;
+/**
+ * O rótulo da geração anterior, em qualquer das grafias que o escritor usa.
+ *
+ * O contrato `v2` não tem `Feature tests` (I-15). Um escritor que o emite por
+ * hábito não errou nada que mereça uma devolução paga: a linha é descartada em
+ * código, e o que ela introduzia — uma lista de nomes — vai junto. Isto vale só
+ * para a saída FRESCA do escritor; um plano publicado pela geração anterior é
+ * recusado pelo parser, nunca limpo em silêncio.
+ */
+const LEGACY_FEATURE_TESTS = /^[ \t]*-?[ \t]*\*{0,2}Feature tests:?\*{0,2}\s*(.*)$/i;
 /** Um heading de fase com qualquer número, para reconhecer o número errado. */
 const OUTRA_FASE = /^##\s+Phase\s+(\d+)\s*:/;
 
@@ -291,9 +301,12 @@ export function extractTasks(markdown: string): { tasks: string; applied: string
   const traduzidos = canonicalWorkflowTraces(lines.join("\n"));
   if (traduzidos.applied) applied.push("traduziu de volta a referência de workflow nos Traces");
 
+  const semTestes = stripLegacyFeatureTests(traduzidos.content);
+  if (semTestes.applied > 0) applied.push(`descartou ${semTestes.applied} linha(s) de Feature tests: o plano descreve comportamento, não testes`);
+
   let inTask = false;
   let closedLabels = 0;
-  const closed = traduzidos.content.split("\n").map(line => {
+  const closed = semTestes.content.split("\n").map(line => {
     if (TASK_LINE.test(line)) inTask = true;
     else if (/^#{1,3}\s/.test(line)) inTask = false;
     if (!inTask) return line;
@@ -387,16 +400,17 @@ export function repairMissingBullets(markdown: string): { content: string; appli
 /**
  * Rótulo de task seguido de uma lista, em vez de texto na mesma linha.
  *
- * A gramática quer `- **Feature tests:** nome → regra`. O modelo escreve o rótulo
+ * A gramática quer `- **Traces:** US-1.1, users`. O modelo escreve o rótulo
  * sozinho e os itens abaixo, que é markdown igualmente razoável e que o contrato
  * não aceita:
  *
- *     - **Feature tests:**
- *       - reserva_expira → a reserva some depois de 2 dias
+ *     - **Traces:**
+ *       - US-1.1
+ *       - users
  *
- * Cada item vira uma linha própria do rótulo. O parser já aceita o rótulo
- * repetido — `featureTests` e `traces` são listas —, então a conversão é exata e
- * não perde nem inventa nada.
+ * Cada item vira uma linha própria do rótulo. O parser aceita o rótulo repetido
+ * — a última linha de `Traces` vale —, então a conversão junta o que cabe numa
+ * linha só e não perde nem inventa nada.
  */
 export function repairLabelLists(markdown: string): { content: string; applied: number } {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
@@ -425,7 +439,43 @@ export function repairLabelLists(markdown: string): { content: string; applied: 
     }
 
     applied += 1;
-    for (const item of itens) saida.push(`  - **${rotulo[1]}:** ${item}`);
+    // `Traces` é UMA linha com vírgulas: o parser lê a última linha do rótulo,
+    // e espalhar os itens em várias perderia todos menos o último.
+    if (rotulo[1] === "Traces") saida.push(`  - **Traces:** ${itens.join(", ")}`);
+    else for (const item of itens) saida.push(`  - **${rotulo[1]}:** ${item}`);
+    i = j - 1;
+  }
+
+  return { content: saida.join("\n"), applied };
+}
+
+/**
+ * Descarta o rótulo `Feature tests` e a lista que ele introduz.
+ *
+ * A linha com conteúdo inline sai sozinha. A linha vazia (só o rótulo) leva
+ * junto os itens simples logo abaixo dela — são os nomes de teste que o rótulo
+ * anunciava —, até a próxima task, rótulo ou heading. Nada mais é tocado.
+ */
+export function stripLegacyFeatureTests(markdown: string): { content: string; applied: number } {
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const saida: string[] = [];
+  let applied = 0;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const rotulo = LEGACY_FEATURE_TESTS.exec(lines[i] ?? "");
+    if (!rotulo) {
+      saida.push(lines[i] ?? "");
+      continue;
+    }
+    applied += 1;
+    if ((rotulo[1] ?? "").trim() !== "") continue;
+    let j = i + 1;
+    for (; j < lines.length; j += 1) {
+      const linha = (lines[j] ?? "").trim();
+      if (linha === "") break;
+      if (!SIMPLE_ITEM.test(linha) || TASK_LINE.test(linha)) break;
+      applied += 1;
+    }
     i = j - 1;
   }
 

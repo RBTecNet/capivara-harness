@@ -1,4 +1,4 @@
-# Contrato `capivara-phases/v1`
+# Contrato `capivara-phases/v2`
 
 > Documento gerado por `npm run docs:contract` a partir de
 > `packages/core/src/contract/`. Não edite à mão: um teste falha quando esta
@@ -14,7 +14,7 @@ executa não podem divergir.
 ```markdown
 # <Projeto> — Project Phases
 
-<!-- inputs: skeleton.md@sha256:abc123abc123 -->
+<!-- inputs: skeleton.md@sha256:abc123abc123 architecture.md@sha256:def456def456 -->
 
 ## Overview
 
@@ -38,11 +38,19 @@ executa não podem divergir.
 ## Open Questions
 ```
 
-O planejamento descreve entregas e critérios observáveis. O validador escolhe
-as verificações durante o build. `**Feature tests:**` é lido em planos existentes
-como sugestão, sem obrigar nomes ou arquivos. `**Design ref:**` é opcional e
-só aponta para artefato de design existente. Os rótulos são literais e nunca
-são traduzidos; a indentação dos sub-itens é livre.
+O planejamento descreve entregas e critérios de aceite observáveis. Quem decide
+como provar o produto é o avaliador do build, lendo o código entregue: o plano
+não nomeia testes, arquivos de teste nem procedimentos de validação, e o rótulo
+`**Feature tests:**` da geração anterior é recusado (I-15). `**Design ref:**` é
+opcional e só aponta para artefato de design existente. Os rótulos são literais e
+nunca são traduzidos; a indentação dos sub-itens é livre.
+
+O stamp da linha 3 cita os dois documentos que o plano leu: `skeleton.md`, o
+produto definido pelo `init`, e `architecture.md`, a arquitetura e a
+infraestrutura decididas pelo `plan` antes de escrever as fases.
+
+**Documentos de versões anteriores são incompatíveis.** Um plano `capivara-phases/v1`
+não é lido nem convertido: gere de novo com `capivara init --fresh` e `capivara plan --fresh`.
 
 ## Invariantes
 
@@ -62,6 +70,7 @@ são traduzidos; a indentação dos sub-itens é livre.
 | I-12 | Todo workflow numerado do esqueleto é coberto por uma task ou explicitamente excluído | `coverage` | `rejects` |
 | I-13 | Nenhum marcador `[NEEDS DECISION]` no documento | `parser` | `rejects` |
 | I-14 | Todo `**Design ref:**` aponta para um caminho existente sob o diretório de design | `design-refs` | `rejects` |
+| I-15 | Nenhum rótulo `**Feature tests:**`: o plano descreve comportamento, não testes | `parser` | `rejects` |
 
 `rejects` produz um erro com o código do invariante; `behaviour` descreve como o
 parser lê o documento e é provado por teste de comportamento, sem código de erro.
@@ -86,6 +95,7 @@ caminhos —, de modo que nenhum deles toca o disco por conta própria.
 - **I-12** — Cobertura: um fluxo principal pode sumir entre a descrição e o plano sem que nenhuma verificação perceba.
 - **I-13** — Gap aberto bloqueia o RALPH READY. Mandar o loop implementar uma decisão que ninguém tomou produz código que será descartado.
 - **I-14** — Referência morta engana o executor: ele implementa por conta própria acreditando ter seguido um design que não existe.
+- **I-15** — Quem decide como provar o produto é o avaliador do build, lendo o código entregue. Um teste nomeado no plano vira obrigação inventada antes de existir código, e um plano da geração anterior que o carrega é incompatível: ele é recusado, nunca convertido em silêncio.
 
 ## Campos removidos de propósito
 
@@ -105,6 +115,7 @@ porque nenhuma decisão do loop quebra sem eles.
 | manifesto com sha256 por artefato | a descoberta é por caminho fixo e o frescor é o stamp da linha 3 |
 | `status: draft/ready/blocked/invalid` | ou o documento passa no parser e nas coberturas, ou não passa |
 | contrato operacional e fase final sintética | a aceitação operacional em ambiente limpo ficou fora do escopo; o produto é provado pela suíte e pelo verificador |
+| `**Feature tests:**` por task (v1) | o plano descreve comportamento; quem decide como prová-lo é o avaliador do build, lendo o código entregue. Um teste nomeado antes de existir código virava obrigação inventada, e o rótulo é recusado (I-15) em vez de lido como sugestão |
 
 Um campo novo só entra depois de responder: **qual decisão do loop quebra sem
 ele?** Se a resposta for "nenhuma", o campo não existe.

@@ -21,7 +21,6 @@ Fundação primeiro, depois os fluxos.
 - [ ] **Task:** Criar a migration de users
   - **Acceptance criteria:**
     - A tabela users existe com email único e timestamps
-  - **Feature tests:** users_migration → a tabela nasce com índice único em email
   - **Traces:** US-1.1, users, workflow 1
 
 - [ ] **Task:** Semear a tabela statuses

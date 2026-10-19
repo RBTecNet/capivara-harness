@@ -280,7 +280,6 @@ describe("ensaio do verificador", () => {
     "  - **Acceptance criteria:**",
     "    - A migração cria a tabela `quartos` com as colunas decididas.",
     "    - O pacote publicado declara as dependências fixadas.",
-    "  - **Feature tests:** migracao_vazia → a migração roda numa base vazia",
     "  - **Traces:** US-1.1",
     "",
   ].join("\n");

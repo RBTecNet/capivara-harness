@@ -19,7 +19,6 @@ function fase(tasks: { titulo: string; criterios: number; traces?: string }[]): 
       `- [ ] **Task:** ${task.titulo}`,
       "  - **Acceptance criteria:**",
       ...Array.from({ length: task.criterios }, (_unused, posicao) => `    - condição ${posicao + 1}`),
-      "  - **Feature tests:** t → t",
       `  - **Traces:** ${task.traces ?? "statuses"}`,
       "",
     ]),

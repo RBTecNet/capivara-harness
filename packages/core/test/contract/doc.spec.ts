@@ -2,10 +2,10 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { INVARIANTS, renderContractDocument } from "../../src/contract/index.js";
 
-const DOC = new URL("../../../../docs/capivara-phases-v1.md", import.meta.url);
+const DOC = new URL("../../../../docs/capivara-phases-v2.md", import.meta.url);
 
 describe("documento do contrato", () => {
-  it("docs/capivara-phases-v1.md está sincronizado com o módulo", async () => {
+  it("docs/capivara-phases-v2.md está sincronizado com o módulo", async () => {
     const onDisk = await readFile(DOC, "utf8");
     expect(onDisk).toBe(renderContractDocument());
   });

@@ -96,13 +96,11 @@ export const PHASE_1 = `## Phase 1: Fundação de dados
 - [ ] **Task:** Criar a migration de statuses e semear as três linhas
   - **Acceptance criteria:**
     - A tabela statuses existe e contém exatamente pendente, confirmada e cancelada
-  - **Feature tests:** statuses_seed → as três linhas existem após o seed
   - **Traces:** statuses
 
 - [ ] **Task:** Criar a migration de reservations com a chave estrangeira
   - **Acceptance criteria:**
     - A tabela reservations existe com status_id referenciando statuses
-  - **Feature tests:** reservations_migration → a FK aponta para statuses
   - **Traces:** reservations
 `;
 
@@ -114,7 +112,6 @@ export const PHASE_2 = `## Phase 2: Criar reserva
   - **Acceptance criteria:**
     - Uma reserva nova nasce com status pendente
     - Datas sobrepostas no mesmo quarto devolvem erro e não persistem nada
-  - **Feature tests:** reserva_sobreposta → a segunda reserva é recusada
   - **Traces:** US-1.1, reservations, workflow 1
 `;
 
@@ -146,7 +143,6 @@ export const PHASE_3 = `## Phase 3: Editar a reserva
   - **Acceptance criteria:**
     - Alterar as datas revalida a sobreposição antes de gravar
     - Uma reserva já cancelada não pode ser editada
-  - **Feature tests:** edicao_revalida_sobreposicao → a edição que sobrepõe é recusada
   - **Traces:** US-1.1, reservations
 `;
 

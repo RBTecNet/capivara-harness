@@ -64,7 +64,7 @@ describe("checkStamp — I-02", () => {
 describe("um validador do contrato nunca lança", () => {
   it("input sem conteúdo vira erro reportado, não exceção", () => {
     const documento = parsePhases(
-      ["# X — Project Phases", "", "<!-- inputs: a.md@sha256:000000000000 -->", "", "## Phase 1: F", "", "**Goal:** g · **Depends on:** none · **Covers:** US-1.1", "", "- [ ] **Task:** T", "  - **Acceptance criteria:**", "    - c", "  - **Feature tests:** t → t", "  - **Traces:** US-1.1", ""].join("\n"),
+      ["# X — Project Phases", "", "<!-- inputs: a.md@sha256:000000000000 -->", "", "## Phase 1: F", "", "**Goal:** g · **Depends on:** none · **Covers:** US-1.1", "", "- [ ] **Task:** T", "  - **Acceptance criteria:**", "    - c", "  - **Traces:** US-1.1", ""].join("\n"),
     );
     if (!documento.ok) throw new Error("fixture inválida");
 

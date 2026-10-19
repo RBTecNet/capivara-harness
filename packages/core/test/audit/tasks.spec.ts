@@ -17,7 +17,6 @@ const task = (overrides: Partial<TaskBlock> = {}): TaskBlock => ({
   done: false,
   title: "Persistir usuários",
   acceptanceCriteria: ["o e-mail é único", "a senha é resumo criptográfico"],
-  featureTests: ["usuarios_unicos -> recusa duplicado"],
   designRef: null,
   traces: ["US-1.1"],
   line: 10,

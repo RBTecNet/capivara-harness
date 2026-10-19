@@ -1,6 +1,6 @@
 /**
  * O documento do contrato é RENDERIZADO a partir deste módulo, nunca o
- * contrário. Um teste falha quando `docs/capivara-phases-v1.md` diverge desta
+ * contrário. Um teste falha quando `docs/capivara-phases-v2.md` diverge desta
  * saída, de modo que a prosa não consegue descrever um contrato que o código
  * não implementa.
  */
@@ -20,6 +20,7 @@ const REMOVED_FIELDS: readonly { field: string; reason: string }[] = [
   { field: "manifesto com sha256 por artefato", reason: "a descoberta é por caminho fixo e o frescor é o stamp da linha 3" },
   { field: "`status: draft/ready/blocked/invalid`", reason: "ou o documento passa no parser e nas coberturas, ou não passa" },
   { field: "contrato operacional e fase final sintética", reason: "a aceitação operacional em ambiente limpo ficou fora do escopo; o produto é provado pela suíte e pelo verificador" },
+  { field: "`**Feature tests:**` por task (v1)", reason: "o plano descreve comportamento; quem decide como prová-lo é o avaliador do build, lendo o código entregue. Um teste nomeado antes de existir código virava obrigação inventada, e o rótulo é recusado (I-15) em vez de lido como sugestão" },
 ];
 
 export function renderContractDocument(): string {
@@ -43,11 +44,19 @@ export function renderContractDocument(): string {
   for (const line of GRAMMAR_BLOCK) lines.push(line);
   lines.push("```");
   lines.push("");
-  lines.push("O planejamento descreve entregas e critérios observáveis. O validador escolhe");
-  lines.push("as verificações durante o build. `**Feature tests:**` é lido em planos existentes");
-  lines.push("como sugestão, sem obrigar nomes ou arquivos. `**Design ref:**` é opcional e");
-  lines.push("só aponta para artefato de design existente. Os rótulos são literais e nunca");
-  lines.push("são traduzidos; a indentação dos sub-itens é livre.");
+  lines.push("O planejamento descreve entregas e critérios de aceite observáveis. Quem decide");
+  lines.push("como provar o produto é o avaliador do build, lendo o código entregue: o plano");
+  lines.push("não nomeia testes, arquivos de teste nem procedimentos de validação, e o rótulo");
+  lines.push("`**Feature tests:**` da geração anterior é recusado (I-15). `**Design ref:**` é");
+  lines.push("opcional e só aponta para artefato de design existente. Os rótulos são literais e");
+  lines.push("nunca são traduzidos; a indentação dos sub-itens é livre.");
+  lines.push("");
+  lines.push("O stamp da linha 3 cita os dois documentos que o plano leu: `skeleton.md`, o");
+  lines.push("produto definido pelo `init`, e `architecture.md`, a arquitetura e a");
+  lines.push("infraestrutura decididas pelo `plan` antes de escrever as fases.");
+  lines.push("");
+  lines.push("**Documentos de versões anteriores são incompatíveis.** Um plano `capivara-phases/v1`");
+  lines.push("não é lido nem convertido: gere de novo com `capivara init --fresh` e `capivara plan --fresh`.");
   lines.push("");
 
   lines.push("## Invariantes");

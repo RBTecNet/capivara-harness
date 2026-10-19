@@ -39,7 +39,6 @@ export function textoDaTask(task: TaskBlock): string {
   return [
     task.title.trim(),
     ...task.acceptanceCriteria.map((criterio) => `c:${criterio.trim()}`),
-    ...task.featureTests.map((teste) => `t:${teste.trim()}`),
     ...task.traces.map((trace) => `r:${trace.trim()}`),
     task.designRef ? `d:${task.designRef.trim()}` : "",
   ]

@@ -86,7 +86,6 @@ describe("duas rodadas de lacuna não se misturam no handoff", () => {
   - **Acceptance criteria:**
     - Uma reserva nova nasce com status pendente
     [NEEDS DECISION] ${texto}
-  - **Feature tests:** reserva_sobreposta → a segunda reserva é recusada
   - **Traces:** US-1.1, reservations, workflow 1
 `;
 

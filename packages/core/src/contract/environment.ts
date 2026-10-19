@@ -1,7 +1,12 @@
 /** O que deve estar pronto antes de qualquer implementação. Não é teste do produto. */
-export const PLANNING_CONTRACT = "capivara-planning/v2" as const;
-export const ENVIRONMENT_CONTRACT = "capivara-environment/v2" as const;
-export const PLANNING_UPGRADE = "planejamento incompatível com a Capivara 0.5.0. Gere novamente com `capivara init --fresh` e depois `capivara plan --fresh`. Código, dados e evidências existentes são preservados";
+/**
+ * `v3` é a geração da reformulação do INIT/PLAN (§116): o plano passa a vir
+ * acompanhado da arquitetura e da infraestrutura, e deixa de prescrever testes.
+ * Identidades de run, caches e aprovações da geração anterior não são lidos.
+ */
+export const PLANNING_CONTRACT = "capivara-planning/v3" as const;
+export const ENVIRONMENT_CONTRACT = "capivara-environment/v3" as const;
+export const PLANNING_UPGRADE = "planejamento incompatível com a Capivara 0.6.0. Gere novamente com `capivara init --fresh` e depois `capivara plan --fresh`. Código, dados e evidências existentes são preservados";
 
 export interface EnvironmentRequirement {
   technology: string;

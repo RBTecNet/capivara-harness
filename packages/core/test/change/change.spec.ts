@@ -219,7 +219,6 @@ describe("o comando change", () => {
     "- [ ] **Task:** Criar a tabela de clientes",
     "  - **Acceptance criteria:**",
     "    - A tabela clientes existe com id e nome",
-    "  - **Feature tests:** clientes_migration → a tabela existe",
     "  - **Traces:** cliente",
     "",
     "## Phase 2: Cadastro",
@@ -229,7 +228,6 @@ describe("o comando change", () => {
     "- [ ] **Task:** Construir a tela de cadastro",
     "  - **Acceptance criteria:**",
     "    - O formulário grava um cliente novo",
-    "  - **Feature tests:** cadastro_grava → o cliente aparece na lista",
     "  - **Traces:** workflow 1",
     "",
   ].join("\n");
@@ -249,7 +247,6 @@ describe("o comando change", () => {
     "- [ ] **Task:** Implementar a edição de um cliente",
     "  - **Acceptance criteria:**",
     "    - Alterar o telefone grava e mostra o valor novo na lista",
-    "  - **Feature tests:** edicao_grava → o telefone novo aparece",
     "  - **Traces:** workflow 2",
   ].join("\n");
 
@@ -299,7 +296,7 @@ describe("o comando change", () => {
     expect(plano).toContain("## Phase 1: Dados\n\n**Goal:** tabelas · **Depends on:** none · **Covers:** cliente · **Areas:** dados");
     expect(plano).toContain("- [ ] **Task:** Construir a tela de cadastro");
     expect(plano).toContain("## Phase 3: Edição de clientes");
-    expect(plano).toContain("edicao_grava");
+    expect(plano).toContain("Alterar o telefone grava e mostra o valor novo na lista");
   });
 
   it("o esqueleto republicado carrega o fluxo novo", async () => {

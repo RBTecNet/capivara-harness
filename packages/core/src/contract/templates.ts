@@ -11,7 +11,7 @@
 export const GRAMMAR_BLOCK: readonly string[] = [
   "# <Projeto> — Project Phases",
   "",
-  "<!-- inputs: skeleton.md@sha256:abc123abc123 -->",
+  "<!-- inputs: skeleton.md@sha256:abc123abc123 architecture.md@sha256:def456def456 -->",
   "",
   "## Overview",
   "",
@@ -59,7 +59,6 @@ export const STRUCTURAL_LABELS: readonly string[] = [
   "### Phase",
   "- [ ] **Task:**",
   "**Acceptance criteria:**",
-  "**Feature tests:**",
   "**Design ref:**",
   "**Traces:**",
   "**Goal:**",

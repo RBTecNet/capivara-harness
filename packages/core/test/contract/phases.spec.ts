@@ -36,13 +36,27 @@ describe("parsePhases — documento válido", () => {
     expect(task?.done).toBe(false);
     expect(task?.title).toBe("Criar a migration de users");
     expect(task?.acceptanceCriteria).toHaveLength(1);
-    expect(task?.featureTests).toHaveLength(1);
     expect(task?.traces).toEqual(["US-1.1", "users", "workflow 1"]);
     expect(task?.designRef).toBeNull();
   });
 
   it("reconhece a task concluída", () => {
     expect(parsed(VALID_PHASES).phases[1]?.tasks[0]?.done).toBe(true);
+  });
+
+  /*
+   * O contrato v2 não tem `Feature tests`. Um plano da geração anterior que o
+   * carrega é recusado com I-15 — nunca lido como se o rótulo fosse critério,
+   * e nunca convertido em silêncio.
+   */
+  it("recusa o rótulo Feature tests da geração anterior com I-15, sem convertê-lo em critério", () => {
+    const antigo = VALID_PHASES.replace(
+      "    - A tabela users existe com email único e timestamps\n",
+      "    - A tabela users existe com email único e timestamps\n  - **Feature tests:** users_migration → a tabela nasce com índice único\n",
+    );
+    const result = parsePhases(antigo);
+    expect(codes(result)).toEqual(["I-15"]);
+    if (!result.ok) expect(result.errors[0]?.hint).toContain("capivara plan --fresh");
   });
 
   it("lê os metadados da fase", () => {

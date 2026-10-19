@@ -103,7 +103,6 @@ function allTaskText(document: PhasesDocument): string[] {
     phase.tasks.flatMap((task) => [
       task.title,
       ...task.acceptanceCriteria,
-      ...task.featureTests,
       ...task.traces,
     ]),
   );

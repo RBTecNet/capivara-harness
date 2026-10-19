@@ -88,6 +88,9 @@ export async function preflight(options: PreflightOptions): Promise<PreflightRes
     const inputs: StampInput[] = [];
     const esqueleto = await readFile(join(init, "skeleton.md"), "utf8").catch(() => null);
     if (esqueleto !== null) inputs.push({ name: "skeleton.md", content: esqueleto });
+    // Desde a geração v3 o plano também lê a arquitetura (§116); ela é input do stamp.
+    const arquitetura = await readFile(join(init, "architecture.md"), "utf8").catch(() => null);
+    if (arquitetura !== null) inputs.push({ name: "architecture.md", content: arquitetura });
     for (const stale of checkStamp(parsed.document, inputs)) {
       // Documento stale é aviso alto, nunca bloqueio: o operador decide.
       warnings.push({ code: "stale", message: `${stale.message} → ${stale.hint}` });

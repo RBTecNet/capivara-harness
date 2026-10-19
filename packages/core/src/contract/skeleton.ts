@@ -74,7 +74,7 @@ export interface SkeletonRule {
 }
 
 /** As áreas que uma fase pode declarar. Fechada dos dois lados, como o §34 pede. */
-const AREAS_VALIDAS = new Set(["frontend", "backend", "dados", "infra", "qualidade", "geral"]);
+export const AREAS_VALIDAS: ReadonlySet<string> = new Set(["frontend", "backend", "dados", "infra", "qualidade", "geral"]);
 
 export interface SkeletonPhase {
   number: number;
@@ -122,7 +122,9 @@ export interface SkeletonDefect {
   hint: string;
 }
 
-export type SkeletonResult = { ok: true; skeleton: Skeleton } | { ok: false; defects: SkeletonDefect[] };
+export type SkeletonResult =
+  | { ok: true; skeleton: Skeleton; /** O que foi consertado contando, para o log. */ applied: string[] }
+  | { ok: false; defects: SkeletonDefect[] };
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -136,6 +138,63 @@ function strings(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => text(item)).filter((item) => item !== "") : [];
 }
 
+
+/**
+ * O que o esqueleto tem de errado e se conserta contando, antes de custar uma
+ * chamada de correção.
+ *
+ * Numeração de fase é posição; `dependsOn` tem uma forma canônica; um rótulo
+ * de `covers` escrito como "Workflow 1", "fluxo 1" ou "us-1.1" é o mesmo item
+ * com outra grafia. Nenhum desses muda o que foi decidido, e cada um custava
+ * uma rodada inteira do escritor quando era devolvido como defeito. O que
+ * exige julgamento — fase sem meta, cobertura ausente, fase grande demais —
+ * continua sendo defeito nomeado.
+ */
+export function repairSkeleton(root: Record<string, unknown>): { root: Record<string, unknown>; applied: string[] } {
+  const applied: string[] = [];
+  const phases = Array.isArray(root.phases) ? root.phases.map((item) => ({ ...((item ?? {}) as Record<string, unknown>) })) : [];
+
+  phases.forEach((phase, index) => {
+    if (typeof phase.number === "number" && phase.number !== index + 1) {
+      applied.push(`renumerou a fase na posição ${index + 1}: veio ${phase.number}`);
+      phase.number = index + 1;
+    }
+    const dependsOn = typeof phase.dependsOn === "string" ? phase.dependsOn : "";
+    const canonico = canonicalPhaseList(dependsOn);
+    if (dependsOn.trim() !== canonico) {
+      applied.push(`normalizou dependsOn da fase ${index + 1}: "${dependsOn}" → "${canonico}"`);
+      phase.dependsOn = canonico;
+    }
+    if (Array.isArray(phase.covers)) {
+      const covers = phase.covers.map((item) => (typeof item === "string" ? canonicalCover(item) : item));
+      if (JSON.stringify(covers) !== JSON.stringify(phase.covers)) {
+        applied.push(`normalizou os rótulos de covers da fase ${index + 1}`);
+        phase.covers = covers;
+      }
+    }
+  });
+
+  return { root: Array.isArray(root.phases) ? { ...root, phases } : root, applied };
+}
+
+/** `none` ou `Phase N, Phase M` — a mesma forma que o plano publica. */
+function canonicalPhaseList(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed === "" || /^(?:none|nenhuma?|nenhum)$/i.test(trimmed)) return "none";
+  const numeros = [...trimmed.matchAll(/(?:phase|fase|p)?\s*0*(\d+)/gi)].map((match) => Number(match[1]));
+  if (numeros.length === 0) return "none";
+  return [...new Set(numeros)].sort((a, b) => a - b).map((n) => `Phase ${n}`).join(", ");
+}
+
+/** `workflow 1`, `US-1.1` e nomes de entidade na grafia que a cobertura lê. */
+function canonicalCover(item: string): string {
+  const trimmed = item.trim();
+  const workflow = /^(?:workflow|fluxo|flow|flujo)s?\s*0*(\d+)$/i.exec(trimmed);
+  if (workflow) return `workflow ${Number(workflow[1])}`;
+  const story = /^us-(\d+)\.(\d+)$/i.exec(trimmed);
+  if (story) return `US-${story[1]}.${story[2]}`;
+  return trimmed;
+}
 
 /**
  * Lê o esqueleto, nunca lança, e recusa o que o loop não conseguiria executar.
@@ -155,7 +214,8 @@ export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number
     };
   }
 
-  const root = (parsed ?? {}) as Record<string, unknown>;
+  const reparo = repairSkeleton((parsed ?? {}) as Record<string, unknown>);
+  const root = reparo.root;
   if (root.contract !== SKELETON_CONTRACT) {
     return { ok: false, defects: [{ problem: `contrato ausente ou diferente de ${SKELETON_CONTRACT}`, hint: `declare "contract": "${SKELETON_CONTRACT}" na raiz` }] };
   }
@@ -251,7 +311,7 @@ export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number
     ...(nonGoals.length > 0 ? { nonGoals } : {}),
   };
 
-  return defects.length > 0 ? { ok: false, defects } : { ok: true, skeleton };
+  return defects.length > 0 ? { ok: false, defects } : { ok: true, skeleton, applied: reparo.applied };
 }
 
 /**

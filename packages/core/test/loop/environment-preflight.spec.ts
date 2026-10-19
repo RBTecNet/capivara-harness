@@ -11,7 +11,7 @@ import { prepareBuildEnvironment } from "../../src/loop/environment-prepare.js";
 import { defaultFlowRunner } from "../../src/loop/flows.js";
 import { checkPrerequisites, resolvePrerequisites } from "../../src/loop/prerequisites.js";
 import { certifyCurrentPlan } from "../support/current-plan.js";
-import { PLANNING_CONTRACT } from "../../src/contract/environment.js";
+import { ENVIRONMENT_CONTRACT, PLANNING_CONTRACT } from "../../src/contract/environment.js";
 import { defaultTestRunner } from "../../src/loop/gates.js";
 import { relatorioDoBuild } from "../../src/loop/parada.js";
 
@@ -28,7 +28,7 @@ afterEach(async () => { vi.restoreAllMocks(); await rm(root, { recursive: true, 
 async function requirements(checkArgs: string[], skeletonSha12?: string) {
   const skeleton = await readFile(join(root, ".capivara/init/skeleton.md"), "utf8");
   await writeFile(join(root, ".capivara/init/environment.json"), JSON.stringify({
-    contract: "capivara-environment/v2", planningContract: PLANNING_CONTRACT,
+    contract: ENVIRONMENT_CONTRACT, planningContract: PLANNING_CONTRACT,
     planSha12: sha12(VALID_PHASES), skeletonSha12: skeletonSha12 ?? sha12(skeleton),
     requirements: [{ technology: "Runtime pronto", binary: process.execPath, systemLevel: false, checkArgs, installHint: "Corrigir runtime" }],
   }));

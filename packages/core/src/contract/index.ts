@@ -31,14 +31,33 @@ export {
   phaseHeading,
 } from "./templates.js";
 export type { PhasesDocumentParts } from "./templates.js";
-export { canonicalDependsOn, canonicalWorkflowTraces, phaseDependencies, extractTasks, joinPhaseMetadata, repairInlineCriteria, repairLabelLists, repairMissingBullets, normalizePhasePart } from "./phase-part.js";
+export { canonicalDependsOn, canonicalWorkflowTraces, phaseDependencies, extractTasks, joinPhaseMetadata, repairInlineCriteria, repairLabelLists, repairMissingBullets, normalizePhasePart, stripLegacyFeatureTests } from "./phase-part.js";
 export type { NormalizedPart, PhasePartExpectation } from "./phase-part.js";
 export { checkRewriteDrift, parsePhaseFragment, preserveUnaddressedTasks } from "./drift.js";
 export { affectedPhases, planAddresses } from "./phase-references.js";
-export { featureTestNames } from "./feature-tests.js";
-export type { NamedFeatureTest } from "./feature-tests.js";
 export type { DriftInput } from "./drift.js";
-export { SKELETON_CONTRACT, coverageFromSkeleton, parseSkeleton, renderSkeleton, sliceForPhase, workflowsForPhase } from "./skeleton.js";
+export { AREAS_VALIDAS, SKELETON_CONTRACT, coverageFromSkeleton, parseSkeleton, renderSkeleton, repairSkeleton, sliceForPhase, workflowsForPhase } from "./skeleton.js";
+export {
+  ARCHITECTURE_CONTRACT,
+  architectureSliceForPhase,
+  parseArchitecture,
+  phasesFromArchitecture,
+  renderArchitecture,
+  renderInfrastructure,
+  requirementsFromArchitecture,
+} from "./architecture.js";
+export type {
+  Architecture,
+  ArchitectureComponent,
+  ArchitectureDefect,
+  ArchitectureFlow,
+  ArchitecturePhase,
+  ArchitectureResult,
+  Infrastructure,
+  InfrastructureDependency,
+  InfrastructureItem,
+  InfrastructureService,
+} from "./architecture.js";
 export type {
   Skeleton,
   SkeletonDefect,

@@ -130,7 +130,7 @@ describe("estágio 1 — init", () => {
     const { outcome, agent } = await plan(skeletonPath());
     expect(outcome.readiness.ready).toBe(true);
     const metadata = JSON.parse(await readFile(join(projectRoot, ".capivara/init/environment.json"), "utf8"));
-    expect(metadata.contract).toBe("capivara-environment/v2");
+    expect(metadata.contract).toBe("capivara-environment/v3");
     expect(metadata.skeletonSha12).toMatch(/^[a-f0-9]{12}$/);
     const { sha12 } = await import("../../src/contract/index.js");
     expect(metadata.planSha12).toBe(sha12(await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")));
@@ -850,7 +850,6 @@ describe("achado mecânico não vai a arbitragem", () => {
         `- [ ] **Task:** Tarefa ${indice + 1}`,
         "  - **Acceptance criteria:**",
         ...Array.from({ length: 7 }, (_ignora, posicao) => `    - condição observável ${posicao + 1}`),
-        "  - **Feature tests:** t → t",
         "  - **Traces:** statuses",
         "",
       ].join("\n")),
@@ -982,7 +981,6 @@ describe("a rodada de lacunas não tem teto", () => {
       "  - **Acceptance criteria:**",
       "    - A tabela statuses existe e contém exatamente pendente, confirmada e cancelada",
       ...numeros.map((numero) => `    [NEEDS DECISION] decisão pendente número ${numero}`),
-      "  - **Feature tests:** statuses_seed → as três linhas existem após o seed",
       "  - **Traces:** statuses, reservations",
       "",
     ].join("\n");
@@ -1164,7 +1162,6 @@ describe("marcador pendente não rebaixa a auditoria", () => {
   - **Acceptance criteria:**
     - A tabela statuses existe e contém exatamente pendente, confirmada e cancelada
     [NEEDS DECISION] o status inicial de uma reserva importada
-  - **Feature tests:** statuses_seed → as três linhas existem após o seed
   - **Traces:** statuses, reservations
 `;
 
@@ -1229,7 +1226,6 @@ describe("a rodada de lacunas não devolve plano marcado", () => {
   - **Acceptance criteria:**
     - A tabela statuses existe e contém exatamente pendente, confirmada e cancelada
     [NEEDS DECISION] ${marcador}
-  - **Feature tests:** statuses_seed → as três linhas existem após o seed
   - **Traces:** statuses, reservations
 `;
 
@@ -1355,7 +1351,6 @@ describe("o plan retomado não perde o que foi decidido nele", () => {
   - **Acceptance criteria:**
     - A tabela statuses existe e contém exatamente pendente, confirmada e cancelada
     [NEEDS DECISION] ${marcador}
-  - **Feature tests:** statuses_seed → as três linhas existem após o seed
   - **Traces:** statuses, reservations
 `;
     const primeiro = skeletonPath();

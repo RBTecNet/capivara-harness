@@ -32,13 +32,11 @@ const FASE = `## Phase 1: Fundação
 - [ ] **Task:** Criar a migration de statuses
   - **Acceptance criteria:**
     - A tabela statuses existe com as três linhas
-  - **Feature tests:** statuses_seed -> as três linhas existem
   - **Traces:** statuses
 
 - [ ] **Task:** Criar a migration de reservas
   - **Acceptance criteria:**
     - A tabela reservations referencia statuses
-  - **Feature tests:** reservations_migration -> a FK aponta para statuses
   - **Traces:** reservations
 `;
 

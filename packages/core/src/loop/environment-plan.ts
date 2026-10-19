@@ -10,9 +10,38 @@ export function plannedRequirements(skeleton: Skeleton): Prerequisite[] {
   return environmentRequirements(skeleton.environment);
 }
 
-export function renderEnvironmentPlan(skeleton: Skeleton, plan: string): string {
+/**
+ * O que o `plan` acrescenta ao metadado desde a geração v3 (§116): a
+ * arquitetura que o plano leu e a infraestrutura declarada. O build lê só o que
+ * sempre leu — contrato, geração, hashes e sondas —, e o resto viaja para quem
+ * vier depois (o `change` o preserva ao republicar).
+ */
+export interface EnvironmentPlanExtras {
+  architectureSha12?: string;
+  infrastructure?: unknown;
+}
+
+export function renderEnvironmentPlan(skeleton: Skeleton, plan: string, extras: EnvironmentPlanExtras = {}): string {
   return JSON.stringify({ contract: ENVIRONMENT_CONTRACT, planningContract: PLANNING_CONTRACT, harnessVersion: VERSION,
-    skeletonSha12: sha12(renderSkeleton(skeleton)), planSha12: sha12(plan), requirements: plannedRequirements(skeleton) }, null, 2) + "\n";
+    skeletonSha12: sha12(renderSkeleton(skeleton)), planSha12: sha12(plan),
+    ...(extras.architectureSha12 ? { architectureSha12: extras.architectureSha12 } : {}),
+    requirements: plannedRequirements(skeleton),
+    ...(extras.infrastructure !== undefined ? { infrastructure: extras.infrastructure } : {}) }, null, 2) + "\n";
+}
+
+/** Os campos que o `change` precisa carregar de um metadado para o seguinte. */
+export async function readEnvironmentPlanExtras(root: string): Promise<EnvironmentPlanExtras> {
+  const source = await readFile(join(root, ".capivara/init/environment.json"), "utf8").catch(() => null);
+  if (source === null) return {};
+  try {
+    const value = JSON.parse(source) as { architectureSha12?: unknown; infrastructure?: unknown };
+    return {
+      ...(typeof value.architectureSha12 === "string" ? { architectureSha12: value.architectureSha12 } : {}),
+      ...(value.infrastructure !== undefined ? { infrastructure: value.infrastructure } : {}),
+    };
+  } catch {
+    return {};
+  }
 }
 
 export async function readEnvironmentPlan(root: string, skeleton: string, plan: string): Promise<Prerequisite[]> {

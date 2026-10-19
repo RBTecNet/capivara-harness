@@ -1,17 +1,22 @@
 /**
- * O registro dos invariantes do contrato `capivara-phases/v1`.
+ * O registro dos invariantes do contrato `capivara-phases/v2`.
  *
  * Esta lista é a autoridade: o validador reporta por código, e o documento
- * `docs/capivara-phases-v1.md` é renderizado a partir daqui. Um invariante que
+ * `docs/capivara-phases-v2.md` é renderizado a partir daqui. Um invariante que
  * não estiver nesta tabela não existe, e um campo novo no contrato só entra
  * depois de responder: "qual decisão do loop quebra sem ele?".
  */
 
-export const PHASES_CONTRACT = "capivara-phases/v1" as const;
+/**
+ * `v2` é a ruptura da reformulação do INIT/PLAN (§116): o plano descreve
+ * comportamento e deixa de prescrever testes. Documentos `capivara-phases/v1`
+ * não são lidos nem convertidos — o rótulo `**Feature tests:**` é recusado (I-15).
+ */
+export const PHASES_CONTRACT = "capivara-phases/v2" as const;
 
 export type InvariantCode =
   | "I-01" | "I-02" | "I-03" | "I-04" | "I-05" | "I-06" | "I-07"
-  | "I-08" | "I-09" | "I-10" | "I-11" | "I-12" | "I-13" | "I-14";
+  | "I-08" | "I-09" | "I-10" | "I-11" | "I-12" | "I-13" | "I-14" | "I-15";
 
 /** Quem verifica o invariante. O parser é puro; os demais recebem o mundo por parâmetro. */
 export type InvariantChecker = "parser" | "stamps" | "coverage" | "design-refs";
@@ -131,6 +136,13 @@ export const INVARIANTS: readonly Invariant[] = [
     title: "Todo `**Design ref:**` aponta para um caminho existente sob o diretório de design",
     rationale: "Referência morta engana o executor: ele implementa por conta própria acreditando ter seguido um design que não existe.",
     checkedBy: "design-refs",
+    enforcement: "rejects",
+  },
+  {
+    code: "I-15",
+    title: "Nenhum rótulo `**Feature tests:**`: o plano descreve comportamento, não testes",
+    rationale: "Quem decide como provar o produto é o avaliador do build, lendo o código entregue. Um teste nomeado no plano vira obrigação inventada antes de existir código, e um plano da geração anterior que o carrega é incompatível: ele é recusado, nunca convertido em silêncio.",
+    checkedBy: "parser",
     enforcement: "rejects",
   },
 ] as const;

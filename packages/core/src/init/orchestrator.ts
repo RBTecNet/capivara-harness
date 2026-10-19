@@ -20,7 +20,7 @@ import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, buil
 import { CoherenceMemory } from "../audit/coherence.js";
 import { applyMaterialityReview, materialityInput, materialityPrompt } from "../audit/materiality.js";
 import type { Architecture, ContractError, CoverageSources, PhasesDocument, Skeleton, StampInput } from "../contract/index.js";
-import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, renderStandoff } from "../audit/index.js";
+import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, persistentFindings, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark, Standoff } from "../audit/index.js";
 import { tasksBlock } from "../contract/templates.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, isRepairable, publish, repairDeterministically, stripAllMarkers, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
@@ -1630,7 +1630,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   }
 
   /** O prompt do arquiteto, sempre sobre o esqueleto de ORIGEM e as decisões de agora. */
-  function promptDoArquiteto(extras: { defects?: string[]; previous?: { architecture: string; findings: Finding[] } } = {}): string {
+  function promptDoArquiteto(extras: { defects?: string[]; previous?: { architecture: string; findings: Finding[] }; strategy?: "serialize" } = {}): string {
     return architectPrompt({
       language: options.language,
       request: options.request.text,
@@ -1642,6 +1642,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
       ...(extras.defects && extras.defects.length > 0 ? { defects: extras.defects } : {}),
       ...(extras.previous ? { previous: extras.previous } : {}),
+      ...(extras.strategy ? { strategy: extras.strategy } : {}),
     });
   }
 
@@ -1689,7 +1690,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * Uma arquitetura que passa no contrato, em até três tentativas com os
    * defeitos nomeados — e reaproveitada do cache quando o prompt não mudou.
    */
-  async function desenharArquitetura(extras: { defects?: string[]; previous?: { architecture: string; findings: Finding[] } }): Promise<Architecture> {
+  async function desenharArquitetura(extras: { defects?: string[]; previous?: { architecture: string; findings: Finding[] }; strategy?: "serialize" }): Promise<Architecture> {
     let defeitos = extras.defects ?? [];
     for (let tentativa = 1; tentativa <= 3; tentativa += 1) {
       const prompt = promptDoArquiteto({ ...extras, ...(defeitos.length > 0 ? { defects: defeitos } : {}) });
@@ -1722,15 +1723,28 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * A auditoria independente da arquitetura.
    *
    * Achado volta ao arquiteto como emenda — a arquitetura anterior mais os
-   * achados — dentro do orçamento de reorganizações. Decisão vai ao
-   * desenvolvedor na hora. Esgotado o orçamento, o impasse é o mesmo do plano:
-   * quem decide é o desenvolvedor, e uma arquitetura reprovada nunca é
-   * declarada aprovada por cansaço.
+   * achados — dentro de um orçamento PRÓPRIO de devoluções, o mesmo do auditor
+   * do plano. Decisão de produto vai ao desenvolvedor na hora.
+   *
+   * O orçamento era compartilhado com as reorganizações pedidas pela auditoria
+   * do plano, e foi isso que no `teste_openrouter3` (0.6.1) mandou ao
+   * desenvolvedor um impasse "após 1 devoluções": duas reorganizações tinham
+   * gasto o contador, e a primeira devolução da auditoria seguinte já não tinha
+   * para onde ir. O que o auditor cobrava — "as fases 3, 4 e 5 editam arquivos
+   * compartilhados sem ponto de extensão" — é um conflito técnico com mais de
+   * uma solução válida, e nenhuma delas é do desenvolvedor.
+   *
+   * Agora: devoluções até o teto; esgotado, UMA mudança de estratégia
+   * (resolver por ordem e dependência, sem mecanismo novo — a serialização que
+   * o parser já aplica a quem declara o componente compartilhado); e se nem
+   * assim convergir, o run para com o diagnóstico e tudo em disco. Nunca uma
+   * pergunta técnica ao desenvolvedor, e nunca uma arquitetura reprovada
+   * publicada como aprovada.
    */
   async function auditarArquitetura(desenhada: Architecture): Promise<Architecture> {
     let atual = desenhada;
     const history: AuditAttempt[] = [];
-    let developerRuled = false;
+    let estrategiaTrocada = false;
     const writer = writerContext([]);
 
     for (let attempt = 1; ; attempt += 1) {
@@ -1765,37 +1779,43 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       announce(`  auditoria da arquitetura devolveu ${findings.length} achado(s)`);
       await event("audit", "architecture", "retry", findings.map((finding) => finding.problem).join("; "), attempt);
 
-      if (developerRuled) {
-        announce(`  publicando a arquitetura sob a decisão do desenvolvedor; ${findings.length} achado(s) viram ressalva`);
-        remarks.push(...findings.map((finding) => ({ document: "architecture.md", remark: { where: finding.where, observation: `${finding.problem} (mantido por decisão do desenvolvedor)` } })));
-        return atual;
+      const devolucoes = history.length;
+      if (devolucoes <= maxAuditReturns) {
+        announce(`  refazendo a arquitetura com os achados (${devolucoes}/${maxAuditReturns})`);
+        atual = await desenharArquitetura({ previous: { architecture: JSON.stringify(atual), findings } });
+        continue;
       }
 
-      if (reorganizacoes >= maxArchitectureReturns) {
-        const standoff = nextAuditAction({ document: "architecture.md", history, maxReturns: 0, maxMechanical: 1 });
-        if (standoff.action !== "ask-developer") throw new InitBlockedError("inalcançável", runId);
-        const rendered = renderStandoff(standoff.standoff);
-        await event("audit", "architecture", "blocked", "orçamento de reorganizações esgotado", attempt);
-        if (!options.decideStandoff) throw new InitBlockedError(rendered, runId);
-        const decision = (await options.decideStandoff(rendered, standoff.standoff)).trim();
-        const normalized = decision.toLowerCase();
-        if (normalized.startsWith("publicar") || isNonAnswer(decision)) {
-          announce(`  arquitetura publicada como está; ${findings.length} achado(s) viram ressalva`);
-          remarks.push(...findings.map((finding) => ({ document: "architecture.md", remark: { where: finding.where, observation: `${finding.problem} (${normalized.startsWith("publicar") ? "mantido por decisão do desenvolvedor" : "o auditor insistiu e ninguém decidiu: segue em aberto"})` } })));
-          return atual;
-        }
-        if (normalized.startsWith("abortar")) throw new InitBlockedError(`${rendered}\n\nDecisão do desenvolvedor: abortar`, runId);
-        if (normalized !== "reiniciar") {
-          developerRuled = true;
-          await recordDeveloperDecision("architecture.md", findings, decision);
-          findings.unshift({ where: "Architecture", problem: "o auditor e o arquiteto não convergiram", fix: `o desenvolvedor decidiu e esta decisão é a autoridade, acima do auditor: ${decision}` });
-        }
-        history.length = 0;
+      if (!estrategiaTrocada) {
+        estrategiaTrocada = true;
+        announce("  a correção não convergiu no orçamento; trocando a estratégia: resolver por ordem e dependência entre fases, sem mecanismo novo");
+        await event("authoring", "architecture", "retry", "mudança de estratégia: serialização por dependência", attempt);
+        atual = await desenharArquitetura({ previous: { architecture: JSON.stringify(atual), findings }, strategy: "serialize" });
+        continue;
       }
 
-      reorganizacoes += 1;
-      announce(`  refazendo a arquitetura com os achados (${reorganizacoes}/${maxArchitectureReturns})`);
-      atual = await desenharArquitetura({ previous: { architecture: JSON.stringify(atual), findings } });
+      /*
+       * Nem com a estratégia trocada. Isto é o arquiteto e o auditor sem
+       * convergir sobre um ponto técnico — não há decisão de produto aqui, e
+       * perguntar ao desenvolvedor seria pedir que ele arbitre engenharia. O
+       * run para com o diagnóstico; o esqueleto, as decisões e a última
+       * arquitetura estão em disco, e a retomada custa só o que falta.
+       */
+      const insistentes = persistentFindings(history);
+      await event("audit", "architecture", "blocked", "a auditoria da arquitetura não convergiu", attempt);
+      throw new InitBlockedError(
+        [
+          `A auditoria de architecture.md não convergiu depois de ${maxAuditReturns} devolução(ões) e de uma mudança de estratégia.`,
+          "",
+          "O auditor insiste em:",
+          ...insistentes.flatMap((finding) => [`  · ${finding.where}: ${finding.problem}`, `    correção pedida: ${finding.fix}`]),
+          "",
+          "Isto é um conflito técnico entre o arquiteto e o auditor, não uma decisão de produto: nada aqui é seu para decidir.",
+          "O esqueleto, as decisões e a última arquitetura estão em disco; `capivara plan` retoma daqui sem repagar o que já passou.",
+          "Se o auditor insistir no mesmo ponto, troque o modelo do papel auditor ou do writer e rode de novo.",
+        ].join("\n"),
+        runId,
+      );
     }
   }
 
@@ -2128,7 +2148,19 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     await event("authoring", "architecture", "retry", findings.map((finding) => finding.problem).join("; "), reorganizacoes);
     relatarFase({ kind: "documento", etapa: "reorganização das fases" });
 
-    const refeita = await desenharArquitetura({ previous: { architecture: JSON.stringify(arquiteturaAtual), findings: [...findings] } });
+    const anterior = JSON.stringify(arquiteturaAtual);
+    let refeita = await desenharArquitetura({ previous: { architecture: anterior, findings: [...findings] } });
+    /*
+     * A mesma arquitetura de volta é a emenda que não mudou o texto — e sem
+     * isto ela seguia para a arbitragem do desenvolvedor, como as Q-91 e Q-92
+     * do `teste_openrouter3`, sobre quem integra o quê. Antes de perguntar a
+     * quem não decide isso, a estratégia muda: resolver por ordem e dependência.
+     */
+    if (JSON.stringify(refeita) === anterior) {
+      announce("  o arquiteto devolveu a mesma arquitetura; trocando a estratégia: resolver por ordem e dependência entre fases, sem mecanismo novo");
+      await event("authoring", "architecture", "retry", "mudança de estratégia: serialização por dependência", reorganizacoes);
+      refeita = await desenharArquitetura({ previous: { architecture: anterior, findings: [...findings] }, strategy: "serialize" });
+    }
     const auditada = await auditarArquitetura(refeita);
     const autoridade = shaDaAutoridade(allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision));
     await publicarArquitetura(auditada, autoridade);

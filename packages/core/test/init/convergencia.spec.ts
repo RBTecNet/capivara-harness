@@ -71,6 +71,8 @@ describe("o laço de auditoria termina contra um auditor que nunca aprova", () =
 
     const steps = skeletonPath().filter((step) => step.match.role !== "auditor");
     steps.unshift(auditorAdversario());
+    // A arquitetura não é o assunto deste teste: o adversário é o auditor do PLANO (§119).
+    steps.unshift({ match: { role: "auditor", stage: "audit", subject: "architecture" }, respond: { stdout: "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: coerente" }, repeat: true });
 
     const perguntas: string[] = [];
     let impasses = 0;
@@ -148,6 +150,7 @@ describe("o laço de auditoria termina contra um auditor que nunca aprova", () =
       },
       repeat: true,
     });
+    steps.unshift({ match: { role: "auditor", stage: "audit", subject: "architecture" }, respond: { stdout: "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: coerente" }, repeat: true });
 
     const arbitragens: string[] = [];
     const agent = fakeAgent(steps);

@@ -168,9 +168,12 @@ describe("o PLAN recebe os achados e segue pela correção arquitetural", () => 
     expect(deCoerencia.some((call) => call.prompt.includes("## Repair the previous audit response"))).toBe(false);
     // A arquitetura foi refeita com o achado inteiro, preservado.
     const arquiteturas = por({ role: "writer", stage: "authoring", subject: "architecture" });
-    expect(arquiteturas).toHaveLength(2);
+    // Três: o desenho, a emenda com o achado e — como o arquiteto falso devolve a
+    // mesma arquitetura — a mudança de estratégia da §119, antes de qualquer arbitragem.
+    expect(arquiteturas).toHaveLength(3);
     expect(arquiteturas[1]?.prompt).toContain(PROBLEMA_1);
     expect(arquiteturas[1]?.prompt).toContain(CORRECAO_1);
+    expect(arquiteturas[2]?.prompt).toContain("## Change of strategy");
     const anunciado = dito.join("\n");
     expect(anunciado).toContain("travessão");
     expect(anunciado).toContain("1 achado(s) pedem reorganização das fases");

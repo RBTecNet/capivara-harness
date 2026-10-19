@@ -347,6 +347,53 @@ export function parseArchitecture(
   if (phases.length === 0) {
     defects.push({ problem: "a arquitetura não declara fase nenhuma", hint: "divida o trabalho em fases: fundação primeiro, cada uma com os componentes que implementa" });
   }
+
+  /*
+   * Duas fases sem ordem entre si que estendem o MESMO componente são
+   * serializadas aqui, por dependência — e é tudo o que a propriedade exige.
+   *
+   * O build executa ao mesmo tempo as fases que não dependem uma da outra, e
+   * duas sessões editando os arquivos de um componente ao mesmo tempo é o
+   * conflito que o `teste_openrouter3` levou ao impasse: o auditor via o
+   * risco, exigia um mecanismo de registro na fundação, o arquiteto não o
+   * entregava a contento, e a pergunta ia ao desenvolvedor — que não tem o que
+   * decidir ali. A ordem entre as fases já é um campo do contrato (`dependsOn`)
+   * e é o que o escalonador lê; a arquitetura não precisa de campo novo nem de
+   * mecanismo novo para ficar correta. Fica menos paralela, e paralelismo é
+   * otimização, não exigência.
+   *
+   * O arquiteto continua com as três saídas: ponto de extensão na fundação e
+   * cada módulo só nos seus componentes (paralelo); uma fase de integração que
+   * depende dos módulos e é a única a tocar o compartilhado (paralelo); ou
+   * declarar o componente compartilhado nas fases que o editam e aceitar a
+   * ordem (serial). As três passam; a escolha é dele.
+   */
+  const dependenciasDe = new Map(phases.map((phase) => [phase.number, dependencies(phase.dependsOn).filter((n) => n < phase.number)]));
+  const alcanca = (de: number, ate: number): boolean => {
+    const visitadas = new Set<number>();
+    const pilha = [...(dependenciasDe.get(de) ?? [])];
+    while (pilha.length > 0) {
+      const numero = pilha.pop()!;
+      if (numero === ate) return true;
+      if (visitadas.has(numero)) continue;
+      visitadas.add(numero);
+      pilha.push(...(dependenciasDe.get(numero) ?? []));
+    }
+    return false;
+  };
+  for (const posterior of phases) {
+    for (const anterior of phases) {
+      if (anterior.number >= posterior.number || alcanca(posterior.number, anterior.number)) continue;
+      const compartilhados = posterior.components.filter((nome) => anterior.components.some((outro) => outro.toLowerCase() === nome.toLowerCase()));
+      if (compartilhados.length === 0) continue;
+      dependenciasDe.get(posterior.number)!.push(anterior.number);
+      posterior.dependsOn = canonicalPhaseList(`${posterior.dependsOn}, Phase ${anterior.number}`);
+      applied.push(
+        `serializou a fase ${posterior.number} depois da fase ${anterior.number}: as duas estendem ${compartilhados.map((nome) => `"${nome}"`).join(", ")} sem dependência entre si,` +
+          " e rodar ao mesmo tempo editaria os mesmos arquivos; a ordem é expressa em dependsOn, que é o que o build lê",
+      );
+    }
+  }
   for (const phase of phases) {
     prosaDeTeste(`a fase ${phase.number}`, [phase.title, phase.goal, phase.rationale].join("\n"));
     if (phase.title === "") defects.push({ problem: `a fase ${phase.number} não tem título`, hint: "dê à fase um título que nomeie a fatia entregue" });

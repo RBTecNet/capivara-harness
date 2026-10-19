@@ -72,7 +72,7 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-Na versão 0.6.1, `npm run check` passa: build, typecheck e **2604 testes**, incluindo o catálogo de
+Na versão 0.6.1, `npm run check` passa: build, typecheck e **2613 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
 
 A 0.6.0 é a reformulação do `init` e do `plan` (§116): o `plan` decide a

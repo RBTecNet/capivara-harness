@@ -267,18 +267,24 @@ describe("6. um documento inválido não recebe aprovação indevida", () => {
       respond: { stdout: reject("components · api", "o componente api não serve o fluxo 1 inteiro", "acrescente o passo de confirmação ao contrato") },
       repeat: true,
     });
-    await expect(plan(passos, { maxArchitectureReturns: 1 })).rejects.toThrow(/Impasse em architecture.md/);
+    await expect(plan(passos, { maxAuditReturns: 1 })).rejects.toThrow(/A auditoria de architecture.md não convergiu/);
     await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).rejects.toThrow();
   });
 
-  it("'publicar' no impasse da arquitetura publica com ressalva, nunca como aprovada em silêncio", async () => {
+  /*
+   * §119: o desacordo técnico entre arquiteto e auditor não vai ao
+   * desenvolvedor. Ele não decide "publicar": a arquitetura reprovada para o run
+   * com o diagnóstico, e nada é publicado como aprovado.
+   */
+  it("a arquitetura reprovada até o fim não é publicada nem vira pergunta ao desenvolvedor", async () => {
     await init(skeletonPath());
     const passos = skeletonPath().filter((passo) => passo.match.role !== "auditor");
     passos.push({ match: { role: "auditor", stage: "audit", subject: "architecture" }, respond: { stdout: reject("phases · Phase 2", "grande demais", "divida") }, repeat: true });
     passos.push({ match: { role: "auditor", stage: "audit" }, respond: { stdout: approve() }, repeat: true });
-    const { outcome } = await plan(passos, { maxArchitectureReturns: 0, decideStandoff: async () => "publicar" });
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(outcome.report.remarks.some((entry) => entry.document === "architecture.md" && entry.remark.observation.includes("mantido por decisão do desenvolvedor"))).toBe(true);
+    let impasses = 0;
+    await expect(plan(passos, { maxAuditReturns: 1, decideStandoff: async () => { impasses += 1; return "publicar"; } })).rejects.toThrow(/não convergiu/);
+    expect(impasses).toBe(0);
+    await expect(readFile(join(projectRoot, ".capivara/init/architecture.md"), "utf8")).rejects.toThrow();
   });
 
   it("arquitetura inválida três vezes para o run com diagnóstico retomável, sem chamar o auditor", async () => {

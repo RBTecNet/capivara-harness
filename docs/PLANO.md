@@ -9908,3 +9908,116 @@ com as suítes das §116 e §117 intactas.
   a leitura do auditor; ela nasce de um achado repetido, não de uma decisão
   inventada, e não foi tocada aqui.
 - Nenhum run real depois desta correção.
+
+## §119 — O conflito técnico não vai ao desenvolvedor: serialização por dependência e orçamento próprio da auditoria da arquitetura
+
+### 119.1 O defeito
+
+Num `plan` real na 0.6.1, a auditoria de `architecture.md` parou assim:
+
+```
+IMPASSE · precisa da sua decisão
+Impasse em architecture.md após 1 devoluções.
+O auditor insiste em:
+components · api-core, web-shell: As fases 3, 4 e 5 são independentes, mas os
+contratos não definem como cada módulo registra suas rotas REST e de interface
+sem alterar arquivos compartilhados. (…)
+Correção pedida: Definir na fundação mecanismos de registro (…)
+```
+
+O auditor viu um conflito técnico real — fases que o build executaria ao mesmo
+tempo editariam os mesmos arquivos — e exigiu UMA solução (um mecanismo de
+registro). Há outras: ordenar as fases, concentrar a integração numa fase que
+depende dos módulos, ou as duas coisas. Nenhuma delas é do desenvolvedor, e o
+harness perguntou a ele.
+
+### 119.2 As causas, no código
+
+1. **Orçamento compartilhado.** `auditarArquitetura` decidia o impasse com
+   `reorganizacoes >= maxArchitectureReturns`, e `reorganizacoes` é o contador
+   das reorganizações pedidas pela auditoria do PLANO. Duas reorganizações
+   gastavam o contador, e a primeira devolução da auditoria da arquitetura
+   seguinte já ia ao desenvolvedor — "após 1 devoluções".
+2. **A propriedade não existia em código.** A arquitetura declara `files` por
+   componente, `components` por fase e `dependsOn` entre fases; o escalonador
+   do build executa ao mesmo tempo as fases que não dependem uma da outra. Mas
+   nada conferia "duas fases sem ordem que estendem o mesmo componente", e o
+   prompt do arquiteto não falava de paralelismo: a única orientação vinha do
+   pedido do desenvolvedor. O auditor, sem propriedade para julgar, julgava um
+   mecanismo.
+3. **O impasse era a única saída.** Esgotado o orçamento, o caminho era
+   `decideStandoff`: publicar como está, abortar, ou uma decisão que vira
+   autoridade acima do auditor — a mesma tela do desacordo de produto, para um
+   desacordo de engenharia.
+
+### 119.3 A estratégia
+
+- **Serialização determinística no contrato** (`parseArchitecture`): duas
+  fases sem ordem entre si (nenhuma alcança a outra pela cadeia de `dependsOn`)
+  que citam o mesmo componente em `components` ganham a ordem — a posterior
+  passa a depender da anterior — com o conserto anunciado ("serializou a fase
+  4 depois da fase 3: as duas estendem api-core, web-shell…"). `dependsOn` já
+  é o que o escalonador do build lê (`dependenciasEfetivas`); não há campo nem
+  mecanismo novo. Uma fase que já alcança a outra não muda. Ponto de extensão
+  (cada módulo só nos seus componentes) e fase de integração (a única a tocar o
+  compartilhado, depois dos módulos) passam sem conserto.
+- **Arquiteto e auditor orientados à propriedade.** O prompt do arquiteto
+  ganhou "Work that runs at the same time": a regra da serialização, as três
+  saídas válidas, a escolha por simplicidade e custo, e "paralelismo é
+  otimização, não exigência". O auditor da arquitetura ganhou o eixo 6
+  (CONCURRENT WORK): confere a propriedade — toda fase nomeia todo componente
+  cujos arquivos muda; todo contrato que um módulo consome existe numa fase de
+  que ele depende —, aceita ordem, integração e extensão como resoluções
+  equivalentes, e nunca reprova por menos paralelismo. O auditor do plano diz
+  o mesmo ao endereçar `Architecture`.
+- **Orçamento próprio e mudança de estratégia.** A auditoria da arquitetura
+  devolve até `maxAuditReturns` vezes (o mesmo teto do auditor do plano) e não
+  mexe em `reorganizacoes`. Esgotado o teto, UMA mudança de estratégia: o
+  arquiteto recebe "Change of strategy: resolve by order, not by mechanism" e
+  refaz resolvendo por ordem e dependência. O mesmo acontece no plano quando o
+  arquiteto devolve a uma reorganização a mesma arquitetura — a emenda que não
+  mudou o texto ia à arbitragem do desenvolvedor (Q-91/Q-92 da §118).
+- **Sem pergunta técnica.** Se nem a estratégia trocada convergir, o run para
+  com o diagnóstico: os achados em que o auditor insiste, a afirmação de que é
+  um conflito técnico e não uma decisão de produto, e o que fazer (retomar;
+  trocar o modelo do papel). Nada é publicado como aprovado, e
+  `decideStandoff` não é chamado para `architecture.md`.
+
+### 119.4 Impacto
+
+- `maxArchitectureReturns` continua valendo só para as reorganizações pedidas
+  pela auditoria do plano. Esgotado esse orçamento com achados `Architecture`
+  ainda abertos, o caminho continua sendo a arbitragem do plano (não tocada).
+- `parseArchitecture` pode acrescentar dependências; o esqueleto publicado e o
+  plano carregam a ordem; o build a lê sem mudança. Fica menos paralelo só
+  onde há componente compartilhado declarado.
+- `decideStandoff` continua existindo para o plano. Os testes da §116 que
+  esperavam o impasse da arquitetura esperam agora o diagnóstico e nenhuma
+  pergunta.
+
+### 119.5 Testes
+
+`test/init/impasse-tecnico-119.spec.ts`, 9 casos. Contrato: serialização com a
+ordem lida pelo escalonador do build; ponto de extensão e integração sem
+conserto; fase que já alcança a outra não muda. Orquestrador, com o achado
+real do auditor: (5, 8, 11) o arquiteto resolve por serialização, sem
+pergunta, sem impasse, sem chamada a mais, até RALPH READY, com a ordem no
+esqueleto e no plano; (7) duas reorganizações do plano não consomem as
+devoluções da auditoria da arquitetura; (7b) o arquiteto que devolve a mesma
+arquitetura recebe a mudança de estratégia antes de qualquer arbitragem; (6)
+decisão genuína de produto na auditoria da arquitetura chega ao desenvolvedor;
+(10) o conflito que o auditor não dá por resolvido para o run com diagnóstico,
+sem pergunta e sem publicar, com três desenhos e três auditorias. (12) `npm run
+check`: 2613 testes em 136 arquivos, verde; §116, §117 e §118 intactas, com
+duas expectativas da §116 e uma da §117 atualizadas para o comportamento novo.
+
+### 119.6 Limitações
+
+- A serialização lê `components` por fase. Uma fase que edita arquivos de um
+  componente que não declarou não é vista em código; é o que o eixo 6 do
+  auditor cobra.
+- Achados `Architecture` do plano que sobrevivem ao orçamento de
+  reorganizações ainda vão à arbitragem do desenvolvedor.
+- O run real do impasse não estava em disco; a reprodução é pelo texto do
+  impasse e pelo código.
+- Nenhum run real depois desta correção.

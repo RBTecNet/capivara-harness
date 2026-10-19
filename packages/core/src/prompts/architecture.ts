@@ -41,7 +41,44 @@ export interface ArchitectContext {
   defects?: readonly string[];
   /** A arquitetura anterior e os achados do auditor, quando é uma emenda. */
   previous?: { architecture: string; findings: readonly { where: string; problem: string; fix: string }[] };
+  /**
+   * A mudança de estratégia, quando a correção não convergiu no orçamento:
+   * resolver o conflito por ordem e dependência entre fases, sem mecanismo novo.
+   */
+  strategy?: "serialize";
 }
+
+const CONCURRENT_PHASES = [
+  "## Work that runs at the same time",
+  "The build runs, simultaneously, phases that do not depend on each other. Two sessions editing",
+  "the files of the same component at the same time is the one conflict the plan must rule out,",
+  "and the harness rules it out mechanically: any two phases with no dependency between them that",
+  "both name the same component in `components` are ORDERED by the harness (the later one gains",
+  "the earlier one in `dependsOn`). So name, in each phase, every component whose files that phase",
+  "will change — an undeclared shared edit is the defect; a declared one is just an order.",
+  "",
+  "When independent modules must plug into something shared (routes into a server, pages into a",
+  "router, entries into a menu), three resolutions are valid and you choose:",
+  "- an extension point delivered by the foundation phase (a registration function, a directory",
+  "  scanned at startup, a per-module file the shell imports), so each module phase names only",
+  "  its own components and they run in parallel;",
+  "- an integration phase that depends on the module phases and is the only one to touch the",
+  "  shared component;",
+  "- naming the shared component in the module phases and accepting the order the harness gives.",
+  "Choose by simplicity, correctness and cost. Parallelism is an optimization, not a requirement:",
+  "a plain serial order beats an abstraction invented only to run phases at once, and a plan with",
+  "some serial phases is a correct plan.",
+].join("\n");
+
+const SERIALIZE_STRATEGY = [
+  "## Change of strategy: resolve by order, not by mechanism",
+  "The previous corrections did not converge. Do not design another extension mechanism. Resolve",
+  "every conflict over shared files by ORDER: name the shared component in each phase that edits",
+  "it, or move the shared edits into one integration phase that depends on the module phases. The",
+  "harness orders phases that share a component; a serial plan is a correct plan. Keep contracts,",
+  "components and coverage as they are, and change only the division and dependencies of phases",
+  "the findings name.",
+].join("\n");
 
 export function architectPrompt(context: ArchitectContext): string {
   const areas = [...AREAS_VALIDAS].join(", ");
@@ -105,6 +142,8 @@ export function architectPrompt(context: ArchitectContext): string {
     "  this size and this position. `dependsOn` is `none` or `Phase N, Phase M`.",
     `- \`areas\` comes from this closed list: ${areas}. It decides which skills the executor receives.`,
     "",
+    CONCURRENT_PHASES,
+    "",
     "## What you never do",
     "- Invent a feature, actor, limit, business rule or failure behaviour no source states.",
     "- Change an entity, story, workflow or cross-cutting rule of the skeleton.",
@@ -157,6 +196,7 @@ export function architectPrompt(context: ArchitectContext): string {
           "",
         ]
       : []),
+    ...(context.strategy === "serialize" ? [SERIALIZE_STRATEGY, ""] : []),
     "## The developer's original request (verbatim)",
     context.request,
     "",
@@ -242,6 +282,14 @@ export function architectureAuditPrompt(context: ArchitectureAuditContext): stri
     "   Recommend splitting, merging or reordering phases when that is the defect — say which phases",
     "   and how. Count is not complexity: a small phase that mixes three open concerns is the",
     "   defect; a larger phase on one fixed contract is not.",
+    "6. CONCURRENT WORK — phases with no dependency between them run at the same time. The harness",
+    "   already orders any two unordered phases that name the same component, so what you check is",
+    "   the PROPERTY, not the mechanism: does every phase name every component whose files it will",
+    "   change (an undeclared shared edit is the defect), and does every contract a module phase",
+    "   consumes exist on a phase it depends on? Ordering phases by dependency, an integration",
+    "   phase that depends on the modules, and an extension point in the foundation are all valid",
+    "   resolutions of a shared-file conflict. Never demand one of them when another is in place,",
+    "   and never reject a correct architecture because it runs fewer phases in parallel.",
     "",
     "## Doubt rule",
     "Reject only on a material defect you can demonstrate by citing the component, contract, phase",

@@ -16,10 +16,30 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.6.1 (`capivara --version`); planos da 0.5.0 e anteriores incompatíveis, ver §116 e §115.26 |
-| suíte | 2604 testes em 135 arquivos, `npm run check` verde |
+| suíte | 2613 testes em 136 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-19 — o conflito técnico não vai ao desenvolvedor (§119)
+
+Um `plan` real na 0.6.1 parou num "IMPASSE · precisa da sua decisão" sobre
+`architecture.md` "após 1 devoluções": o auditor cobrava que as fases 3, 4 e
+5 editariam `server/index.ts` e o roteador da interface sem ponto de extensão,
+e o harness perguntou ao desenvolvedor — que não tem o que decidir ali. Duas
+causas em código: o orçamento das devoluções da auditoria da arquitetura era o
+contador das reorganizações do plano, já gasto; e nada representava "fases sem
+ordem que estendem o mesmo componente", então o auditor julgava um mecanismo
+em vez de uma propriedade. Agora o parser serializa, por `dependsOn`, as fases
+sem ordem entre si que estendem o mesmo componente (campo que o escalonador do
+build já lê; nada novo no contrato); ponto de extensão e fase de integração
+passam sem mudança; o arquiteto e o auditor recebem as três saídas como
+válidas e "paralelismo é otimização"; a auditoria da arquitetura tem orçamento
+próprio (`maxAuditReturns`), troca de estratégia uma vez (resolver por ordem,
+sem mecanismo novo) antes de desistir, e se nem assim convergir o run para com
+o diagnóstico — sem pergunta e sem publicar. O mesmo acontece no plano quando
+o arquiteto devolve a mesma arquitetura a uma reorganização. Detalhe na §119
+do PLANO; testes em `test/init/impasse-tecnico-119.spec.ts`.
 
 ## 2026-10-19 — a autoridade das decisões e a prescrição de teste (§118)
 
@@ -600,7 +620,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 2604 testes
+npm run check     # build + typecheck + 2613 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

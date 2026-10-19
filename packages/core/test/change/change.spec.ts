@@ -336,6 +336,35 @@ describe("o comando change", () => {
     expect(outcome.written).toContain(join(projectRoot, ".capivara/init/environment.json"));
   });
 
+  /*
+   * Desde o §116 o plano cita a arquitetura no stamp. O `change` não a
+   * reescreve, mas precisa citá-la com os bytes em disco e carregar o metadado
+   * de infraestrutura adiante — senão o preflight do build lê um stamp que
+   * esqueceu um input, e o build perde a infraestrutura que o plan declarou.
+   */
+  it("carimba a arquitetura publicada e preserva o metadado de infraestrutura", async () => {
+    const arquitetura = "# Locadora — Arquitetura e infraestrutura\n\n## Componentes\n### api\n";
+    await writeFile(join(projectRoot, ".capivara/init/architecture.md"), arquitetura, "utf8");
+    const { sha12, parsePhases, checkStamp } = await import("../../src/contract/index.js");
+    const metadado = JSON.parse(await readFile(join(projectRoot, ".capivara/init/environment.json"), "utf8"));
+    await writeFile(join(projectRoot, ".capivara/init/environment.json"), JSON.stringify({ ...metadado, architectureSha12: sha12(arquitetura), infrastructure: { runtimes: [{ name: "Node.js" }] } }), "utf8");
+
+    const { call } = modelo([DELTA, TASKS]);
+    await runChange({ projectRoot, language: "pt", request: "editar clientes", call });
+
+    const plano = await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8");
+    const lido = parsePhases(plano);
+    expect(lido.ok).toBe(true);
+    if (lido.ok) {
+      const esqueleto = await readFile(join(projectRoot, ".capivara/init/skeleton.md"), "utf8");
+      expect(checkStamp(lido.document, [{ name: "skeleton.md", content: esqueleto }, { name: "architecture.md", content: arquitetura }])).toEqual([]);
+    }
+    const renovado = JSON.parse(await readFile(join(projectRoot, ".capivara/init/environment.json"), "utf8"));
+    expect(renovado.architectureSha12).toBe(sha12(arquitetura));
+    expect(renovado.infrastructure).toEqual({ runtimes: [{ name: "Node.js" }] });
+    expect(await readFile(join(projectRoot, ".capivara/init/architecture.md"), "utf8")).toBe(arquitetura);
+  });
+
   it("a pergunta vai à tela antes de virar fase, e a resposta volta ao planejador", async () => {
     const PERGUNTANDO = JSON.stringify({
       contract: CHANGE_CONTRACT,

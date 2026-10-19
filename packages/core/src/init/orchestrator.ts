@@ -491,14 +491,20 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
        * exatamente por esse motivo, e esse caso é o mesmo: o provider não
        * respondeu. Uma só, e a segunda falha vale pelo que ela for.
        */
+      /*
+       * Só o silêncio ganha a segunda chance automática. Um erro do motor QUE
+       * DIZ o que houve — credencial, cota, geração cortada — é definitivo até
+       * prova em contrário, e repeti-lo às cegas gasta dinheiro para receber a
+       * mesma recusa (§115.14). O que ele ganha é não ser lido como resposta.
+       */
       const mudo = response.stdout.trim() === "";
-      if ((mudo || falhouNoMotor) && tentativa === 1 && !estouro) {
+      if (mudo && tentativa === 1 && !estouro) {
         announce(
-          mudo
-            ? `  ${call.role} saiu com código ${response.exitCode} sem escrever nada em ${call.subject}; tentando uma segunda vez`
-            : `  a CLI de ${call.role} declarou erro do motor em ${call.subject}; tentando uma segunda vez`,
+          falhouNoMotor
+            ? `  a CLI de ${call.role} declarou erro do motor sem escrever nada em ${call.subject}; tentando uma segunda vez`
+            : `  ${call.role} saiu com código ${response.exitCode} sem escrever nada em ${call.subject}; tentando uma segunda vez`,
         );
-        await event(call.stage, call.subject, "retry", mudo ? `saída vazia com código ${response.exitCode}` : "erro do motor da CLI", call.attempt);
+        await event(call.stage, call.subject, "retry", falhouNoMotor ? "erro do motor da CLI, sem saída" : `saída vazia com código ${response.exitCode}`, call.attempt);
         continue;
       }
 
@@ -524,7 +530,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             ].join("\n")
           : [
               falhouNoMotor && response.exitCode === 0
-                ? `A CLI de ${call.role} declarou erro do motor em ${call.subject}, duas vezes.`
+                ? `A CLI de ${call.role} declarou erro do motor em ${call.subject}.`
                 : `O papel ${call.role} falhou com código ${response.exitCode} em ${call.subject}.`,
               "",
               /*

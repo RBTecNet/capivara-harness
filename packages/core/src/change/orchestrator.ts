@@ -44,7 +44,7 @@ import { changePrompt, phaseFromSlicePrompt } from "../prompts/index.js";
 import { inspectProject, summarizeInventory } from "../init/inventory.js";
 import { readRequestState, readSkeletonState, writeSkeletonState } from "../init/index.js";
 import { runIdFor } from "../state/run-store.js";
-import { readEnvironmentPlan, renderEnvironmentPlan } from "../loop/environment-plan.js";
+import { readEnvironmentPlan, readEnvironmentPlanExtras, renderEnvironmentPlan } from "../loop/environment-plan.js";
 import { artifactPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
 
@@ -299,10 +299,20 @@ export async function runChange(options: ChangeOptions): Promise<ChangeOutcome> 
     throw new ChangeBlockedError("não consegui ler as fases do plano atual; não vou reescrevê-lo sem saber o que já estava lá");
   }
 
+  /*
+   * O plano é carimbado com o que ele leu — e desde o §116 isso inclui a
+   * arquitetura, quando o `plan` a publicou. O `change` não a reescreve (é a
+   * decisão do plano original); ele a cita com os bytes que estão em disco,
+   * para o preflight do build não ler um stamp que esqueceu um input.
+   */
+  const arquiteturaMd = await readFile(join(paths.init, "architecture.md"), "utf8").catch(() => "");
   const skeletonMarkdown = renderSkeleton(aplicada.skeleton);
   const plano = assemblePhasesDocument({
     projectName: aplicada.skeleton.projectName,
-    stamp: buildStamp([{ name: "skeleton.md", content: skeletonMarkdown }]),
+    stamp: buildStamp([
+      { name: "skeleton.md", content: skeletonMarkdown },
+      ...(arquiteturaMd !== "" ? [{ name: "architecture.md", content: arquiteturaMd }] : []),
+    ]),
     overview: `${aplicada.skeleton.phases.length} fases, fundação primeiro. O MVP fecha na fase ${aplicada.skeleton.mvpCutPhase}.`,
     phases: [...anteriores, ...detalhadas],
     openQuestions: [],
@@ -313,7 +323,9 @@ export async function runChange(options: ChangeOptions): Promise<ChangeOutcome> 
 
   await writeAtomic(caminhoEsqueleto, skeletonMarkdown);
   await writeAtomic(caminhoPlano, plano);
-  await writeAtomic(join(paths.init, "environment.json"), renderEnvironmentPlan(aplicada.skeleton, plano));
+  // O metadado é renovado com o que o plan tinha registrado: a infraestrutura
+  // declarada e o sha da arquitetura seguem valendo para a mudança.
+  await writeAtomic(join(paths.init, "environment.json"), renderEnvironmentPlan(aplicada.skeleton, plano, await readEnvironmentPlanExtras(options.projectRoot)));
   // O estado do esqueleto é atualizado no MESMO lugar de onde veio: é por ele
   // que o `plan` e um `change` seguinte encontram o que já foi combinado.
   await writeSkeletonState(options.projectRoot, runIdFor("init", pedido!.sha12), aplicada.skeleton);

@@ -2,10 +2,13 @@
 
 Do prompt à aplicação final, em três comandos.
 
-Versão **0.5.0**: planejamentos de versões anteriores são incompatíveis.
+Versão **0.6.0**: planejamentos de versões anteriores são incompatíveis.
+O plano deixou de prescrever testes (`capivara-phases/v2`) e passou a vir com a
+arquitetura e a infraestrutura decididas pelo `plan` (`capivara-planning/v3`).
 Em projetos existentes, gere novamente com `capivara init --fresh` e depois
 `capivara plan --fresh` antes de executar o build. Código, dados e evidências
-existentes são preservados; aprovações da geração anterior não são reutilizadas.
+existentes são preservados; planos, caches e aprovações da geração anterior não
+são lidos nem convertidos.
 
 ```bash
 capivara init "um sistema de reservas para uma pousada de 8 quartos"
@@ -13,8 +16,9 @@ capivara plan
 capivara build
 ```
 
-O `init` entrevista você e desenha as fases do projeto: **PLAN READY**. O `plan`
-detalha cada fase, audita, ensaia e para quando não há mais nenhum gap:
+O `init` entrevista você e desenha o produto: **PLAN READY**. O `plan` decide a
+arquitetura e a infraestrutura, reorganiza as fases se a arquitetura pedir,
+detalha cada uma, audita, ensaia e para quando não há mais nenhum gap:
 **RALPH READY**. O `build` constrói a aplicação a partir desse plano, uma fase
 por sessão, até o fim.
 
@@ -224,15 +228,40 @@ nenhuma decisão material ficou em aberto.
 
 ### `capivara plan`
 
-Escreve uma fase por chamada, **cada uma vendo só a sua fatia**: a stack, o que
-aquela fase entrega, e todas as regras transversais. Nada mais. O que precisava
-ser acordado entre as fases já foi, no esqueleto.
+Começa pela **arquitetura**: uma chamada olha o esqueleto inteiro e decide os
+componentes do código, os contratos entre eles, as decisões de dados, a
+infraestrutura necessária — runtimes, ferramentas, gerenciadores de pacotes,
+dependências, serviços, bancos, requisitos de ambiente e condições para começar,
+cada item com a autoridade da escolha — e a divisão de fases que vale. A divisão
+do `init` é proposta: a arquitetura pode dividir, fundir e reordenar, e o harness
+confere em código que nenhuma story, entidade ou fluxo se perdeu. Um auditor
+independente julga a arquitetura antes de qualquer fase ser escrita. O resultado
+é `architecture.md`.
+
+Depois escreve uma fase por chamada, **cada uma vendo só a sua fatia**: a stack,
+o que aquela fase entrega, as regras transversais, e os componentes e contratos
+que a arquitetura lhe atribuiu. As tasks nomeiam arquivo, rota e função, para que
+um executor econômico nunca precise de uma decisão arquitetural. O plano
+descreve comportamento e critérios de aceite; ele não nomeia testes, arquivos de
+teste nem procedimentos de validação — quem decide como provar o produto é o
+avaliador do build, lendo o código entregue.
 
 O que só a escrita da fase descobre volta como uma segunda rodada de entrevista.
 Depois vêm o self-check mecânico (custo zero), o **auditor independente** — uma
-chamada por fase, mais uma de coerência sobre o plano inteiro — e o **ensaio do
+chamada por fase, mais uma de coerência sobre o plano inteiro, julgando
+fidelidade ao produto, coerência arquitetural, completude, dependências,
+dimensionamento e viabilidade para um executor econômico — e o **ensaio do
 verificador**, que julga cada critério de aceite antes de existir código: um
 critério impossível de observar para aqui, e não três ciclos de correção adiante.
+Um achado que pede reorganização de fases volta à arquitetura, e as fases cujo
+envelope não mudou voltam do cache.
+
+A recuperação é orientada à conclusão: o que se conserta contando é consertado
+em código; uma emenda toca só a fase citada; esqueleto, arquitetura, fases,
+aprovações por task e coerência sobrevivem em disco, e uma retomada depois de o
+provider cair recomeça de onde parou. Uma emenda que não muda o texto leva os
+pontos a você em vez de pagar outra devolução. Nada disso declara aprovado um
+documento que não foi.
 
 Termina em `RALPH READY` ou em `NOT READY` dizendo exatamente o que falta. Nunca
 "quase pronto".
@@ -309,7 +338,7 @@ da fase: endpoints, métodos e base do cliente já publicados não precisam ser 
 a partir do nome da tela.
 
 O `plan` publica `environment.json` com os pré-requisitos e sondas de prontidão
-declarados no esqueleto. O `build` verifica e prepara o ambiente antes de iniciar
+decididos pela arquitetura, mais a infraestrutura declarada. O `build` verifica e prepara o ambiente antes de iniciar
 as fases, incluindo dependências existentes e Chromium quando G4 está habilitado.
 A aprovação vale para a execução: as fases não repetem essas sondas. Dependência
 ou migração criada pelo código continua sendo instalada/aplicada quando necessário.
@@ -439,8 +468,10 @@ Nenhum dos dois aparece em `argv`, onde ficariam visíveis em `ps`.
 ```
 .capivara/
 ├── init/                    autoridade de leitura para o executor
-│   ├── skeleton.md          o produto: stack, dados, stories, fluxos, regras
+│   ├── skeleton.md          o produto: stack, dados, stories, fluxos, regras, fases
+│   ├── architecture.md      componentes, contratos, infraestrutura e a divisão de fases
 │   ├── project-phases.md    o único documento que o loop consome
+│   ├── environment.json     sondas de prontidão e infraestrutura, vinculadas aos três acima
 │   └── design/              manual e opcional; a ferramenta nunca escreve aqui
 ├── handoffs/                a entrevista, preservada entre execuções
 └── runs/<run-id>/           plano de controle: nunca entra num commit de fase
@@ -458,7 +489,7 @@ Nenhum dos dois aparece em `argv`, onde ficariam visíveis em `ps`.
 
 ```bash
 npm run check           # build + typecheck + suíte
-npm run docs:contract   # regenera docs/capivara-phases-v1.md a partir do código
+npm run docs:contract   # regenera docs/capivara-phases-v2.md a partir do código
 ```
 
 `docs/PLANO.md` é a especificação do produto e a autoridade deste repositório.

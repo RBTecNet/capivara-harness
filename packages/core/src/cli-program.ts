@@ -548,6 +548,10 @@ function estagioInterativo(options: {
     return {
       stdout: response.exitCode !== 0 ? [response.stdout, response.stderr].filter(Boolean).join("\n") : response.stdout,
       exitCode: response.exitCode,
+      // O fato do envelope viaja como campo: é o orquestrador quem decide que
+      // erro do motor não é resposta (HANDOFF §16).
+      ...(response.engineError ? { engineError: true } : {}),
+      ...(response.timedOut ? { timedOut: response.timedOut } : {}),
       ...(response.partialOutput ? { partialOutput: response.partialOutput } : {}),
       ...(response.usage
         ? {

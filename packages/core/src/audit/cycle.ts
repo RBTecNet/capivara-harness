@@ -94,6 +94,125 @@ export function marcaDoProblema(finding: Finding): string {
     .trim();
 }
 
+/*
+ * A identidade de um achado sem exigir texto idêntico (§122).
+ *
+ * O auditor é sem memória e reescreve o mesmo ponto com outras palavras a cada
+ * leitura; a emenda muda o título da task que o endereço cita. Com identidade
+ * exata, o mesmo problema contava como "fechou um, apareceu um novo" — progresso
+ * artificial que não gastava o teto —, e a regressão descrita de outra forma
+ * passava por ponto novo. A comparação é por vocabulário: as palavras do
+ * problema, sem acento, sem as que não distinguem nada. Jaccard alto é o mesmo
+ * ponto; baixo é outro; o meio é incerto, e o incerto não conta como progresso
+ * nem como regressão — não se inventa identidade onde a evidência não chega.
+ */
+const PALAVRAS_SEM_PESO = new Set([
+  "de", "da", "do", "das", "dos", "que", "a", "o", "as", "os", "e", "em", "um", "uma", "para", "com", "nao", "no", "na", "nos", "nas",
+  "por", "se", "ao", "aos", "ou", "mas", "ja", "sua", "seu", "suas", "seus", "ser", "esta", "este", "isso", "como", "qual", "quando",
+  "the", "and", "of", "to", "is", "in", "on", "for", "with", "it", "its", "this", "that", "not", "be", "as", "at", "by", "or", "an", "are",
+]);
+
+/** As palavras que distinguem um problema: sem acento, sem as sem peso, sem as curtas. */
+export function vocabularioDoProblema(text: string): Set<string> {
+  return new Set(
+    text
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((palavra) => palavra.length >= 3 && !PALAVRAS_SEM_PESO.has(palavra)),
+  );
+}
+
+/** Jaccard entre os vocabulários dos problemas: 1 é o mesmo texto, 0 é nada em comum. */
+export function semelhancaDosProblemas(a: Finding, b: Finding): number {
+  const de = vocabularioDoProblema(a.problem);
+  const para = vocabularioDoProblema(b.problem);
+  if (de.size === 0 && para.size === 0) return 1;
+  let comuns = 0;
+  for (const palavra of de) if (para.has(palavra)) comuns += 1;
+  return comuns / (de.size + para.size - comuns);
+}
+
+const MESMO_PONTO = 0.6;
+const PONTO_INCERTO = 0.25;
+
+/**
+ * Endereços do plano citados num `where`, para desempatar o meio incerto: a
+ * task (`P2.T1`, com ou sem critério) e a fase (`P2`). O critério não entra
+ * na identidade — a emenda renumera critérios, e o auditor cita ora a task,
+ * ora o critério dela.
+ */
+function enderecos(where: string): { tasks: Set<string>; fases: Set<string>; itens: Set<string> } {
+  const tasks = new Set<string>();
+  const fases = new Set<string>();
+  const itens = new Set<string>();
+  const texto = where.toLowerCase();
+  for (const match of texto.matchAll(/\b(p\d+)(\.t\d+)?(?:\.c\d+)?\b/g)) {
+    fases.add(match[1]!);
+    if (match[2]) tasks.add(`${match[1]}${match[2]}`);
+  }
+  // Stories e workflows são endereços também: "US-1.2" e "US-2.1" são dois lugares.
+  for (const match of texto.matchAll(/\bus-\d+(?:\.\d+)?\b|\bworkflow\s*\d+\b/g)) itens.add(match[0].replace(/\s+/g, " "));
+  return { tasks, fases, itens };
+}
+
+/**
+ * Os dois endereços são o mesmo lugar, lugares diferentes, ou não se sabe?
+ *
+ * Com endereço estruturado dos dois lados a resposta é objetiva: a mesma
+ * task (critério não conta), a mesma fase quando só a fase é citada, a mesma
+ * story. Sem estrutura — um título de task, que a emenda renomeia — não se
+ * sabe, e o texto do problema decide sozinho.
+ */
+function compararEnderecos(a: string, b: string): "igual" | "diferente" | "desconhecido" {
+  if (a.trim().toLowerCase() === b.trim().toLowerCase()) return "igual";
+  const deA = enderecos(a);
+  const deB = enderecos(b);
+  if (deA.tasks.size > 0 && deB.tasks.size > 0) return [...deA.tasks].some((task) => deB.tasks.has(task)) ? "igual" : "diferente";
+  if (deA.fases.size > 0 && deB.fases.size > 0) return [...deA.fases].some((fase) => deB.fases.has(fase)) ? "igual" : "diferente";
+  if (deA.itens.size > 0 && deB.itens.size > 0) return [...deA.itens].some((item) => deB.itens.has(item)) ? "igual" : "diferente";
+  return "desconhecido";
+}
+
+export type Identidade = "sim" | "incerto" | "nao";
+
+/**
+ * Dois achados são o mesmo ponto?
+ *
+ * Texto igual é sim. Vocabulário muito parecido é sim. Parecido pela metade é
+ * sim quando os dois citam o mesmo endereço do plano, e incerto quando não —
+ * o endereço desempata, o resto fica em aberto. O que não se parece é outro
+ * ponto.
+ */
+export function mesmoPonto(a: Finding, b: Finding): Identidade {
+  if (fingerprint(a) === fingerprint(b)) return "sim";
+  const lugar = compararEnderecos(a.where, b.where);
+  /*
+   * O mesmo problema em dois lugares objetivamente diferentes são dois
+   * defeitos (§120): "critério vago" em US-1.2 e em US-2.1 é o escritor
+   * precisando consertar duas tasks. Sem estrutura no endereço, a frase
+   * idêntica é o mesmo ponto — é o caso do `assistencia2`, em que a emenda
+   * renomeou a task que o endereço citava.
+   */
+  if (marcaDoProblema(a) === marcaDoProblema(b)) return lugar === "diferente" ? "nao" : "sim";
+  const semelhanca = semelhancaDosProblemas(a, b);
+  if (semelhanca >= MESMO_PONTO) return lugar === "diferente" ? "incerto" : "sim";
+  if (semelhanca < PONTO_INCERTO) return "nao";
+  return lugar === "igual" ? "sim" : "incerto";
+}
+
+/** A melhor identidade de um achado contra uma lista: sim vence incerto, que vence não. */
+function identidadeEm(finding: Finding, lista: readonly Finding[]): Identidade {
+  let melhor: Identidade = "nao";
+  for (const outro of lista) {
+    const identidade = mesmoPonto(finding, outro);
+    if (identidade === "sim") return "sim";
+    if (identidade === "incerto") melhor = "incerto";
+  }
+  return melhor;
+}
+
 /**
  * O achado que já voltou antes — e é aí que a conversa deixa de ser sobre escrita.
  *
@@ -101,10 +220,11 @@ export function marcaDoProblema(finding: Finding): string {
  * que sobrevive a uma reescrita é DESACORDO — o escritor leu as fontes de um
  * jeito, o auditor de outro, e nenhum dos dois pode decidir quem tem razão.
  * Mandá-lo de volta uma terceira vez é pagar para reencenar a mesma discussão.
+ *
+ * Reescrito com outras palavras continua sendo o mesmo achado (§122).
  */
 export function ehRepetido(finding: Finding, history: readonly AuditAttempt[]): boolean {
-  const marca = marcaDoProblema(finding);
-  return history.some((tentativa) => tentativa.verdict.findings.some((anterior) => marcaDoProblema(anterior) === marca));
+  return history.some((tentativa) => identidadeEm(finding, tentativa.verdict.findings) === "sim");
 }
 
 /** Findings que sobreviveram a todas as devoluções, sem repetir o equivalente. */
@@ -134,13 +254,14 @@ export function persistentFindings(history: readonly AuditAttempt[]): Finding[] 
  * provavelmente não se resolve escrevendo melhor.
  */
 export function repeatedFindings(history: readonly AuditAttempt[]): Set<string> {
-  const contagem = new Map<string, number>();
-  for (const attempt of history) {
-    for (const marca of new Set(attempt.verdict.findings.map(marcaDoProblema))) {
-      contagem.set(marca, (contagem.get(marca) ?? 0) + 1);
+  const repetidos = new Set<string>();
+  history.forEach((attempt, index) => {
+    const outras = history.filter((_outra, posicao) => posicao !== index).flatMap((outra) => outra.verdict.findings);
+    for (const finding of attempt.verdict.findings) {
+      if (identidadeEm(finding, outras) === "sim") repetidos.add(marcaDoProblema(finding));
     }
-  }
-  return new Set([...contagem.entries()].filter(([, vezes]) => vezes > 1).map(([marca]) => marca));
+  });
+  return repetidos;
 }
 
 /**
@@ -191,13 +312,20 @@ export function writerDid(history: readonly AuditAttempt[]): string[] {
  * - `persistentes`: apontados na anterior e ainda presentes;
  * - `novos`: nunca apontados antes;
  * - `regressoes`: fechados numa rodada anterior e de volta agora;
+ * - `incertos`: pontos cuja identidade com um anterior não se decide (§122) —
+ *   não contam como fechados, novos nem regressões, e impedem que a rodada
+ *   seja declarada progresso;
  * - `mesmoTexto`: o documento não mudou desde a rodada anterior.
+ *
+ * A identidade é por vocabulário (`mesmoPonto`), não por texto exato: o mesmo
+ * problema reescrito é o mesmo problema.
  */
 export interface Balanco {
   fechados: number;
   persistentes: number;
   novos: number;
   regressoes: number;
+  incertos: number;
   mesmoTexto: boolean;
 }
 
@@ -205,26 +333,44 @@ export function balancoDaRodada(history: readonly AuditAttempt[], index = histor
   const atual = history[index];
   const anterior = index > 0 ? history[index - 1] : undefined;
   if (!atual || !anterior) {
-    return { fechados: 0, persistentes: 0, novos: atual?.verdict.findings.length ?? 0, regressoes: 0, mesmoTexto: false };
+    return { fechados: 0, persistentes: 0, novos: atual?.verdict.findings.length ?? 0, regressoes: 0, incertos: 0, mesmoTexto: false };
   }
-  const agora = new Set(atual.verdict.findings.map(fingerprint));
-  const antes = new Set(anterior.verdict.findings.map(fingerprint));
-  const jaVistos = new Set(history.slice(0, index - 1).flatMap((tentativa) => tentativa.verdict.findings.map(fingerprint)));
-  const fechados = [...antes].filter((marca) => !agora.has(marca)).length;
-  const persistentes = [...antes].filter((marca) => agora.has(marca)).length;
-  const inéditos = [...agora].filter((marca) => !antes.has(marca));
-  const regressoes = inéditos.filter((marca) => jaVistos.has(marca)).length;
-  return { fechados, persistentes, novos: inéditos.length - regressoes, regressoes, mesmoTexto: anterior.contentSha === atual.contentSha };
+  const agora = atual.verdict.findings;
+  const antes = anterior.verdict.findings;
+  const jaVistos = history.slice(0, index - 1).flatMap((tentativa) => tentativa.verdict.findings);
+
+  let fechados = 0;
+  let persistentes = 0;
+  let incertos = 0;
+  for (const finding of antes) {
+    const identidade = identidadeEm(finding, agora);
+    if (identidade === "sim") persistentes += 1;
+    else if (identidade === "incerto") incertos += 1;
+    else fechados += 1;
+  }
+  let novos = 0;
+  let regressoes = 0;
+  for (const finding of agora) {
+    const contraAnterior = identidadeEm(finding, antes);
+    if (contraAnterior === "sim") continue; // já contado como persistente
+    if (contraAnterior === "incerto") { incertos += 1; continue; }
+    const contraVistos = identidadeEm(finding, jaVistos);
+    if (contraVistos === "sim") regressoes += 1;
+    else if (contraVistos === "incerto") incertos += 1;
+    else novos += 1;
+  }
+  return { fechados, persistentes, novos, regressoes, incertos, mesmoTexto: anterior.contentSha === atual.contentSha };
 }
 
 /**
- * Uma rodada que avançou: o texto mudou, algo fechou, nada persistiu e nada
- * voltou. A primeira devolução nunca é progresso — não há com o que comparar.
+ * Uma rodada que avançou: o texto mudou, algo fechou, nada persistiu, nada
+ * voltou e nada ficou incerto. A primeira devolução nunca é progresso — não há
+ * com o que comparar.
  */
 export function rodadaAvancou(history: readonly AuditAttempt[], index: number): boolean {
   if (index <= 0) return false;
   const balanco = balancoDaRodada(history, index);
-  return !balanco.mesmoTexto && balanco.fechados > 0 && balanco.persistentes === 0 && balanco.regressoes === 0;
+  return !balanco.mesmoTexto && balanco.fechados > 0 && balanco.persistentes === 0 && balanco.regressoes === 0 && balanco.incertos === 0;
 }
 
 /** O balanço em uma linha, para o log e para o impasse. */
@@ -234,6 +380,7 @@ export function descreverBalanco(balanco: Balanco): string {
   if (balanco.persistentes > 0) partes.push(`${balanco.persistentes} seguiu(ram) aberto(s)`);
   if (balanco.novos > 0) partes.push(`${balanco.novos} apareceu(ram) novo(s)`);
   if (balanco.regressoes > 0) partes.push(`${balanco.regressoes} voltou(aram) depois de fechado(s)`);
+  if (balanco.incertos > 0) partes.push(`${balanco.incertos} de identidade incerta (reescrito ou parecido com um anterior)`);
   return partes.join(", ");
 }
 

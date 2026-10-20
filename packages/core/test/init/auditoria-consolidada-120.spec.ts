@@ -71,9 +71,9 @@ describe("5–6. o balanço de uma rodada distingue fechado, persistente, novo e
       rodada(3, [sete[0]!, sete[4]!], "c"), // fechou 2; o primeiro voltou (regressão); 1 novo
       rodada(4, [sete[4]!], "c"), // mesmo texto
     ];
-    expect(balancoDaRodada(history, 0)).toEqual({ fechados: 0, persistentes: 0, novos: 3, regressoes: 0, mesmoTexto: false });
-    expect(balancoDaRodada(history, 1)).toEqual({ fechados: 2, persistentes: 1, novos: 1, regressoes: 0, mesmoTexto: false });
-    expect(balancoDaRodada(history, 2)).toEqual({ fechados: 2, persistentes: 0, novos: 1, regressoes: 1, mesmoTexto: false });
+    expect(balancoDaRodada(history, 0)).toEqual({ fechados: 0, persistentes: 0, novos: 3, regressoes: 0, incertos: 0, mesmoTexto: false });
+    expect(balancoDaRodada(history, 1)).toEqual({ fechados: 2, persistentes: 1, novos: 1, regressoes: 0, incertos: 0, mesmoTexto: false });
+    expect(balancoDaRodada(history, 2)).toEqual({ fechados: 2, persistentes: 0, novos: 1, regressoes: 1, incertos: 0, mesmoTexto: false });
     expect(balancoDaRodada(history, 3).mesmoTexto).toBe(true);
     expect(rodadaAvancou(history, 1)).toBe(false);
     expect(rodadaAvancou(history, 2)).toBe(false);

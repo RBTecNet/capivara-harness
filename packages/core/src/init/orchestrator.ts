@@ -37,7 +37,7 @@ import { decisoesComoMemorias, renderLibraryBlock, type McpDocument, type Memori
 import { INIT_ARTIFACTS, evaluateReadiness } from "./readiness.js";
 import type { LeituraEscolhida } from "../interview/index.js";
 import { comAutoridade, decisaoDoAuditorComoFinding, decisaoDoEnsaio, decisaoGravada, lerEscolha, lerEscolhaDoEnsaio, perguntaDeLevantamento, perguntaDoAuditor, perguntaDoEnsaio } from "../interview/index.js";
-import { TasksJulgadas, ehRepetido, marcaDoProblema, shaDaAutoridade } from "../audit/index.js";
+import { NOTA_DE_ENGENHARIA, TasksJulgadas, autoridadeDaDecisao, autoridadeDoAchado, comNotaDeEngenharia, decisaoDeEngenhariaComoFinding, ehRepetido, marcaDoProblema, mesmoPonto, shaDaAutoridade, sinaisDeEngenharia } from "../audit/index.js";
 import type { TaskBlock } from "../contract/index.js";
 import { MemoriaDoPlano } from "./plan-cache.js";
 import type { PlanProgressListener } from "./progress.js";
@@ -624,6 +624,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * "não há mais nada a fazer" — e devolvia o plano marcado.
    */
   const lacunasDecididas = new Set<string>();
+  /** Marcadores de engenharia já devolvidos ao escritor uma vez (§122); se voltarem, a pendência é preservada e perguntada. */
+  const marcadoresDevolvidos = new Set<string>();
   const marcadorDaPergunta = new Map<string, string>();
 
   /**
@@ -1249,11 +1251,20 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * cumpre o protocolo neste prompt, não que a auditoria seja impossível —
      * o verifier e o auditor leem o mesmo protocolo, em sessão própria.
      */
-    const outro: "auditor" | "verifier" = papel === "auditor" ? "verifier" : "auditor";
+    /*
+     * Quem reparou não lê (§122). No INIT e no PLAN o verifier só audita
+     * depois de um reparo pelo auditor; quando ele falha duas vezes no
+     * protocolo, a terceira leitura não pode voltar ao auditor — seria o
+     * reparador aprovando a própria emenda. O escritor é a alternativa
+     * independente que existe: outra sessão, outro papel, e não foi ele quem
+     * reparou. Se também falhar, o run para com o diagnóstico; nunca aprova.
+     */
+    const outro: "auditor" | "verifier" | "writer" = papel === "auditor" ? "verifier" : "writer";
     for (let tentativa = 1; tentativa <= 3; tentativa += 1) {
       const role = tentativa === 3 ? outro : papel;
       if (tentativa === 3) {
-        announce(`  o ${papel} de ${subject} não cumpriu o protocolo duas vezes; a leitura passa ao ${outro}, em sessão própria`);
+        announce(`  o ${papel} de ${subject} não cumpriu o protocolo duas vezes; a leitura passa ao ${outro}, em sessão própria${outro === "writer" ? " — o auditor reparou este documento e não lê o próprio reparo" : ""}`);
+        if (outro === "writer") anunciarIndependencia("writer", "auditor");
         registrarEstrategia(subject, `auditoria de ${subject} refeita pelo papel ${outro} depois de duas saídas inválidas do ${papel}`);
         await event("audit", subject, "retry", `saída inválida duas vezes; leitura pelo ${outro}`, attempt);
       }
@@ -1262,7 +1273,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       if (parsed.ok) {
         // O que o parser consertou sozinho é dito: é uma chamada que não foi paga.
         for (const nota of parsed.applied) announce(`  ${nota}`);
-        return parsed.verdict;
+        return semPrescricaoDeTeste(subject, parsed.verdict);
       }
       if (tentativa === 3) {
         const amostra = ultima.trim().slice(0, 300).replace(/\n/g, "\n  ");
@@ -2368,6 +2379,43 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   }
 
   /**
+   * O achado cuja correção prescreve trabalho de teste (§122) volta ao
+   * escritor com a correção da regra, não com a do auditor.
+   *
+   * No `minimax` o auditor pediu "acrescentar em Phase 3 uma task de testes
+   * equivalente a P2.T9/P4.T8": aplicada, a emenda criaria a task que I-16
+   * devolve mecanicamente na leitura seguinte — um laço entre o auditor e a
+   * regra, pago pelo escritor. O problema do auditor fica; a correção passa a
+   * ser a da regra, e o requisito do pedido segue como comportamento.
+   */
+  function semPrescricaoDeTeste(subject: string, verdict: AuditVerdict): AuditVerdict {
+    const autoridade = autoridadeDeTeste();
+    let corrigidos = 0;
+    const findings = verdict.findings.map((finding) => {
+      const termos = testPrescriptions(finding.fix, autoridade);
+      if (termos.length === 0) return finding;
+      corrigidos += 1;
+      return { ...finding, fix: `${testPrescriptionHint(termos)} (a correção que o auditor propôs — "${finding.fix}" — prescrevia teste e foi substituída pela regra I-16)` };
+    });
+    if (corrigidos > 0) announce(`  ${corrigidos} achado(s) de ${subject} pediam trabalho de teste na correção; a correção passa a ser a da regra (I-16), e o requisito fica como comportamento`);
+    return { ...verdict, findings };
+  }
+
+  /**
+   * A independência que existe é dita (§122): quando o papel que valida e o
+   * que reparou rodam no mesmo provider e modelo, a separação é só de sessão.
+   */
+  function anunciarIndependencia(valida: string, reparou: string): void {
+    const papeis = options.roles ?? {};
+    const a = papeis[valida];
+    const b = papeis[reparou];
+    if (!a || !b) return;
+    if (a.provider === b.provider && a.model === b.model) {
+      announce(`  a independência entre ${valida} e ${reparou} é só de sessão: os dois rodam em ${a.provider}/${a.model}`);
+    }
+  }
+
+  /**
    * As estratégias tentadas por documento (§121): o diagnóstico de um bloqueio
    * diz o que ficou aberto e o que foi tentado, nunca só "tentativas esgotadas".
    */
@@ -2627,13 +2675,30 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * prosa: no `assistencia2` as quatro tentativas apontaram fases sempre
      * diferentes, nada repetiu, e o levantamento nunca abriu.
      */
+    /*
+     * Achado de engenharia não vai a arbitragem (§122).
+     *
+     * "O `rotas.ts` de Categorias não declara `export const prefixo` que
+     * `registrarRotasApi` exige" voltou pela segunda vez no `minimax`, foi à
+     * frente do desenvolvedor como "desacordo de leitura", e ele respondeu
+     * "fica como está": a contradição foi publicada como decidida. Um
+     * conflito entre contratos do próprio plano é o plano que fecha — o
+     * escritor, e depois o reparador — e a escolha do desenvolvedor não o
+     * torna coerente. O achado segue na recuperação, com a nota de quem decide.
+     */
+    const deEngenharia = findings.filter((finding) => autoridadeDoAchado(finding) === "engenharia");
+    if (deEngenharia.length > 0 && (todos || deEngenharia.some((finding) => ehRepetido(finding, history)))) {
+      announce(`  ${deEngenharia.length} ponto(s) são de engenharia (${deEngenharia.map((finding) => sinaisDeEngenharia(`${finding.where}\n${finding.problem}`)[0] ?? finding.where).join(", ")}): o plano decide, não você — seguem na correção`);
+    }
+    const anotado = (finding: Finding): Finding => (deEngenharia.includes(finding) ? comNotaDeEngenharia(finding) : finding);
     const repetidos = findings.filter(
       (finding) =>
         finding.mechanical !== true &&
+        !deEngenharia.includes(finding) &&
         (todos || ehRepetido(finding, history)) &&
         !arbitrados.has(marcaDoProblema(finding)),
     );
-    if (repetidos.length === 0) return [...findings];
+    if (repetidos.length === 0) return findings.map(anotado);
 
     announce(
       todos
@@ -2657,7 +2722,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
     for (const finding of findings) {
       if (!repetidos.includes(finding)) {
-        resultado.push(finding);
+        resultado.push(anotado(finding));
         continue;
       }
 
@@ -2809,6 +2874,23 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     for (const decisao of novas) {
       const termos = testPrescriptions([decisao.decision, ...decisao.options].join("\n"), autoridade);
       if (termos.length === 0) {
+        /*
+         * Uma escolha de engenharia não é decisão do desenvolvedor (§122).
+         *
+         * No `minimax` o auditor perguntou como o `rotas.ts` obtém a
+         * instância `Database` e se o módulo escreve `router.get('/')` ou
+         * `router.get('/tarefas')` — todas as leituras em forma de código, o
+         * mesmo produto em qualquer uma. O plano decide: o achado leva as
+         * leituras do auditor ao escritor, que escolhe a compatível com a
+         * arquitetura e alinha as fases.
+         */
+        if (autoridadeDaDecisao(decisao) === "engenharia") {
+          decisoesDoAuditor.add(`${decisao.where}::${decisao.decision}`.toLowerCase());
+          announce(`  o auditor levantou como decisão uma escolha de engenharia (${decisao.where}); o plano decide, não você — vira correção ao escritor`);
+          await event("audit", document, "retry", `decisão de engenharia devolvida ao escritor: ${decisao.where}`, attempt);
+          decididas.push(decisaoDeEngenhariaComoFinding(decisao));
+          continue;
+        }
         perguntaveis.push(decisao);
         continue;
       }
@@ -2981,6 +3063,33 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           authored = { content: limpo.content, rewrite: authored.rewrite };
           continue;
         }
+      }
+
+      /*
+       * O marcador que pede uma decisão de engenharia volta ao escritor (§122).
+       *
+       * Ele escreve "[NEEDS DECISION] o `rotas.ts` exporta `prefixo` ou a
+       * fundação deriva do diretório?" e isso é dele mesmo: o plano decide
+       * assinatura, exportação e registro, lendo a arquitetura. Uma vez; se o
+       * marcador voltar, a pendência é preservada e o desenvolvedor a lê —
+       * na dúvida, ninguém inventa a decisão por ele.
+       */
+      const deEngenharia = presentes.filter(
+        (marker) => !asked.has(marker.toLowerCase()) && !marcadoresDevolvidos.has(marker.toLowerCase()) && sinaisDeEngenharia(marker).length > 0,
+      );
+      if (deEngenharia.length > 0) {
+        for (const marker of deEngenharia) marcadoresDevolvidos.add(marker.toLowerCase());
+        announce(`  ${deEngenharia.length} marcador(es) pedem decisão de engenharia; o plano decide, não você — devolvendo ao escritor`);
+        await event("interview", document, "retry", `${deEngenharia.length} marcador(es) de engenharia devolvidos ao escritor`, round);
+        authored = await authored.rewrite(
+          deEngenharia.map((marker) => ({
+            where: document,
+            problem: `o marcador "[NEEDS DECISION] ${marker}" pede uma decisão de engenharia, que é do plano, não do desenvolvedor`,
+            fix: `decida: escolha a leitura compatível com a arquitetura e com o contrato da fase que o fixa, aplique-a e remova o marcador\n${NOTA_DE_ENGENHARIA}`,
+          })),
+          round,
+        );
+        continue;
       }
 
       const markers = presentes.filter((marker) => !asked.has(marker.toLowerCase())).slice(0, maxGapQuestions);
@@ -3545,6 +3654,17 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     let reparos = 0;
     const maxReparos = 2;
     const papelDaEmenda = (): "writer" | "auditor" => (modoReparo ? "auditor" : "writer");
+    /*
+     * O que o desenvolvedor decidiu no impasse, ponto a ponto (§122).
+     *
+     * A decisão dele vale para os pontos que ele leu e decidiu; não para o
+     * que o auditor apontar depois. Com uma única bandeira, a primeira
+     * decisão transformava QUALQUER reprovação seguinte em publicação com
+     * ressalvas — o `minimax` publicou contradições de contrato assim.
+     */
+    const decididosNoImpasse: Finding[] = [];
+    /** Não-respostas no impasse: a primeira recomeça a correção; a segunda para com diagnóstico. */
+    let naoRespostas = 0;
     for (let attempt = 1; attempt <= attemptLimit; attempt += 1) {
       const content = authored.content;
       if (modoReparo) announce(`  validação independente de ${document} reparado, pelo verifier`);
@@ -3602,21 +3722,33 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       if (action.action === "publish") return { content, remarks: verdict.remarks, authored };
 
       if (action.action === "ask-developer" && developerRuled) {
-        // Findings que sobrevivem à decisão do desenvolvedor não bloqueiam: eles
-        // viram ressalva no relatório, onde ficam visíveis sem travar o run.
-        announce(`  publicando ${document} sob a decisão do desenvolvedor; ${verdict.findings.length} finding(s) viram ressalva`);
-        await event("audit", document, "complete", "publicado sob decisão do desenvolvedor", attempt);
-        return {
-          content,
-          authored,
-          remarks: [
-            ...verdict.remarks,
-            ...verdict.findings.map((finding) => ({
-              where: finding.where,
-              observation: `${finding.problem} (mantido por decisão do desenvolvedor)`,
-            })),
-          ],
-        };
+        /*
+         * Só o que o desenvolvedor DECIDIU vira ressalva (§122).
+         *
+         * O auditor que insiste contra a decisão dele perde: o ponto decidido
+         * fica visível no relatório, sem travar o run. O que o auditor apontou
+         * DEPOIS, sobre outra coisa, não foi decidido por ninguém — e um achado
+         * técnico não é promovido a ressalva por ter aparecido no momento
+         * errado: ele segue na recuperação como qualquer outro.
+         */
+        const decididos = verdict.findings.filter((finding) => decididosNoImpasse.some((decidido) => mesmoPonto(finding, decidido) === "sim"));
+        const restantes = verdict.findings.filter((finding) => !decididos.includes(finding));
+        if (restantes.length === 0) {
+          announce(`  publicando ${document} sob a decisão do desenvolvedor; ${decididos.length} finding(s) decidido(s) por ele viram ressalva`);
+          await event("audit", document, "complete", "publicado sob decisão do desenvolvedor", attempt);
+          return {
+            content,
+            authored,
+            remarks: [
+              ...verdict.remarks,
+              ...decididos.map((finding) => ({
+                where: finding.where,
+                observation: `${finding.problem} (mantido por decisão do desenvolvedor)`,
+              })),
+            ],
+          };
+        }
+        announce(`  ${restantes.length} achado(s) não foram decididos por você (${decididos.length} foram); eles seguem na correção, não viram ressalva`);
       }
 
       if (action.action === "ask-developer" && reparos < maxReparos) {
@@ -3628,6 +3760,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             ? "o escritor não adequou a estrutura aos limites"
             : `o escritor não fechou os pontos em ${action.standoff.returns} devolução(ões)`;
         announce(`  ${motivo}; o auditor assume o reparo (${reparos}/${maxReparos}) e o verifier valida, em sessão própria`);
+        if (reparos === 1) anunciarIndependencia("verifier", "auditor");
         registrarEstrategia(document, `reparo ${reparos} pelo auditor: ${motivo}; validação independente pelo verifier`);
         await event("authoring", document, "retry", `reparo pelo auditor (${reparos}/${maxReparos}): ${motivo}`, attempt);
         const historico = writerDid(history);
@@ -3701,7 +3834,19 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         const decision = (await options.decideStandoff(rendered, action.standoff)).trim();
         const normalized = decision.toLowerCase();
 
-        if (normalized.startsWith("publicar")) return { content, remarks: verdict.remarks, authored };
+        if (normalized.startsWith("publicar")) {
+          // Publicar é decisão dele; o que ficou aberto não some: vai ao relatório como ressalva (§122).
+          announce(`  publicando ${document} por decisão explícita sua, com ${verdict.findings.length} achado(s) em aberto no relatório`);
+          await event("audit", document, "complete", `publicado por decisão do desenvolvedor com ${verdict.findings.length} achado(s) em aberto`, attempt);
+          return {
+            content,
+            authored,
+            remarks: [
+              ...verdict.remarks,
+              ...verdict.findings.map((finding) => ({ where: finding.where, observation: `${finding.problem} (publicado por decisão explícita do desenvolvedor, com o achado em aberto)` })),
+            ],
+          };
+        }
         if (normalized.startsWith("abortar")) {
           throw new InitBlockedError(`${rendered}\n\nDecisão do desenvolvedor: abortar`, runId);
         }
@@ -3738,29 +3883,53 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
          * — parar aqui custaria o run inteiro por uma pergunta sem dono — mas a
          * ressalva sai dizendo que NINGUÉM decidiu, que é a verdade.
          */
+        /*
+         * E não-resposta também não é aprovação (§122).
+         *
+         * Publicar "com ressalva em aberto" era aprovar por exaustão: o achado
+         * material ia ao relatório e o plano a RALPH READY. Agora a primeira
+         * não-resposta recomeça a correção — Recovery First: o orçamento do
+         * ciclo volta e o escritor tenta de novo com os achados consolidados —
+         * e a segunda para o run com o diagnóstico e o estado em disco, que é
+         * o fim da escada, não um atalho para o READY.
+         */
         if (isNonAnswer(decision)) {
-          announce(`  ninguém decidiu o impasse; publicando com ${verdict.findings.length} ressalva(s) em aberto`);
-          await event("audit", document, "complete", "publicado sem decisão do desenvolvedor", attempt);
-          return {
-            content,
-            authored,
-            remarks: [
-              ...verdict.remarks,
-              ...verdict.findings.map((finding) => ({
-                where: finding.where,
-                observation: `${finding.problem} (o auditor insistiu e ninguém decidiu: segue em aberto)`,
-              })),
-            ],
-          };
+          naoRespostas += 1;
+          if (naoRespostas === 1) {
+            announce(`  ninguém decidiu o impasse; isso não aprova ${verdict.findings.length} achado(s) material(is) — recomeçando a correção e a auditoria`);
+            registrarEstrategia(document, "impasse sem decisão do desenvolvedor: correção e auditoria recomeçadas com os achados consolidados");
+            await event("audit", document, "retry", "impasse sem decisão; correção recomeçada", attempt);
+            history.length = 0;
+            attemptLimit = attempt + cycleBudget;
+            modoReparo = false;
+            authored = await authored.rewrite(action.standoff.auditorInsists, attempt + 1);
+            continue;
+          }
+          await event("audit", document, "blocked", "impasse sem decisão pela segunda vez", attempt);
+          throw new InitBlockedError(
+            diagnostico(document, [rendered, "", `Ninguém decidiu o impasse duas vezes, e ${verdict.findings.length} achado(s) material(is) seguem abertos: o documento não é publicado assim.`],
+              "O último estado válido está em disco; `capivara plan` retoma daqui — decida os pontos acima, ou responda reiniciar, publicar ou abortar."),
+            runId,
+          );
         }
 
         // A resposta do desenvolvedor É a decisão: ela volta ao escritor como
         // autoridade, acima do auditor. Perguntar "o que vale?" e descartar a
         // resposta é pior do que não ter perguntado.
         developerRuled = true;
+        decididosNoImpasse.push(...action.standoff.auditorInsists);
         await recordDeveloperDecision(document, action.standoff.auditorInsists, decision);
         await event("audit", document, "retry", `decisão do desenvolvedor: ${decision}`, attempt);
         announce(`  decisão aplicada; reescrevendo ${document}`);
+        /*
+         * A decisão muda a autoridade; o documento reescrito sobre ela continua
+         * sujeito à validação de sempre (§122): o ciclo recomeça com orçamento
+         * próprio, e o escritor volta a ser quem emenda. Os reparos já gastos
+         * não voltam — o que recomeça é a correção, não a escada inteira.
+         */
+        history.length = 0;
+        attemptLimit = attempt + cycleBudget;
+        modoReparo = false;
         authored = await authored.rewrite(
           [
             {

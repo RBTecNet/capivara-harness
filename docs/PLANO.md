@@ -10271,3 +10271,207 @@ próprias. `npm run check`: 2634 testes em 138 arquivos, verde.
   forem o mesmo modelo, é uma independência de sessão, registrada no log.
 - Reparos são dois por documento, fixos; não há flag.
 - Nenhum run real depois desta implementação.
+
+## §122 — Integridade do PLAN: autoridade técnica, decisão do desenvolvedor e independência do reparo
+
+### 122.1 A evidência: o `minimax` (DeepSeek-Flash, 0.6.2)
+
+Run `init-dc741f0d7b92`, projeto `laravel/minimax`: RALPH READY em ~16 min,
+151 chamadas (writer 45, auditor 66, verifier 40), US$ 0,12 informado. O
+plano fechou — a §121 funcionou — e o relatório trazia quatorze decisões
+"confirmadas" pela auditoria. Lidas uma a uma no handoff
+(`init-dc741f0d7b92.project-phases.md.json`):
+
+- **Q-72, Q-74** (CAPIVARA_DECISION): como o `rotas.ts` obtém a instância
+  `Database` (`abrirBanco(process.env…)` × `obterBanco()` ×
+  `registrarRotasCategorias(router, db?)`); o módulo escreve `router.get('/')`
+  ou `router.get('/tarefas')`. Engenharia pura: as leituras produzem o mesmo
+  produto. Foram ao desenvolvedor.
+- **Q-73**: o select de status aparece na criação ou só na edição. Produto,
+  e com razão foi perguntada.
+- **Q-91 a Q-911** (levantamento, "qual dos dois entendimentos vale"): sete
+  das onze são contratos — `export const prefixo`, `connection.ts`,
+  `package.json`/script `test`, `.env.example`. Quatro foram respondidas
+  "fica como está". Duas são contradições materiais confirmadas no plano
+  publicado: **(A)** P1.T5 exige `export const prefixo` em todo `rotas.ts`
+  sob pena de `registrarRotasApi` lançar erro, e P3.T3 (Categorias) não o
+  declara; **(B)** P2.T9/P3.T4/P4.T8 dizem que "o dono único do script
+  `test` é a fase consolidada", e a fase 5 diz que só edita README.md e não
+  declara o script — `npm test`, documentado no README, não existe em fase
+  nenhuma. Os casos C (SQLite: P3 recebe `db` por parâmetro, P2/P4 importam
+  a instância — compatíveis, se P1 exporta a instância, e exporta) e D
+  (`.env.example`) não são contradições.
+- O plano ainda tinha "Entregar a suíte automatizada do módulo Tarefas" como
+  task, com "a suíte cobre os cenários de…" como critério: prescrição de
+  teste sem ferramenta e sem arquivo, invisível ao I-16 da §118.
+
+### 122.2 As causas, no código
+
+1. **Nenhum canal de decisão distinguia autoridade.** `perguntarDecisoesDoAuditor`
+   perguntava toda CAPIVARA_DECISION que não fosse I-16; `levantamentoDeAuditoria`
+   arbitrava todo achado repetido não mecânico; `closeGaps` perguntava todo
+   marcador. A única classificação existente era a de teste (§118).
+2. **"Vale o que o escritor escreveu" apagava o achado.** `decisaoGravada`
+   grava "fica como está — decidido a favor do texto atual", o achado sai da
+   lista, e o auditor seguinte recebe a decisão como autoridade: a
+   contradição vira coerência por decreto.
+3. **`developerRuled` era uma bandeira única.** Depois de uma decisão no
+   impasse, a história não era zerada, `maxReturns` era 0 em modo de reparo,
+   e QUALQUER reprovação seguinte caía em "publicando sob a decisão do
+   desenvolvedor; N finding(s) viram ressalva" — inclusive achados sobre
+   outra coisa, nunca decididos.
+4. **Não-resposta publicava.** `isNonAnswer` → "ninguém decidiu; publicando
+   com N ressalva(s) em aberto" → RALPH READY. Aprovação por exaustão.
+5. **`auditCall` caía no outro papel de julgamento.** Verifier inválido duas
+   vezes → terceira leitura pelo auditor, que no INIT/PLAN é quem reparou.
+6. **I-16 era léxico.** Ferramentas e arquivos; "entregar a suíte", "cobrir
+   os cenários", "task de testes", "execução de testes por módulo", "testes
+   de integração" passavam. E a correção do auditor (Q-97) pedia "acrescentar
+   em Phase 3 uma task de testes": aplicada, a task cairia no I-16 mecânico
+   na leitura seguinte — um laço entre o auditor e a regra.
+7. **Identidade exata dos achados.** `fingerprint` (where+problema) e
+   `marcaDoProblema` (problema exato): o mesmo ponto reescrito contava como
+   "fechou 1, novo 1" — progresso que não gastava o teto.
+8. **A arquitetura não conferia propriedade de arquivos**: o mesmo caminho
+   em dois `files` passava.
+
+### 122.3 O que mudou
+
+**Classificação por forma, não por assunto** — `src/audit/authority.ts`.
+`sinaisDeEngenharia(texto)`: caminho de arquivo com extensão de código,
+chamada ou assinatura entre crases, `export`/`import`, script npm ou
+"script `x`", variável de ambiente. `autoridadeDaDecisao`: engenharia quando
+TODAS as leituras têm sinal; `autoridadeDoAchado`: engenharia quando problema
+E correção têm. Fora disso, `indefinida`, e o ponto segue ao desenvolvedor
+como sempre — a pendência é preservada, nunca decidida por inferência. Sobre
+as quatorze decisões reais: Q-72 e Q-74 engenharia, Q-73 indefinida; Q-92 a
+Q-911 engenharia, Q-91 e Q-94 (verificabilidade de critério) indefinidas.
+Nenhuma chamada de modelo.
+
+**Os canais** (`orchestrator.ts`):
+- CAPIVARA_DECISION de engenharia → `decisaoDeEngenhariaComoFinding`: achado
+  ao escritor com as leituras do auditor e a nota de quem decide
+  (`NOTA_DE_ENGENHARIA`); gravada em `decisoesDoAuditor` para não repetir.
+- Levantamento: achado de engenharia nunca entra em `repetidos`; segue na
+  correção com a nota. O escritor, depois o reparador (§121), depois o
+  impasse — nunca "qual leitura vale".
+- Marcador `[NEEDS DECISION]` com sinal de engenharia: devolvido ao escritor
+  uma vez com o achado "o plano decide"; se voltar, é perguntado (pendência
+  preservada).
+- Impasse: `decididosNoImpasse` guarda os pontos que o desenvolvedor leu e
+  decidiu; a publicação "sob a decisão do desenvolvedor" só acontece quando
+  TODO achado aberto é um deles (`mesmoPonto`); o resto segue na correção.
+  Depois da decisão, a história zera, o ciclo ganha orçamento próprio e
+  o escritor volta a emendar (`modoReparo = false`; os reparos gastos não
+  voltam). "Publicar" explícito publica com os achados abertos no relatório.
+  Não-resposta: a primeira recomeça a correção (estratégia registrada); a
+  segunda para com diagnóstico e estado em disco — fim da escada, não
+  atalho para o READY.
+- `auditCall`: o terceiro leitor depois de duas saídas inválidas é o
+  verifier quando o auditor falhou, e o ESCRITOR quando o verifier falhou —
+  no INIT/PLAN o verifier só lê depois de um reparo do auditor. Sem leitor
+  válido: diagnóstico "(verifier, verifier, writer)", nada aprovado.
+  `anunciarIndependencia` diz quando validador e reparador rodam no mesmo
+  provider/modelo (`options.roles`).
+- `semPrescricaoDeTeste` em `auditCall`: achado cuja correção prescreve
+  teste chega ao escritor com a correção da regra e o texto original do
+  auditor citado.
+
+**I-16 sem ferramenta** (`contract/test-prescription.ts`): `TEST_WORK`
+(verbo de implementação no começo da frase + suíte/testes/cobertura a até
+três palavras), `TEST_COVER` ("cobrir … cenários"), `TEST_TASK` ("task de
+testes", "task … suíte automatizada"), `TEST_STRATEGY` (tipo de teste,
+"cobre os cenários", "execução de testes por módulo"). Autoridade: o
+composto do domínio do produto que o pedido contém escapa ("testes de
+laboratório"); o tipo de teste que o pedido nomeia escapa ("testes de
+integração"); o composto genérico de teste de software NÃO escapa da forma
+imperativa — "testes automatizados" no pedido autoriza o requisito, não a
+task de escrevê-los. `testPrescriptionHint` diz onde o requisito fica. A
+mesma função vale no esqueleto (stack, stories, regras e agora o goal das
+fases), na arquitetura (overview, componentes, fases), no plano (tasks e
+critérios), nas decisões e correções do auditor e no gate.
+
+**Identidade por vocabulário** (`audit/cycle.ts`): `vocabularioDoProblema`,
+`semelhancaDosProblemas` (Jaccard sem acento e sem palavras sem peso),
+`mesmoPonto` → `sim | incerto | nao`: fingerprint igual é sim; frase igual é
+sim, salvo endereços estruturados objetivamente diferentes (dois lugares,
+§120); Jaccard ≥ 0,6 é sim (incerto se os endereços divergem); < 0,25 é não;
+o meio é sim na mesma task/fase/story, incerto fora. `balancoDaRodada` ganha
+`incertos`, que não contam como fechados, novos nem regressões e impedem
+`rodadaAvancou`. `ehRepetido` e `repeatedFindings` usam a mesma identidade.
+Calibrado nos sete achados reais da §120 (todos < 0,2 entre si), no caso do
+`assistencia2` (0,75) e no Q-99 reescrito (0,48, mesma task).
+
+**Arquitetura**: `files` com o mesmo caminho em dois componentes é defeito
+("um arquivo tem um dono"). É a única obrigação de integração que o contrato
+prova sem julgamento; os casos A–D da §122.1 exigem leitura semântica e
+ficam com o auditor de coerência — cujo prompt agora nomeia obrigações de
+integração (exportação exigida pela fundação, obrigação entregue a "uma
+fase posterior" sem dono, recurso compartilhado obtido de formas
+incompatíveis) e diz que formas diferentes que satisfazem o mesmo contrato
+não são contradição. A garantia de que esses achados são CORRIGIDOS, e não
+arbitrados, vem da classificação acima.
+
+**Prompts**: `planningScopeBlock` ganha a fronteira sem ferramenta;
+`DECISION_CHANNEL` diz que escolha entre implementações com o mesmo produto
+observável é do plano e vai como finding.
+
+### 122.4 RED → GREEN
+
+`test/init/integridade-122.spec.ts`, 22 cenários. Rodados contra a `main`
+(0.6.2) com o `src/` guardado: 19 falham, 3 passam (decisão de produto
+continua indo; auditor que insiste contra a decisão vira ressalva; caminho
+sem defeito). Os 19 reproduzem o defeito, não um import ausente apenas: a
+pergunta de engenharia é feita; "fica como está" publica sem o prefixo; o
+marcador vira pergunta; "não sei" publica com "segue em aberto"; o achado
+posterior vira ressalva; o auditor lê o próprio reparo (sequência auditor,
+auditor, verifier, verifier, auditor); "Entregar a suíte automatizada" passa
+no I-16; a correção do auditor pede task de testes; o reformulado conta como
+progresso; o arquivo com dois donos passa. Com a correção, 22 verdes.
+
+Expectativas antigas que mudaram, com a razão: `auditoria-consolidada-120`
+(campo `incertos` no balanço); catálogo B-40 (a não-resposta deixou de
+publicar: agora recomeça uma vez e depois para com diagnóstico, e nada é
+gravado como decisão). Nenhuma outra.
+
+`npm run check`: 2656 testes em 139 arquivos, rc=0.
+
+### 122.5 Custo, recuperação, autoridade, independência
+
+- **Chamadas no caminho normal: zero a mais.** Cenário 15 fixa a lista de
+  chamadas do plano correto (arquitetura, leitura, duas fases, duas
+  leituras, coerência, ensaio em dois lotes). A classificação e a identidade
+  são determinísticas.
+- **Problema técnico recuperável**: achado/decisão de engenharia → escritor
+  com as leituras e a nota → (§120 balanço) → reparo pelo auditor → verifier
+  → impasse só depois. A não-resposta recomeça uma vez. Nenhum invariante
+  novo gera PAROU direto: o arquivo com dois donos e a fase que aloca testes
+  voltam ao arquiteto/escritor dentro das tentativas que já têm.
+- **Autoridade do desenvolvedor**: decisão de produto do auditor com uma
+  leitura em prosa continua sendo perguntada, sem leitura recomendada; a
+  arbitragem de achado não-engenharia continua; a decisão dele no impasse
+  continua acima do auditor para os pontos decididos; "publicar" e
+  "abortar" continuam seus.
+- **Independência do reparo**: auditor repara → verifier valida; verifier
+  falha → escritor lê; ninguém elegível → diagnóstico. Mesmo modelo nos dois
+  papéis é anunciado.
+
+### 122.6 Limitações
+
+- A classificação é por forma. Uma decisão de produto escrita em código nas
+  DUAS leituras vai ao escritor como engenharia; uma de engenharia escrita
+  em prosa continua indo ao desenvolvedor. O segundo caso é o padrão seguro.
+- I-16 semântico é por padrões em português e inglês, verbo + objeto a até
+  três palavras e compostos conhecidos. "Validar o módulo com cenários de
+  criação" passa; "Criar a suíte" sem qualificador passa (uma suíte pode ser
+  um quarto). O gate e a emenda mecânica cobrem o que os padrões pegam.
+- Os casos A–D continuam dependendo do auditor de coerência para serem
+  VISTOS; o que a §122 garante é que, vistos, não são arbitrados nem
+  publicados por não-resposta. Um auditor que não os vê publica o plano.
+- A identidade por vocabulário tem dois limiares fixos (0,25 e 0,6),
+  calibrados em três casos reais; não há flag.
+- A reconsideração da `main` depois de uma decisão dá ao escritor um ciclo
+  inteiro de novo, mas não devolve os reparos gastos; um desenvolvedor que
+  decide repetidamente pode alongar o run — cada volta pede a decisão dele.
+- Nenhum run real depois desta implementação; a evidência é o provider
+  falso sobre os textos reais do `minimax`.

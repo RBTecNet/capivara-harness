@@ -16,10 +16,36 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.6.2 (`capivara --version`); planos da 0.5.0 e anteriores incompatíveis, ver §116 e §115.26 |
-| suíte | 2634 testes em 138 arquivos, `npm run check` verde |
+| suíte | 2656 testes em 139 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-20 — integridade do PLAN: autoridade técnica e independência do reparo (§122)
+
+O `minimax` (DeepSeek-Flash, 0.6.2) fechou o PLAN em 151 chamadas e US$ 0,12
+— e o relatório trazia decisões "confirmadas" que ninguém deveria ter
+perguntado: como o `rotas.ts` obtém o `Database`, `router.get('/')` ou
+`router.get('/tarefas')`, quem declara o script `test`. Quatro respondidas
+"fica como está", duas contradições materiais publicadas como decididas
+(módulo sem o `export const prefixo` que a fundação exige; `npm test` sem
+fase que o crie). Agora a autoridade é classificada pela FORMA do ponto
+(`src/audit/authority.ts`: caminho, chamada, export, script, variável de
+ambiente): decisão do auditor com todas as leituras em código e achado com
+problema e correção em código são do plano — vão ao escritor com as
+leituras e a nota, nunca ao desenvolvedor; o que não é inequívoco continua
+indo a ele. A decisão dele no impasse vale para os pontos decididos e não
+promove achado posterior a ressalva; a não-resposta recomeça a correção uma
+vez e depois para com diagnóstico, nunca publica; "publicar" leva os achados
+ao relatório. Verifier inválido duas vezes depois de um reparo passa ao
+ESCRITOR, nunca ao auditor que reparou; sem leitor, diagnóstico. I-16 ganhou
+a prescrição sem ferramenta (task "entregar a suíte", "cobrir os cenários",
+"task de testes", tipo e organização), também no goal das fases e na
+correção do auditor; o requisito do pedido fica como critério. Identidade
+dos achados por vocabulário (`mesmoPonto`), com `incertos` no balanço.
+Arquitetura recusa arquivo com dois donos. Zero chamadas a mais no caminho
+normal. Detalhe na §122; 22 cenários em `test/init/integridade-122.spec.ts`,
+19 RED contra a 0.6.2.
 
 ## 2026-10-19 — RECOVERY FIRST: o INIT e o PLAN trabalham para concluir (§121)
 
@@ -660,7 +686,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 2634 testes
+npm run check     # build + typecheck + 2656 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

@@ -242,6 +242,23 @@ export function parseArchitecture(
     }
   }
   const existe = (nome: string): boolean => nomes.has(nome.trim().toLowerCase());
+  /*
+   * Um arquivo, um dono (§122). `files` é a propriedade declarada: o mesmo
+   * caminho em dois componentes é ownership ambíguo — duas fases podem
+   * escrevê-lo, e o conflito aparece no build. Sem julgamento semântico: é a
+   * única verificação de integração que o contrato prova sozinho.
+   */
+  const donos = new Map<string, string[]>();
+  for (const component of components) {
+    for (const file of new Set(component.files.map((entry) => entry.trim()).filter((entry) => entry !== ""))) {
+      donos.set(file, [...(donos.get(file) ?? []), component.name]);
+    }
+  }
+  for (const [file, componentes] of donos) {
+    if (componentes.length > 1) {
+      defects.push({ problem: `o arquivo ${file} pertence a ${componentes.length} componentes (${componentes.join(", ")})`, hint: "um arquivo tem um dono: deixe-o em um componente só, e os outros o consomem pelo contrato" });
+    }
+  }
   for (const component of components) {
     for (const dependencia of component.dependsOn) {
       if (!existe(dependencia)) {

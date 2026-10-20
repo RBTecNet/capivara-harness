@@ -326,6 +326,11 @@ export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number
     }
     if (phase.title === "") defects.push({ problem: `a fase ${phase.number} não tem título`, hint: "dê à fase um título que nomeie a fatia entregue" });
     if (phase.goal === "") defects.push({ problem: `a fase ${phase.number} não tem goal`, hint: "declare o resultado observável que a fase entrega" });
+    // A divisão de fases também não aloca trabalho de teste (I-16, §122):
+    // "incluir nesta fase os testes do módulo" decide em que fase a suíte é
+    // escrita, e isso é do build.
+    const termosDaFase = testPrescriptions(`${phase.title}\n${phase.goal}`, limits.authority ?? []);
+    if (termosDaFase.length > 0) defects.push({ problem: `a fase ${phase.number} prescreve teste: ${termosDaFase.join(", ")}`, hint: testPrescriptionHint(termosDaFase) });
     if (phase.covers.length === 0) {
       defects.push({ problem: `a fase ${phase.number} não cobre nada`, hint: "declare as stories, entidades ou workflows que esta fase entrega" });
     }

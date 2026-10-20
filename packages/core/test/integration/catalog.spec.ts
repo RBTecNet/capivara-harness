@@ -9,7 +9,7 @@ import { certifyCurrentPlan } from "../support/current-plan.js";
  */
 
 import { execFile } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -1275,14 +1275,31 @@ describe("B-40 · não-resposta não vira autoridade", () => {
     return { outcome, agent };
   }
 
+  /*
+   * §122: a não-resposta deixou de publicar. Ela não é decisão de ninguém —
+   * isso continua — e também não é aprovação: a primeira recomeça a correção
+   * (Recovery First) e, com o auditor insistindo e ninguém decidindo pela
+   * segunda vez, o run para com o diagnóstico e o estado em disco. Nada
+   * chega ao relatório como "decisão do desenvolvedor".
+   */
   for (const naoResposta of ["use as recomendações", "não sei", "tanto faz", "   "]) {
-    it(`"${naoResposta.trim() || "(vazio)"}" publica, mas o finding segue em aberto e não vira decisão de ninguém`, async () => {
-      const { outcome } = await comDecisao(naoResposta);
-      expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-
-      const ressalva = outcome.report.remarks.find((entry) => entry.remark.observation.includes("inventou escopo"));
-      expect(ressalva?.remark.observation).toContain("ninguém decidiu");
-      expect(ressalva?.remark.observation).not.toContain("decisão do desenvolvedor");
+    it(`"${naoResposta.trim() || "(vazio)"}" não vira decisão de ninguém: recomeça a correção uma vez, e depois para com diagnóstico`, async () => {
+      const impasses: string[] = [];
+      const agent = fakeAgent(impasseNoPlano(happyPath()));
+      const erro = await runInit({
+        projectRoot, request, language: "português do Brasil", maxAuditReturns: 2, call: agent.call,
+        ask: async () => "use as recomendações",
+        decideStandoff: async (rendered) => { impasses.push(rendered); return naoResposta; },
+      }).then(() => null, (e: Error) => e.message);
+      expect(erro).toContain("Ninguém decidiu o impasse duas vezes");
+      expect(erro).toContain("impasse sem decisão do desenvolvedor: correção e auditoria recomeçadas");
+      // Nada foi gravado como decisão dele: o handoff não tem resposta de impasse.
+      const handoffs = await readdir(join(projectRoot, ".capivara/handoffs"));
+      const gravado = (await Promise.all(handoffs.map((nome) => readFile(join(projectRoot, ".capivara/handoffs", nome), "utf8")))).join("\n");
+      expect(gravado).not.toContain("impasse de auditoria");
+      expect(impasses).toHaveLength(2);
+      // A correção recomeçou de verdade: o escritor foi chamado de novo depois do primeiro impasse.
+      expect(agent.calls.filter((call) => call.stage === "authoring" && call.subject === "phase-p01").length).toBeGreaterThanOrEqual(3);
     });
   }
 

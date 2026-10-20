@@ -20,7 +20,7 @@ import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, buil
 import { CoherenceMemory } from "../audit/coherence.js";
 import { applyMaterialityReview, materialityInput, materialityPrompt } from "../audit/materiality.js";
 import type { Architecture, ContractError, CoverageSources, PhasesDocument, Skeleton, StampInput } from "../contract/index.js";
-import { DEFAULT_MAX_RETURNS, nextAuditAction, parseAudit, persistentFindings, renderStandoff } from "../audit/index.js";
+import { DEFAULT_MAX_RETURNS, balancoDaRodada, descreverBalanco, fingerprint, nextAuditAction, parseAudit, persistentFindings, renderStandoff } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark, Standoff } from "../audit/index.js";
 import { tasksBlock } from "../contract/templates.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, isRepairable, publish, repairDeterministically, stripAllMarkers, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
@@ -1630,7 +1630,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   }
 
   /** O prompt do arquiteto, sempre sobre o esqueleto de ORIGEM e as decisões de agora. */
-  function promptDoArquiteto(extras: { defects?: string[]; previous?: { architecture: string; findings: Finding[] }; strategy?: "serialize" } = {}): string {
+  function promptDoArquiteto(extras: { defects?: string[]; previous?: { architecture: string; findings: Finding[]; resolved?: Finding[] }; strategy?: "serialize" } = {}): string {
     return architectPrompt({
       language: options.language,
       request: options.request.text,
@@ -1690,7 +1690,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * Uma arquitetura que passa no contrato, em até três tentativas com os
    * defeitos nomeados — e reaproveitada do cache quando o prompt não mudou.
    */
-  async function desenharArquitetura(extras: { defects?: string[]; previous?: { architecture: string; findings: Finding[] }; strategy?: "serialize" }): Promise<Architecture> {
+  async function desenharArquitetura(extras: { defects?: string[]; previous?: { architecture: string; findings: Finding[]; resolved?: Finding[] }; strategy?: "serialize" }): Promise<Architecture> {
     let defeitos = extras.defects ?? [];
     for (let tentativa = 1; tentativa <= 3; tentativa += 1) {
       const prompt = promptDoArquiteto({ ...extras, ...(defeitos.length > 0 ? { defects: defeitos } : {}) });
@@ -1749,6 +1749,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
     for (let attempt = 1; ; attempt += 1) {
       const md = renderArchitecture(atual, esqueletoDeOrigem!);
+      const ultimaDevolucao = history.at(-1)?.verdict.findings ?? [];
       const promptDeAuditoria = architectureAuditPrompt({
         language: options.language,
         request: options.request.text,
@@ -1756,6 +1757,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         skeleton: renderSkeleton(esqueletoDeOrigem!),
         architecture: md,
         maxTasksPerPhase: MAX_TASKS_PER_PHASE,
+        ...(ultimaDevolucao.length > 0 ? { previousFindings: ultimaDevolucao } : {}),
       });
       if (memoria.jaAprovada(promptDeAuditoria)) {
         announce("  arquitetura aprovada numa execução anterior, com a mesma auditoria; não vou repagar");
@@ -1776,13 +1778,24 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }
 
       history.push({ attempt, verdict: { ...verdict, findings }, contentSha: sha12(md) });
-      announce(`  auditoria da arquitetura devolveu ${findings.length} achado(s)`);
+      const balanco = balancoDaRodada(history);
+      announce(`  auditoria da arquitetura devolveu ${findings.length} achado(s)${history.length > 1 ? `; rodada: ${descreverBalanco(balanco)}` : ""}`);
       await event("audit", "architecture", "retry", findings.map((finding) => finding.problem).join("; "), attempt);
 
-      const devolucoes = history.length;
-      if (devolucoes <= maxAuditReturns) {
-        announce(`  refazendo a arquitetura com os achados (${devolucoes}/${maxAuditReturns})`);
-        atual = await desenharArquitetura({ previous: { architecture: JSON.stringify(atual), findings } });
+      /*
+       * O teto conta devoluções sem progresso, e o dobro dele é o teto duro —
+       * é `nextAuditAction`, o mesmo do plano (§120). O que o arquiteto já
+       * fechou em rodadas anteriores vai junto, para não voltar.
+       */
+      const acao = nextAuditAction({ document: "architecture.md", history, maxReturns: maxAuditReturns, maxMechanical: 1 });
+      if (acao.action === "return-to-writer") {
+        const abertos = new Set(findings.map(fingerprint));
+        const resolvidos = new Map<string, Finding>();
+        for (const tentativa of history.slice(0, -1)) {
+          for (const finding of tentativa.verdict.findings) if (!abertos.has(fingerprint(finding))) resolvidos.set(fingerprint(finding), finding);
+        }
+        announce(`  refazendo a arquitetura com os ${findings.length} achado(s) juntos (devolução ${history.length}; teto ${maxAuditReturns} sem progresso)`);
+        atual = await desenharArquitetura({ previous: { architecture: JSON.stringify(atual), findings, resolved: [...resolvidos.values()] } });
         continue;
       }
 
@@ -1805,7 +1818,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       await event("audit", "architecture", "blocked", "a auditoria da arquitetura não convergiu", attempt);
       throw new InitBlockedError(
         [
-          `A auditoria de architecture.md não convergiu depois de ${maxAuditReturns} devolução(ões) e de uma mudança de estratégia.`,
+          `A auditoria de architecture.md não convergiu depois de ${history.length} devolução(ões) e de uma mudança de estratégia.`,
+          "",
+          ...history.slice(1).map((tentativa, index) => `  rodada ${tentativa.attempt}: ${descreverBalanco(balancoDaRodada(history, index + 1))}`),
           "",
           "O auditor insiste em:",
           ...insistentes.flatMap((finding) => [`  · ${finding.where}: ${finding.problem}`, `    correção pedida: ${finding.fix}`]),

@@ -134,6 +134,8 @@ export function amendPhasePrompt(context: AmendContext): string {
     "",
     "## What the audit found",
     ...context.findings.map((finding) => `- ${finding.where}: ${finding.problem}\n  what to do: ${finding.fix}`),
+    "Read the whole list before changing anything, then apply ALL of it in this one answer: where two",
+    "findings touch the same task, correct it once so the result satisfies both.",
     ...(context.drift && context.drift.length > 0
       ? [
           "",

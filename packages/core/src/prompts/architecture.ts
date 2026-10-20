@@ -40,7 +40,12 @@ export interface ArchitectContext {
   /** Defeitos mecânicos da tentativa anterior, quando houve. */
   defects?: readonly string[];
   /** A arquitetura anterior e os achados do auditor, quando é uma emenda. */
-  previous?: { architecture: string; findings: readonly { where: string; problem: string; fix: string }[] };
+  previous?: {
+    architecture: string;
+    findings: readonly { where: string; problem: string; fix: string }[];
+    /** O que rodadas anteriores já fecharam: fica fechado. */
+    resolved?: readonly { where: string; problem: string; fix: string }[];
+  };
   /**
    * A mudança de estratégia, quando a correção não convergiu no orçamento:
    * resolver o conflito por ordem e dependência entre fases, sem mecanismo novo.
@@ -187,10 +192,21 @@ export function architectPrompt(context: ArchitectContext): string {
           "## The audit of your previous architecture found",
           ...context.previous.findings.map((finding) => `- ${finding.where}: ${finding.problem}\n  what to do: ${finding.fix}`),
           "",
-          "Return the WHOLE architecture again, corrected. Change what the findings name and keep",
-          "everything else as it was: a phase whose envelope does not change keeps the work already",
-          "written for it, and a gratuitous change throws that work away.",
+          "Read the whole list before changing anything, then correct ALL of it in this one answer:",
+          "where two corrections touch the same contract or phase, resolve them together so the result",
+          "satisfies both; where they conflict, the skeleton and the decisions decide. Correct what the",
+          "findings name and keep everything else as it was: a phase whose envelope does not change",
+          "keeps the work already written for it, and a gratuitous change throws that work away. Do",
+          "not redesign, do not add a requirement no source states, and do not trade a simple order",
+          "of phases for a mechanism the findings did not ask for.",
           "",
+          ...(context.previous.resolved && context.previous.resolved.length > 0
+            ? [
+                "## Already fixed in earlier rounds — keep it fixed",
+                ...context.previous.resolved.map((finding) => `- ${finding.where}: ${finding.problem}`),
+                "",
+              ]
+            : []),
           "## Your previous architecture",
           context.previous.architecture,
           "",
@@ -218,6 +234,8 @@ export interface ArchitectureAuditContext {
   language: string;
   request: string;
   decisions: readonly string[];
+  /** O que a leitura anterior apontou, quando é uma reauditoria. */
+  previousFindings?: readonly { where: string; problem: string; fix: string }[];
   /** O esqueleto inteiro, em markdown. */
   skeleton: string;
   /** A arquitetura sob auditoria, em markdown. */
@@ -290,6 +308,27 @@ export function architectureAuditPrompt(context: ArchitectureAuditContext): stri
     "   phase that depends on the modules, and an extension point in the foundation are all valid",
     "   resolutions of a shared-file conflict. Never demand one of them when another is in place,",
     "   and never reject a correct architecture because it runs fewer phases in parallel.",
+    "",
+    "## One complete reading",
+    "Walk EVERY axis above over the whole architecture before you write a line of the response, and",
+    "report every material, independent defect you found — each one its own CAPIVARA_FINDING, all in",
+    "this response. The architect corrects the whole list together, once; a defect you hold back",
+    "costs a full round of correction and re-reading. Never stop at the first defect. Never invent a",
+    "finding to fill a list: when the reading finds nothing material, APPROVE. A preference, a",
+    "detail the architecture legitimately leaves free, or an observation that blocks nothing is a",
+    "CAPIVARA_REMARK, not a finding. A product decision no source settles is a CAPIVARA_DECISION,",
+    "never mixed into a finding.",
+    ...(context.previousFindings && context.previousFindings.length > 0
+      ? [
+          "",
+          "## Your previous reading of this architecture found",
+          ...context.previousFindings.map((finding) => `- ${finding.where}: ${finding.problem}`),
+          "The architect corrected it. Check these first and repeat, word for word, any that still",
+          "holds; do not repeat one that is resolved. Then read everything else again, completely: a",
+          "defect you could have reported in that reading and did not is a failure of that reading,",
+          "not a new discovery.",
+        ]
+      : []),
     "",
     "## Doubt rule",
     "Reject only on a material defect you can demonstrate by citing the component, contract, phase",

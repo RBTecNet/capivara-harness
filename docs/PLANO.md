@@ -10021,3 +10021,102 @@ duas expectativas da §116 e uma da §117 atualizadas para o comportamento novo.
 - O run real do impasse não estava em disco; a reprodução é pelo texto do
   impasse e pelo código.
 - Nenhum run real depois desta correção.
+
+## §120 — Auditoria consolidada e convergência por evidência
+
+### 120.1 O defeito, com a comparação das versões
+
+No `teste_openrouter3` (0.6.1), run `init-dc741f0d7b92`, a auditoria da
+arquitetura devolveu cinco vezes e o run parou "porque não convergiu". As
+leituras: rodada 1 com três achados (PUT sem status, contratos da interface
+sem estados visuais, `npm start` sem integração), depois um por rodada
+(dependências de tipos; status inicial do POST; fluxo 4 com ordem entre
+módulos independentes; `.env`/`.gitignore` sem componente responsável). O
+arquiteto fechou tudo o que cada rodada apontou.
+
+Comparar as cinco arquiteturas no `plan-cache` responde o que os logs não
+provam sozinhos: as dependências de tipos faltavam nos desenhos 1 e 2 (achado
+da rodada 2); o status inicial do POST faltava nos desenhos 1 a 3 (achado da
+rodada 3); o fluxo 4 tinha a mesma sequência em todos os cinco (achado da
+rodada 4). Três dos sete estavam na primeira arquitetura e foram descobertos
+depois: o auditor leu aos pedaços. Os outros não se decide pela comparação, e
+não se afirma.
+
+### 120.2 A causa, no código
+
+- O parser lê N findings (nunca houve limite de um), e o arquiteto recebe
+  todos os da última rodada. Não há filtro nem truncamento no caminho. O que
+  não havia era instrução de leitura completa: o auditor da arquitetura tinha
+  os eixos e o protocolo, nada dizia "todos os defeitos, nesta resposta".
+- A reauditoria era a mesma pergunta de novo, sem o que a leitura anterior
+  apontou: o auditor não tinha como distinguir "resolvido" de "não vi".
+- A convergência era contagem bruta: `devolucoes <= maxAuditReturns`. Uma
+  rodada que fechava tudo contava igual a uma que não fechava nada. O plano
+  tinha o mesmo defeito em `nextAuditAction`, e `writerDid` já media o
+  progresso — só para o texto do impasse.
+
+### 120.3 O que mudou
+
+- **Balanço por rodada** (`audit/cycle.ts`): `balancoDaRodada` mede, pelas
+  marcas dos achados, o que fechou, persistiu, apareceu novo, voltou depois de
+  fechado, e se o texto mudou; `rodadaAvancou` é "texto mudou, algo fechou,
+  nada persistiu, nada voltou"; `descreverBalanco` é a linha do log e do
+  impasse. `writerDid` passou a usar o mesmo balanço.
+- **Teto por evidência** (`nextAuditAction`): o teto conta devoluções SEM
+  progresso; a rodada que avançou não gasta. O dobro do teto é o teto duro,
+  finito, contra o auditor que acrescenta um ponto por leitura — e o impasse
+  diz qual dos dois acabou. Vale para o plano e para a arquitetura, que passou
+  a usar a mesma função (orçamento `maxAuditReturns`, mecânico 1).
+- **Tudo junto, nas duas direções.** O arquiteto recebe os achados abertos da
+  rodada e, em "Already fixed in earlier rounds — keep it fixed", o que
+  rodadas anteriores fecharam. O auditor recebe, na reauditoria, "Your
+  previous reading of this architecture found": confere esses primeiro,
+  repete palavra por palavra o que ainda vale, e relê tudo — "um defeito que
+  você podia ter apontado antes é falha daquela leitura".
+- **Leitura completa nos prompts.** Auditor da arquitetura e os três do plano
+  (fase, plano inteiro, coerência): percorrer todos os eixos antes de
+  escrever, um finding por defeito material independente, todos nesta
+  resposta; nunca parar no primeiro; nunca inventar para encher; ressalva e
+  decisão separadas. Arquiteto e emenda: ler a lista inteira, corrigir tudo
+  numa passagem, resolver juntos os que tocam o mesmo contrato ou task, sem
+  redesenhar, sem exigência nova, sem trocar ordem simples por mecanismo.
+- **Sem chamada nova.** Nenhum papel, rodada ou subauditor; a reauditoria e a
+  emenda já existiam e só carregam mais contexto.
+
+### 120.4 Impacto
+
+- `nextAuditAction` muda para o plano: uma devolução com progresso não gasta o
+  teto. Três testes antigos (`audit.spec`, `impasse-tecnico-119.spec`) que
+  contavam o teto bruto foram ajustados para a semântica nova; o resto das
+  suítes §116–§119 passa sem mudança.
+- A reauditoria da arquitetura muda de prompt a cada rodada (carrega os
+  achados anteriores); a memória de aprovação continua por prompt.
+- BUILD intocado.
+
+### 120.5 Testes e métricas de chamadas
+
+`test/init/auditoria-consolidada-120.spec.ts`, 10 casos, com os sete achados
+reais byte a byte: (1) sete findings lidos inteiros; (5–6) o balanço
+classifica fechado, persistente, novo e regressão, a rodada que fecha tudo é
+progresso e não gasta o teto; (7) o que persiste gasta, e o teto duro para o
+auditor sem fim. Integrados: (2–4, 10, 12) os sete chegam juntos ao
+arquiteto, com "correct ALL of it in this one answer" e a arquitetura
+anterior, a reauditoria sabe o que a anterior apontou, e o plano fecha com
+**2 desenhos e 2 auditorias**; (6, 11) o caso real — 3, 1, 1, 1, 1 achados e
+a sexta leitura aprova — converge com 6 auditorias e 6 desenhos em vez de
+parar na quinta, e o arquiteto leva o que já fechou; (7, 10) o achado que
+persiste gasta o teto e o run para em 4 devoluções com a estratégia trocada,
+sem publicar; (7) o auditor que sempre acha ponto novo para em 7, no teto
+duro; (8) a decisão genuína de produto chega ao desenvolvedor; (3, 12) no
+plano, dois achados de uma fase chegam juntos à emenda, 2 escritas e 2
+auditorias. `npm run check`: 2623 testes em 137 arquivos, verde.
+
+### 120.6 Limites
+
+- A leitura completa é pedida ao modelo; o código mede se ela aconteceu
+  (balanço) e limita o preço quando não acontece (teto duro), mas não a
+  garante.
+- O balanço identifica achados por endereço e problema; um auditor que
+  reescreve a frase de um mesmo defeito faz um "novo" de um "persistente". O
+  pedido de repetir palavra por palavra existe por isso.
+- Nenhum run real depois desta correção.

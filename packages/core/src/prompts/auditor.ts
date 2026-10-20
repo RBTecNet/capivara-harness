@@ -233,6 +233,15 @@ const DECISION_CHANNEL = [
   "after the run is over.",
 ].join("\n");
 
+const LEITURA_COMPLETA = [
+  "## One complete reading",
+  "Walk every axis over the whole document before you write a line of the response, and report",
+  "every material, independent defect you found — each one its own CAPIVARA_FINDING, all in this",
+  "response. The writer corrects the whole list together, once; a defect you hold back costs a full",
+  "round of correction and re-reading. Never stop at the first defect, and never invent a finding to",
+  "fill a list: when the reading finds nothing material, APPROVE.",
+].join("\n");
+
 const OUTPUT = [
   "## Output protocol",
   "Plain text. Each key starts at column 1. No markdown, no bullet, no indentation, no code fence.",
@@ -274,6 +283,8 @@ export function auditRetryPrompt(original: string, previous: string, defects: re
     "If there is a material defect, use REJECTED and give every finding three fields separated by the literal | character, not /.",
     "If there is no material defect, use APPROVED and omit every CAPIVARA_FINDING line. Do not emit placeholder findings such as none, nada or sem defeito.",
     "Use CAPIVARA_REMARK only for non-blocking observations. Choose the status from the evidence; the parser does not choose it for you.",
+    LEITURA_COMPLETA,
+    "",
     OUTPUT,
   ].join("\n");
 }
@@ -296,6 +307,8 @@ export function auditorPrompt(context: AuditorContext): string {
     DOUBT_RULE,
     "",
     DECISION_CHANNEL,
+    "",
+    LEITURA_COMPLETA,
     "",
     OUTPUT,
     "",
@@ -408,6 +421,8 @@ export function phaseAuditPrompt(context: PhaseAuditContext): string {
     "another pass reads the whole plan for that, and a finding you raise here about a phase you cannot",
     "see would send the writer rewriting blind.",
     "",
+    LEITURA_COMPLETA,
+    "",
     OUTPUT,
     "",
     "## The developer's original request (verbatim)",
@@ -498,6 +513,8 @@ export function coherencePrompt(context: CoherenceContext): string {
     DOUBT_RULE,
     "",
     DECISION_CHANNEL,
+    "",
+    LEITURA_COMPLETA,
     "",
     OUTPUT,
     "",

@@ -131,8 +131,9 @@ describe("ciclo de devolução", () => {
   });
 
   it("o impasse mostra lado a lado a insistência do auditor e o que o escritor fez", () => {
+    // A tentativa 2 avançou (fechou US-1.2) e não gasta o teto; a 3 trouxe US-1.2 de volta — regressão — e gasta (§120).
     const history = [attempt(1, "REJECTED", "US-1.2"), attempt(2, "REJECTED", "US-2.1"), attempt(3, "REJECTED", "US-1.2")];
-    const action = nextAuditAction({ document: "user-stories.md", history, maxReturns: 3, maxMechanical: 3 });
+    const action = nextAuditAction({ document: "user-stories.md", history, maxReturns: 2, maxMechanical: 3 });
     if (action.action !== "ask-developer") throw new Error("esperava impasse");
     const texto = renderStandoff(action.standoff);
     expect(texto).toContain("O auditor insiste em:");
@@ -307,12 +308,13 @@ describe("o impasse fala da versão atual", () => {
   });
 
   it("finding já corrigido não é apresentado como insistência", () => {
+    // A tentativa 2 avançou (fechou o índice) e não gasta o teto; a 3 persistiu e gasta (§120).
     const history = [
       { attempt: 1, verdict: rejeita("Phase 1", "faltava o índice"), contentSha: "sha-1" },
       { attempt: 2, verdict: rejeita("Phase 2", "falta a regra de unicidade"), contentSha: "sha-2" },
       { attempt: 3, verdict: rejeita("Phase 2", "falta a regra de unicidade"), contentSha: "sha-3" },
     ];
-    const action = nextAuditAction({ document: "project-phases.md", history, maxReturns: 3, maxMechanical: 3 });
+    const action = nextAuditAction({ document: "project-phases.md", history, maxReturns: 2, maxMechanical: 3 });
     expect(action.action).toBe("ask-developer");
     if (action.action !== "ask-developer") return;
     expect(action.standoff.auditorInsists).toHaveLength(1);

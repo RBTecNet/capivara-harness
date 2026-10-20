@@ -16,10 +16,30 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.6.1 (`capivara --version`); planos da 0.5.0 e anteriores incompatíveis, ver §116 e §115.26 |
-| suíte | 2613 testes em 136 arquivos, `npm run check` verde |
+| suíte | 2623 testes em 137 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-19 — auditoria consolidada e convergência por evidência (§120)
+
+No mesmo `teste_openrouter3` (0.6.1) a auditoria da arquitetura devolveu
+cinco vezes: a cada rodada fechou o que tinha apontado e trouxe um ponto novo,
+sete defeitos em cinco leituras — três deles presentes desde a primeira
+arquitetura, como a comparação das versões em cache mostra. O arquiteto
+convergia, o auditor lia aos pedaços, e o run parou por contagem. Agora o
+ciclo mede cada rodada (`balancoDaRodada`: fechados, persistentes, novos,
+regressões, mesmo texto): a rodada que fecha tudo e só traz pontos novos não
+gasta o teto; o que persiste, regride ou volta idêntico gasta; e o dobro do
+teto é o teto duro contra o auditor que nunca termina de ler. A auditoria da
+arquitetura usa o mesmo `nextAuditAction` do plano, leva à reauditoria o que
+a leitura anterior apontou, e leva ao arquiteto os achados abertos juntos e o
+que já fechou para não voltar. Os prompts do auditor (arquitetura, fase,
+plano, coerência) pedem uma leitura completa — todos os eixos, todos os
+defeitos materiais numa resposta — e os do arquiteto e da emenda pedem a
+correção conjunta. Nenhuma chamada nova; nenhum limite subiu como solução.
+Detalhe na §120 do PLANO; os sete achados reais estão em
+`test/init/auditoria-consolidada-120.spec.ts`.
 
 ## 2026-10-19 — o conflito técnico não vai ao desenvolvedor (§119)
 
@@ -620,7 +640,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 2613 testes
+npm run check     # build + typecheck + 2623 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

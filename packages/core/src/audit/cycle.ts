@@ -165,26 +165,76 @@ export function writerDid(history: readonly AuditAttempt[]): string[] {
   return history.map((attempt, index) => {
     const anterior = index === 0 ? null : history[index - 1];
     const apontados = attempt.verdict.findings.length;
-    const agora = new Set(attempt.verdict.findings.map(fingerprint));
 
     if (!anterior) {
       return `tentativa ${attempt.attempt}: escreveu o documento; ${attempt.verdict.mechanical ? "o self-check" : "o auditor"} apontou ${apontados} ponto(s)`;
     }
 
-    if (anterior.contentSha === attempt.contentSha) {
-      return `tentativa ${attempt.attempt}: devolveu o MESMO texto, sem uma alteração sequer`;
-    }
-
-    const antes = anterior.verdict.findings.map(fingerprint);
-    const fechados = antes.filter((marca) => !agora.has(marca)).length;
-    const abertos = antes.filter((marca) => agora.has(marca)).length;
-    const novos = [...agora].filter((marca) => !antes.includes(marca)).length;
-
-    const partes = [`fechou ${fechados} de ${antes.length}`];
-    if (abertos > 0) partes.push(`${abertos} seguiu(ram) aberto(s)`);
-    if (novos > 0) partes.push(`${novos} apareceu(ram) novo(s)`);
-    return `tentativa ${attempt.attempt}: reescreveu — ${partes.join(", ")}`;
+    const balanco = balancoDaRodada(history, index);
+    if (balanco.mesmoTexto) return `tentativa ${attempt.attempt}: ${descreverBalanco(balanco)}`;
+    return `tentativa ${attempt.attempt}: reescreveu — ${descreverBalanco(balanco).replace(/^fechou (\d+)/, `fechou $1 de ${anterior.verdict.findings.length}`)}`;
   });
+}
+
+/**
+ * O balanço de uma rodada, medido pelo que o auditor deixou de apontar.
+ *
+ * É o que distingue progresso de estagnação com evidência, e não pela contagem
+ * de devoluções. No `teste_openrouter3` (0.6.1, §120) a auditoria da
+ * arquitetura devolveu cinco vezes e cada rodada fechou tudo o que a anterior
+ * tinha apontado e trouxe um ponto novo — três deles presentes desde a primeira
+ * arquitetura, como a comparação das versões em cache mostra. O arquiteto
+ * estava convergindo; o auditor estava lendo aos pedaços; e o run parou por
+ * contagem.
+ *
+ * - `fechados`: apontados na rodada anterior e ausentes agora;
+ * - `persistentes`: apontados na anterior e ainda presentes;
+ * - `novos`: nunca apontados antes;
+ * - `regressoes`: fechados numa rodada anterior e de volta agora;
+ * - `mesmoTexto`: o documento não mudou desde a rodada anterior.
+ */
+export interface Balanco {
+  fechados: number;
+  persistentes: number;
+  novos: number;
+  regressoes: number;
+  mesmoTexto: boolean;
+}
+
+export function balancoDaRodada(history: readonly AuditAttempt[], index = history.length - 1): Balanco {
+  const atual = history[index];
+  const anterior = index > 0 ? history[index - 1] : undefined;
+  if (!atual || !anterior) {
+    return { fechados: 0, persistentes: 0, novos: atual?.verdict.findings.length ?? 0, regressoes: 0, mesmoTexto: false };
+  }
+  const agora = new Set(atual.verdict.findings.map(fingerprint));
+  const antes = new Set(anterior.verdict.findings.map(fingerprint));
+  const jaVistos = new Set(history.slice(0, index - 1).flatMap((tentativa) => tentativa.verdict.findings.map(fingerprint)));
+  const fechados = [...antes].filter((marca) => !agora.has(marca)).length;
+  const persistentes = [...antes].filter((marca) => agora.has(marca)).length;
+  const inéditos = [...agora].filter((marca) => !antes.has(marca));
+  const regressoes = inéditos.filter((marca) => jaVistos.has(marca)).length;
+  return { fechados, persistentes, novos: inéditos.length - regressoes, regressoes, mesmoTexto: anterior.contentSha === atual.contentSha };
+}
+
+/**
+ * Uma rodada que avançou: o texto mudou, algo fechou, nada persistiu e nada
+ * voltou. A primeira devolução nunca é progresso — não há com o que comparar.
+ */
+export function rodadaAvancou(history: readonly AuditAttempt[], index: number): boolean {
+  if (index <= 0) return false;
+  const balanco = balancoDaRodada(history, index);
+  return !balanco.mesmoTexto && balanco.fechados > 0 && balanco.persistentes === 0 && balanco.regressoes === 0;
+}
+
+/** O balanço em uma linha, para o log e para o impasse. */
+export function descreverBalanco(balanco: Balanco): string {
+  if (balanco.mesmoTexto) return "devolveu o MESMO texto, sem uma alteração sequer";
+  const partes = [`fechou ${balanco.fechados}`];
+  if (balanco.persistentes > 0) partes.push(`${balanco.persistentes} seguiu(ram) aberto(s)`);
+  if (balanco.novos > 0) partes.push(`${balanco.novos} apareceu(ram) novo(s)`);
+  if (balanco.regressoes > 0) partes.push(`${balanco.regressoes} voltou(aram) depois de fechado(s)`);
+  return partes.join(", ");
 }
 
 export function nextAuditAction(state: AuditCycleState): AuditAction {
@@ -206,12 +256,22 @@ export function nextAuditAction(state: AuditCycleState): AuditAction {
    */
   const mechanical = state.history.filter((attempt) => attempt.verdict.status === "REJECTED" && attempt.verdict.mechanical === true).length;
   const returns = state.history.filter((attempt) => attempt.verdict.status === "REJECTED" && attempt.verdict.mechanical !== true).length;
+  /*
+   * O teto conta devoluções SEM progresso (§120). Uma rodada que fechou tudo o
+   * que a anterior apontou, sem nada persistir nem voltar, é o escritor
+   * convergindo e o auditor lendo mais: ela não gasta o teto. O que impede o
+   * laço infinito de um auditor que sempre acha um ponto novo é o teto duro, o
+   * dobro do teto — finito, e dito no impasse.
+   */
+  const semProgresso = state.history.filter(
+    (attempt, index) => attempt.verdict.status === "REJECTED" && attempt.verdict.mechanical !== true && !rodadaAvancou(state.history, index),
+  ).length;
 
   if (last.verdict.mechanical === true) {
     if (mechanical < state.maxMechanical) {
       return { action: "return-to-writer", findings: last.verdict.findings, attempt: last.attempt + 1 };
     }
-  } else if (returns < state.maxReturns) {
+  } else if (semProgresso < state.maxReturns && returns < state.maxReturns * 2) {
     return { action: "return-to-writer", findings: last.verdict.findings, attempt: last.attempt + 1 };
   }
 
@@ -230,8 +290,11 @@ export function nextAuditAction(state: AuditCycleState): AuditAction {
           ? `O self-check devolveu ${state.document} ${mechanical} vezes e a forma não fechou. ` +
             "Isso não é desacordo nem decisão de produto: o modelo não adequou a estrutura aos limites. " +
             "É possível repetir a correção ou interromper e trocar o modelo do writer. Publicar rascunho não dispensa os limites de prontidão."
-          : `O auditor devolveu ${state.document} ${returns} vezes e o escritor não fechou o ponto. ` +
-            "A correção não convergiu dentro do orçamento. Confira os pontos acima; isso, por si só, não indica uma decisão de produto pendente.",
+          : returns >= state.maxReturns * 2
+            ? `O auditor devolveu ${state.document} ${returns} vezes, cada rodada fechando o que a anterior apontou e trazendo ponto novo. ` +
+              "O teto duro acabou: o auditor não termina de ler, ou o escritor abre um ponto a cada correção. Confira os pontos acima; isso, por si só, não indica uma decisão de produto pendente."
+            : `O auditor devolveu ${state.document} ${returns} vezes e o escritor não fechou o ponto. ` +
+              "A correção não convergiu dentro do orçamento. Confira os pontos acima; isso, por si só, não indica uma decisão de produto pendente.",
     },
   };
 }

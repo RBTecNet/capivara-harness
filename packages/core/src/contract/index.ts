@@ -20,6 +20,8 @@ export type { CoverageSources } from "./coverage.js";
 export { checkTestPrescription, testPrescriptionHint, testPrescriptions } from "./test-prescription.js";
 export type { TestAuthority } from "./test-prescription.js";
 export { mechanismPrescriptionHint, mechanismPrescriptions } from "./mechanism-prescription.js";
+export { WRITE_OWNERSHIP_INVARIANT, checkWriteOwnership, effectiveDependencies, writeConflicts, writeIntents, writeOwnershipHint } from "./ownership.js";
+export type { WriteConflict, WriteIntent, WriteKind, WriteOwnershipOptions } from "./ownership.js";
 export { renderContractDocument } from "./doc.js";
 export { TASKS_BLOCK, assemblePhase, tasksBlock } from "./templates.js";
 export type { PhaseEnvelope } from "./templates.js";
@@ -37,7 +39,7 @@ export type { PhasesDocumentParts } from "./templates.js";
 export { canonicalDependsOn, canonicalWorkflowTraces, phaseDependencies, extractTasks, joinPhaseMetadata, repairInlineCriteria, repairLabelLists, repairMissingBullets, normalizePhasePart, stripLegacyFeatureTests } from "./phase-part.js";
 export type { NormalizedPart, PhasePartExpectation } from "./phase-part.js";
 export { checkRewriteDrift, parsePhaseFragment, preserveUnaddressedTasks } from "./drift.js";
-export { affectedPhases, planAddresses } from "./phase-references.js";
+export { affectedPhases, phaseReferences, planAddresses } from "./phase-references.js";
 export type { DriftInput } from "./drift.js";
 export { AREAS_VALIDAS, SKELETON_CONTRACT, coverageFromSkeleton, parseSkeleton, renderSkeleton, repairSkeleton, sliceForPhase, workflowsForPhase } from "./skeleton.js";
 export {

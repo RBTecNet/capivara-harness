@@ -16,7 +16,7 @@ import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkTestPrescription, testPrescriptionHint, testPrescriptions, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parseArchitecture, parsePhaseFragment, parseSkeleton, phaseHeading, phasesFromArchitecture, renderArchitecture, renderSkeleton, requirementsFromArchitecture, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12 } from "../contract/index.js";
+import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkTestPrescription, checkWriteOwnership, testPrescriptionHint, testPrescriptions, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parseArchitecture, parsePhaseFragment, parseSkeleton, phaseHeading, phasesFromArchitecture, renderArchitecture, renderSkeleton, requirementsFromArchitecture, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12 } from "../contract/index.js";
 import { CoherenceMemory } from "../audit/coherence.js";
 import { applyMaterialityReview, materialityInput, materialityPrompt } from "../audit/materiality.js";
 import type { Architecture, ContractError, CoverageSources, PhasesDocument, Skeleton, StampInput } from "../contract/index.js";
@@ -2998,6 +2998,28 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     return escolhida;
   }
 
+  /**
+   * O achado mecânico com ENDEREÇO de task (§124).
+   *
+   * `Phase N · linha L` localizava a fase e nada mais: a emenda chegava sem
+   * `P<n>.T<m>`, `preserveUnaddressedTasks` devolvia a reescrita inteira e as
+   * tasks vizinhas perdiam os bytes — e a aprovação — sem nenhum achado
+   * pedir. Com o endereço, só a task em conflito muda; as outras voltam
+   * byte a byte, que é o que a emenda promete.
+   */
+  function achadoMecanico(documento: PhasesDocument, texto: string, erro: ContractError, total: number): Finding {
+    const fase = faseDaLinha(texto, erro.line, total);
+    const task = fase === undefined ? undefined : documento.phases.find((phase) => phase.number === fase)?.tasks.find((candidata) => candidata.line === erro.line);
+    const endereco = fase === undefined ? `linha ${erro.line}` : task === undefined ? `Phase ${fase} · linha ${erro.line}` : `P${fase}.T${task.index} · linha ${erro.line}`;
+    return {
+      where: endereco,
+      mechanical: true,
+      problem: `${erro.code}: ${erro.message}`,
+      fix: erro.hint,
+      ...(fase === undefined ? {} : { phase: fase }),
+    };
+  }
+
   /** Marca como fechados os marcadores cuja pergunta já tem resposta aceita. */
   function registrarLacunasFechadas(): void {
     const aceitas = new Set(
@@ -4101,18 +4123,36 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           const total = skeletonAtual?.phases.length ?? 0;
           return {
             status: "REJECTED",
-            findings: prescritos.map((erro) => {
-              const fase = faseDaLinha(content, erro.line, total);
-              return {
-                where: fase === undefined ? `linha ${erro.line}` : `Phase ${fase} · linha ${erro.line}`,
-                mechanical: true,
-                problem: `${erro.code}: ${erro.message}`,
-                fix: erro.hint,
-                ...(fase === undefined ? {} : { phase: fase }),
-              };
-            }),
+            findings: prescritos.map((erro) => achadoMecanico(parsed.document, content, erro, total)),
             remarks: [],
             reason: "há task que prescreve teste, e como provar o produto é decisão do build",
+            mechanical: true,
+          };
+        }
+      }
+
+      /*
+       * Propriedade de escrita (I-18, §124): fases sem dependência entre si
+       * com obrigação de escrita no mesmo arquivo. É a metade irmã, no nível
+       * das fases, da serialização por componente que a arquitetura faz
+       * (§119). No `haiku` o auditor de coerência apontou três rodadas
+       * seguidas que as fases 3 a 6 mandavam acrescentar em `modulos.ts` e
+       * `navegacao.ts` as entradas que a fundação já entregava, e a triagem
+       * descartou três vezes porque "existe uma implementação que evita o
+       * conflito". Contável, conferido aqui: vira emenda mecânica na fase que
+       * escreve, com o dono do arquivo nomeado, sem auditor, sem triagem e sem
+       * pergunta ao desenvolvedor — e sem inventar dependência, que é da
+       * arquitetura.
+       */
+      if (parsed.ok) {
+        const conflitos = checkWriteOwnership(parsed.document, { components: arquiteturaAtual?.components ?? [] });
+        if (conflitos.length > 0) {
+          const total = skeletonAtual?.phases.length ?? 0;
+          return {
+            status: "REJECTED",
+            findings: conflitos.map((erro) => achadoMecanico(parsed.document, content, erro, total)),
+            remarks: [],
+            reason: "há fases sem ordem entre si com obrigação de escrita no mesmo arquivo, e o build as executa ao mesmo tempo",
             mechanical: true,
           };
         }

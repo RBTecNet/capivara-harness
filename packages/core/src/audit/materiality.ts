@@ -1,9 +1,9 @@
-import { affectedPhases } from "../contract/index.js";
+import { STRUCTURAL_LABELS, affectedPhases, phaseReferences } from "../contract/index.js";
 import type { PhaseBlock } from "../contract/index.js";
 import type { AuditVerdict } from "./protocol.js";
 
 export interface MaterialityInput {
-  items: { id: string; kind: "finding" | "decision"; where: string; claim: string; proposed: string[] }[];
+  items: { id: string; kind: "finding" | "decision"; where: string; claim: string; proposed: string[]; phase?: number }[];
   sources: { id: string; content: string }[];
 }
 
@@ -12,12 +12,23 @@ export function materialityInput(verdict: AuditVerdict, context: {
 }): MaterialityInput {
   const items: MaterialityInput["items"] = [
     ...verdict.findings.map((finding, index) => ({ id: `F${index + 1}`, kind: "finding" as const,
-      where: finding.where, claim: finding.problem, proposed: [finding.fix] })),
+      where: finding.where, claim: finding.problem, proposed: [finding.fix], ...(finding.phase === undefined ? {} : { phase: finding.phase }) })),
     ...(verdict.decisions ?? []).map((decision, index) => ({ id: `D${index + 1}`, kind: "decision" as const,
       where: decision.where, claim: decision.decision, proposed: decision.options })),
   ];
   const related = new Set<number>();
-  for (const finding of verdict.findings) for (const number of affectedPhases([finding], context.phases.length)) related.add(number);
+  /*
+   * A fase do achado E as que o endereço cita (§124). `affectedPhases` para na
+   * fase declarada por quem chamou — certo para a emenda, que vai a uma fase
+   * só; errado para a triagem, que precisa ver os dois lados de "T1.C1 vs
+   * P1.T1.C1" para poder dizer que não há conflito. No `haiku` os auditores
+   * por fase também apontaram a escrita concorrente em `modulos.ts`, e a
+   * fundação acusada nunca chegava à mesa.
+   */
+  for (const finding of verdict.findings) {
+    for (const number of affectedPhases([finding], context.phases.length)) related.add(number);
+    for (const number of phaseReferences(finding.where)) if (number >= 1 && number <= context.phases.length) related.add(number);
+  }
   for (const decision of verdict.decisions ?? []) {
     for (const number of affectedPhases([{ where: decision.where, problem: "", fix: "" }], context.phases.length)) related.add(number);
   }
@@ -41,11 +52,22 @@ export function materialityPrompt(input: MaterialityInput): string {
     "Review every item once. Do not create new requirements, findings, decisions or tests.",
     "KEEP real missing requested behavior, incompatible obligations in the same operation, entity, scenario and moment,",
     "unauthorized product scope, and a material business decision the sources genuinely cannot settle.",
-    "A contradiction requires disjoint obligations: if any valid implementation satisfies both, use ADVISORY.",
+    "KEEP also when the documents, AS WRITTEN, order or permit incompatible behaviour even though a careful implementer",
+    "could avoid it: a task told to add or register an entry a dependency phase already delivers; two phases with no",
+    "order between them told to edit the same file; an undefined owner of a shared file; a replacement between phases",
+    "that no task orders. A possible implementation is not a correction. The executor follows the text literally, so",
+    "the text must change — that is a localized documentary fix, and it is KEEP, never ADVISORY.",
+    "ADVISORY is for a false positive only: the accused passage does not say what the finding claims, or an explicit",
+    "contract in the documents already settles it. Quote THAT passage. Never dismiss on an interpretation the documents",
+    "do not state, and never on the architecture's intention alone when the phase text contradicts it.",
+    "A finding that names two or more phases is a contradiction between them: to dismiss it, quote each of those phases.",
+    "The harness refuses an ADVISORY that quotes only one side or only the skeleton/architecture.",
     "Compare allowed sets, not preferred choices: 204 is compatible with '200 or 204', even across modules.",
     "Validation before POST and showing errors after GET are different operations and may coexist.",
     "An empty database fixture and persistence in another test scenario may coexist; do not assume tests share state or ordering.",
-    "A foundation page/component and its later extension or replacement are a sequence, not simultaneous alternatives.",
+    "A foundation page/component and its later extension or replacement are a sequence, not simultaneous alternatives,",
+    "when the later phase's task says it replaces or edits it and the later phase depends on the earlier one; a",
+    "replacement nobody orders is not a sequence.",
     "Do not demand an extra test for every sentence or an exact constructor/signature/setup technique when compatible implementations exist.",
     "A task description is evidence too; acceptance criteria need not duplicate every descriptive sentence.",
     "Unspecified implementation details with a compatible choice (sidebar initial mode, function vs class, test organization)",
@@ -66,6 +88,13 @@ export function materialityPrompt(input: MaterialityInput): string {
 
 const normalized = (text: string): string => text.replace(/\s+/g, " ").trim();
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** Um trecho que é só rótulo estrutural não prova nada: o rótulo dos critérios existe em toda fase. */
+function citacaoSubstantiva(quote: string): boolean {
+  let texto = normalized(quote);
+  for (const label of STRUCTURAL_LABELS) texto = texto.split(label).join(" ");
+  return normalized(texto.replace(/^[-*\s]+/u, "")).length >= 12;
+}
 
 /** Ausência ou prova inválida conserva o bloqueio original; nunca aprova por omissão. */
 export function applyMaterialityReview(original: AuditVerdict, input: MaterialityInput, output: string): {
@@ -91,13 +120,39 @@ export function applyMaterialityReview(original: AuditVerdict, input: Materialit
     const quotes: string[] = [];
     for (const evidence of raw.evidence) {
       if (!record(evidence) || typeof evidence.source !== "string" || typeof evidence.quote !== "string"
-        || normalized(evidence.quote).length < 12 || !sources.get(evidence.source)?.includes(normalized(evidence.quote))) {
+        || !citacaoSubstantiva(evidence.quote) || !sources.get(evidence.source)?.includes(normalized(evidence.quote))) {
         defects.push(`${raw.id}: a citação da triagem não existe na fonte indicada`);
         break;
       }
       quotes.push(`${evidence.source}: ${evidence.quote}`);
     }
-    if (quotes.length === raw.evidence.length) advisory.set(raw.id, `${raw.reason.trim()} Evidência: ${quotes.join("; ")}`);
+    if (quotes.length !== raw.evidence.length) continue;
+    /*
+     * Um conflito entre fases só é falso positivo com o texto das duas na mesa (§124).
+     *
+     * No `haiku` a triagem descartou, três rodadas seguidas, "P1.T6.C1 vs
+     * P3.T4.C1, P4.T5.C1, P5.T4.C1 e P6.T2.C1" citando a fundação e a frase
+     * de intenção da arquitetura — nunca as tasks acusadas, que mandavam
+     * acrescentar o que a fundação já entregava. Uma solução possível não é
+     * uma correção realizada: para dizer que a fase acusada não ordena o que
+     * o achado afirma, é preciso citá-la. Sem a citação de cada fase citada
+     * no endereço, o parecer não remove o bloqueio.
+     */
+    const item = input.items.find((candidate) => candidate.id === raw.id);
+    if (item?.kind === "finding") {
+      const citadas = [...new Set([...(item.phase === undefined ? [] : [item.phase]), ...phaseReferences(item.where)])]
+        .filter((numero) => sources.has(`P${numero}`))
+        .sort((left, right) => left - right);
+      if (citadas.length >= 2) {
+        const citadasNaEvidencia = new Set((raw.evidence as { source: string }[]).map((evidence) => evidence.source));
+        const faltam = citadas.filter((numero) => !citadasNaEvidencia.has(`P${numero}`));
+        if (faltam.length > 0) {
+          defects.push(`${raw.id}: a triagem descartou um conflito entre as fases ${citadas.join(", ")} sem citar o texto da(s) fase(s) ${faltam.join(", ")}`);
+          continue;
+        }
+      }
+    }
+    advisory.set(raw.id, `${raw.reason.trim()} Evidência: ${quotes.join("; ")}`);
   }
   if (advisory.size === 0) return { verdict: original, defects, advisory: 0 };
   const findings = original.findings.filter((_finding, index) => !advisory.has(`F${index + 1}`));

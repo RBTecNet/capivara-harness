@@ -7,6 +7,23 @@
  * fallback de "todas as fases" nunca era alcançado porque UM achado a citava —
  * então uma fase era reescrita e os outros 24 defeitos não chegavam a ninguém.
  */
+/**
+ * As fases que um texto cita, na ordem em que aparecem e sem repetição:
+ * endereços do índice (`P3.T4.C1`) e referências em prosa ("Phase 2", "fase
+ * 6"). É o único tokenizador de referência a fase: `affectedPhases` escolhe
+ * destinos com ele, e a triagem de materialidade (§124) exige citação de cada
+ * fase que o endereço de um achado nomeia com ele — as duas leituras não
+ * podem divergir.
+ */
+export function phaseReferences(text: string): number[] {
+  const phases: number[] = [];
+  for (const match of text.matchAll(/\b(?:phase|fase)\s*(\d+)\b|\bP(\d+)(?:\.T\d+(?:\.C\d+)?)?\b/gi)) {
+    const phase = Number(match[1] ?? match[2]);
+    if (!phases.includes(phase)) phases.push(phase);
+  }
+  return phases;
+}
+
 export function affectedPhases(
   findings: readonly { where: string; problem: string; fix: string; phase?: number }[],
   total: number,
@@ -19,11 +36,7 @@ export function affectedPhases(
     }
     const local = new Set<number>();
     const localizar = (text: string): void => {
-      // Endereços do índice e referências em prosa compartilham o contrato.
-      for (const match of text.matchAll(/\b(?:phase|fase)\s*(\d+)\b|\bP(\d+)(?:\.T\d+(?:\.C\d+)?)?\b/gi)) {
-        const phase = Number(match[1] ?? match[2]);
-        if (phase >= 1 && phase <= total) local.add(phase);
-      }
+      for (const phase of phaseReferences(text)) if (phase >= 1 && phase <= total) local.add(phase);
     };
     localizar(finding.where);
     // Exemplos e contratos citados na justificativa não são novos destinos.

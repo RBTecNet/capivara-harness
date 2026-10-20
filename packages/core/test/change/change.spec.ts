@@ -299,6 +299,64 @@ describe("o comando change", () => {
     expect(plano).toContain("Alterar o telefone grava e mostra o valor novo na lista");
   });
 
+  /*
+   * Propriedade de escrita também aqui (I-18, §124). O `change` não passa pelo
+   * ciclo de auditoria do `plan`; duas fases novas sem ordem entre si que
+   * mandam registrar no mesmo arquivo compartilhado seriam executadas em
+   * paralelo pelo build, editando o mesmo arquivo — o defeito do `haiku`,
+   * publicado pelo estágio irmão.
+   */
+  const DELTA_DOIS_MODULOS = JSON.stringify({
+    contract: CHANGE_CONTRACT,
+    summary: "dois módulos novos sobre a mesma fundação",
+    touches: ["a lista de montagem das rotas"],
+    entities: [],
+    rules: [],
+    workflows: [
+      { number: "", name: "Emitir relatório", steps: ["abre relatórios", "gera"] },
+      { number: "", name: "Consultar auditoria", steps: ["abre auditoria", "lê"] },
+    ],
+    phases: [
+      { title: "Relatórios", goal: "o atendente emite relatórios", dependsOn: "Phase 1", covers: ["workflow 2"], areas: ["backend"], taskCount: 1 },
+      { title: "Auditoria", goal: "o atendente consulta a auditoria", dependsOn: "Phase 1", covers: ["workflow 3"], areas: ["backend"], taskCount: 1 },
+    ],
+    questions: [],
+  });
+  const registra = (modulo: string, fluxo: string) => [
+    `- [ ] **Task:** Criar \`src/servidor/modulos/${modulo}/rotas.ts\` e registrar o módulo em \`src/servidor/modulos.ts\`, acrescentando a entrada \`/${modulo}\``,
+    "  - **Acceptance criteria:**",
+    `    - \`GET /api/${modulo}\` responde 200`,
+    `  - **Traces:** ${fluxo}`,
+  ].join("\n");
+  const consome = (modulo: string, fluxo: string) => [
+    `- [ ] **Task:** Criar \`src/servidor/modulos/${modulo}/rotas.ts\`, o stub registrado em \`src/servidor/modulos.ts\` pela fundação sob \`/${modulo}\``,
+    "  - **Acceptance criteria:**",
+    `    - \`GET /api/${modulo}\` responde 200`,
+    `  - **Traces:** ${fluxo}`,
+  ].join("\n");
+
+  it("duas fases novas sem ordem entre si que escrevem no mesmo arquivo voltam ao escritor com o I-18, e o plano sai sem a escrita", async () => {
+    const { call, chamadas } = modelo([DELTA_DOIS_MODULOS, registra("relatorios", "workflow 2"), registra("auditoria", "workflow 3"), consome("relatorios", "workflow 2"), consome("auditoria", "workflow 3")]);
+    const resultado = await runChange({ projectRoot, language: "pt", request: "relatórios e auditoria", call });
+    expect(resultado.novas.map((fase) => fase.number)).toEqual([3, 4]);
+    expect(chamadas.map((chamada) => chamada.subject)).toEqual(["delta", "phase-p03", "phase-p04", "phase-p03", "phase-p04"]);
+    expect(chamadas[3]?.prompt).toContain("## Your previous attempt was rejected (I-18)");
+    expect(chamadas[3]?.prompt).toContain("ordena escrever em `src/servidor/modulos.ts`");
+    expect(chamadas[3]?.prompt).toContain("a fase 4 — sem dependência com ela, que o build pode executar ao mesmo tempo");
+    const plano = await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8");
+    expect(plano).not.toContain("registrar o módulo em `src/servidor/modulos.ts`");
+    expect(plano).toContain("o stub registrado em `src/servidor/modulos.ts` pela fundação sob `/relatorios`");
+    expect(plano).toContain("## Phase 4: Auditoria");
+    // As fases antigas continuam letra por letra.
+    expect(plano).toContain("- [ ] **Task:** Construir a tela de cadastro");
+  });
+
+  it("se o escritor insistir na escrita concorrente, o change para dizendo o arquivo e as fases, e não publica", async () => {
+    const { call } = modelo([DELTA_DOIS_MODULOS, registra("relatorios", "workflow 2"), registra("auditoria", "workflow 3"), registra("relatorios", "workflow 2"), registra("auditoria", "workflow 3")]);
+    await expect(runChange({ projectRoot, language: "pt", request: "relatórios e auditoria", call })).rejects.toThrow(/I-18[\s\S]*src\/servidor\/modulos\.ts/u);
+    expect(await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).toBe(PLANO);
+  });
+
   it("o esqueleto republicado carrega o fluxo novo", async () => {
     const { call } = modelo([DELTA, TASKS]);
     await runChange({ projectRoot, language: "pt", request: "quero editar clientes", call });

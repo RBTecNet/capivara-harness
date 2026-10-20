@@ -780,8 +780,8 @@ describe("gate de prontidão", () => {
     expect(readiness.checks.find((check) => check.id === "decisoes")?.passed).toBe(false);
   });
 
-  it("inclui dimensionamento, arquitetura e prescrição de teste entre as doze verificações", () => {
-    expect(evaluateReadiness(base).checks).toHaveLength(12);
+  it("inclui dimensionamento, arquitetura, prescrição de teste e propriedade de escrita entre as treze verificações", () => {
+    expect(evaluateReadiness(base).checks).toHaveLength(13);
   });
 
   it("plano sem arquitetura publicada é NOT READY, dizendo o que rodar", () => {

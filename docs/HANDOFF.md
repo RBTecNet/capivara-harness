@@ -16,10 +16,58 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.6.2 (`capivara --version`); planos da 0.5.0 e anteriores incompatíveis, ver §116 e §115.26 |
-| suíte | 2676 testes em 140 arquivos, `npm run check` verde |
+| suíte | 2725 testes em 143 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-20 — integridade da triagem: finding material só está resolvido quando o plano está coerente (§124)
+
+O mesmo `haiku`, agora com a §123: esqueleto limpo em uma chamada,
+arquitetura em três rodadas, 63 chamadas, 39 minutos, RALPH READY — e o plano
+publicado mandando as fases 3, 4, 5 e 6, sem ordem entre si, "acrescentar"
+em `src/servidor/modulos.ts` e `src/web/navegacao.ts` as entradas que a
+fundação já entregava completas. O auditor de coerência apontou três rodadas
+seguidas, com a correção certa; a triagem de materialidade descartou três
+rodadas seguidas ("os conflitos desaparecem se os módulos só substituírem os
+próprios stubs… a conclusão depende de remover as edições") — porque o
+prompt dizia "if any valid implementation satisfies both, use ADVISORY" e o
+código aceitava qualquer citação existente, mesmo da fundação, para apagar
+um achado que acusava outras fases; o ADVISORY aprovava a fase e gravava a
+coerência como aprovada. Duas correções. (1) I-18
+(`contract/ownership.ts`): fases sem dependência entre si não recebem
+obrigação de escrita no mesmo arquivo — a obrigação é a frase da task que
+ordena criar/acrescentar/registrar/alterar um caminho (infinitivo,
+imperativo, "registrá-la"); critério, fonte ("importado de"), consumo
+("usando"), subordinada ("se… existir") e a terceira pessoa que descreve não
+contam; fases com ordem, direta ou transitiva, podem alterar o mesmo
+arquivo. É a metade irmã, por arquivo e por fase, da serialização por
+componente da §119. Roda como self-check mecânico do `auditOnce` (emenda só
+na task que escreve — o achado mecânico ganhou endereço `P<n>.T<m>`, também
+no I-16 —, com quem cria o arquivo e o componente nomeados, sem inventar
+`dependsOn`), como item "propriedade" do RALPH READY (13 itens) e no
+`change`, que nunca teve self-check nenhum e era a porta aberta para o
+build. A concorrência é a do escalonador (`effectiveDependencies` espelha
+`dependenciasEfetivas`, com teste de equivalência). Calibrado nas 52 tasks
+reais, agora fixture da suíte: só os oito conflitos. (2) Triagem: o prompt ganha as
+três situações do pedido (falso positivo / ambiguidade material que exige
+correção documental / contradição) e perde a regra da implementação possível;
+`applyMaterialityReview` recusa o ADVISORY de um achado que envolve duas ou
+mais fases (citadas ou declarada) se a evidência não cita cada uma delas, com
+o tokenizador do contrato (`phaseReferences`) — o parecer real da rodada 4 do
+`haiku` é recusado, um falso positivo com todas as fases citadas continua
+descartável, e o achado por fase recebe os dois lados. Zero chamadas a mais no
+caminho limpo; sem alterar o build. Uma revisão adversarial (quatro lentes)
+sobre a primeira versão rendeu os casos de negação, aparte, genitivo, crase,
+prosa com ponto, nome ambíguo, fundação implícita, endereço de task, achado
+por fase e `change`, todos incorporados. Detalhe na §124; 25 + 6 + 5 + 2 + 10
+cenários em `test/contract/ownership.spec.ts`,
+`test/loop/escalonador-contrato.spec.ts`, `test/audit/materiality.spec.ts`,
+`test/change/change.spec.ts` e `test/init/triagem-124.spec.ts`, 23 RED na
+primeira versão. Retomar o `haiku` com este binário reescreve as fases: o
+prompt da fase mudou e o cache é chaveado por ele.
+Branch `fix/triagem-124` sobre a `fix/fronteira-init-plan-123`; sem merge na
+`main` sem autorização.
 
 ## 2026-10-20 — a fronteira INIT → PLAN: requisitos sem arquitetura prematura (§123)
 
@@ -714,7 +762,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 2676 testes
+npm run check     # build + typecheck + 2725 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

@@ -148,7 +148,17 @@ export function preserveUnaddressedTasks(before: string, after: string, phase: n
     const block = original[index]!;
     const matching = candidate.filter(entry => entry.title === block.title);
     const correction = original.length === candidate.length ? candidate[index] : matching.length === 1 ? matching[0] : undefined;
-    if (!correction) continue;
+    /*
+     * A task endereçada sumiu ou mudou de nome numa reescrita que também
+     * mudou a contagem: a emenda a reestruturou (apagou a task que era a
+     * suíte, fundiu-a noutra), e não há bloco para pôr no lugar dela. Antes
+     * isto deixava o bloco ORIGINAL — e a correção pedida era descartada em
+     * silêncio: o I-16 voltava a cada rodada sobre a mesma task que o
+     * escritor tinha removido (§124). A reescrita inteira vale, como já valia
+     * para a divisão pedida; o que se perde é a proteção das vizinhas nesta
+     * emenda, que é o menor dos dois males.
+     */
+    if (!correction) return after;
     result = result.slice(0, block.start) + correction.text + result.slice(block.end);
   }
   return result;

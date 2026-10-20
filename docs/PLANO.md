@@ -10685,3 +10685,446 @@ testes em 140 arquivos.
   arquiteto é o que o protege.
 - Nenhum run real depois desta implementação; a evidência é o provider falso
   sobre os textos reais do `haiku` e o parser sobre o JSON real dele.
+
+## §124 — Integridade da triagem: finding material só está resolvido quando o plano está coerente
+
+### 124.1 A evidência: o `haiku` depois da §123
+
+Mesmo run `init-dc741f0d7b92`, projeto `laravel/haiku`, Haiku nos três
+papéis, 0.6.2 com a §123 instalada: 7 fases, 52 tasks, 18 stories, 3
+entidades, 5 workflows, 63 chamadas de modelo, 39 minutos (11:31 → 12:10),
+RALPH READY. O esqueleto saiu limpo em uma chamada e a arquitetura fechou em
+três rodadas — a §123 fez o que prometeu. O defeito desta vez está no plano
+publicado, e não foi falta de detecção.
+
+A arquitetura (`architecture.md`, visão geral) decidiu o ponto de extensão:
+"cada módulo é formado por dois componentes independentes (a API e a página),
+que se registram em pontos de extensão entregues pela fundação:
+`src/servidor/modulos.ts` no servidor e `src/web/navegacao.ts` na interface.
+Assim, as fases de módulo tocam apenas arquivos próprios e podem rodar em
+paralelo sem disputar arquivos." A fase 1 (P1.T6) cria `modulos.ts` com
+`criarModulosApi(banco)` devolvendo "nesta ordem, as entradas com `caminho`
+`/tarefas`, `/categorias`, `/anotacoes` e `/painel`", cada uma com o router
+stub do módulo; a fase 2 (P2.T9) cria `navegacao.ts` com os quatro itens.
+As fases 3, 4, 5 e 6 — `Depends on: Phase 1, Phase 2`, sem ordem entre si —
+mandam, cada uma: "registrar o módulo em `src/servidor/modulos.ts`,
+acrescentando à lista… a entrada `{ caminho: '/tarefas', … }`" (P3.T4),
+"Registrar o router… em `src/servidor/modulos.ts` como um item" (P4.T5),
+"Registrar o módulo em `src/servidor/modulos.ts`… Se o item já estiver na
+lista, nenhuma alteração é feita" (P5.T4), "registrar o módulo em
+`src/servidor/modulos.ts`, adicionando `{ caminho: '/painel', … }`" (P6.T2);
+e o mesmo em `navegacao.ts` (P3.T8, P4.T8, P5.T7, P6.T4). Quatro fases que o
+escalonador do build executa ao mesmo tempo, em quatro worktrees, cada uma
+ordenando ao executor literal acrescentar num arquivo compartilhado a entrada
+que a fundação já entregou — contra o critério "exatamente um item" das
+próprias tasks e contra o pedido ("os módulos independentes não devem
+modificar arquivos compartilhados simultaneamente").
+
+O auditor de coerência viu, três rodadas seguidas
+(`logs/audit.project-phases.md-coer-ncia.auditor.{2,3,4}`), com endereço e
+correção: "P1.T6.C1 vs P3.T4.C1, P4.T5.C1, P5.T4.C1 e P6.T2.C1 | A fase 1 já
+põe os quatro itens em modulos.ts; P3.T4.C1 manda 'acrescentar'… Executadas
+em ordem, cada uma duplica a entrada e quebra 'exatamente um item' | Pela
+arquitetura, o registro é da fase 1. Remover de P3.T4.C1, P4.T5.C1, P5.T4.C1
+e P6.T2.C1 qualquer instrução de acrescentar ou registrar a entrada em
+modulos.ts." Os auditores por fase também viram (P3, P5, P6: "fases
+declaradas paralelas… editam src/servidor/modulos.ts").
+
+A triagem de materialidade descartou, três rodadas seguidas
+(`logs/audit.project-phases.md-materialidade.verifier.{2,3,4}`), com estas
+razões, literais: rodada 2, F5: "As fases de módulo não precisam editar
+modulos.ts nem navegacao.ts, porque a fundação e a fase de casca já
+registram as entradas… **A conclusão depende de remover as edições
+compartilhadas dessas tarefas**" — ADVISORY; F23: "A instrução de
+acrescentar não é obrigação que impeça essa implementação" — ADVISORY;
+rodada 3, F7: "O problema real são as instruções de editar esses arquivos nas
+fases de módulo, tratadas nos itens F13 e F14" — e F13/F14: "A instrução de
+acrescentar a entrada na fase 3 é compatível se a fase apenas verificar que a
+entrada existe" — ADVISORY; rodada 4, F4: "Os conflitos em modulos.ts e
+navegacao.ts desaparecem se a fundação já registrar as entradas e os módulos
+só substituírem os próprios arquivos" — ADVISORY, F6, F7 idem. A evidência
+citada era sempre a fundação ("cada uma com o router de `criarRotas` do seu
+módulo") e a frase de intenção da arquitetura ("as fases de módulo tocam
+apenas arquivos próprios"); nunca o texto das tasks acusadas. Na rodada 4,
+0 defeitos mantidos; APPROVED; ensaio; RALPH READY. O plano publicado
+(`project-phases.md`, linhas 163, 231, 295, 336, 192, 252, 317, 350) ordena
+exatamente o que o auditor mandou remover.
+
+O mesmo mecanismo descartou outros defeitos materiais e os reencontrou na
+rodada seguinte: `lerTexto` rejeitando `undefined` com 400 (F19 r2 ADVISORY →
+F6 r3 KEEP), `aplicarEsquema` chamado com um caminho onde a assinatura pede
+`Database` (F21 r2 ADVISORY → F16 r3 ADVISORY → publicado), `criarModulosApi`
+"devolve lista vazia" na fase 2 contra as quatro entradas da fase 1 (parte
+de F25 r2 ADVISORY → F12 r3 KEEP). E o caso `raiz` → `root` (P1.T1.C1 monta
+em `raiz`; P2.T7.C3 e P2.T9.C4 fixam `root`): F15 r3 ADVISORY citando só P1
+("a sequência é coerente se a fase 2 usar root"), F8 r4 ADVISORY citando P1
+e P2 ("a instrução de 'raiz' vale só até a fase 2 substituir o arquivo") —
+uma substituição que a P2.T9 de fato ordena ("Criar… `src/web/main.tsx`").
+
+### 124.2 As seis perguntas do pedido, respondidas no código de antes
+
+1. **Quem autoriza descartar um finding?** Uma chamada do `verifier`
+   (`orchestrator.ts`, `auditOnce` do plano, "project-phases.md#materialidade")
+   e `applyMaterialityReview` (`src/audit/materiality.ts`): todo item com
+   `disposition: "ADVISORY"`, razão não vazia e ao menos uma citação de 12+
+   caracteres existente em alguma fonte é REMOVIDO de `findings` e vira
+   `remark` ("triagem de materialidade: …"); sem finding restante, o veredito
+   vira APPROVED. Ninguém mais lê o parecer.
+2. **Que evidência precisa existir?** Só a existência da citação em uma
+   fonte (`sources.get(evidence.source)?.includes(quote)`). A citação não
+   precisava vir da fase acusada nem sustentar a razão: "cada uma com o router
+   de `criarRotas` do seu módulo", tirada da fundação, bastava para descartar
+   um conflito que acusava as fases 3 a 6.
+3. **A triagem verifica o documento publicado?** Ela recebe o texto atual das
+   fases citadas (`materialityInput`, `related` por `affectedPhases`), mas o
+   parecer não é confrontado com ele, e depois do ADVISORY ninguém relê: o
+   `auditLoop` publica o MESMO `content` que foi auditado (`if
+   (action.action === "publish") return { content, … }`), e a interpretação
+   aceita vive só na ressalva.
+4. **Uma solução hipotética pode encerrar um finding?** Por desenho do
+   prompt: "A contradiction requires disjoint obligations: **if any valid
+   implementation satisfies both, use ADVISORY**" e "Unspecified
+   implementation details with a compatible choice … are ADVISORY". A regra é
+   certa para conjuntos permitidos ("204 é compatível com '200 ou 204'") e
+   errada para instruções: uma task que manda acrescentar o que já existe
+   admite uma implementação que não acrescenta, e o executor literal
+   acrescenta.
+5. **Findings descartados voltam a ser verificados?** Não. Pior: a fase cujos
+   achados foram todos ADVISORY é APROVADA (`fasesAprovadas.add`,
+   `memoria.guardarAprovacao`, `tasksJulgadas.aprovar`, logo após a
+   triagem), e a coerência é gravada como aprovada
+   (`coerencia.reconcile({ …review.verdict, status: "APPROVED", findings: [] })`),
+   de modo que o mesmo achado sobre endereços não alterados seria descartado
+   na rodada seguinte sem modelo nenhum ("coerência já aprovada: referências e
+   decisões não mudaram"). O auditor sem memória reencontrava porque as fases
+   mudavam por outros achados.
+6. **O plano publicado pode divergir da interpretação aceita?** Sim: a
+   interpretação ("os módulos substituem os stubs sem acrescentar") é texto da
+   ressalva; o documento publicado é o `content` auditado, com "acrescentar"
+   nas oito tasks. O relatório final do run disse "aprovado com ressalvas".
+
+### 124.3 A causa-raiz
+
+Duas metades, uma de cada lado do que a §119 fez.
+
+**A metade do código.** A §119 serializa, no CONTRATO DA ARQUITETURA, as
+fases sem ordem entre si que estendem o mesmo componente
+(`contract/architecture.ts`, `serializou a fase N depois da fase M`). O
+Parallel Lab passou por ela limpo: as fases 3 a 6 declaravam só os próprios
+componentes (`tarefas-api`, `tarefas-web`…). O conflito nasceu DEPOIS, no
+texto das fases, escrito por um escritor que lia a sua fatia e o arquivo da
+fundação como ponto de extensão — e nada conferia, no nível das fases, a
+obrigação de escrita contra a ordem entre elas. É a correção pela metade
+(CAPIVARA.md): a verificação existia no irmão (arquitetura, por componente) e
+faltava aqui (fases, por arquivo). Sem ela, o único leitor do defeito era o
+modelo, e o modelo que decidia a materialidade tinha uma regra que o mandava
+descartar.
+
+**A metade do protocolo.** A triagem só distinguia bloqueio de não-bloqueio
+(KEEP/ADVISORY), e definia não-bloqueio como "existe uma implementação
+compatível". As três situações do pedido (§6) — falso positivo, ambiguidade
+material recuperável, contradição genuína — colapsavam em duas, e a do meio
+caía sempre no lado errado: o verifier reconhecia que "a conclusão depende de
+remover as edições" e descartava mesmo assim, porque a regra lhe dizia que a
+possibilidade bastava. E o descarte não precisava provar nada sobre o texto
+acusado: qualquer citação existente servia.
+
+### 124.4 O que muda
+
+**Contrato.** `src/contract/ownership.ts`, I-18: fases sem dependência entre
+si não recebem obrigação de escrita no mesmo arquivo. A obrigação de escrita
+é a FRASE DA TASK que ordena criar, acrescentar, registrar, alterar,
+ajustar, configurar… um arquivo nomeado — verbo de escrita (infinitivo,
+imperativo, gerúndio, infinitivo com pronome "registrá-la"; pt e en)
+governando um caminho na mesma ORAÇÃO — ponto, ponto-e-vírgula, dois-pontos
+e travessão fecham a oração; um aparte entre parênteses não vê o verbo de
+fora nem governa fora dele; o que está entre crases é código ou caminho,
+nunca verbo (`import { x } from './x'` não desfaz a escrita em `App.tsx`;
+`POST /import` não é consumo). Não é escrita: um critério de aceite (afirma
+estado — "`modulos.ts` contém exatamente um item" verifica, não modifica); o
+caminho citado como origem ("importado de", "lido de", "a partir de", "uma
+cópia de"); o caminho depois de um verbo de consumo ("usando", "lê",
+"chama", "importar … de") ou dentro de uma subordinada que não fechou ("que
+serve `dist/web`", "se `dist/web/index.html` existir") — e as duas coisas
+valem até a oração fechar numa vírgula ou coordenação ("`index.html` que
+carrega `main.tsx`, e `src/web/main.tsx`" cria o segundo); o verbo negado ou
+precedido de preposição, que descreve em vez de ordenar ("sem alterar `X`",
+"não modificar `X`", "without modifying `X`", "ao criar uma tarefa, grava em
+`X`", "para registrar em `X`") — a frase que a própria dica do I-18 sugere
+não pode ser recusada; e a terceira pessoa que descreve ("a função cria o
+diretório", "o router registra GET /", "a lista inclui o item", "a classe
+estende Error") fica de fora de propósito — a task ordena no infinitivo, no
+imperativo, no gerúndio ou com pronome ("registrá-la"). O genitivo e o
+locativo composto nomeiam o DESTINO ("à lista de `navegacao.ts`", "dentro de
+`modulos.ts`", "ao final de `X`", "the `scripts` section of `package.json`");
+o particípio que localiza ("definido em", "registrado em") é destino quando a
+task altera a coisa no lugar ("Alterar o tipo definido em `tipos.ts`",
+"acrescentar ao array definido em `x.ts`") e origem quando a pega e a põe
+noutro lugar ("Registrar o módulo definido em `a.ts` em `modulos.ts`"); a
+passiva que ordena conta ("deve ser registrada em `X`"). Nome com ponto na
+prosa não é arquivo (Node.js, Next.js, p.ex., process.env): fora das crases
+só conta o que tem diretório ou é dotfile; o nome solto sem diretório
+(`rotas.ts`, `index.ts`) é AMBÍGUO — cada módulo pode ter o seu — e entra nas
+obrigações da fase mas nunca em conflito, a menos que seja arquivo de raiz
+(`package.json`, `index.html`, `tsconfig*.json`, `*.config.*`, `README.md`,
+dotfiles); diretório explícito ("em `src/web/componentes/`", ou "`index.ts`
+em `src/modulos/tarefas`" logo depois do arquivo) qualifica o nome solto;
+"(inclui `src/web`)" não move o `tsconfig.json` para dentro de `src/web`.
+Acento no caminho fica (a normalização preserva o comprimento, e o arquivo é
+lido do texto original), `\` vira `/`, glob e placeholder não são caminho.
+Fases com ordem entre si podem alterar o mesmo arquivo — e a ordem é a que o
+ESCALONADOR respeita (`effectiveDependencies` espelha
+`loop/escalonador.ts` `dependenciasEfetivas`, com teste de equivalência em
+`test/loop/escalonador-contrato.spec.ts`): `Depends on` lido com o mesmo
+`phaseDependencies`, transitivo, a fundação (fase de menor número) como
+dependência de toda fase posterior mesmo quando o texto diz `none`, e a
+dependência ilegível valendo "todas as anteriores". O stub que a fundação
+cria e o módulo substitui é sequência; a integração que "ajusta
+`navegacao.ts`" depois dos módulos é sequência. O conflito é só: duas fases
+sem dependência efetiva entre si, as duas com obrigação de escrita no mesmo
+arquivo. `checkWriteOwnership` devolve um `ContractError` I-18 por task em
+conflito, na linha da task, com o arquivo, as fases concorrentes, quem CRIA o
+arquivo, o dono (criador de que todas as conflitantes dependem) e, quando a
+arquitetura é informada, o componente que lista o arquivo. A dica é honesta
+sobre o que se sabe: com dono, "se ela já entrega o que esta fase precisa
+encontrar em `F`, retire a escrita e verifique o estado num critério; se não
+entrega, escreva a necessidade como critério ('`F` contém …, entregue pela
+fase N') — a auditoria leva a lacuna à fase dona; em nenhum caso esta fase
+escreve em `F`"; quando a própria fase em conflito é a única criadora,
+"mantenha a criação — é a divisão que está errada, não esta task"; quando o
+criador não vem antes desta, "retire a escrita e peça como critério o que
+precisa encontrar"; e sempre "a ordem entre as fases (dependsOn) é decisão
+da arquitetura, não desta task: não invente dependência aqui". Calibrado
+sobre as 52 tasks reais do `haiku`, agora como fixture da suíte
+(`test/fixtures/haiku-124.project-phases.md`): exatamente os oito conflitos
+(modulos.ts e navegacao.ts × P3–P6) nas linhas publicadas, donos P1/P2 e P2,
+componentes `api-base` e `web-shell`; dezenas de outras obrigações de escrita
+lidas sem conflito, inclusive as sequenciais (P2 recria `app.ts`,
+`interface.ts`, `index.ts` da P1; P7 ajusta `navegacao.ts`, `App.tsx`); e o
+mesmo plano com as oito tasks corrigidas como o auditor mandou passa limpo.
+
+**Orquestrador.** `auditOnce` do plano ganha o I-18 como self-check
+mecânico, depois do I-16 e antes do dimensionamento: `mechanical: true`,
+`phase` por achado, `where: P<n>.T<m> · linha L` (`achadoMecanico`), problema
+`I-18: …`, correção = a dica acima. O ENDEREÇO DE TASK é o que faltava
+também ao I-16 e foi corrigido junto: `Phase N · linha L` localizava só a
+fase, `preserveUnaddressedTasks` devolvia a reescrita inteira, e as tasks
+vizinhas perdiam bytes e aprovação sem nenhum achado pedir; com `P2.T1` só a
+task em conflito muda e as outras voltam byte a byte, que é o que a emenda
+promete — e o envelope (`Depends on`) continua sendo o do harness, como o
+teste 9/10/11 prova com uma emenda que tenta mexer nos dois. O endereço
+expôs um defeito antigo de `preserveUnaddressedTasks`: quando a emenda APAGA
+a task endereçada (a task que era a suíte, no I-16) ou a funde noutra, não
+há bloco para pôr no lugar, e a função deixava o bloco original — a correção
+pedida era descartada em silêncio e o I-16 voltava a cada rodada sobre a
+task que o escritor tinha removido. Agora a reescrita inteira vale nesse
+caso, como já valia para a divisão pedida (`test/contract/drift.spec.ts`). Vai à fase que
+escreve — nunca à dona — pelo canal das emendas (`amendPhasePrompt`), com
+orçamento mecânico próprio (`maxMechanicalRounds`), sem auditor, sem triagem
+(o self-check devolve antes de qualquer chamada de modelo) e sem pergunta ao
+desenvolvedor; esgotado o escritor, a escada da §121 (reparo pelo auditor com
+`repairBlock`, validação pelo verifier) e, no fim, o impasse mecânico de
+sempre. `evaluateReadiness` ganha o item "propriedade" (13 itens): o gate
+RALPH READY recusa publicar o que o ciclo devolveria — nem "publicar" no
+impasse passa por ele, como já era com cobertura e I-16. E o `change`
+(`change/orchestrator.ts`), que não passa por `auditOnce` nem por
+`evaluateReadiness` — nunca passou: não tem I-16, cobertura nem
+dimensionamento, e a §123 o deixou fora do I-17 de propósito —, ganha a
+mesma conferência sobre o documento montado antes de gravar: a fase nova em
+conflito é pedida de novo uma vez, com o achado ("## Your previous attempt
+was rejected (I-18)"); se insistir, `ChangeBlockedError` com o arquivo e as
+fases, e o plano em disco não muda. Era a única porta por onde um plano com
+escrita concorrente chegava ao build sem gate.
+
+**Triagem.** O prompt troca "if any valid implementation satisfies both, use
+ADVISORY" pelas três situações do pedido: KEEP quando os documentos, COMO
+ESTÃO ESCRITOS, ordenam ou permitem comportamento incompatível mesmo que um
+implementador cuidadoso o evitasse ("a possible implementation is not a
+correction; the executor follows the text literally, so the text must change
+— that is a localized documentary fix, and it is KEEP"); ADVISORY só para
+falso positivo — o trecho acusado não diz o que o achado afirma, ou um
+contrato explícito já o resolve — citando ESSE trecho; nunca por uma
+interpretação que o documento não estabelece nem pela intenção da
+arquitetura quando o texto da fase a contradiz; a substituição entre fases é
+sequência quando a fase posterior ORDENA a substituição e depende da
+anterior, "a replacement nobody orders is not a sequence". E a metade em
+código, `applyMaterialityReview`: um achado que envolve duas ou mais fases —
+as citadas no endereço mais a fase declarada por quem chamou, lidas pelo
+MESMO tokenizador que escolhe os destinos das emendas (`phaseReferences`,
+`contract/phase-references.ts`, usado por `affectedPhases` e pela triagem;
+nenhuma regex de fase fora do contrato) — só é descartado se a evidência cita
+CADA uma dessas fases; caso contrário o parecer é recusado ("a triagem
+descartou um conflito entre as fases 1, 3, 4, 5, 6 sem citar o texto da(s)
+fase(s) 3, 4, 5, 6") e o bloqueio continua, como já acontecia com citação
+inventada. O achado POR FASE ("T1.C1 vs P1.T1.C1", `phase: 2`) recebe os
+dois lados na mesa — `materialityInput` une a fase declarada às citadas ao
+escolher as fontes, em vez de parar na declarada como a emenda faz — e exige
+os dois: no `haiku` os auditores por fase também apontaram a escrita
+concorrente, e a fundação acusada nunca chegava à triagem. Uma citação que é
+só rótulo estrutural ("**Acceptance criteria:**", que existe em toda fase)
+não prova nada e é recusada como inexistente. É o §6.A do pedido — "pode ser
+descartado com evidência ESPECÍFICA" — tornado verificável: para dizer que a
+fase acusada não ordena o que o achado afirma, é preciso ter o texto dela na
+mesa. O parecer real da rodada 4 do `haiku` (F6: P1 + esqueleto) é recusado
+por essa regra; um falso positivo de verdade — as fases corrigidas, que não
+ordenam a escrita, cada uma citada — continua descartável, e o código
+concorda (zero conflitos no mesmo plano); um achado de uma fase só continua
+descartável com uma citação.
+
+**Prompt da fase.** Uma regra nova em "Writing for an economical executor":
+arquivo compartilhado de um componente que esta fase só CONSOME é consumido,
+nunca reregistrado; quando a fundação entrega o ponto de extensão já com a
+entrada deste módulo, a fase implementa os próprios arquivos e os critérios
+verificam que a entrada existe; quando o componente compartilhado está entre
+os DESTA fase, a arquitetura a ordenou depois das outras que o editam e a
+task escreve o registro (a terceira saída da §119 continua válida); a task
+que manda acrescentar ou registrar em arquivo que outra fase sem ordem com
+esta também edita é recusada mecanicamente (I-18); a ordem entre fases é da
+arquitetura. É a última defesa, não a única.
+
+### 124.5 O que NÃO muda, de propósito
+
+- O build (`src/loop/`) e o escalonador: o I-18 protege o que eles leem, sem
+  tocá-los. A arquitetura continua serializando por componente (§119) — o
+  I-18 nunca acrescenta `dependsOn`: reporta, e a emenda não tem como mudar o
+  envelope da fase.
+- A triagem continua existindo, com o mesmo custo (uma chamada quando há
+  achados de modelo), e falso positivo continua descartável — com o texto
+  dos dois lados.
+- Nenhuma chamada no caminho limpo: o I-18 é determinístico; o teste 19
+  prova a lista exata de chamadas (quatro escritas, cinco leituras, ensaio).
+- Nenhum papel novo, nenhuma dependência nova, nenhum limite de retries
+  alterado.
+- O self-check mecânico continua devolvendo UMA classe por rodada (referência
+  de design, cobertura, I-16, I-18, task inchada, dimensionamento), com um
+  orçamento mecânico só (`maxMechanicalRounds`, sem o crédito de progresso
+  da §120): o I-18 alonga essa cadeia em um degrau. Juntar as classes numa
+  devolução só é a melhoria certa, e fica anotada; não é desta correção.
+- O que o ADVISORY continua fazendo: aprovar a fase e gravar a coerência
+  como aprovada (orchestrator, depois da triagem). Um achado descartado com
+  os dois lados citados não é reverificado enquanto os endereços não mudam —
+  é o preço da memória de julgamentos (§120), e é a pergunta 5 do pedido,
+  que segue respondida "não" para tudo o que não é I-18.
+
+### 124.6 Testes: RED → GREEN
+
+`test/contract/ownership.spec.ts` (25), sobre as tasks reais do `haiku` e os
+casos da revisão adversarial: leitura das obrigações de escrita (criar,
+acrescentar, registrar, ajustar, "registrá-la"; consumo, origem, presente
+descritivo e condicional ignorados; diretório explícito), critérios nunca
+são escrita, os cenários 1, 2, 3, 4, 5, 6, 14/15, 16 e a forma do erro;
+negação e preposição antes do verbo; ponto-e-vírgula, dois-pontos,
+parênteses e passiva; genitivo e locativo composto como destino, origem como
+origem; código entre crases; nome com ponto na prosa, barra invertida, glob;
+coordenação que fecha a subordinada e homógrafos; nome solto ambíguo contra
+arquivo de raiz; o mesmo em inglês; criador entre as concorrentes, dono que
+todas alcançam, fundação implícita como no escalonador, acento preservado; e
+a calibração reproduzível sobre o plano real como fixture (os oito conflitos
+nas linhas publicadas, dezenas de obrigações sem conflito, o plano corrigido
+limpo). `test/loop/escalonador-contrato.spec.ts` (6): `effectiveDependencies`
+igual a `dependenciasEfetivas` em seis formas de `Depends on`.
+`test/audit/materiality.spec.ts` (+5): parecer que cita só um lado recusado
+e nomeando a fase que faltou; parecer que cita só esqueleto/arquitetura/pedido
+recusado; achado de uma fase só continua descartável; achado POR FASE
+recebe e exige os dois lados; rótulo estrutural não é citação. (O teste que
+procurava frases no prompt saiu: o pedido proíbe esse tipo de teste.)
+`test/change/change.spec.ts` (+2): duas fases novas sem ordem que escrevem no
+mesmo arquivo voltam ao escritor com o I-18 e o plano sai sem a escrita; o
+escritor que insiste para o `change` sem publicar. `test/init/triagem-124.spec.ts`
+(10), provider falso sobre um esqueleto, uma arquitetura e fases modeladas no
+Parallel Lab (fundação com `modulos.ts` e as duas entradas; dois módulos sem
+ordem entre si mandando registrar de novo): 9/10/11 emenda só nas fases que
+escrevem, com `P2.T1` no endereço, I-18, dono e componente no prompt,
+nenhuma triagem, instrução contraditória fora do publicado, contrato do
+produto e critério de estado preservados — e a emenda INVASIVA (que reescreve
+a task vizinha e tenta acrescentar `Phase 3` ao `Depends on`) tem a task
+vizinha devolvida byte a byte e o envelope mantido pelo harness; 12 escritor
+insiste, auditor repara com o `repairBlock`, só o verifier lê depois; 13
+escritor, reparador e "publicar" do desenvolvedor: NOT READY pelo item
+"propriedade", nenhum auditor de modelo leu o plano contaminado, menos de 30
+chamadas; 13 (gate) o plano do Haiku reprova em `evaluateReadiness` e o
+corrigido passa; 7 o parecer real da rodada 4 não remove o bloqueio; 8 o
+falso positivo de verdade — fases corrigidas, cada uma citada — é descartado
+e o I-18 concorda; 18 `raiz` → `root` sem substituição ordenada: parecer com
+só P1 recusado, fase 1 emendada para `root`, sem ressalva; 17 `raiz` → `root`
+com a fase 2 ordenando a reescrita: parecer com P1 e P2 aceito, zero emendas,
+ressalva; 19 caminho limpo com a lista exata de chamadas; 20 auditor que
+reinsiste depois de resolvido: o I-18 devolveu uma vez e não volta a
+disparar, a escada sobe os degraus de sempre (texto idêntico, troca de
+estratégia, dois reparos) e termina em `InitBlockedError` — com a altura
+exata pinada (4 coerências, 4 triagens, 27 chamadas), para que um degrau a
+mais seja regressão e não folga. RED contra a `fix/fronteira-init-plan-123`:
+23 falhas na primeira versão (os 12 do contrato por módulo inexistente; 3 da
+triagem; 7, 9/10/11, 12, 13, 13-gate, 18, 20; e a contagem de 12 → 13 itens
+do gate); a segunda versão, depois da revisão adversarial, acrescenta os
+casos acima, que falham sobre a primeira versão do detector por construção
+(negação, aparte, genitivo, crase, prosa com ponto, ambiguidade, fundação
+implícita, endereço de task, achado por fase, `change`). Verdes antes e
+depois, de propósito: 8, 17, 19 e o achado de uma fase só — são a
+preservação do descarte legítimo e do caminho limpo. `npm run check`:
+2725 testes em 143 arquivos.
+
+### 124.7 Custo
+
+No `haiku`, a sequência teria sido: rodada mecânica 1 (critérios a mais, como
+foi) → rodada mecânica 2: I-18 devolve oito achados a quatro fases, quatro
+emendas em paralelo (uma chamada cada) → auditoria por fase + coerência +
+triagem sobre um plano sem o conflito. Contra o que foi: três auditorias de
+coerência (170 KB de prompt cada), três triagens (120–136 KB cada), sete
+auditorias por fase e dez emendas gastas em torno de um defeito que a
+primeira leitura já tinha descrito. O caminho limpo não muda.
+
+### 124.8 Limitações e riscos
+
+- O I-18 lê a frase da task por forma. Verbo fora da lista ("Fazer o servidor
+  entregar a interface… no ponto de entrada em `src/servidor`", "Versionar"
+  entrou; "Garantir que `X` contém…" é verificação), nominalização ("Criação
+  de `X`"), ou um "Depois de criar `a.ts`, registrar em `b.ts`" (preposição
+  antes do infinitivo é lida como descrição) escapam; falso negativo é o
+  estado anterior. Falso positivo exige verbo de escrita governando um
+  caminho na mesma oração, em duas fases sem ordem efetiva, e custa uma
+  emenda com o dono nomeado.
+- Nome solto sem diretório fora da lista de raiz nunca conflita: "Criar
+  `rotas.ts`" numa fase e "`src/servidor/modulos/tarefas/rotas.ts`" noutra são
+  chaves diferentes, e um conflito real escrito assim escapa. O preço
+  inverso — dois `rotas.ts` de módulos diferentes acusados — era pior.
+- Quando nenhuma fase comum cria o arquivo em conflito (duas fases paralelas
+  que acrescentam dependências ao `package.json`), a dica manda retirar a
+  escrita e descrever a necessidade como critério; a lacuna resultante é do
+  arquiteto, e o run pode terminar no impasse mecânico com esse diagnóstico.
+  É a saída honesta: a emenda não tem como serializar, e o plano não é
+  reorganizado por um achado mecânico. Quando a própria fase em conflito é a
+  única criadora, a dica manda manter a criação e diz que a divisão está
+  errada — também é o arquiteto que resolve.
+- O self-check mecânico devolve uma classe por rodada e o orçamento mecânico
+  não credita progresso: um plano com quatro classes de defeito mecânico
+  corrigidas uma por rodada chega ao impasse mecânico depois de três rodadas
+  perfeitas, e o I-18 alonga a cadeia em um degrau. Juntar as classes numa
+  devolução só (como a §120 fez com os achados de modelo) é a próxima
+  melhoria do ciclo, não desta correção.
+- A regra dos dois lados vale para achados que envolvem duas ou mais fases
+  (citadas no endereço ou declaradas). Um achado de uma fase só ("Phase 6 ·
+  Task 2 manda adicionar o que a fundação entregou") continua descartável com
+  uma citação — é o prompt que o protege, e o I-18 quando há concorrência. E
+  a citação precisa existir e ser substantiva, não sustentar a razão: um
+  parecer que cita cada fase com uma frase qualquer passa — é o modelo que
+  julga, e é a segunda chamada barata que o pedido manteve.
+- O ADVISORY continua aprovando a fase e a coerência: um achado descartado
+  com os dois lados citados não é reverificado enquanto os endereços não
+  mudam (pergunta 5 do pedido). Só o I-18 é reconferido a cada rodada e no
+  gate, porque é código.
+- O auditor que insiste num ponto já resolvido pelo I-18 não é reconhecido
+  como repetido: sobe a escada de sempre (texto idêntico, troca de
+  estratégia, dois reparos) e termina. Com um verifier real, o parecer que
+  cita as fases corrigidas descarta o achado na primeira triagem; o teste 20
+  modela o pior caso, com a triagem mantendo tudo, e pina a altura da escada.
+- `raiz` → `root` continua decisão do modelo: a substituição ordenada pela
+  fase posterior é sequência (17), a só imaginada exige correção (18), e o
+  que separa as duas é o parecer citar — ou não — o texto da fase que ordena.
+- A regra nova no prompt da fase muda o texto de toda escrita de fase, e o
+  cache do `plan` é chaveado pelo prompt (`plan-cache.ts`): um `capivara plan`
+  retomado com este binário reescreve todas as fases e repaga as auditorias
+  das que mudarem de bytes. É a autoinvalidação de sempre, e é o que o
+  `haiku` retomado vai pagar — anotado aqui para não parecer defeito.
+- Validado só com o provider falso sobre os textos reais e com a calibração
+  sobre o plano real como fixture; nenhum run real depois desta implementação.

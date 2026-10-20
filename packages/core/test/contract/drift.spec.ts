@@ -71,6 +71,22 @@ describe("deriva da emenda", () => {
     expect(result).not.toContain("Uma reescrita não pedida");
   });
 
+  it("a task endereçada que a emenda apagou: a reescrita vale inteira, em vez de a correção ser descartada em silêncio (§124)", () => {
+    const before = fase([{ titulo: "Criar a tabela", criterios: 2 }, { titulo: "Entregar a suíte automatizada", criterios: 1 }]);
+    const after = fase([{ titulo: "Criar a tabela", criterios: 3 }]);
+    expect(preserveUnaddressedTasks(before, after, 1, [
+      { where: "P1.T2 · linha 12", problem: "I-16: a task prescreve teste", fix: "remova a task; o requisito vira critério" },
+    ])).toBe(after);
+    // Com a task endereçada ainda presente e a contagem igual, a vizinha continua protegida.
+    const renomeada = fase([{ titulo: "Criar a tabela", criterios: 2 }, { titulo: "O módulo tem comportamento verificável", criterios: 1 }])
+      .replace("- [ ] **Task:** Criar a tabela", "- [ ] **Task:** Criar a tabela REESCRITA");
+    const result = preserveUnaddressedTasks(before, renomeada, 1, [
+      { where: "P1.T2 · linha 12", problem: "I-16: a task prescreve teste", fix: "reescreva como requisito" },
+    ]);
+    expect(result).toContain("O módulo tem comportamento verificável");
+    expect(result).not.toContain("REESCRITA");
+  });
+
   it("proteção das tasks permite a divisão explicitamente pedida", () => {
     const before = fase([{ titulo: "Fazer tudo", criterios: 4 }]);
     const after = fase([{ titulo: "Fazer uma coisa", criterios: 2 }, { titulo: "Fazer outra", criterios: 2 }]);

@@ -16,10 +16,10 @@ export const PHASES_CONTRACT = "capivara-phases/v2" as const;
 
 export type InvariantCode =
   | "I-01" | "I-02" | "I-03" | "I-04" | "I-05" | "I-06" | "I-07"
-  | "I-08" | "I-09" | "I-10" | "I-11" | "I-12" | "I-13" | "I-14" | "I-15" | "I-16" | "I-17";
+  | "I-08" | "I-09" | "I-10" | "I-11" | "I-12" | "I-13" | "I-14" | "I-15" | "I-16" | "I-17" | "I-18";
 
 /** Quem verifica o invariante. O parser é puro; os demais recebem o mundo por parâmetro. */
-export type InvariantChecker = "parser" | "stamps" | "coverage" | "design-refs" | "test-prescription" | "mechanism-prescription";
+export type InvariantChecker = "parser" | "stamps" | "coverage" | "design-refs" | "test-prescription" | "mechanism-prescription" | "write-ownership";
 
 /**
  * Como o invariante se manifesta.
@@ -157,6 +157,13 @@ export const INVARIANTS: readonly Invariant[] = [
     title: "O esqueleto não fixa mecanismo de implementação sem autoridade: caminho de arquivo, variável de ambiente, comando ou código não entram nas regras, na stack, nas stories, nos fluxos nem nas fases",
     rationale: "O init levanta o produto; o plan decide a engenharia. Um mecanismo escrito no esqueleto chega ao arquiteto como requisito, a auditoria da arquitetura o cobra como fidelidade, e dois mecanismos inventados em regras diferentes viram uma contradição que ninguém tem autoridade para resolver — foi o CREATE TABLE do esqueleto contra a regra de migração no Parallel Lab. Um termo que o pedido ou uma decisão aceita do desenvolvedor contém não é prescrição: é dele, e passa. A entrada de stack que é só estrutura de pastas sai contando; o resto volta ao escritor nomeado, e o resíduo depois da escada de recuperação é publicado com ressalva, nunca bloqueia.",
     checkedBy: "mechanism-prescription",
+    enforcement: "rejects",
+  },
+  {
+    code: "I-18",
+    title: "Fases sem dependência entre si não recebem obrigação de escrita no mesmo arquivo: um arquivo compartilhado tem um dono por vez, e quem pode rodar ao mesmo tempo escreve só nos seus",
+    rationale: "O build executa ao mesmo tempo as fases que não dependem uma da outra, e a arquitetura serializa as que estendem o mesmo componente (§119) — mas a task de uma fase pode ordenar \"acrescentar em modulos.ts\" um registro que a fundação já entrega, e quatro fases paralelas editariam o mesmo arquivo, duplicando a entrada. No Parallel Lab o auditor viu, a triagem descartou por existir uma implementação que evitaria o conflito, e o plano foi publicado ordenando o que o executor literal não pode cumprir. A obrigação de escrita é a frase da task que ordena criar, acrescentar, registrar ou alterar um arquivo nomeado; um critério que verifica o estado final de um arquivo não é escrita, um arquivo citado como fonte é consumo, e fases com ordem entre si podem alterar o mesmo arquivo. A correção é documental e local — a fase escreve só nos seus arquivos — e a ordem entre fases é da arquitetura (dependsOn), nunca inventada por esta checagem.",
+    checkedBy: "write-ownership",
     enforcement: "rejects",
   },
 ] as const;

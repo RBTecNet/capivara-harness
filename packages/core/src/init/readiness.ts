@@ -1,13 +1,13 @@
 /**
  * O gate RALPH READY.
  *
- * Doze itens, todos verdadeiros ou o run termina em NOT READY — retomável e
+ * Treze itens, todos verdadeiros ou o run termina em NOT READY — retomável e
  * dizendo exatamente o que falta. Nunca "quase pronto": um pacote quase pronto
  * entregue ao loop vira uma aplicação quase feita, descoberta fase a fase, ao
  * preço de uma chamada de modelo por descoberta.
  */
 
-import { checkCoverage, checkDesignRefs, checkStamp, checkTestPrescription, parsePhases } from "../contract/index.js";
+import { checkCoverage, checkDesignRefs, checkStamp, checkTestPrescription, checkWriteOwnership, parsePhases } from "../contract/index.js";
 import type { ContractError, CoverageSources, StampInput, TestAuthority } from "../contract/index.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE } from "../authoring/ledger.js";
 
@@ -132,6 +132,23 @@ export function evaluateReadiness(input: ReadinessInput): Readiness {
     detail: document === null ? "não há plano válido para conferir" : testErrors.map((error) => `${error.message} → ${error.hint}`).join("\n"),
   });
   contractErrors = [...contractErrors, ...testErrors];
+
+  /*
+   * Propriedade de escrita (I-18, §124). O build executa ao mesmo tempo as
+   * fases sem dependência entre si; duas delas com obrigação de escrita no
+   * mesmo arquivo é o plano mandando o que o executor não pode cumprir — e o
+   * `haiku` publicou RALPH READY assim, porque a triagem descartou o que o
+   * auditor viu. O gate é a metade irmã do self-check do ciclo: o que o
+   * ciclo devolve ao escritor, o gate recusa publicar.
+   */
+  const ownershipErrors = document ? checkWriteOwnership(document) : [];
+  checks.push({
+    id: "propriedade",
+    title: "Fases que podem rodar ao mesmo tempo não escrevem no mesmo arquivo",
+    passed: document !== null && ownershipErrors.length === 0,
+    detail: document === null ? "não há plano válido para conferir" : ownershipErrors.map((error) => `${error.message} → ${error.hint}`).join("\n"),
+  });
+  contractErrors = [...contractErrors, ...ownershipErrors];
 
   const designErrors = document ? checkDesignRefs(document, input.designRoot, input.designExists) : [];
   checks.push({

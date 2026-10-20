@@ -28,6 +28,7 @@ import {
   assemblePhase,
   assemblePhasesDocument,
   buildStamp,
+  checkWriteOwnership,
   extractTasks,
   parseChange,
   parsePhases,
@@ -248,45 +249,6 @@ export async function runChange(options: ChangeOptions): Promise<ChangeOutcome> 
    * fases fechadas usa para reconhecê-las, e o build refaria a aplicação inteira
    * para acrescentar um formulário.
    */
-  const detalhadas: string[] = [];
-  for (const fase of aplicada.novas) {
-    announce(`  detalhando a fase ${fase.number} — ${fase.title}`);
-    let tasks = "";
-
-    for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
-      const saida = await options.call({
-        role: "writer",
-        stage: "change",
-        subject: `phase-p${String(fase.number).padStart(2, "0")}`,
-        attempt: tentativa,
-        prompt: phaseFromSlicePrompt({
-          language: options.language,
-          // O pedido da mudança é o que vale para as fases que ela cria.
-          request: options.request,
-          slice: sliceForPhase(aplicada.skeleton, fase.number),
-          phaseNumber: fase.number,
-          totalPhases: aplicada.skeleton.phases.length,
-          grammar: tasksBlock(fase.number),
-          maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
-          maxTasksPerPhase: MAX_TASKS_PER_PHASE,
-        }),
-      });
-
-      tasks = extractTasks(saida.stdout).tasks;
-      if (tasks.trim() !== "") break;
-      if (tentativa === 1) announce(`    a fase ${fase.number} voltou sem task nenhuma; pedindo de novo`);
-    }
-
-    if (tasks.trim() === "") throw new ChangeBlockedError(`a fase ${fase.number} voltou sem task nenhuma em duas tentativas`);
-
-    detalhadas.push(
-      assemblePhase(
-        { number: fase.number, title: fase.title, goal: fase.goal, dependsOn: fase.dependsOn, covers: fase.covers, areas: fase.areas },
-        tasks,
-      ).trim(),
-    );
-  }
-
   /*
    * O texto das fases que já existiam é preservado LETRA POR LETRA.
    *
@@ -297,6 +259,100 @@ export async function runChange(options: ChangeOptions): Promise<ChangeOutcome> 
   const anteriores = existentes.ok ? existentes.document.phases.map((fase) => fase.markdown.trim()) : [];
   if (anteriores.length === 0) {
     throw new ChangeBlockedError("não consegui ler as fases do plano atual; não vou reescrevê-lo sem saber o que já estava lá");
+  }
+
+  const detalhadas = new Map<number, string>();
+  const detalhar = async (fase: SkeletonPhase, tentativa: number, complemento: string): Promise<string> => {
+    const saida = await options.call({
+      role: "writer",
+      stage: "change",
+      subject: `phase-p${String(fase.number).padStart(2, "0")}`,
+      attempt: tentativa,
+      prompt:
+        phaseFromSlicePrompt({
+          language: options.language,
+          // O pedido da mudança é o que vale para as fases que ela cria.
+          request: options.request,
+          slice: sliceForPhase(aplicada.skeleton, fase.number),
+          phaseNumber: fase.number,
+          totalPhases: aplicada.skeleton.phases.length,
+          grammar: tasksBlock(fase.number),
+          maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
+          maxTasksPerPhase: MAX_TASKS_PER_PHASE,
+        }) + complemento,
+    });
+    return extractTasks(saida.stdout).tasks;
+  };
+  const montar = (fase: SkeletonPhase, tasks: string): string =>
+    assemblePhase({ number: fase.number, title: fase.title, goal: fase.goal, dependsOn: fase.dependsOn, covers: fase.covers, areas: fase.areas }, tasks).trim();
+
+  for (const fase of aplicada.novas) {
+    announce(`  detalhando a fase ${fase.number} — ${fase.title}`);
+    let tasks = "";
+
+    for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
+      tasks = await detalhar(fase, tentativa, "");
+      if (tasks.trim() !== "") break;
+      if (tentativa === 1) announce(`    a fase ${fase.number} voltou sem task nenhuma; pedindo de novo`);
+    }
+
+    if (tasks.trim() === "") throw new ChangeBlockedError(`a fase ${fase.number} voltou sem task nenhuma em duas tentativas`);
+    detalhadas.set(fase.number, montar(fase, tasks));
+  }
+
+  /*
+   * Propriedade de escrita (I-18, §124), também aqui.
+   *
+   * O `change` não passa pelo ciclo de auditoria do `plan`: ele detalha as
+   * fases novas e publica. Uma fase nova que manda "registrar o módulo em
+   * `modulos.ts`" ao lado de outra, nova ou antiga, sem ordem com ela, é o
+   * mesmo defeito que o `haiku` publicou — e daqui o build a executaria em
+   * paralelo sem gate nenhum. A conferência é a mesma do plano, sobre o
+   * documento montado; a fase nova em conflito é pedida de novo uma vez, com
+   * o achado; se insistir, o `change` para dizendo qual arquivo e quais
+   * fases, em vez de publicar o que o executor não pode cumprir.
+   */
+  const montarPlano = (): string =>
+    assemblePhasesDocument({
+      projectName: aplicada.skeleton.projectName,
+      stamp: buildStamp([{ name: "skeleton.md", content: renderSkeleton(aplicada.skeleton) }]),
+      overview: "",
+      phases: [...anteriores, ...[...detalhadas.keys()].sort((a, b) => a - b).map((numero) => detalhadas.get(numero)!)],
+      openQuestions: [],
+    });
+  const conflitosDeEscrita = (): { numero: number; mensagem: string; dica: string }[] => {
+    const lido = parsePhases(montarPlano());
+    if (!lido.ok) return [];
+    return checkWriteOwnership(lido.document).map((erro) => ({
+      numero: lido.document.phases.find((phase) => phase.tasks.some((task) => task.line === erro.line))?.number ?? 0,
+      mensagem: erro.message,
+      dica: erro.hint,
+    }));
+  };
+  let conflitos = conflitosDeEscrita();
+  const novas = new Set(aplicada.novas.map((fase) => fase.number));
+  if (conflitos.some((conflito) => novas.has(conflito.numero))) {
+    for (const fase of aplicada.novas) {
+      const desta = conflitos.filter((conflito) => conflito.numero === fase.number);
+      if (desta.length === 0) continue;
+      announce(`    a fase ${fase.number} escreve em arquivo que outra fase sem ordem com ela também escreve (I-18); pedindo de novo com o achado`);
+      const complemento = [
+        "",
+        "## Your previous attempt was rejected (I-18)",
+        ...desta.map((conflito) => `- ${conflito.mensagem}
+  what to do: ${conflito.dica}`),
+        "Return the whole phase again with the correction applied and nothing else changed.",
+      ].join("\n");
+      const tasks = await detalhar(fase, 3, complemento);
+      if (tasks.trim() !== "") detalhadas.set(fase.number, montar(fase, tasks));
+    }
+    conflitos = conflitosDeEscrita();
+  }
+  const persistentes = conflitos.filter((conflito) => novas.has(conflito.numero));
+  if (persistentes.length > 0) {
+    throw new ChangeBlockedError(
+      `a mudança escreve em arquivo compartilhado por fases sem ordem entre si (I-18), e o build as executaria ao mesmo tempo:\n${persistentes.map((conflito) => `- ${conflito.mensagem}`).join("\n")}\nA divisão da mudança precisa de um dono por arquivo, ou de ordem entre as fases.`,
+    );
   }
 
   /*
@@ -314,7 +370,7 @@ export async function runChange(options: ChangeOptions): Promise<ChangeOutcome> 
       ...(arquiteturaMd !== "" ? [{ name: "architecture.md", content: arquiteturaMd }] : []),
     ]),
     overview: `${aplicada.skeleton.phases.length} fases, fundação primeiro. O MVP fecha na fase ${aplicada.skeleton.mvpCutPhase}.`,
-    phases: [...anteriores, ...detalhadas],
+    phases: [...anteriores, ...[...detalhadas.keys()].sort((a, b) => a - b).map((numero) => detalhadas.get(numero)!)],
     openQuestions: [],
   });
 

@@ -461,10 +461,10 @@ describe("B-05 a B-07 · escrita", () => {
     expect(published).not.toContain("```markdown");
   });
 
-  it("B-06 esqueleto inválido bloqueia sem tentar reparo", async () => {
+  it("B-06 esqueleto inválido pelo writer e pelo auditor bloqueia com o defeito nomeado", async () => {
     const steps = happyPath();
     steps.unshift({ match: { role: "writer", stage: "authoring", subject: "skeleton" }, respond: { stdout: "{}" }, repeat: true });
-    await expect(init(steps)).rejects.toThrow(/esqueleto veio inválido duas vezes/);
+    await expect(init(steps)).rejects.toThrow(/esqueleto veio inválido três vezes, duas do writer e uma do auditor/);
   });
 
   it("B-07 parte com intervalo de fases é recusada pelo runtime", async () => {
@@ -578,10 +578,10 @@ describe("B-08 a B-12 · auditoria", () => {
     expect(outcome.rendered).toContain("Ressalvas do auditor");
   });
 
-  it("B-12 auditor com saída inválida duas vezes bloqueia com diagnóstico", async () => {
+  it("B-12 auditor com saída inválida duas vezes passa ao verifier; inválida de novo, bloqueia com diagnóstico", async () => {
     const steps = happyPath();
     steps.unshift({ match: { role: "auditor", stage: "audit" }, respond: { stdout: "achei bom" }, repeat: true });
-    await expect(init(steps)).rejects.toThrow(/saída inválida duas vezes/);
+    await expect(init(steps)).rejects.toThrow(/saída inválida três vezes \(auditor, auditor, verifier\)/);
   });
 });
 
@@ -755,7 +755,9 @@ describe("B-35 · impasse do auditor", () => {
     const steps = happyPath();
     steps.unshift({
       match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
-      respond: { stdout: (call) => call.attempt < 3 ? reject("Phase 1", "falta a restrição", "declare a restrição") : approve() },
+      // Duas devoluções ao escritor, dois reparos do auditor validados pelo verifier (§121), uma
+      // arbitragem; só então a prosa do impasse — e o "reiniciar" que este cenário prova.
+      respond: { stdout: (call) => call.attempt < 5 ? reject("Phase 1", "falta a restrição", "declare a restrição") : approve() },
       repeat: true,
     });
     const agent = fakeAgent(steps);

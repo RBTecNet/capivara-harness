@@ -10120,3 +10120,154 @@ auditorias. `npm run check`: 2623 testes em 137 arquivos, verde.
   reescreve a frase de um mesmo defeito faz um "novo" de um "persistente". O
   pedido de repetir palavra por palavra existe por isso.
 - Nenhum run real depois desta correção.
+
+## §121 — RECOVERY FIRST: o INIT e o PLAN trabalham para concluir a etapa
+
+### 121.1 Os caminhos de interrupção, e a causa comum
+
+O orquestrador tinha dezesseis `InitBlockedError`. Os operacionais ficam
+(provider mudo duas vezes, geração cortada por tokens, credencial recusada,
+esqueleto ausente). Os recuperáveis viviam em quatro laços, e todos tinham a
+mesma causa: o escritor era a única alternativa de correção, e o teto dele
+era o fim do processo.
+
+- **Esqueleto** (`init`): três tentativas do writer com os defeitos nomeados;
+  inválido de novo, parava.
+- **Arquitetura** (`plan`): três estruturas inválidas do writer paravam;
+  devoluções do auditor até o teto (§120), uma mudança de estratégia (§119),
+  e parava — era o caso B do pedido: o último achado pedia acrescentar ao
+  contrato da `api` a regra do `.env`/`.gitignore` que o esqueleto já tinha,
+  correção localizada e objetiva, e o run acabou.
+- **Escrita de fase**: duas respostas sem task do writer paravam.
+- **Ciclo de auditoria do plano**: teto do auditor, arbitragem ao
+  desenvolvedor, impasse (publicar/abortar/decidir); e "o ciclo não
+  convergiu" quando a volta estourava.
+- **Saída inválida do auditor** duas vezes parava — sem nunca perguntar a
+  outro papel.
+
+A separação escritor/auditor estava sendo lida como "o auditor nunca
+escreve". A independência que o contrato exige é a do VEREDITO: quem
+reparou não aprova o que reparou.
+
+### 121.2 A política, a mesma nos quatro laços
+
+A escada, do mais barato ao mais caro; cada degrau só é pago quando o
+anterior falhou, e o caminho sem defeito não paga nenhum:
+
+1. **Determinístico** (já existia e ficou): travessão no finding (§117),
+   reparo do esqueleto e da arquitetura, serialização por dependência
+   (§119), cache de esqueleto, arquitetura, fases e aprovações.
+2. **Emenda ao escritor** com os achados consolidados (§120), só nas partes
+   afetadas, com `preserveUnaddressedTasks` e a recusa da emenda inútil.
+3. **Progresso por evidência** (`balancoDaRodada`, §120): fechados,
+   persistentes, novos, regressões, texto idêntico. A rodada que avança não
+   gasta o teto; o teto duro limita o auditor sem fim.
+4. **Mudança de estratégia**: na arquitetura, resolver por ordem (§119);
+   no plano, o texto idêntico muda de estratégia em vez de repetir.
+5. **Reparo pelo auditor** (`repairBlock`, `prompts/repair.ts`): o papel
+   `auditor` recebe o MESMO prompt do escritor — emenda da fase, arquiteto,
+   esqueleto — mais o bloco de reparo: os achados pendentes, o histórico
+   compacto das tentativas (`writerDid`), e os limites (só o que os achados
+   nomeiam; nenhum requisito, regra, decisão ou story a mais ou a menos;
+   nunca abrir decisão de produto; a mudança mais simples). Ele produz o
+   documento, não uma opinião.
+6. **Validação independente pelo verifier**: depois de um reparo, toda
+   leitura daquele documento é do papel `verifier`, em sessão própria, com o
+   mesmo prompt de auditoria. Aprovou, publica; reprovou, os achados voltam
+   ao reparador — até dois reparos por documento.
+7. **Parar**: só depois disso, com o diagnóstico: o que continua aberto, o
+   balanço de cada rodada, e "Estratégias tentadas, nesta ordem" — nunca
+   "tentativas esgotadas". O estado válido está em disco e `capivara plan`
+   retoma do cache.
+
+Onde cada degrau entrou:
+
+- `auditCall(subject, attempt, prompt, papel)`: duas saídas inválidas do
+  papel pedido, a terceira é do outro papel de julgamento.
+- Esqueleto: a terceira tentativa é do auditor com o bloco de reparo.
+- `desenharArquitetura(extras, papel)`: três estruturas inválidas do writer
+  passam ao auditor (duas tentativas); o `arquiteturaReparada` faz a
+  auditoria seguinte ser do verifier.
+- `auditarArquitetura`: devoluções com progresso (§120) → estratégia (§119)
+  → reparo 1 → validação → reparo 2 → validação → diagnóstico.
+- `escreverFases`: a terceira tentativa sem task é do auditor.
+- `auditLoop` do plano: modo de reparo em `ask-developer` (teto sem
+  progresso, texto idêntico, estrutura fora dos limites): a emenda passa ao
+  auditor (`OpcoesDaEmenda.papel`, com `historico`), a leitura ao verifier;
+  dois reparos; depois, a arbitragem e o impasse de sempre.
+
+### 121.3 Gatilhos, orçamento e observabilidade
+
+O reparador entra por evidência, não por contador: texto idêntico
+(`semAvanco`), teto SEM progresso esgotado, estrutura fora dos limites
+(mecânico), estrutura inválida repetida. Nunca por uma falha transitória
+(o silêncio do provider já tinha a segunda chance) nem por um defeito que o
+código resolve. O orçamento distingue: devoluções com progresso (não gastam
+o teto), sem progresso (gastam), mudança de estratégia (uma), reparos (dois
+por documento), validações (uma por reparo). Tudo finito; nada publica por
+cansaço: o verifier reprovando, o documento não sai.
+
+Cada passo vai ao `events.tsv` (`authoring · <doc> · retry · reparo pelo
+auditor (n/2): <motivo>`; `audit · … · started · validação independente pelo
+verifier`) e ao log em uma linha; o diagnóstico final lista as estratégias
+por documento (`registrarEstrategia`).
+
+### 121.4 Autoridade e o que o reparador não pode
+
+A hierarquia da §118 continua: o bloco de reparo proíbe mudar requisito,
+regra, decisão ou story, e manda não abrir decisão de produto. O verifier
+confere fidelidade como o auditor confere (é o mesmo prompt). Uma
+`CAPIVARA_DECISION` genuína levantada por qualquer dos dois vai à
+entrevista, como antes; a que é regra do harness vira achado (§118). O
+desenvolvedor não é chamado para engenharia: a arquitetura não tem mais
+impasse interativo (§119), e o plano só chega à arbitragem depois dos dois
+reparos — e a arbitragem é sobre leituras das fontes, não sobre mecanismo.
+
+### 121.5 Impacto e compatibilidade
+
+- O caminho sem defeito é idêntico: nenhum papel novo é chamado (teste 13).
+- Os roteiros do provider falso ganharam uma regra: o auditor que REPARA cai
+  no passo do escritor e o verifier que VALIDA cai no passo do auditor quando
+  não têm passo próprio. É o que os cenários antigos modelam (a correção
+  improdutiva), e por isso onze expectativas de mensagem ou contagem
+  mudaram (B-06, B-12, B-35 "reiniciar", convergência, §116, §119, §120):
+  nenhuma afrouxou um gate; todas contam agora o reparo e a validação.
+- Sem papel novo na configuração: `auditor` e `verifier` já existiam no
+  INIT/PLAN. Se o desenvolvedor configurou o mesmo modelo para os dois, a
+  independência da validação é a da sessão, e o log diz "em sessão própria".
+- BUILD intocado.
+
+### 121.6 Testes e o preço de cada caminho
+
+`test/init/recovery-first-121.spec.ts`, 11 cenários com o provider falso:
+
+| cenário | o que prova | chamadas |
+|---|---|---|
+| 1, 3, 10, 14 | texto idêntico → reparo pelo auditor → validação pelo verifier → RALPH READY; ninguém aprova o próprio reparo | fase 2: 2 escritas, 1 reparo, 3 leituras (auditor, auditor, verifier) = 6, contra 3 devoluções + arbitragem |
+| 2, 4 | reparo parcial: a pendência segue, o que fechou fica; o escritor recebeu os dois achados | 2 reparos, 2 validações |
+| 5 | ponto novo na reauditoria depois de fechar o anterior: progresso preservado, sem reparo | 0 reparos |
+| 8 | reparador apaga regra confirmada: o verifier recusa, o reparo seguinte a preserva | 2 validações |
+| 9 | reparador introduz regressão: o verifier recusa e cita, o reparo seguinte desfaz | 2 validações |
+| 7 | decisão genuína de produto continua indo à entrevista | — |
+| 11 | provider mudo uma vez: nada se perde | fase 1 escrita 1 vez |
+| 13 | caminho sem defeito: nenhum reparo, nenhuma validação | 0 chamadas a mais |
+| 6 | conflito de contrato na arquitetura resolvido pelo arquiteto | 2 desenhos, 2 leituras |
+| 1 (arq.) | arquiteto não fecha: reparo pelo auditor, validação pelo verifier, publicada | 4 leituras do auditor, 1 do verifier, 1 reparo |
+| 12 | esgotamento: diagnóstico com as estratégias em ordem, estado em disco, nada publicado | — |
+
+Os cenários 6 (§119), 4–5 (§120) e 15 (§116–§120) têm também as suítes
+próprias. `npm run check`: 2634 testes em 138 arquivos, verde.
+
+### 121.7 O que ainda para, e limitações
+
+- Para, com razão: decisão de produto sem resposta; provider mudo duas
+  vezes, geração cortada, credencial recusada; dois reparos validados e
+  reprovados (diagnóstico); esqueleto/arquitetura/fase inválidos pelos dois
+  papéis; "abortar" do desenvolvedor.
+- O plano, esgotados os reparos, ainda chega à arbitragem e ao impasse do
+  desenvolvedor; é o caminho para desacordo de leitura das fontes, e não foi
+  tocado.
+- A independência da validação é por papel e sessão; se auditor e verifier
+  forem o mesmo modelo, é uma independência de sessão, registrada no log.
+- Reparos são dois por documento, fixos; não há flag.
+- Nenhum run real depois desta implementação.

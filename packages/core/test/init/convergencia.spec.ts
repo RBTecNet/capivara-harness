@@ -267,8 +267,9 @@ describe("o levantamento mostra o que o escritor entregou", () => {
       respond: {
         stdout: () => {
           voltas += 1;
-          // O mesmo achado duas vezes, sem citar fase: é o que abre o levantamento.
-          return voltas <= 2
+          // O mesmo achado quatro vezes, sem citar fase: duas ao escritor e duas aos reparos do
+          // auditor validados pelo verifier (§121) — só então o levantamento abre.
+          return voltas <= 4
             ? [
                 "CAPIVARA_AUDIT_STATUS: REJECTED",
                 "CAPIVARA_FINDING: Tarefa «Criar a migration de statuses» | falta dizer o que acontece com a linha existente | descreva o efeito",

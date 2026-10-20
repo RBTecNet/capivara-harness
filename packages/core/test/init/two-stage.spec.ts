@@ -99,8 +99,9 @@ describe("recuperação do protocolo do auditor — teste_openrouter", () => {
     const steps = skeletonPath();
     steps.unshift({ match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" }, repeat: true, respond: { stdout: invalid } });
     const agent = fakeAgent(steps);
-    await expect(runPlan({ projectRoot, request, ...comum, call: agent.call })).rejects.toThrow(/saída inválida duas vezes: APPROVED com CAPIVARA_FINDING/);
-    expect(agent.calls.filter(call => call.subject === "project-phases.md#P1")).toHaveLength(2);
+    await expect(runPlan({ projectRoot, request, ...comum, call: agent.call })).rejects.toThrow(/saída inválida três vezes \(auditor, auditor, verifier\): APPROVED com CAPIVARA_FINDING/);
+    // Duas do auditor e a terceira do verifier (§121), que no roteiro responde o mesmo texto inválido.
+    expect(agent.calls.filter(call => call.subject === "project-phases.md#P1").map(call => call.role)).toEqual(["auditor", "auditor", "verifier"]);
     await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).rejects.toThrow();
   });
 
@@ -283,9 +284,11 @@ describe("reprovação mecânica não é decisão de produto", () => {
     })).rejects.toThrow("Uma decisão escrita não dispensa os limites mecânicos");
     expect(paradaDoEstagio(new Error(rendered), "plan").natureza).toBe("modelo");
     expect(rendered).not.toContain("após 0 devoluções");
-    // O auditor do PLANO não é chamado: o impasse mecânico vem antes dele. A
-    // auditoria da arquitetura é outra etapa, e acontece antes de haver fases.
-    expect(agent.calls.filter(call => call.role === "auditor" && call.subject !== "architecture")).toHaveLength(0);
+    // O auditor do PLANO não é chamado a JULGAR: o impasse mecânico vem antes dele. Ele é chamado a
+    // REPARAR (§121), duas vezes, antes de o impasse chegar ao desenvolvedor. A auditoria da
+    // arquitetura é outra etapa, e acontece antes de haver fases.
+    expect(agent.calls.filter(call => call.role === "auditor" && call.stage === "audit" && call.subject !== "architecture")).toHaveLength(0);
+    expect(agent.calls.filter(call => call.role === "auditor" && call.stage === "authoring")).toHaveLength(2);
     const handoff = await readHandoff(projectRoot, initialized.outcome.runId, "project-phases.md");
     expect(handoff?.answers.some(answer => answer.decision.includes(decision)) ?? false).toBe(false);
     await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"))).rejects.toThrow();
@@ -567,7 +570,7 @@ describe("fase sem task é resposta inválida, não resultado", () => {
 
     // Antes disto o plano seguia vazio para a auditoria, o ensaio e o gate, que o
     // reprovava por I-07 — muitas chamadas depois de o defeito ser conhecível.
-    await expect(plan(steps)).rejects.toThrow(/sem nenhuma task em duas tentativas/);
+    await expect(plan(steps)).rejects.toThrow(/sem nenhuma task em três tentativas: duas do writer e uma do auditor/);
   });
 });
 

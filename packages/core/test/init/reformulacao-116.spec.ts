@@ -287,14 +287,15 @@ describe("6. um documento inválido não recebe aprovação indevida", () => {
     await expect(readFile(join(projectRoot, ".capivara/init/architecture.md"), "utf8")).rejects.toThrow();
   });
 
-  it("arquitetura inválida três vezes para o run com diagnóstico retomável, sem chamar o auditor", async () => {
+  it("arquitetura inválida três vezes passa ao auditor (§121); inválida de novo, para com diagnóstico retomável, sem auditoria", async () => {
     await init(skeletonPath());
     const passos = skeletonPath().filter((passo) => passo.match.subject !== "architecture");
-    passos.push({ match: { role: "writer", stage: "authoring", subject: "architecture" }, respond: { stdout: "{}" }, repeat: true });
+    passos.push({ match: { stage: "authoring", subject: "architecture" }, respond: { stdout: "{}" }, repeat: true });
     const agent = fakeAgent(passos);
-    await expect(runPlan({ projectRoot, request, language: "português do Brasil", call: agent.call, ask: responde })).rejects.toThrow(/a arquitetura veio inválida três vezes/);
-    expect(chamadas(agent, { stage: "authoring", subject: "architecture" })).toHaveLength(3);
-    expect(chamadas(agent, { role: "auditor" })).toHaveLength(0);
+    await expect(runPlan({ projectRoot, request, language: "português do Brasil", call: agent.call, ask: responde })).rejects.toThrow(/a arquitetura veio inválida 2 vezes pelo auditor, depois do writer/);
+    expect(chamadas(agent, { role: "writer", stage: "authoring", subject: "architecture" })).toHaveLength(3);
+    expect(chamadas(agent, { role: "auditor", stage: "authoring", subject: "architecture" })).toHaveLength(2);
+    expect(chamadas(agent, { stage: "audit" })).toHaveLength(0);
   });
 
   it("o plano reprovado por um auditor que não cede não vira RALPH READY", async () => {

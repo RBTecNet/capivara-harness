@@ -253,14 +253,18 @@ describe("no orquestrador, com o provider falso", () => {
 
   it("10. o conflito que o auditor não dá por resolvido para o run com diagnóstico: sem pergunta, sem publicar", async () => {
     const { run, agent, impasses, perguntadas } = await plan(roteiro(() => ARQ_PONTO_DE_EXTENSAO, () => ACHADO_REAL), { maxAuditReturns: 1 });
-    await expect(run).rejects.toThrow(/A auditoria de architecture.md não convergiu depois de 2 devolução\(ões\) e de uma mudança de estratégia/);
+    await expect(run).rejects.toThrow(/A auditoria de architecture.md não convergiu depois de 4 devolução\(ões\)/);
     expect(impasses()).toBe(0);
     expect(perguntadas.filter((pergunta) => pergunta.topic.startsWith("auditoria ·"))).toEqual([]);
-    // Teto 1 sem progresso: a primeira devolução já o esgota; uma mudança de estratégia, e para: dois desenhos, duas auditorias.
+    // Teto 1 sem progresso: a primeira devolução já o esgota; uma mudança de estratégia; dois reparos pelo
+    // auditor validados pelo verifier (§121); e para, com o diagnóstico das estratégias tentadas.
     const desenhos = por(agent, { role: "writer", stage: "authoring", subject: "architecture" });
     expect(desenhos).toHaveLength(2);
     expect(desenhos[1]?.prompt).toContain("## Change of strategy: resolve by order, not by mechanism");
+    expect(por(agent, { role: "auditor", stage: "authoring", subject: "architecture" })).toHaveLength(2);
     expect(por(agent, { role: "auditor", stage: "audit", subject: "architecture" })).toHaveLength(2);
+    expect(por(agent, { role: "verifier", stage: "audit", subject: "architecture" })).toHaveLength(2);
+    await expect(run).rejects.toThrow(/Estratégias tentadas, nesta ordem:/);
     await expect(readFile(join(projectRoot, ".capivara/init/architecture.md"), "utf8")).rejects.toThrow();
     await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).rejects.toThrow();
   });

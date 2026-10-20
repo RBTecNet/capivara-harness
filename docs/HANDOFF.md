@@ -16,10 +16,30 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.6.1 (`capivara --version`); planos da 0.5.0 e anteriores incompatíveis, ver §116 e §115.26 |
-| suíte | 2623 testes em 137 arquivos, `npm run check` verde |
+| suíte | 2634 testes em 138 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-19 — RECOVERY FIRST: o INIT e o PLAN trabalham para concluir (§121)
+
+Dezesseis lançamentos de bloqueio no orquestrador; os recuperáveis viviam em
+quatro laços (esqueleto, arquitetura, escrita de fase, ciclo de auditoria do
+plano), e todos paravam quando o ESCRITOR esgotava o teto — como se o escritor
+fosse a única alternativa. Agora cada laço sobe a mesma escada: correção
+determinística; emenda ao escritor com os achados consolidados e o balanço de
+progresso (§120); mudança de estratégia (§119); REPARO PELO AUDITOR, com o
+mesmo prompt do escritor mais o bloco de reparo (achados, histórico compacto,
+limites); e VALIDAÇÃO INDEPENDENTE PELO VERIFIER, em sessão própria — quem
+reparou nunca julga. Dois reparos por documento; esgotados, o plano segue para
+a arbitragem e o impasse de sempre, e a arquitetura para com o diagnóstico:
+o que ficou aberto e as estratégias tentadas, nesta ordem, com o estado em
+disco. Saída inválida do auditor duas vezes passa ao verifier; esqueleto,
+arquitetura e fase sem estrutura válida passam ao auditor. O caminho sem
+defeito não ganhou chamada nenhuma. Detalhe na §121 do PLANO; os onze
+cenários em `test/init/recovery-first-121.spec.ts`. No provider falso, o
+papel que repara cai no roteiro do escritor e o que valida no do auditor
+quando não têm passo próprio: é o que os roteiros antigos modelam.
 
 ## 2026-10-19 — auditoria consolidada e convergência por evidência (§120)
 
@@ -640,7 +660,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 2623 testes
+npm run check     # build + typecheck + 2634 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

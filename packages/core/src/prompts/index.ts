@@ -23,3 +23,5 @@ export { SURVEY_HEADER, surveyDomainPrompt, surveyMapPrompt } from "./survey.js"
 export type { SurveyDomainContext, SurveyMapContext } from "./survey.js";
 export { CHANGE_HEADER, changePrompt } from "./change.js";
 export type { ChangeContext } from "./change.js";
+export { REPAIR_MARKER, repairBlock } from "./repair.js";
+export type { RepairContext } from "./repair.js";

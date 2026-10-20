@@ -187,10 +187,13 @@ describe("no orquestrador, com o provider falso", () => {
 
   it("7, 10. o achado que persiste gasta o teto; esgotado, a estratégia muda uma vez e o run para sem publicar", async () => {
     const { run, agent, impasses } = await plan(() => consolidada([ACHADOS_REAIS[0]!]));
-    await expect(run).rejects.toThrow(/não convergiu depois de 4 devolução\(ões\)/);
-    // Devoluções 1 e 2 dentro do teto, a 3 esgota, a 4 é a estratégia trocada: quatro auditorias, quatro desenhos.
+    await expect(run).rejects.toThrow(/não convergiu depois de 6 devolução\(ões\)/);
+    // Devoluções 1 e 2 dentro do teto, a 3 esgota, a 4 é a estratégia trocada, a 5 e a 6 são os dois
+    // reparos pelo auditor validados pelo verifier (§121): seis desenhos, seis leituras, e para.
     expect(por(agent, { role: "auditor", stage: "audit", subject: "architecture" })).toHaveLength(4);
+    expect(por(agent, { role: "verifier", stage: "audit", subject: "architecture" })).toHaveLength(2);
     expect(por(agent, { role: "writer", stage: "authoring", subject: "architecture" })).toHaveLength(4);
+    expect(por(agent, { role: "auditor", stage: "authoring", subject: "architecture" })).toHaveLength(2);
     expect(impasses()).toBe(0);
     await expect(readFile(join(projectRoot, ".capivara/init/architecture.md"), "utf8")).rejects.toThrow();
   });
@@ -198,8 +201,10 @@ describe("no orquestrador, com o provider falso", () => {
   it("7. o auditor que sempre acha um ponto novo bate no teto duro: finito, e dito no diagnóstico", async () => {
     let auditorias = 0;
     const { run, agent, impasses } = await plan(() => consolidada([ACHADOS_REAIS[(auditorias += 1) % ACHADOS_REAIS.length]!]));
-    await expect(run).rejects.toThrow(/não convergiu depois de 7 devolução\(ões\)/);
+    await expect(run).rejects.toThrow(/não convergiu depois de 9 devolução\(ões\)/);
+    // Sete leituras do auditor até o teto duro e a estratégia; depois dois reparos validados pelo verifier.
     expect(por(agent, { role: "auditor", stage: "audit", subject: "architecture" })).toHaveLength(7);
+    expect(por(agent, { role: "verifier", stage: "audit", subject: "architecture" })).toHaveLength(2);
     expect(impasses()).toBe(0);
   });
 

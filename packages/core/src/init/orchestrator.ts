@@ -20,13 +20,13 @@ import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, buil
 import { CoherenceMemory } from "../audit/coherence.js";
 import { applyMaterialityReview, materialityInput, materialityPrompt } from "../audit/materiality.js";
 import type { Architecture, ContractError, CoverageSources, PhasesDocument, Skeleton, StampInput } from "../contract/index.js";
-import { DEFAULT_MAX_RETURNS, balancoDaRodada, descreverBalanco, fingerprint, nextAuditAction, parseAudit, persistentFindings, renderStandoff } from "../audit/index.js";
+import { DEFAULT_MAX_RETURNS, balancoDaRodada, descreverBalanco, fingerprint, nextAuditAction, parseAudit, persistentFindings, renderStandoff, writerDid } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark, Standoff } from "../audit/index.js";
 import { tasksBlock } from "../contract/templates.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, isRepairable, publish, repairDeterministically, stripAllMarkers, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, decisaoDeBanco, isNonAnswer, leituraInsistente, naoObjetivos, perguntaDeLacuna, perguntaDoBanco, perguntaInsistente, regrasDeBanco, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, suposicaoDelegada, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Assumption, Question } from "../interview/index.js";
-import { amendPhasePrompt, architectPrompt, architectureAuditPrompt, assessRehearsal, auditRetryPrompt, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
+import { repairBlock, amendPhasePrompt, architectPrompt, architectureAuditPrompt, assessRehearsal, auditRetryPrompt, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
 import type { AskedQuestion, CriterionRef, RehearsalResult, WriterContext } from "../prompts/index.js";
 import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEvents, runIdFor, runPaths, writeAtomic, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
@@ -323,6 +323,13 @@ interface OpcoesDaEmenda {
    * coerência: ela não nomeia fase porque o defeito é ENTRE elas.
    */
   somenteNomeadas?: boolean;
+  /**
+   * Quem emenda. O padrão é o escritor; em modo de reparo (§121) é o auditor,
+   * com o bloco de reparo anexado ao mesmo prompt de emenda.
+   */
+  papel?: "writer" | "auditor";
+  /** O histórico compacto que o reparador recebe. */
+  historico?: readonly string[];
 }
 
 interface Authored {
@@ -656,7 +663,11 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   let arquiteturaAtual: Architecture | null = null;
   let arquiteturaMd = "";
   /** Quantas vezes a arquitetura foi refeita por achado neste run. */
+  /** As estratégias de recuperação tentadas por documento (§121), para o diagnóstico. */
+  const estrategias = new Map<string, string[]>();
   let reorganizacoes = 0;
+  /** A arquitetura atual foi escrita pelo auditor: quem a julga é o verifier (§121). */
+  let arquiteturaReparada = false;
 
   /*
    * Um caminho só: uma leitura do produto inteiro, depois cada fase vendo a sua
@@ -992,6 +1003,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     writer: WriterContext,
     upstream: { name: string; content: string }[],
     attempt: number,
+    papel: "auditor" | "verifier" = "auditor",
   ): Promise<AuditVerdict> {
     const parsed = parsePhases(content);
     if (!parsed.ok) throw new InitBlockedError("o plano não passa no parser na hora de auditar", runId);
@@ -1088,7 +1100,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         .filter((fase) => !fasesAprovadas.has(sha12(fase.markdown.trim())))
         .map((fase) => () => {
           relatarFase({ kind: "audit", number: fase.number, state: "corrente" });
-          return auditCall(`project-phases.md#P${fase.number}`, attempt, () => promptDaFase(fase)).then((bruto) => {
+          return auditCall(`project-phases.md#P${fase.number}`, attempt, () => promptDaFase(fase), papel).then((bruto) => {
             /*
              * Quem chamou sabe a fase; o auditor não precisa dizê-la.
              *
@@ -1141,6 +1153,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             totalPhases: fases.length,
             ...(changed ? { changedSinceApproval: changed } : {}),
           }),
+          papel,
         );
         const reconciliado = coerencia.reconcile(verdict, criteria, autoridade);
         memoria.guardarCoerencia(coerencia.exportar());
@@ -1226,27 +1239,40 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * apenas colado a chave no fim da frase de abertura, e descobrir isso exigiu
    * abrir o log com `cat -A`. A causa cabia na tela.
    */
-  async function auditCall(subject: string, attempt: number, prompt: () => string): Promise<AuditVerdict> {
+  async function auditCall(subject: string, attempt: number, prompt: () => string, papel: "auditor" | "verifier" = "auditor"): Promise<AuditVerdict> {
     let ultima = "";
     const original = prompt();
     let proximoPrompt = original;
-    for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
-      ultima = await track({ role: "auditor", stage: "audit", subject, attempt, prompt: proximoPrompt });
+    /*
+     * Duas tentativas do papel pedido; a terceira é do OUTRO papel de
+     * julgamento (§121). Saída inválida duas vezes diz que este modelo não
+     * cumpre o protocolo neste prompt, não que a auditoria seja impossível —
+     * o verifier e o auditor leem o mesmo protocolo, em sessão própria.
+     */
+    const outro: "auditor" | "verifier" = papel === "auditor" ? "verifier" : "auditor";
+    for (let tentativa = 1; tentativa <= 3; tentativa += 1) {
+      const role = tentativa === 3 ? outro : papel;
+      if (tentativa === 3) {
+        announce(`  o ${papel} de ${subject} não cumpriu o protocolo duas vezes; a leitura passa ao ${outro}, em sessão própria`);
+        registrarEstrategia(subject, `auditoria de ${subject} refeita pelo papel ${outro} depois de duas saídas inválidas do ${papel}`);
+        await event("audit", subject, "retry", `saída inválida duas vezes; leitura pelo ${outro}`, attempt);
+      }
+      ultima = await track({ role, stage: "audit", subject, attempt, prompt: tentativa === 3 ? original : proximoPrompt });
       const parsed = parseAudit(ultima);
       if (parsed.ok) {
         // O que o parser consertou sozinho é dito: é uma chamada que não foi paga.
         for (const nota of parsed.applied) announce(`  ${nota}`);
         return parsed.verdict;
       }
-      if (tentativa === 2) {
+      if (tentativa === 3) {
         const amostra = ultima.trim().slice(0, 300).replace(/\n/g, "\n  ");
         throw new InitBlockedError(
-          [
-            `o auditor de ${subject} devolveu saída inválida duas vezes: ${parsed.defects.join("; ")}`,
+          diagnostico(subject, [
+            `a auditoria de ${subject} devolveu saída inválida três vezes (${papel}, ${papel}, ${outro}): ${parsed.defects.join("; ")}`,
             "",
-            "O que ele respondeu, do começo:",
+            "O que veio por último, do começo:",
             `  ${amostra || "(nada)"}`,
-          ].join("\n"),
+          ], "Nada do que já foi publicado se perdeu; `capivara plan` retoma daqui. Verifique os modelos dos papéis auditor e verifier."),
           runId,
         );
       }
@@ -1393,7 +1419,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     let esqueleto: Skeleton | null = null;
     let defeitos: string[] = [];
     for (let tentativa = 1; tentativa <= 3; tentativa += 1) {
-      const promptDoEsqueleto = skeletonPrompt({
+      const promptBase = skeletonPrompt({
         language: options.language,
         request: options.request.text,
         decisions: decisoes,
@@ -1403,6 +1429,16 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         maxCriteriaPerTask: MAX_CRITERIA_PER_TASK,
         ...(defeitos.length > 0 ? { defects: defeitos } : {}),
       });
+      // A terceira tentativa é do auditor, com o bloco de reparo (§121): duas estruturas inválidas do writer bastam.
+      const papel: "writer" | "auditor" = tentativa === 3 ? "auditor" : "writer";
+      if (papel === "auditor") {
+        announce("  o escritor devolveu o esqueleto inválido duas vezes; o auditor assume a escrita, com os defeitos nomeados");
+        registrarEstrategia("skeleton.md", "escrita do esqueleto pelo auditor depois de duas estruturas inválidas do writer");
+        await event("authoring", "skeleton", "retry", "inválido duas vezes; o auditor assume", tentativa);
+      }
+      const promptDoEsqueleto = papel === "auditor"
+        ? `${promptBase}\n\n${repairBlock({ document: "skeleton.md", findings: [], history: [`o writer devolveu duas estruturas inválidas: ${defeitos.join("; ")}`] })}`
+        : promptBase;
 
       /*
        * O esqueleto que este mesmo prompt já produziu não é pago de novo.
@@ -1414,7 +1450,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
        */
       const guardado = memoria.esqueletoEscrito(promptDoEsqueleto);
       if (guardado !== null) announce("  esqueleto reaproveitado de uma execução anterior: o prompt não mudou");
-      const saida = guardado ?? (await track({ role: "writer", stage: "authoring", subject: "skeleton", attempt: tentativa, prompt: promptDoEsqueleto }));
+      const saida = guardado ?? (await track({ role: papel, stage: "authoring", subject: "skeleton", attempt: tentativa, prompt: promptDoEsqueleto }));
 
       const lido = parseSkeleton(saida, { maxTasksPerPhase: MAX_TASKS_PER_PHASE, authority: autoridadeDeTeste() });
       if (!lido.ok) {
@@ -1450,7 +1486,11 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     }
 
     if (!esqueleto) {
-      throw new InitBlockedError(`o esqueleto veio inválido duas vezes: ${defeitos.join("; ")}`, runId);
+      throw new InitBlockedError(
+        diagnostico("skeleton.md", [`o esqueleto veio inválido três vezes, duas do writer e uma do auditor: ${defeitos.join("; ")}`],
+          "As respostas da entrevista estão em disco; `capivara init` retoma daqui. Verifique os modelos dos papéis writer e auditor."),
+        runId,
+      );
     }
 
     if (fora.length > 0) esqueleto = { ...esqueleto, nonGoals: fora };
@@ -1690,13 +1730,20 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * Uma arquitetura que passa no contrato, em até três tentativas com os
    * defeitos nomeados — e reaproveitada do cache quando o prompt não mudou.
    */
-  async function desenharArquitetura(extras: { defects?: string[]; previous?: { architecture: string; findings: Finding[]; resolved?: Finding[] }; strategy?: "serialize" }): Promise<Architecture> {
+  async function desenharArquitetura(
+    extras: { defects?: string[]; previous?: { architecture: string; findings: Finding[]; resolved?: Finding[] }; strategy?: "serialize"; historico?: string[] },
+    papel: "writer" | "auditor" = "writer",
+  ): Promise<Architecture> {
     let defeitos = extras.defects ?? [];
-    for (let tentativa = 1; tentativa <= 3; tentativa += 1) {
-      const prompt = promptDoArquiteto({ ...extras, ...(defeitos.length > 0 ? { defects: defeitos } : {}) });
+    const tentativas = papel === "writer" ? 3 : 2;
+    for (let tentativa = 1; tentativa <= tentativas; tentativa += 1) {
+      const base = promptDoArquiteto({ ...extras, ...(defeitos.length > 0 ? { defects: defeitos } : {}) });
+      const prompt = papel === "auditor"
+        ? `${base}\n\n${repairBlock({ document: "architecture.md", findings: extras.previous?.findings ?? [], history: extras.historico ?? [], limits: ["Keep every component, contract and phase the findings do not name exactly as they are."] })}`
+        : base;
       const guardada = memoria.arquiteturaEscrita(prompt);
       if (guardada !== null) announce("  arquitetura reaproveitada do cache: o prompt não mudou");
-      const saida = guardada ?? (await track({ role: "writer", stage: "authoring", subject: "architecture", attempt: tentativa, prompt }));
+      const saida = guardada ?? (await track({ role: papel, stage: "authoring", subject: "architecture", attempt: tentativa, prompt }));
 
       const lida = parseArchitecture(saida, esqueletoDeOrigem!, { maxTasksPerPhase: MAX_TASKS_PER_PHASE, authority: autoridadeDeTeste() });
       if (!lida.ok) {
@@ -1709,12 +1756,22 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       if (guardada === null) memoria.guardarArquitetura(prompt, saida);
       return lida.architecture;
     }
+    /*
+     * O arquiteto não produz estrutura válida: o auditor assume (§121). O que
+     * ele recebe é o mesmo prompt, os defeitos nomeados e o bloco de reparo; o
+     * que ele devolve passa pelo mesmo parser e pela mesma auditoria — que, por
+     * ter sido ele a escrever, é feita pelo verifier.
+     */
+    if (papel === "writer") {
+      announce(`  o arquiteto devolveu estrutura inválida ${tentativas} vezes; o auditor assume o desenho, com os defeitos nomeados`);
+      registrarEstrategia("architecture.md", `desenho pelo auditor depois de ${tentativas} estruturas inválidas do writer`);
+      await event("authoring", "architecture", "retry", "estrutura inválida três vezes; o auditor assume", tentativas);
+      arquiteturaReparada = true;
+      return await desenharArquitetura({ ...extras, defects: defeitos, historico: [...(extras.historico ?? []), `o writer devolveu ${tentativas} estruturas inválidas: ${defeitos.join("; ")}`] }, "auditor");
+    }
     throw new InitBlockedError(
-      [
-        `a arquitetura veio inválida três vezes: ${defeitos.join("; ")}`,
-        "",
-        "O esqueleto e as decisões continuam em disco; nada se perdeu. Verifique o modelo do papel writer e rode `capivara plan` de novo.",
-      ].join("\n"),
+      diagnostico("architecture.md", [`a arquitetura veio inválida ${tentativas} vezes pelo ${papel}, depois do writer: ${defeitos.join("; ")}`],
+        "O esqueleto e as decisões continuam em disco; nada se perdeu. Verifique os modelos dos papéis writer e auditor e rode `capivara plan` de novo."),
       runId,
     );
   }
@@ -1745,10 +1802,13 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     let atual = desenhada;
     const history: AuditAttempt[] = [];
     let estrategiaTrocada = false;
+    let reparos = 0;
+    const maxReparos = 2;
     const writer = writerContext([]);
 
     for (let attempt = 1; ; attempt += 1) {
       const md = renderArchitecture(atual, esqueletoDeOrigem!);
+      const papelDaAuditoria: "auditor" | "verifier" = arquiteturaReparada ? "verifier" : "auditor";
       const ultimaDevolucao = history.at(-1)?.verdict.findings ?? [];
       const promptDeAuditoria = architectureAuditPrompt({
         language: options.language,
@@ -1764,15 +1824,17 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         return atual;
       }
 
-      await event("audit", "architecture", "started", "", attempt);
-      const verdict = await auditCall("architecture", attempt, () => promptDeAuditoria);
+      await event("audit", "architecture", "started", papelDaAuditoria === "verifier" ? "validação independente pelo verifier" : "", attempt);
+      if (papelDaAuditoria === "verifier") announce("  validação independente da arquitetura reparada, pelo verifier");
+      const verdict = await auditCall("architecture", attempt, () => promptDeAuditoria, papelDaAuditoria);
       const doAuditor = await perguntarDecisoesDoAuditor("architecture.md", verdict, attempt, writer);
       const findings = [...doAuditor, ...verdict.findings];
 
       if (findings.length === 0) {
         memoria.guardarAprovacao(promptDeAuditoria);
         remarks.push(...verdict.remarks.map((remark) => ({ document: "architecture.md", remark })));
-        announce(`  arquitetura aprovada${verdict.remarks.length > 0 ? ` com ${verdict.remarks.length} ressalva(s)` : ""}`);
+        announce(`  arquitetura aprovada${papelDaAuditoria === "verifier" ? " pela validação independente" : ""}${verdict.remarks.length > 0 ? ` com ${verdict.remarks.length} ressalva(s)` : ""}`);
+        arquiteturaReparada = false;
         await event("audit", "architecture", "complete", "aprovada", attempt);
         return atual;
       }
@@ -1787,24 +1849,54 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
        * é `nextAuditAction`, o mesmo do plano (§120). O que o arquiteto já
        * fechou em rodadas anteriores vai junto, para não voltar.
        */
-      const acao = nextAuditAction({ document: "architecture.md", history, maxReturns: maxAuditReturns, maxMechanical: 1 });
-      if (acao.action === "return-to-writer") {
-        const abertos = new Set(findings.map(fingerprint));
-        const resolvidos = new Map<string, Finding>();
-        for (const tentativa of history.slice(0, -1)) {
-          for (const finding of tentativa.verdict.findings) if (!abertos.has(fingerprint(finding))) resolvidos.set(fingerprint(finding), finding);
-        }
-        announce(`  refazendo a arquitetura com os ${findings.length} achado(s) juntos (devolução ${history.length}; teto ${maxAuditReturns} sem progresso)`);
-        atual = await desenharArquitetura({ previous: { architecture: JSON.stringify(atual), findings, resolved: [...resolvidos.values()] } });
-        continue;
+      const abertos = new Set(findings.map(fingerprint));
+      const resolvidos = new Map<string, Finding>();
+      for (const tentativa of history.slice(0, -1)) {
+        for (const finding of tentativa.verdict.findings) if (!abertos.has(fingerprint(finding))) resolvidos.set(fingerprint(finding), finding);
       }
+      const previous = { architecture: JSON.stringify(atual), findings, resolved: [...resolvidos.values()] };
 
-      if (!estrategiaTrocada) {
-        estrategiaTrocada = true;
-        announce("  a correção não convergiu no orçamento; trocando a estratégia: resolver por ordem e dependência entre fases, sem mecanismo novo");
-        await event("authoring", "architecture", "retry", "mudança de estratégia: serialização por dependência", attempt);
-        atual = await desenharArquitetura({ previous: { architecture: JSON.stringify(atual), findings }, strategy: "serialize" });
-        continue;
+      /*
+       * Em modo de reparo toda emenda é do auditor e toda leitura é do
+       * verifier, dentro do orçamento de reparos; fora dele, o arquiteto
+       * emenda enquanto houver progresso e teto (§120), depois troca de
+       * estratégia (§119), depois entrega ao auditor (§121).
+       */
+      if (arquiteturaReparada) {
+        if (reparos < maxReparos) {
+          reparos += 1;
+          announce(`  o verifier devolveu a arquitetura reparada; o auditor repara de novo (${reparos}/${maxReparos})`);
+          registrarEstrategia("architecture.md", `reparo ${reparos} pelo auditor sobre os achados do verifier`);
+          await event("authoring", "architecture", "retry", `reparo ${reparos}/${maxReparos} pelo auditor`, attempt);
+          atual = await desenharArquitetura({ previous, historico: writerDid(history) }, "auditor");
+          continue;
+        }
+      } else {
+        const acao = nextAuditAction({ document: "architecture.md", history, maxReturns: maxAuditReturns, maxMechanical: 1 });
+        if (acao.action === "return-to-writer") {
+          announce(`  refazendo a arquitetura com os ${findings.length} achado(s) juntos (devolução ${history.length}; teto ${maxAuditReturns} sem progresso)`);
+          atual = await desenharArquitetura({ previous });
+          continue;
+        }
+
+        if (!estrategiaTrocada) {
+          estrategiaTrocada = true;
+          announce("  a correção não convergiu no orçamento; trocando a estratégia: resolver por ordem e dependência entre fases, sem mecanismo novo");
+          registrarEstrategia("architecture.md", `${history.length} devolução(ões) ao arquiteto; mudança de estratégia: serialização por dependência`);
+          await event("authoring", "architecture", "retry", "mudança de estratégia: serialização por dependência", attempt);
+          atual = await desenharArquitetura({ previous, strategy: "serialize" });
+          continue;
+        }
+
+        if (reparos < maxReparos) {
+          reparos += 1;
+          arquiteturaReparada = true;
+          announce(`  o arquiteto não fechou os achados nem com a estratégia trocada; o auditor assume o reparo (${reparos}/${maxReparos}) e o verifier valida, em sessão própria`);
+          registrarEstrategia("architecture.md", `reparo ${reparos} pelo auditor depois da estratégia trocada; validação independente pelo verifier`);
+          await event("authoring", "architecture", "retry", `reparo ${reparos}/${maxReparos} pelo auditor`, attempt);
+          atual = await desenharArquitetura({ previous, historico: writerDid(history) }, "auditor");
+          continue;
+        }
       }
 
       /*
@@ -1817,18 +1909,16 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       const insistentes = persistentFindings(history);
       await event("audit", "architecture", "blocked", "a auditoria da arquitetura não convergiu", attempt);
       throw new InitBlockedError(
-        [
-          `A auditoria de architecture.md não convergiu depois de ${history.length} devolução(ões) e de uma mudança de estratégia.`,
+        diagnostico("architecture.md", [
+          `A auditoria de architecture.md não convergiu depois de ${history.length} devolução(ões): o arquiteto, a estratégia trocada e ${reparos} reparo(s) pelo auditor não fecharam o que o ${papelDaAuditoria} aponta.`,
           "",
           ...history.slice(1).map((tentativa, index) => `  rodada ${tentativa.attempt}: ${descreverBalanco(balancoDaRodada(history, index + 1))}`),
           "",
-          "O auditor insiste em:",
+          "O que continua aberto:",
           ...insistentes.flatMap((finding) => [`  · ${finding.where}: ${finding.problem}`, `    correção pedida: ${finding.fix}`]),
           "",
-          "Isto é um conflito técnico entre o arquiteto e o auditor, não uma decisão de produto: nada aqui é seu para decidir.",
-          "O esqueleto, as decisões e a última arquitetura estão em disco; `capivara plan` retoma daqui sem repagar o que já passou.",
-          "Se o auditor insistir no mesmo ponto, troque o modelo do papel auditor ou do writer e rode de novo.",
-        ].join("\n"),
+          "Isto é um conflito técnico entre quem escreve e quem julga, não uma decisão de produto: nada aqui é seu para decidir.",
+        ], "O esqueleto, as decisões e a última arquitetura estão em disco; `capivara plan` retoma daqui sem repagar o que já passou. Se o mesmo ponto voltar, troque o modelo de um dos papéis e rode de novo."),
         runId,
       );
     }
@@ -1932,13 +2022,21 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
            * tentativa custa uma chamada. Descobrir no gate custa o run.
            */
           let tarefas: { tasks: string; applied: string[] } = { tasks: "", applied: [] };
-          for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
+          for (let tentativa = 1; tentativa <= 3; tentativa += 1) {
+            // A terceira é do auditor, com o bloco de reparo (§121): o escritor mostrou que não produz a fase.
+            if (tentativa === 3) {
+              announce(`  fase ${fase.number} sem task em duas tentativas do escritor; o auditor assume a escrita`);
+              registrarEstrategia(marca, "escrita pelo auditor depois de duas respostas sem task do writer");
+              await event("authoring", marca, "retry", "sem task duas vezes; o auditor assume", tentativa);
+            }
             const saida = await track({
-              role: "writer",
+              role: tentativa === 3 ? "auditor" : "writer",
               stage: "authoring",
               subject: `phase-p${String(fase.number).padStart(2, "0")}`,
               attempt: tentativa,
-              prompt: promptDaFase,
+              prompt: tentativa === 3
+                ? `${promptDaFase}\n\n${repairBlock({ document: marca, findings: [], history: ["o writer devolveu a fase sem task nenhuma, duas vezes"] })}`
+                : promptDaFase,
             });
             const semMortas = stripDeadDesignRefs(repairDeterministically(saida).content, designExiste);
             for (const conserto of semMortas.applied) announce(`    fase ${fase.number}: ${conserto}`);
@@ -1955,9 +2053,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
           if (contaTasks(tarefas.tasks) === 0) {
             throw new InitBlockedError(
-              `a fase ${fase.number} voltou sem nenhuma task em duas tentativas. ` +
-                "O escritor não produziu conteúdo — verifique o provider e o modelo desse papel antes de rodar de novo. " +
-                "As fases já escritas e a arquitetura continuam em cache.",
+              diagnostico(marca, [`a fase ${fase.number} voltou sem nenhuma task em três tentativas: duas do writer e uma do auditor.`],
+                "Nenhum dos dois papéis produziu conteúdo — verifique provider e modelo antes de rodar de novo. As fases já escritas e a arquitetura continuam em cache."),
               runId,
             );
           }
@@ -2090,12 +2187,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               const anterior = extractTasks(proximas[numero - 1] ?? "").tasks;
               const destaFase = deFase.filter(finding => affectedPhases([finding], partes.length).includes(numero));
               const relacionadas = new Set(destaFase.flatMap(finding => affectedPhases([finding], partes.length)));
-              const saida = await track({
-                role: "writer",
-                stage: "authoring",
-                subject: `phase-p${String(numero).padStart(2, "0")}`,
-                attempt,
-                prompt: amendPhasePrompt({
+              const papel = opcoes?.papel ?? "writer";
+              const promptDaEmenda = amendPhasePrompt({
                   language: options.language,
                   request: options.request.text,
                   current: anterior,
@@ -2106,7 +2199,15 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
                   ...(arquiteturaAtual ? { architecture: architectureSliceForPhase(arquiteturaAtual, numero) } : {}),
                   phaseNumber: numero,
                   grammar: tasksBlock(numero),
-                }),
+                });
+              const saida = await track({
+                role: papel,
+                stage: "authoring",
+                subject: `phase-p${String(numero).padStart(2, "0")}`,
+                attempt,
+                prompt: papel === "auditor"
+                  ? `${promptDaEmenda}\n\n${repairBlock({ document: `phase-p${String(numero).padStart(2, "0")}`, findings: destaFase, history: opcoes?.historico ?? [] })}`
+                  : promptDaEmenda,
               });
 
               const limpa = stripDeadDesignRefs(repairDeterministically(saida).content, designExiste);
@@ -2264,6 +2365,27 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         !/^(?:auditoria|ensaio|impasse)\b/u.test(topico(answer.questionId)),
     );
     return [options.request.text, ...doDesenvolvedor.map((answer) => answer.decision)];
+  }
+
+  /**
+   * As estratégias tentadas por documento (§121): o diagnóstico de um bloqueio
+   * diz o que ficou aberto e o que foi tentado, nunca só "tentativas esgotadas".
+   */
+  function registrarEstrategia(document: string, estrategia: string): void {
+    const lista = estrategias.get(document) ?? [];
+    lista.push(estrategia);
+    estrategias.set(document, lista);
+  }
+  function diagnostico(document: string, problema: string[], retomada: string): string {
+    const tentadas = estrategias.get(document) ?? [];
+    return [
+      ...problema,
+      "",
+      "Estratégias tentadas, nesta ordem:",
+      ...(tentadas.length > 0 ? tentadas.map((estrategia, index) => `  ${index + 1}. ${estrategia}`) : ["  (nenhuma recuperação se aplicava)"]),
+      "",
+      retomada,
+    ].join("\n");
   }
 
   function coberturaAtual(): CoverageSources {
@@ -3412,9 +3534,21 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     let attemptLimit = cycleBudget;
     /** Rodadas gastas com decisão do auditor — não são devolução de escrita. */
     let rodadasDeDecisao = 0;
+    /*
+     * Modo de reparo (§121): quando o escritor demonstrou que não fecha os
+     * pontos — texto idêntico, teto sem progresso, estrutura fora dos limites
+     * —, toda emenda passa ao auditor, com o histórico compacto, e toda
+     * leitura passa ao verifier, em sessão própria: quem reparou não julga.
+     * Dois reparos; depois disso o caminho é o de sempre, arbitragem e impasse.
+     */
+    let modoReparo = false;
+    let reparos = 0;
+    const maxReparos = 2;
+    const papelDaEmenda = (): "writer" | "auditor" => (modoReparo ? "auditor" : "writer");
     for (let attempt = 1; attempt <= attemptLimit; attempt += 1) {
       const content = authored.content;
-      const verdict = await auditOnce(document, content, writer, upstream, attempt);
+      if (modoReparo) announce(`  validação independente de ${document} reparado, pelo verifier`);
+      const verdict = await auditOnce(document, content, writer, upstream, attempt, modoReparo ? "verifier" : "auditor");
 
       /*
        * A decisão que o auditor levantou vem ANTES de o veredito entrar na
@@ -3457,9 +3591,14 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         anterior.verdict.status === "REJECTED" &&
         verdict.status === "REJECTED" &&
         verdict.mechanical !== true;
-      if (semAvanco) announce("  a emenda não mudou o texto e o auditor reprovou de novo; insistir não resolve — levando os pontos a você");
+      if (semAvanco) announce("  a emenda não mudou o texto e o auditor reprovou de novo; insistir não resolve — trocando de estratégia");
 
-      const action = nextAuditAction({ document, history, maxReturns: semAvanco ? 0 : maxAuditReturns, maxMechanical: maxMechanicalRounds });
+      const action = nextAuditAction({
+        document,
+        history,
+        maxReturns: semAvanco || (modoReparo && reparos >= maxReparos) ? 0 : maxAuditReturns,
+        maxMechanical: modoReparo && reparos >= maxReparos ? 0 : maxMechanicalRounds,
+      });
       if (action.action === "publish") return { content, remarks: verdict.remarks, authored };
 
       if (action.action === "ask-developer" && developerRuled) {
@@ -3478,6 +3617,28 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             })),
           ],
         };
+      }
+
+      if (action.action === "ask-developer" && reparos < maxReparos) {
+        reparos += 1;
+        modoReparo = true;
+        const motivo = semAvanco
+          ? "a emenda não mudou o texto"
+          : action.standoff.mechanical
+            ? "o escritor não adequou a estrutura aos limites"
+            : `o escritor não fechou os pontos em ${action.standoff.returns} devolução(ões)`;
+        announce(`  ${motivo}; o auditor assume o reparo (${reparos}/${maxReparos}) e o verifier valida, em sessão própria`);
+        registrarEstrategia(document, `reparo ${reparos} pelo auditor: ${motivo}; validação independente pelo verifier`);
+        await event("authoring", document, "retry", `reparo pelo auditor (${reparos}/${maxReparos}): ${motivo}`, attempt);
+        const historico = writerDid(history);
+        history.length = 0;
+        attemptLimit = attempt + cycleBudget;
+        authored = await authored.rewrite(action.standoff.auditorInsists, attempt + 1, { papel: "auditor", historico });
+        if (temDecisaoPendente(authored.content)) {
+          announce("  o reparo deixou decisão pendente; levando ao desenvolvedor antes de validar");
+          authored = await closeGaps(document, authored, writer);
+        }
+        continue;
       }
 
       if (action.action === "ask-developer") {
@@ -3528,14 +3689,14 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             } else {
               announce(`  ${decididos.length} ponto(s) voltam ao escritor com a sua decisão como autoridade`);
             }
-            authored = decididos.length > 0 ? await authored.rewrite(decididos, attempt + 1) : authored;
+            authored = decididos.length > 0 ? await authored.rewrite(decididos, attempt + 1, { papel: papelDaEmenda() }) : authored;
             continue;
           }
         }
 
         const rendered = renderStandoff(action.standoff);
         await event("audit", document, "blocked", "teto de devoluções esgotado", attempt);
-        if (!options.decideStandoff) throw new InitBlockedError(rendered, runId);
+        if (!options.decideStandoff) throw new InitBlockedError(diagnostico(document, [rendered], "O último estado válido está em disco; `capivara plan` retoma daqui, num terminal, para a sua decisão."), runId);
 
         const decision = (await options.decideStandoff(rendered, action.standoff)).trim();
         const normalized = decision.toLowerCase();
@@ -3555,7 +3716,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           attemptLimit = attempt + cycleBudget;
           await event("audit", document, "retry", "reinício da auditoria solicitado pelo desenvolvedor", attempt);
           announce(`  reiniciando correção e auditoria de ${document}; aprovação continua obrigatória`);
-          authored = await authored.rewrite(action.standoff.auditorInsists, attempt + 1);
+          authored = await authored.rewrite(action.standoff.auditorInsists, attempt + 1, { papel: papelDaEmenda() });
           continue;
         }
 
@@ -3652,7 +3813,12 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
        */
       const anteriores = history.slice(0, -1);
       const arbitradosDaVolta = await levantamentoDeAuditoria(document, content, action.findings, anteriores, attempt, writer, verdict.mechanical === true);
-      authored = await authored.rewrite([...decisoes, ...arbitradosDaVolta], action.attempt);
+      if (modoReparo) {
+        reparos += 1;
+        announce(`  o verifier devolveu ${document}; o auditor repara de novo (${reparos}/${maxReparos})`);
+        registrarEstrategia(document, `reparo ${reparos} pelo auditor sobre os achados do verifier`);
+      }
+      authored = await authored.rewrite([...decisoes, ...arbitradosDaVolta], action.attempt, modoReparo ? { papel: "auditor", historico: writerDid(history) } : {});
 
       /*
        * Decisão que aparece NA REESCRITA também vai ao desenvolvedor.
@@ -3674,7 +3840,11 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }
     }
 
-    throw new InitBlockedError(`o ciclo de auditoria de ${document} não convergiu`, runId);
+    throw new InitBlockedError(
+      diagnostico(document, [`o ciclo de auditoria de ${document} não convergiu: o teto de rodadas acabou com defeito material aberto.`],
+        "O último estado válido está em disco; `capivara plan` retoma daqui."),
+      runId,
+    );
   }
 
   async function auditOnce(
@@ -3683,6 +3853,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     writer: WriterContext,
     upstream: { name: string; content: string }[],
     attempt: number,
+    papel: "auditor" | "verifier" = "auditor",
   ): Promise<AuditVerdict> {
     // Self-check mecânico antes do auditor: erro de forma não custa modelo.
     if (document === "project-phases.md") {
@@ -3910,7 +4081,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * fases é o defeito que ninguém mais pega.
      */
     if (document === "project-phases.md") {
-      if (parsePhases(content).ok) return await auditPlanInParts(content, writer, upstream, attempt);
+      if (parsePhases(content).ok) return await auditPlanInParts(content, writer, upstream, attempt, papel);
 
       /*
        * Marcador pendente não decide como o plano é auditado.
@@ -3929,7 +4100,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       const semMarcas = stripAllMarkers(content);
       if (semMarcas.applied.length > 0 && parsePhases(semMarcas.content).ok) {
         announce(`  ${semMarcas.applied[0]}`);
-        return await auditPlanInParts(semMarcas.content, writer, upstream, attempt);
+        return await auditPlanInParts(semMarcas.content, writer, upstream, attempt, papel);
       }
     }
 
@@ -3952,6 +4123,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         })),
         content,
       }),
+      papel,
     );
   }
 

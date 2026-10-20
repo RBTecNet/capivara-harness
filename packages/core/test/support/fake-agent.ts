@@ -32,15 +32,27 @@ export function fakeAgent(steps: ScriptStep[]): FakeAgent {
     unmatched: [],
     call: async (call) => {
       agent.calls.push(call);
-      const index = steps.findIndex((step, position) => {
-        if (used.has(position) && step.match.attempt === undefined && step.repeat !== true) return false;
-        const { role, stage, subject, attempt } = step.match;
-        if (role !== undefined && role !== call.role) return false;
-        if (stage !== undefined && stage !== call.stage) return false;
-        if (subject !== undefined && subject !== call.subject) return false;
-        if (attempt !== undefined && attempt !== call.attempt) return false;
-        return true;
-      });
+      const procurar = (como: AgentCall): number =>
+        steps.findIndex((step, position) => {
+          if (used.has(position) && step.match.attempt === undefined && step.repeat !== true) return false;
+          const { role, stage, subject, attempt } = step.match;
+          if (role !== undefined && role !== como.role) return false;
+          if (stage !== undefined && stage !== como.stage) return false;
+          if (subject !== undefined && subject !== como.subject) return false;
+          if (attempt !== undefined && attempt !== como.attempt) return false;
+          return true;
+        });
+      /*
+       * Os papéis da recuperação (§121) caem no roteiro do papel que substituem
+       * quando não têm passo próprio: o auditor que REPARA responde como o
+       * escritor responderia, e o verifier que VALIDA responde como o auditor.
+       * É o que os roteiros antigos modelam — a correção improdutiva — sem que
+       * cada um precise de dois passos a mais. Quem quer provar a recuperação
+       * escreve o passo do papel, que tem precedência.
+       */
+      let index = procurar(call);
+      if (index === -1 && call.role === "auditor" && call.stage === "authoring") index = procurar({ ...call, role: "writer" });
+      if (index === -1 && call.role === "verifier" && call.stage === "audit") index = procurar({ ...call, role: "auditor" });
       if (index === -1) {
         agent.unmatched.push(call);
         // Falha alto: um default silencioso esconderia a regressão que o

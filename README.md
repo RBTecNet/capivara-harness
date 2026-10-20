@@ -2,7 +2,7 @@
 
 Do prompt à aplicação final, em três comandos.
 
-Versão **0.6.1**: planejamentos de versões anteriores são incompatíveis.
+Versão **0.6.2**: planejamentos de versões anteriores são incompatíveis.
 O plano deixou de prescrever testes (`capivara-phases/v2`) e passou a vir com a
 arquitetura e a infraestrutura decididas pelo `plan` (`capivara-planning/v3`).
 Em projetos existentes, gere novamente com `capivara init --fresh` e depois

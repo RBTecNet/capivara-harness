@@ -1463,13 +1463,35 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       if (guardado !== null) announce("  esqueleto reaproveitado de uma execução anterior: o prompt não mudou");
       const saida = guardado ?? (await track({ role: papel, stage: "authoring", subject: "skeleton", attempt: tentativa, prompt: promptDoEsqueleto }));
 
-      const lido = parseSkeleton(saida, { maxTasksPerPhase: MAX_TASKS_PER_PHASE, authority: autoridadeDeTeste() });
+      /*
+       * O mecanismo sem autoridade (I-17, §123) volta ao escritor nomeado nas
+       * duas primeiras tentativas e ao auditor na terceira. O que sobrar
+       * depois dela não bloqueia o run: o esqueleto é publicado com o resíduo
+       * em ressalva, e o arquiteto recebe a regra de que um mecanismo sem
+       * autoridade é escolha dele. Um run que para por causa de um caminho de
+       * arquivo numa regra é exatamente "encontrar um motivo para interromper".
+       */
+      const lido = parseSkeleton(saida, {
+        maxTasksPerPhase: MAX_TASKS_PER_PHASE,
+        authority: autoridadeDeTeste(),
+        mechanisms: tentativa === 3 ? "tolerate" : "reject",
+      });
       if (!lido.ok) {
         defeitos = lido.defects.map((defeito) => `${defeito.problem} → ${defeito.hint}`);
-        announce(`  o esqueleto veio com ${defeitos.length} defeito(s) de forma; pedindo de novo com eles nomeados`);
+        const comMecanismo = lido.defects.filter((defeito) => defeito.problem.includes("fixa mecanismo de implementação")).length;
+        announce(
+          `  o esqueleto veio com ${defeitos.length} defeito(s)${comMecanismo > 0 ? `, ${comMecanismo} dele(s) por fixar mecanismo de implementação que é do plano (I-17)` : " de forma"}; pedindo de novo com eles nomeados`,
+        );
         continue;
       }
       for (const conserto of lido.applied) announce(`    esqueleto: ${conserto}`);
+      if (lido.tolerated.length > 0) {
+        announce(`  o esqueleto segue com ${lido.tolerated.length} ressalva(s): mecanismo de implementação que o escritor e o auditor não retiraram; o plano decide por conta própria (I-17)`);
+        for (const residuo of lido.tolerated) {
+          announce(`    ressalva: ${residuo}`);
+          remarks.push({ document: "skeleton.md", remark: { where: "I-17", observation: `${residuo} — o plano escolhe o mecanismo; a regra vale pelo comportamento` } });
+        }
+      }
 
       /*
        * O gate é a autoridade sobre o que é um esqueleto executável, então o

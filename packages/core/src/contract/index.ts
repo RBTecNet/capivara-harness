@@ -19,6 +19,7 @@ export { checkCoverage, checkEntities, checkStories, checkWorkflows } from "./co
 export type { CoverageSources } from "./coverage.js";
 export { checkTestPrescription, testPrescriptionHint, testPrescriptions } from "./test-prescription.js";
 export type { TestAuthority } from "./test-prescription.js";
+export { mechanismPrescriptionHint, mechanismPrescriptions } from "./mechanism-prescription.js";
 export { renderContractDocument } from "./doc.js";
 export { TASKS_BLOCK, assemblePhase, tasksBlock } from "./templates.js";
 export type { PhaseEnvelope } from "./templates.js";
@@ -65,6 +66,7 @@ export type {
   SkeletonDefect,
   SkeletonEntity,
   SkeletonField,
+  SkeletonLimits,
   SkeletonPhase,
   SkeletonResult,
   SkeletonRule,

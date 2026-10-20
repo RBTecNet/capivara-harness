@@ -16,10 +16,38 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 |---|---|
 | branch | `main` — é onde tudo está |
 | versão | 0.6.2 (`capivara --version`); planos da 0.5.0 e anteriores incompatíveis, ver §116 e §115.26 |
-| suíte | 2656 testes em 139 arquivos, `npm run check` verde |
+| suíte | 2676 testes em 140 arquivos, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-20 — a fronteira INIT → PLAN: requisitos sem arquitetura prematura (§123)
+
+O `haiku` (Parallel Lab, 0.6.2) fechou o esqueleto em uma chamada e gastou
+trinta minutos na arquitetura: seis rodadas, mudança de estratégia, dois
+reparos, bloqueio e reinício à mão. Quatro dos seis defeitos cobrados eram
+mecanismos que o pedido nunca fixou e o esqueleto inventou — `APP_DB_PATH`,
+`data/parallel-lab.db`, "CREATE TABLE IF NOT EXISTS antes de o servidor
+aceitar requisições", `E2E_PORT` (vinha do PROMPT do esqueleto),
+`src/nucleo/api.ts`, `src/casca/rotas.tsx`, a página de cada módulo em
+`src/modulos/<modulo>/Pagina<Modulo>.tsx`, uma stack "Estrutura de pastas" —
+e a regra do harness "criar ou alterar esquema fora desse comando é
+proibido" foi a outra metade da contradição que o auditor mandou o arquiteto
+não resolver. Agora: I-17 (`contract/mechanism-prescription.ts`) devolve ao
+escritor, com os termos, caminho de arquivo, variável de ambiente, comando e
+código (DDL, chamada) sem autoridade no pedido ou nas decisões; a stack que é
+só estrutura de pastas sai contando; rotas HTTP ficam (o build lê o contrato
+de interface do `skeleton.md`). Escritor ×2, auditor ×1, e o resíduo é
+PUBLICADO com ressalva — nunca bloqueia. O prompt do esqueleto perde "the
+ONLY time anyone looks at the whole product" (falso desde a §116) e
+`E2E_PORT`, ganha "Product, not implementation" e fases preliminares; a
+entrevista não pergunta como implementar; arquiteto e auditor ganham
+`MECHANISM_BOUNDARY`: regra que fixa COMO sem autoridade não é produto, o
+mecanismo é do arquiteto, e as regras do banco são requisito dos gates. A
+regra de migração perde a proibição e ganha o nome que `loop/ambiente.ts`
+sempre exigiu (`migrate` no `package.json`) — o `haiku` tinha escolhido
+`migrar`, e os gates não migrariam nada. Zero chamadas no caminho limpo.
+Detalhe na §123; 20 cenários em `test/init/fronteira-123.spec.ts`, 17 RED.
 
 ## 2026-10-20 — integridade do PLAN: autoridade técnica e independência do reparo (§122)
 
@@ -686,7 +714,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 2656 testes
+npm run check     # build + typecheck + 2676 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

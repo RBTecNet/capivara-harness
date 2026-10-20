@@ -10475,3 +10475,213 @@ gravado como decisão). Nenhuma outra.
   decide repetidamente pode alongar o run — cada volta pede a decisão dele.
 - Nenhum run real depois desta implementação; a evidência é o provider
   falso sobre os textos reais do `minimax`.
+
+## §123 — A fronteira INIT → PLAN: requisitos sem arquitetura prematura
+
+### 123.1 A evidência: o `haiku` (Parallel Lab, 0.6.2)
+
+Run `init-dc741f0d7b92`, projeto `laravel/haiku`, Haiku nos três papéis. O
+pedido: uma aplicação web simples para testar o paralelismo do harness —
+Node, TypeScript, React, Vite, REST, SQLite em arquivo, testes automatizados,
+três módulos independentes sobre uma fundação compartilhada, persistência
+entre reinicializações, banco de testes isolado. Resultado: 6 fases, 66
+tasks, 59 chamadas, ~32 minutos com uma retomada manual, RALPH READY. O
+esqueleto saiu em UMA chamada (12:08 → 12:11); a arquitetura levou de 12:11 a
+12:42 — seis rodadas de auditoria, mudança de estratégia, dois reparos pelo
+auditor, duas validações pelo verifier, um bloqueio, reinício à mão.
+
+Lidos os achados (`logs/audit.architecture.*`), quatro dos seis defeitos que
+a auditoria cobrou eram sobre decisões que o pedido nunca tomou e que o
+esqueleto fixou:
+
+- `servidor.porta`: "escuta na porta definida pela variável `E2E_PORT`, que o
+  harness atribui". O auditor exigiu `E2E_PORT` no contrato de configuração e
+  no `.env.example` (rodadas 1 e 1b). A frase veio do PROMPT do esqueleto —
+  "The harness assigns E2E_PORT per test process…" — uma instrução do build
+  colada no estágio que define o produto.
+- `banco.arquivo`: "caminho vem da variável de ambiente `APP_DB_PATH`; sem a
+  variável, `data/parallel-lab.db`; as tabelas são criadas com `CREATE TABLE
+  IF NOT EXISTS` antes de o servidor aceitar requisições". Contra a regra do
+  harness "criar ou alterar esquema fora desse comando é proibido", o
+  arquiteto fez `abrirBanco()` criar o esquema; o auditor (rodada 4b)
+  apontou "a arquitetura ainda escolhe uma leitura para uma contradição do
+  esqueleto" e mandou "retirar a leitura adotada e reescrever sem fixar o
+  comportamento de abrirBanco" — isto é, PROIBIU o arquiteto de decidir.
+  Metade da contradição era invenção do modelo; a outra metade era nossa.
+- `api.cliente`, `interface.tema`, `interface.navegacao`,
+  `modulos.independencia`, `arquivos.compartilhados`: `src/nucleo/api.ts`,
+  `src/nucleo/tema.css`, `src/casca/rotas.tsx`,
+  `src/modulos/<modulo>/Pagina<Modulo>.tsx`, "cada módulo ocupa somente
+  `server/modulos/<modulo>/`", "nenhuma fase de módulo altera esses
+  arquivos". Mais a entrada de stack "Estrutura de pastas: server/nucleo (…);
+  src/casca (…)". A distribuição de arquivos por fase — exatamente o que a
+  §119 deu ao arquiteto — chegou a ele como requisito, e a rodada 1b cobrou
+  "o componente projeto é declarado pelas fases 3, 4 e 5, mas o esqueleto
+  determina em arquivos.compartilhados que nenhuma fase de módulo altera
+  esses arquivos".
+- `banco.isolamento-de-testes`: "os testes automatizados definem
+  `APP_DB_PATH` para um arquivo temporário exclusivo de cada execução e
+  removem o arquivo ao fim". Estratégia de teste, que a §118 tirou do plano
+  por ferramenta e arquivo, voltando pela variável de ambiente.
+
+E, do lado do harness, um defeito latente que o run não chegou a pagar: a
+arquitetura nomeou o comando de migração `npm run migrar`. O preparo do
+ambiente dos gates (`loop/ambiente.ts`, §46.5) procura o script `migrate` no
+`package.json` e, sem ele, "não há migração a rodar". A regra do harness
+pedia "um comando único de migração" e nunca disse o nome; os gates teriam
+subido a aplicação contra um banco sem esquema — ou contra o esquema que o
+`abrirBanco()` criava, exatamente o que o auditor mandou tirar.
+
+### 123.2 As causas, no código
+
+1. **O prompt do esqueleto é de antes da §116.** Dizia "This is the ONLY time
+   anyone looks at the whole product at once … whatever must be agreed across
+   phases has to be decided by you, now". Era verdade quando não havia
+   arquiteto; desde a 0.6.0 o arquiteto lê o esqueleto inteiro e decide
+   componentes, contratos, arquivos e fases. A frase mandava o escritor do
+   esqueleto fazer o trabalho dele, e nada no prompt distinguia regra de
+   produto de mecanismo de implementação.
+2. **`E2E_PORT` no prompt do esqueleto.** A instrução pertence ao build
+   (`acceptance-policy.ts`, `proportionateChecksBlock`) e já está lá; no
+   esqueleto ela virou regra transversal.
+3. **Nada conferia em código.** `parseSkeleton` tinha I-16 (teste) e mais
+   nada: um caminho de arquivo, uma variável, um comando ou um `CREATE TABLE`
+   numa regra passavam direto ao arquiteto como "the product" (autoridade 3
+   do prompt dele) e ao auditor como fidelidade a cobrar.
+4. **A regra do harness proibia o que o plano decide.** "Criar ou alterar
+   esquema fora desse comando é proibido" não sustenta gate nenhum: o build
+   semeia o `.env`, roda a migração contra um banco vazio e sobe a aplicação;
+   se a aplicação também aplica o esquema ao iniciar, nada quebra. A frase só
+   servia para colidir com qualquer leitura "esquema na inicialização" — e a
+   §46.1 nunca a teve.
+5. **A entrevista do esqueleto aceitava perguntas de engenharia.** O filtro
+   ("the choice changes … contracts … or architecture") convida a perguntar
+   como implementar; no `haiku` não disparou, mas é a mesma porta que a §122
+   fechou no plano.
+
+### 123.3 O que muda
+
+**Contrato.** `src/contract/mechanism-prescription.ts`, I-17: o esqueleto não
+fixa mecanismo de implementação sem autoridade. Quatro FORMAS, nunca uma lista
+de termos técnicos: um CAMINHO de arquivo ou diretório de código
+(`src/nucleo/api.ts`, `server/modulos/<modulo>/`, `data/app.db`; um arquivo
+de código solto, `main.tsx`); uma VARIÁVEL DE AMBIENTE (maiúsculas com
+sublinhado; "a variável PORT"; `process.env.X`); um COMANDO de ferramenta
+(`npm run migrar`, `php artisan migrate`, `composer`, `cargo`…); CÓDIGO (DDL —
+`CREATE TABLE IF NOT EXISTS` — e chamada de função — `abrirBanco()`,
+`router.get('/')`, exceto o plural de prosa "registro(s)"). Rotas HTTP
+(`GET /api/tarefas/:id`) não são tocadas: começam por `/` e são o contrato de
+interface que o build lê do esqueleto (`sharedContractFromSkeleton`, §116
+ainda não moveu o build para `architecture.md`). A autoridade é a mesma do
+I-16 — o pedido e as decisões aceitas: "use a variável `DATABASE_URL`"
+continua podendo ser dito. Calibrado no JSON real do Haiku: 9 regras
+devolvidas (as oito acima mais `api.servir-interface`, por `dist/`), 21
+regras de produto intactas (`tarefas.titulo`, `categorias.nome`,
+`api.corpos-e-status-http`, `api.erros`, `listas.ordem`, `exclusao`…), as
+sete entradas da stack pedida preservadas, e as regras que o próprio harness
+escreve (`.env`, `.env.example`, `.gitignore`, `package.json`, `migrate`)
+passando na mesma checagem.
+
+`parseSkeleton` confere stack, regras, stories, fluxos e fases; a entrada de
+stack que é só organização de arquivos ("Estrutura de pastas") sai contando,
+como a de ferramenta de teste (I-16); o resto é defeito nomeado com os termos
+("a regra `banco.arquivo` fixa mecanismo de implementação sem autoridade
+(I-17): data/parallel-lab.db, APP_DB_PATH, CREATE TABLE IF NOT EXISTS") e a
+correção ("descreva só o comportamento … não apague a exigência"). O modo
+`mechanisms: "tolerate"` aceita o esqueleto e devolve o resíduo em
+`tolerated`.
+
+**Orquestrador.** A escada do esqueleto é a de sempre (§121): escritor,
+escritor com os defeitos nomeados, auditor com o bloco de reparo. A diferença:
+na terceira tentativa o mecanismo é TOLERADO — o esqueleto é publicado, o
+resíduo vai ao relatório como ressalva (`skeleton.md · I-17`) e à tela, e o
+run segue. Um run que para por um caminho de arquivo numa regra é "encontrar
+um motivo para interromper". Defeito estrutural continua bloqueando como
+antes. Zero chamadas no caminho limpo; uma ou duas chamadas baratas no
+caminho sujo, contra as dez rodadas de arquitetura que o `haiku` pagou.
+
+**Prompts.** O esqueleto perde "the ONLY time anyone looks at the whole
+product" e `E2E_PORT`, e ganha "Product, not implementation": o que não
+escrever (caminho, variável, comando, esquema, função, arquivos por fase,
+estratégia de teste) e o que escrever no lugar ("os dados dos três módulos
+persistem em um banco SQLite local e continuam disponíveis após reiniciar");
+as fases são "a preliminary division by functional delivery" que o arquiteto
+reorganiza. A enumeração de rotas fica, com a nota de que é contrato de
+interface, não código. A entrevista do esqueleto ganha "Never ask how the
+product will be implemented". O arquiteto e o auditor da arquitetura ganham a
+mesma fronteira (`MECHANISM_BOUNDARY`): regra que fixa COMO sem autoridade
+não é produto — fica o comportamento, o mecanismo é do arquiteto, e dois
+mecanismos incompatíveis nunca são contradição a escalar nem pergunta ao
+desenvolvedor; as regras derivadas da decisão de banco (`.env`,
+`.env.example`, migração, banco descartável) são requisito dos gates e ficam
+exatamente como estão. O eixo de fidelidade do auditor passa a cobrar o
+COMPORTAMENTO de cada regra, não o mecanismo. Esta é a metade do PLAN: cobre
+o que o código não pega (prosa sem forma, esqueleto de versão anterior,
+resíduo tolerado).
+
+**Regra do harness.** "Comando de migração" diz o que os gates precisam —
+cria o esquema inteiro a partir de um banco vazio, repetível sem erro, é o
+que o desenvolvedor roda depois do `.env` e o que o harness roda antes de
+subir a aplicação; "num projeto com `package.json`, é o script `migrate`" —
+e deixa escrito que aplicar o esquema também na inicialização "é decisão do
+plano, não desta regra". A proibição saiu. O nome do script é do harness, não
+do INIT: é o contrato de `loop/ambiente.ts`, que nunca tinha sido dito a
+ninguém.
+
+### 123.4 O que NÃO muda, de propósito
+
+- O build (`loop/`), inclusive `sharedContractFromSkeleton`: ele continua
+  lendo Stack e Regras do `skeleton.md`, e por isso as rotas HTTP ficam no
+  esqueleto. Mover o contrato de interface para `architecture.md` é a
+  primeira tarefa da etapa do build (§116), não desta.
+- O `change` (`contract/change.ts`) não recebe I-17: ele escreve contra uma
+  árvore existente, onde um caminho de arquivo é fato descoberto, não decisão
+  inventada.
+- Nenhum verifier no esqueleto. A validação independente do reparo do
+  auditor é o parser — determinística, em código, sem chamada. Um verifier de
+  modelo aqui seria a chamada a mais que a §12 do pedido proíbe.
+- Os prompts das fases e do plano, a auditoria consolidada (§120), o reparo
+  pelo auditor e o verifier (§121), a autoridade das decisões (§118, §122), a
+  serialização por dependência (§119), o cache por prompt.
+
+### 123.5 Testes: RED → GREEN
+
+`test/init/fronteira-123.spec.ts`, 20 cenários sobre o pedido real do
+Parallel Lab e as regras reais do Haiku: 17 RED contra a `fix/integridade-122`
+(os três verdes são preservação: I-16, caminho limpo com uma chamada, decisão
+de produto perguntada). Cobrem os vinte do pedido: migração não inventada,
+SQLite preservado, tabelas na abertura não impostas, contradição eliminada,
+variável e `E2E_PORT` sem autoridade, arquivo React, testes preservados como
+requisito, isolamento preservado como comportamento, estratégia de teste
+fora, fase preliminar sem arquivo nem `registrarRotas(app)`, migração livre
+para o plano (prompt + regra), requisito técnico do pedido autorizado,
+decisão de produto perguntada, pergunta de engenharia proibida no prompt,
+escritor corrige (2 chamadas, 0 auditor), auditor assume (3ª chamada), o
+parser valida o reparo, resíduo publicado com ressalva, caminho limpo sem
+chamada extra, PLAN até RALPH READY com o esqueleto limpo e a fronteira no
+prompt do arquiteto. `test/prompts/prompts.spec.ts` troca a expectativa "única
+vez que alguém olha o produto inteiro" — falsa desde a §116 — pela fronteira.
+`docs/capivara-phases-v2.md` regenerado com I-17. `npm run check`: 2676
+testes em 140 arquivos.
+
+### 123.6 Limitações
+
+- I-17 é por forma. "As tabelas são criadas ao abrir a conexão", "registra os
+  roteadores de cada módulo", "o cliente da API fica num módulo compartilhado"
+  passam; é o prompt do esqueleto que pede para não escrevê-las, e o
+  `MECHANISM_BOUNDARY` do arquiteto que as neutraliza se vierem.
+- A variável de ambiente é reconhecida por maiúsculas com sublinhado ou por
+  "variável X"; `PORT` solto numa frase sem "variável" passa. `npm install`
+  e `pip install` são comando e são devolvidos — num esqueleto, "dependências
+  locais ao projeto" é o que se escreve.
+- A terceira tentativa tolera; as duas primeiras devolvem. Um escritor que
+  reescreve o esqueleto inteiro a cada devolução pode trocar um mecanismo por
+  outro — o cache por prompt não o salva, porque o prompt muda com os
+  defeitos. É o mesmo custo do I-16.
+- O nome `migrate` vale para projetos com `package.json`; o build não roda
+  migração de outra stack (§46.5), e a regra não promete que roda.
+- Esqueleto gravado por uma versão anterior entra no `plan` sem passar pelo
+  I-17 (o `plan` lê o estado, não reparseia); a fronteira dos prompts do
+  arquiteto é o que o protege.
+- Nenhum run real depois desta implementação; a evidência é o provider falso
+  sobre os textos reais do `haiku` e o parser sobre o JSON real dele.

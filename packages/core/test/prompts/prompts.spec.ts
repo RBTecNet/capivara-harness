@@ -188,8 +188,9 @@ describe("ausência de artefato de design", () => {
 });
 
 describe("o esqueleto pensa o produto uma vez, a fase vê só a fatia", () => {
-  it("o esqueleto é a única vez que alguém olha o produto inteiro", () => {
-    expect(esqueleto).toContain("ONLY time anyone looks at the whole product at once");
+  it("o esqueleto pensa o produto; a implementação fica para o arquiteto do plan (§116, §123)", () => {
+    expect(esqueleto).toContain("the plan's architect reads this");
+    expect(esqueleto).toContain("## Product, not implementation");
     expect(esqueleto).toContain("capivara-skeleton/v2");
   });
 

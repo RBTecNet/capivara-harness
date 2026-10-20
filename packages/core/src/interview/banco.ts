@@ -217,10 +217,27 @@ export function regrasDeBanco(decisao: DecisaoDeBanco): SkeletonRule[] {
     },
     {
       subject: "comando de migração",
+      /*
+       * O que os gates precisam, e só isso (§123).
+       *
+       * Dizia também "criar ou alterar esquema fora desse comando é proibido",
+       * e no Parallel Lab essa frase foi metade de uma contradição que custou
+       * seis rodadas: a outra metade era o "CREATE TABLE IF NOT EXISTS antes
+       * de o servidor aceitar requisições" que o esqueleto inventou. Nenhum
+       * gate depende da proibição — o build semeia o `.env`, roda a migração
+       * contra um banco vazio e sobe a aplicação; se a aplicação também aplica
+       * o esquema ao iniciar, nada quebra. É decisão do plano, e a regra diz
+       * isso com todas as letras. O NOME do script, sim, é do harness: o
+       * preparo do ambiente (`loop/ambiente.ts`) procura `migrate` no
+       * `package.json` e, sem ele, não migra nada — o Parallel Lab escolheu
+       * `migrar` e os gates teriam subido contra um banco sem esquema.
+       */
       statement:
         "o projeto entrega um comando único de migração que cria o esquema inteiro a partir de um banco " +
-        "vazio e pode ser repetido sem erro; criar ou alterar esquema fora desse comando é proibido, e é ele " +
-        "que o desenvolvedor roda depois de preencher o `.env`",
+        "vazio e pode ser repetido sem erro; é ele que o desenvolvedor roda depois de preencher o `.env` e que " +
+        "o harness roda antes de subir a aplicação nos gates — num projeto com `package.json`, é o script " +
+        "`migrate`. Se o esquema também é aplicado na inicialização da aplicação, e como, é decisão do plano, " +
+        "não desta regra",
     },
     {
       subject: "banco dos testes",

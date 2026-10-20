@@ -180,6 +180,15 @@ export function interviewPrompt(
     "4. A wrong assumption creates meaningful rework or risk.",
     "",
     "Never ask about a discoverable command, path, dependency or convention.",
+    ...(document === "skeleton"
+      ? [
+          "Never ask how the product will be implemented — the layout of files, the name of an environment",
+          "variable or a command, how the schema is created or migrated, how modules plug into the server",
+          "or the router, how the product is tested. The plan decides those without the developer, and an",
+          "answer here would turn an implementation detail into a requirement nobody asked for. Ask about",
+          "behaviour, scope, data, security and what the user sees.",
+        ]
+      : []),
     "",
     "## The assumption channel, and why it exists",
     "Anything that does NOT change observable behaviour, scope, contracts, security or data goes in",

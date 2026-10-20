@@ -72,6 +72,7 @@ não é lido nem convertido: gere de novo com `capivara init --fresh` e `capivar
 | I-14 | Todo `**Design ref:**` aponta para um caminho existente sob o diretório de design | `design-refs` | `rejects` |
 | I-15 | Nenhum rótulo `**Feature tests:**`: o plano descreve comportamento, não testes | `parser` | `rejects` |
 | I-16 | Nenhuma prescrição de teste: ferramenta, arquivo, diretório, configuração, task de teste, cobertura ou tipo de teste não entram no plano | `test-prescription` | `rejects` |
+| I-17 | O esqueleto não fixa mecanismo de implementação sem autoridade: caminho de arquivo, variável de ambiente, comando ou código não entram nas regras, na stack, nas stories, nos fluxos nem nas fases | `mechanism-prescription` | `rejects` |
 
 `rejects` produz um erro com o código do invariante; `behaviour` descreve como o
 parser lê o documento e é provado por teste de comportamento, sem código de erro.
@@ -98,6 +99,7 @@ caminhos —, de modo que nenhum deles toca o disco por conta própria.
 - **I-14** — Referência morta engana o executor: ele implementa por conta própria acreditando ter seguido um design que não existe.
 - **I-15** — Quem decide como provar o produto é o avaliador do build, lendo o código entregue. Um teste nomeado no plano vira obrigação inventada antes de existir código, e um plano da geração anterior que o carrega é incompatível: ele é recusado, nunca convertido em silêncio.
 - **I-16** — O plano descreve o produto e o caminho de implementação; a estratégia de validação — qual ferramenta, quais arquivos, quais cenários, que trabalho de teste em que fase, que tipo e organização — é do build. Um termo que o pedido ou uma decisão aceita do desenvolvedor contém não é prescrição do plano: é dele, e passa; o pedido que exige testes automatizados autoriza o requisito (um critério de comportamento do produto), não a task de escrevê-los. O mesmo critério vale para a stack e as fases do esqueleto e para a infraestrutura e as fases da arquitetura, que são de onde a prescrição se propagava.
+- **I-17** — O init levanta o produto; o plan decide a engenharia. Um mecanismo escrito no esqueleto chega ao arquiteto como requisito, a auditoria da arquitetura o cobra como fidelidade, e dois mecanismos inventados em regras diferentes viram uma contradição que ninguém tem autoridade para resolver — foi o CREATE TABLE do esqueleto contra a regra de migração no Parallel Lab. Um termo que o pedido ou uma decisão aceita do desenvolvedor contém não é prescrição: é dele, e passa. A entrada de stack que é só estrutura de pastas sai contando; o resto volta ao escritor nomeado, e o resíduo depois da escada de recuperação é publicado com ressalva, nunca bloqueia.
 
 ## Campos removidos de propósito
 

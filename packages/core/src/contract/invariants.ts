@@ -16,10 +16,10 @@ export const PHASES_CONTRACT = "capivara-phases/v2" as const;
 
 export type InvariantCode =
   | "I-01" | "I-02" | "I-03" | "I-04" | "I-05" | "I-06" | "I-07"
-  | "I-08" | "I-09" | "I-10" | "I-11" | "I-12" | "I-13" | "I-14" | "I-15" | "I-16";
+  | "I-08" | "I-09" | "I-10" | "I-11" | "I-12" | "I-13" | "I-14" | "I-15" | "I-16" | "I-17";
 
 /** Quem verifica o invariante. O parser é puro; os demais recebem o mundo por parâmetro. */
-export type InvariantChecker = "parser" | "stamps" | "coverage" | "design-refs" | "test-prescription";
+export type InvariantChecker = "parser" | "stamps" | "coverage" | "design-refs" | "test-prescription" | "mechanism-prescription";
 
 /**
  * Como o invariante se manifesta.
@@ -150,6 +150,13 @@ export const INVARIANTS: readonly Invariant[] = [
     title: "Nenhuma prescrição de teste: ferramenta, arquivo, diretório, configuração, task de teste, cobertura ou tipo de teste não entram no plano",
     rationale: "O plano descreve o produto e o caminho de implementação; a estratégia de validação — qual ferramenta, quais arquivos, quais cenários, que trabalho de teste em que fase, que tipo e organização — é do build. Um termo que o pedido ou uma decisão aceita do desenvolvedor contém não é prescrição do plano: é dele, e passa; o pedido que exige testes automatizados autoriza o requisito (um critério de comportamento do produto), não a task de escrevê-los. O mesmo critério vale para a stack e as fases do esqueleto e para a infraestrutura e as fases da arquitetura, que são de onde a prescrição se propagava.",
     checkedBy: "test-prescription",
+    enforcement: "rejects",
+  },
+  {
+    code: "I-17",
+    title: "O esqueleto não fixa mecanismo de implementação sem autoridade: caminho de arquivo, variável de ambiente, comando ou código não entram nas regras, na stack, nas stories, nos fluxos nem nas fases",
+    rationale: "O init levanta o produto; o plan decide a engenharia. Um mecanismo escrito no esqueleto chega ao arquiteto como requisito, a auditoria da arquitetura o cobra como fidelidade, e dois mecanismos inventados em regras diferentes viram uma contradição que ninguém tem autoridade para resolver — foi o CREATE TABLE do esqueleto contra a regra de migração no Parallel Lab. Um termo que o pedido ou uma decisão aceita do desenvolvedor contém não é prescrição: é dele, e passa. A entrada de stack que é só estrutura de pastas sai contando; o resto volta ao escritor nomeado, e o resíduo depois da escada de recuperação é publicado com ressalva, nunca bloqueia.",
+    checkedBy: "mechanism-prescription",
     enforcement: "rejects",
   },
 ] as const;

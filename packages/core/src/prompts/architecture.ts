@@ -17,6 +17,32 @@ import { AREAS_VALIDAS } from "../contract/skeleton.js";
 import { languageBlock } from "./language.js";
 import { planningScopeBlock } from "./planning-scope.js";
 
+/**
+ * A fronteira entre produto e mecanismo, dita a quem desenha e a quem audita (§123).
+ *
+ * O esqueleto é o produto, mas um esqueleto pode trazer um mecanismo que o
+ * pedido nunca fixou — um caminho, uma variável, um comando, "CREATE TABLE ao
+ * abrir a conexão". O I-17 devolve esses ao escritor; o que sobra (prosa sem
+ * forma, esqueleto de uma versão anterior, resíduo tolerado) chega aqui, e
+ * aqui ele não pode virar requisito nem contradição. As regras do banco que o
+ * harness escreve a partir da decisão do desenvolvedor ficam de fora da
+ * exceção: os gates dependem delas.
+ */
+const MECHANISM_BOUNDARY = [
+  "## What in the skeleton is product, and what is yours",
+  "A cross-cutting rule states a BEHAVIOUR that must hold, and that behaviour is product.",
+  "A skeleton rule that fixes HOW — a file or directory path, the name of an environment variable,",
+  "a command or script, a function, how the schema is created or when (at connection open, before",
+  "the server listens) — is not product unless the developer's request or a confirmed decision states it:",
+  "keep the behaviour the rule protects, choose the mechanism yourself, and say so in the",
+  "architecture. Two such mechanisms that cannot both be true are never a contradiction to escalate",
+  "and never a decision for the developer: choose one coherent mechanism that serves both",
+  "behaviours. The rules derived from the developer's database decision — the `.env` and",
+  "`.env.example`, the migration command, the disposable database for tests and flows — are",
+  "requirements the harness's gates depend on: keep them exactly; what they leave to the plan",
+  "(whether the application also applies the schema at start-up, and how) is yours.",
+].join("\n");
+
 const AUTHORITY = [
   "## Authority order",
   "1. The developer's original prompt, verbatim.",
@@ -25,7 +51,10 @@ const AUTHORITY = [
   "4. Explicit low-risk assumptions recorded during the interview.",
   "Nothing else is authority. You never invent a feature, actor, limit, business rule or",
   "compatibility promise that none of them states, and you never change what they state.",
+  "",
+  MECHANISM_BOUNDARY,
 ].join("\n");
+
 
 export interface ArchitectContext {
   language: string;
@@ -279,10 +308,14 @@ export function architectureAuditPrompt(context: ArchitectureAuditContext): stri
     "covered by some phase, every cited component exists, numbering and dependencies are in order,",
     "and every infrastructure item names its basis. Do not re-audit those.",
     "",
+    MECHANISM_BOUNDARY,
+    "",
     "## Axes",
     "1. FIDELITY TO THE PRODUCT — does the architecture serve exactly the skeleton and the decisions?",
     "   Was a capability, actor, rule or integration invented? Was a confirmed decision dropped,",
-    "   weakened or reinterpreted — a stack entry replaced, a rule that no component enforces?",
+    "   weakened or reinterpreted — a stack entry replaced, a rule whose BEHAVIOUR no component",
+    "   enforces? A mechanism the architect chose differently from a skeleton rule that had no",
+    "   authority to fix it is not a fidelity defect, as long as the behaviour holds.",
     "2. COHERENCE — do the components and contracts fit together? Does every contract a component",
     "   consumes exist on the component it depends on? Does each flow cross components able to",
     "   serve it, in an order that works? Do two contracts assert things that cannot both be true?",

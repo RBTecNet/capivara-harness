@@ -23,6 +23,7 @@
 
 import { testPrescriptionHint, testPrescriptions } from "./test-prescription.js";
 import type { TestAuthority } from "./test-prescription.js";
+import { MECHANISM_INVARIANT, mechanismPrescriptionHint, mechanismPrescriptions } from "./mechanism-prescription.js";
 import type { CoverageSources } from "./coverage.js";
 import { jsonDaResposta } from "./resposta.js";
 import { environmentRequirements, renderEnvironmentRequirements, type EnvironmentRequirement } from "./environment.js";
@@ -125,8 +126,30 @@ export interface SkeletonDefect {
 }
 
 export type SkeletonResult =
-  | { ok: true; skeleton: Skeleton; /** O que foi consertado contando, para o log. */ applied: string[] }
+  | {
+      ok: true;
+      skeleton: Skeleton;
+      /** O que foi consertado contando, para o log. */
+      applied: string[];
+      /**
+       * Os mecanismos sem autoridade que ficaram no esqueleto porque a leitura
+       * foi pedida em modo tolerante (I-17, §123): o resíduo depois da escada
+       * de recuperação, publicado com ressalva em vez de bloquear o run.
+       */
+      tolerated: string[];
+    }
   | { ok: false; defects: SkeletonDefect[] };
+
+export interface SkeletonLimits {
+  maxTasksPerPhase: number;
+  /** O que autoriza nomear ferramenta de teste (I-16) ou mecanismo de implementação (I-17): o pedido e as decisões aceitas. */
+  authority?: TestAuthority;
+  /**
+   * `reject` (padrão) devolve o mecanismo sem autoridade como defeito ao
+   * escritor; `tolerate` aceita o esqueleto e lista o resíduo em `tolerated`.
+   */
+  mechanisms?: "reject" | "tolerate";
+}
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -166,15 +189,31 @@ export function repairSkeleton(root: Record<string, unknown>, authority: TestAut
    * vira defeito nomeado, abaixo.
    */
   const ROTULO_DE_TESTE = /\b(?:tests?|testes?|testing|qa|qualidade|automa[çc][ãa]o|e2e)\b/iu;
+  /*
+   * A entrada de stack que É a organização dos arquivos — "Estrutura de
+   * pastas: server/nucleo (…); src/modulos/<modulo> (…)" — sai inteira pelo
+   * mesmo motivo (I-17, §123): ela não carrega nada além da decisão que é do
+   * arquiteto, e o Parallel Lab a recebeu como requisito. Uma entrada de OUTRO
+   * componente que cita um caminho ("Interface: React, montada em src/main.tsx")
+   * não é apagada: perderia a tecnologia; ela vira defeito nomeado, abaixo.
+   */
+  const ROTULO_DE_ESTRUTURA = /\b(?:estrutura|organiza[çc][ãa]o|layout|árvore|arvore)\s+(?:de\s+|dos\s+|das\s+)?(?:pastas?|diret[óo]rios?|arquivos?|c[óo]digo|projeto)\b|\b(?:folder|directory|file|project)\s+(?:structure|layout|organi[sz]ation|tree)\b|^(?:pastas|diret[óo]rios|folders|directories)$/iu;
   const stack = Array.isArray(root.stack)
     ? root.stack.filter((item) => {
         const entrada = (item ?? {}) as Record<string, unknown>;
         const component = typeof entrada.component === "string" ? entrada.component : "";
         const decision = typeof entrada.decision === "string" ? entrada.decision : "";
         const termos = testPrescriptions(`${component}\n${decision}`, authority);
-        if (termos.length === 0 || !ROTULO_DE_TESTE.test(component)) return true;
-        applied.push(`removeu da stack "${component}: ${decision}": ferramenta de teste é decisão do build (I-16); a exigência de testes do pedido segue nas stories e regras`);
-        return false;
+        if (termos.length > 0 && ROTULO_DE_TESTE.test(component)) {
+          applied.push(`removeu da stack "${component}: ${decision}": ferramenta de teste é decisão do build (I-16); a exigência de testes do pedido segue nas stories e regras`);
+          return false;
+        }
+        const mecanismos = mechanismPrescriptions(`${component}\n${decision}`, authority);
+        if (mecanismos.length > 0 && ROTULO_DE_ESTRUTURA.test(component.trim())) {
+          applied.push(`removeu da stack "${component}: ${decision}": a organização dos arquivos é decisão do plano (I-17); a stack pedida continua`);
+          return false;
+        }
+        return true;
       })
     : root.stack;
 
@@ -240,7 +279,7 @@ function canonicalCover(item: string): string {
  * o que entrega, entidade sem campo não dá para criar, dimensionamento fora do
  * teto não cabe numa sessão de agente.
  */
-export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number; authority?: TestAuthority }): SkeletonResult {
+export function parseSkeleton(source: string, limits: SkeletonLimits): SkeletonResult {
   let parsed: unknown;
   try {
     parsed = jsonDaResposta(source);
@@ -258,6 +297,18 @@ export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number
   }
 
   const defects: SkeletonDefect[] = [];
+  /*
+   * I-17 (§123): o mecanismo de implementação sem autoridade é defeito ao
+   * escritor — e, em modo tolerante, resíduo publicado com ressalva. Vai numa
+   * lista própria porque o orquestrador decide o destino dela, não o parser.
+   */
+  const mecanismos: SkeletonDefect[] = [];
+  const autoridade = limits.authority ?? [];
+  const mecanismoEm = (onde: string, texto: string): void => {
+    const termos = mechanismPrescriptions(texto, autoridade);
+    if (termos.length === 0) return;
+    mecanismos.push({ problem: `${onde} fixa mecanismo de implementação sem autoridade (${MECHANISM_INVARIANT}): ${termos.join(", ")}`, hint: mechanismPrescriptionHint(termos) });
+  };
 
   const stack: SkeletonStack[] = list(root.stack)
     .map((item) => ({ component: text(item.component), decision: text(item.decision) }))
@@ -266,8 +317,9 @@ export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number
     defects.push({ problem: "a stack está vazia", hint: "declare ao menos linguagem e como a aplicação roda; o preflight verifica os pré-requisitos a partir daqui" });
   }
   for (const item of stack) {
-    const termos = testPrescriptions(`${item.component}\n${item.decision}`, limits.authority ?? []);
+    const termos = testPrescriptions(`${item.component}\n${item.decision}`, autoridade);
     if (termos.length > 0) defects.push({ problem: `a stack prescreve teste em "${item.component}: ${item.decision}"`, hint: testPrescriptionHint(termos) });
+    mecanismoEm(`a entrada de stack "${item.component}"`, `${item.component}\n${item.decision}`);
   }
 
   const entities: SkeletonEntity[] = list(root.entities).map((item) => ({
@@ -296,12 +348,15 @@ export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number
     .map((item) => ({ subject: text(item.subject), statement: text(item.statement) }))
     .filter((item) => item.statement !== "");
   for (const story of stories) {
-    const termos = testPrescriptions(story.statement, limits.authority ?? []);
+    const termos = testPrescriptions(story.statement, autoridade);
     if (termos.length > 0) defects.push({ problem: `a story ${story.id} prescreve teste`, hint: testPrescriptionHint(termos) });
+    mecanismoEm(`a story ${story.id}`, story.statement);
   }
+  for (const workflow of workflows) mecanismoEm(`o workflow ${workflow.number}`, `${workflow.name}\n${workflow.steps.join("\n")}`);
   for (const rule of rules) {
-    const termos = testPrescriptions(`${rule.subject}\n${rule.statement}`, limits.authority ?? []);
+    const termos = testPrescriptions(`${rule.subject}\n${rule.statement}`, autoridade);
     if (termos.length > 0) defects.push({ problem: `a regra "${rule.subject}" prescreve teste`, hint: testPrescriptionHint(termos) });
+    mecanismoEm(`a regra "${rule.subject}"`, rule.statement);
   }
 
   const phases: SkeletonPhase[] = list(root.phases).map((item, index) => ({
@@ -329,8 +384,11 @@ export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number
     // A divisão de fases também não aloca trabalho de teste (I-16, §122):
     // "incluir nesta fase os testes do módulo" decide em que fase a suíte é
     // escrita, e isso é do build.
-    const termosDaFase = testPrescriptions(`${phase.title}\n${phase.goal}`, limits.authority ?? []);
+    const termosDaFase = testPrescriptions(`${phase.title}\n${phase.goal}`, autoridade);
     if (termosDaFase.length > 0) defects.push({ problem: `a fase ${phase.number} prescreve teste: ${termosDaFase.join(", ")}`, hint: testPrescriptionHint(termosDaFase) });
+    // Nem congela arquitetura (I-17, §123): a fase preliminar é uma entrega
+    // funcional; arquivo, contrato e mecanismo de integração são do arquiteto.
+    mecanismoEm(`a fase ${phase.number}`, `${phase.title}\n${phase.goal}`);
     if (phase.covers.length === 0) {
       defects.push({ problem: `a fase ${phase.number} não cobre nada`, hint: "declare as stories, entidades ou workflows que esta fase entrega" });
     }
@@ -365,7 +423,9 @@ export function parseSkeleton(source: string, limits: { maxTasksPerPhase: number
     ...(nonGoals.length > 0 ? { nonGoals } : {}),
   };
 
-  return defects.length > 0 ? { ok: false, defects } : { ok: true, skeleton, applied: reparo.applied };
+  if (defects.length > 0) return { ok: false, defects: [...defects, ...mecanismos] };
+  if (mecanismos.length > 0 && limits.mechanisms !== "tolerate") return { ok: false, defects: mecanismos };
+  return { ok: true, skeleton, applied: reparo.applied, tolerated: mecanismos.map((defeito) => defeito.problem) };
 }
 
 /**

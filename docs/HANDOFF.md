@@ -14,12 +14,54 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `main`; o BUILD vNext (§125) está em `feat/build-vnext`, sobre a `fix/triagem-124`, sem merge; a §126 em `fix/impasse-init-plan-126`, sobre a `feat/build-vnext`, sem merge |
+| branch | `main`; o BUILD vNext (§125) está em `feat/build-vnext`, sobre a `fix/triagem-124`, sem merge; a §126 em `fix/impasse-init-plan-126`, sobre a `feat/build-vnext`, sem merge; a §127 em `fix/coerencia-temporal-127`, sobre a `fix/impasse-init-plan-126`, sem merge nem push |
 | versão | 0.7.0 (`capivara --version`) na `feat/build-vnext`, 0.6.2 na `main`; planos da 0.6.x valem na 0.7.0; os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
-| suíte | 2866 testes em 152 arquivos na `feat/build-vnext`; 2889 em 153 na `fix/impasse-init-plan-126`; `npm run check` verde |
+| suíte | 2866 testes em 152 arquivos na `feat/build-vnext`; 2889 em 153 na `fix/impasse-init-plan-126`; 2933 em 157 na `fix/coerencia-temporal-127`; `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-21 — coerência temporal: o fluxo é cobrado quando o plano diz que ele existe, e a oscilação entre gates é diagnóstico (§127)
+
+O build do Luna (`build-8e24c805009f`, 0.7.0 + §126, paralelo) fechou P01–P03 e
+parou a P04 — Gestão de categorias — com três ciclos esgotados, pondo e tirando
+a integração de categorias quatro vezes: o G4 cobrava o fluxo 3 e o G3 cobrava
+"o roteador é exportado sem registro no servidor central". A causa é do
+harness: o G4 percorre os workflows que a fase COBRE, e ninguém dizia isso a
+quem escreve `covers` — o prompt do arquiteto até oferecia "uma fase de
+integração que depende dos módulos". O plano publicou a integração na P06 e o
+fluxo na P04. O registro de defeitos agravou: a identidade do defeito do G4
+era a prosa da triagem (cinco ids para a mesma falha, cada um resolvendo o
+anterior "por não reproduzir"), a ponte de citações juntou a exigência e a
+proibição por `/categorias`, e o relatório velho do reparo do verificador ficou
+em todos os prompts. No PLAN, a decisão Q-71 do auditor da fase 3 saiu sem fase
+e a emenda da fase 1 aprovada perdeu três tasks (~26 chamadas).
+Agora: `contract/disponibilidade.ts` responde, para o plano e para o build,
+quando cada workflow é cobrado — adiado só com evidência explícita (a fase nomeia
+a posterior que o cobre e espera por ela; ou o caminho dele pela arquitetura só
+fica de pé lá); o contrato da arquitetura recusa o fluxo cobrado sem caminho e o
+adiamento para quem não espera; arquiteto, escritor e auditores recebem o
+contrato e a tabela derivada; o G4 cobra só os fluxos da fase e registra os
+adiados como obrigação (`adiado-N`), e o build não conclui com fluxo nunca
+percorrido; a oscilação entre gates provada pela reversão causal (três ações,
+dois gates, os mesmos arquivos, o mesmo defeito de volta) para a fase com
+pacote documental ao PLAN; a âncora do G4 é o passo do roteiro; a ponte entre
+gates só aceita mensagem; o relatório do reparo vale uma vez; a decisão de fase
+leva a fase, somada às do endereço. A oscilação só vale entre a task do G3 e
+o fluxo do G4, e só com o Git mostrando o estado rejeitado restaurado byte a
+byte; a fase de destino de um adiamento é revalidada quando a de origem roda
+de novo. Medido nos cenários: a oscilação da P04 cai de 26 para 8 chamadas, a
+decisão de fase de 21 para 18, e o plano correto não ganha nenhuma. Nenhum
+teto aumentou. Uma revisão adversarial (um agente) reproduziu sete defeitos na
+primeira versão, todos corrigidos com cenário. Detalhe na §127; 44 cenários em
+`test/contract/disponibilidade-127.spec.ts`, `test/loop/coerencia-temporal-127.spec.ts`,
+`test/loop/oscilacao-127.spec.ts` e `test/init/coerencia-temporal-127.spec.ts`,
+27 dos 32 primeiros RED contra a §126; os 12 da revisão cobrem os sete
+defeitos que as sondas do revisor reproduziram contra a primeira versão. O run do Luna
+não deve ser retomado como está (o plano publicado continua com P03/P05
+revisitadas pela P06): `capivara plan` de novo, e depois `capivara build`.
+Branch `fix/coerencia-temporal-127` sobre a `fix/impasse-init-plan-126`; sem
+merge, push nem release.
 
 ## 2026-10-21 — o impasse INIT → PLAN: o procedimento da execução de teste não é requisito, e o envelope de fase se corrige na arquitetura (§126)
 

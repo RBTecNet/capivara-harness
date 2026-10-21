@@ -95,7 +95,11 @@ módulo — não edite à mão; um teste falha se a página divergir do código.
 
 O gate 4 — o que abre a aplicação e percorre os fluxos declarados — existe desde
 o §33. Era o buraco que fez um build fechar com todas as fases verdes e metade
-dos cadastros sem funcionar.
+dos cadastros sem funcionar. Ele percorre, ao fim de cada fase, os workflows que
+ela cobre — menos os que o plano deixa EXPLICITAMENTE para a fase que os
+completa (§127, `contract/disponibilidade.ts`): é a mesma resposta que o `plan`
+dá ao arquiteto, ao escritor e aos auditores, e o build não se declara concluído
+com um workflow que nunca passou nele.
 
 **O que falta está em `docs/HANDOFF.md`**, em ordem de importância.
 
@@ -108,6 +112,7 @@ defeito mais comum deste repositório, e a tabela só cresce:
 |---|---|---|
 | fila de linhas no wizard | `init`, `plan`, `build` | um run morto na pergunta 1 de 6 |
 | cobertura no laço da auditoria do plano | laço de escrita do esqueleto | um run terminando em NOT READY |
+| identidade estável do defeito no G3 (task + sha, id citado) | G4 (o passo era a prosa da triagem) | 28 chamadas da P04 do Luna em oscilação (§127) |
 | commit da especificação no `init` | `plan`, que publica o plano executável | o artefato que o loop consome ficava fora do histórico |
 | `Phase N` e `Fase N` nas emendas | o endereço `P2.T2.C1`, no mesmo campo | a emenda do `cron5` foi para a fase 1 com o defeito na 2 |
 | o fim de texto sem `\Z` em `prerequisites.ts` | `acceptance.ts`, na leitura do `pyproject` | a aceitação de um projeto Python aprovava sem executar o produto |

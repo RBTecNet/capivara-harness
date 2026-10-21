@@ -11895,3 +11895,387 @@ em vez de "arbitrados por você".
   e não é tratada aqui.
 - Validado só com o provider falso sobre os textos reais; nenhum run real
   depois desta implementação.
+
+## §127 — Coerência temporal: o fluxo é cobrado quando o plano diz que ele existe, e a oscilação entre gates é diagnóstico
+
+### 127.1 A evidência: Luna, Parallel Lab (0.7.0 + §126)
+
+Projeto `laravel/luna`. O `init`/`plan` rodou de novo com a §126
+(`init-dc741f0d7b92`, 21/10, 15:15–15:38 UTC, 79 chamadas) e publicou
+RALPH READY; o build `build-8e24c805009f` (paralelo, três agentes, `gpt-6-luna`)
+fechou P01, P02 e P03, e a P04 — Gestão de categorias — parou com os três
+ciclos esgotados; a P05, verde no worktree, conflitou ao integrar em
+`src/app/routes.tsx` e voltou à fila; a P06 não começou. Os artefatos foram
+copiados antes de qualquer leitura (o `.capivara` do projeto não foi tocado);
+dois leitores independentes reconstruíram, um o PLAN (prompt → resposta →
+achado → correção, por documento e rodada), outro a P04 ação a ação, com as
+árvores que o próprio Core gravou no repositório do Luna.
+
+O plano publicado:
+
+- a arquitetura, desde a PRIMEIRA chamada do arquiteto, antes de qualquer
+  auditoria: "Cada módulo mantém suas rotas, serviços e componentes; uma fase
+  final conecta os módulos ao servidor e à navegação". A origem é o pedido
+  ("Integração e verificação consolidada ao final"; "Os módulos independentes
+  não devem modificar arquivos compartilhados simultaneamente") e a opção que
+  o prompt do arquiteto oferece: "an integration phase that depends on the
+  module phases and is the only one to touch the shared component";
+- a P04 cobre `categorias, US-3.1, workflow 3`, com o goal "… entregando a
+  página do módulo pronta para a integração da entrada compartilhada e da
+  navegação na fase 6" e os critérios "O roteador é exportado sem registro no
+  servidor central" e "A página exporta `CategoriasPage` e não registra
+  caminhos na navegação compartilhada";
+- a P06 cobre `workflow 1, workflow 2, workflow 3, workflow 4` e depende de
+  P03, P04 e P05: "Conectar os roteadores e páginas dos três módulos ao
+  servidor e à navegação compartilhada";
+- a P03 e a P05 cobrem os seus workflows sem cláusula nenhuma; a P03 diz "A
+  página é acessível em `/tarefas` pelo shell compartilhado".
+
+A P04, lida nas árvores (`git diff` entre as árvores de conteúdo que o Core
+gravou em cada ação): a rota `/categorias` em `routes.tsx` entrou na ação 2,
+saiu na 3, voltou na 6 e saiu na 8; `registrarModulo('categorias', …)` em
+`server/api/index.ts` entrou na 2, saiu na 4, voltou na 7 e saiu na 8; o link
+da barra lateral que a P02 tinha entregado saiu na 4 e não voltou. O G4 cobrava
+o fluxo 3 (cadastrar uma categoria, passo 1); o G3 cobrava "exportar o roteador
+sem registrá-lo no servidor central". 32 das 56 chamadas do build foram da
+P04, 28 delas na oscilação, em 27 minutos; quem parou a fase foi o teto de três
+ciclos. O commit `wip(P04)` ficou pior que a primeira implementação. A própria
+triagem viu a contradição duas vezes ("Há conflito entre o passo 3 do workflow
+1 … e os critérios da fase 4, que adiam a integração de Categorias à navegação
+para a fase 6"; "Execute este fluxo quando a fase 6 integrar /categorias ao
+shell"), e o harness só tinha como resposta reescrever o roteiro ou gravar a
+leitura em `decisoes-do-build.md`, que ninguém lê de volta.
+
+E o registro de defeitos não percebeu que era a mesma falha. D1, D2, D5, D7 e
+D8 — o mesmo `› passo 1: Cadastrar uma categoria…` com o mesmo localizador —
+ganharam ids novos porque a âncora `step` era o `CAPIVARA_ONDE` da triagem,
+prosa ("Rota `/categorias`, na página de categorias." / "Rota /categorias na
+interface."), comparada por igualdade; cada id novo fazia o anterior virar
+RESOLVED "por não reproduzir", a regra de progresso nunca viu a falha voltar, e
+cada um começava com o orçamento por defeito cheio. A ponte de citações, por
+sua vez, juntou ao defeito do fluxo 3 o achado do G3 que PROIBIA o registro —
+os dois citavam `/categorias`. E o relatório do reparo do verificador do ciclo
+1 ("Removi a rota `/categorias`") ficou em todos os prompts do executor dos
+ciclos 4 a 9; o do ciclo 6 pedia para restaurar a rota e, no mesmo texto,
+contava que ela tinha sido removida.
+
+No PLAN, das 79 chamadas cerca de 41 estão em trechos evitáveis. A maior perda,
+~26 chamadas e 8 minutos, nasceu da decisão Q-71 ("status inicial de uma
+tarefa"), levantada pelo auditor da fase 3: os achados da auditoria por fase
+levam a fase (`orchestrator.ts`, desde a §52), as decisões não; a resposta
+virou achado sem endereço, foi às fases 1, 4 e 6, a emenda da fase 1 — aprovada
+— devolveu cinco tasks em vez de oito (`.env`, manifesto, migração na
+inicialização), e a coerência mandou as lacunas para `Architecture`: uma
+reorganização inteira. Nenhum auditor apontou "a P04 cobre o workflow 3 e a
+integração é da P06"; quatro achados culparam os escritores por "antecipar a
+integração", seguindo uma regra do prompt deles (`phaseFromSlicePrompt`:
+"its criteria verify that the entry exists and points at them") que não
+conhecia o terceiro caso.
+
+### 127.2 A causa-raiz
+
+O G4 percorre, ao fim de uma fase, os workflows que ela COBRE
+(`workflowsForPhase`). Esse contrato nunca foi dito a quem escreve `covers`.
+O próprio harness oferece ao arquiteto a integração numa fase posterior, manda
+cobrir todo workflow em alguma fase, e não diz que a fase do módulo que
+continua cobrindo o workflow terá o fluxo cobrado antes da integração. O
+escritor da fase e os auditores também não sabiam. O plano publicou duas
+responsabilidades temporais incompatíveis — integração na P06, fluxo cobrado
+na P04 —, e o build não tinha como distinguir "fluxo ainda não executável" de
+"defeito": cobrou, e o G3, que lia o critério da mesma fase, cobrou o
+contrário. O que transformou a contradição em 28 chamadas foi o registro de
+defeitos, que não reconhecia a falha voltando (identidade por prosa), juntava
+exigências opostas por um nome em comum, e não tinha nenhuma noção de "um
+reparo desfez o outro".
+
+Erros do PLAN: a cobertura sem o tempo (arquitetura), o terceiro caso ausente
+do escritor, nenhum auditor com o contrato, a decisão sem fase. Erros do
+BUILD: G4 sem elegibilidade, identidade do G4 por prosa, ponte por nome,
+relatório velho, nenhuma detecção de oscilação. Implementação dos agentes: a
+P03 e a P05 integraram porque o G3 as fez integrar (critérios lidos como
+"disponível pela aplicação"), e a P05 conflitou na integração por isso; o
+verify-6 aceitou o registro que o verify-3 tinha reprovado. Nenhum desses é
+corrigido aqui — são do modelo, e a correção do plano tira o incentivo.
+
+### 127.3 O que muda
+
+**A. Uma derivação única do tempo dos fluxos** (`contract/disponibilidade.ts`).
+"O G4 cobra o workflow N ao fim da fase K?" tem agora uma resposta só, usada
+pelo plano para escrever e auditar e pelo build para decidir o G4. Um workflow
+que K cobre fica para uma fase posterior J só com evidência EXPLÍCITA do plano
+publicado, e J tem de cobri-lo também e esperar por K (as dependências
+efetivas do escalonador, transitivas):
+
+- pelo texto: o envelope de K — título e goal, o mesmo que o escritor e o
+  auditor leem; as tasks não entram — nomeia J ("fase 6", "Phase 6"; não o
+  endereço solto `P6`, que "prioridade P1, P2 ou P3" também é, e nada entre
+  crases). Só referência adiante conta: o `Depends on` de quem depende cita a
+  fase anterior, e isso não diz nada sobre o fluxo;
+- pelo caminho: a arquitetura diz que o workflow atravessa um componente que
+  nenhuma fase até K constrói, e J é a primeira que o cobre com o caminho
+  inteiro de pé. Componente que fase nenhuma constrói (um serviço externo
+  descrito como componente) não é caminho que falta; fase sem componentes
+  conhecidos (a que o `change` acrescentou fora da arquitetura) torna
+  desconhecido só o que depende dela.
+
+Sem uma das duas, o fluxo é cobrado em K, como sempre — inclusive quando a
+fase proíbe a integração em prosa sem nomear quem a faz: elegibilidade
+desconhecida não vira dispensa. Na integração progressiva nada se adia. Não
+há campo novo, pergunta nova nem regra universal: as duas arquiteturas
+coerentes passam, e o que se derivava em silêncio passa a ser dito.
+
+**B. O PLAN recusa e audita a contradição antes do build.** Duas formas
+viram defeito do contrato da arquitetura (`parseArchitecture`), devolvidas
+ao arquiteto na escada mecânica que já existe, sem auditor e sem pergunta: o
+workflow cobrado numa fase em que o caminho dele não existe e que nenhuma
+fase posterior completa; e a fase que nomeia uma posterior que cobre o mesmo
+workflow sem esperar por ela. O resto é auditoria com os fatos na mesa: o
+arquiteto lê "When each workflow is walked" (as duas integrações, e o que
+nenhum plano pode fazer); o auditor da arquitetura ganha o eixo 7 e a tabela
+derivada; o escritor de cada fase recebe o bloco da fase ("Walked at the end
+of THIS phase …" / "covered here but walked only at the end of Phase N …"; o
+que a fase liga é o goal dela que diz, e o bloco só proíbe cobrar o fluxo
+inteiro pela aplicação) e o terceiro caso na regra do arquivo compartilhado; o
+auditor de fase e o de coerência recebem o mesmo contrato, com o endereço
+certo (a task, ou `Architecture` quando o defeito é o tempo). A tabela também
+mostra a REVISITA — a fase posterior que cobre o workflow de novo e mexe em
+componentes do caminho que a fase anterior não nomeia —, que não é
+contradição provada (pode ser acabamento sobre um ponto de extensão) e por
+isso só informa. Para o plano do Luna, a tabela diz: P2 deixa o workflow 1
+para a P6 (caminho), P4 deixa o 3 para a P6 (texto), e P3 e P5 são revisitadas
+pela P6 — exatamente a incoerência que nenhum auditor apontou.
+
+**C. A decisão que o auditor de uma fase levanta volta a ela.** A
+auditoria por fase carimba a fase também nas decisões, e as três conversões
+(a do desenvolvedor, a de engenharia, a da I-16) a põem no endereço do achado
+— somada às fases que o `where` do auditor cita, nunca no lugar delas; a
+triagem de materialidade põe a mesma fase na mesa.
+
+**D. O G4 cobra só o que a fase pode entregar** (`build.ts`, `runner.ts`). A
+fase percorre os workflows cobrados; os adiados viram registro no livro de
+evidências — `adiado-N`, G4, `NOT_APPLICABLE`, com a fase que completa e o
+porquê, marca própria — e a transição "fluxo adiado"; não são prova (não são
+`fluxo-N`), não entram na regressão, e a revalidação não os toca. A fase que
+completa os cobre e os percorre. No fim, o build não se declara concluído com
+um workflow do esqueleto que nunca passou no G4 — adiado ou nunca coberto; o
+nunca coberto já é dito antes da primeira fase. E a fase que completa um fluxo
+adiado não é pulada como "fechada antes" quando a fase que o deixou roda de
+novo (um `change` mudou um critério dela) ou fechou depois dela: volta a ser
+verificada, sem implementação, e o G4 dela percorre o fluxo sobre o código
+novo. O paralelo não muda: as fases independentes continuam saindo juntas, e
+a que só tem fluxos adiados não precisa do entrypoint cedo.
+
+**E. A oscilação entre gates é diagnóstico, não trabalho a repetir**
+(`defeitos.ts`, `runner.ts`). O registro guarda, de cada defeito, a ação depois
+da qual ele apareceu ou voltou, e de cada ação os arquivos que ela mudou. Hash
+que volta não basta; o que se exige é a reversão causal inteira: uma ação
+contra o defeito X (de um gate) mudou arquivos e o defeito Y (de outro gate)
+apareceu; a ação que resolveu Y mudou os mesmos arquivos, e X continuou
+exigindo outra ação; essa nova ação mexeu nos arquivos do reparo de Y, e Y
+voltou — o mesmo defeito —; e o Git confirma que esses arquivos estão de novo
+com o conteúdo EXATO que Y rejeitou. Só entre os dois gates que trazem
+critério do PLAN — a task do G3 e o fluxo do G4 (produto ou critério): a suíte
+do G2 é escrita pelo próprio executor, e roteiro, subida e ferramenta são do
+build; nenhum deles é contradição que o PLAN reconcilie. Aí o Core para de
+reparar, preserva código, commits,
+branches, logs e provas, publica pelo contrato do reparo documental da §125 H
+um pacote para o PLAN (`project-phases.md`) com os dois critérios, as três
+ações e os arquivos, marca os dois defeitos `UPSTREAM_REPAIR_REQUIRED` e para a
+fase com o diagnóstico; nenhum documento é editado, nenhum agente escolhe um
+lado. Na retomada, o pacote ainda válido para a fase sem chamada nenhuma; o
+documento corrigido o invalida e devolve os defeitos à escada. Se o pacote for
+recusado, a parada acontece do mesmo jeito, com o diagnóstico.
+
+**F. A identidade do defeito do G4.** A âncora do passo é a do roteiro, lida
+da saída do runner (`› passo 1: …`), nunca a prosa da triagem: a mesma falha
+com outra redação é o mesmo defeito, com a história e o orçamento dele, e
+passos diferentes continuam defeitos diferentes. A ponte entre gates só aceita
+citação que é MENSAGEM (frase, ou código de erro como `ERR_MODULE_NOT_FOUND`,
+não um nome): `/categorias` não junta mais a
+exigência e a proibição. E o relatório do reparo do verificador vale para a
+correção seguinte, uma vez.
+
+### 127.4 O que NÃO muda, de propósito
+
+- O G3 e o G4 continuam; nenhum teto aumentou; nenhum G4 é pulado "nas fases do
+  meio" — só o fluxo que o plano deixa, explicitamente, para outra fase.
+- A integração progressiva continua cobrada na fase do módulo; a posterior
+  continua válida. O arquiteto escolhe.
+- Os documentos certificados não são editados pelo build; o pacote documental
+  continua sem edição automática (§125 H).
+- O INIT não muda (nenhuma evidência de defeito nele neste run).
+- Não corrigido, anotado: a P03 e a P05 publicadas continuam revisitadas pela
+  P06 (o build as cobra na própria fase, e o conflito do paralelo no
+  `routes.tsx` é a recuperação de integração de sempre); `CoherenceMemory`
+  rebaixou a ressalva o achado real do verifier sobre `tarefasRouter.ts` ×
+  `routes.ts` (aprovação anterior protegendo a si mesma); a verificação de
+  deriva da emenda (`checkRewriteDrift`) existe e não é chamada, embora o prompt
+  da emenda prometa; a contestação do roteiro conta como mudança; o roteirista
+  reescreveu o fluxo 1 sem Categorias depois de o G3 mandar tirar o link
+  (regressão mais fraca, sem aviso).
+
+### 127.5 Testes: RED → GREEN
+
+44 cenários, provider falso e Git real onde há código, sobre os textos do run:
+a arquitetura e o esqueleto que o `plan` publicou para o Luna
+(`test/fixtures/luna-127.*`), e uma fixture mínima do incidente — fundação,
+tarefas que se integram sozinhas, categorias "pronta para a integração … na
+fase 4" com o roteador "exportado sem registro no servidor central", e a fase
+de integração.
+
+- `test/contract/disponibilidade-127.spec.ts` (17): a derivação sobre o Luna
+  publicado (P4 deixa o workflow 3 para a P6 pelo texto; P2 deixa o 1 pelo
+  caminho; P3 e P5 cobram os seus e aparecem revisitadas pela P6); as duas
+  integrações válidas (17, 18); elegibilidade desconhecida continua cobrada
+  (6); as duas contradições recusadas pelo contrato (7); o bloco do escritor;
+  e da revisão, os nomes de fase (C3), o componente externo (C7) e a fase
+  desconhecida (C4).
+- `test/loop/coerencia-temporal-127.spec.ts` (9), o `runBuild` inteiro com o
+  runner de fluxos falso: o fluxo adiado não é percorrido na fase 3, fica no
+  livro como `adiado-2` → P04 e passa na P4 com a regressão (2, 4, 14); a
+  integração progressiva percorre na fase do módulo (1, 17); a integração que
+  é da fase e não veio reprova nela, com o defeito no `passo 1` (3); a
+  proibição em prosa não dispensa (6); o build não conclui com fluxo nunca
+  percorrido (5); as fases de módulo correm juntas no paralelo, com o adiamento
+  valendo no worktree (12); e da revisão, a fase de destino revalidada quando a
+  de origem roda de novo (C2), os rótulos de prioridade (C3) e a fase 7 fora
+  da arquitetura sobre o Luna real (C4).
+- `test/loop/oscilacao-127.spec.ts` (9), o `runPhase` com o G4 simulado lendo o
+  arquivo do servidor, como na P04: a oscilação provada para no ciclo 2, com o
+  pacote ao PLAN, os dois defeitos `UPSTREAM_REPAIR_REQUIRED`, o trabalho e o
+  commit preservados e a prova da task 2 valendo (9, 11, 13, 15); a retomada
+  para sem chamada; a mesma falha com outra redação é o mesmo defeito (10);
+  passos diferentes, defeitos diferentes (11); o relatório do reparo uma vez;
+  e da revisão, G2 × G4 e o executor que nunca restaura o mesmo conteúdo NÃO
+  param por oscilação (C1), e a ponte só com mensagem.
+- `test/init/coerencia-temporal-127.spec.ts` (9), `init` + `plan` com o agente
+  falso: o adiamento que não espera e o fluxo sem caminho voltam ao arquiteto,
+  sem pergunta (7, 8); o escritor, o auditor de fase, o de coerência e o da
+  arquitetura recebem o contrato; a decisão do auditor da fase 3 emenda só a
+  fase 3 (8); o plano correto com a lista exata de chamadas (16); o achado
+  endereçado a `Architecture` vai ao arquiteto (8); e da revisão, a fase da
+  decisão soma às do endereço, e a triagem a vê (C6).
+
+RED contra a §126 (`9b1042a`), a primeira bateria de 32: 27 falham. Os cinco
+verdes antes e depois são de preservação, de propósito: a integração
+progressiva, a proibição em prosa que continua cobrada, o plano correto com as
+mesmas chamadas, o achado de `Architecture` indo ao arquiteto, e a
+arquitetura publicada do Luna passando no contrato novo. Os doze da revisão cobrem os sete
+defeitos que as sondas do revisor reproduziram contra a PRIMEIRA versão desta
+correção (não os doze cenários em si, que foram escritos depois): a fase
+parava com pacote ao PLAN por G2 × G4 (C1); o fluxo 2 não era percorrido em
+lugar nenhum no segundo run (C2); a P2 não percorria o seu fluxo por "P1, P2
+ou P3" num critério (C3); a fase 7 apagava os adiamentos pelo caminho (C4); o
+bloco mandava a fase da navegação "não ligar" (C5); a decisão perdia a fase 1
+do endereço (C6); o componente externo gerava contradição sem saída (C7).
+
+`npm run check`: 2933 testes em 157 arquivos, rc=0 (2889 em 153 antes). A
+máquina rodava com load average ~20 em 4 CPUs (dois `mpv` em loop, acesso
+remoto): nessas condições, três testes do paralelo que medem concorrência pelo
+relógio (`paralelo.spec.ts`: "fases independentes rodam ao mesmo tempo", "a
+suíte da árvore integrada é o juiz", a conciliação em arquivo com acento) e o
+cenário 15 da `integridade-122` falharam, cada um uma vez, em rodadas
+diferentes; todos passam isolados e repetidos, e nenhum passa por código desta
+correção. O cenário 12 deste § guardava o último intervalo da fase, e uma
+correção sob carga o sobrescrevia: agora guarda o da implementação, que a
+barreira faz começar junto.
+
+### 127.6 A revisão adversarial
+
+Um revisor independente (um agente; sondas fora da árvore, apagadas depois de
+rodar) atacou a primeira versão e reproduziu sete defeitos, todos corrigidos
+com cenário (127.5): o detector de oscilação aceitava qualquer par de gates e
+qualquer alternância sobre os mesmos arquivos — um teste da suíte, escrito pelo
+executor, virava "incompatibilidade de contrato" (agora: só task × fluxo do
+plano, e o Git tem de mostrar o estado rejeitado restaurado byte a byte); o
+fluxo adiado não era revalidado quando a fase de origem rodava de novo e a de
+destino continuava "fechada antes"; o build lia referência de fase nas tasks
+e em `P\d` solto, o plano só no goal (agora o envelope nos dois, e só "fase N"
+/ "Phase N"); a fase fora da arquitetura anulava todos os adiamentos pelo
+caminho; o bloco proibia ligar mesmo quando o goal manda; a fase carimbada na
+decisão substituía as fases do endereço; o componente externo gerava defeito
+sem saída. Das suspeitas, três viraram correção (a obrigação invalidada é
+regravada; o código de erro de um token continua cruzando a ponte; o fluxo que
+nenhuma fase cobre é dito antes da primeira fase) e as outras estão em 127.9.
+O revisor também confirmou o que resistiu: a cadeia de adiamento não tem
+ciclo, o incerto continua cobrado, o passo vem do cabeçalho real de falha do
+Playwright (conferido nos logs do Luna), e as onze respostas reais do
+arquiteto do Luna passam no contrato novo com zero contradições.
+
+### 127.7 Custo, medido
+
+Nos cenários dos testes, base (`9b1042a`) contra a correção, mesmo provider
+falso: a oscilação G3 × G4 da P04 custava 26 chamadas (13 do executor, 13 do
+verificador) e parava pelo teto de três ciclos; agora 8 (4 + 4), parando no
+ciclo 2 com o diagnóstico. A decisão de uma fase: 21 chamadas, com as fases 1,
+2 e 4 reemendadas; agora 18, só a 3. O adiamento com todos os fluxos verdes:
+10 e 10 — nenhuma chamada a mais, o roteiro do fluxo 2 só muda de fase. O plano
+correto: a mesma lista de chamadas, exata, nos dois. Não medido com modelo
+real: no Luna, a P04 gastou 28 chamadas na oscilação; com a correção, o fluxo
+3 não é cobrado na P04, e a oscilação não teria por onde começar.
+
+### 127.8 Compatibilidade e o run original
+
+Planos da 0.7.0 continuam válidos: nada muda no formato de nenhum documento,
+e o adiamento é derivado do que já está publicado. O contrato da arquitetura
+ganhou duas recusas; uma arquitetura guardada que caia numa delas é desenhada
+de novo (a §126 já a passa pelo contrato atual antes de reaproveitar). Os
+prompts do plano mudaram, então aprovações e caches do plano por sha de
+prompt não se reaproveitam, como em toda mudança de prompt. O registro de
+defeitos ganhou campos opcionais (`discovered.action`, `rediagnoses[].reopened`,
+`attempts[].files`, `attempts[].tree`); um estado antigo é lido sem eles, e a
+oscilação só se prova com eles.
+
+O build do Luna (`build-8e24c805009f`) é retomável em princípio — o plano é o
+mesmo, então o id do run é o mesmo —, e não foi retomado aqui (sem teste pago
+antes da validação determinística, como pede a especificação). O que a
+retomada faria, pelo código: P01–P03 puladas; a P04 volta com os defeitos
+gravados (D1–D8 com a âncora antiga, em prosa; as falhas novas ancoram em
+`passo N` e não casam com eles, e os antigos se resolvem quando o G4 não os
+reproduz), o fluxo 3 adiado para a P06 e o fluxo 1 também (pelo caminho), e a
+árvore da P04 é a do `wip` (sem integração — o que o plano da P04 pede —, e sem
+o link da barra lateral que a P02 entregou, que o fluxo 1 vai cobrar na P06);
+a P05 roda sozinha sobre a árvore integrada, como a recuperação do conflito
+manda; a P06 percorre os quatro fluxos. Mas o plano publicado continua com a
+P03 e a P05 revisitadas pela P06 (o build as cobra na própria fase), e é por
+isso que a rota recomendada é outra: `capivara plan` de novo — o arquiteto,
+o escritor e os auditores agora veem o tempo de cada fluxo — e então `capivara
+build`; as fases cujo texto não mudar continuam fechadas.
+
+### 127.9 Limitações e riscos
+
+- A evidência textual é a fase nomeada no envelope. Uma menção incidental no
+  goal ("o relatório da fase 7 usa esta listagem"), com a fase 7 cobrindo o
+  mesmo workflow e esperando por ela, adia o fluxo para a 7 — que o percorre;
+  o custo é detectar mais tarde, nunca aprovar sem percorrer.
+- A proibição de integração escrita em prosa, sem nomear a fase que integra,
+  não é reconhecida pelo código: o fluxo continua cobrado, e quem a pega é o
+  auditor (com o contrato e a tabela na mesa) ou, no build, a oscilação.
+- A revisita (a P06 do Luna cobrindo de novo os fluxos de P03 e P05 e mexendo
+  nos componentes do caminho) só informa: bloquear recusaria o plano com uma
+  fase final de consolidação sobre um ponto de extensão, que é válido. No
+  Luna, a P03 e a P05 continuariam cobrando os seus fluxos e integrando
+  pelo arquivo compartilhado; o conflito do paralelo no `routes.tsx` é
+  recuperado como sempre (a fase volta sozinha sobre a árvore integrada).
+- A prova da oscilação exige Git (a conferência byte a byte); sem Git, a
+  escada segue até o fim dos ciclos, como antes. Ela também exige o MESMO
+  conteúdo restaurado: um executor que alterna entre dois estados com
+  redações diferentes não é parado — gasta os ciclos, como antes.
+- `discovered.action` é a última ação antes de o gate achar o defeito, mesmo
+  quando o gate dele rodou ali pela primeira vez; a conferência do Git torna
+  isso irrelevante para a prova, mas o campo, sozinho, não é causalidade.
+- A chave de dedupe da decisão do auditor (`where::decision`) não tem fase: se
+  outra fase levanta a mesma decisão numa rodada seguinte, ela não é
+  perguntada de novo (certo) e a resposta não é reentregue a essa fase como
+  achado (a decisão aceita continua nas "Confirmed decisions" de todo prompt).
+- Não corrigidos, observados e anotados: `CoherenceMemory` rebaixou a
+  ressalva um achado real do verifier (P3 cria `tarefasRouter.ts`, P6 monta
+  `routes.ts`; publicado); `checkRewriteDrift` existe e não é chamada, embora
+  o prompt da emenda prometa a conferência; a contestação do roteiro conta
+  como mudança; o roteirista reescreveu o fluxo 1 sem Categorias depois de o
+  G3 mandar tirar o link (regressão mais fraca, sem aviso); a oscilação sobre
+  testes na arquitetura (requisito × prescrição) custou sete das oito
+  devoluções da arquitetura no PLAN e continua dependendo da calibração das
+  §118/§122/§126.
+- Validado só com provider falso e Git real; nenhum run real depois desta
+  implementação.

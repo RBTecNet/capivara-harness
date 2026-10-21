@@ -27,6 +27,15 @@ import { planningScopeBlock } from "./planning-scope.js";
  * aqui ele não pode virar requisito nem contradição. As regras do banco que o
  * harness escreve a partir da decisão do desenvolvedor ficam de fora da
  * exceção: os gates dependem delas.
+ *
+ * "Keep them exactly" valia também para "the disposable database for tests
+ * and flows", e no Parallel Lab com Luna (§126) foi a licença que o auditor da
+ * arquitetura usou para cobrar quem cria e destrói o banco dos testes — e o
+ * arquiteto escreveu o procedimento no goal de quatro fases, onde os auditores
+ * de fase o reprovaram sem que nenhuma emenda pudesse tirá-lo. O que os gates
+ * exigem é o lado da APLICAÇÃO; o procedimento da execução é do build, e isso
+ * é dito aqui aos dois papéis, porque o auditor também precisa saber que a
+ * ausência dele não é defeito.
  */
 const MECHANISM_BOUNDARY = [
   "## What in the skeleton is product, and what is yours",
@@ -38,9 +47,14 @@ const MECHANISM_BOUNDARY = [
   "architecture. Two such mechanisms that cannot both be true are never a contradiction to escalate",
   "and never a decision for the developer: choose one coherent mechanism that serves both",
   "behaviours. The rules derived from the developer's database decision — the `.env` and",
-  "`.env.example`, the migration command, the disposable database for tests and flows — are",
-  "requirements the harness's gates depend on: keep them exactly; what they leave to the plan",
-  "(whether the application also applies the schema at start-up, and how) is yours.",
+  "`.env.example`, the migration command, the isolated database for tests and flows — are",
+  "requirements the harness's gates depend on: keep exactly what they require of the application",
+  "(it reads its database location from the environment and accepts a separate, isolated database",
+  "through it; the migration command is the one they name). What they leave to the plan (whether",
+  "the application also applies the schema at start-up, and how) is yours. How a test run obtains,",
+  "points to and discards its database is neither yours nor a phase's: the build decides it when it",
+  "writes the tests. It is never a component's responsibility or contract, a data decision, an",
+  "infrastructure requirement or a phase goal, and an architecture that leaves it out is missing nothing.",
 ].join("\n");
 
 const AUTHORITY = [

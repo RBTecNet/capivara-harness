@@ -17,7 +17,7 @@ export type { StampInput } from "./stamps.js";
 export type { Workflow } from "./coverage.js";
 export { checkCoverage, checkEntities, checkStories, checkWorkflows } from "./coverage.js";
 export type { CoverageSources } from "./coverage.js";
-export { checkTestPrescription, testPrescriptionHint, testPrescriptions } from "./test-prescription.js";
+export { checkTestPrescription, testPrescriptionHint, testPrescriptions, testRunPrescriptions, testToolPrescriptions } from "./test-prescription.js";
 export type { TestAuthority } from "./test-prescription.js";
 export { mechanismPrescriptionHint, mechanismPrescriptions } from "./mechanism-prescription.js";
 export { WRITE_OWNERSHIP_INVARIANT, checkWriteOwnership, effectiveDependencies, projectPaths, writeConflicts, writeIntents, writeOwnershipHint } from "./ownership.js";

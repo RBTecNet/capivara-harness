@@ -147,8 +147,8 @@ export const INVARIANTS: readonly Invariant[] = [
   },
   {
     code: "I-16",
-    title: "Nenhuma prescrição de teste: ferramenta, arquivo, diretório, configuração, task de teste, cobertura ou tipo de teste não entram no plano",
-    rationale: "O plano descreve o produto e o caminho de implementação; a estratégia de validação — qual ferramenta, quais arquivos, quais cenários, que trabalho de teste em que fase, que tipo e organização — é do build. Um termo que o pedido ou uma decisão aceita do desenvolvedor contém não é prescrição do plano: é dele, e passa; o pedido que exige testes automatizados autoriza o requisito (um critério de comportamento do produto), não a task de escrevê-los. O mesmo critério vale para a stack e as fases do esqueleto e para a infraestrutura e as fases da arquitetura, que são de onde a prescrição se propagava.",
+    title: "Nenhuma prescrição de teste: ferramenta, arquivo, diretório, configuração, task de teste, cobertura, tipo de teste ou procedimento da execução não entram no plano",
+    rationale: "O plano descreve o produto e o caminho de implementação; a estratégia de validação — qual ferramenta, quais arquivos, quais cenários, que trabalho de teste em que fase, que tipo e organização — é do build. Um termo que o pedido ou uma decisão aceita do desenvolvedor contém não é prescrição do plano: é dele, e passa; o pedido que exige testes automatizados autoriza o requisito (um critério de comportamento do produto), não a task de escrevê-los. O mesmo critério vale para a stack e as fases do esqueleto e para a infraestrutura e as fases da arquitetura, que são de onde a prescrição se propagava. O procedimento da execução — quem cria, aponta e destrói o banco que os testes usam — também é do build: o isolamento é requisito do produto; a execução que o produz não é responsabilidade de componente, decisão de dados, requisito de ambiente nem goal de fase.",
     checkedBy: "test-prescription",
     enforcement: "rejects",
   },

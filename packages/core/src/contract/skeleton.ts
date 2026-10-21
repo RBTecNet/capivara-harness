@@ -21,7 +21,7 @@
  * exatamente a ausência desse acordo que produziu os impasses do piloto 3.
  */
 
-import { testPrescriptionHint, testPrescriptions } from "./test-prescription.js";
+import { testPrescriptionHint, testPrescriptions, testRunPrescriptions, testToolPrescriptions } from "./test-prescription.js";
 import type { TestAuthority } from "./test-prescription.js";
 import { MECHANISM_INVARIANT, mechanismPrescriptionHint, mechanismPrescriptions } from "./mechanism-prescription.js";
 import type { CoverageSources } from "./coverage.js";
@@ -203,7 +203,8 @@ export function repairSkeleton(root: Record<string, unknown>, authority: TestAut
         const entrada = (item ?? {}) as Record<string, unknown>;
         const component = typeof entrada.component === "string" ? entrada.component : "";
         const decision = typeof entrada.decision === "string" ? entrada.decision : "";
-        const termos = testPrescriptions(`${component}\n${decision}`, authority);
+        // Sai a entrada que nomeia ferramenta; a que só descreve o procedimento da execução (§126) fica e vira defeito, abaixo.
+        const termos = testToolPrescriptions(`${component}\n${decision}`, authority);
         if (termos.length > 0 && ROTULO_DE_TESTE.test(component)) {
           applied.push(`removeu da stack "${component}: ${decision}": ferramenta de teste é decisão do build (I-16); a exigência de testes do pedido segue nas stories e regras`);
           return false;
@@ -309,6 +310,24 @@ export function parseSkeleton(source: string, limits: SkeletonLimits): SkeletonR
     if (termos.length === 0) return;
     mecanismos.push({ problem: `${onde} fixa mecanismo de implementação sem autoridade (${MECHANISM_INVARIANT}): ${termos.join(", ")}`, hint: mechanismPrescriptionHint(termos) });
   };
+  /*
+   * A prescrição de teste se divide em duas (§126). A que nomeia ferramenta,
+   * arquivo, trabalho ou estratégia de teste continua sendo defeito que
+   * bloqueia (I-16, §118). A que só descreve o PROCEDIMENTO da execução — "os
+   * testes definem APP_DB_PATH para um arquivo temporário e o removem ao fim"
+   * — é prosa de mecanismo, e segue o destino dele: volta ao escritor
+   * nomeada e, depois da escada, é publicada com ressalva. Um run que para no
+   * esqueleto por uma frase sobre o banco dos testes é o mesmo "encontrar um
+   * motivo para interromper" que a §123 tirou do I-17.
+   */
+  const testeEm = (onde: string, texto: string, entrada = ""): void => {
+    const ferramenta = testToolPrescriptions(texto, autoridade);
+    if (ferramenta.length > 0) defects.push({ problem: `${onde} prescreve teste${entrada}: ${ferramenta.join(", ")}`, hint: testPrescriptionHint(ferramenta) });
+    const procedimento = testRunPrescriptions(texto, autoridade);
+    if (procedimento.length > 0) {
+      mecanismos.push({ problem: `${onde} prescreve o procedimento da execução de teste${entrada} (I-16): ${procedimento.join(", ")}`, hint: testPrescriptionHint(procedimento) });
+    }
+  };
 
   const stack: SkeletonStack[] = list(root.stack)
     .map((item) => ({ component: text(item.component), decision: text(item.decision) }))
@@ -317,8 +336,7 @@ export function parseSkeleton(source: string, limits: SkeletonLimits): SkeletonR
     defects.push({ problem: "a stack está vazia", hint: "declare ao menos linguagem e como a aplicação roda; o preflight verifica os pré-requisitos a partir daqui" });
   }
   for (const item of stack) {
-    const termos = testPrescriptions(`${item.component}\n${item.decision}`, autoridade);
-    if (termos.length > 0) defects.push({ problem: `a stack prescreve teste em "${item.component}: ${item.decision}"`, hint: testPrescriptionHint(termos) });
+    testeEm("a stack", `${item.component}\n${item.decision}`, ` em "${item.component}: ${item.decision}"`);
     mecanismoEm(`a entrada de stack "${item.component}"`, `${item.component}\n${item.decision}`);
   }
 
@@ -348,14 +366,12 @@ export function parseSkeleton(source: string, limits: SkeletonLimits): SkeletonR
     .map((item) => ({ subject: text(item.subject), statement: text(item.statement) }))
     .filter((item) => item.statement !== "");
   for (const story of stories) {
-    const termos = testPrescriptions(story.statement, autoridade);
-    if (termos.length > 0) defects.push({ problem: `a story ${story.id} prescreve teste`, hint: testPrescriptionHint(termos) });
+    testeEm(`a story ${story.id}`, story.statement);
     mecanismoEm(`a story ${story.id}`, story.statement);
   }
   for (const workflow of workflows) mecanismoEm(`o workflow ${workflow.number}`, `${workflow.name}\n${workflow.steps.join("\n")}`);
   for (const rule of rules) {
-    const termos = testPrescriptions(`${rule.subject}\n${rule.statement}`, autoridade);
-    if (termos.length > 0) defects.push({ problem: `a regra "${rule.subject}" prescreve teste`, hint: testPrescriptionHint(termos) });
+    testeEm(`a regra "${rule.subject}"`, `${rule.subject}\n${rule.statement}`);
     mecanismoEm(`a regra "${rule.subject}"`, rule.statement);
   }
 
@@ -384,8 +400,7 @@ export function parseSkeleton(source: string, limits: SkeletonLimits): SkeletonR
     // A divisão de fases também não aloca trabalho de teste (I-16, §122):
     // "incluir nesta fase os testes do módulo" decide em que fase a suíte é
     // escrita, e isso é do build.
-    const termosDaFase = testPrescriptions(`${phase.title}\n${phase.goal}`, autoridade);
-    if (termosDaFase.length > 0) defects.push({ problem: `a fase ${phase.number} prescreve teste: ${termosDaFase.join(", ")}`, hint: testPrescriptionHint(termosDaFase) });
+    testeEm(`a fase ${phase.number}`, `${phase.title}\n${phase.goal}`);
     // Nem congela arquitetura (I-17, §123): a fase preliminar é uma entrega
     // funcional; arquivo, contrato e mecanismo de integração são do arquiteto.
     mecanismoEm(`a fase ${phase.number}`, `${phase.title}\n${phase.goal}`);

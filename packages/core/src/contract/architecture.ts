@@ -24,7 +24,7 @@
  * produto é o avaliador do build, lendo o código entregue.
  */
 
-import { testPrescriptionHint, testPrescriptions } from "./test-prescription.js";
+import { testPrescriptionHint, testPrescriptions, testToolPrescriptions } from "./test-prescription.js";
 import type { TestAuthority } from "./test-prescription.js";
 import { jsonDaResposta } from "./resposta.js";
 import { sha12 } from "./stamps.js";
@@ -301,7 +301,13 @@ export function parseArchitecture(
   const infraBruta = (root.infrastructure ?? {}) as Record<string, unknown>;
   const semFerramentaDeTeste = <T extends InfrastructureItem>(grupo: string, itens: T[]): T[] =>
     itens.filter((entrada) => {
-      if (testPrescriptions(`${entrada.name}\n${entrada.purpose}`, authority).length === 0) return true;
+      const texto = `${entrada.name}\n${entrada.purpose}`;
+      if (testPrescriptions(texto, authority).length === 0) return true;
+      // Só o procedimento da execução (§126) não faz do item uma ferramenta de teste: ele fica, e a frase volta ao arquiteto.
+      if (testToolPrescriptions(texto, authority).length === 0) {
+        prosaDeTeste(`o item ${entrada.name} de infrastructure.${grupo}`, texto);
+        return true;
+      }
       applied.push(`removeu ${entrada.name} de infrastructure.${grupo}: ferramenta de teste é decisão do build (I-16)`);
       return false;
     });
@@ -331,6 +337,13 @@ export function parseArchitecture(
       }
     }
   }
+  /*
+   * Os requisitos de ambiente também são prosa, e eram a única que o I-16 não
+   * lia: no Parallel Lab com Luna (§126) o procedimento da execução de teste
+   * estava no goal das fases, nos módulos, na decisão de dados — e aqui, onde
+   * nada o conferia.
+   */
+  prosaDeTeste("a infraestrutura (requisitos de ambiente)", [...infrastructure.compatibility, ...infrastructure.preconditions].join("\n"));
   if (infrastructure.runtimes.length === 0) {
     defects.push({ problem: "a infraestrutura não declara runtime nenhum", hint: "declare ao menos o runtime da stack decidida no esqueleto" });
   }

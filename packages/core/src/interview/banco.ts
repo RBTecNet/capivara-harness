@@ -203,12 +203,26 @@ export function regrasDeBanco(decisao: DecisaoDeBanco): SkeletonRule[] {
     },
     {
       subject: "o exemplo precisa RODAR",
+      /*
+       * O que a regra garante é QUAL banco o exemplo abre (§115.10) e que os
+       * testes não tocam nele — não quem cria o arquivo dos testes (§126).
+       *
+       * Ela dizia "testes e fluxos fornecem pela mesma variável de ambiente
+       * outro arquivo temporário, criado e destruído pela própria execução". No
+       * Parallel Lab com Luna a auditoria da arquitetura leu isso como produto
+       * sem dono e mandou atribuir "a criação e a destruição" a um componente;
+       * o arquiteto escreveu o procedimento no goal de quatro fases, e os
+       * auditores de fase — com razão, pela responsabilidade do planejamento —
+       * mandaram tirar o que o envelope não deixa tirar. Onze rodadas e três
+       * arbitragens. O arquivo isolado e a variável que o aponta continuam;
+       * como a execução dos testes o obtém e descarta é do build.
+       */
       statement:
         decisao === "embutido"
           ? "copiar o `.env.example` para `.env` deixa a aplicação de pé sem serviço externo, usando um arquivo " +
             "local persistente criado pelo próprio projeto, que conserva os dados entre reinicializações; " +
-            "testes e fluxos fornecem pela mesma variável de ambiente outro arquivo temporário, criado e " +
-            "destruído pela própria execução, sem tocar o banco normal da aplicação nem alterar o `.env` do desenvolvedor"
+            "testes e fluxos usam outro arquivo temporário, isolado, que a aplicação aceita pela mesma variável " +
+            "de ambiente, sem tocar o banco normal da aplicação nem alterar o `.env` do desenvolvedor"
           : "copiar o `.env.example` para `.env` tem de deixar a aplicação de pé e utilizável sem mais nenhuma " +
         "configuração: ele aponta para o banco descartável, nunca para um servidor de mentira. As variáveis do " +
         "servidor de produção ficam documentadas ali ao lado, comentadas ou claramente opcionais — quem for " +
@@ -241,9 +255,20 @@ export function regrasDeBanco(decisao: DecisaoDeBanco): SkeletonRule[] {
     },
     {
       subject: "banco dos testes",
+      /*
+       * O requisito dos gates é o isolamento: os testes nunca abrem o banco de
+       * quem os roda. "Criado e destruído pela própria execução dos testes" era
+       * o PROCEDIMENTO da execução, e foi a frase que a auditoria da
+       * arquitetura cobrou como responsabilidade de componente e de fase
+       * (§126). A última oração existe para quem lê a regra no `plan`: é a
+       * mesma forma da ressalva da migração (§123), "é decisão do plano, não
+       * desta regra", apontando para o estágio que de fato decide.
+       */
       statement:
-        "a suíte automatizada e os fluxos rodam contra um banco descartável, criado e destruído pela própria " +
-        "execução dos testes; nenhum teste lê, escreve ou migra o banco configurado no `.env` do desenvolvedor",
+        "a suíte automatizada e os fluxos rodam contra um banco descartável, isolado do banco normal da " +
+        "aplicação; nenhum teste lê, escreve ou migra o banco configurado no `.env` do desenvolvedor. Como cada " +
+        "execução obtém e descarta esse banco é decisão do build, não do plano nem desta regra: não é " +
+        "responsabilidade de componente nem objetivo de fase",
     },
     {
       subject: "a aplicação escolhe o banco pelo ambiente",

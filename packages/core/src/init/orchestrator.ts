@@ -18,6 +18,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkTestPrescription, checkWriteOwnership, testPrescriptionHint, testPrescriptions, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parseArchitecture, parsePhaseFragment, parseSkeleton, phaseHeading, phasesFromArchitecture, renderArchitecture, renderSkeleton, requirementsFromArchitecture, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12 } from "../contract/index.js";
 import { CoherenceMemory } from "../audit/coherence.js";
+import { achadoNaOrigem, alvoNoEnvelope, chavesDoEnvelope, veioDoEnvelope } from "../audit/envelope.js";
 import { applyMaterialityReview, materialityInput, materialityPrompt } from "../audit/materiality.js";
 import type { Architecture, ContractError, CoverageSources, PhasesDocument, Skeleton, StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, balancoDaRodada, descreverBalanco, fingerprint, nextAuditAction, parseAudit, persistentFindings, renderStandoff, writerDid } from "../audit/index.js";
@@ -655,6 +656,12 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   /** Suposições que o escritor registrou em vez de perguntar; o relatório as mostra. */
   const allAssumptions: Assumption[] = [];
   const remarks: { document: string; remark: Remark }[] = [];
+  /*
+   * O que vai ao relatório e NÃO aos auditores (§126). `remarks` é lido por
+   * todo auditor de fase como ressalva a resolver; um aviso sobre a versão do
+   * harness que gravou o esqueleto viraria achado que nenhuma fase corrige.
+   */
+  const avisosDoRelatorio: { document: string; remark: Remark }[] = [];
   /** Ausente até o ensaio rodar; o gate trata ausência como reprovação. */
   let rehearsal: { blocked: string[] } | undefined;
   /** Presente apenas no caminho por esqueleto; é dele que sai a cobertura. */
@@ -1331,6 +1338,31 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         allQuestions.push(...doInit.questions.map((question) => ({ ...question, id: scoped("skeleton", question.id) })));
         allAnswers.push(...doInit.answers.map((answer) => ({ ...answer, questionId: scoped("skeleton", answer.questionId) })));
         announce(`  ${doInit.answers.length} decisão(ões) do init carregada(s); não vou perguntar de novo`);
+
+        /*
+         * As regras de banco são do harness, e o harness muda (§126).
+         *
+         * O esqueleto gravado por uma versão anterior carrega o texto dela —
+         * no Parallel Lab com Luna, "criado e destruído pela própria execução
+         * dos testes", a frase que a arquitetura transformou em goal de fase.
+         * O `plan` não reescreve o que o `init` publicou: trocar a regra aqui
+         * mudaria o documento por baixo do desenvolvedor e a identidade de
+         * tudo o que foi aprovado sobre ele. Diz a diferença e a rota — o
+         * `init` republica com as respostas e a chamada do esqueleto que já
+         * estão em disco —, e segue com o que está publicado.
+         */
+        // Só o texto que as versões anteriores escreviam: uma regra do escritor com o mesmo assunto é mantida pelo init e não é "de outra versão".
+        const atuais = regrasDeBanco(decisaoDeBanco(doInit.questions, doInit.answers));
+        const defasadas = atuais.filter((regra) =>
+          guardado.rules.some((gravada) => gravada.subject === regra.subject && gravada.statement !== regra.statement && /criado e destru[ií]do pela pr[oó]pria execu[cç][aã]o/iu.test(gravada.statement)),
+        );
+        if (defasadas.length > 0) {
+          const observacao =
+            `a(s) regra(s) de banco ${defasadas.map((regra) => `"${regra.subject}"`).join(", ")} deste esqueleto foram escritas por uma versão anterior do harness e ainda prescrevem o procedimento da execução de teste ("criado e destruído pela própria execução"); ` +
+            "o plano segue com o que está publicado. Para republicá-las, rode `capivara init` neste projeto — as respostas da entrevista e a chamada do esqueleto em disco são reaproveitadas — e depois `capivara plan`";
+          announce(`  ${observacao}`);
+          avisosDoRelatorio.push({ document: "skeleton.md", remark: { where: "regras de banco", observation: observacao } });
+        }
       }
 
       /*
@@ -1489,7 +1521,14 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         announce(`  o esqueleto segue com ${lido.tolerated.length} ressalva(s): mecanismo de implementação que o escritor e o auditor não retiraram; o plano decide por conta própria (I-17)`);
         for (const residuo of lido.tolerated) {
           announce(`    ressalva: ${residuo}`);
-          remarks.push({ document: "skeleton.md", remark: { where: "I-17", observation: `${residuo} — o plano escolhe o mecanismo; a regra vale pelo comportamento` } });
+          // O procedimento da execução de teste (§126) tolerado é do build, não do plano.
+          const deTeste = residuo.includes("procedimento da execução de teste");
+          remarks.push({
+            document: "skeleton.md",
+            remark: deTeste
+              ? { where: "I-16", observation: `${residuo} — como a execução dos testes obtém e descarta o banco é do build; a regra vale pelo isolamento` }
+              : { where: "I-17", observation: `${residuo} — o plano escolhe o mecanismo; a regra vale pelo comportamento` },
+          });
         }
       }
 
@@ -1741,11 +1780,23 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     const shaDoEsqueleto = sha12(renderSkeleton(esqueletoDeOrigem!));
 
     const guardada = options.fresh === true ? null : await readArchitectureState(options.projectRoot, runId);
-    if (
-      guardada &&
+    /*
+     * Reaproveitar não dispensa o contrato (§126): a arquitetura aprovada por
+     * uma versão anterior pode carregar o que o contrato de hoje devolve — o
+     * procedimento da execução de teste no goal das fases, no Luna. A mesma
+     * leitura que um desenho novo passaria, sem chamada nenhuma.
+     */
+    const mesmaOrigem =
+      guardada !== null &&
       guardada.authoritySha12 === autoridade &&
-      (guardada.sourceSkeletonSha12 === shaDoEsqueleto || guardada.appliedSkeletonSha12 === shaDoEsqueleto)
-    ) {
+      (guardada.sourceSkeletonSha12 === shaDoEsqueleto || guardada.appliedSkeletonSha12 === shaDoEsqueleto);
+    const contratoAtual = guardada === null || !mesmaOrigem
+      ? null
+      : parseArchitecture(JSON.stringify(guardada.architecture), esqueletoDeOrigem!, { maxTasksPerPhase: MAX_TASKS_PER_PHASE, authority: autoridadeDeTeste() });
+    if (contratoAtual !== null && !contratoAtual.ok) {
+      announce(`  a arquitetura guardada não passa no contrato atual (${contratoAtual.defects.map((defeito) => defeito.problem).join("; ")}); vou desenhá-la de novo`);
+    }
+    if (guardada && mesmaOrigem && contratoAtual?.ok === true) {
       announce("  arquitetura reaproveitada de uma execução anterior: esqueleto e decisões não mudaram");
       await event("authoring", "architecture", "complete", "reaproveitada: esqueleto e decisões não mudaram");
       await publicarArquitetura(guardada.architecture, autoridade);
@@ -2175,6 +2226,34 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
              */
             if (deFase.length > 0) announce(`  ${deFase.length} achado(s) de fase ficam para a próxima auditoria, sobre a divisão nova`);
             return autorado(novas);
+          }
+          /*
+           * O envelope que a arquitetura não corrigiu não vai a voto (§126).
+           *
+           * "Seguem para a sua arbitragem" é o destino de um achado de
+           * reorganização que pode ser uma escolha; o goal de uma fase que
+           * contradiz a regra do planejamento não é. No Parallel Lab com Luna
+           * ele foi arbitrado três vezes — "qual dos dois entendimentos vale?"
+           * — e a resposta, gravada como decisão aceita, não tinha quem a
+           * aplicasse. O run para dizendo onde o defeito nasceu.
+           */
+          const doEnvelope = deArquitetura.filter(veioDoEnvelope);
+          if (doEnvelope.length > 0) {
+            await event("audit", "project-phases.md", "blocked", "o envelope de fase herdado da arquitetura não convergiu", attempt);
+            throw new InitBlockedError(
+              diagnostico("project-phases.md", [
+                `O que a auditoria do plano aponta está no envelope de fase, e o envelope é escrito por architecture.md, não por project-phases.md: a emenda e o reparo de uma fase só reescrevem as tasks dela.`,
+                `A arquitetura foi refeita ${reorganizacoes} vez(es) — o orçamento de reorganizações — e o ponto voltou.`,
+                "",
+                "O que continua aberto, no documento de origem:",
+                ...doEnvelope.flatMap((finding) => [`  · ${finding.where}: ${finding.problem}`, `    correção pedida: ${finding.fix}`]),
+                "",
+                ...(deFase.length > 0 ? ["", `E ${deFase.length} achado(s) de fase desta rodada, que esperavam a divisão nova, também seguem abertos.`] : []),
+                "",
+                "Isto é um defeito técnico herdado da arquitetura, não uma decisão de produto: nada aqui é seu para decidir.",
+              ], "O esqueleto, a arquitetura e as fases estão em disco; `capivara plan` retoma daqui sem repagar o que já passou. Se o mesmo ponto voltar, troque o modelo do papel writer (o arquiteto) ou do auditor e rode de novo."),
+              runId,
+            );
           }
           announce(`  ${deArquitetura.length} achado(s) pedem reorganização, e o orçamento de ${maxArchitectureReturns} reorganização(ões) acabou; eles seguem para a sua arbitragem`);
           if (deFase.length === 0) return autorado(partes);
@@ -2713,10 +2792,18 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       announce(`  ${deEngenharia.length} ponto(s) são de engenharia (${deEngenharia.map((finding) => sinaisDeEngenharia(`${finding.where}\n${finding.problem}`)[0] ?? finding.where).join(", ")}): o plano decide, não você — seguem na correção`);
     }
     const anotado = (finding: Finding): Finding => (deEngenharia.includes(finding) ? comNotaDeEngenharia(finding) : finding);
+    /*
+     * Nem o achado sobre o envelope da fase (§126): as duas "leituras" que a
+     * pergunta oferece — a do auditor e a do escritor — são igualmente
+     * inalcançáveis para quem emenda a fase, e a resposta vira uma decisão
+     * aceita que ninguém aplica. Ele vai à arquitetura, que escreve o envelope.
+     */
     const repetidos = findings.filter(
       (finding) =>
         finding.mechanical !== true &&
         !deEngenharia.includes(finding) &&
+        !alvoNoEnvelope(finding) &&
+        !veioDoEnvelope(finding) &&
         (todos || ehRepetido(finding, history)) &&
         !arbitrados.has(marcaDoProblema(finding)),
     );
@@ -3709,6 +3796,30 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     const decididosNoImpasse: Finding[] = [];
     /** Não-respostas no impasse: a primeira recomeça a correção; a segunda para com diagnóstico. */
     let naoRespostas = 0;
+    /*
+     * Os lugares do envelope de fase já apontados neste ciclo (§126), por
+     * endereço — `P2·goal` —, e não pelo texto: a mesma reclamação sobre o
+     * mesmo goal volta com outras palavras a cada leitura. Não zera com a
+     * história, porque nenhuma emenda, reparo ou arbitragem muda o envelope;
+     * só a arquitetura muda.
+     */
+    const envelopesApontados = new Set<string>();
+    const totalDeFases = (): number => skeletonAtual?.phases.length ?? 0;
+    /*
+     * A chave leva o envelope que está na mesa: depois de uma reorganização o
+     * goal é outro, e um achado sobre ele é primeira aparição de novo — a
+     * emenda tem a chance dela. Renumerar fases também muda a assinatura.
+     */
+    const assinaturaDoEnvelope = (numero: number): string => sha12(JSON.stringify(skeletonAtual?.phases.find((fase) => fase.number === numero) ?? null));
+    const naOrigem = (findings: readonly Finding[], herdados: readonly Finding[]): Finding[] => [
+      ...findings.filter((finding) => !herdados.includes(finding)),
+      ...herdados.map((finding) => achadoNaOrigem(finding, totalDeFases())),
+    ];
+    const anunciarHeranca = (herdados: readonly Finding[]): void => {
+      const lugares = [...new Set(herdados.flatMap((finding) => chavesDoEnvelope(finding, totalDeFases())))].join(", ");
+      announce(`  ${herdados.length} achado(s) apontam o envelope de fase (${lugares}), que é escrito por architecture.md: nenhuma emenda de fase o alcança, e a correção vai à arquitetura — não a você`);
+      registrarEstrategia(document, `envelope de fase (${lugares}) devolvido à arquitetura, que o escreve`);
+    };
     for (let attempt = 1; attempt <= attemptLimit; attempt += 1) {
       const content = authored.content;
       if (modoReparo) announce(`  validação independente de ${document} reparado, pelo verifier`);
@@ -3739,6 +3850,11 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
       history.push({ attempt, verdict, contentSha: sha12(content) });
 
+      // O envelope que VOLTA ao mesmo lugar é herança; na primeira vez, é defeito como qualquer outro (§70).
+      const doEnvelope = document === "project-phases.md" ? verdict.findings.filter(alvoNoEnvelope) : [];
+      const reincidentes = doEnvelope.filter((finding) => chavesDoEnvelope(finding, totalDeFases(), assinaturaDoEnvelope).some((chave) => envelopesApontados.has(chave)));
+      for (const finding of doEnvelope) for (const chave of chavesDoEnvelope(finding, totalDeFases(), assinaturaDoEnvelope)) envelopesApontados.add(chave);
+
       /*
        * Emenda que não mudou o texto não vai ser emendada de novo.
        *
@@ -3764,6 +3880,27 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         maxMechanical: modoReparo && reparos >= maxReparos ? 0 : maxMechanicalRounds,
       });
       if (action.action === "publish") return { content, remarks: verdict.remarks, authored };
+
+      /*
+       * O envelope no fim da escada vai à arquitetura, não à escada (§126).
+       *
+       * Reparo pelo auditor, arbitragem e impasse emendam ou decidem a FASE —
+       * e o envelope não é dela. No Parallel Lab com Luna o Goal das fases 2 a
+       * 5 passou pelos dois reparos, por três arbitragens e pelo impasse, e a
+       * segunda reorganização, a única que alcançava o texto, nunca foi usada.
+       * Cada passagem por aqui gasta uma reorganização ou para o run com o
+       * diagnóstico da origem: o laço é finito.
+       */
+      if (action.action === "ask-developer" && document === "project-phases.md") {
+        const herdados = action.standoff.auditorInsists.filter(alvoNoEnvelope);
+        if (herdados.length > 0) {
+          anunciarHeranca(herdados);
+          history.length = 0;
+          attemptLimit = attempt + cycleBudget;
+          authored = await authored.rewrite(naOrigem(action.standoff.auditorInsists, herdados), attempt + 1, { papel: papelDaEmenda() });
+          continue;
+        }
+      }
 
       if (action.action === "ask-developer" && developerRuled) {
         /*
@@ -4025,13 +4162,24 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
        * nove achados: o desenvolvedor decidindo o que o escritor teria fechado.
        */
       const anteriores = history.slice(0, -1);
-      const arbitradosDaVolta = await levantamentoDeAuditoria(document, content, action.findings, anteriores, attempt, writer, verdict.mechanical === true);
-      if (modoReparo) {
+      const arbitradosDaVolta = await levantamentoDeAuditoria(document, content, action.findings.filter((finding) => !reincidentes.includes(finding)), anteriores, attempt, writer, verdict.mechanical === true);
+      if (reincidentes.length > 0) anunciarHeranca(reincidentes);
+      // Com herança, a reescrita é a reorganização da arquitetura, e os achados de fase esperam a divisão nova: não há reparo a contar.
+      if (modoReparo && reincidentes.length === 0) {
         reparos += 1;
         announce(`  o verifier devolveu ${document}; o auditor repara de novo (${reparos}/${maxReparos})`);
         registrarEstrategia(document, `reparo ${reparos} pelo auditor sobre os achados do verifier`);
       }
-      authored = await authored.rewrite([...decisoes, ...arbitradosDaVolta], action.attempt, modoReparo ? { papel: "auditor", historico: writerDid(history) } : {});
+      authored = await authored.rewrite(
+        [...decisoes, ...arbitradosDaVolta, ...reincidentes.map((finding) => achadoNaOrigem(finding, totalDeFases()))],
+        action.attempt,
+        modoReparo ? { papel: "auditor", historico: writerDid(history) } : {},
+      );
+      if (reincidentes.length > 0) {
+        // A divisão é nova: o ciclo recomeça sobre ela, como no ramo do impasse.
+        history.length = 0;
+        attemptLimit = attempt + cycleBudget;
+      }
 
       /*
        * Decisão que aparece NA REESCRITA também vai ao desenvolvedor.
@@ -4426,7 +4574,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       mvpCutPhase: parsedPhases.ok ? parsedPhases.document.phases.length : 0,
       coverage: { stories: coverage.storyIds.length, entities: coverage.entities.length, workflows: coverage.workflows.length },
       checkpoint: buildCheckpoint({ round: maxInterviewRounds, questions: allQuestions, answers: allAnswers, assumptions: allAssumptions, maxRounds: maxInterviewRounds }),
-      remarks,
+      remarks: [...remarks, ...avisosDoRelatorio],
       costs: [...costs.values()],
       readiness,
     };

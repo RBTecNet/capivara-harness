@@ -262,12 +262,195 @@ describe("build paralelo", () => {
     expect(anuncios.some((linha) => linha.includes("[P03] conflito ao integrar em compartilhado.txt"))).toBe(true);
     const sessoesDoRelatorio = engine.chamadas.filter((chamada) => chamada.role === "builder" && chamada.phase.id === "P03");
     expect(sessoesDoRelatorio).toHaveLength(2);
+    // §125 F: a segunda sessão é a conciliação do conflito, não uma nova implementação.
+    expect(sessoesDoRelatorio[1]!.prompt).toContain("You are reconciling a Git conflict between two pieces of APPROVED work.");
+    expect(sessoesDoRelatorio[1]!.prompt).toContain("- `compartilhado.txt`");
+    expect(sessoesDoRelatorio[1]!.prompt).not.toContain("Implement the phase below COMPLETELY");
     expect(await readFile(join(projectRoot, "compartilhado.txt"), "utf8")).toBe("do relatório\n");
 
-    // A conclusão só foi gravada depois de a fase entrar no produto.
+    // A conclusão só foi gravada depois de a fase entrar no produto. A conciliação é
+    // uma chamada de construção e, como toda chamada corretiva, tem o seu retry (§125 F).
     const runId = runIdFor("build", sha12(PLANO));
     const doRelatorio = (await readEvents(runPaths(projectRoot, runId).events)).filter((evento) => evento.subject === "P03");
-    expect(doRelatorio.map((evento) => evento.status)).toEqual(["started", "started", "retry", "started", "started", "complete"]);
+    expect(doRelatorio.map((evento) => evento.status)).toEqual(["started", "started", "retry", "retry", "started", "started", "complete"]);
+  });
+
+  /*
+   * §125 F · §13.11 da especificação: o conflito preserva os dois commits, a
+   * conciliação mexe só nos trechos em conflito, e o que se revalida é o que
+   * ela atingiu — sem reimplementar a fase nem descartar o aprovado.
+   */
+  describe("conciliação localizada do conflito de integração (§125 F)", () => {
+    const escreve = {
+      ...ESCRITAS,
+      P02: [{ path: "compartilhado.txt", content: "do cadastro\n" }],
+      P03: [{ path: "compartilhado.txt", content: "do relatório\n" }, { path: "relatorio.txt", content: "relatório\n" }],
+    };
+
+    /** O executor da P03: a implementação escreve o de sempre; a conciliação, o que o cenário mandar (e o que ela responde). */
+    function comConciliacao(conciliar: (raiz: string, chamada: EngineCall) => Promise<void | string>, escritas: Passo["escreve"] = escreve) {
+      const engine = motor({ escreve: escritas, demora: { P02: 20, P03: 150 } });
+      const vistos: { prompt: string; compartilhado: string | null }[] = [];
+      const call = async (chamada: EngineCall): Promise<EngineResult> => {
+        if (chamada.role === "builder" && chamada.phase.id === "P03" && engine.chamadas.some((anterior) => anterior.role === "builder" && anterior.phase.id === "P03")) {
+          engine.chamadas.push(chamada);
+          vistos.push({ prompt: chamada.prompt, compartilhado: await readFile(join(chamada.root!, "compartilhado.txt"), "utf8").catch(() => null) });
+          const resposta = await conciliar(chamada.root!, chamada);
+          return { exitCode: 0, stdout: `feito\n${resposta ?? ""}\nCAPIVARA_BUILDER_STATUS: COMPLETE`, stderr: "", timedOut: null };
+        }
+        return engine.call(chamada);
+      };
+      return { engine, call, vistos };
+    }
+
+    it("os dois commits ficam guardados; a conciliação recebe os marcadores e o resto do aprovado já no lugar", async () => {
+      const cenario = comConciliacao(async (raiz) => writeFile(join(raiz, "compartilhado.txt"), "do cadastro\ndo relatório\n"));
+      const { outcome, anuncios } = await construir({ escreve }, { call: cenario.call });
+      expect(outcome.exitCode, anuncios.join("\n")).toBe(0);
+
+      const [conciliacao] = cenario.vistos;
+      // Os dois lados no arquivo, com a base (diff3), e nada mais em conflito.
+      expect(conciliacao!.compartilhado).toMatch(/^<{7} /mu);
+      expect(conciliacao!.compartilhado).toMatch(/^\|{7} /mu);
+      expect(conciliacao!.compartilhado).toContain("do cadastro");
+      expect(conciliacao!.compartilhado).toContain("do relatório");
+      expect(cenario.vistos).toHaveLength(1);
+
+      // Os dois commits preservados: o da P02 no histórico da principal, o aprovado da P03 no branch dele.
+      const runId = runIdFor("build", sha12(PLANO));
+      const aprovado = (await git(["branch", "--list", "--format=%(refname:short)", `capivara/${runId}/P03-aprovada-*`])).trim();
+      expect(aprovado).not.toBe("");
+      expect(await git(["show", `${aprovado}:compartilhado.txt`])).toBe("do relatório");
+      expect(await git(["log", "--format=%s"])).toContain("feat(phase-2): Cadastro");
+      // A conciliação entrou no produto, junto com o resto do aprovado que não conflitava.
+      expect(await readFile(join(projectRoot, "compartilhado.txt"), "utf8")).toBe("do cadastro\ndo relatório\n");
+      expect(await readFile(join(projectRoot, "relatorio.txt"), "utf8")).toBe("relatório\n");
+      // O checkpoint do conflito saiu quando a fase integrou.
+      await expect(readFile(join(runPaths(projectRoot, runId).root, "integracoes", "P03.json"), "utf8")).rejects.toThrow();
+    });
+
+    it("o que a conciliação mexer fora dos arquivos em conflito, o Core desfaz", async () => {
+      const cenario = comConciliacao(async (raiz) => {
+        await writeFile(join(raiz, "compartilhado.txt"), "do cadastro\ndo relatório\n");
+        await writeFile(join(raiz, "relatorio.txt"), "reescrito pela conciliação\n");
+        await writeFile(join(raiz, "intruso.txt"), "não devia estar aqui\n");
+      });
+      const { outcome, anuncios } = await construir({ escreve }, { call: cenario.call });
+      expect(outcome.exitCode, anuncios.join("\n")).toBe(0);
+      expect(anuncios.some((linha) => linha.includes("[P03] a conciliação mexeu fora dos arquivos em conflito (intruso.txt, relatorio.txt); o Core desfez essas mudanças"))).toBe(true);
+      expect(await readFile(join(projectRoot, "relatorio.txt"), "utf8")).toBe("relatório\n");
+      expect(await existe(join(projectRoot, "intruso.txt"))).toBe(false);
+      expect(await readFile(join(projectRoot, "compartilhado.txt"), "utf8")).toBe("do cadastro\ndo relatório\n");
+    });
+
+    it("marcador que sobra não passa: o executor recebe o conflito com o handoff, e a fase não é reimplementada", async () => {
+      let conciliacoes = 0;
+      const cenario = comConciliacao(async (raiz) => {
+        conciliacoes += 1;
+        // A primeira tentativa não resolve nada; a segunda (o executor da escada) resolve.
+        if (conciliacoes === 2) await writeFile(join(raiz, "compartilhado.txt"), "do cadastro\ndo relatório\n");
+      });
+      const { outcome, anuncios } = await construir({ escreve }, { call: cenario.call });
+      expect(outcome.exitCode, anuncios.join("\n")).toBe(0);
+      expect(cenario.vistos).toHaveLength(2);
+      expect(cenario.vistos[0]!.prompt).toContain("You are reconciling a Git conflict");
+      expect(cenario.vistos[1]!.prompt).toContain("conflito de integração: marcadores em compartilhado.txt");
+      expect(cenario.vistos.every((visto) => !visto.prompt.includes("Implement the phase below COMPLETELY"))).toBe(true);
+      expect(await readFile(join(projectRoot, "compartilhado.txt"), "utf8")).toBe("do cadastro\ndo relatório\n");
+    });
+
+    // Da revisão adversarial do F: nome que o Git cita entre aspas, conflito sem marcador, wip com marcador, --rebuild-all.
+    it("arquivo com acento: os marcadores são vistos e conciliados, e nada com marcador entra no produto", async () => {
+      const comAcento = { ...ESCRITAS, P02: [{ path: "configuração.md", content: "do cadastro\n" }], P03: [{ path: "configuração.md", content: "do relatório\n" }, { path: "relatorio.txt", content: "relatório\n" }] };
+      const cenario = comConciliacao(async (raiz) => writeFile(join(raiz, "configuração.md"), "do cadastro\ndo relatório\n"), comAcento);
+      const { outcome, anuncios } = await construir({ escreve: comAcento }, { call: cenario.call });
+      expect(outcome.exitCode, anuncios.join("\n")).toBe(0);
+      expect(cenario.vistos).toHaveLength(1);
+      expect(cenario.vistos[0]!.prompt).toContain("- `configuração.md`");
+      expect(await readFile(join(projectRoot, "configuração.md"), "utf8")).toBe("do cadastro\ndo relatório\n");
+    });
+
+    it("o que a conciliação mexe fora do escopo, em arquivo com acento, volta de verdade", async () => {
+      const cenario = comConciliacao(async (raiz) => {
+        await writeFile(join(raiz, "compartilhado.txt"), "do cadastro\ndo relatório\n");
+        await writeFile(join(raiz, "relatório.md"), "reescrito fora do escopo\n");
+      }, { ...escreve, P03: [...escreve.P03!, { path: "relatório.md", content: "aprovado\n" }] });
+      const { outcome, anuncios } = await construir({ escreve }, { call: cenario.call });
+      expect(outcome.exitCode, anuncios.join("\n")).toBe(0);
+      expect(await readFile(join(projectRoot, "relatório.md"), "utf8")).toBe("aprovado\n");
+    });
+
+    it("conflito binário não se resolve sozinho: sem decisão a fase para, com os dois lados guardados", async () => {
+      const binario = { ...ESCRITAS, P02: [{ path: "dados.bin", content: "\u0000\u0001BIN-do-cadastro\u0000" }], P03: [{ path: "dados.bin", content: "\u0000\u0002BIN-do-relatorio\u0000" }, { path: "relatorio.txt", content: "relatório\n" }] };
+      const cenario = comConciliacao(async () => undefined, binario);
+      const { outcome } = await construir({ escreve: binario }, { call: cenario.call });
+      expect(outcome.exitCode).toBe(2);
+      expect(cenario.vistos.length).toBeGreaterThanOrEqual(1);
+      expect(cenario.vistos[0]!.prompt).toContain("## Conflicts without markers — decide each one explicitly");
+      expect(await git(["log", "--format=%s"])).not.toContain("feat(phase-3)");
+      const aprovado = (await git(["branch", "--list", "--format=%(refname:short)", "capivara/*/P03-aprovada-*"])).trim();
+      expect(await git(["show", `${aprovado}:dados.bin`])).toContain("BIN-do-relatorio");
+    });
+
+    it("conflito binário com a decisão de manter a versão integrada: resolvido e integrado", async () => {
+      const binario = { ...ESCRITAS, P02: [{ path: "dados.bin", content: "\u0000\u0001BIN-do-cadastro\u0000" }], P03: [{ path: "dados.bin", content: "\u0000\u0002BIN-do-relatorio\u0000" }, { path: "relatorio.txt", content: "relatório\n" }] };
+      const cenario = comConciliacao(async () => "CAPIVARA_MANTER_INTEGRADA: dados.bin", binario);
+      const { outcome, anuncios } = await construir({ escreve: binario }, { call: cenario.call });
+      expect(outcome.exitCode, anuncios.join("\n")).toBe(0);
+      expect(await readFile(join(projectRoot, "dados.bin"), "utf8")).toContain("BIN-do-cadastro");
+      expect(await readFile(join(projectRoot, "relatorio.txt"), "utf8")).toBe("relatório\n");
+    });
+
+    it("o marcador que um parcial anterior deixou é varrido mesmo fora da lista do conflito de agora", async () => {
+      const primeira = comConciliacao(async () => undefined, { ...escreve, P03: [...escreve.P03!, { path: "outro.txt", content: "relatório-outro\n" }] });
+      const r1 = await construir({ escreve }, { call: primeira.call });
+      expect(r1.outcome.exitCode).toBe(2);
+      await writeFile(join(projectRoot, "outro.txt"), "do usuário\n");
+      await git(["add", "outro.txt"]);
+      await git(["commit", "-q", "-m", "chore: outro"]);
+      // Na segunda execução, a sessão resolve o conflito NOVO (outro.txt) e não toca no marcador que o wip trouxe.
+      const escreveComOutro = { ...escreve, P03: [...escreve.P03!, { path: "outro.txt", content: "relatório-outro\n" }] };
+      const segunda = await construir({ escreve: escreveComOutro }, {
+        call: async (chamada) => {
+          if (chamada.role === "builder" && chamada.phase.id === "P03") {
+            await writeFile(join(chamada.root!, "outro.txt"), "do usuário\nrelatório-outro\n");
+            return { exitCode: 0, stdout: "feito\nCAPIVARA_BUILDER_STATUS: COMPLETE", stderr: "", timedOut: null };
+          }
+          return motor({ escreve: escreveComOutro }).call(chamada);
+        },
+      });
+      expect(segunda.outcome.exitCode).toBe(2);
+      expect(await readFile(join(projectRoot, "compartilhado.txt"), "utf8")).not.toMatch(/^<{7} /mu);
+    });
+
+    it("com --rebuild-all, o conflito desta execução é conciliado, não reimplementado", async () => {
+      const cenario = comConciliacao(async (raiz) => writeFile(join(raiz, "compartilhado.txt"), "do cadastro\ndo relatório\n"));
+      const { outcome, anuncios } = await construir({ escreve }, { call: cenario.call, rebuildAll: true });
+      expect(outcome.exitCode, anuncios.join("\n")).toBe(0);
+      expect(cenario.vistos[0]!.prompt).toContain("You are reconciling a Git conflict");
+      expect(cenario.vistos[0]!.compartilhado).toMatch(/^<{7} /mu);
+    });
+
+    it("a conciliação interrompida volta na próxima execução, com os marcadores, sem nova implementação", async () => {
+      const primeira = comConciliacao(async () => {
+        throw new Error("o provider caiu no meio da conciliação");
+      });
+      // O provider que cai derruba a execução, como em qualquer sessão (o worktree e o branch ficam).
+      await expect(construir({ escreve }, { call: primeira.call })).rejects.toThrow("o provider caiu no meio da conciliação");
+      const runId = runIdFor("build", sha12(PLANO));
+      const checkpoint = JSON.parse(await readFile(join(runPaths(projectRoot, runId).root, "integracoes", "P03.json"), "utf8")) as { versao: number; arquivos: string[] };
+      expect(checkpoint).toMatchObject({ versao: 2, motivo: "conflito", arquivos: ["compartilhado.txt"] });
+
+      const segunda = comConciliacao(async (raiz) => writeFile(join(raiz, "compartilhado.txt"), "do cadastro\ndo relatório\n"));
+      // Na retomada, a primeira chamada de construção da P03 já é a conciliação.
+      segunda.engine.chamadas.push({ role: "builder", phase: { id: "P03" } } as EngineCall);
+      const retomada = await construir({ escreve }, { call: segunda.call });
+      expect(retomada.outcome.exitCode, retomada.anuncios.join("\n")).toBe(0);
+      expect(segunda.vistos.length).toBeGreaterThanOrEqual(1);
+      expect(segunda.vistos[0]!.prompt).toContain("You are reconciling a Git conflict");
+      expect(segunda.vistos[0]!.compartilhado).toMatch(/^<{7} /mu);
+      expect(await readFile(join(projectRoot, "compartilhado.txt"), "utf8")).toBe("do cadastro\ndo relatório\n");
+    });
   });
 
   it("a suíte da árvore integrada é o juiz: verde no worktree e vermelho junto não entra no produto", async () => {
@@ -341,6 +524,19 @@ describe("build paralelo", () => {
     expect(engine.chamadas.filter((chamada) => chamada.role === "builder" && chamada.phase.id === "P03")).toHaveLength(2);
     expect(await existe(join(projectRoot, "relatorio.txt"))).toBe(false);
     expect((await git(["log", "--format=%s"])).split("\n").some((linha) => linha.includes("phase-3"))).toBe(false);
+    // §125 G: o relatório conta a falha da integração (não "verde no worktree") e lista a fase que nem começou.
+    const resumo = JSON.parse(await readFile(join(runPaths(projectRoot, outcome.runId).root, "relatorio.json"), "utf8")) as { fases: { id: string; status: string }[] };
+    expect(resumo.fases.find((fase) => fase.id === "P03")?.status).toBe("blocked");
+    expect(resumo.fases.find((fase) => fase.id === "P04")?.status).toContain("sem evento");
+  });
+
+  // §125 G: no worktree o commit é a entrega; o git que o recusa não pode virar "nada a integrar" e o trabalho sumir.
+  it("o commit recusado no worktree para a fase, e o trabalho não some", async () => {
+    await git(["config", "user.name", ""]);
+    const { outcome, anuncios } = await construir({ escreve: ESCRITAS });
+    expect(outcome.exitCode).toBe(2);
+    expect(anuncios.join("\n")).toContain("o commit no worktree não foi criado");
+    expect(anuncios).not.toContain("aplicação concluída: todas as fases verdes");
   });
 
   it("fase que falha para o build; a que estava rodando termina e é integrada", async () => {

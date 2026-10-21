@@ -206,7 +206,35 @@ export interface ParcialRetomado {
    * integrada (§113). Vazio quando o parcial voltou inteiro.
    */
   foraDoParcial: string[];
+  /**
+   * Os que conflitaram e ficaram com os marcadores, para a conciliação (§125 F):
+   * só quando a reabertura pediu `manterConflitos`, e então `foraDoParcial` é vazio.
+   */
+  emConflito?: string[];
+  /** Dos em conflito, os que um lado apagou: não há marcador, e o prompt diz qual lado. */
+  apagados?: { caminho: string; por: "fase" | "integrada" }[];
+  /** Dos em conflito, os que o Git não marcou (binário, atributo): ficaram com a versão da árvore integrada e pedem decisão. */
+  binarios?: string[];
   motivo?: string;
+}
+
+/**
+ * O conflito de integração que a fase traz de volta para conciliar (§125 F; spec §7).
+ *
+ * Os dois lados estão guardados: a árvore integrada é o HEAD, e o commit verde
+ * da fase está no branch `aprovado`. O worktree já tem a fase reaplicada com os
+ * marcadores nos `arquivos`; nada mais conflitou.
+ */
+export interface ConciliacaoDaIntegracao {
+  arquivos: string[];
+  apagados?: { caminho: string; por: "fase" | "integrada" }[];
+  /** Em conflito sem marcador (binário): ficaram com a versão integrada, e só uma decisão explícita os resolve. */
+  binarios?: string[];
+  /** O HEAD da árvore principal com que a fase conflitou. */
+  principal: string;
+  aprovado: { branch: string; commit: string };
+  /** O que a árvore integrada recebeu nesses arquivos desde a base da fase. */
+  historico?: string;
 }
 
 /**
@@ -235,7 +263,11 @@ async function guardarSobra(projectRoot: string, branch: string): Promise<{ bran
  * em conflito é o do HEAD, inteiro, e a lista sai no anúncio. Se o git recusa
  * por outro motivo, ou se nada do parcial sobra, a árvore volta ao HEAD.
  */
-async function reaplicarParcial(dir: string, commit: string): Promise<{ foraDoParcial: string[] } | { motivo: string }> {
+async function reaplicarParcial(
+  dir: string,
+  commit: string,
+  manterConflitos = false,
+): Promise<{ foraDoParcial: string[]; emConflito?: string[]; apagados?: { caminho: string; por: "fase" | "integrada" }[]; binarios?: string[] } | { motivo: string }> {
   // O `merge --squash` deixa a mensagem dele, e um `git commit` sem `-m` a usaria.
   const semMensagem = async (): Promise<void> => {
     await rm(resolve(dir, await git(dir, ["rev-parse", "--git-path", "SQUASH_MSG"])), { force: true }).catch(() => undefined);
@@ -246,16 +278,42 @@ async function reaplicarParcial(dir: string, commit: string): Promise<{ foraDoPa
     await semMensagem();
   };
   try {
-    await git(dir, ["merge", "--squash", commit]);
+    // Com a base no marcador (diff3), quem concilia vê o que cada lado mudou, e não só as duas versões.
+    await git(dir, [...(manterConflitos ? ["-c", "merge.conflictStyle=diff3"] : []), "merge", "--squash", commit]);
     await git(dir, ["reset", "-q"]);
     await semMensagem();
     return { foraDoParcial: [] };
   } catch (erro) {
-    const conflitos = (await git(dir, ["diff", "--name-only", "--diff-filter=U"]).catch(() => "")).split("\n").filter(Boolean);
+    // `-z`: o caminho vem como é — sem `-z`, nome com acento ou espaço volta entre aspas e nenhuma leitura o acha.
+    const conflitos = (await git(dir, ["diff", "--name-only", "-z", "--diff-filter=U"]).catch(() => "")).split("\0").filter(Boolean);
     if (conflitos.length === 0) {
       await voltarAoHead();
       const saida = erro instanceof Error && "stderr" in erro ? String((erro as { stderr: unknown }).stderr) : String(erro);
       return { motivo: saida.split("\n").map((linha) => linha.trim()).find((linha) => linha !== "") ?? "o git recusou" };
+    }
+    if (manterConflitos) {
+      /*
+       * A conciliação (§125 F): os dois lados são aprovados, e nenhum vence por
+       * padrão. O arquivo fica com os marcadores; o índice volta ao HEAD, para o
+       * commit da fase continuar sendo um só, sobre a árvore integrada.
+       */
+      try {
+        const apagados: { caminho: string; por: "fase" | "integrada" }[] = [];
+        const binarios: string[] = [];
+        for (const entrada of (await git(dir, ["status", "--porcelain", "-z", "--", ...conflitos])).split("\0").filter(Boolean)) {
+          const codigo = entrada.slice(0, 2);
+          const caminho = entrada.slice(3);
+          if (codigo === "UD") apagados.push({ caminho, por: "fase" });
+          else if (codigo === "DU") apagados.push({ caminho, por: "integrada" });
+          else if (!temMarcadores(await readFile(join(dir, caminho), "utf8").catch(() => ""))) binarios.push(caminho);
+        }
+        await git(dir, ["reset", "-q"]);
+        await semMensagem();
+        return { foraDoParcial: [], emConflito: conflitos, apagados, binarios };
+      } catch (falha) {
+        await voltarAoHead();
+        return { motivo: `conflita com a árvore integrada em ${conflitos.join(", ")}, e os marcadores não puderam ser mantidos: ${falha instanceof Error ? (falha.message.split("\n")[0] ?? "") : String(falha)}` };
+      }
     }
     try {
       for (const caminho of conflitos) {
@@ -280,6 +338,11 @@ async function reaplicarParcial(dir: string, commit: string): Promise<{ foraDoPa
   }
 }
 
+/** O arquivo tem os marcadores de um conflito: a abertura E o fechamento, em linha própria. */
+export function temMarcadores(conteudo: string): boolean {
+  return /^<{7} /mu.test(conteudo) && /^>{7}(?: |$)/mu.test(conteudo);
+}
+
 /**
  * O worktree da fase, partindo do HEAD integrado, com o que o checkout não traz.
  *
@@ -292,6 +355,8 @@ export async function abrirWorktree(
   phaseId: string,
   environment: NodeJS.ProcessEnv = process.env,
   environmentApproved = false,
+  /** A fase volta de um conflito de integração: o parcial é o commit aprovado, e o conflito fica para a conciliação (§125 F). */
+  manterConflitos = false,
 ): Promise<{ worktree: Worktree; copiado: string[]; naoCopiado: string[]; retomado: ParcialRetomado | null }> {
   const base = await git(projectRoot, ["rev-parse", "HEAD"]);
   const branch = branchDaFase(runId, phaseId);
@@ -322,11 +387,16 @@ export async function abrirWorktree(
   await git(projectRoot, ["worktree", "add", "-q", "-b", branch, dir, base]);
   let retomado: ParcialRetomado | null = null;
   if (sobra) {
-    const reaplicado = await reaplicarParcial(dir, sobra.commit);
+    const reaplicado = await reaplicarParcial(dir, sobra.commit, manterConflitos);
     retomado =
       "motivo" in reaplicado
         ? { ...sobra, aplicado: false, foraDoParcial: [], motivo: reaplicado.motivo }
-        : { ...sobra, aplicado: true, foraDoParcial: reaplicado.foraDoParcial };
+        : {
+            ...sobra,
+            aplicado: true,
+            foraDoParcial: reaplicado.foraDoParcial,
+            ...(reaplicado.emConflito ? { emConflito: reaplicado.emConflito, apagados: reaplicado.apagados ?? [], binarios: reaplicado.binarios ?? [] } : {}),
+          };
   }
 
   const copiado: string[] = [];
@@ -536,8 +606,8 @@ export async function integrar(projectRoot: string, worktree: Worktree): Promise
   try {
     await git(projectRoot, ["cherry-pick", "--allow-empty", "--keep-redundant-commits", ...commits]);
   } catch (erro) {
-    const arquivos = (await git(projectRoot, ["diff", "--name-only", "--diff-filter=U"]).catch(() => ""))
-      .split("\n")
+    const arquivos = (await git(projectRoot, ["diff", "--name-only", "-z", "--diff-filter=U"]).catch(() => ""))
+      .split("\0")
       .filter(Boolean);
     await git(projectRoot, ["cherry-pick", "--abort"]).catch(() => undefined);
     // `--abort` volta ao commit de antes da sequência; se não voltou, voltar à mão.
@@ -551,8 +621,18 @@ export async function integrar(projectRoot: string, worktree: Worktree): Promise
     const saida = erro instanceof Error && "stderr" in erro ? String((erro as { stderr: unknown }).stderr) : String(erro);
     return { status: "recusada", motivo: saida.split("\n").map((linha) => linha.trim()).filter(Boolean).slice(0, 4).join(" ") };
   }
-  const arquivos = (await git(projectRoot, ["diff", "--name-only", antes, "HEAD"])).split("\n").filter(Boolean);
+  const arquivos = (await git(projectRoot, ["diff", "--name-only", "-z", antes, "HEAD"])).split("\0").filter(Boolean);
   return { status: "integrada", commits: commits.length, arquivos };
+}
+
+/**
+ * O que a árvore integrada recebeu nos arquivos em conflito desde a base do
+ * commit aprovado: o lado "deles", em uma linha por commit. Vazio quando o git
+ * não sabe dizer — a conciliação continua, com os marcadores.
+ */
+export async function historicoDoConflito(projectRoot: string, aprovado: string, principal: string, arquivos: readonly string[]): Promise<string> {
+  if (arquivos.length === 0) return "";
+  return git(projectRoot, ["log", "--oneline", "--no-decorate", "-n", "20", `${aprovado}..${principal}`, "--", ...arquivos]).catch(() => "");
 }
 
 /**
@@ -620,7 +700,7 @@ export async function impedimentosDaPrincipal(
   worktree: Worktree,
 ): Promise<{ impedimentos: string[]; naoVersionados: string[] }> {
   const { alterados, naoVersionados } = await situacaoDaPrincipal(projectRoot);
-  const daFase = new Set((await git(projectRoot, ["diff", "--name-only", worktree.base, worktree.branch])).split("\n").filter(Boolean));
+  const daFase = new Set((await git(projectRoot, ["diff", "--name-only", "-z", worktree.base, worktree.branch])).split("\0").filter(Boolean));
   return { impedimentos: [...alterados, ...naoVersionados.filter((caminho) => daFase.has(caminho))].sort(), naoVersionados };
 }
 

@@ -82,6 +82,28 @@ describe("próximas fases", () => {
     expect(proximas(agenda(ERP, { P01: "integrada", P02: "integrada", P03: "rodando" }, 3, ["P03"]))).toEqual([]);
   });
 
+  /*
+   * §125 F (spec §7): o mapa de componentes do PLAN evita o conflito previsível.
+   * Duas fases que a arquitetura põe no mesmo arquivo não rodam juntas; a que
+   * espera não barra as seguintes, e sem mapa nada muda.
+   */
+  it("fases que a arquitetura põe nos mesmos arquivos não rodam juntas", () => {
+    const comArquivos = [
+      fase(1, []),
+      { ...fase(2, [1]), arquivos: ["src/api/rotas.ts", "src/cadastro/"] },
+      { ...fase(3, [1]), arquivos: ["src/cadastro/relatorio.ts"] },
+      { ...fase(4, [1]), arquivos: ["src/pagamentos/"] },
+      fase(5, [1]),
+    ];
+    expect(proximas(agenda(comArquivos, { P01: "integrada" }, 4))).toEqual(["P02", "P04", "P05"]);
+    expect(proximas(agenda(comArquivos, { P01: "integrada", P02: "rodando" }, 4))).toEqual(["P04", "P05"]);
+    expect(proximas(agenda(comArquivos, { P01: "integrada", P02: "integrada" }, 4))).toEqual(["P03", "P04", "P05"]);
+    // Sem mapa (arquivos ausentes), as mesmas fases saem juntas como antes.
+    expect(proximas(agenda(ERP, { P01: "integrada" }, 4))).toEqual(["P02", "P03"]);
+    // Nada rodando, a vizinha sai: a regra nunca trava o run.
+    expect(esgotada(agenda(comArquivos, { P01: "integrada", P02: "integrada", P04: "integrada", P05: "integrada" }, 2))).toBe(false);
+  });
+
   it("é determinística: o mesmo estado dá a mesma resposta", () => {
     const uma = agenda(ERP, { P01: "integrada" }, 3);
     expect(proximas(uma)).toEqual(proximas(uma));

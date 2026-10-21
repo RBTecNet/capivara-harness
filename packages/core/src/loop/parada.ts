@@ -97,6 +97,10 @@ function evidenciaDaFase(runId: string, fase: PhaseReport): string[] {
   const logs = join(".capivara", "runs", runId, "logs");
   const eventos = join(".capivara", "runs", runId, "events.tsv");
   if (fase.outcome.status !== "failed") return [eventos];
+  // O runner do vNext diz onde está a prova (§125 G): o handoff e o log da evidência que reprovou.
+  if (fase.outcome.evidencia && fase.outcome.evidencia.length > 0) {
+    return [...fase.outcome.evidencia, join(".capivara", "runs", runId, "relatorio.md"), eventos];
+  }
 
   const ciclo = fase.outcome.cycles;
   const gate = fase.outcome.gate;
@@ -118,7 +122,8 @@ function contarCusto(outcome: BuildOutcome, contexto: ContextoDaParada): string 
 
   const fechadasNoTotal = novas + antes;
   const denominador = total !== undefined ? ` de ${total}` : "";
-  const preservadas = "elas não serão refeitas — o build reconhece o texto delas";
+  // O que sustenta a afirmação (§125 G): o texto e a fatia da arquitetura, e o commit da fase no histórico.
+  const preservadas = "elas não serão refeitas enquanto o texto, a fatia da arquitetura e o commit delas continuarem os mesmos";
   return `${fechadasNoTotal}${denominador} fase(s) fechada(s); ${preservadas}`;
 }
 

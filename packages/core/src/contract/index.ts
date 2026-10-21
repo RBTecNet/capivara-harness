@@ -102,3 +102,16 @@ export { CHANGE_CONTRACT, MAX_FASES_DA_MUDANCA, applyChange, parseChange } from 
 export type { Change, ChangeApplied, ChangeDefect, ChangePhase, ChangeQuestion, ChangeResult, ChangeRule } from "./change.js";
 export { desgrudarChaves } from "./protocolo.js";
 export { jsonDaResposta } from "./resposta.js";
+export {
+  DOCUMENTOS_DA_ETAPA,
+  OPCOES_DE_ESCOPO,
+  SECOES_DO_DIAGNOSTICO,
+  UPSTREAM_REPAIR_CONTRACT,
+  checkUpstreamPackage,
+  escopoDoReparo,
+  idDoReparo,
+  registrarDecisao,
+  secoesFaltando,
+  shaDoImpacto,
+} from "./upstream.js";
+export type { DecisaoDeEscopo, EstadoDoReparoUpstream, EtapaDestino, ImpactoUpstream, PacoteLido, ResultadoDoPacote, UpstreamEvidence, UpstreamManifest } from "./upstream.js";

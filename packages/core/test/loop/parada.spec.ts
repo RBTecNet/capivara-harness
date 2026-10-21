@@ -118,6 +118,21 @@ describe("relatório do build", () => {
     expect(g3.parada.evidencia?.[0]).toContain("P04.verify-1.log");
   });
 
+  // §125 G: o runner do vNext diz onde está a prova; o caminho não é adivinhado pelo número do ciclo.
+  it("aponta o handoff e o log que o runner registrou, e o relatório do run", () => {
+    const fase = falhou("P04", "gate 3 — verificação independente", "x", 2);
+    if (fase.outcome.status !== "failed") throw new Error("esperava falha");
+    fase.outcome.evidencia = [".capivara/runs/b/defects/P04/P04-D1/handoff-G3-c1.json", ".capivara/runs/b/logs/P04.verify-3.log"];
+    const relatorio = relatorioDoBuild(build({ phases: [fase], errors: ["x"] }));
+    if (relatorio.tipo !== "parada") throw new Error("esperava parada");
+    expect(relatorio.parada.evidencia).toEqual([
+      ".capivara/runs/b/defects/P04/P04-D1/handoff-G3-c1.json",
+      ".capivara/runs/b/logs/P04.verify-3.log",
+      expect.stringMatching(/relatorio\.md$/u),
+      expect.stringMatching(/events\.tsv$/u),
+    ]);
+  });
+
   it("diz o que foi preservado, que é o que a pessoa quer saber", () => {
     const relatorio = relatorioDoBuild(
       build({ phases: [fechada("P01"), fechada("P02"), falhou("P03", "gate 2 — suíte do projeto", "x")], errors: ["x"] }),

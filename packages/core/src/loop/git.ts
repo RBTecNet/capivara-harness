@@ -328,8 +328,9 @@ export async function arquivosMudados(projectRoot: string, de: string | null, pa
   if (de === para) return [];
   if (!ID_DE_ARVORE.test(de) || !ID_DE_ARVORE.test(para)) return null;
   try {
-    const { stdout } = await run("git", ["diff-tree", "-r", "--name-only", "--no-renames", de, para], { cwd: projectRoot, ...GRANDE });
-    return stdout.split("\n").map((linha) => linha.trim()).filter(Boolean).sort();
+    // `-z`: o nome vem como é (sem `-z`, acento e espaço voltam entre aspas e não casam com arquivo nenhum).
+    const { stdout } = await run("git", ["diff-tree", "-r", "-z", "--name-only", "--no-renames", de, para], { cwd: projectRoot, ...GRANDE });
+    return stdout.split("\0").filter(Boolean).sort();
   } catch {
     return null;
   }
@@ -346,6 +347,53 @@ export async function existiamNaArvore(projectRoot: string, tree: string | null,
   return existiam;
 }
 
+/** O commit continua no histórico do HEAD? null quando não dá para saber (sem Git, commit desconhecido). */
+export async function noHistoricoDoHead(projectRoot: string, commit: string): Promise<boolean | null> {
+  if (!/^[0-9a-f]{7,64}$/u.test(commit) || !(await isRepository(projectRoot))) return null;
+  const existe = await run("git", ["cat-file", "-e", `${commit}^{commit}`], { cwd: projectRoot }).then(() => true, () => false);
+  if (!existe) return false;
+  return run("git", ["merge-base", "--is-ancestor", commit, "HEAD"], { cwd: projectRoot }).then(() => true, (erro: { code?: number }) => (erro.code === 1 ? false : null));
+}
+
+/**
+ * Dos arquivos de um conflito, os que ainda têm marcador (§125 F). É a prova
+ * TEXTUAL da conciliação, e só ela: arquivo sem marcador pode estar errado, e
+ * quem diz é a suíte, o verificador e os fluxos.
+ */
+export async function comMarcadorDeConflito(projectRoot: string, arquivos: readonly string[]): Promise<string[]> {
+  const restantes: string[] = [];
+  for (const arquivo of arquivos) {
+    // Ausente é decisão (o arquivo saiu); ilegível por outro motivo conta como ainda em conflito — nunca como resolvido.
+    const conteudo = await readFile(join(projectRoot, arquivo), "utf8").catch((erro: NodeJS.ErrnoException) => (erro.code === "ENOENT" ? "" : null));
+    // A abertura E o fechamento: uma linha "=======" sozinha é sublinhado de título, não conflito.
+    if (conteudo === null || (/^<{7} /mu.test(conteudo) && /^>{7}(?: |$)/mu.test(conteudo))) restantes.push(arquivo);
+  }
+  return restantes;
+}
+
+/**
+ * Volta estes arquivos ao conteúdo que tinham num estado (`estadoDoCodigo`):
+ * o que existia lá é restaurado, o que não existia sai. O índice não é tocado.
+ * Serve ao Core para manter uma ação dentro do escopo dela (§125 F); devolve
+ * os que não pôde restaurar.
+ */
+export async function restaurarDoEstado(projectRoot: string, tree: string, arquivos: readonly string[]): Promise<string[]> {
+  const falharam: string[] = [];
+  if (!ID_DE_ARVORE.test(tree)) return [...arquivos];
+  for (const arquivo of arquivos) {
+    const existia = await run("git", ["cat-file", "-e", `${tree}:${arquivo}`], { cwd: projectRoot }).then(() => true, () => false);
+    try {
+      if (existia) await run("git", ["restore", `--source=${tree}`, "--worktree", "--", arquivo], { cwd: projectRoot, ...GRANDE });
+      // Nem no estado nem no disco: o caminho não é o que o Git listou — falha dita, nunca "desfeito".
+      else if (!(await stat(join(projectRoot, arquivo)).then(() => true, () => false))) falharam.push(arquivo);
+      else await rm(join(projectRoot, arquivo), { force: true, recursive: true });
+    } catch {
+      falharam.push(arquivo);
+    }
+  }
+  return falharam;
+}
+
 /**
  * Os arquivos que cada fase escreveu, pelos commits `feat(phase-N)` do histórico.
  *
@@ -359,7 +407,7 @@ export async function arquivosDasFases(projectRoot: string): Promise<Map<number,
   try {
     const { stdout } = await run(
       "git",
-      ["log", "--no-renames", "--name-only", "--format=%x00%s", "--grep=^feat(phase-[0-9][0-9]*):", "HEAD"],
+      ["-c", "core.quotePath=false", "log", "--no-renames", "--name-only", "--format=%x00%s", "--grep=^feat(phase-[0-9][0-9]*):", "HEAD"],
       { cwd: projectRoot, ...GRANDE },
     );
     for (const bloco of stdout.split("\0").slice(1)) {
@@ -456,6 +504,29 @@ export async function commitPhase(projectRoot: string, phaseNumber: number, titl
   } catch (erro) {
     const causa = (erro instanceof Error ? erro.message : String(erro)).split("\n").slice(0, 4).join(" ").trim();
     return { committed: false, message: `a fase passou, mas o commit não foi criado: ${causa}` };
+  }
+}
+
+/**
+ * O reparo da entrega final entra no histórico pela mesma porta da fase (§125 G).
+ *
+ * A aceitação operacional chamava o executor na árvore principal e deixava o
+ * que ele escreveu sem commit: a aplicação era declarada concluída com o
+ * conserto fora do histórico, e o próximo `build` mandava commitar ou
+ * descartar. Agora o Core commita — com a mesma política de admissão, sem os
+ * hooks do projeto —, e só depois de a suíte e a aceitação passarem.
+ */
+export async function commitDaEntrega(projectRoot: string, tentativa: number): Promise<CommitResult> {
+  if (!(await isRepository(projectRoot))) return { committed: false, message: "sem repositório Git: nenhum commit criado" };
+  if (!(await hasPendingChanges(projectRoot))) return { committed: false, message: "nada a commitar: o reparo não mudou o produto" };
+  const bloqueado = await bloqueioDoCommit(projectRoot, CONTROL_PLANE_PATHSPEC);
+  if (bloqueado) return bloqueado;
+  try {
+    const admitidos = (await alteracoesParaCommit(projectRoot, CONTROL_PLANE_PATHSPEC)).map((entrada) => entrada.caminho);
+    return await publicar(projectRoot, admitidos, `fix(entrega): preparação operacional (aceitação, tentativa ${tentativa})`);
+  } catch (erro) {
+    const causa = (erro instanceof Error ? erro.message : String(erro)).split("\n").slice(0, 4).join(" ").trim();
+    return { committed: false, message: `a aceitação passou, mas o commit do reparo não foi criado: ${causa}` };
   }
 }
 

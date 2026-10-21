@@ -56,6 +56,8 @@ import {
   pastaDosWorktrees,
   preservarAprovado,
   trazerRoteiros,
+  historicoDoConflito,
+  type ConciliacaoDaIntegracao,
   type ParcialGuardado,
   type Worktree,
 } from "./worktree.js";
@@ -77,6 +79,8 @@ export interface ExecucaoDaFase {
   /** Conferência serializada com a integração; não observa cherry-pick pela metade. */
   conferirPrincipal: () => Promise<string[]>;
   integrationFailure?: IntegrationFailure;
+  /** A fase volta de um conflito de integração para conciliar só o que conflitou (§125 F). */
+  conciliacao?: ConciliacaoDaIntegracao;
 }
 
 export interface ParaleloOptions {
@@ -119,6 +123,11 @@ export interface ParaleloOptions {
   semEntrypoint?: () => Promise<boolean>;
   /** A fase percorre fluxos no gate 4. */
   comFluxos?: (session: PhaseSession) => boolean;
+  /**
+   * Os arquivos que a arquitetura do PLAN fixa para os componentes da fase:
+   * duas fases que dividem um deles não rodam ao mesmo tempo (§125 F).
+   */
+  arquivosDaFase?: (session: PhaseSession) => readonly string[];
   announce: (message: string) => void;
   onProgress?: BuildProgressListener;
   onWorker?: WorkerProgressListener;
@@ -133,7 +142,31 @@ export interface ParaleloResultado {
   parada: { session: PhaseSession; outcome: PhaseOutcome } | null;
 }
 
-type ResultadoDaIntegracao = { desfecho: "integrada" } | { desfecho: "refazer"; motivo: string; testFailure?: true } | { desfecho: "falhou"; outcome: PhaseOutcome };
+type ResultadoDaIntegracao =
+  | { desfecho: "integrada" }
+  | { desfecho: "refazer"; motivo: string; testFailure?: true; conflito?: { arquivos: string[]; principal: string } }
+  | { desfecho: "falhou"; outcome: PhaseOutcome };
+
+/** O checkpoint de quem volta de um conflito (versão 2); a versão 1 é o commit aprovado à espera de integrar. */
+interface CheckpointDoConflito {
+  versao: 2;
+  motivo: "conflito";
+  arquivos: string[];
+  principal: string;
+  aprovado: { branch: string; commit: string };
+}
+
+function lerConflito(bruto: string | null): CheckpointDoConflito | null {
+  if (bruto === null) return null;
+  try {
+    const lido = JSON.parse(bruto) as Partial<CheckpointDoConflito>;
+    if (lido.versao !== 2 || lido.motivo !== "conflito" || !Array.isArray(lido.arquivos) || typeof lido.principal !== "string") return null;
+    if (!lido.aprovado || typeof lido.aprovado.branch !== "string" || !/^[0-9a-f]{40,64}$/u.test(lido.aprovado.commit ?? "")) return null;
+    return lido as CheckpointDoConflito;
+  } catch {
+    return null;
+  }
+}
 
 function descreverFalha(outcome: PhaseOutcome): string {
   if (outcome.status === "failed") return `${outcome.gate}: ${outcome.cause}`;
@@ -232,11 +265,19 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
     }
   }
 
+  /** As fases como o escalonador as vê, com os arquivos que a arquitetura fixa para cada uma (§125 F). */
+  const agendaveis = options.sessions.map((session) => ({ ...session, arquivos: options.arquivosDaFase?.(session) ?? [] }));
+
   /** O verde que conflitou na integração, por fase: onde ele ficou (§110). */
   const preservados = new Map<string, { branch: string; commit: string }>();
   const aprovados = new Map<string, PhaseOutcome>();
   const integracoesSuspensas = new Set<string>();
   const checkpointDaIntegracao = (id: string): string => join(paths.root, "integracoes", `${id}.json`);
+  // Quem pede para refazer tudo descarta as integrações suspensas de execuções anteriores — uma vez, antes de qualquer fase sair.
+  if (options.rebuildAll) {
+    for (const session of options.sessions) await rm(checkpointDaIntegracao(session.id), { force: true });
+  }
+
   for (const slot of livres) agente(slot, "livre", null);
 
   // Ajustes de dependência são ditos uma vez, antes de qualquer fase sair.
@@ -400,6 +441,7 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
       return {
         desfecho: "refazer",
         motivo: `conflito ao integrar${integracao.arquivos.length > 0 ? ` em ${integracao.arquivos.join(", ")}` : ""}`,
+        conflito: { arquivos: integracao.arquivos, principal: antes },
       };
     }
 
@@ -542,13 +584,17 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
     /** A guarda do parcial não foi comprovada: o worktree não sai do disco (§100). */
     let manterArvore = false;
     let aprovadoRetomado: PhaseOutcome | null = null;
+    let conciliacao: ConciliacaoDaIntegracao | null = null;
     try {
       agente(slot, "preparando", session.id);
       const anterior = preservados.get(session.id);
       if (anterior) announce(`[${session.id}] o commit aprovado antes (${anterior.commit.slice(0, 12)}) continua no branch ${anterior.branch}`);
       try {
-        const salvo = options.rebuildAll ? null : await readFile(checkpointDaIntegracao(session.id), "utf8").catch(() => null);
-        if (salvo !== null) {
+        // O --rebuild-all limpou os checkpoints de ANTES desta execução; o que ela mesma gravou (um conflito) vale.
+        const salvo = await readFile(checkpointDaIntegracao(session.id), "utf8").catch(() => null);
+        // Versão 2: a fase volta de um conflito, para conciliar; a 1 é o aprovado à espera de integrar.
+        const conflito = lerConflito(salvo);
+        if (salvo !== null && conflito === null) {
           const checkpoint = JSON.parse(salvo) as { versao: number; worktree: Worktree; commit: string; outcome: PhaseOutcome };
           if (checkpoint.versao !== 1 || !checkpoint.worktree || !["complete", "already-implemented"].includes(checkpoint.outcome?.status) ||
             checkpoint.worktree.branch !== branchDaFase(options.runId, session.id) ||
@@ -565,11 +611,10 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
           manterArvore = true;
           announce(`[${session.id}] retomando a integração do commit já aprovado ${checkpoint.commit.slice(0, 12)}; nenhuma nova sessão de construção`);
         }
-        const aberto = worktree === null ? await abrirWorktree(projectRoot, options.runId, session.id, options.environment, options.environmentApproved) : null;
+        const aberto = worktree === null ? await abrirWorktree(projectRoot, options.runId, session.id, options.environment, options.environmentApproved, conflito !== null) : null;
         if (aberto) {
           worktree = aberto.worktree;
           // abrirWorktree já guardou o commit anterior antes de recriar o branch.
-          if (options.rebuildAll) await rm(checkpointDaIntegracao(session.id), { force: true });
           announce(
             `[${session.id}] agente ${slot + 1} (${pool.label}) num worktree próprio` +
               `${aberto.copiado.length > 0 ? `; copiado: ${aberto.copiado.join(", ")}` : ""}`,
@@ -577,7 +622,35 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
           for (const naoCopiado of aberto.naoCopiado) announce(`[${session.id}] dependências não copiadas: ${naoCopiado}; a instalação será preparada no worktree`);
         }
         const retomado = aberto?.retomado;
-        if (retomado) {
+        if (retomado && conflito && worktree) {
+          if (retomado.aplicado) {
+            /*
+             * O conflito volta para quem pode resolvê-lo sem jogar nada fora
+             * (§125 F): o commit aprovado está sobre a árvore integrada, tudo o
+             * que não conflitou já está no lugar, e só os marcadores esperam.
+             */
+            // A lista do checkpoint E a de agora: um parcial anterior pode ter deixado marcador em arquivo que não conflitou desta vez.
+            const arquivos = [...new Set([...conflito.arquivos, ...(retomado.emConflito ?? [])])];
+            const historico = await historicoDoConflito(projectRoot, conflito.aprovado.commit, conflito.principal, arquivos);
+            conciliacao = {
+              arquivos,
+              ...(retomado.apagados && retomado.apagados.length > 0 ? { apagados: retomado.apagados } : {}),
+              ...(retomado.binarios && retomado.binarios.length > 0 ? { binarios: retomado.binarios } : {}),
+              principal: conflito.principal,
+              aprovado: conflito.aprovado,
+              ...(historico !== "" ? { historico } : {}),
+            };
+            announce(
+              `[${session.id}] o commit aprovado (${conflito.aprovado.commit.slice(0, 12)}) voltou sobre a árvore integrada; ` +
+                `${arquivos.length > 0 ? `os arquivos em conflito são ${arquivos.join(", ")} (marcadores nos de texto; binário e apagado pedem decisão), e a conciliação mexe só neles` : "nada conflita mais"}. ` +
+                `Os dois lados continuam guardados: o HEAD e o branch ${conflito.aprovado.branch}`,
+            );
+          } else {
+            // O aprovado não voltou: o que se aprovou sobre ele não está nesta árvore.
+            await options.esquecer(session);
+            announce(`[${session.id}] o commit aprovado (${conflito.aprovado.commit.slice(0, 12)}) não voltou — ${retomado.motivo ?? "o git recusou"}; a fase recomeça do HEAD, e o aprovado continua no branch ${conflito.aprovado.branch}`);
+          }
+        } else if (retomado) {
           announce(
             retomado.aplicado && retomado.foraDoParcial.length > 0
               ? `[${session.id}] o parcial da tentativa anterior (${retomado.commit.slice(0, 12)}) foi reaplicado em parte sobre a árvore integrada: ` +
@@ -608,6 +681,7 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
         preferredPort: options.portaBase + slot,
         conferirPrincipal,
         ...(recuperacoesDeTeste.has(session.id) ? { integrationFailure: recuperacoesDeTeste.get(session.id)! } : {}),
+        ...(conciliacao ? { conciliacao } : {}),
       });
 
       if (outcome.status === "complete" || outcome.status === "already-implemented") {
@@ -654,7 +728,18 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
           if (recovery) recuperacoesDeTeste.set(session.id, recovery);
           exclusivas.add(session.id);
           estados.set(session.id, "pendente");
-          await options.esquecer(session);
+          if (integracao.desfecho === "refazer" && integracao.conflito) {
+            /*
+             * O conflito é gravado, não lembrado (§125 F): a reabertura — nesta
+             * execução ou depois de uma queda — mantém os marcadores para a
+             * conciliação. As aprovações ficam: cada uma sabe a árvore em que
+             * foi dada, e o verificador as confere contra o que mudou.
+             */
+            const checkpoint: CheckpointDoConflito = { versao: 2, motivo: "conflito", ...integracao.conflito, aprovado: preservado };
+            await writeAtomic(checkpointDaIntegracao(session.id), JSON.stringify(checkpoint));
+          } else {
+            await options.esquecer(session);
+          }
           await evento(
             session.id,
             "retry",
@@ -675,6 +760,8 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
             : { status: "failed", gate: "gate 2 — suíte do projeto", cause: `mesmo rodando sozinha, a fase não fechou na árvore integrada: ${integracao.motivo}`, cycles: outcome.cycles };
         manterBranch = true;
         manterArvore ||= integracoesSuspensas.has(session.id);
+        // O runner deixou "verde no worktree"; o que valeu foi a integração — o evento diz isso (relatório e retomada leem daqui).
+        await evento(session.id, "blocked", descreverFalha(falha).split("\n")[0] ?? "");
         // Verde no worktree, fora do produto: o que se aprovou dela só existe no branch (§99).
         if (!integracoesSuspensas.has(session.id)) await options.esquecer(session);
         await registrarFalha(session, falha, slot);
@@ -766,14 +853,14 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
   for (;;) {
     if (parada === null && erroInesperado === null && !fatal) {
       if (options.keepGoing) {
-        for (const id of bloqueadas({ fases: options.sessions, estados, exclusivas, limite: 0 })) {
+        for (const id of bloqueadas({ fases: agendaveis, estados, exclusivas, limite: 0 })) {
           estados.set(id, "bloqueada");
           announce(`[${id}] pulada: depende de uma fase que falhou`);
           options.onProgress?.({ kind: "phase", id, state: "pulado", cycle: 0, detail: "dependência falhou" });
         }
       }
 
-      const candidatas = proximas({ fases: options.sessions, estados, exclusivas, limite: livres.length + rodando.size });
+      const candidatas = proximas({ fases: agendaveis, estados, exclusivas, limite: livres.length + rodando.size });
       if (candidatas.length > 0) {
         /*
          * O isolamento é perguntado de novo a cada leva, sobre a árvore
@@ -787,7 +874,7 @@ export async function executarEmParalelo(options: ParaleloOptions): Promise<Para
           suspenso = motivo;
         }
         const limite = motivo === null ? Math.min(options.maxConcurrency, options.agentes.length) : 1;
-        for (const id of proximas({ fases: options.sessions, estados, exclusivas, limite })) {
+        for (const id of proximas({ fases: agendaveis, estados, exclusivas, limite })) {
           const slot = livres.shift();
           if (slot === undefined) break;
           const session = porId.get(id)!;

@@ -47,6 +47,8 @@ export const CONTROL_PLANE_IGNORE = [
   "skills/",
   "memorias/",
   "tmp/",
+  // Os pacotes de reparo documental (§125 H): diagnóstico do run, não especificação publicada.
+  "repairs/",
   "",
 ].join("\n");
 

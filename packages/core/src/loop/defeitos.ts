@@ -126,6 +126,8 @@ export interface Defect {
   costs: { calls: number; seconds: number; costUsd: number };
   /** A ordem da escada, quando quem chama a fixa (a integração que já passou pelo executor começa pelo verificador). */
   order?: Estrategia[];
+  /** O pacote de reparo documental que o encaminhou (§125 H), para ser reconferido na retomada. */
+  upstream?: string;
 }
 
 /** O que um gate achou, antes de virar (ou de casar com) um defeito. */
@@ -457,7 +459,8 @@ export class RegistroDeDefeitos {
     const assinatura = achado.anchors.version ? sha12(`${assinaturaDaFalha(texto)}|${achado.anchors.version}`) : assinaturaDaFalha(texto);
     const existente = [...this.estado.defects].reverse().find((defeito) => mesmoDefeito(defeito, achado));
     if (existente) {
-      const reaberto = existente.status === "RESOLVED" || existente.status === "ESCALATED";
+      // O que esperava um reparo documental e voltou a ser achado pelo gate também reabre: a escada volta a valer.
+      const reaberto = existente.status === "RESOLVED" || existente.status === "ESCALATED" || existente.status === "UPSTREAM_REPAIR_REQUIRED";
       if (!existente.gates.includes(achado.gate)) existente.gates.push(achado.gate);
       else if (existente.gates.at(-1) !== achado.gate) existente.gates.push(achado.gate);
       const anteriores = new Set(existente.anchors.quotes ?? []);

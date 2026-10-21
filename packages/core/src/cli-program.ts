@@ -76,7 +76,8 @@ import type { LineIO } from "./commands/line-io.js";
 import { contratoDaRetomada, isCliProvider, isDirectProvider, listarEfforts, listarModelos } from "./provider/index.js";
 import type { RoleName } from "./provider/index.js";
 import { runIdFor, runPaths, safeProjectPath, writeAtomic } from "./state/index.js";
-import { sha12 } from "./contract/index.js";
+import { architectureViewForPhase, sha12, type DecisaoDeEscopo } from "./contract/index.js";
+import { conferirReparosNaEntrada } from "./loop/upstream.js";
 import { MAX_DOMINIOS, SurveyBlockedError, runSurvey } from "./survey/index.js";
 import { ChangeBlockedError, renderQuestion as renderPerguntaDaMudanca, runChange } from "./change/index.js";
 import type { DecisaoDeColisao } from "./survey/index.js";
@@ -1175,7 +1176,7 @@ export function createProgram(): Command {
           "Para construir o que foi planejado:",
           "  capivara build",
           "",
-          "As fases que já estavam fechadas não são refeitas — o build reconhece o texto delas.",
+          "As fases que já estavam fechadas não são refeitas enquanto o texto, a fatia da arquitetura e o commit delas continuarem os mesmos.",
           "",
         ].join("\n"),
       );
@@ -1601,6 +1602,51 @@ export function createProgram(): Command {
 
     const language = detectLanguage(request.text, flags.language);
     const runId = runIdFor("init", request.sha12);
+
+    /*
+     * O reparo documental que o build encaminhou é conferido aqui, na entrada
+     * da etapa destinatária, antes de qualquer chamada (§125 H; spec §8). O
+     * pacote inválido é dito e ignorado; o que alcança além do defeito pede a
+     * decisão de quem está no terminal. A edição automática do documento a
+     * partir do pacote não está habilitada: a troca segura não foi demonstrável.
+     */
+    const arquiteturaDoPlan = (await readArchitectureState(projectRoot, runId))?.architecture ?? null;
+    const conferencia = await conferirReparosNaEntrada(
+      projectRoot,
+      "plan",
+      (manifest) => {
+        const numero = Number(manifest.origin.phaseId.replace(/^\D+/u, ""));
+        const vista = arquiteturaDoPlan ? architectureViewForPhase(arquiteturaDoPlan, numero) : null;
+        return {
+          phase: numero,
+          components: vista ? vista.own.map((componente) => componente.name) : manifest.impact.components,
+          contracts: vista ? vista.own.flatMap((componente) => componente.contracts) : [],
+        };
+      },
+      stdin.isTTY === true
+        ? async (texto: string, opcoes: readonly DecisaoDeEscopo[]): Promise<DecisaoDeEscopo | null> => {
+            const terminal = createInterface({ input: stdin, output: stdout });
+            try {
+              stdout.write(`\n${texto}\n${opcoes.map((opcao, indice) => `  ${indice + 1}) ${opcao}`).join("\n")}\n`);
+              // EOF (Ctrl+D) fecha a interface sem responder: vale como "decidir depois", não como espera infinita.
+              const resposta = (await Promise.race([
+                terminal.question("Escolha (vazio deixa a decisão para depois): "),
+                new Promise<string>((resolver) => terminal.once("close", () => resolver(""))),
+              ])).trim();
+              return opcoes[Number(resposta) - 1] ?? null;
+            } finally {
+              terminal.close();
+            }
+          }
+        : undefined,
+    );
+    for (const linha of conferencia.linhas) stdout.write(`${linha}\n`);
+    if (conferencia.pendentes.length > 0) {
+      stdout.write(
+        "a edição automática do documento a partir do pacote não está habilitada nesta versão (§125 H): revise o trecho indicado em " +
+          "diagnosis.md; o build revalida só as fases cujo texto ou fatia da arquitetura mudar.\n",
+      );
+    }
 
     /*
      * O `plan` é o estágio LONGO — dezenas de chamadas contra uma do `init` — e

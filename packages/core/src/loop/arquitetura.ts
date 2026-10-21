@@ -41,6 +41,10 @@ export interface FatiaDaArquitetura {
   arquivos: string[];
   /** Os contratos que a fase entrega e os que consome, uma linha cada, com o componente: o roteirista e a triagem os recebem. */
   contratos: string[];
+  /** Só os contratos que a fase entrega (sem o componente na frente): o que um reparo documental dela pode alcançar. */
+  contratosProprios: string[];
+  /** As outras fases cujos componentes dependem, direta ou indiretamente, de um componente desta: quem um reparo do contrato atinge. */
+  consumidoras: number[];
 }
 
 /**
@@ -117,6 +121,15 @@ export async function vincularArquitetura(
           ...view.own.flatMap((component) => component.contracts.map((contract) => `${component.name} (desta fase): ${contract}`)),
           ...view.consumed.flatMap((component) => component.contracts.map((contract) => `${component.name} (consumido): ${contract}`)),
         ],
+        contratosProprios: view.own.flatMap((component) => component.contracts),
+        consumidoras: architecture.phases
+          .filter((phase) => phase.number !== phaseNumber)
+          .filter((phase) => {
+            const fecho = fechoDeDependencias(architecture, phase.components);
+            return view.own.some((component) => fecho.has(component.name.toLowerCase()));
+          })
+          .map((phase) => phase.number)
+          .sort((a, b) => a - b),
       };
     },
     fluxo(workflow) {

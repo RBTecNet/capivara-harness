@@ -46,7 +46,11 @@ import {
   writeAtomic,
   type RunBudgets,
 } from "../state/index.js";
-import { escolhaSemRepositorio, iniciarRepositorio, isClean, isRepository, lerEscolhaDeRepositorio, renderSemRepositorio } from "./git.js";
+import { arquivosMudados, commitDaEntrega, estadoDoCodigo, escolhaSemRepositorio, noHistoricoDoHead, iniciarRepositorio, isClean, isRepository, lerEscolhaDeRepositorio, renderSemRepositorio } from "./git.js";
+import { gravarRelatorio } from "./relatorio.js";
+import { comBancosDeTeste } from "./test-databases.js";
+import { prepararAmbiente } from "./ambiente.js";
+import { montarEntrega, renderEntrega } from "./entrega.js";
 import { materializeSessions } from "./split.js";
 import { preflight, type PreflightWarning } from "./preflight.js";
 import { checkPrerequisites, prerequisiteChoice, readPrerequisiteChoice, renderPrerequisiteChoice, resolvePrerequisites, type PrerequisiteStatus } from "./prerequisites.js";
@@ -60,7 +64,7 @@ import { acceptancePrompt, installPrompt } from "../prompts/index.js";
 import type { BuildProgressListener } from "./progress.js";
 import { lerFasesFechadas, registrarFaseFechada, shaDaFase } from "./ledger.js";
 import { TasksAprovadas, tasksDaFase } from "./veredictos.js";
-import { defaultTestRunner, gate0, type TestRunner } from "./gates.js";
+import { defaultTestRunner, gate0, gate2, type TestRunner } from "./gates.js";
 import { adoptPreparedDependencies } from "./prepared-dependencies.js";
 import { admitirArvore, alteracoesParaCommit, artefatosLocaisIgnorados, lerStatus } from "./admissao.js";
 import { garantiaDeAutoridade } from "./autoridade.js";
@@ -829,18 +833,33 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
      */
     const livro = await LivroDeEvidencias.abrir(paths.root, runId);
     const shaFechado = new Map(fechadasAntes.map((fase) => [fase.sha, fase]));
+    /*
+     * "Fechada antes" é uma afirmação sobre o código (§125 G; spec §9), e o
+     * ledger guarda o HEAD em que cada fase fechou: a fase só é pulada se ele
+     * continuar no histórico do HEAD de agora. Entrada antiga, sem o campo, ou
+     * projeto sem Git: não há o que conferir, e o anúncio diz isso.
+     */
+    const historicoDaFechada = new Map<string, boolean | null>();
+    for (const fase of fechadasAntes) {
+      if (fase.head !== undefined) historicoDaFechada.set(fase.sha, await noHistoricoDoHead(options.projectRoot, fase.head));
+    }
 
     const phases: PhaseReport[] = [];
 
     /** As opções de uma fase — no serial, na raiz; no paralelo, no worktree dela. */
+    /** As fases que já começaram nesta execução: o --rebuild-all vale só para a primeira rodada de cada uma. */
+    const refeitas = new Set<string>();
     const opcoesDaFase = (session: PhaseSession, execucao?: ExecucaoDaFase): Parameters<typeof runPhase>[0] => {
       const arvore = execucao?.workRoot ?? options.projectRoot;
       const fluxos = fluxosDaFase ? fluxosDaFase(session.number) : null;
       const fatia = arquitetura.fatia(session.number);
+      const primeiraRodada = !refeitas.has(session.id);
+      refeitas.add(session.id);
       return {
         ...(fatia ? { architecture: fatia } : {}),
         evidencias: livro,
-        ...(options.rebuildAll === true ? { refazer: true } : {}),
+        // Refazer é da PRIMEIRA rodada da fase nesta execução: a volta de um conflito ou da integração continua do que ela fez.
+        ...(options.rebuildAll === true && primeiraRodada ? { refazer: true } : {}),
         ...(revalidarFase.has(session.id) ? { revalidar: revalidarFase.get(session.id)! } : {}),
         territorioDoFluxo: (workflow, donos) => arquitetura.territorio(workflow, donos, session.number),
         ...(options.orcamento ? { orcamento: options.orcamento } : {}),
@@ -879,7 +898,13 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
         ...(options.onProgress !== undefined ? { onProgress: options.onProgress } : {}),
         ...(options.sleep !== undefined ? { sleep: options.sleep } : {}),
         now,
-        ...(execucao ? { workRoot: execucao.workRoot, worker: execucao.worker, integracaoPendente: true, conferirPrincipal: execucao.conferirPrincipal, ...(execucao.integrationFailure ? { integrationFailure: execucao.integrationFailure } : {}) } : {}),
+        ...(execucao
+          ? {
+              workRoot: execucao.workRoot, worker: execucao.worker, integracaoPendente: true, conferirPrincipal: execucao.conferirPrincipal,
+              ...(execucao.integrationFailure ? { integrationFailure: execucao.integrationFailure } : {}),
+              ...(execucao.conciliacao ? { conciliacao: execucao.conciliacao } : {}),
+            }
+          : {}),
       };
     };
 
@@ -907,9 +932,13 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
     };
 
     /** O que toda fase verde deixa: o registro no ledger e os fluxos como regressão das seguintes. */
-    const aposVerde = async (session: PhaseSession): Promise<void> => {
+    const aposVerde = async (session: PhaseSession, outcome?: PhaseOutcome): Promise<void> => {
       const fechadaEm = now().toISOString();
       const fatia = arquitetura.fatia(session.number);
+      // O commit que o git recusou: o código ficou na árvore, e nenhum HEAD o contém — sem HEAD no registro, e revalidada depois.
+      const semCommit = checked.commitsEnabled && outcome?.status === "complete" && !outcome.committed;
+      // No paralelo, depois do cherry-pick: o HEAD da principal, que já tem a fase.
+      const head = checked.commitsEnabled && !semCommit ? (await estadoDoCodigo(options.projectRoot)).head : null;
       await registrarFaseFechada(options.projectRoot, {
         id: session.id,
         title: session.title,
@@ -918,6 +947,8 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
         closedAt: fechadaEm,
         // Sem fatia é "", não ausente: ausente é o registro anterior ao campo, que vale pelo texto.
         sliceSha12: fatia?.sha12 ?? "",
+        ...(head ? { head } : {}),
+        ...(semCommit ? { semCommit: true } : {}),
       });
       cumprir(session, fechadaEm);
     };
@@ -946,8 +977,23 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
         return false;
       }
       const fechadaAntes = registrada;
+      const noHistorico = fechadaAntes ? historicoDaFechada.get(fechadaAntes.sha) : undefined;
+      if (fechadaAntes?.semCommit === true) {
+        announce(`[${session.id}] fechou no run ${fechadaAntes.runId} sem commit (o git recusou): o código pode não estar mais na árvore; volta a ser verificada, sem nova implementação`);
+        revalidarFase.set(session.id, `a fase fechou no run ${fechadaAntes.runId} sem commit`);
+        return false;
+      }
+      // Vale também para a fase fechada neste run: um reset no meio tira o código dela do mesmo jeito.
+      if (fechadaAntes && noHistorico === false) {
+        announce(`[${session.id}] fechada no run ${fechadaAntes.runId} com este mesmo texto, mas o commit em que ela fechou (${fechadaAntes.head!.slice(0, 12)}) não está no histórico do HEAD; volta a ser verificada, sem nova implementação`);
+        revalidarFase.set(session.id, `o commit em que a fase fechou no run ${fechadaAntes.runId} não está no histórico do HEAD`);
+        return false;
+      }
       if (!done.has(session.id) && fechadaAntes) {
-        announce(`[${session.id}] já fechada no run ${fechadaAntes.runId}, com este mesmo texto; não vou refazer`);
+        announce(
+          `[${session.id}] já fechada no run ${fechadaAntes.runId}, com este mesmo texto` +
+            `${noHistorico === true ? " e o código dela no histórico do HEAD" : " (a presença do código não é conferida: o registro não guarda o commit)"}; não vou refazer`,
+        );
         options.onProgress?.({ kind: "phase", id: session.id, state: "concluído", cycle: 0, detail: "fechada antes" });
         for (const gate of ["G0", "G1", "G2", "G3"] as const) {
           options.onProgress?.({ kind: "gate", id: session.id, gate, state: "verde", cycle: 0 });
@@ -1024,8 +1070,10 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
         keepGoing: options.keepGoing === true,
         jaFechada: pularSeFechada,
         rodar: (session, execucao) => runPhase(opcoesDaFase(session, execucao)),
+        // O mapa de componentes do PLAN evita o conflito previsível (§125 F).
+        arquivosDaFase: (session) => arquitetura.fatia(session.number)?.arquivos ?? [],
         ...(options.maxVerifierRepairs !== undefined ? { maxVerifierRepairs: options.maxVerifierRepairs } : {}),
-        aposIntegrar: (session) => aposVerde(session),
+        aposIntegrar: (session, outcome) => aposVerde(session, outcome),
         esquecer: async (session) => {
           const tasks = tasksDaFase(session.markdown);
           await aprovadas.revogar(session.id, tasks, tasks.map((task) => task.index));
@@ -1081,7 +1129,7 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
 
       // Fluxo que passou vira regressão das fases seguintes: é o que faz um
       // defeito introduzido na fase 5 aparecer na fase 5.
-      if (outcome.status === "complete" || outcome.status === "already-implemented") await aposVerde(session);
+      if (outcome.status === "complete" || outcome.status === "already-implemented") await aposVerde(session, outcome);
 
       if (
         outcome.status === "failed" ||
@@ -1115,12 +1163,35 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
       }
     }
 
+    /*
+     * §10 da especificação: a aplicação só é concluída com TODAS as fases
+     * fechadas. Com `--keep-going`, uma fase que falhou (ou que ficou pulada por
+     * depender dela) não parava o build — e ele terminava em "todas as fases
+     * verdes", código 0, sobre um produto incompleto.
+     */
+    const fechadas = new Set(phases.filter((fase) => fase.outcome.status === "complete" || fase.outcome.status === "already-implemented").map((fase) => fase.id));
+    const naoFechadas = checked.sessions.filter((session) => !fechadas.has(session.id));
+    if (naoFechadas.length > 0) {
+      const detalhe = `${naoFechadas.length} de ${checked.sessions.length} fase(s) não fecharam: ${naoFechadas.map((session) => session.id).join(", ")}`;
+      announce(`aplicação NÃO concluída — ${detalhe}; a aceitação operacional não roda sobre um produto incompleto`);
+      await appendEvent(paths.events, { timestamp: now().toISOString(), stage: "implement", subject: "-", attempt: 1, status: "paused", detail: detalhe });
+      const primeira = phases.find((fase) => !fechadas.has(fase.id))?.outcome ?? null;
+      await registrarEstado(phases, checked.sessions, primeira);
+      return { runId, exitCode: 2, phases, warnings: checked.warnings, errors: [detalhe], acceptance: null };
+    }
+
     await registrarEstado(phases, checked.sessions, null);
 
     // Todas as fases verdes provam que as regras estão implementadas e testadas.
     // Não provam que o produto sobe: o piloto 1b entregou 30 testes verdes sem
     // que ninguém tivesse aplicado uma migração ou aberto uma conexão.
     let acceptance: AcceptanceResult | null = null;
+    const tocadosNaEntrega: string[] = [];
+    /** O reparo da aceitação mudou o código sem que se saiba o quê (sem árvore do Git), ou sem suíte para prová-lo. */
+    let reparoSemLista = false;
+    let reparoSemSuite = false;
+    /** O último estado que a suíte provou: o das fases fechadas, até um reparo da aceitação passar por ela. */
+    let provadoEm: string | null = null;
     if (options.skipAcceptance !== true) {
       announce("aceitação operacional: copiando o projeto para uma pasta limpa");
       acceptance = await runAcceptance({
@@ -1129,6 +1200,7 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
         ...(options.acceptanceService !== undefined ? { service: options.acceptanceService } : {}),
       });
 
+      provadoEm = (await estadoDoCodigo(options.projectRoot)).tree;
       for (let tentativa = 1; !acceptance.accepted && tentativa <= (options.maxCycles ?? 3); tentativa += 1) {
         const causa = acceptance.failure.cause;
         announce(`aceitação reprovou em "${acceptance.failure.id}"; ciclo de correção ${tentativa}`);
@@ -1143,7 +1215,7 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
 
         const ultima = checked.sessions.at(-1);
         if (!ultima) break;
-        await options.call({
+        const resposta = await options.call({
           role: "builder",
           phase: ultima,
           attempt: tentativa,
@@ -1157,11 +1229,60 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
           }),
         });
 
+        /*
+         * O reparo da entrega é julgado pelo Core (§125 G), contra o último
+         * estado que a suíte PROVOU — não contra o começo desta tentativa: um
+         * reparo que quebrou a suíte numa tentativa não é absolvido porque a
+         * seguinte não mexeu em nada. O que mudou é conferido pela suíte (com
+         * os bancos de teste e o preparo do G2, nunca o banco do usuário), uma
+         * vez, e só então a aceitação roda de novo. G3 e G4 continuam valendo
+         * para o que o reparo não tocou; o que ele tocou fica dito na entrega.
+         */
+        const agora = (await estadoDoCodigo(options.projectRoot)).tree;
+        const listados = await arquivosMudados(options.projectRoot, provadoEm, agora);
+        const mudou = listados === null ? agora === null || provadoEm === null || agora !== provadoEm : listados.length > 0;
+        if (listados) tocadosNaEntrega.push(...listados);
+        else if (mudou) reparoSemLista = true;
+        const sessao = gate0(resposta, options.engine);
+        if (!sessao.green && !mudou) {
+          // A sessão que não entregou nada não é reparo: parar com a causa dela, sem gastar as tentativas restantes.
+          acceptance = { accepted: false, steps: [], failure: { id: "sessão", cause: `a sessão de reparo da aceitação não entregou resultado utilizável: ${sessao.cause}\n\n${causa}` } };
+          break;
+        }
+        if (mudou) {
+          const teste = checked.testCommand ?? (await resolveTestCommand(options.projectRoot, {
+            ...(options.explicitTestCommand !== undefined ? { explicit: options.explicitTestCommand } : {}),
+            ...(options.environment !== undefined ? { environment: options.environment } : {}),
+          }));
+          if (teste) {
+            const suite = await comBancosDeTeste(options.projectRoot, options.testRunner ?? defaultTestRunner, async (testar) => {
+              await prepararAmbiente(options.projectRoot, testar);
+              return gate2(options.projectRoot, teste.command, testar, options.systemInstall === true);
+            });
+            if (!suite.green) {
+              acceptance = { accepted: false, steps: [], failure: { id: "suíte", cause: `o reparo da aceitação quebrou a suíte do projeto:\n${suite.cause}` } };
+              continue;
+            }
+            provadoEm = agora;
+          } else {
+            reparoSemSuite = true;
+          }
+        }
+
         acceptance = await runAcceptance({
           projectRoot: options.projectRoot,
           ...(options.acceptanceRunner !== undefined ? { runner: options.acceptanceRunner } : {}),
           ...(options.acceptanceService !== undefined ? { service: options.acceptanceService } : {}),
         });
+        if (acceptance.accepted && checked.commitsEnabled) {
+          const commit = await commitDaEntrega(options.projectRoot, tentativa);
+          announce(`aceitação: ${commit.message}`);
+          // O reparo que não entra no histórico não é entrega: a aplicação não é declarada concluída com ele fora.
+          if (!commit.committed && !commit.message.startsWith("nada a commitar")) {
+            acceptance = { accepted: false, steps: acceptance.steps, failure: { id: "commit", cause: `a aceitação passou, mas o reparo dela não entrou no histórico: ${commit.message}. O reparo continua na árvore` } };
+            break;
+          }
+        }
       }
 
       if (!acceptance.accepted) {
@@ -1179,6 +1300,36 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
 
       announce(acceptance.skipped !== "" ? `aceitação operacional: ${acceptance.skipped}` : "aceitação operacional: o produto sobe a partir de uma cópia limpa");
     }
+
+    /*
+     * Os fluxos cuja última prova não vale mais para o conteúdo entregue
+     * (spec §10: reutilizar o que está provado e dizer o que não está). O G4 não
+     * é repetido inteiro aqui; o que ficou sem prova atual é dito na entrega.
+     */
+    const fluxosSemProvaAtual = checked.sessions.flatMap((session) =>
+      livro.daFase(session.id)
+        .filter(({ evidence, validity }) => evidence.gate === "G4" && /^fluxo-/u.test(evidence.checkId) && validity.state !== "VALID")
+        .map(({ evidence, validity }) => `${evidence.checkId.replace("fluxo-", "fluxo ")} (${session.id}): a última prova ${validity.state === "UNKNOWN" ? "não se sabe se vale" : "não vale"} para o conteúdo entregue — ${validity.reason}`),
+    );
+    // As instruções e as limitações conhecidas, do que de fato rodou (spec §10).
+    const entrega = await montarEntrega(options.projectRoot, acceptance, [
+      ...(tocadosNaEntrega.length > 0 || reparoSemLista
+        ? [
+            `o reparo da aceitação tocou ${tocadosNaEntrega.length > 0 ? [...new Set(tocadosNaEntrega)].join(", ") : "arquivos que não puderam ser determinados (sem árvore do Git)"}: ` +
+              `${reparoSemSuite ? "sem suíte resolvida, provado só pela aceitação" : "provado pela suíte e pela aceitação"}; a verificação independente (G3/G4) não foi repetida sobre ele`,
+          ]
+        : []),
+      // A fase que passou e não entrou no histórico (commit recusado pelo git): o código está na árvore, e isso é dito.
+      ...phases.flatMap((fase) =>
+        checked.commitsEnabled && fase.outcome.status === "complete" && !fase.outcome.committed
+          ? [`${fase.id} passou nos gates, mas o commit não foi criado (${fase.outcome.message}): o código está na árvore, fora do histórico`]
+          : [],
+      ),
+      ...fluxosSemProvaAtual,
+    ]);
+    const caminhoDaEntrega = join(paths.root, "entrega.md");
+    await writeAtomic(caminhoDaEntrega, renderEntrega(runId, entrega));
+    announce(`entrega: instruções e limitações em ${caminhoDaEntrega}`);
 
     await appendEvent(paths.events, {
       timestamp: now().toISOString(),
@@ -1202,6 +1353,8 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
         ? "complete"
         : lastEvent?.status === "paused" ? "paused" : "blocked";
       await writeRunState(options.projectRoot, snapshot, now);
+      // O relatório sai do que ficou gravado, a cada fim de execução (§125 G): derivado, nunca autoridade.
+      await gravarRelatorio(options.projectRoot, runId, now, checked.sessions.map((session) => session.id)).catch(() => undefined);
     } finally {
       await lock.release();
     }

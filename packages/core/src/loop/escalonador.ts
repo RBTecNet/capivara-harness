@@ -22,6 +22,12 @@
  *
  * A concorrência configurada é TETO, não meta: com o grafo em fila, o build
  * paralelo roda uma fase por vez, como o serial.
+ *
+ * E uma regra de vizinhança, que sai do mapa de componentes do PLAN (§125 F;
+ * spec §7): duas fases cujos componentes a arquitetura fixa nos MESMOS
+ * arquivos não rodam ao mesmo tempo. O conflito que dá para prever não
+ * precisa acontecer para ser resolvido depois; a segunda espera a primeira
+ * integrar, e parte da árvore que já tem o trabalho dela.
  */
 
 export interface FaseAgendavel {
@@ -29,6 +35,14 @@ export interface FaseAgendavel {
   number: number;
   /** Ausente: sessão sem `Depends on` lido, tratada como dependente de todas as anteriores. */
   dependsOn?: readonly number[];
+  /** Os arquivos que a arquitetura fixa para os componentes da fase; ausente ou vazio é "não se sabe", e não restringe. */
+  arquivos?: readonly string[];
+}
+
+/** Os dois conjuntos fixam um mesmo arquivo — igual, ou um dentro de um diretório do outro? */
+function dividemArquivo(a: readonly string[], b: readonly string[]): boolean {
+  const dentro = (arquivo: string, de: string): boolean => arquivo === de || (de.endsWith("/") && arquivo.startsWith(de));
+  return a.some((x) => b.some((y) => dentro(x, y) || dentro(y, x)));
 }
 
 /**
@@ -134,6 +148,7 @@ export function proximas(agenda: Agenda): string[] {
 
   let livres = Math.max(0, agenda.limite - rodando.length);
   const saem: string[] = [];
+  const ocupados = rodando.map((fase) => fase.arquivos ?? []);
   for (const fase of agenda.fases) {
     if (livres === 0) break;
     if (estadoDe(agenda, fase.id) !== "pendente") continue;
@@ -142,7 +157,10 @@ export function proximas(agenda: Agenda): string[] {
       if (rodando.length === 0 && saem.length === 0) return [fase.id];
       break;
     }
+    // Vizinha de uma que está rodando (ou que acabou de sair): espera, sem barrar as seguintes.
+    if (ocupados.some((arquivos) => dividemArquivo(fase.arquivos ?? [], arquivos))) continue;
     saem.push(fase.id);
+    ocupados.push(fase.arquivos ?? []);
     livres -= 1;
   }
   return saem;

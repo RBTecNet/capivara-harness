@@ -41,6 +41,22 @@ export interface FaseFechada {
    * pelo texto, como sempre valeu.
    */
   sliceSha12?: string;
+  /**
+   * O HEAD do repositório quando ela fechou (§125 G), quando havia Git.
+   *
+   * "Fechada antes" é uma afirmação sobre o código, e o texto sozinho não a
+   * sustenta: um `reset` ou um histórico reescrito tira o trabalho da árvore e
+   * deixa o ledger dizendo o contrário. A fase só é pulada enquanto este
+   * commit continuar no histórico do HEAD. Entrada sem o campo (anterior a
+   * ele) vale como sempre valeu, e o anúncio diz que não foi conferida.
+   */
+  head?: string;
+  /**
+   * Fechou sem commit (o git recusou): o código ficou na árvore, fora do
+   * histórico, e nenhum HEAD o contém. Não é pulada nas próximas execuções —
+   * volta a ser verificada, porque o código pode ter sido descartado.
+   */
+  semCommit?: boolean;
 }
 
 function caminho(projectRoot: string): string {

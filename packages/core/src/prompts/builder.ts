@@ -418,6 +418,71 @@ export function fixPrompt(context: FixContext): string {
   ].join("\n");
 }
 
+export interface ConflictContext extends BuilderContext {
+  /** Os arquivos que ficaram com os marcadores do conflito, e só eles podem mudar. */
+  arquivos: readonly string[];
+  /** O que a árvore integrada recebeu nesses arquivos desde a base da fase (`git log --oneline`), quando se sabe. */
+  historico?: string;
+  /** Os que o Git não marcou (binário, apagado de um lado): pedem decisão explícita. */
+  semMarcador?: readonly string[];
+}
+
+/**
+ * Prompt da conciliação de um conflito de integração (§125 F; spec §7).
+ *
+ * Os dois lados são trabalho aprovado: a árvore integrada e o commit verde da
+ * fase, que ficou num branch. O executor resolve SÓ os trechos marcados — o
+ * Core desfaz o que ele mexer fora dos arquivos em conflito, confere que não
+ * sobrou marcador e, porque resolver texto não prova comportamento, revalida
+ * o que a resolução atingiu.
+ */
+export function conflictPrompt(context: ConflictContext): string {
+  return [
+    languageBlock(context.language),
+    "",
+    "You are reconciling a Git conflict between two pieces of APPROVED work.",
+    ...(context.sharedContract ? ["## Published shared contracts", context.sharedContract] : []),
+    ...architectureSliceBlock(context.architectureSlice),
+    "",
+    "## Situation",
+    "The phase below was implemented and approved by independent verification on an older base. Other",
+    "phases were integrated meanwhile. The harness reapplied this phase over the integrated tree; every",
+    "file that does not conflict is already in place. The files listed below kept Git's conflict markers:",
+    "`<<<<<<<` opens the integrated tree's version, `|||||||` the common base, `=======` separates, and",
+    "`>>>>>>>` closes this phase's approved version.",
+    "",
+    "## Files in conflict — the only files you may change",
+    ...context.arquivos.map((arquivo) => `- \`${arquivo}\``),
+    ...(context.historico && context.historico.trim() !== "" ? ["", "## What the integrated tree received in these files", "````", context.historico.trim(), "````"] : []),
+    ...(context.semMarcador && context.semMarcador.length > 0
+      ? [
+          "",
+          "## Conflicts without markers — decide each one explicitly",
+          "These files have no marker (binary, or deleted on one side); each currently holds the integrated tree's version:",
+          ...context.semMarcador.map((arquivo) => `- \`${arquivo}\``),
+          "Decide by writing the content that keeps both sides' behaviour (or deleting the file, when that is the decision).",
+          "To keep the integrated tree's version as it is, answer with this line for that file, alone: `CAPIVARA_MANTER_INTEGRADA: <file>`.",
+          "A file you neither change nor declare stays an unresolved conflict.",
+        ]
+      : []),
+    "",
+    "## Mandatory rules",
+    "- Resolve ONLY the marked hunks. Do not rewrite, reformat or move code outside them.",
+    "- Keep the behaviour of BOTH sides. When they truly cannot coexist, keep the integrated tree's",
+    "  behaviour and adapt this phase's part so its acceptance criteria still hold.",
+    "- Remove every conflict marker. A file left with a marker is an unresolved conflict.",
+    "- Do not touch any other file: the harness reverts changes outside the files above.",
+    "- Do not commit. Run focused checks if useful; the harness then runs the suite, the independent",
+    "  verifier and the flows on what your resolution changed — resolving the text does not prove it works.",
+    "",
+    "When every hunk is resolved, end your answer with this line, alone:",
+    BUILDER_COMPLETE_MARKER,
+    "",
+    "## The phase whose approved work is being reconciled",
+    context.phaseMarkdown,
+  ].join("\n");
+}
+
 /**
  * Prompt de correção da aceitação operacional.
  *

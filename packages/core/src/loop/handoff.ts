@@ -40,6 +40,12 @@ export interface CamposDoDiagnostico {
   hypothesis: string;
   minimalRepair: string;
   requiredProof: string;
+  /**
+   * O verificador diz que o defeito é do documento aprovado, não do código
+   * (§125 H): `UPSTREAM: PLAN|INIT — <documento e trecho>: <por quê>`. É só a
+   * alegação; o encaminhamento é do Core, com a escada esgotada e pacote válido.
+   */
+  upstream: string;
 }
 
 export interface VerifierHandoff extends CamposDoDiagnostico {
@@ -62,6 +68,7 @@ const ROTULOS: Record<keyof CamposDoDiagnostico, readonly string[]> = {
   hypothesis: ["HYPOTHESIS", "CAUSE", "CAUSA", "HIPÓTESE", "HIPOTESE"],
   minimalRepair: ["FIX", "CORRECTION", "CORREÇÃO", "CORRECAO"],
   requiredProof: ["CHECK", "PROOF", "PROVA", "VERIFICAÇÃO", "VERIFICACAO"],
+  upstream: ["UPSTREAM"],
 };
 
 /**
@@ -82,7 +89,7 @@ export function camposDoDiagnostico(texto: string): CamposDoDiagnostico {
     rotuloComeca: (match.index ?? 0) + (match[1]?.length ?? 0),
     valorComeca: (match.index ?? 0) + match[0].length,
   }));
-  const campos: CamposDoDiagnostico = { criterion: "", observed: "", expected: "", evidence: "", location: "", hypothesis: "", minimalRepair: "", requiredProof: "" };
+  const campos: CamposDoDiagnostico = { criterion: "", observed: "", expected: "", evidence: "", location: "", hypothesis: "", minimalRepair: "", requiredProof: "", upstream: "" };
   achados.forEach((achado, indice) => {
     const fim = achados[indice + 1]?.rotuloComeca ?? texto.length;
     const valor = texto.slice(achado.valorComeca, fim).replace(/[;\s|]+$/u, "").trim();

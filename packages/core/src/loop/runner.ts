@@ -15,11 +15,11 @@ import { join, relative } from "node:path";
 import { appendEvent } from "../state/events.js";
 import { runPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
-import { declarouRoteiroErrado, extractFlowScript, fixPrompt, flowPrompt, implementPrompt, triagePrompt, verifierRepairPrompt, verifyPrompt, type Triagem } from "../prompts/index.js";
+import { conflictPrompt, declarouRoteiroErrado, extractFlowScript, fixPrompt, flowPrompt, implementPrompt, triagePrompt, verifierRepairPrompt, verifyPrompt, type Triagem } from "../prompts/index.js";
 import type { BuildProgressListener, LoopGate, LoopGateState } from "./progress.js";
-import type { Bloqueio } from "./admissao.js";
+import { alteracoesParaCommit, type Bloqueio } from "./admissao.js";
 import { fotografarRefs, publicacaoProvavel, refsMovidas } from "./autoridade.js";
-import { arquivosDasFases, arquivosMudados, commitPhase, estadoDoCodigo, existiamNaArvore, hasPendingChanges } from "./git.js";
+import { arquivosDasFases, arquivosMudados, comMarcadorDeConflito, commitPhase, estadoDoCodigo, existiamNaArvore, hasPendingChanges, restaurarDoEstado } from "./git.js";
 import { declaredComplete, defaultTestRunner, gate0, gate2, gate3, type GateName, type GateResult, type TestRunner } from "./gates.js";
 import { detectCredentialRejection, detectRateLimit, planWait } from "./ratelimit.js";
 import { checkFlowScript, FLOW_MARK, FLOWS_DIR, flowScriptName, gate4, type FlowRunner } from "./flows.js";
@@ -30,12 +30,12 @@ import { sharedContractFromSkeleton } from "../prompts/acceptance-policy.js";
 import { portaLivre } from "./ports.js";
 import { faltaOPacoteDoRunner } from "./dependencias.js";
 import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mcp/index.js";
-import { sha12 } from "../contract/index.js";
+import { DOCUMENTOS_DA_ETAPA, ENVIRONMENT_CONTRACT, phaseReferences, sha12 } from "../contract/index.js";
 import type { SkeletonWorkflow, TaskBlock } from "../contract/index.js";
 import type { PhaseSession } from "./split.js";
 import { resolveE2eCommand, type TestCommand } from "./testcmd.js";
 import { falhaDeInstalacaoNode, inspecionarInstalacaoNode, MARCA_DE_INSTALACAO_NODE, registrarInstalacaoNode, runtimeNode } from "./instalacao-node.js";
-import { comandoDeInstalacao } from "./worktree.js";
+import { comandoDeInstalacao, type ConciliacaoDaIntegracao } from "./worktree.js";
 import { parseVerification, testRepairGuidancePrompt, verifyRetryPrompt } from "../prompts/verifier.js";
 import { FLOW_REVIEWS, type FlowReviewPurpose } from "../provider/flow-review.js";
 import type { FatiaDaArquitetura, TerritorioDoFluxo } from "./arquitetura.js";
@@ -60,6 +60,7 @@ import { camposDoDiagnostico, gravarHandoff, HANDOFF_CONTRACT, lerHandoff, rende
 import { criarNarrador, type Transicao } from "./narrador.js";
 import { escopoDaTask, impactoNaSuite, impactoNaTask, impactoNoFluxo } from "./impacto.js";
 import { shaDaFase } from "./ledger.js";
+import { documentosPublicados, pastaDosReparos, publicarReparo, validarReparo } from "./upstream.js";
 import { bancosDeclarados } from "./passagem.js";
 import type { ContratoDaRetomada } from "../provider/cli/types.js";
 
@@ -137,6 +138,12 @@ export interface PhaseRunOptions {
    */
   integracaoPendente?: boolean;
   integrationFailure?: IntegrationFailure;
+  /**
+   * A fase volta de um conflito de integração com o commit aprovado reaplicado
+   * e os marcadores nos arquivos em conflito (§125 F): a conciliação mexe só
+   * neles, sem sessão de implementação, e os gates revalidam o que ela atingir.
+   */
+  conciliacao?: ConciliacaoDaIntegracao;
   /** O agente do pool que roda esta fase; vai em cada chamada, para o CLI escolher o modelo. */
   worker?: number;
   runId: string;
@@ -254,7 +261,19 @@ export interface PhaseRunOptions {
 export type PhaseOutcome =
   | { status: "complete"; committed: boolean; message: string; cycles: number }
   | { status: "already-implemented"; cycles: number }
-  | { status: "failed"; gate: GateName; cause: string; cycles: number }
+  | {
+      status: "failed";
+      gate: GateName;
+      cause: string;
+      cycles: number;
+      /**
+       * Onde está a prova da parada, relativo à raiz do projeto (§125 G): o
+       * handoff do defeito que parou e o log da evidência que reprovou. O nome
+       * do log não se adivinha pelo número do ciclo — os ciclos são janelas de
+       * orçamento, e os logs seguem as sessões.
+       */
+      evidencia?: string[];
+    }
   | { status: "rate-limit-exhausted"; waits: number }
   /**
    * O provider recusou a credencial.
@@ -646,10 +665,11 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   };
 
   /** A estratégia é possível para o defeito, pela capacidade do run — sem olhar o orçamento. */
-  const possivel = (estrategia: Estrategia, _defeito: Defect): boolean => {
+  const possivel = (estrategia: Estrategia, defeito: Defect): boolean => {
     if (estrategia === "verificador") return orcamento.reparosDoVerificador > 0;
     if (estrategia === "roteiro" || estrategia === "revisao") return options.flows !== undefined;
-    return estrategia !== "conciliacao";
+    if (estrategia === "conciliacao") return options.conciliacao !== undefined && defeito.nature === "integracao-conflito";
+    return true;
   };
   /** Possível E com orçamento neste ciclo (o do verificador é por gate). */
   const disponivel = (estrategia: Estrategia, defeito: Defect): boolean => {
@@ -668,6 +688,64 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       defeito.costs.seconds = Math.round((defeito.costs.seconds + segundos) * 10) / 10;
       defeito.costs.costUsd += usd;
     }
+  };
+
+  /*
+   * Os arquivos do conflito, em duas espécies: os marcados (texto, com
+   * `<<<<<<<`/`>>>>>>>`) e os que o Git não marca — binário, apagado de um
+   * lado —, que ficaram com a versão da árvore integrada e só se resolvem por
+   * decisão explícita: mudados por uma ação, ou mantidos com a linha
+   * `CAPIVARA_MANTER_INTEGRADA: <arquivo>`. Nenhum lado vence por padrão.
+   */
+  const semMarcadorDoConflito = [...new Set([...(options.conciliacao?.binarios ?? []), ...(options.conciliacao?.apagados ?? []).map((apagado) => apagado.caminho)])];
+  const conflitoAtual = {
+    marcados: (options.conciliacao?.arquivos ?? []).filter((arquivo) => !semMarcadorDoConflito.includes(arquivo)),
+    semMarcador: semMarcadorDoConflito,
+  };
+  const decididos = new Set<string>();
+  /** Os arquivos que a conciliação pode tocar: os marcados e os que pedem decisão. */
+  const arquivosDoConflito = (): string[] => [...new Set([...conflitoAtual.marcados, ...conflitoAtual.semMarcador])];
+  /** As decisões que a sessão tomou: o que ela mudou entre os arquivos do conflito, e o que disse manter da integrada. */
+  const registrarDecisoes = (mudados: readonly string[], saida: string): void => {
+    const doConflito = new Set(arquivosDoConflito());
+    for (const arquivo of mudados) if (doConflito.has(arquivo)) decididos.add(arquivo);
+    for (const linha of saida.matchAll(/^\s*CAPIVARA_MANTER_INTEGRADA:\s*(.+?)\s*$/gmu)) {
+      const arquivo = (linha[1] ?? "").replace(/^`|`$/gu, "");
+      if (doConflito.has(arquivo)) decididos.add(arquivo);
+    }
+  };
+  /** O que ainda está em conflito: marcador que sobrou, ou arquivo sem marcador que ninguém decidiu. */
+  const conflitosRestantes = async (): Promise<string[]> => [
+    ...(await comMarcadorDeConflito(arvore, conflitoAtual.marcados)),
+    ...conflitoAtual.semMarcador.filter((arquivo) => !decididos.has(arquivo)),
+  ];
+  const detalheDoConflito = (restantes: readonly string[]): string => `conflito de integração: marcadores em ${restantes.join(", ")}`;
+  /**
+   * A prova TEXTUAL da conciliação: não sobrou marcador. A funcional vem depois,
+   * dos gates sobre o que a resolução mudou — resolver texto não prova nada.
+   */
+  const validarConciliacao = async (): Promise<void> => {
+    if (!options.conciliacao) return;
+    const restantes = await conflitosRestantes();
+    for (const defeito of estado.defects.filter((cada) => cada.nature === "integracao-conflito" && cada.status === "AWAITING_VALIDATION")) {
+      const resultado = registro.validar(defeito, restantes.length > 0 ? { assinatura: assinaturaDaFalha(detalheDoConflito(restantes)) } : null, false);
+      if (restantes.length > 0) {
+        defeito.detail = detalheDoConflito(restantes);
+        defeito.anchors.signature = assinaturaDaFalha(defeito.detail);
+      }
+      await transicao({
+        tipo: "conflito",
+        gate: "INTEGRACAO",
+        defeitos: [defeito.defectId],
+        motivo:
+          resultado === "resolved"
+            ? "conflito textual resolvido, sem marcador; a correção funcional ainda vai ser provada pelos gates"
+            : resultado === "progress"
+              ? `menos marcadores, ainda em ${restantes.join(", ")}`
+              : `os marcadores continuam em ${restantes.join(", ")}`,
+      });
+    }
+    await registro.salvar();
   };
 
   const defeitosConhecidos = () =>
@@ -1377,8 +1455,12 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       progressoDaFase(`ciclo ${ciclosAbertos}/${maxCycles} · correção`);
       const ambienteAntes = testeAgora ? await identidadeDoAmbiente(testeAgora.command, testeAgora.source) : "";
       const comecou = Date.now();
+      const arvoreAntes = codigo.atual.tree;
       const sessao = await sessaoDoExecutor(prompt);
       contarCusto(acao.defeitos, [sessao.result], comecou);
+      if (acao.defeitos.some((defeito) => defeito.nature === "integracao-conflito")) {
+        registrarDecisoes((await arquivosMudados(arvore, arvoreAntes, codigo.atual.tree)) ?? [], sessao.result.stdout);
+      }
       const g0 = gate0(sessao.result, options.engine);
       if (!g0.green && (sessao.result.timedOut || sessao.result.providerFailure)) return { parar: await pararPorSessao("gate 0 — engine", g0.cause) };
       const mudouAmbiente = testeAgora ? ambienteAntes !== (await identidadeDoAmbiente(testeAgora.command, testeAgora.source)) : false;
@@ -1397,6 +1479,60 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         await achar({ gate: "G0", nature: "engine", anchors: {}, summary: "a sessão do executor não terminou com resultado utilizável", detail: g0.cause });
       }
       await registro.salvar();
+      // O conflito não tem gate que o revalide neste worktree: os marcadores são conferidos aqui.
+      if (acao.defeitos.some((defeito) => defeito.nature === "integracao-conflito")) await validarConciliacao();
+      return null;
+    }
+
+    if (acao.estrategia === "conciliacao") {
+      const conflito = options.conciliacao!;
+      const permitidos = new Set(arquivosDoConflito());
+      const apagados = conflito.apagados ?? [];
+      const ctx = await contexto();
+      const historico = [
+        ...apagados.map((apagado) => `${apagado.caminho}: apagado ${apagado.por === "fase" ? "por esta fase; a árvore integrada o alterou" : "pela árvore integrada; esta fase o alterou"}`),
+        ...(conflito.binarios ?? []).map((arquivo) => `${arquivo}: sem marcador (binário); está com a versão da árvore integrada, e a desta fase está no branch ${conflito.aprovado.branch}`),
+        ...(conflito.historico ? [conflito.historico] : []),
+      ].join("\n");
+      const pendentes = conflitoAtual.semMarcador.filter((arquivo) => !decididos.has(arquivo));
+      const prompt = conflictPrompt({ ...ctx, arquivos: [...permitidos], ...(pendentes.length > 0 ? { semMarcador: pendentes } : {}), ...(historico !== "" ? { historico } : {}) });
+      registro.consumir(acao, { role: "builder", attempt: sessoesNestaExecucao + 1 });
+      await registro.salvar();
+      await transicao({
+        tipo: "estrategia", gate: "INTEGRACAO", defeitos: acao.defeitos.map((defeito) => defeito.defectId), estrategia: rotuloDaEstrategia.conciliacao,
+        agente: `executor, só em ${[...permitidos].join(", ")}`, orcamento: orcamentoDaAcao,
+        motivo: `os dois lados são aprovados (HEAD ${conflito.principal.slice(0, 12)} e ${conflito.aprovado.branch}); não reimplementa a fase nem consome ciclo de implementação`,
+        proximo: "marcadores; depois os gates sobre o que a conciliação mudou",
+      });
+      announce(`[${session.id}] conciliando o conflito de integração em ${[...permitidos].join(", ")}; nada fora desses arquivos pode mudar`);
+      await event("retry", `conciliação do conflito de integração em ${[...permitidos].join(", ")}`, ciclosAbertos);
+      progressoDaFase(`ciclo ${ciclosAbertos}/${maxCycles} · conciliação`);
+      const antes = codigo.atual.tree;
+      const sessao = await sessaoDoExecutor(prompt);
+      const g0 = gate0(sessao.result, options.engine);
+      if (!g0.green && (sessao.result.timedOut || sessao.result.providerFailure)) return { parar: await pararPorSessao("gate 0 — engine", g0.cause) };
+      // O escopo é do Core, não da boa vontade do agente: o que mudou fora dos arquivos em conflito volta.
+      const mudados = (await arquivosMudados(arvore, antes, codigo.atual.tree)) ?? [];
+      const fora = mudados.filter((arquivo) => !permitidos.has(arquivo));
+      if (fora.length > 0 && antes !== null) {
+        const naoVoltaram = await restaurarDoEstado(arvore, antes, fora);
+        codigo.atual = await estadoDoCodigo(arvore);
+        announce(
+          `[${session.id}] a conciliação mexeu fora dos arquivos em conflito (${fora.join(", ")}); o Core desfez essas mudanças` +
+            `${naoVoltaram.length > 0 ? `, menos ${naoVoltaram.join(", ")}, que não puderam voltar` : ""}`,
+        );
+        await event("retry", `conciliação fora do escopo desfeita: ${fora.join(", ")}`, ciclosAbertos);
+      }
+      const dentro = mudados.filter((arquivo) => permitidos.has(arquivo));
+      const decididosAntes = decididos.size;
+      registrarDecisoes(dentro, sessao.result.stdout);
+      for (const defeito of acao.defeitos) {
+        const tentativa = defeito.attempts.at(-1);
+        if (tentativa) tentativa.changed = dentro.length > 0 || decididos.size > decididosAntes;
+      }
+      registro.aguardarValidacao(acao.defeitos);
+      await registro.salvar();
+      await validarConciliacao();
       return null;
     }
 
@@ -1529,6 +1665,115 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     };
   };
 
+  /** O pacote de reparo documental publicado nesta parada, relativo à raiz do projeto. */
+  let pacoteUpstream: string | null = null;
+
+  /**
+   * O último recurso (§125 H; spec §8): a escada do BUILD acabou sem
+   * informação nova, e o verificador disse — no diagnóstico, com `UPSTREAM:` —
+   * que o defeito é do documento aprovado. O Core monta o pacote do que já
+   * está registrado (handoff, tentativas, provas), valida e publica; só então
+   * o defeito vira `UPSTREAM_REPAIR_REQUIRED`. Pacote recusado não vira estado,
+   * e nenhum agente é chamado para inventar a correção.
+   */
+  const encaminharUpstream = async (): Promise<void> => {
+    const contratos: Record<string, string> = {
+      "project-phases.md": "capivara-phases/v2",
+      "architecture.md": "capivara-architecture/v1",
+      "environment.json": ENVIRONMENT_CONTRACT,
+      "skeleton.md": "capivara-skeleton/v2",
+    };
+    const daRaiz = (relativo: string): string => relative(options.projectRoot, join(paths.root, relativo));
+    for (const defeito of estado.defects.filter((cada) => cada.status === "OPEN" || cada.status === "ESCALATED")) {
+      const ultimo = defeito.handoffs.at(-1);
+      const handoff = ultimo ? await lerHandoff(join(paths.root, ultimo)) : null;
+      const alegacao = (handoff?.upstream ?? "") || camposDoDiagnostico(defeito.rediagnoses.at(-1)?.excerpt ?? "").upstream;
+      const alvo = /^\s*INIT\b/iu.test(alegacao) ? "init" : /^\s*PLAN\b/iu.test(alegacao) ? "plan" : null;
+      if (alvo === null) continue;
+      if (alvo === "init") {
+        // A especificação manda habilitar o INIT só depois de o caminho do PLAN estar provado (§8.3): a alegação fica no handoff.
+        announce(`[${session.id}] o verificador aponta o INIT em ${defeito.defectId}; o encaminhamento ao INIT não está habilitado nesta versão (primeiro o PLAN), e o diagnóstico fica no handoff`);
+        continue;
+      }
+      // Só os documentos da etapa destino: citar um de outra etapa não muda a autoridade do reparo.
+      const nome = DOCUMENTOS_DA_ETAPA[alvo].find((documento) => alegacao.includes(documento)) ?? DOCUMENTOS_DA_ETAPA[alvo][0]!;
+      const documentos = await documentosPublicados(options.projectRoot);
+      const gateDoDefeito = defeito.gates.at(-1) ?? defeito.discovered.gate;
+      const artefatos = livro.daFase(session.id).map(({ evidence }) => evidence)
+        .filter((evidencia) => evidencia.outcome === "REPAIR_REQUIRED" && evidencia.gate === gateDoDefeito)
+        .flatMap((evidencia) => evidencia.artifactRefs.map((ref) => ({ path: daRaiz(ref.path), sha12: ref.sha12 })));
+      const tentativas = defeito.attempts.filter((tentativa) => tentativa.result !== "pending");
+      const diagnosis = [
+        "## Defeito", `${defeito.defectId} (${defeito.nature}, ${gateDoDefeito}): ${defeito.summary}${defeito.criterion ? `\nCritério: ${defeito.criterion}` : ""}`, "",
+        "## Observado", defeito.observed || defeito.detail.split("\n").slice(0, 12).join("\n"), "",
+        "## Esperado", defeito.expected || "o critério da fase satisfeito pelo código, sem contradizer o documento aprovado", "",
+        "## Contornos tentados", ...tentativas.map((tentativa) => `- ciclo ${tentativa.cycle}, ${tentativa.strategy}: ${tentativa.result}`), "",
+        "## Limites da edição", alegacao, "",
+      ].join("\n");
+      const publicado = await publicarReparo(options.projectRoot, {
+        origin: { runId: options.runId, phaseId: session.id, gate: gateDoDefeito, cycle: estado.cycle, defectId: defeito.defectId },
+        target: alvo,
+        document: { name: nome, contract: contratos[nome]!, sha12: documentos[nome] ?? "" },
+        /*
+         * O que o reparo pode alcançar, pelo grafo da arquitetura e não pela
+         * redação da alegação: um contrato (architecture.md) ou a infraestrutura
+         * (environment.json) atingem as fases que consomem os componentes desta;
+         * o critério de uma fase (project-phases.md) atinge ela e as que a
+         * alegação nomeia. A pergunta de escopo, na entrada do PLAN, sai daqui.
+         */
+        impact: {
+          phases: [...new Set([
+            session.number,
+            ...phaseReferences(alegacao),
+            ...(nome === "project-phases.md" ? [] : options.architecture?.consumidoras ?? []),
+          ])].sort((a, b) => a - b),
+          components: options.architecture?.componentes ?? [],
+          contracts: nome === "architecture.md" ? options.architecture?.contratosProprios ?? [] : [],
+        },
+        diagnosis,
+        evidence: {
+          artifacts: artefatos,
+          handoffs: defeito.handoffs.map(daRaiz),
+          recovery: tentativas.map((tentativa) => ({ strategy: tentativa.strategy, result: tentativa.result, cycle: tentativa.cycle })),
+          exhausted: true,
+        },
+        createdAt: now().toISOString(),
+      });
+      if (!publicado.ok) {
+        announce(`[${session.id}] o encaminhamento documental de ${defeito.defectId} foi recusado — ${publicado.errors.join("; ")}; nenhum agente é chamado para inventar a correção`);
+        continue;
+      }
+      defeito.status = "UPSTREAM_REPAIR_REQUIRED";
+      defeito.upstream = publicado.manifest.repairId;
+      await registro.salvar();
+      pacoteUpstream = relative(options.projectRoot, publicado.caminho);
+      await transicao({
+        tipo: "upstream",
+        gate: gateDoDefeito,
+        defeitos: [defeito.defectId],
+        motivo: `reparo documental necessário no ${alvo.toUpperCase()} (${nome}): pacote ${publicado.manifest.repairId} validado e publicado em ${pacoteUpstream}`,
+        proximo: `capivara ${alvo}`,
+      });
+      return;
+    }
+  };
+
+  /** O handoff do defeito que parou e os logs da última prova reprovada do gate dele, relativos à raiz do projeto. */
+  const evidenciaDaParada = async (gateDaFalha: GateName): Promise<string[]> => {
+    const daRaiz = (relativo: string): string => relative(options.projectRoot, join(paths.root, relativo));
+    const pendentes = estado.defects.filter((defeito) => defeito.status !== "RESOLVED");
+    const primeiro = pendentes.filter((defeito) => defeito.status === "OPEN" || defeito.status === "ESCALATED").at(-1) ?? pendentes.at(-1);
+    const caminhos = (primeiro?.handoffs ?? []).slice(-1).map(daRaiz);
+    const gate = primeiro ? primeiro.gates.at(-1) ?? primeiro.discovered.gate : null;
+    const reprovada = livro.daFase(session.id).map(({ evidence }) => evidence)
+      .filter((evidencia) => evidencia.outcome === "REPAIR_REQUIRED" && (gate === null || evidencia.gate === gate || nomeDoGate(evidencia.gate as DefectGate) === gateDaFalha))
+      .at(-1);
+    for (const ref of reprovada?.artifactRefs ?? []) caminhos.push(daRaiz(ref.path));
+    if (estado.defects.length > 0) caminhos.push(daRaiz(join("defects", `${session.id}.json`)));
+    if (pacoteUpstream !== null) caminhos.unshift(pacoteUpstream);
+    return [...new Set(caminhos)];
+  };
+
   const fecharFalha = async (gateDaFalha: GateName, causa: string, motivo: string): Promise<PhaseOutcome> => {
     for (const defeito of estado.defects) registro.escalar(defeito);
     estado.ultimoEstado = { tree: codigo.atual.tree, at: now().toISOString() };
@@ -1543,7 +1788,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       announce("           git checkout -- . && git clean -fd                      → descarta e a fase recomeça do zero");
       announce("           ou rode `capivara build` de novo sem mexer: o Core reconhece o próprio parcial e continua dos defeitos registrados");
     }
-    return { status: "failed", gate: gateDaFalha, cause: causa, cycles: ciclosAbertos };
+    const evidencia = await evidenciaDaParada(gateDaFalha);
+    return { status: "failed", gate: gateDaFalha, cause: causa, cycles: ciclosAbertos, ...(evidencia.length > 0 ? { evidencia } : {}) };
   };
 
   /** A sessão não entregou resultado utilizável: para com o parcial preservado (§115.17). */
@@ -1554,6 +1800,13 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
 
   /** Todas as provas válidas: commit pelo Core e conclusão. */
   const fechar = async (): Promise<PhaseOutcome> => {
+    if (options.conciliacao) {
+      // A última barreira: nenhum arquivo com marcador de conflito entra no commit da fase (§125 F).
+      const comMarca = await comMarcadorDeConflito(arvore, (await alteracoesParaCommit(arvore)).map((entrada) => entrada.caminho));
+      if (comMarca.length > 0) {
+        return fecharFalha("gate 2 — suíte do projeto", `${detalheDoConflito(comMarca)}: o Core não commita marcador de conflito`, "marcadores de conflito restantes na árvore da fase");
+      }
+    }
     delete estado.ultimoEstado;
     await registro.salvar();
     const commit = options.commitsEnabled
@@ -1572,6 +1825,15 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       announce(`[${session.id}] JÁ IMPLEMENTADA — gates verdes, nada a commitar`);
       return { status: "already-implemented", cycles: ciclosAbertos };
     }
+    if (options.commitsEnabled && !commit.committed && noWorktree) {
+      /*
+       * No worktree, o commit É a entrega (§125 G): sem ele a integração não
+       * acha nada, o worktree é fechado e o trabalho se perde. A fase para,
+       * o parcial vai para o branch dela, e a causa é a do git.
+       */
+      return fecharFalha("gate 0 — engine", `a fase passou nos gates, mas o commit no worktree não foi criado: ${commit.message}. O trabalho fica no branch da fase`, "commit da fase recusado pelo git no worktree");
+    }
+    if (options.commitsEnabled && !commit.committed) announce(`[${session.id}] gates verdes, mas o commit não foi criado — ${commit.message}; o código fica na árvore, fora do histórico`);
     await recolher(ciclosAbertos);
     await concluir(commit.message, ciclosAbertos);
     relatar({ kind: "phase", id: session.id, state: "concluído", cycle: ciclosAbertos, detail: commit.committed ? "commitada" : "completa" });
@@ -1579,9 +1841,35 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     return { status: "complete", committed: commit.committed, message: commit.message, cycles: ciclosAbertos };
   };
 
+  /**
+   * Na retomada, o defeito que espera um reparo documental é reconferido
+   * (§125 H): o pacote ainda válido e pendente para a fase de novo, sem gastar
+   * ciclos contra o que o documento impede; o pacote velho (documento
+   * revisado), abortado ou sumido devolve o defeito à escada.
+   */
+  const reconferirUpstream = async (): Promise<PhaseOutcome | null> => {
+    for (const defeito of estado.defects.filter((cada) => cada.status === "UPSTREAM_REPAIR_REQUIRED")) {
+      const pacote = defeito.upstream ? await validarReparo(options.projectRoot, defeito.upstream) : null;
+      if (pacote?.ok && pacote.manifest.state !== "ABORTED") {
+        pacoteUpstream = relative(options.projectRoot, join(pastaDosReparos(options.projectRoot), pacote.manifest.repairId));
+        return fecharFalha(
+          nomeDoGate(defeito.gates.at(-1) ?? defeito.discovered.gate),
+          `${defeito.detail}\n\nREPARO DOCUMENTAL PENDENTE: o pacote ${pacote.manifest.repairId} continua válido e o documento não mudou; o BUILD não repara o que o documento impede.`,
+          "reparo documental pendente: o pacote continua válido",
+        );
+      }
+      defeito.status = "OPEN";
+      await transicao({ tipo: "upstream", defeitos: [defeito.defectId], motivo: `o pacote ${defeito.upstream ?? "?"} não vale mais (${pacote && !pacote.ok ? pacote.errors[0] ?? "inválido" : "abortado ou ausente"}): o defeito volta à escada do BUILD` });
+    }
+    await registro.salvar();
+    return null;
+  };
+
   // ------------------------------------------------------------------ laço
 
   try {
+    const pendenteDocumental = await reconferirUpstream();
+    if (pendenteDocumental) return pendenteDocumental;
     if (options.integrationFailure) {
       /*
        * A falha de integração chega com o diagnóstico do verificador (§114),
@@ -1639,6 +1927,65 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       const parada = await executarAcao(acao);
       if (parada) return parada.parar;
       await revalidar(`ação ${estado.actions}`);
+    } else if (options.conciliacao) {
+      /*
+       * A volta de um conflito de integração (§125 F; spec §7). A fase já foi
+       * aprovada; os dois commits estão guardados; o worktree tem o aprovado
+       * sobre a árvore integrada e só os arquivos em conflito com marcador. Não
+       * há sessão de implementação: o defeito é o conflito, com a escada dele
+       * (conciliação localizada, depois o executor com o handoff), e o que a
+       * resolução mudar é revalidado pelas provas, como qualquer reparo.
+       */
+      const conflito = options.conciliacao;
+      if (estado.implementation === "done") registro.novoCiclo();
+      estado.implementation = "done";
+      await registro.salvar();
+      /*
+       * A lista do checkpoint não basta: um parcial de conciliação anterior
+       * (wip) pode trazer marcadores em arquivo que não conflitou desta vez.
+       * Todo arquivo mudado em relação ao HEAD é varrido.
+       */
+      const comMarca = await comMarcadorDeConflito(arvore, (await alteracoesParaCommit(arvore)).map((entrada) => entrada.caminho));
+      conflitoAtual.marcados = [...new Set([...conflitoAtual.marcados, ...comMarca])];
+      const restantes = await conflitosRestantes();
+      await transicao({
+        tipo: "conflito",
+        gate: "INTEGRACAO",
+        motivo:
+          `conflito ao integrar em ${arquivosDoConflito().join(", ") || "nenhum arquivo"}: os dois commits continuam guardados ` +
+          `(HEAD ${conflito.principal.slice(0, 12)} e o aprovado ${conflito.aprovado.commit.slice(0, 12)} em ${conflito.aprovado.branch}); ` +
+          "a fase não é reimplementada — só os trechos em conflito são conciliados, e os gates revalidam o que a conciliação atingir",
+      });
+      if (restantes.length > 0) {
+        const doConflito = await achar({
+          gate: "INTEGRACAO",
+          nature: "integracao-conflito",
+          anchors: {},
+          summary: `conflito de integração em ${arquivosDoConflito().join(", ")}`,
+          detail: detalheDoConflito(restantes),
+          ...(conflito.historico ? { observed: conflito.historico } : {}),
+          ...(options.architecture ? { components: options.architecture.componentes } : {}),
+        });
+        while (registro.porId(doConflito.defectId)?.status !== "RESOLVED") {
+          const acao = registro.planejar(orcamento, disponivel);
+          if (acao === null) {
+            return await fecharFalha(
+              "gate 2 — suíte do projeto",
+              `${doConflito.detail}\nOs dois lados continuam guardados: o HEAD da árvore principal e o branch ${conflito.aprovado.branch}.`,
+              "o conflito não foi conciliado dentro do orçamento; nada aprovado foi descartado",
+            );
+          }
+          const parada = await executarAcao(acao);
+          if (parada) return parada.parar;
+        }
+      }
+      const efeito = await revalidar("conciliação");
+      await transicao({
+        tipo: "revalidacao",
+        motivo: "depois da conciliação, só o que ela (e a árvore integrada) mudou volta a ser verificado",
+        ...(efeito.preservadas.length > 0 ? { preservadas: [...new Set(efeito.preservadas)] } : {}),
+        ...(efeito.invalidadas.length + efeito.desconhecidas.length > 0 ? { invalidadas: [...new Set([...efeito.invalidadas, ...efeito.desconhecidas])] } : {}),
+      });
     } else if (options.revalidar !== undefined) {
       if (estado.implementation === "done") registro.novoCiclo();
       estado.implementation = "done";
@@ -1786,6 +2133,15 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         if (registro.semSaida(possivel)) {
           const { gate: gateDaFalha, cause } = causaDaParada();
           if (declaredComplete(estado.defects.map((defeito) => defeito.detail).join("\n"))) announce(`[${session.id}] o executor declarou conclusão, mas ${gateDaFalha} reprovou`);
+          await encaminharUpstream();
+          if (pacoteUpstream !== null) {
+            return await fecharFalha(
+              gateDaFalha,
+              `${cause}\n\nREPARO DOCUMENTAL NECESSÁRIO: o defeito é do documento aprovado, segundo o diagnóstico, e o BUILD esgotou os reparos compatíveis. ` +
+                `O pacote validado está em ${pacoteUpstream}; nenhum documento foi alterado.`,
+              "esgotamento técnico com encaminhamento documental validado",
+            );
+          }
           return await fecharFalha(gateDaFalha, cause, "esgotamento técnico: nenhuma estratégia restante tem informação nova para os defeitos abertos");
         }
         if (ciclosAbertos >= maxCycles) {

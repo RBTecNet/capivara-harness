@@ -193,8 +193,12 @@ export function descreverEventoDoAgente(evento: { state: "livre" | "preparando" 
 
 /** A mudança de fase ou de gate que o loop contou, para os eventos do agente que está nela. */
 export function descreverProgressoDaFase(
-  evento: { kind: "phase"; id: string; state: string; detail: string } | { kind: "gate"; id: string; gate: string; state: string },
+  evento:
+    | { kind: "phase"; id: string; state: string; detail: string }
+    | { kind: "gate"; id: string; gate: string; state: string }
+    | { kind: "recovery"; id: string; line: string },
 ): string {
+  if (evento.kind === "recovery") return `${evento.id} · ${evento.line}`;
   return evento.kind === "phase"
     ? `${evento.id} · ${evento.state}${evento.detail && evento.detail !== evento.state ? ` · ${evento.detail}` : ""}`
     : `${evento.id} · ${evento.gate} ${evento.state}`;

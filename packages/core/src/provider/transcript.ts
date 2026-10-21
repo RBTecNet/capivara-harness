@@ -55,6 +55,44 @@ export interface Transcript {
    * para dizer a causa: "o executor não pôde rodar npm".
    */
   negacoes?: string[];
+  /**
+   * O id da sessão que a CLI abriu, quando o envelope o traz (§125 E).
+   *
+   * É o que permite retomar a sessão do verificador que diagnosticou um
+   * defeito — e o que prova, depois, que a sessão retomada é a mesma: a CLI
+   * que devolve outro id abriu outra sessão, e isso não é retomada. Vem do
+   * envelope, nunca do texto do agente, e só passa se tiver forma de id.
+   */
+  sessionId?: string;
+}
+
+/** Um id de sessão tem forma de id: nada de espaço, aspas ou caractere de shell. */
+const ID_DE_SESSAO = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/;
+
+function idDeSessao(valor: unknown): string | undefined {
+  return typeof valor === "string" && ID_DE_SESSAO.test(valor) ? valor : undefined;
+}
+
+/**
+ * O id da sessão, pelo campo que cada CLI usa: `session_id` (claude, cursor),
+ * `thread_id` do `thread.started` (codex), `sessionID` dos eventos (opencode),
+ * `conversation_id` (agy).
+ */
+export function sessaoDoTranscrito(kind: TranscriptKind, stdout: string): string | undefined {
+  if (kind === "codex-jsonl") {
+    for (const evento of objetos(stdout)) if (evento["type"] === "thread.started") return idDeSessao(evento["thread_id"]);
+    return undefined;
+  }
+  if (kind === "opencode-jsonl") {
+    for (const evento of objetos(stdout)) {
+      const id = idDeSessao(evento["sessionID"]);
+      if (id) return id;
+    }
+    return undefined;
+  }
+  const objeto = ultimoObjeto(stdout);
+  if (!objeto) return undefined;
+  return kind === "agy-json" ? idDeSessao(objeto["conversation_id"]) : idDeSessao(objeto["session_id"]);
 }
 
 /** `Bash: npm` a partir de `FOO=bar npm view x`; só o nome do programa sobrevive. */
@@ -353,11 +391,14 @@ export function parseCursorJson(stdout: string): Transcript {
 
 /** Lê o transcrito conforme a CLI que o produziu. */
 export function readTranscript(kind: TranscriptKind, stdout: string): Transcript {
-  if (kind === "claude-json") return parseClaudeJson(stdout);
-  if (kind === "opencode-jsonl") return parseOpencodeJsonl(stdout);
-  if (kind === "agy-json") return parseAgyJson(stdout);
-  if (kind === "cursor-json") return parseCursorJson(stdout);
-  return parseCodexJsonl(stdout);
+  const lido =
+    kind === "claude-json" ? parseClaudeJson(stdout)
+      : kind === "opencode-jsonl" ? parseOpencodeJsonl(stdout)
+        : kind === "agy-json" ? parseAgyJson(stdout)
+          : kind === "cursor-json" ? parseCursorJson(stdout)
+            : parseCodexJsonl(stdout);
+  const sessionId = sessaoDoTranscrito(kind, stdout);
+  return sessionId ? { ...lido, sessionId } : lido;
 }
 
 /**

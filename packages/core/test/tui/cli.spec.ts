@@ -33,6 +33,8 @@ describe("cli", () => {
     expect(flags).toContain("--test-cmd");
     expect(flags).toContain("--max-cycles");
     expect(flags).toContain("--keep-going");
+    // §125: os orçamentos da recuperação e a retomada opcional do verificador.
+    for (const flag of ["--repairs-per-cycle", "--repairs-per-gate", "--repairs-per-defect", "--verifier-resume"]) expect(flags).toContain(flag);
   });
 
   it("toda descrição está no idioma do produto", () => {

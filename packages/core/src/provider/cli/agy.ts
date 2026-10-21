@@ -41,9 +41,9 @@ export const agyAdapter = {
   transcript: "agy-json",
   // Objeto único no fim.
   streams: false,
-  build: ({ projectRoot, model, effort, access }) => {
+  build: ({ projectRoot, model, effort, access, resumeSessionId }) => {
     // Onde o projeto está. Sem isto, o terminal dela roda no scratch dela.
-    const args = ["--output-format", "json", "--add-dir", projectRoot];
+    const args = ["--output-format", "json", "--add-dir", projectRoot, ...(resumeSessionId ? ["--conversation", resumeSessionId] : [])];
     if (model) args.push("--model", model);
     if (effort) args.push("--effort", effort);
 
@@ -65,6 +65,11 @@ export const agyAdapter = {
     // Sem sandbox, em qualquer nível do executor (§112).
     args.push("--mode", "accept-edits", "--dangerously-skip-permissions");
     return { args };
+  },
+  retomada: {
+    estado: "nao-verificado",
+    elevacao: "desconhecida",
+    motivo: "`agy --conversation <id>` existe na 1.4.1; não validado se o --sandbox da sessão original é mantido",
   },
   workspace: () => ({
     estado: "nao-verificado",

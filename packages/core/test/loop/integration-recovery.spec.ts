@@ -155,7 +155,8 @@ it.each(["broken", "timeout", "quota"] as const)("%s no reparo fica limitado, pr
   const { result, calls } = await scenario(mode);
   expect(result.parada).not.toBeNull();
   expect(calls.filter(c => c.repair)).toHaveLength(1);
-  expect(calls.filter(c => c.role === "builder")).toHaveLength(2);
+  // §125: a recuperação da integração tem janela própria; depois do reparo que quebrou, o executor ainda tem a vez dele.
+  expect(calls.filter(c => c.role === "builder")).toHaveLength(mode === "broken" ? 3 : 2);
   expect((await run("git", ["log", "--format=%s"], { cwd: root })).stdout.trim()).toBe("base");
 });
 

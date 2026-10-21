@@ -44,7 +44,7 @@ export type { CredentialRecord, SafeCredential } from "./credentials.js";
 export { createLineSplitter, parseAgyJson, parseCursorJson,
   parseClaudeJson, parseCodexJsonl, parseOpencodeJsonl, readTranscript, resumirNegacao, summarizeCodexEvent, summarizeOpencodeEvent } from "./transcript.js";
 export type { TokenUsage, Transcript, TranscriptKind } from "./transcript.js";
-export { CLI_ADAPTERS, cliAdapter, contratoDoWorkspace } from "./cli/index.js";
+export { CLI_ADAPTERS, cliAdapter, contratoDaRetomada, contratoDoWorkspace } from "./cli/index.js";
 export type { ContratoDoWorkspace } from "./cli/index.js";
 export type { AccessLevel, CliAdapter, CliInvocation, CliInvocationInput } from "./cli/index.js";
 export { CLAUDE_FAMILIES, MODEL_LISTINGS, cliDisponivel, listarEfforts, listarModelos } from "./models.js";

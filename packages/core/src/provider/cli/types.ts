@@ -39,6 +39,13 @@ export interface CliInvocationInput {
   env: NodeJS.ProcessEnv;
   /** Caminho configurado pelo operador. Só o adaptador custom usa. */
   command: string;
+  /**
+   * Retomar esta sessão gravada da CLI em vez de abrir outra (§125 E).
+   *
+   * Só chega aqui quando o adaptador declara `retomada`; o prompt continua
+   * levando o handoff inteiro, porque a retomada pode não acontecer.
+   */
+  resumeSessionId?: string;
 }
 
 export interface CliInvocation {
@@ -80,6 +87,22 @@ export interface ContratoDoWorkspace {
   dependencias?: readonly string[];
 }
 
+/**
+ * O que uma CLI declara sobre retomar uma sessão gravada (§125 E; spec §6).
+ *
+ * Declarar não é provar: `nao-verificado` quer dizer que a flag existe na
+ * versão instalada (conferida no `--help`), e não que uma chamada real
+ * mostrou a sessão sendo retomada com as permissões desta chamada. Quem
+ * confirma, a cada vez, é o envelope: só é retomada quando o id devolvido é o
+ * mesmo que foi pedido.
+ */
+export interface ContratoDaRetomada {
+  estado: "garantido" | "nao-verificado";
+  /** A permissão da sessão retomada vem das flags desta chamada, ou da sessão original. */
+  elevacao: "por-invocacao" | "herdada" | "desconhecida";
+  motivo: string;
+}
+
 export interface CliAdapter {
   id: string;
   label: string;
@@ -102,4 +125,6 @@ export interface CliAdapter {
   build: (input: CliInvocationInput) => CliInvocation;
   /** O que o nível `workspace` do executor garante nesta plataforma (§106). */
   workspace: (platform: NodeJS.Platform) => ContratoDoWorkspace;
+  /** Como esta CLI retoma uma sessão gravada; ausente é "não retoma" — nunca simular continuidade. */
+  retomada?: ContratoDaRetomada;
 }

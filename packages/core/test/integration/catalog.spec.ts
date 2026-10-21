@@ -929,8 +929,14 @@ describe("B-39 · a causa aparece uma vez só", () => {
     const texto = avisos.join("\n");
     expect(texto).toContain("PAROU");
     expect(texto).toContain("falta a migration inteira");
-    // Uma vez só, no anúncio; `errors` é dado para quem consome, não segunda via.
-    expect(texto.split("falta a migration inteira").length - 1).toBe(1);
+    /*
+     * Uma vez só no bloco da parada; `errors` é dado para quem consome, não
+     * segunda via. O defeito aparece também nas transições da recuperação
+     * (§125, spec §9) — é a mesma linha do events.tsv, não uma reimpressão.
+     */
+    const inicio = avisos.findIndex((aviso) => aviso.includes("PAROU"));
+    const bloco = avisos.slice(inicio).filter((aviso) => !/^\[P\d+\] (?:defeito|recuperação|validação|parada|revalidação|evidência preservada|novo ciclo) · /u.test(aviso)).join("\n");
+    expect(bloco.split("falta a migration inteira").length - 1).toBe(1);
   });
 });
 

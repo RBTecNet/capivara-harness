@@ -1040,6 +1040,10 @@ async function conduct(deps: WizardDeps): Promise<WizardResult | null> {
 
     const ciclos = await text(io, "Ciclos de correção por fase [3]: ", "3");
     if (/^\d+$/.test(ciclos) && Number(ciclos) !== 3) answers.maxCycles = Number(ciclos);
+
+    // Esgotado, o ciclo seguinte abre sozinho, com o histórico e o código preservados (§125 D).
+    const reparos = await text(io, "Reparos por ciclo de cada fase [6]: ", "6");
+    if (/^\d+$/.test(reparos) && Number(reparos) > 0 && Number(reparos) !== 6) answers.repairsPerCycle = Number(reparos);
   }
 
   const rendered = renderCommand(answers);

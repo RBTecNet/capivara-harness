@@ -117,10 +117,18 @@ describe("wizard", () => {
 
   it("o build pergunta teste e ciclos, e não pergunta pedido", async () => {
     // O "" depois do "n" é a estratégia: Enter fica no serial, e serial não acrescenta flag.
-    const { deps, tela } = roteiro(["", "3", "1", "", "1", "n", "", "npm run test:ci", "5", "s"]);
+    const { deps, tela } = roteiro(["", "3", "1", "", "1", "n", "", "npm run test:ci", "5", "", "s"]);
     const resultado = await runWizard(deps);
     expect(resultado?.argv).toEqual(["build", "--provider", "codex", "--test-cmd", "npm run test:ci", "--max-cycles", "5"]);
     expect(tela()).not.toContain("De onde vem o pedido?");
+  });
+
+  it("o build pergunta os reparos por ciclo, e o padrão não acrescenta flag (§125)", async () => {
+    const { deps } = roteiro(["", "3", "1", "", "1", "n", "", "", "", "4", "s"]);
+    const resultado = await runWizard(deps);
+    expect(resultado?.argv).toEqual(["build", "--provider", "codex", "--repairs-per-cycle", "4"]);
+    expect(resultado?.command).toBe("capivara build --provider codex --repairs-per-cycle 4");
+    expect(resultado?.execute).toBe(true);
   });
 
   describe("estratégia de execução do build (§97)", () => {
@@ -129,7 +137,7 @@ describe("wizard", () => {
 
     it.each(["s", "n"])("todos como executor sobrescreve pool antigo mesmo com lembrar=%s", async lembrar => {
       const salva = { mode: "parallel" as const, maxConcurrency: 3, workers: [{ provider: "opencode", model: "openrouter/antigo", effort: "high" }] };
-      const { deps } = roteiro([...ATE_OS_PAPEIS, "2", "3", "1", lembrar, "", "", "n"]);
+      const { deps } = roteiro([...ATE_OS_PAPEIS, "2", "3", "1", lembrar, "", "", "", "n"]);
       const result = await runWizard({ ...deps, readExecution: async () => salva });
       expect(result?.answers.execution).toEqual({ mode: "parallel", maxConcurrency: 3, workers: [] });
       expect(result?.argv).toContain("--workers-as-builder");
@@ -156,7 +164,7 @@ describe("wizard", () => {
     });
 
     it("MiniMax no build mostra seus modelos e usa só variantes aceitas pelo OpenCode", async () => {
-      const { deps, tela } = roteiro(["", "3", "11", "1", "2", "n", "1", "", "", "n"]);
+      const { deps, tela } = roteiro(["", "3", "11", "1", "2", "n", "1", "", "", "", "n"]);
       const configured: string[] = [];
       const result = await runWizard({ ...deps,
         configureApi: async (provider) => { configured.push(provider); return true; },
@@ -171,7 +179,7 @@ describe("wizard", () => {
     });
 
     it("o build lista APIs após custom e permite escolher DeepSeek via OpenCode", async () => {
-      const { deps, tela } = roteiro(["", "3", "10", "1", "3", "n", "2", "3", "1", "s", "", "3", "n"]);
+      const { deps, tela } = roteiro(["", "3", "10", "1", "3", "n", "2", "3", "1", "s", "", "3", "", "n"]);
       const consulted: string[] = [];
       const configured: string[] = [];
       const result = await runWizard({
@@ -192,7 +200,7 @@ describe("wizard", () => {
     });
 
     it("ajuste por papel usa API via OpenCode no executor e API direta no verificador", async () => {
-      const { deps, tela } = roteiro(["", "3", "1", "", "1", "s", "10", "1", "10", "1", "1", "", "", "n"]);
+      const { deps, tela } = roteiro(["", "3", "1", "", "1", "s", "10", "1", "10", "1", "1", "", "", "", "n"]);
       const result = await runWizard({ ...deps, listModels: async (provider) => provider === "opencode" ? ["deepseek/deepseek-flash"] : provider === "deepseek" ? ["deepseek-flash"] : [] });
       expect(result?.answers.roles.builder).toEqual({ provider: "opencode", model: "deepseek/deepseek-flash" });
       expect(result?.answers.roles.verifier).toEqual({ provider: "deepseek", model: "deepseek-flash" });
@@ -200,14 +208,14 @@ describe("wizard", () => {
     });
 
     it("sem listagem, o modelo da API via OpenCode é obrigatório e recebe o prefixo", async () => {
-      const { deps, tela } = roteiro(["", "3", "10", "", "deepseek-flash", "1", "n", "1", "", "", "n"]);
+      const { deps, tela } = roteiro(["", "3", "10", "", "deepseek-flash", "1", "n", "1", "", "", "", "n"]);
       const result = await runWizard({ ...deps, listModels: async () => [] });
       expect(result?.answers.global).toMatchObject({ provider: "opencode", model: "deepseek/deepseek-flash" });
       expect(tela()).toContain("Informe um modelo explícito para este provider");
     });
 
     it("recusar cadastro volta aos providers sem consultar modelos", async () => {
-      const { deps } = roteiro(["", "3", "10", "1", "", "1", "n", "1", "", "", "n"]);
+      const { deps } = roteiro(["", "3", "10", "1", "", "1", "n", "1", "", "", "", "n"]);
       const consulted: string[] = [];
       const result = await runWizard({ ...deps, configureApi: async () => false, listModels: async (id) => { consulted.push(id); return []; } });
       expect(result?.answers.global.provider).toBe("codex");
@@ -215,7 +223,7 @@ describe("wizard", () => {
     });
 
     it("Gemini usa google no OpenCode e mantém o cadastro da chave como gemini", async () => {
-      const { deps } = roteiro(["", "3", "9", "1", "1", "n", "1", "", "", "n"]);
+      const { deps } = roteiro(["", "3", "9", "1", "1", "n", "1", "", "", "", "n"]);
       const configured: string[] = [];
       const result = await runWizard({ ...deps, configureApi: async (id) => { configured.push(id); return true; }, listModels: async () => ["google/gemini-teste", "deepseek/outro"] });
       expect(result?.answers.global).toMatchObject({ provider: "opencode", model: "google/gemini-teste" });
@@ -223,19 +231,19 @@ describe("wizard", () => {
     });
 
     it("modelo conhecido sem variantes não oferece high; variante none é usada para desligar", async () => {
-      const without = roteiro(["", "3", "3", "1", "1", "n", "1", "", "", "n"]);
+      const without = roteiro(["", "3", "3", "1", "1", "n", "1", "", "", "", "n"]);
       const noVariants = await runWizard({ ...without.deps, listModels: async () => ["deepseek/sem-variantes"], listEfforts: async () => [] });
       expect(noVariants?.answers.global.effort).toBeUndefined();
       expect(without.tela()).toContain("padrão do modelo");
       expect(without.tela()).not.toContain("2) low");
-      const off = roteiro(["", "3", "3", "1", "1", "n", "1", "", "", "n"]);
+      const off = roteiro(["", "3", "3", "1", "1", "n", "1", "", "", "", "n"]);
       const none = await runWizard({ ...off.deps, listModels: async () => ["deepseek/deepseek-flash"], listEfforts: async () => ["none", "low", "high", "max"] });
       expect(none?.answers.global.effort).toBe("none");
       expect(none?.argv).toContain("none");
     });
 
     it("paralela com todos os agentes iguais ao executor: o comando declara a escolha", async () => {
-      const { deps, tela } = roteiro([...ATE_OS_PAPEIS, "2", "3", "1", "s", "", "", "s"]);
+      const { deps, tela } = roteiro([...ATE_OS_PAPEIS, "2", "3", "1", "s", "", "", "", "s"]);
       const resultado = await runWizard({ ...deps, planWidth: async () => 2 });
       expect(resultado?.argv).toEqual(["build", "--provider", "codex", "--parallel", "3", "--workers-as-builder", "--save-execution"]);
       expect(tela()).toContain("este plano deixa até 2");
@@ -244,7 +252,7 @@ describe("wizard", () => {
 
     it("cada agente com o seu provider e modelo; Enter mantém o executor", async () => {
       // teto 2, configurar cada um; agente 1 = executor; agente 2 = claude/opus, sem effort, restrito
-      const { deps } = roteiro([...ATE_OS_PAPEIS, "2", "2", "2", "", "2", "opus", "1", "s", "n", "", "", "s"]);
+      const { deps } = roteiro([...ATE_OS_PAPEIS, "2", "2", "2", "", "2", "opus", "1", "s", "n", "", "", "", "s"]);
       const resultado = await runWizard(deps);
       expect(resultado?.argv).toEqual([
         "build",
@@ -261,7 +269,7 @@ describe("wizard", () => {
     });
 
     it("a lista dos agentes também oferece APIs via OpenCode", async () => {
-      const { deps, tela } = roteiro([...ATE_OS_PAPEIS, "2", "2", "2", "", "", "n", "", "", "n"]);
+      const { deps, tela } = roteiro([...ATE_OS_PAPEIS, "2", "2", "2", "", "", "n", "", "", "", "n"]);
       await runWizard(deps);
       const lista = tela().slice(tela().indexOf("Agente 1 — provider"));
       expect(lista).toContain("claude");
@@ -270,14 +278,14 @@ describe("wizard", () => {
     });
 
     it("um worker escolhido como DeepSeek persiste o executor OpenCode", async () => {
-      const { deps } = roteiro([...ATE_OS_PAPEIS, "2", "2", "2", "10", "1", "1", "n", "", "s", "", "", "n"]);
+      const { deps } = roteiro([...ATE_OS_PAPEIS, "2", "2", "2", "10", "1", "1", "n", "", "s", "", "", "", "n"]);
       const result = await runWizard({ ...deps, listModels: async (id) => id === "opencode" ? ["deepseek/deepseek-flash"] : [] });
       expect(result?.answers.execution).toEqual({ mode: "parallel", maxConcurrency: 2, workers: [{ provider: "opencode", model: "deepseek/deepseek-flash", effort: "" }] });
       expect(result?.argv).toContain("provider=opencode,model=deepseek/deepseek-flash");
     });
 
     it("indisponível aqui: a opção diz por quê e não pode ser escolhida", async () => {
-      const { deps, tela } = roteiro([...ATE_OS_PAPEIS, "2", "1", "", "", "s"]);
+      const { deps, tela } = roteiro([...ATE_OS_PAPEIS, "2", "1", "", "", "", "s"]);
       const resultado = await runWizard({ ...deps, parallelAvailability: async () => ({ disponivel: false, motivo: "o git não está instalado" }) });
       expect(tela()).toContain("indisponível aqui: o git não está instalado");
       expect(tela()).toContain("A execução paralela não roda aqui");
@@ -286,11 +294,11 @@ describe("wizard", () => {
 
     it("parte do que está salvo, e voltar ao serial num projeto paralelo grava o serial", async () => {
       const salva = { mode: "parallel" as const, maxConcurrency: 3, workers: [{ provider: "claude", model: "opus", effort: "" }] };
-      const manter = roteiro([...ATE_OS_PAPEIS, "", "", "", "s", "", "", "s"]);
+      const manter = roteiro([...ATE_OS_PAPEIS, "", "", "", "s", "", "", "", "s"]);
       const mantido = await runWizard({ ...manter.deps, readExecution: async () => salva });
       expect(mantido?.argv).toEqual(["build", "--provider", "codex", "--parallel", "3", "--worker", "provider=claude,model=opus", "--save-execution"]);
 
-      const voltar = roteiro([...ATE_OS_PAPEIS, "1", "s", "", "", "s"]);
+      const voltar = roteiro([...ATE_OS_PAPEIS, "1", "s", "", "", "", "s"]);
       const serial = await runWizard({ ...voltar.deps, readExecution: async () => salva });
       expect(serial?.argv).toEqual(["build", "--provider", "codex", "--serial", "--save-execution"]);
     });
@@ -301,7 +309,7 @@ describe("wizard", () => {
     await runWizard(init.deps);
     expect(init.tela()).not.toContain("Executor");
 
-    const build = roteiro(["", "3", "1", "", "1", "s", "1", "1", "", "", "n"]);
+    const build = roteiro(["", "3", "1", "", "1", "s", "1", "1", "", "", "", "n"]);
     await runWizard(build.deps);
     expect(build.tela()).not.toContain("Escritor");
   });

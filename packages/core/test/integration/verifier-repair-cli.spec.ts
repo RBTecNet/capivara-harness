@@ -155,14 +155,35 @@ app_conteudo();
     ]);
     expect(metadata.every((call) => call.node === process.version && call.abi === process.versions.modules)).toBe(true);
     expect(await readRunState(projectRoot, runId)).toMatchObject({ status: "complete", stage: "complete" });
+    // §125: o orçamento que valeu fica fotografado no run, e o adapter custom não retoma sessão.
+    expect((await readRunState(projectRoot, runId))?.budgets).toEqual({
+      cycles: 1, repairsPerCycle: 6, repairsPerGate: 2, repairsPerDefect: 3, verifierRepairs: 1, verifierResume: "desligada",
+    });
   }, 120_000);
 
-  it("orçamento zero para em G2 sem chamar o reparador ou repetir o builder", async () => {
+  it("orçamento inválido é recusado antes de qualquer sessão; o pedido vira o efetivo no run (§125)", async () => {
+    const recusado = await execute(["--repairs-per-cycle", "0"]);
+    expect(recusado.code).toBe(2);
+    expect(recusado.stdout).toContain("--repairs-per-cycle deve ser um inteiro entre 1 e 50");
+    await expect(readFile(adapterLog, "utf8")).rejects.toThrow();
+
+    const result = await execute(["--repairs-per-gate", "4", "--repairs-per-defect", "5"]);
+    expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(0);
+    const runId = runIdFor("build", sha12(PLAN));
+    expect((await readRunState(projectRoot, runId))?.budgets).toMatchObject({ repairsPerCycle: 12, repairsPerGate: 4, repairsPerDefect: 5 });
+  }, 120_000);
+
+  /*
+   * §125: sem reparo pelo verificador, a escada do G2 é o executor, numa
+   * correção localizada dentro do ciclo (spec §5.2); a mesma falha sem
+   * progresso para a fase — o reparador nunca é chamado.
+   */
+  it("orçamento zero para em G2 sem chamar o reparador, depois de uma correção localizada do executor", async () => {
     const result = await execute(["--max-verifier-repairs", "0"]);
     expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(2);
     expect(await readFile(join(projectRoot, "app.txt"), "utf8")).toBe("errado");
     const calls = jsonLines<AdapterCall>(await readFile(adapterLog, "utf8"));
-    expect(calls.map(({ role, repair }) => ({ role, repair }))).toEqual([{ role: "builder", repair: "0" }]);
+    expect(calls.map(({ role, repair }) => ({ role, repair }))).toEqual([{ role: "builder", repair: "0" }, { role: "builder", repair: "0" }]);
     const runId = runIdFor("build", sha12(PLAN));
     expect(await readRunState(projectRoot, runId)).toMatchObject({ status: "paused" });
     expect(result.stdout).toContain("gate 2");

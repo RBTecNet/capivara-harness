@@ -10,6 +10,8 @@
  * execução depende de haver um ouvinte.
  */
 
+import type { Transicao } from "./narrador.js";
+
 /** Os cinco gates, na ordem em que a fase passa por eles. */
 export type LoopGate = "G0" | "G1" | "G2" | "G3" | "G4";
 
@@ -28,7 +30,13 @@ export type LoopPhaseState = "aguardando" | "em andamento" | "concluído" | "fal
 
 export type BuildProgress =
   | { kind: "phase"; id: string; state: LoopPhaseState; cycle: number; detail: string }
-  | { kind: "gate"; id: string; gate: LoopGate; state: LoopGateState; cycle: number };
+  | { kind: "gate"; id: string; gate: LoopGate; state: LoopGateState; cycle: number }
+  /**
+   * Uma transição da recuperação (§125 G): defeito, estratégia, revalidação,
+   * ciclo novo, gate não aplicável. `line` é a mesma linha que vai ao
+   * `events.tsv` e ao relatório; quem desenha não monta texto próprio.
+   */
+  | { kind: "recovery"; id: string; cycle: number; line: string; transition: Transicao };
 
 export type BuildProgressListener = (event: BuildProgress) => void;
 

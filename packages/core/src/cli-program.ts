@@ -73,7 +73,7 @@ import { box } from "./tui/dashboard.js";
 import { renderSelect, type SelectSpec } from "./tui/select.js";
 import type { WizardIO } from "./commands/wizard.js";
 import type { LineIO } from "./commands/line-io.js";
-import { isCliProvider, isDirectProvider, listarEfforts, listarModelos } from "./provider/index.js";
+import { contratoDaRetomada, isCliProvider, isDirectProvider, listarEfforts, listarModelos } from "./provider/index.js";
 import type { RoleName } from "./provider/index.js";
 import { runIdFor, runPaths, safeProjectPath, writeAtomic } from "./state/index.js";
 import { sha12 } from "./contract/index.js";
@@ -1672,6 +1672,10 @@ export function createProgram(): Command {
       .option("--test-cmd <comando>", "comando de teste do projeto (gate 2)")
       .option("--max-cycles <n>", "ciclos de correção por fase", "3")
       .option("--max-verifier-repairs <n>", "reparos pelo validador por fase (0 desliga; requer CLI)", "1")
+      .option("--repairs-per-cycle <n>", "ações de reparo por ciclo de cada fase (padrão 6)")
+      .option("--repairs-per-gate <n>", "ações de reparo de um gate em cada ciclo (padrão 2)")
+      .option("--repairs-per-defect <n>", "tentativas contra o mesmo defeito em cada ciclo (padrão 3)")
+      .option("--verifier-resume", "o reparo do validador retoma a sessão que diagnosticou, mesmo sem retomada comprovada na CLI; se o id não voltar igual, segue em sessão nova com o handoff")
       .option("--keep-going", "continua mesmo depois de uma fase falhar")
       .option("--no-system-install", "mantém o executor dentro do workspace, sem instalar pacotes de sistema")
       .option("--no-acceptance", "pula a aceitação operacional final")
@@ -1692,13 +1696,30 @@ export function createProgram(): Command {
       .option("--save-execution", "grava a estratégia desta execução em .capivara/execucao.json, para as próximas")
       .option("--no-dashboard", "não desenha o painel; só as linhas de progresso"),
     ["builder", "verifier"],
-  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; maxVerifierRepairs: string; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean; flows?: boolean; rebuildAll?: boolean; git?: boolean; mcp?: string; mcpProject?: string; dashboard?: boolean; serial?: boolean; parallel?: string; worker?: string[]; workersAsBuilder?: boolean; saveExecution?: boolean }) => {
+  ).action(async (flags: CommonFlags & { testCmd?: string; maxCycles: string; maxVerifierRepairs: string; repairsPerCycle?: string; repairsPerGate?: string; repairsPerDefect?: string; verifierResume?: boolean; keepGoing?: boolean; systemInstall?: boolean; acceptance?: boolean; flows?: boolean; rebuildAll?: boolean; git?: boolean; mcp?: string; mcpProject?: string; dashboard?: boolean; serial?: boolean; parallel?: string; worker?: string[]; workersAsBuilder?: boolean; saveExecution?: boolean }) => {
     const projectRoot = flags.project ?? ".";
     const requestedRepairs = Number(flags.maxVerifierRepairs);
     if (!Number.isSafeInteger(requestedRepairs) || requestedRepairs < 0 || requestedRepairs > 10) {
       stdout.write("erro: --max-verifier-repairs deve ser um inteiro entre 0 e 10.\n");
       process.exitCode = 2;
       return;
+    }
+    // Os orçamentos da recuperação (§125 D): ciclos e as três escalas, cada uma um inteiro positivo.
+    const orcamento: { porCiclo?: number; porGate?: number; porDefeito?: number } = {};
+    for (const [flag, valor, campo] of [
+      ["--max-cycles", flags.maxCycles, null],
+      ["--repairs-per-cycle", flags.repairsPerCycle, "porCiclo"],
+      ["--repairs-per-gate", flags.repairsPerGate, "porGate"],
+      ["--repairs-per-defect", flags.repairsPerDefect, "porDefeito"],
+    ] as const) {
+      if (valor === undefined) continue;
+      const numero = Number(valor);
+      if (!Number.isSafeInteger(numero) || numero < 1 || numero > 50) {
+        stdout.write(`erro: ${flag} deve ser um inteiro entre 1 e 50.\n`);
+        process.exitCode = 2;
+        return;
+      }
+      if (campo !== null) orcamento[campo] = numero;
     }
     let escolhas = flags;
     let roles = rolesFromFlags(escolhas);
@@ -2230,6 +2251,9 @@ export function createProgram(): Command {
       ...(flags.testCmd !== undefined ? { explicitTestCommand: flags.testCmd } : {}),
       maxCycles: Number(flags.maxCycles),
       maxVerifierRepairs: verifierRepairs,
+      ...(Object.keys(orcamento).length > 0 ? { orcamento } : {}),
+      verifierResume: contratoDaRetomada(roles.verifier.provider),
+      ...(flags.verifierResume === true ? { verifierResumeUnverified: true } : {}),
       systemInstall: flags.systemInstall !== false,
       skipAcceptance: flags.acceptance === false,
       ...(flags.keepGoing !== undefined ? { keepGoing: flags.keepGoing } : {}),
@@ -2291,7 +2315,7 @@ export function createProgram(): Command {
             const effective = call.role === "builder" && agente ? agente.config : roles[call.role];
             await appendFile(join(pastaDosLogs, "calls.jsonl"), `${JSON.stringify({
               timestamp: new Date().toISOString(), role: call.role, repair: call.repair === true,
-              purpose: call.purpose ?? null, wallSeconds: DEFAULT_LIMITS.wallSeconds,
+              purpose: call.purpose ?? null, resumeSession: call.resumeSession ?? null, wallSeconds: DEFAULT_LIMITS.wallSeconds,
               phase: call.phase.id, attempt: call.attempt, worker: call.worker ?? null,
               provider: effective.provider, model: effective.model, effort: effective.effort,
               root: call.root ?? projectRoot, node: process.version, abi: process.versions.modules,
@@ -2303,6 +2327,7 @@ export function createProgram(): Command {
             stage: call.purpose ?? (call.repair ? "repair" : "implement"),
             ...(call.purpose ? { purpose: call.purpose } : {}),
             ...(call.repair === true ? { repair: true } : {}),
+            ...(call.resumeSession !== undefined ? { resumeSessionId: call.resumeSession } : {}),
             prompt: call.prompt,
             ...(slot !== null
               ? {

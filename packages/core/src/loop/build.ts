@@ -14,6 +14,9 @@ import { join } from "node:path";
 import { sha12 } from "../contract/stamps.js";
 import { workflowsForPhase, type Architecture, type Skeleton, type SkeletonWorkflow } from "../contract/index.js";
 import { vincularArquitetura } from "./arquitetura.js";
+import { LivroDeEvidencias } from "./evidencias.js";
+import { orcamentoEfetivo, type OrcamentoDaRecuperacao } from "./defeitos.js";
+import type { ContratoDaRetomada } from "../provider/cli/types.js";
 import {
   escolherSkills,
   escreverIndice,
@@ -41,6 +44,7 @@ import {
   writeRunState,
   readRunState,
   writeAtomic,
+  type RunBudgets,
 } from "../state/index.js";
 import { escolhaSemRepositorio, iniciarRepositorio, isClean, isRepository, lerEscolhaDeRepositorio, renderSemRepositorio } from "./git.js";
 import { materializeSessions } from "./split.js";
@@ -50,7 +54,7 @@ import { prepareBuildEnvironment } from "./environment-prepare.js";
 import { readEnvironmentPlan } from "./environment-plan.js";
 import type { EscolhaNumerada } from "./escolha.js";
 import { resolveTestCommand } from "./testcmd.js";
-import { runPhase, type EngineCaller, type EngineResult, type PhaseOutcome } from "./runner.js";
+import { DEFAULT_MAX_CYCLES, runPhase, type EngineCaller, type EngineResult, type PhaseOutcome } from "./runner.js";
 import { runAcceptance, type AcceptanceResult, type CommandRunner } from "./acceptance.js";
 import { acceptancePrompt, installPrompt } from "../prompts/index.js";
 import type { BuildProgressListener } from "./progress.js";
@@ -138,6 +142,12 @@ export interface BuildOptions {
   maxCycles?: number;
   /** Orçamento de sessões de reparo do verificador; quem chama deve conferir capacidade de CLI. */
   maxVerifierRepairs?: number;
+  /** Orçamentos da recuperação por ciclo, gate e defeito (§125 D); ausente usa os padrões. */
+  orcamento?: Partial<Pick<OrcamentoDaRecuperacao, "porCiclo" | "porGate" | "porDefeito">>;
+  /** Como o provider do verificador retoma uma sessão (§125 E); null quando não retoma. */
+  verifierResume?: ContratoDaRetomada | null;
+  /** Tentar a retomada mesmo não verificada com provider real (`--verifier-resume`). */
+  verifierResumeUnverified?: boolean;
   keepGoing?: boolean;
   announce?: (message: string) => void;
   /**
@@ -211,6 +221,28 @@ export interface BuildOutcome {
 function quandoLocal(iso: string): string {
   const instante = new Date(iso);
   return Number.isNaN(instante.getTime()) ? iso : instante.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "medium" });
+}
+
+/** O orçamento que esta execução usa, como o runner o calcula, para o `run.json` (spec §5.2). */
+function orcamentoDoRun(options: BuildOptions): RunBudgets {
+  const efetivo = orcamentoEfetivo(options.maxCycles ?? DEFAULT_MAX_CYCLES, options.maxVerifierRepairs ?? 0, options.orcamento);
+  const contrato = options.verifierResume ?? null;
+  const retomada =
+    efetivo.reparosDoVerificador === 0 || contrato === null || contrato.elevacao !== "por-invocacao"
+      ? "desligada"
+      : contrato.estado === "garantido"
+        ? "garantida"
+        : options.verifierResumeUnverified === true
+          ? "não verificada, pedida"
+          : "desligada";
+  return {
+    cycles: efetivo.ciclos,
+    repairsPerCycle: efetivo.porCiclo,
+    repairsPerGate: efetivo.porGate,
+    repairsPerDefect: efetivo.porDefeito,
+    verifierRepairs: efetivo.reparosDoVerificador,
+    verifierResume: retomada,
+  };
 }
 
 export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
@@ -566,6 +598,7 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
     now,
     ...(options.roles ? { roles: options.roles } : {}),
     sources: [{ name: "project-phases.md", sha12: sha12(plan) }],
+    budgets: orcamentoDoRun(options),
   });
   if (previousState) snapshot.createdAt = previousState.createdAt;
 
@@ -789,6 +822,12 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
      * limpa esta também, porque quem pede para refazer tudo pede isso mesmo.
      */
     const aprovadas = await TasksAprovadas.abrir(options.projectRoot, runId, options.rebuildAll === true);
+    /*
+     * O registro de evidências do run (§125 B): um só, para que no paralelo as
+     * fases registrem pela mesma fila, e para a regressão do G4 de uma fase ver
+     * a prova dos fluxos que outra percorreu.
+     */
+    const livro = await LivroDeEvidencias.abrir(paths.root, runId);
     const shaFechado = new Map(fechadasAntes.map((fase) => [fase.sha, fase]));
 
     const phases: PhaseReport[] = [];
@@ -800,6 +839,13 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
       const fatia = arquitetura.fatia(session.number);
       return {
         ...(fatia ? { architecture: fatia } : {}),
+        evidencias: livro,
+        ...(options.rebuildAll === true ? { refazer: true } : {}),
+        ...(revalidarFase.has(session.id) ? { revalidar: revalidarFase.get(session.id)! } : {}),
+        territorioDoFluxo: (workflow, donos) => arquitetura.territorio(workflow, donos, session.number),
+        ...(options.orcamento ? { orcamento: options.orcamento } : {}),
+        ...(options.verifierResume !== undefined ? { verifierResume: options.verifierResume } : {}),
+        ...(options.verifierResumeUnverified === true ? { verifierResumeUnverified: true } : {}),
         projectRoot: options.projectRoot,
         runId,
         language: options.language,
@@ -870,7 +916,8 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
         sha: shaDaFase(session.markdown),
         runId,
         closedAt: fechadaEm,
-        ...(fatia ? { sliceSha12: fatia.sha12 } : {}),
+        // Sem fatia é "", não ausente: ausente é o registro anterior ao campo, que vale pelo texto.
+        sliceSha12: fatia?.sha12 ?? "",
       });
       cumprir(session, fechadaEm);
     };
@@ -880,6 +927,8 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
      * ou neste mesmo run antes de uma queda. O serial e o paralelo pulam pelo
      * mesmo caminho — duas cópias desta regra divergiriam na primeira correção.
      */
+    /** As fases fechadas que voltam só para revalidação documental (§125). */
+    const revalidarFase = new Map<string, string>();
     const pularSeFechada = (session: PhaseSession): boolean => {
       const registrada = shaFechado.get(shaDaFase(session.markdown));
       const fatiaAtual = arquitetura.fatia(session.number);
@@ -888,10 +937,12 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
        * consome mudou, e a aprovação dela não viu o contrato novo (§125). Ela
        * volta a ser construída sobre o que já existe, em vez de ser pulada.
        */
-      const fatiaMudou = registrada?.sliceSha12 !== undefined && fatiaAtual !== null && registrada.sliceSha12 !== fatiaAtual.sha12;
+      // Fechada sob uma fatia que hoje não se comprova (vínculo quebrado) também não vale como atual.
+      const fatiaMudou = registrada?.sliceSha12 !== undefined && registrada.sliceSha12 !== (fatiaAtual?.sha12 ?? "");
       if (registrada && fatiaMudou) {
         // Vale também para a fase fechada neste mesmo run: o plano é o mesmo, a arquitetura não.
-        announce(`[${session.id}] fechada no run ${registrada.runId} com o mesmo texto, mas a fatia da arquitetura mudou desde então; volta a ser verificada`);
+        announce(`[${session.id}] fechada no run ${registrada.runId} com o mesmo texto, mas a fatia da arquitetura mudou desde então; volta a ser verificada contra o contrato novo, sem nova implementação`);
+        revalidarFase.set(session.id, `a fatia da arquitetura mudou desde que a fase fechou no run ${registrada.runId}`);
         return false;
       }
       const fechadaAntes = registrada;
@@ -978,6 +1029,12 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
         esquecer: async (session) => {
           const tasks = tasksDaFase(session.markdown);
           await aprovadas.revogar(session.id, tasks, tasks.map((task) => task.index));
+          // A metade irmã (§125): as provas do run sobre o código que saiu da árvore também deixam de valer.
+          for (const { evidence, validity } of livro.daFase(session.id)) {
+            if (validity.state !== "INVALIDATED") {
+              await livro.alterarValidade(evidence.evidenceId, "INVALIDATED", "o código da fase saiu da árvore principal (parcial guardado no branch da fase)", "esquecer", now);
+            }
+          }
         },
         isolamento: () =>
           conferirIsolamento(options.projectRoot, {

@@ -32,8 +32,8 @@ export const cursorAdapter = {
   transcript: "cursor-json",
   // Objeto único no fim.
   streams: false,
-  build: ({ model, access }) => {
-    const args = ["-p", "--output-format", "json", "--trust"];
+  build: ({ model, access, resumeSessionId }) => {
+    const args = ["-p", "--output-format", "json", "--trust", ...(resumeSessionId ? ["--resume", resumeSessionId] : [])];
     if (model) args.push("--model", model);
     // Sem `--effort`: esta CLI expõe a intensidade dentro do nome do modelo
     // (`gpt-5.3-codex-high`, `-xhigh`), e inventar a flag quebraria a chamada.
@@ -71,6 +71,11 @@ export const cursorAdapter = {
      */
     args.push("--sandbox", "disabled");
     return { args };
+  },
+  retomada: {
+    estado: "nao-verificado",
+    elevacao: "desconhecida",
+    motivo: "`cursor-agent --resume <chatId>` existe na 2026.10.18; não validado se o modo da sessão original (ask) é mantido",
   },
   workspace: () => ({
     estado: "nao-verificado",

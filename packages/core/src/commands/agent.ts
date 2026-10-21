@@ -45,6 +45,8 @@ export interface BridgeRequest {
   purpose?: FlowReviewPurpose;
   /** Sessão de reparo explícita do verificador, separada da avaliação somente leitura. */
   repair?: boolean;
+  /** Retomar a sessão gravada da CLI (§125 E); só para reparo, só em CLI que declara retomada. */
+  resumeSessionId?: string;
   stage: string;
   prompt: string;
   /** Uma linha por acontecimento, enquanto a chamada acontece. */
@@ -84,6 +86,8 @@ export interface BridgeResponse {
    * Ausente quando nada foi recusado, ou quando a CLI não conta.
    */
   negacoes?: string[];
+  /** O id da sessão que a CLI abriu ou retomou, lido do envelope (§125 E). */
+  sessionId?: string;
 }
 
 const run = promisify(execFile);
@@ -114,6 +118,10 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
     if (request.purpose && (request.role !== "verifier" || request.repair)) {
       throw new Error("a revisão do G4 só se aplica ao verificador somente leitura");
     }
+    // Quem julga nasce limpo: só o reparo retoma uma sessão (§125 E).
+    if (request.resumeSessionId !== undefined && request.repair !== true) {
+      throw new Error("só a sessão de reparo do verificador pode retomar uma sessão; a validação é sempre uma sessão nova");
+    }
     const config = options.roles[request.role];
     const stored = await readCredentials(options.credentialsFile);
     const credential = selectCredential(stored, config.provider, config.credential);
@@ -143,6 +151,7 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
       language: options.language,
       ...(environment ? { environment } : {}),
       ...(request.repair === true ? { verifierRepair: true } : {}),
+      ...(request.resumeSessionId !== undefined ? { resumeSessionId: request.resumeSessionId } : {}),
       ...(options.systemInstall !== undefined ? { systemInstall: options.systemInstall } : {}),
       ...(credential ? { secret: credential.secret } : {}),
     });
@@ -205,6 +214,7 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
       ...(transcript?.error === true ? { engineError: true } : {}),
       ...(transcript?.providerFailure ? { providerFailure: transcript.providerFailure } : {}),
       ...(transcript?.negacoes ? { negacoes: transcript.negacoes } : {}),
+      ...(transcript?.sessionId ? { sessionId: transcript.sessionId } : {}),
     };
   };
 }

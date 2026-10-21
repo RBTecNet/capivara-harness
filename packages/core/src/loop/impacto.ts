@@ -15,7 +15,7 @@
 
 import { posix } from "node:path";
 import { projectPaths, type TaskBlock } from "../contract/index.js";
-import type { FluxoNaArquitetura } from "./arquitetura.js";
+import type { TerritorioDoFluxo } from "./arquitetura.js";
 
 export type Impacto = "NONE" | "AFFECTED" | "UNKNOWN";
 
@@ -79,35 +79,35 @@ export function impactoNaTask(arquivos: readonly string[] | null, escopo: readon
   return { impacto: "UNKNOWN", motivo: `mudaram ${lista(arquivos)}, que a task não cita`, arquivos: [...arquivos] };
 }
 
+/** Manifesto, lockfile, migração, configuração e exemplo de ambiente: tocam todo o produto. */
+const DE_TODOS = /(?:^|\/)(?:package(?:-lock)?\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|pyproject\.toml|requirements[^/]*\.txt|go\.(?:mod|sum)|Cargo\.(?:toml|lock)|composer\.(?:json|lock)|\.env\.example|[^/]*\.config\.[cm]?[jt]s|tsconfig[^/]*\.json)$|(?:^|\/)(?:migrations?|migracoes|db\/migrate)\//u;
+
 /**
  * Um fluxo já percorrido, depois de uma mudança.
  *
- * Os arquivos do fluxo são os que a arquitetura fixa para os componentes que ele
- * atravessa e os que as fases desses componentes commitaram. Um arquivo mudado
- * entre eles atinge o fluxo; um arquivo novo ou alterado na mesma pasta deles —
- * um módulo descoberto por diretório, uma migração nova — ou na raiz do projeto
- * (manifesto, lockfile, configuração) deixa o fluxo desconhecido; só a mudança
- * inteira fora do território do fluxo deixa a prova dele de pé.
+ * Só fica de pé quando TODO arquivo mudado tem dono demonstrado fora do fecho
+ * de dependências dos componentes que o fluxo atravessa — fixado pela
+ * arquitetura ou escrito pelos commits de fases que não tocam esses
+ * componentes — e não é manifesto, lockfile, migração ou configuração, nem vive
+ * na raiz ou numa pasta onde o fluxo também tem arquivo (um módulo descoberto
+ * por diretório, uma migração nova). Dono desconhecido é desconhecido, nunca
+ * "fora".
  */
-export function impactoNoFluxo(
-  arquivos: readonly string[] | null,
-  fluxo: (FluxoNaArquitetura & { commitados: readonly string[] }) | null,
-): ResultadoDoImpacto {
+export function impactoNoFluxo(arquivos: readonly string[] | null, territorio: TerritorioDoFluxo | null): ResultadoDoImpacto {
   if (arquivos === null) return semSaber();
   if (arquivos.length === 0) return nada();
-  if (fluxo === null) {
+  if (territorio === null) {
     return { impacto: "UNKNOWN", motivo: "a arquitetura não diz por onde o fluxo passa", arquivos: [...arquivos] };
   }
-  const territorio = new Set([...fluxo.arquivos, ...fluxo.commitados]);
-  if (territorio.size === 0) {
-    return { impacto: "UNKNOWN", motivo: "nenhum arquivo do fluxo é conhecido (componentes sem arquivos fixados e sem commit de fase)", arquivos: [...arquivos] };
-  }
-  const atingidos = arquivos.filter((arquivo) => territorio.has(arquivo));
+  const doFluxo = new Set([...territorio.arquivos, ...territorio.commitados]);
+  const atingidos = arquivos.filter((arquivo) => doFluxo.has(arquivo) || territorio.classificar(arquivo) === "dentro");
   if (atingidos.length > 0) return { impacto: "AFFECTED", motivo: `a mudança toca arquivos do fluxo: ${lista(atingidos)}`, arquivos: atingidos };
-  const pastas = new Set([...territorio].map((arquivo) => posix.dirname(arquivo)));
-  const vizinhos = arquivos.filter((arquivo) => posix.dirname(arquivo) === "." || pastas.has(posix.dirname(arquivo)));
-  if (vizinhos.length > 0) {
-    return { impacto: "UNKNOWN", motivo: `a mudança está na raiz ou numa pasta do fluxo: ${lista(vizinhos)}`, arquivos: vizinhos };
+  const pastas = new Set([...doFluxo].map((arquivo) => posix.dirname(arquivo)));
+  const incertos = arquivos.filter((arquivo) =>
+    posix.dirname(arquivo) === "." || DE_TODOS.test(arquivo) || pastas.has(posix.dirname(arquivo)) || territorio.classificar(arquivo) === "desconhecido",
+  );
+  if (incertos.length > 0) {
+    return { impacto: "UNKNOWN", motivo: `não se demonstra que a mudança fica fora do fluxo: ${lista(incertos)}`, arquivos: incertos };
   }
-  return { impacto: "NONE", motivo: `a mudança (${lista(arquivos)}) fica fora dos componentes que o fluxo atravessa`, arquivos: [] };
+  return { impacto: "NONE", motivo: `todo arquivo mudado (${lista(arquivos)}) tem dono fora dos componentes que o fluxo atravessa`, arquivos: [] };
 }

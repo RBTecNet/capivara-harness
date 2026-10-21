@@ -23,6 +23,8 @@ export interface WizardAnswers {
   projectRoot?: string;
   testCommand?: string;
   maxCycles?: number;
+  /** Ações de reparo por ciclo de cada fase (§125 D); ausente é o padrão. */
+  repairsPerCycle?: number;
   noSplash?: boolean;
   /** Onde gravar o levantamento do `survey` ou o prompt do `prompt-engineer`. */
   saida?: string;
@@ -96,6 +98,7 @@ export function toArgv(answers: WizardAnswers): string[] {
   if (answers.projectRoot) argv.push("--project", answers.projectRoot);
   if (answers.testCommand) argv.push("--test-cmd", answers.testCommand);
   if (answers.maxCycles !== undefined) argv.push("--max-cycles", String(answers.maxCycles));
+  if (answers.repairsPerCycle !== undefined) argv.push("--repairs-per-cycle", String(answers.repairsPerCycle));
   argv.push(...flagsDeExecucao(answers));
   if (answers.noSplash) argv.push("--no-splash");
 
@@ -128,6 +131,7 @@ export function renderCommand(answers: WizardAnswers): string {
   if (answers.projectRoot) parts.push("--project", quote(answers.projectRoot));
   if (answers.testCommand) parts.push("--test-cmd", quote(answers.testCommand));
   if (answers.maxCycles !== undefined) parts.push("--max-cycles", String(answers.maxCycles));
+  if (answers.repairsPerCycle !== undefined) parts.push("--repairs-per-cycle", String(answers.repairsPerCycle));
   parts.push(...flagsDeExecucao(answers).map(quote));
   if (answers.noSplash) parts.push("--no-splash");
 
@@ -184,6 +188,7 @@ export function wizardSteps(command: "init" | "build" | "prompt-engineer"): Wiza
   if (command === "build") {
     steps.push({ id: "test-cmd", prompt: "Comando de teste do projeto?", hint: "deixe vazio para detectar pelo manifesto" });
     steps.push({ id: "max-cycles", prompt: "Ciclos de correção por fase?", hint: "padrão 3" });
+    steps.push({ id: "repairs-per-cycle", prompt: "Reparos por ciclo de cada fase?", hint: "padrão 6; esgotado, abre o ciclo seguinte" });
   }
 
   return steps;

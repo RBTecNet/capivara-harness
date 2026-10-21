@@ -252,9 +252,33 @@ describe("aprovação anterior não vale para uma fatia que ela não viu (§13 i
     const segundo = await construir(revisada);
     expect(segundo.outcome.exitCode, segundo.outcome.errors.join("\n")).toBe(0);
     expect(segundo.outcome.runId === primeiro.outcome.runId).toBe(variante === "mesmo run");
-    const builders = segundo.calls.filter((c) => c.role === "builder").map((c) => c.phase.id);
-    expect(builders).toEqual(["P02"]);
-    expect(segundo.calls.find((c) => c.role === "builder")!.prompt).toContain("GET /reservas/:id → 200 {id, status}");
+    // Só a P02 volta, e volta para ser VERIFICADA contra o contrato novo — sem sessão de implementação (§125).
+    expect(segundo.calls.filter((c) => c.role === "builder")).toEqual([]);
+    const verificadas = segundo.calls.filter((c) => c.role === "verifier").map((c) => c.phase.id);
+    expect(verificadas).toEqual(["P02"]);
+    expect(segundo.calls.find((c) => c.role === "verifier")!.prompt).toContain("GET /reservas/:id → 200 {id, status}");
+  });
+
+  it("a identidade da fatia é o que a fase entrega e consome: infraestrutura e visão geral não reabrem fase", async () => {
+    const { vincularArquitetura } = await import("../../src/loop/arquitetura.js");
+    const sk = esqueleto();
+    const plan = assemblePhasesDocument({ projectName: "Pousada", stamp: "<!-- inputs: skeleton.md@sha256:aaaaaaaaaaaa -->", overview: "x", phases: [PHASE_1.trim(), PHASE_2.trim()], openQuestions: [] });
+    const fatiasDe = async (arch: Architecture) => {
+      await mkdir(join(projectRoot, ".capivara", "init"), { recursive: true });
+      await writeFile(join(projectRoot, ".capivara", "init", "architecture.md"), renderArchitecture(arch, sk));
+      const vinculo = await vincularArquitetura(projectRoot, plan, arch, sk);
+      return [vinculo.fatia(1)!.sha12, vinculo.fatia(2)!.sha12];
+    };
+    const [p1, p2] = await fatiasDe(arquitetura());
+    const [q1, q2] = await fatiasDe(arquitetura((bruta) => {
+      bruta.overview = "Outra visão geral, mesma divisão de componentes.";
+      (bruta.infrastructure as { compatibility: string[] }).compatibility.push("Linux x64");
+    }));
+    expect([q1, q2]).toEqual([p1, p2]);
+    // Mudar o contrato do componente de dados muda a fatia da fase 1 E a da fase 2, que o consome.
+    const [r1, r2] = await fatiasDe(arquitetura((bruta) => { (bruta.components as { contracts: string[] }[])[0]!.contracts.push("módulo db: transacao(fn)"); }));
+    expect(r1).not.toBe(p1);
+    expect(r2).not.toBe(p2);
   });
 
   it("a task aprovada com uma fatia volta à verificação com outra; registro antigo sem fatia vale pelo texto", async () => {
@@ -263,6 +287,8 @@ describe("aprovação anterior não vale para uma fatia que ela não viu (§13 i
     await registro.aprovar("P02", tarefas, [1], 1, () => new Date(), "fatiaA00000");
     expect(registro.jaAprovadas("P02", tarefas, "fatiaA00000").map((t) => t.index)).toEqual([1]);
     expect(registro.jaAprovadas("P02", tarefas, "fatiaB00000")).toEqual([]);
+    // Fatia que hoje não se comprova: a aprovação dada sob uma fatia não vale como atual.
+    expect(registro.jaAprovadas("P02", tarefas, undefined)).toEqual([]);
 
     await mkdir(join(projectRoot, ".capivara", "handoffs"), { recursive: true });
     const legado = [{ phase: "P02", index: 1, sha: (await import("../../src/loop/veredictos.js")).shaDaTask(tarefas[0]!), title: "x", runId: "build-velho", cycle: 1, at: "2026-01-01T00:00:00.000Z" }];

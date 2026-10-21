@@ -182,13 +182,27 @@ describe("o impacto de uma mudança", () => {
     expect(impactoNaTask([], escopoDaTask(segunda!)).impacto).toBe("NONE");
   });
 
-  it("o fluxo fica de pé só com a mudança fora do território dele; raiz e pasta vizinha são desconhecidas", () => {
-    const fluxo = { componentes: ["cadastro"], arquivos: ["src/cadastro/rotas.ts"], fases: [2], commitados: ["src/cadastro/tela.tsx"] };
-    expect(impactoNoFluxo(["src/relatorios/mensal.ts"], fluxo).impacto).toBe("NONE");
-    expect(impactoNoFluxo(["src/cadastro/tela.tsx"], fluxo).impacto).toBe("AFFECTED");
-    expect(impactoNoFluxo(["src/cadastro/novo-modulo.ts"], fluxo).impacto).toBe("UNKNOWN");
-    expect(impactoNoFluxo(["package.json"], fluxo).impacto).toBe("UNKNOWN");
+  it("o fluxo fica de pé só com dono demonstrado fora dele; raiz, manifesto, pasta vizinha e dono desconhecido não", () => {
+    const donos: Record<string, "dentro" | "fora" | "desconhecido"> = {
+      "src/relatorios/mensal.ts": "fora",
+      "src/cadastro/tela.tsx": "dentro",
+      "src/cadastro/novo-modulo.ts": "fora",
+      "src/misterio/sem-dono.ts": "desconhecido",
+      "src/relatorios/migrations/002.sql": "fora",
+    };
+    const territorio = {
+      componentes: ["cadastro", "dados"],
+      arquivos: ["src/cadastro/rotas.ts"],
+      commitados: ["src/cadastro/tela.tsx"],
+      classificar: (arquivo: string) => donos[arquivo] ?? "desconhecido",
+    };
+    expect(impactoNoFluxo(["src/relatorios/mensal.ts"], territorio).impacto).toBe("NONE");
+    expect(impactoNoFluxo(["src/cadastro/tela.tsx"], territorio).impacto).toBe("AFFECTED");
+    expect(impactoNoFluxo(["src/cadastro/novo-modulo.ts"], territorio).impacto).toBe("UNKNOWN");
+    expect(impactoNoFluxo(["src/misterio/sem-dono.ts"], territorio).impacto).toBe("UNKNOWN");
+    expect(impactoNoFluxo(["package.json"], territorio).impacto).toBe("UNKNOWN");
+    expect(impactoNoFluxo(["src/relatorios/migrations/002.sql"], territorio).impacto).toBe("UNKNOWN");
+    expect(impactoNoFluxo(["src/relatorios/mensal.ts", "src/misterio/sem-dono.ts"], territorio).impacto).toBe("UNKNOWN");
     expect(impactoNoFluxo(["src/relatorios/mensal.ts"], null).impacto).toBe("UNKNOWN");
-    expect(impactoNoFluxo(["src/x.ts"], { componentes: ["c"], arquivos: [], fases: [], commitados: [] }).impacto).toBe("UNKNOWN");
   });
 });

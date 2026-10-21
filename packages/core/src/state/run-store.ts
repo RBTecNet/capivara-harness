@@ -65,6 +65,22 @@ export interface RunState {
   roles: Record<string, RunRoleSnapshot>;
   /** Hashes das fontes que definem a identidade deste run. */
   sources: { name: string; sha12: string }[];
+  /**
+   * Os orçamentos da recuperação que valeram nesta execução do build, já
+   * efetivos (§125 D; spec §5.2). Opcional: runs anteriores e estágios
+   * documentais não têm, e quem lê não pode exigir.
+   */
+  budgets?: RunBudgets;
+}
+
+export interface RunBudgets {
+  cycles: number;
+  repairsPerCycle: number;
+  repairsPerGate: number;
+  repairsPerDefect: number;
+  verifierRepairs: number;
+  /** Como o reparo do verificador usa a sessão que diagnosticou: "desligada", "garantida" ou "não verificada, pedida". */
+  verifierResume: string;
 }
 
 export interface NewRunOptions {
@@ -73,6 +89,7 @@ export interface NewRunOptions {
   language: string;
   roles?: Record<string, RunRoleSnapshot>;
   sources?: { name: string; sha12: string }[];
+  budgets?: RunBudgets;
   now?: () => Date;
 }
 
@@ -91,6 +108,7 @@ export function createRunState(options: NewRunOptions): RunState {
     updatedAt: timestamp,
     roles: options.roles ?? {},
     sources: options.sources ?? [],
+    ...(options.budgets ? { budgets: options.budgets } : {}),
   };
 }
 

@@ -51,11 +51,32 @@ export interface TaskAprovada {
    * arquitetura — continua valendo pelo texto da task.
    */
   sliceSha12?: string;
+  /**
+   * O conteúdo do código quando ela passou (§125: `estadoDoCodigo`). Mesmo
+   * conteúdo agora: a aprovação vale sem perguntar. Conteúdo diferente: o
+   * runner decide pelo impacto da mudança — nunca em silêncio.
+   */
+  tree?: string;
+  /**
+   * O sha do contrato compartilhado (Stack, Regras, Contratos do esqueleto)
+   * que o verificador tinha na mesa (§125). O código igual não basta: uma regra
+   * revisada no INIT muda o que "DONE" quer dizer, e a aprovação anterior não
+   * a viu. Quem lê confere; diferente (ou ausente), a aprovação não dispensa
+   * o verificador.
+   */
+  contratoSha?: string;
 }
 
-/** Uma aprovação vale para a fatia atual? Ausente de um dos lados: vale pelo texto. */
+/**
+ * Uma aprovação vale para a fatia atual?
+ *
+ * A dada sob uma fatia só vale para a mesma fatia — inclusive quando a atual
+ * não pôde ser comprovada: aprovação contra um contrato que agora ninguém
+ * consegue mostrar não é aprovação atual. A anterior ao campo vale pelo texto,
+ * como sempre valeu.
+ */
 function mesmaFatia(entrada: TaskAprovada, sliceSha12: string | undefined): boolean {
-  return entrada.sliceSha12 === undefined || sliceSha12 === undefined || entrada.sliceSha12 === sliceSha12;
+  return entrada.sliceSha12 === undefined || entrada.sliceSha12 === (sliceSha12 ?? "");
 }
 
 function caminho(projectRoot: string): string {
@@ -111,6 +132,15 @@ export class TasksAprovadas {
     );
   }
 
+  /** A aprovação de uma task, com a fatia e o conteúdo com que ela passou; null quando não há. */
+  aprovacao(phaseId: string, task: TaskBlock, sliceSha12?: string): TaskAprovada | null {
+    for (let indice = this.registro.length - 1; indice >= 0; indice -= 1) {
+      const entrada = this.registro[indice]!;
+      if (entrada.phase === phaseId && entrada.sha === shaDaTask(task) && mesmaFatia(entrada, sliceSha12)) return entrada;
+    }
+    return null;
+  }
+
   /** Os índices já aprovados, que é o que o gate 3 precisa saber. */
   indicesAprovados(phaseId: string, tasks: readonly TaskBlock[], sliceSha12?: string): Set<number> {
     return new Set(this.jaAprovadas(phaseId, tasks, sliceSha12).map((task) => task.index));
@@ -123,8 +153,10 @@ export class TasksAprovadas {
     cycle: number,
     now = () => new Date(),
     sliceSha12?: string,
+    tree?: string,
+    contratoSha?: string,
   ): Promise<void> {
-    return this.emFila(() => this.gravarAprovacao(phaseId, tasks, indices, cycle, now, sliceSha12));
+    return this.emFila(() => this.gravarAprovacao(phaseId, tasks, indices, cycle, now, sliceSha12, tree, contratoSha));
   }
 
   private async gravarAprovacao(
@@ -134,10 +166,12 @@ export class TasksAprovadas {
     cycle: number,
     now: () => Date,
     sliceSha12: string | undefined,
+    tree: string | undefined,
+    contratoSha?: string,
   ): Promise<void> {
     const novas: TaskAprovada[] = tasks
       .filter((task) => indices.includes(task.index))
-      .filter((task) => !this.registro.some((entrada) => entrada.phase === phaseId && entrada.sha === shaDaTask(task) && entrada.sliceSha12 === sliceSha12))
+      .filter((task) => !this.registro.some((entrada) => entrada.phase === phaseId && entrada.sha === shaDaTask(task) && entrada.sliceSha12 === sliceSha12 && entrada.tree === tree && entrada.contratoSha === contratoSha))
       .map((task) => ({
         phase: phaseId,
         index: task.index,
@@ -147,6 +181,8 @@ export class TasksAprovadas {
         cycle,
         at: now().toISOString(),
         ...(sliceSha12 !== undefined ? { sliceSha12 } : {}),
+        ...(tree !== undefined ? { tree } : {}),
+        ...(contratoSha !== undefined ? { contratoSha } : {}),
       }));
     if (novas.length === 0) return;
 

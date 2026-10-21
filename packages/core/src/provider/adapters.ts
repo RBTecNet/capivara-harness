@@ -38,6 +38,12 @@ export interface InvocationContext {
   platform?: NodeJS.Platform;
   /** O diretório comum do Git da raiz, absoluto; ausente fora de um repositório. */
   gitDir?: string | null;
+  /**
+   * Retomar esta sessão gravada (§125 E). Só para o reparo do verificador, e só
+   * em CLI que declara `retomada`: pedir a quem não declara é erro, nunca uma
+   * sessão nova com cara de continuação.
+   */
+  resumeSessionId?: string;
 }
 
 export interface Invocation {
@@ -173,6 +179,10 @@ export function buildInvocation(role: RoleName, config: RoleConfig, context: Inv
    */
   const adapter = cliAdapter(config.provider);
   const binary = env[adapter.binaryEnv]?.trim() || adapter.defaultBinary;
+  const resumeSessionId = context.resumeSessionId === undefined ? "" : safe(context.resumeSessionId, "sessão");
+  if (resumeSessionId !== "" && !adapter.retomada) {
+    throw new Error(`a CLI ${adapter.id} não declara retomada de sessão; a chamada tem de ser uma sessão nova`);
+  }
   const built = adapter.build({
     projectRoot: context.projectRoot,
     platform: context.platform ?? process.platform,
@@ -183,6 +193,7 @@ export function buildInvocation(role: RoleName, config: RoleConfig, context: Inv
     binary,
     env,
     command: config.command,
+    ...(resumeSessionId !== "" ? { resumeSessionId } : {}),
   });
 
   return {

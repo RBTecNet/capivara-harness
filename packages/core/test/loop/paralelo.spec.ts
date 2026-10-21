@@ -208,7 +208,8 @@ describe("build paralelo", () => {
       },
     });
     expect(outcome.exitCode).toBe(2);
-    expect(calls.map((c) => [c.role, c.repair === true])).toEqual([["builder", false], ["verifier", false], ["verifier", true]]);
+    // §125 (spec §6): o executor tenta antes; sem progresso, o verificador repara — e o reparo que escreve na principal para.
+    expect(calls.map((c) => [c.role, c.repair === true])).toEqual([["builder", false], ["verifier", false], ["builder", false], ["verifier", false], ["verifier", true]]);
     expect(anuncios.join("\n")).toContain("PARADA DE ISOLAMENTO");
     expect(await readFile(join(projectRoot, "reparo-fora.txt"), "utf8")).toBe("preservar\n");
   });

@@ -335,6 +335,17 @@ export async function arquivosMudados(projectRoot: string, de: string | null, pa
   }
 }
 
+/** Dos caminhos, os que existiam num estado de conteúdo (`estadoDoCodigo`); sem árvore do Git, todos (ninguém pode afirmar que eram novos). */
+export async function existiamNaArvore(projectRoot: string, tree: string | null, caminhos: readonly string[]): Promise<string[]> {
+  if (caminhos.length === 0) return [];
+  if (tree === null || !ID_DE_ARVORE.test(tree)) return [...caminhos];
+  const existiam: string[] = [];
+  for (const caminho of caminhos) {
+    if (await run("git", ["cat-file", "-e", `${tree}:${caminho}`], { cwd: projectRoot }).then(() => true, () => false)) existiam.push(caminho);
+  }
+  return existiam;
+}
+
 /**
  * Os arquivos que cada fase escreveu, pelos commits `feat(phase-N)` do histórico.
  *

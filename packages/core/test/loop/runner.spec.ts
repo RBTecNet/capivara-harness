@@ -46,7 +46,12 @@ it.each(["quota", "configuration"] as const)("recusa permanente %s do roteirista
   expect(reviews).toBe(1);
 });
 
-it.each(["roteiro", "timeout"] as const)("G4 recupera %s no segundo ciclo preservando builder, G2 e G3 aprovados", async failure => {
+/*
+ * §125: a correção do roteiro (ou a nova sessão do roteirista que caiu) é um
+ * reparo local do G4 — não abre outro ciclo da fase. Antes ela consumia o
+ * ciclo 2; agora tudo acontece no ciclo 1, com builder, G2 e G3 preservados.
+ */
+it.each(["roteiro", "timeout"] as const)("G4 recupera %s sem abrir outro ciclo, preservando builder, G2 e G3 aprovados", async failure => {
   const target = session();
   const calls: EngineCall[] = [];
   let authors = 0;
@@ -67,7 +72,7 @@ it.each(["roteiro", "timeout"] as const)("G4 recupera %s no segundo ciclo preser
         authors += 1;
         if (failure === "timeout" && authors === 1) return { exitCode: 124, stdout: "", stderr: "rede interrompida", timedOut: "wall" };
         if (failure === "roteiro" && authors <= 2) return ok(invalid);
-        expect(call.attempt).toBe(2);
+        expect(call.attempt).toBe(1);
         if (failure === "roteiro") {
           expect(call.prompt).toContain("const faltou");
           expect(call.prompt).toContain("conferência estrutural");
@@ -77,7 +82,7 @@ it.each(["roteiro", "timeout"] as const)("G4 recupera %s no segundo ciclo preser
       return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
     },
   });
-  expect(outcome).toMatchObject({ status: "complete", cycles: 2 });
+  expect(outcome).toMatchObject({ status: "complete", cycles: 1 });
   expect(calls.filter(call => call.role === "builder")).toHaveLength(1);
   expect(calls.filter(call => call.role === "verifier" && !call.purpose)).toHaveLength(1);
   expect(suites).toBe(1);
@@ -86,7 +91,12 @@ it.each(["roteiro", "timeout"] as const)("G4 recupera %s no segundo ciclo preser
   expect(events.some(event => event.status === "retry" && event.detail.includes("roteiro"))).toBe(true);
 });
 
-it.each(["flow-author", "flow-triage"] as const)("timeout persistente de %s usa os ciclos disponíveis sem reconstruir o produto", async purpose => {
+/*
+ * §125: a sessão de revisão que cai ganha UMA sessão nova daquele gate; caindo
+ * de novo, igual, a fase para (mesma falha, sem informação nova) — sem usar os
+ * ciclos restantes para repetir a mesma queda, e sem reconstruir o produto.
+ */
+it.each(["flow-author", "flow-triage"] as const)("timeout persistente de %s para sem reconstruir o produto nem repetir a mesma queda", async purpose => {
   const target = session();
   const calls: EngineCall[] = [];
   let browsers = 0;
@@ -120,18 +130,23 @@ it.each(["flow-author", "flow-triage"] as const)("timeout persistente de %s usa 
       return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
     },
   });
-  expect(outcome).toMatchObject({ status: "failed", gate: "gate 0 — engine", cycles: 3 });
+  expect(outcome).toMatchObject({ status: "failed", gate: "gate 0 — engine", cycles: 1 });
   expect(calls.filter(call => call.role === "builder")).toHaveLength(1);
-  expect(calls.filter(call => call.purpose === purpose)).toHaveLength(3);
-  expect(browsers).toBe(purpose === "flow-author" ? 0 : 3);
+  expect(calls.filter(call => call.purpose === purpose)).toHaveLength(2);
+  expect(browsers).toBe(purpose === "flow-author" ? 0 : 2);
   expect(notices.join("\n")).toContain("G4");
   const logs = await readdir(runPaths(projectRoot, RUN).logs);
   const reviewLogs = logs.filter(name => name.includes(purpose === "flow-author" ? ".flow-4-" : ".triagem-"));
-  expect(reviewLogs).toHaveLength(3);
+  expect(reviewLogs).toHaveLength(2);
   expect(await readFile(join(runPaths(projectRoot, RUN).logs, reviewLogs[0]!), "utf8")).toContain("sessão interrompida");
   expect(await readFile(join(projectRoot, "produto.ts"), "utf8")).toContain("pronto = true");
 });
 
+/*
+ * §125: a reescrita do roteiro que volta com o MESMO defeito estrutural não se
+ * repete até esgotar os ciclos — duas passagens do roteirista (quatro rascunhos)
+ * e a fase para por esgotamento técnico, com cada evidência no disco.
+ */
 it("falha estrutural do roteirista não gasta outro ciclo do construtor e preserva cada evidência", async () => {
   const target = session();
   let builders = 0;
@@ -156,21 +171,23 @@ it("falha estrutural do roteirista não gasta outro ciclo do construtor e preser
   });
   expect(outcome.status).toBe("failed");
   if (outcome.status !== "failed") throw new Error("esperava falha do roteirista");
-  expect(outcome.cycles).toBe(3);
+  expect(outcome.cycles).toBe(1);
   expect(builders).toBe(1);
-  expect(authors).toBe(6);
+  expect(authors).toBe(4);
   expect(browsers).toBe(0);
   expect(await readFile(join(projectRoot, "produto.ts"), "utf8")).toContain("pronto = true");
   const paths = runPaths(projectRoot, RUN);
   const logs = await readdir(paths.logs);
   expect(logs.some(name => name.includes("[object Object]"))).toBe(false);
   const authorLogs = logs.filter(name => name.startsWith(`${target.id}.flow-4-`));
-  expect(authorLogs).toHaveLength(6);
+  expect(authorLogs).toHaveLength(4);
   for (const name of authorLogs) expect(await readFile(join(paths.prompts, name.replace(/\.log$/, ".txt")), "utf8")).toContain("CAPIVARA_FLOW");
   expect(await readFile(join(paths.logs, `${target.id}.flow-run-1.log`), "utf8")).toContain("Isto é do harness");
 });
 
 interface Scenario {
+  /** O executor só escreve na implementação: as correções não mudam nada. */
+  soNaImplementacao?: boolean;
   builder?: (call: EngineCall) => Promise<EngineResult>;
   verifier?: (call: EngineCall) => Promise<EngineResult>;
   testExit?: number[];
@@ -200,8 +217,8 @@ async function phase(scenario: Scenario) {
           ? scenario.verifier(call)
           : ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
       }
-      // O executor escreve algo, para o gate 1 sinalizar mudança.
-      await writeFile(join(projectRoot, `fase-${call.attempt}.ts`), `export const x = ${call.attempt};`, "utf8");
+      // O executor escreve algo, para o gate 1 sinalizar mudança (só na implementação, quando o cenário pede).
+      if (!scenario.soNaImplementacao || call.attempt === 1) await writeFile(join(projectRoot, `fase-${call.attempt}.ts`), `export const x = ${call.attempt};`, "utf8");
       return scenario.builder ? scenario.builder(call) : ok();
     },
     testRunner: async () => {
@@ -230,9 +247,24 @@ describe("ciclo de fase — caminho verde", () => {
     expect(calls.map(c => c.role)).toEqual(["builder", "verifier"]);
   });
 
-  it.each(["wall", "idle", "first-output"])("timeout %s preserva o parcial e não inicia outro ciclo de construção", async timedOut => {
+  /*
+   * §125: o tempo acabou DEPOIS de a sessão escrever — o parcial é julgado uma
+   * vez pelos gates, sem outra sessão de construção (§115.17 continua: nenhuma
+   * hora de construção nova). Verde, fecha; vermelho, para com o parcial.
+   */
+  it.each(["wall", "idle", "first-output"])("timeout %s com trabalho escrito: o parcial é julgado uma vez, sem outra sessão de construção", async timedOut => {
     const { outcome, calls } = await phase({ maxCycles: 3, builder: async () => ({ exitCode: 124, stdout: "Continuarei investigando um mutante. CAPIVARA_BUILDER_STATUS: COMPLETE", stderr: "", timedOut }) });
-    expect(outcome).toMatchObject({ status: "failed", gate: "gate 0 — engine", cycles: 1 });
+    expect(outcome).toMatchObject({ status: "complete", cycles: 1 });
+    expect(calls.filter(call => call.role === "builder")).toHaveLength(1);
+    expect(calls.filter(call => call.role === "verifier")).toHaveLength(1);
+    expect(await readFile(join(projectRoot, "fase-1.ts"), "utf8")).toContain("x = 1");
+    const events = await readEvents(runPaths(projectRoot, RUN).events);
+    expect(events.some(event => event.status === "retry")).toBe(false);
+  });
+
+  it.each(["wall", "idle", "first-output"])("timeout %s cujo parcial não fecha: para com o parcial preservado, sem outra sessão de construção", async timedOut => {
+    const { outcome, calls } = await phase({ maxCycles: 3, testExit: [1, 1, 1], builder: async () => ({ exitCode: 124, stdout: "Continuarei investigando um mutante.", stderr: "", timedOut }) });
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 2 — suíte do projeto", cycles: 1 });
     expect(calls.filter(call => call.role === "builder")).toHaveLength(1);
     expect(calls.filter(call => call.role === "verifier")).toHaveLength(0);
     expect(await readFile(join(projectRoot, "fase-1.ts"), "utf8")).toContain("x = 1");
@@ -241,17 +273,21 @@ describe("ciclo de fase — caminho verde", () => {
     expect(events.some(event => event.status === "retry")).toBe(false);
   });
 
+  // §125: o verificador que cai ganha UMA sessão nova do mesmo gate; caindo de novo, a fase para — nunca outra construção.
   it("timeout do verificador não vira nova sessão do construtor", async () => {
     const { outcome, calls } = await phase({ maxCycles: 3, verifier: async () => ({ exitCode: 124, stdout: "Investigando critérios", stderr: "", timedOut: "wall" }) });
     expect(outcome).toMatchObject({ status: "failed", cycles: 1 });
     expect(calls.filter(call => call.role === "builder")).toHaveLength(1);
-    expect(calls.filter(call => call.role === "verifier")).toHaveLength(1);
+    expect(calls.filter(call => call.role === "verifier")).toHaveLength(2);
   });
 
   it("timeout confirmado não vira repetição por texto de rate limit na resposta parcial", async () => {
     const { outcome, calls } = await phase({ builder: async () => ({ exitCode: 124, stdout: "rate limit exceeded HTTP 429", stderr: "", timedOut: "wall" }) });
-    expect(outcome).toMatchObject({ status: "failed", cycles: 1 });
-    expect(calls).toHaveLength(1);
+    // O parcial é julgado (§125), mas a sessão do executor nunca é repetida por causa do texto de limite.
+    expect(outcome).toMatchObject({ status: "complete", cycles: 1 });
+    expect(calls.filter(call => call.role === "builder")).toHaveLength(1);
+    const events = await readEvents(runPaths(projectRoot, RUN).events);
+    expect(events.some(event => event.detail.includes("limite de uso"))).toBe(false);
   });
   it("fecha a fase quando os quatro gates ficam verdes", async () => {
     const { outcome } = await phase({});
@@ -276,7 +312,7 @@ describe("a palavra do agente nunca supera um gate", () => {
   it("executor declara COMPLETE mas a suíte está vermelha: reprova mesmo assim", async () => {
     const { outcome } = await phase({
       builder: async () => ok("pronto\nCAPIVARA_BUILDER_STATUS: COMPLETE"),
-      testExit: [1, 1, 1],
+      testExit: [1, 1, 1, 1, 1, 1],
     });
     expect(outcome.status).toBe("failed");
     if (outcome.status !== "failed") return;
@@ -302,16 +338,65 @@ describe("ciclos de correção", () => {
     expect(correcao?.prompt).toContain("gate 2");
   });
 
-  it("converge quando o ciclo seguinte conserta", async () => {
-    const { outcome } = await phase({ testExit: [1, 0] });
+  // §125: a correção localizada não abre ciclo: converge no ciclo 1, com duas sessões do executor.
+  it("converge quando a correção seguinte conserta, sem abrir outro ciclo", async () => {
+    const { outcome, calls } = await phase({ testExit: [1, 0] });
     expect(outcome.status).toBe("complete");
-    if (outcome.status === "complete") expect(outcome.cycles).toBe(2);
+    if (outcome.status === "complete") expect(outcome.cycles).toBe(1);
+    expect(calls.filter((call) => call.role === "builder")).toHaveLength(2);
   });
 
-  it("esgotados os ciclos, PARA e reporta — não segue para a próxima fase", async () => {
-    const { outcome, calls } = await phase({ testExit: [1, 1, 1], maxCycles: 3 });
-    expect(outcome.status).toBe("failed");
-    expect(calls.filter((call) => call.role === "builder")).toHaveLength(3);
+  /*
+   * §125 (spec §5.2 e §5.3): a correção que muda o código sem resolver não se
+   * repete no MESMO ciclo; o ciclo seguinte recomeça a escada com a história
+   * no handoff — uma correção por ciclo novo — e a fase para quando os ciclos
+   * acabam. Antes, três ciclos davam três sessões; agora a correção local do
+   * ciclo 1 não gasta ciclo, e cada ciclo seguinte tem a sua.
+   */
+  it("a mesma falha com o código mudando passa pelos ciclos e PARA quando eles acabam — não segue para a próxima fase", async () => {
+    const { outcome, calls } = await phase({ testExit: [1, 1, 1, 1, 1, 1], maxCycles: 3 });
+    expect(outcome).toMatchObject({ status: "failed", cycles: 3 });
+    if (outcome.status === "failed") expect(outcome.cause).toContain("esperava 409, recebeu 500");
+    expect(calls.filter((call) => call.role === "builder")).toHaveLength(4);
+    const events = await readEvents(runPaths(projectRoot, RUN).events);
+    expect(events.some((event) => event.detail.includes("ciclo(s) desta execução se esgotaram"))).toBe(true);
+  });
+
+  // §125 (spec §5.3): a correção que não muda nada não é repetida — é a impossibilidade real, e a fase para antes dos ciclos.
+  it("a correção que não muda nada PARA por esgotamento técnico, sem gastar os ciclos restantes", async () => {
+    const { outcome, calls } = await phase({ testExit: [1, 1, 1, 1, 1, 1], maxCycles: 3, soNaImplementacao: true });
+    expect(outcome).toMatchObject({ status: "failed", cycles: 1 });
+    expect(calls.filter((call) => call.role === "builder")).toHaveLength(2);
+    const events = await readEvents(runPaths(projectRoot, RUN).events);
+    expect(events.some((event) => event.detail.includes("esgotamento técnico"))).toBe(true);
+  });
+
+  it("com progresso a cada correção, os ciclos se esgotam e a fase PARA — não segue para a próxima fase", async () => {
+    const target = session();
+    const calls: EngineCall[] = [];
+    let suites = 0;
+    const outcome = await runPhase({
+      projectRoot, runId: RUN, language: "pt-BR", engine: "codex", session: target,
+      testCommand: { command: "npm test", source: "teste", containerized: false },
+      commitsEnabled: false, maxCycles: 2, sleep: async () => undefined,
+      call: async (call) => {
+        calls.push(call);
+        if (call.role === "verifier") return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
+        await writeFile(join(projectRoot, `fase-${calls.length}.ts`), `export const x = ${calls.length};`, "utf8");
+        return ok();
+      },
+      // Cada correção muda a falha: é progresso, e a recuperação continua enquanto houver orçamento.
+      testRunner: async () => {
+        const nome = ["alfa", "beta", "gama", "delta", "epsilon", "zeta", "eta"][suites++] ?? "omega";
+        return { exitCode: 1, output: `FAIL reserva.spec.ts > caso ${nome}\n  esperava o caso ${nome}` };
+      },
+    });
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 2 — suíte do projeto", cycles: 2 });
+    // Implementação + duas correções por ciclo (o orçamento do defeito), em dois ciclos.
+    expect(calls.filter((call) => call.role === "builder")).toHaveLength(5);
+    const events = await readEvents(runPaths(projectRoot, RUN).events);
+    expect(events.some((event) => event.detail.includes("os 2 ciclo(s) desta execução se esgotaram"))).toBe(true);
+    expect(events.some((event) => event.stage === "recover" && event.detail.startsWith("novo ciclo"))).toBe(true);
   });
 
   it("G0 vermelho também vira ciclo de correção com a saída do engine", async () => {
@@ -869,7 +954,8 @@ describe("a contestação vale uma vez por VERSÃO do roteiro", () => {
 
   it("a mesma versão não é contestada duas vezes", async () => {
     // A reescrita volta com defeito estrutural: o roteiro gravado continua o mesmo.
-    const { outcome, reescritas } = await fase(() => "não é um roteiro", [FALHOU, FALHOU, FALHOU, FALHOU]);
+    // O fluxo continua falhando em toda passagem (a contestação de uma versão já contestada não se repete).
+    const { outcome, reescritas } = await fase(() => "não é um roteiro", Array.from({ length: 16 }, () => FALHOU));
     expect(reescritas).toBe(1);
     expect(outcome.status).not.toBe("complete");
   });

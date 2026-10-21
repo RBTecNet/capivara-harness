@@ -52,10 +52,11 @@ export const claudeAdapter = {
   transcript: "claude-json",
   // `-p --output-format json`: um objeto só, no fim. Nada antes disso.
   streams: false,
-  build: ({ model, effort, access, env }) => {
+  build: ({ model, effort, access, env, resumeSessionId }) => {
     const args = [
       "-p",
       "--output-format", "json",
+      ...(resumeSessionId ? ["--resume", resumeSessionId] : []),
       ...(access === "workspace"
         ? ["--dangerously-skip-permissions"]
         : ["--permission-mode", access === "read-only" ? "default" : "bypassPermissions"]),
@@ -69,4 +70,10 @@ export const claudeAdapter = {
     return { args, env: semMarcador, ...(access === "workspace" ? { tmpPrivado: true } : {}) };
   },
   workspace: contrato,
+  // `-r, --resume <session-id>` no --help da 2.1.303; as flags de permissão são desta invocação.
+  retomada: {
+    estado: "nao-verificado",
+    elevacao: "por-invocacao",
+    motivo: "`claude -p --resume <id>` existe na 2.1.303; não validado com chamada real que a sessão somente leitura volta com escrita",
+  },
 } as const satisfies CliAdapter;

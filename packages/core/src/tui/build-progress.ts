@@ -7,6 +7,7 @@
  */
 
 import type { BuildProgress } from "../loop/progress.js";
+import { resumoDaTransicao } from "../loop/narrador.js";
 import { emptyGates, phaseSummary, type BuildPhaseRow, type GateId } from "./build-phases.js";
 
 export class BuildPhaseTracker {
@@ -61,6 +62,16 @@ export class BuildPhaseTracker {
       }
       linha.state = event.state;
       linha.detail = event.detail;
+      return;
+    }
+
+    /*
+     * A recuperação muda o detalhe da fase, nunca os gates: quem diz o estado de
+     * um gate é o evento do gate. O texto é o resumo da mesma transição que foi
+     * ao `events.tsv` e ao relatório (§125 G).
+     */
+    if (event.kind === "recovery") {
+      linha.detail = resumoDaTransicao(event.transition);
       return;
     }
 

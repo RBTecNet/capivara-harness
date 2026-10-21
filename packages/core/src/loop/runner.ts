@@ -11,7 +11,7 @@
 
 import { appendFile, readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { appendEvent } from "../state/events.js";
 import { runPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
@@ -19,11 +19,11 @@ import { declarouRoteiroErrado, extractFlowScript, fixPrompt, flowPrompt, implem
 import type { BuildProgressListener, LoopGate, LoopGateState } from "./progress.js";
 import type { Bloqueio } from "./admissao.js";
 import { fotografarRefs, publicacaoProvavel, refsMovidas } from "./autoridade.js";
-import { commitPhase, hasPendingChanges, treeSignature } from "./git.js";
-import { declaredComplete, defaultTestRunner, gate0, gate1, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
+import { arquivosDasFases, arquivosMudados, commitPhase, estadoDoCodigo, existiamNaArvore, hasPendingChanges } from "./git.js";
+import { declaredComplete, defaultTestRunner, gate0, gate2, gate3, type GateName, type GateResult, type TestRunner } from "./gates.js";
 import { detectCredentialRejection, detectRateLimit, planWait } from "./ratelimit.js";
-import { checkFlowScript, FLOWS_DIR, flowScriptName, gate4, type FlowRunner } from "./flows.js";
-import { TasksAprovadas, tasksDaFase } from "./veredictos.js";
+import { checkFlowScript, FLOW_MARK, FLOWS_DIR, flowScriptName, gate4, type FlowRunner } from "./flows.js";
+import { shaDaTask, TasksAprovadas, tasksDaFase } from "./veredictos.js";
 import { prepararAmbiente } from "./ambiente.js";
 import { comBancosDeTeste } from "./test-databases.js";
 import { sharedContractFromSkeleton } from "../prompts/acceptance-policy.js";
@@ -31,14 +31,37 @@ import { portaLivre } from "./ports.js";
 import { faltaOPacoteDoRunner } from "./dependencias.js";
 import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { sha12 } from "../contract/index.js";
-import type { SkeletonWorkflow } from "../contract/index.js";
+import type { SkeletonWorkflow, TaskBlock } from "../contract/index.js";
 import type { PhaseSession } from "./split.js";
 import { resolveE2eCommand, type TestCommand } from "./testcmd.js";
-import { falhaDeInstalacaoNode, inspecionarInstalacaoNode, registrarInstalacaoNode } from "./instalacao-node.js";
+import { falhaDeInstalacaoNode, inspecionarInstalacaoNode, MARCA_DE_INSTALACAO_NODE, registrarInstalacaoNode, runtimeNode } from "./instalacao-node.js";
 import { comandoDeInstalacao } from "./worktree.js";
 import { parseVerification, testRepairGuidancePrompt, verifyRetryPrompt } from "../prompts/verifier.js";
 import { FLOW_REVIEWS, type FlowReviewPurpose } from "../provider/flow-review.js";
-import type { FatiaDaArquitetura } from "./arquitetura.js";
+import type { FatiaDaArquitetura, TerritorioDoFluxo } from "./arquitetura.js";
+import { emptyScope, LivroDeEvidencias, referenciaDeArtefato, type ArtifactRef, type EvidenceInputs } from "./evidencias.js";
+import {
+  assinaturaDaFalha,
+  citacoes,
+  defeitoCitado,
+  orcamentoEfetivo,
+  RegistroDeDefeitos,
+  severidadeDoAchado,
+  testesQueFalharam,
+  type AcaoPlanejada,
+  type Defect,
+  type DefectGate,
+  type DefeitoEncontrado,
+  type Estrategia,
+  type NaturezaDoDefeito,
+  type OrcamentoDaRecuperacao,
+} from "./defeitos.js";
+import { camposDoDiagnostico, gravarHandoff, HANDOFF_CONTRACT, lerHandoff, renderHandoff } from "./handoff.js";
+import { criarNarrador, type Transicao } from "./narrador.js";
+import { escopoDaTask, impactoNaSuite, impactoNaTask, impactoNoFluxo } from "./impacto.js";
+import { shaDaFase } from "./ledger.js";
+import { bancosDeclarados } from "./passagem.js";
+import type { ContratoDaRetomada } from "../provider/cli/types.js";
 
 /** Janela limitada para um defeito novo que só apareceu na integração. */
 export interface IntegrationFailure {
@@ -62,6 +85,10 @@ export interface EngineResult {
   providerFailure?: "quota" | "configuration";
   /** O que a sessão recusou por permissão: só ferramenta e programa, nunca argumentos (§106). */
   negacoes?: string[];
+  /** O id da sessão que a CLI abriu ou retomou, do envelope (§125 E). Ausente quando a CLI não informa. */
+  sessionId?: string;
+  /** Tokens e custo da chamada, quando a CLI informa (§125 D: teto financeiro). */
+  usage?: { inputTokens: number; outputTokens: number; costUsd?: number };
 }
 
 export interface EngineCall {
@@ -69,6 +96,12 @@ export interface EngineCall {
   purpose?: FlowReviewPurpose;
   /** Sessão separada de reparo. Apenas o verificador recebe escrita nesta chamada. */
   repair?: boolean;
+  /**
+   * Retomar a sessão do verificador que diagnosticou o defeito (§125 E). Só em
+   * reparo, só quando o provider declara retomada; o prompt leva o handoff
+   * inteiro mesmo assim.
+   */
+  resumeSession?: string;
   phase: PhaseSession;
   attempt: number;
   prompt: string;
@@ -155,6 +188,31 @@ export interface PhaseRunOptions {
     preferredPort?: number;
   };
   testRunner?: TestRunner;
+  /**
+   * O registro de evidências do run (§125 B). O build passa um só para todas as
+   * fases — no paralelo elas registram ao mesmo tempo —; ausente, a fase abre o
+   * do run.
+   */
+  evidencias?: LivroDeEvidencias;
+  /** Orçamentos da recuperação além de ciclos e reparos do verificador (§125 D); ausente usa os padrões. */
+  orcamento?: Partial<Pick<OrcamentoDaRecuperacao, "porCiclo" | "porGate" | "porDefeito">>;
+  /**
+   * Como o provider do verificador retoma uma sessão (§125 E). Ausente ou null:
+   * o reparo é sempre uma sessão nova do mesmo modelo com o handoff.
+   */
+  verifierResume?: ContratoDaRetomada | null;
+  /** Tentar a retomada mesmo com a capacidade declarada como não verificada (`--verifier-resume`). */
+  verifierResumeUnverified?: boolean;
+  /** O território de um fluxo pela arquitetura, para o G4 saber se a regressão foi atingida (§125 C). */
+  territorioDoFluxo?: (workflow: string, donos: ReadonlyMap<number, ReadonlySet<string>>) => TerritorioDoFluxo | null;
+  /** `--rebuild-all`: o estado de recuperação e as provas anteriores da fase não valem; nada é apagado. */
+  refazer?: boolean;
+  /**
+   * A fase já fechou com este texto, mas um documento que ela consome mudou (a
+   * fatia da arquitetura): ela volta só para ser verificada contra o documento
+   * novo — sem sessão de implementação, porque o código é o que já passou.
+   */
+  revalidar?: string;
   /** Sondas de prontidão já passaram no início do build; só materializar dependências novas. */
   environmentApproved?: boolean;
   /**
@@ -282,15 +340,6 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   };
 
   let waits = 0;
-  let lastGate: GateName | null = null;
-  let lastCause = "";
-  let previousWroteNothing = false;
-  let verifierRepairs = options.integrationFailure?.repairBudget.used ?? 0;
-  let lastRepairGuidance = "";
-  let integrationGuidance = "";
-  // Um reparo pode atingir qualquer task. Depois dele nenhum DONE antigo substitui
-  // a leitura independente do estado atual, mesmo se a chamada terminou em erro.
-  let verificarTudo = false;
   /*
    * As VERSÕES de roteiro já contestadas, pelo sha do conteúdo.
    *
@@ -376,6 +425,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     }
   };
 
+  /** O último id de sessão de cada revisão do G4: a triagem que diagnostica PRODUTO é o verificador que pode reparar (§125 E). */
+  const sessoesDasRevisoes = new Map<FlowReviewPurpose, string>();
   const chamarRevisao = async (purpose: FlowReviewPurpose, prompt: string, arquivo: string, cycle: number): Promise<string> => {
     const policy = FLOW_REVIEWS[purpose];
     const detail = `${policy.label} · ${arquivo}`;
@@ -394,6 +445,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       const g0 = gate0(resposta, options.engine);
       if (!g0.green) throw new FalhaDeRevisao(`${policy.label}: ${g0.cause}\nO produto não foi reprovado por esta sessão; não abrir outro ciclo de construção.`, !resposta.providerFailure);
       await reviewEvent("complete", `${policy.label}: resposta recebida`);
+      if (resposta.sessionId) sessoesDasRevisoes.set(purpose, resposta.sessionId);
+      else sessoesDasRevisoes.delete(purpose);
       return resposta.stdout;
     } catch (erro) {
       await reviewEvent("blocked", `${policy.label}: sessão interrompida; parcial preservado`);
@@ -440,47 +493,296 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     return false;
   };
 
-  let cicloCorrente = 1;
   const rascunhosDosFluxos = new Map<string, string>();
   const causasDosRoteiros = new Map<string, string>();
-  try {
-  for (let cycle = 1; cycle <= maxCycles; ) {
-    cicloCorrente = cycle;
-    await event("started", cycle === 1 ? "implementação" : `ciclo de correção ${cycle}`, cycle);
-    announce(cycle === 1 ? `[${session.id}] ${session.title}` : `[${session.id}] ciclo de correção ${cycle}/${maxCycles}`);
-    relatar({
-      kind: "phase",
-      id: session.id,
-      state: "em andamento",
-      cycle,
-      detail: cycle === 1 ? "implementação" : `ciclo ${cycle}/${maxCycles}`,
-    });
-    // O engine roda antes de qualquer veredito: o gate 0 é o que está correndo
-    // enquanto a sessão trabalha, e é o que a tela precisa mostrar por minutos.
-    gate("G0", "corrente", cycle);
-    if (cycle === 1 && !options.environmentApproved) await prepararDependenciasNode(cycle);
-    if (runtimeRecusado) {
-      const cause = `O ambiente Node/npm foi recusado por engines. Reinicie a Capivara com uma versão compatível com o projeto; nenhuma sessão de construção foi iniciada.\n${falhaNaPreparacaoNode}`;
-      gate("G0", "neutro", cycle);
-      gate("G2", "vermelho", cycle);
-      await event("blocked", cause, cycle);
-      relatar({ kind: "phase", id: session.id, state: "falhou", cycle, detail: cause });
-      return { status: "failed", gate: "gate 2 — suíte do projeto", cause, cycles: cycle - 1 };
+
+  /*
+   * ------------------------------------------------------------------ vNext (§125)
+   *
+   * O laço de ciclos deixa de ser uma esteira. A fase tem um estado no plano de
+   * controle — defeitos com identidade e história, o ciclo corrente, quantas
+   * sessões de escrita já houve — e cada prova vira evidência com o conteúdo do
+   * código contra o qual foi tirada. A ordem é sempre: verificar o que não tem
+   * prova válida (G2, G3, G4, nessa dependência técnica), registrar o que falhou
+   * como defeito, escolher a ação pela escada do defeito dentro do orçamento, e
+   * depois da ação invalidar só o que a mudança atingiu. Nada se repete porque
+   * outro gate falhou; nada se aprova sem aplicabilidade demonstrada.
+   */
+  const livro = options.evidencias ?? (await LivroDeEvidencias.abrir(paths.root, options.runId));
+  const registro = await RegistroDeDefeitos.abrir(paths.root, options.runId, session.id, now, options.refazer === true);
+  if (options.refazer === true) {
+    // Quem pede para refazer tudo não confia no que está lá: as provas anteriores da fase deixam de valer, com o motivo.
+    for (const { evidence, validity } of livro.daFase(session.id)) {
+      if (validity.state !== "INVALIDATED") await livro.alterarValidade(evidence.evidenceId, "INVALIDATED", "--rebuild-all", "refazer", now);
     }
+  }
+  const estado = registro.estado;
+  const orcamento: OrcamentoDaRecuperacao = orcamentoEfetivo(maxCycles, maxVerifierRepairs, options.orcamento);
+  const narrar = criarNarrador({
+    projectRoot: options.projectRoot,
+    runId: options.runId,
+    announce,
+    ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+    now,
+  });
+  const tasksDestaFase = tasksDaFase(session.markdown);
+  const contratoSha = sha12(sharedContract);
+  const documentosDaFase = (): EvidenceInputs["documents"] => [
+    { name: "fase", sha12: shaDaFase(session.markdown) },
+    ...(options.architecture ? [{ name: "fatia", sha12: options.architecture.sha12 }] : []),
+    { name: "contrato", sha12: contratoSha },
+  ];
+  const escopoDe = (task: TaskBlock) => escopoDaTask(task, options.architecture?.arquivos ?? []);
+  /*
+   * O roteirista e a triagem decidem PRODUTO × ROTEIRO lendo rotas e contratos;
+   * eles recebem os contratos da fatia (sem a seção de fluxos), ao lado do
+   * contrato compartilhado de sempre.
+   */
+  const contratoDosFluxos = options.architecture && options.architecture.contratos.length > 0
+    ? `${sharedContract}\n\n## Contratos da arquitetura para esta fase\n${options.architecture.contratos.map((linha) => `- ${linha}`).join("\n")}`
+    : sharedContract;
 
-    /*
-     * O runner de fluxos, dito ANTES de a sessão começar.
-     *
-     * O harness já sabia no preflight, e contava de novo só quando o gate 4
-     * reprovava — meia hora de sessão para descobrir uma ausência anotada antes
-     * da primeira chamada. Só é dito na fase que tem fluxo: avisar quem não vai
-     * ser percorrido no navegador é ruído.
-     */
-    const precisaDoRunner =
-      cycle === 1 && (options.flows?.workflows.length ?? 0) > 0 && (await faltaOPacoteDoRunner(arvore));
+  /** Quantos ciclos esta execução abriu: é o que `--max-cycles` limita e o que a fase relata. */
+  let ciclosAbertos = 1;
+  /**
+   * Sessões de escrita do executor NESTA execução: nomeiam prompts e logs e são
+   * o `attempt` das chamadas, como antes (os logs de cada execução são
+   * arquivados em `attempts/`). O total do run fica no registro de defeitos.
+   */
+  let sessoesNestaExecucao = 0;
+  /** Reparos do verificador nesta execução: nomeiam as passagens, como antes. */
+  let reparosNestaExecucao = options.integrationFailure?.repairBudget.used ?? 0;
+  /**
+   * Um reparo do verificador mudou o código desde a última verificação? Então as
+   * aprovações anteriores voltam à verificação, dirigida pelo que mudou (§114).
+   * Mudança só do executor mantém a memória de DONE do §75, com a lista do que
+   * mudou para o verificador reabrir o que ele VIR quebrado.
+   */
+  let verificadorEscreveuDesdeOG3 = false;
+  let previousWroteNothing = false;
+  let ultimoRelatorioDeReparo = "";
+  let contestacaoPendente: string | null = null;
+  let proximoG4: { rejeitados?: string[] } | null = null;
+  let julgandoParcial = false;
+  /** A retomada sobre código que mudou começa por uma sessão do executor (ver o início do laço). */
+  let retomarPeloExecutor: { defeitos: Defect[]; mudouDesde: string[] | null } | null = null;
+  /** Quantas vezes seguidas cada gate passou sem que a prova dele se sustentasse (a guarda contra o laço do harness). */
+  const verdesSemProva = new Map<string, number>();
+  let execucoesG4NaPassagem = 0;
+  let ultimaPassagemG4 = "";
+  const codigo = { atual: await estadoDoCodigo(arvore) };
 
+  const ordinal = (): number => Math.max(1, sessoesNestaExecucao);
+  const passagemAtual = (): string =>
+    reparosNestaExecucao > 0 ? `${ordinal()}-after-repair-${reparosNestaExecucao}` : `${ordinal()}`;
+  const nomeDoGate = (gate: DefectGate): GateName =>
+    gate === "G0" ? "gate 0 — engine" : gate === "G3" ? "gate 3 — verificação independente" : gate === "G4" ? "gate 4 — fluxos na aplicação" : "gate 2 — suíte do projeto";
+  const progressoDaFase = (detail: string): void =>
+    relatar({ kind: "phase", id: session.id, state: "em andamento", cycle: ciclosAbertos, detail });
+  const transicao = (parcial: Omit<Transicao, "fase" | "ciclo" | "maxCiclos">): Promise<string> =>
+    narrar({ fase: session.id, ciclo: ciclosAbertos, maxCiclos: maxCycles, ...parcial });
+
+  /** Gravar log ou prompt sem nunca sobrescrever um anterior desta execução. */
+  const gravarUnico = async (caminho: string, conteudo: string): Promise<string> => {
+    let destino = caminho;
+    for (let n = 2; await readFile(destino).then(() => true, () => false); n += 1) destino = caminho.replace(/(\.[a-z]+)$/u, `.${n}$1`);
+    await writeAtomic(destino, conteudo);
+    return destino;
+  };
+  const refDe = async (absoluto: string): Promise<ArtifactRef[]> => {
+    const ref = await referenciaDeArtefato(paths.root, relative(paths.root, absoluto));
+    return ref ? [ref] : [];
+  };
+
+  /** O ambiente que decide o resultado da suíte além do código: runtime, instalação, `.env`, bancos (§114). */
+  const identidadeDoAmbiente = async (comando: string, fonte: string): Promise<string> => {
+    const marca = await readFile(join(arvore, "node_modules", MARCA_DE_INSTALACAO_NODE), "utf8").catch(() => "");
+    const ambienteEnv = await readFile(join(arvore, ".env"), "utf8").catch(() => "");
+    // O que cada gerenciador reescreve a cada instalação: um `npm install` muda a prova sem mudar o código.
+    const instalacoes: string[] = [];
+    for (const arquivo of [".package-lock.json", ".modules.yaml", ".yarn-state.yml", ".yarn-integrity"]) {
+      instalacoes.push(sha12(await readFile(join(arvore, "node_modules", arquivo), "utf8").catch(() => "")));
+    }
+    return sha12(JSON.stringify({ runtime: runtimeNode(), marca, instalacoes, env: sha12(ambienteEnv), bancos: Object.keys(await bancosDeclarados(arvore)).sort(), comando, fonte }));
+  };
+
+  /*
+   * Depois de toda ação que pode mudar o código: o que a mudança atingiu perde a
+   * validade, com o motivo; o que não atingiu continua de pé; o que não se pode
+   * dizer fica desconhecido. É o Core quem grava — nenhum agente aprova nada.
+   */
+  const revalidar = async (evento: string): Promise<{ invalidadas: string[]; desconhecidas: string[]; preservadas: string[] }> => {
+    codigo.atual = await estadoDoCodigo(arvore);
+    const invalidadas: string[] = [];
+    const desconhecidas: string[] = [];
+    const preservadas: string[] = [];
+    const docs = documentosDaFase();
+    for (const { evidence, validity } of livro.daFase(session.id)) {
+      if (validity.state === "INVALIDATED" || evidence.outcome === "REPAIR_REQUIRED" || evidence.gate === "G0" || evidence.gate === "G1") continue;
+      const mudouDocumento = evidence.inputs.documents.find((doc) => {
+        const atual = docs.find((cada) => cada.name === doc.name);
+        return atual !== undefined && atual.sha12 !== doc.sha12;
+      });
+      if (mudouDocumento) {
+        await livro.alterarValidade(evidence.evidenceId, "INVALIDATED", `documento mudou: ${mudouDocumento.name}`, evento, now);
+        invalidadas.push(evidence.checkId);
+        continue;
+      }
+      const arquivos = await arquivosMudados(arvore, evidence.inputs.code?.tree ?? null, codigo.atual.tree);
+      const task = evidence.scope.tasks[0] !== undefined ? tasksDestaFase.find((cada) => cada.index === evidence.scope.tasks[0]) : undefined;
+      const impacto = evidence.gate === "G3" && task ? impactoNaTask(arquivos, escopoDe(task)) : evidence.gate === "G4" ? impactoNoFluxo(arquivos, null) : impactoNaSuite(arquivos);
+      if (impacto.impacto === "AFFECTED") {
+        await livro.alterarValidade(evidence.evidenceId, "INVALIDATED", impacto.motivo, evento, now);
+        invalidadas.push(evidence.checkId);
+      } else if (impacto.impacto === "UNKNOWN") {
+        await livro.alterarValidade(evidence.evidenceId, "UNKNOWN", impacto.motivo, evento, now);
+        desconhecidas.push(evidence.checkId);
+      } else {
+        if (validity.state !== "VALID") await livro.alterarValidade(evidence.evidenceId, "VALID", "o conteúdo voltou a ser o da prova", evento, now);
+        preservadas.push(evidence.checkId);
+      }
+    }
+    return { invalidadas, desconhecidas, preservadas };
+  };
+
+  /** A estratégia é possível para o defeito, pela capacidade do run — sem olhar o orçamento. */
+  const possivel = (estrategia: Estrategia, _defeito: Defect): boolean => {
+    if (estrategia === "verificador") return orcamento.reparosDoVerificador > 0;
+    if (estrategia === "roteiro" || estrategia === "revisao") return options.flows !== undefined;
+    return estrategia !== "conciliacao";
+  };
+  /** Possível E com orçamento neste ciclo (o do verificador é por gate). */
+  const disponivel = (estrategia: Estrategia, defeito: Defect): boolean => {
+    if (!possivel(estrategia, defeito)) return false;
+    if (estrategia !== "verificador") return true;
+    const gate = defeito.gates.at(-1) ?? defeito.discovered.gate;
+    return (registro.uso().verifierByGate[gate] ?? 0) < orcamento.reparosDoVerificador;
+  };
+
+  /** O custo de uma ação, dividido entre os defeitos que ela tratou: chamadas já contadas no consumir; tempo e US$ aqui. */
+  const contarCusto = (defeitos: readonly Defect[], sessoes: readonly EngineResult[], comecou: number): void => {
+    if (defeitos.length === 0) return;
+    const segundos = (Date.now() - comecou) / 1000 / defeitos.length;
+    const usd = sessoes.reduce((total, sessao) => total + (sessao.usage?.costUsd ?? 0), 0) / defeitos.length;
+    for (const defeito of defeitos) {
+      defeito.costs.seconds = Math.round((defeito.costs.seconds + segundos) * 10) / 10;
+      defeito.costs.costUsd += usd;
+    }
+  };
+
+  const defeitosConhecidos = () =>
+    estado.defects.map((defeito) => ({ id: defeito.defectId, status: defeito.status, gate: defeito.gates.at(-1) ?? defeito.discovered.gate, summary: defeito.summary }));
+
+  /** Registra o achado, grava o handoff quando o verificador diagnosticou, e diz na tela. */
+  const achar = async (achado: DefeitoEncontrado, handoff?: { raw: string; sessionId?: string; purpose?: string; log?: string }): Promise<Defect> => {
+    const { defeito, novo, reaberto } = registro.registrar(achado);
+    if (handoff) {
+      const campos = camposDoDiagnostico(handoff.raw);
+      const identidade = { runId: options.runId, phaseId: session.id, gate: achado.gate, cycle: estado.cycle, defectId: defeito.defectId };
+      const gravado = await gravarHandoff(paths.root, {
+        contract: HANDOFF_CONTRACT,
+        identity: identidade,
+        createdAt: now().toISOString(),
+        diagnosedBy: { role: "verifier", ...(handoff.purpose ? { purpose: handoff.purpose } : {}), ...(handoff.sessionId ? { sessionId: handoff.sessionId } : {}), ...(handoff.log ? { log: handoff.log } : {}) },
+        ...campos,
+        raw: handoff.raw,
+        code: codigo.atual,
+        documents: documentosDaFase(),
+      });
+      const relativo = relative(paths.root, gravado.caminho);
+      if (!defeito.handoffs.includes(relativo)) defeito.handoffs.push(relativo);
+      if (!defeito.criterion && campos.criterion) defeito.criterion = campos.criterion;
+      if (!defeito.observed && campos.observed) defeito.observed = campos.observed;
+      if (!defeito.expected && campos.expected) defeito.expected = campos.expected;
+      if (!defeito.hypothesis && campos.hypothesis) defeito.hypothesis = campos.hypothesis;
+    }
+    await registro.salvar();
+    if (novo || reaberto) {
+      await transicao({
+        tipo: "defeito",
+        gate: achado.gate,
+        defeitos: [defeito.defectId],
+        motivo: `${reaberto ? "reaberto" : "novo"} (${defeito.severity}): ${defeito.summary}${handoff ? " · handoff do verificador gravado antes de qualquer reparo" : ""}`,
+      });
+    }
+    return defeito;
+  };
+
+  /**
+   * Valida os defeitos de um gate que esperavam pela verificação que acabou de
+   * rodar. O defeito de integração não se valida pela suíte deste worktree: a
+   * falha dele é da cópia limpa da árvore integrada, e quem a confere é a
+   * integração — verde aqui não o resolve.
+   */
+  const validarDoGate = async (gate: DefectGate, reproduzidos: ReadonlyMap<string, { assinatura: string; testes?: number }>, regressao: boolean, integracao = false): Promise<void> => {
+    // Aberto e não reproduzido também se resolve: outra ação (um reparo agrupado, uma correção vizinha) o consertou.
+    const doGate = (cada: Defect): boolean =>
+      cada.status === "AWAITING_VALIDATION" || ((cada.status === "OPEN" || cada.status === "ESCALATED") && !reproduzidos.has(cada.defectId));
+    for (const defeito of estado.defects.filter((cada) => doGate(cada) && (cada.gates.at(-1) ?? cada.discovered.gate) === gate && (integracao || cada.nature !== "integracao-teste" || reproduzidos.has(cada.defectId)))) {
+      const reproduzido = reproduzidos.get(defeito.defectId) ?? null;
+      const resultado = registro.validar(defeito, reproduzido, regressao);
+      await transicao({
+        tipo: "resultado",
+        gate,
+        defeitos: [defeito.defectId],
+        motivo:
+          resultado === "resolved"
+            ? "resolvido: a verificação independente não o reproduz"
+            : resultado === "progress"
+              ? "progresso: a falha mudou sem regressão; a estratégia pode continuar"
+              : "sem progresso: a mesma falha (ou regressão); esta estratégia não se repete sem informação nova",
+      });
+    }
+    await registro.salvar();
+  };
+
+  /** Uma sessão de escrita do executor: implementação ou correção localizada. */
+  const sessaoDoExecutor = async (prompt: string): Promise<{ result: EngineResult; escreveu: boolean; ordinal: number }> => {
+    estado.builderSessions += 1;
+    sessoesNestaExecucao += 1;
+    const ordinal = sessoesNestaExecucao;
+    if (estado.implementation === "pending") estado.implementation = "started";
+    await registro.salvar();
+    await writeAtomic(`${paths.prompts}/${evidencePrefix}.cycle-${ordinal}.txt`, prompt);
+    const antes = codigo.atual;
+    gate("G0", "corrente", ciclosAbertos);
+    const result = await chamarLeitor({ role: "builder", phase: session, attempt: ordinal, prompt });
+    const log = await gravarUnico(`${paths.logs}/${evidencePrefix}.cycle-${ordinal}.log`, `${result.stdout}\n${result.stderr}`);
+    const negacoes = result.negacoes ?? [];
+    if (negacoes.length > 0) {
+      const lista = negacoes.slice(0, 6).join(", ") + (negacoes.length > 6 ? ` e mais ${negacoes.length - 6}` : "");
+      announce(`[${session.id}] a sessão do executor teve comando(s) negado(s) por permissão: ${lista} — registrado, a fase segue para os gates`);
+    }
+    codigo.atual = await estadoDoCodigo(arvore);
+    const escreveu = antes.tree !== codigo.atual.tree;
+    const g0 = gate0(result, options.engine);
+    gate("G0", g0.green ? "verde" : "vermelho", ciclosAbertos);
+    gate("G1", escreveu ? "verde" : "neutro", ciclosAbertos);
+    previousWroteNothing = !escreveu;
+    if (!escreveu) announce(`[${session.id}] a sessão não escreveu nada; validando o código existente`);
+    await livro.registrar({
+      phaseId: session.id, gate: "G0", checkId: `sessao-${ordinal}`, now,
+      claim: "a sessão do executor terminou com resultado utilizável",
+      outcome: g0.green ? "PASS" : "REPAIR_REQUIRED",
+      inputs: { documents: documentosDaFase(), code: codigo.atual },
+      scope: emptyScope(), supports: [], artifactRefs: await refDe(log),
+    });
+    await livro.registrar({
+      phaseId: session.id, gate: "G1", checkId: `entrega-${ordinal}`, now,
+      claim: escreveu ? "a sessão alterou o código do produto" : "a sessão não alterou nada (legítimo numa fase já implementada)",
+      outcome: escreveu ? "PASS" : "PASS_WITH_WARNING",
+      inputs: { documents: documentosDaFase(), code: codigo.atual },
+      scope: emptyScope(), supports: [], artifactRefs: [],
+    });
+    const declarada = declarouRoteiroErrado(result.stdout);
+    if (declarada) contestacaoPendente = declarada;
+    return { result, escreveu, ordinal };
+  };
+
+  const contexto = async () => {
+    const precisaDoRunner = sessoesNestaExecucao === 0 && (options.flows?.workflows.length ?? 0) > 0 && (await faltaOPacoteDoRunner(arvore));
     const temFluxos = (options.flows?.workflows.length ?? 0) + (options.flows?.regressao?.length ?? 0) > 0;
-    const context = {
+    return {
       language: options.language,
       sharedContract,
       ...(options.architecture ? { architectureSlice: options.architecture.texto } : {}),
@@ -494,246 +796,382 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       ...(options.skills !== undefined && options.skills !== "" ? { skills: options.skills } : {}),
       ...(options.onMemorias ? { memoriasDir: MEMORIAS_DIR } : {}),
     };
+  };
 
-    const promptBase =
-      cycle === 1
-        ? implementPrompt(context)
-        : fixPrompt({
-            ...context,
-            gate: lastGate ?? "gate 0 — engine",
-            cause: lastCause + (lastRepairGuidance ? `\n\nRelatório do último reparo assistido pelo verificador (confira os gates; o relatório não é aprovação):\n${lastRepairGuidance}` : ""),
-            previousWroteNothing,
-          });
-    let prompt = promptBase;
-
-    let diagnosis: EngineResult | null = null;
-    const recovery = options.integrationFailure;
-    const repairingIntegration = recovery?.repairByVerifier === true;
-    if (recovery) {
-      const guidancePrompt = testRepairGuidancePrompt({ language: options.language, sharedContract, ...(options.architecture ? { architectureSlice: options.architecture.texto } : {}), phaseMarkdown: session.markdown, cause: recovery.cause, testCommand: context.testCommand });
-      await writeAtomic(`${paths.prompts}/${evidencePrefix}.guidance.txt`, guidancePrompt);
-      announce(`[${session.id}] validador diagnosticando a falha de integração; devolverá evidência, ação concreta e comando de regressão`);
-      diagnosis = await chamarLeitor({ role: "verifier", phase: session, attempt: cycle, prompt: guidancePrompt });
-      await writeAtomic(`${paths.logs}/${evidencePrefix}.guidance.log`, `${diagnosis.stdout}\n${diagnosis.stderr}`);
-      integrationGuidance = diagnosis.stdout;
-      const cause = `${recovery.cause}\n\nOrientação do validador para esta falha (não é aprovação):\n${diagnosis.stdout}`;
-      lastCause = cause;
-      lastGate = "gate 2 — suíte do projeto";
-      prompt = repairingIntegration
-        ? verifierRepairPrompt({ language: options.language, sharedContract, ...(options.architecture ? { architectureSlice: options.architecture.texto } : {}), phaseMarkdown: session.markdown, cause, testCommand: context.testCommand, systemInstall: options.systemInstall === true, ...(context.e2eCommand ? { e2eCommand: context.e2eCommand } : {}) })
-        : fixPrompt({ ...context, gate: "gate 2 — suíte do projeto", cause, previousWroteNothing: false });
+  /** O que vai ao prompt de quem repara: o handoff de cada defeito, com o que mudou desde ele. */
+  const causaDosDefeitos = async (defeitos: readonly Defect[]): Promise<string> => {
+    const partes: string[] = [];
+    for (const defeito of defeitos) {
+      const handoff = defeito.handoffs.at(-1) ? await lerHandoff(join(paths.root, defeito.handoffs.at(-1)!)) : null;
+      if (handoff) {
+        const desde = await arquivosMudados(arvore, handoff.code?.tree ?? null, codigo.atual.tree);
+        // O handoff é o diagnóstico; a falha observada vem junto quando ele não a reproduz (a saída da suíte, do fluxo).
+        const observada = handoff.raw.includes(defeito.detail.slice(0, 200).trim()) ? "" : `\nLatest observed failure:\n\`\`\`\`\n${defeito.detail}\n\`\`\`\``;
+        partes.push(`${renderHandoff(handoff, defeito, desde)}${observada}`);
+      } else {
+        partes.push(`### ${defeito.defectId} — ${defeito.gates.at(-1) ?? defeito.discovered.gate}: ${defeito.summary}\n${defeito.detail}`);
+      }
     }
-    if (falhaNaPreparacaoNode) prompt += `\n\n## Dependency preparation — unresolved environment failure\n${falhaNaPreparacaoNode}`;
+    return partes.join("\n\n");
+  };
 
-    await writeAtomic(`${paths.prompts}/${evidencePrefix}.cycle-${cycle}.txt`, prompt);
+  // -------------------------------------------------------------- verificações
 
-    const signatureBefore = await treeSignature(arvore);
-    let result: EngineResult;
-    if (diagnosis && !gate0(diagnosis, options.engine).green) result = diagnosis;
-    else if (repairingIntegration) {
-      if (verifierRepairs >= maxVerifierRepairs) throw new Error("o orçamento de reparo da integração foi esgotado");
-      verifierRepairs += 1;
-      recovery!.repairBudget.used = verifierRepairs;
-      verificarTudo = true;
-      const tasks = tasksDaFase(session.markdown);
-      await options.aprovadas?.revogar(session.id, tasks, tasks.map(task => task.index));
-      announce(`[${session.id}] a devolução ao executor não resolveu a integração; o validador executará a correção (${verifierRepairs}/${maxVerifierRepairs})`);
-      result = await chamarLeitor({ role: "verifier", repair: true, phase: session, attempt: cycle, prompt });
-    } else result = await chamar({ role: "builder", phase: session, attempt: cycle, prompt });
-    await writeAtomic(`${paths.logs}/${evidencePrefix}.cycle-${cycle}.log`, `${result.stdout}\n${result.stderr}`);
+  let testeAgora: TestCommand | null = options.testCommand;
 
-    const recusa = detectCredentialRejection(`${result.stdout}\n${result.stderr}`);
-    if (recusa !== null) throw new CredencialRecusada(recusa);
-    /*
-     * A negação de permissão é diagnóstico, não parada (§108): a fase segue para
-     * os gates, que julgam o que ficou. O §106 parava aqui quando a sessão não
-     * concluía; com o executor liberado, uma negação não diz mais que o ambiente
-     * impede a fase.
-     */
-    const negacoes = result.negacoes ?? [];
-    if (negacoes.length > 0) {
-      const lista = negacoes.slice(0, 6).join(", ") + (negacoes.length > 6 ? ` e mais ${negacoes.length - 6}` : "");
-      announce(`[${session.id}] a sessão do executor teve comando(s) negado(s) por permissão: ${lista} — registrado, a fase segue para os gates`);
-    }
+  /** G2 — a suíte do projeto, só quando não há prova válida para este conteúdo e este ambiente. */
+  const g2Valido = async (): Promise<boolean> => {
+    // Um defeito do G2 esperando validação só se resolve com a suíte rodando: a prova antiga não o valida.
+    if (estado.defects.some((defeito) => defeito.status === "AWAITING_VALIDATION" && defeito.nature !== "integracao-teste" && (defeito.gates.at(-1) ?? defeito.discovered.gate) === "G2")) return false;
+    const atual = livro.atual(session.id, "suite");
+    if (!testeAgora) return atual !== null && atual.evidence.outcome === "NOT_APPLICABLE" && atual.evidence.inputs.code?.tree === codigo.atual.tree;
+    if (!atual || atual.evidence.outcome !== "PASS" || atual.validity.state !== "VALID") return false;
+    if (atual.evidence.inputs.code?.tree !== codigo.atual.tree || atual.evidence.inputs.command !== testeAgora.command) return false;
+    return atual.evidence.inputs.extra?.["ambiente"] === (await identidadeDoAmbiente(testeAgora.command, testeAgora.source));
+  };
 
-    // Limite de uso não é defeito da implementação: espera e repete a MESMA
-    // fase, sem consumir ciclo de correção.
-    const limit = result.timedOut || result.providerFailure ? null : detectRateLimit(`${result.stdout}\n${result.stderr}`, options.engine);
-    if (limit) {
-      waits += 1;
-      if (waits > maxLimitWaits) return { status: "rate-limit-exhausted", waits };
-      const plan = planWait(limit);
-      announce(`[${session.id}] ${plan.reason}; aguardando ${plan.seconds}s sem consumir ciclo`);
-      await event("retry", `limite de uso: ${plan.reason}`, cycle);
-      await sleep(plan.seconds);
-      continue;
-    }
-
-    // A fase pode ter acabado de criar a suíte. Perguntar de novo custa um
-    // acesso a disco; não perguntar custa a fase inteira sem validação.
-    let testeAgora = options.resolveTest ? await options.resolveTest() : options.testCommand;
-    if (testeAgora && testeAgora.command !== options.testCommand?.command) {
-      announce(`[${session.id}] comando de teste detectado: ${testeAgora.command} (${testeAgora.source})`);
-    }
-
-    const wrote = gate1(signatureBefore, await treeSignature(arvore));
-    previousWroteNothing = !wrote;
-    if (!wrote) announce(`[${session.id}] a sessão não escreveu nada; validando o código existente`);
-
-    let noChangeNote = wrote ? "" : "A sessão anterior terminou sem alterar nenhum arquivo. ";
-
-    /*
-     * G4 — a aplicação faz o que foi pedido.
-     *
-     * Só roda depois do G3 verde, e por isso não encarece a fase que ainda está
-     * errada: abrir o produto para percorrer um fluxo que o código nem tem
-     * gastaria uma sessão e um navegador para descobrir o que o gate 3 já sabia.
-     */
-    let reparoDeFluxo = false;
-    let falhaDoRoteiro = false;
-    let falhaDeSessao = Boolean(result.timedOut || result.providerFailure);
-    const passouNosFluxos = async (cycleAtual: number, contestacao?: string, rejeitados?: readonly string[]): Promise<boolean> => {
-      reparoDeFluxo = false;
-      const fluxos = options.flows;
-      if (!fluxos) return true;
-      const passagem = verifierRepairs > 0 ? `${cycleAtual}-after-repair-${verifierRepairs}` : `${cycleAtual}`;
-      const avancar = async (cause: string, roteiros?: readonly string[]): Promise<boolean> => {
-        await event("retry", `correção do roteiro G4 no próximo ciclo, preservando produto e G2/G3 aprovados: ${cause}`, cycleAtual);
-        cycle = cycleAtual + 1;
-        cicloCorrente = cycle;
-        announce(`[${session.id}] ciclo de correção ${cycle}/${maxCycles}: corrigindo somente a verificação G4; implementação e G2/G3 preservados`);
-        relatar({ kind: "phase", id: session.id, state: "em andamento", cycle, detail: `ciclo ${cycle}/${maxCycles} · correção do G4` });
-        return await passouNosFluxos(cycle, undefined, roteiros);
-      };
-
-      gate("G4", "corrente", cycleAtual);
-      let g4: Awaited<ReturnType<typeof gate4>>;
-      try {
-        g4 = await gate4({
-          projectRoot: arvore,
-          workflows: fluxos.workflows,
-          ...(contestacao ? { roteiroContestado: contestacao, roteirosQueFalharam: fluxosQueFalharamPorUltimo } : {}),
-          ...(fluxos.regressao ? { regressao: fluxos.regressao } : {}),
-          ...(rejeitados ? { rejectedScripts: rejeitados } : {}),
-          startCommand: await fluxos.resolveStart(),
-          author: async (workflow, rejected, baseUrl, contextoDaPassagem) => {
-            const priorCause = causasDosRoteiros.get(workflow.number);
-            const previousScript = rascunhosDosFluxos.get(workflow.number) ?? (rejected.length > 0 || priorCause
-              ? await readFile(join(arvore, FLOWS_DIR, flowScriptName(workflow.number)), "utf8").catch(() => undefined)
-              : undefined);
-            const prompt = flowPrompt({
-              language: options.language,
-              workflow: { number: workflow.number, name: workflow.name, steps: workflow.steps },
-              baseUrl,
-              sharedContract,
-              phaseMarkdown: session.markdown,
-              ...((rejected.length > 0 || priorCause) ? { rejected: [...rejected, ...(priorCause ? [priorCause] : [])] } : {}),
-              ...(previousScript ? { previousScript } : {}),
-              passagem: contextoDaPassagem,
-            });
-            const arquivo = `${evidencePrefix}.flow-${workflow.number}-${passagem}-${randomUUID()}`;
-            const response = await chamarRevisao("flow-author", prompt, arquivo, cycleAtual);
-            const draft = extractFlowScript(response);
-            // Um roteiro publicável será lido do disco na próxima correção,
-            // incluindo patches que o Core aplicar depois desta resposta.
-            if (draft && checkFlowScript(draft, workflow).length > 0) rascunhosDosFluxos.set(workflow.number, draft);
-            else rascunhosDosFluxos.delete(workflow.number);
-            return response;
-          },
-          /*
-           * A triagem é um leitor independente, como o verificador e o roteirista:
-           * só lê, e passa pela mesma proteção contra credencial e limite de uso.
-           */
-          triagem: async (entrada) => {
-            triagensNoCiclo += 1;
-            return await chamarRevisao("flow-triage", triagePrompt({
-                language: options.language,
-                phaseMarkdown: session.markdown,
-                sharedContract,
-                workflow: { number: entrada.workflow.number, name: entrada.workflow.name, steps: entrada.workflow.steps },
-                script: entrada.script,
-                failure: entrada.failure,
-                snapshot: entrada.snapshot,
-                serverErrors: entrada.serverErrors,
-              }), `${evidencePrefix}.triagem-${passagem}-${triagensNoCiclo}`, cycleAtual);
-          },
-          ...(fluxos.runner !== undefined ? { runner: fluxos.runner } : {}),
-          ...(fluxos.port !== undefined ? { port: fluxos.port } : {}),
-          ...(fluxos.preferredPort !== undefined ? { preferredPort: fluxos.preferredPort } : {}),
-          announce: (message) => announce(`[${session.id}] ${message}`),
+  const verificarSuite = async (): Promise<"verde" | "vermelho"> => {
+    for (;;) {
+      const passagem = passagemAtual();
+      let saidaDaSuite = "";
+      const g2 = await comBancosDeTeste(arvore, options.testRunner ?? defaultTestRunner, async (testar) => {
+        const ambiente = await prepararAmbiente(arvore, testar);
+        for (const aviso of ambiente.anuncios) announce(`[${session.id}] ${aviso}`);
+        if (ambiente.saidaDaMigracao !== "") {
+          await writeAtomic(`${paths.logs}/${evidencePrefix}.migrate-${passagem}.log`, ambiente.saidaDaMigracao);
+        }
+        if (await prepararDependenciasNode(ordinal())) {
+          if (options.resolveTest) testeAgora = await options.resolveTest();
+        }
+        gate("G2", "corrente", ciclosAbertos);
+        const comSaida: TestRunner = async (command, cwd, env) => {
+          const resultado = await testar(command, cwd, env);
+          saidaDaSuite = resultado.output;
+          return resultado;
+        };
+        return gate2(arvore, testeAgora?.command ?? null, comSaida, options.systemInstall === true);
+      });
+      gate("G2", g2.green ? "verde" : "vermelho", ciclosAbertos);
+      if (!g2.green && (await prepararDependenciasNode(ordinal(), g2.cause))) {
+        if (options.resolveTest) testeAgora = await options.resolveTest();
+        continue;
+      }
+      const log = saidaDaSuite !== "" ? await gravarUnico(`${paths.logs}/${evidencePrefix}.g2-${passagem}.log`, `$ ${testeAgora?.command ?? ""}\n${saidaDaSuite}`) : null;
+      const doG2 = estado.defects.filter((cada) => cada.status !== "RESOLVED" && cada.nature !== "integracao-teste" && (cada.gates.at(-1) ?? cada.discovered.gate) === "G2");
+      if (g2.green && g2.skipped && doG2.length > 0) {
+        const sumiu = await achar({
+          gate: "G2",
+          nature: doG2[0]!.nature,
+          anchors: { tests: doG2[0]!.anchors.tests ?? [] },
+          summary: "o comando de teste deixou de existir depois que a suíte falhou",
+          detail: `O projeto deixou de declarar o comando de teste (${options.testCommand?.command ?? "o que a fase usava"}) depois que a suíte falhou. Uma suíte que some não está consertada: restaure o comando e corrija a falha.\n\n${doG2[0]!.detail}`,
         });
-      } catch (erro) {
-        if (erro instanceof FalhaDeRevisao && erro.retryable && cycleAtual < maxCycles) return await avancar(erro.message, rejeitados);
-        throw erro;
+        gate("G2", "vermelho", ciclosAbertos);
+        await validarDoGate("G2", new Map([[sumiu.defectId, { assinatura: sumiu.anchors.signature }]]), true);
+        return "vermelho";
       }
-      reparoDeFluxo = !g4.green && g4.triagem?.tipo === "PRODUTO";
-      falhaDoRoteiro = !g4.green && (g4.scriptFailed === true || g4.triagem?.tipo === "ROTEIRO");
-      triagensNoCiclo = 0;
-      if (g4.green === false && g4.triagem?.tipo === "CRITERIO") {
-        await registrarDecisaoDoBuild(options.projectRoot, session.id, cycleAtual, g4.triagem);
+      if (g2.green && g2.skipped) {
+        announce(`[${session.id}] gate 2 pulado: nenhum comando de teste resolvido`);
+        await livro.registrar({
+          phaseId: session.id, gate: "G2", checkId: "suite", now,
+          claim: "nenhum comando de teste resolvido: o G2 não se aplica",
+          outcome: "NOT_APPLICABLE", inputs: { documents: documentosDaFase(), code: codigo.atual },
+          scope: emptyScope(), supports: [], artifactRefs: [],
+        });
+        return "verde";
       }
+      const comando = testeAgora?.command ?? "";
+      // A marca da instalação entra ANTES da identidade do ambiente: senão a primeira prova verde nunca vale de novo.
+      if (g2.green) await registrarInstalacaoNode(arvore);
+      const evidencia = await livro.registrar({
+        phaseId: session.id, gate: "G2", checkId: "suite", now,
+        claim: `a suíte do projeto (${comando}) passa`,
+        outcome: g2.green ? "PASS" : "REPAIR_REQUIRED",
+        inputs: { documents: documentosDaFase(), code: codigo.atual, command: comando, extra: { ambiente: await identidadeDoAmbiente(comando, testeAgora?.source ?? "") } },
+        scope: emptyScope({ components: options.architecture?.componentes ?? [] }),
+        supports: [], artifactRefs: log ? await refDe(log) : [],
+      });
+      if (g2.green) {
+        falhaNaPreparacaoNode = "";
+        await validarDoGate("G2", new Map(), false);
+        return "verde";
+      }
+      const causa = (g2.toolMissing === true ? g2.cause : `${previousWroteNothing ? "A sessão anterior terminou sem alterar nenhum arquivo. " : ""}${g2.cause}`) +
+        (falhaNaPreparacaoNode ? `\n\n${falhaNaPreparacaoNode}` : "");
+      if (g2.toolMissing === true) {
+        announce(
+          `[${session.id}] o runner de testes não está instalado; ` +
+            (options.systemInstall === true ? "o executor tem acesso de sistema para instalá-lo" : "o executor vai instalá-lo como dependência do projeto"),
+        );
+      }
+      const testes = testesQueFalharam(saidaDaSuite);
+      const naturezaIntegracao = options.integrationFailure !== undefined && estado.defects.some((cada) => cada.nature === "integracao-teste" && cada.status !== "RESOLVED");
+      const defeito = await achar({
+        gate: "G2",
+        nature: g2.toolMissing === true ? "ferramenta" : naturezaIntegracao ? "integracao-teste" : "suite",
+        anchors: { tests: testes, quotes: citacoes(saidaDaSuite.slice(-20000)) },
+        summary: g2.toolMissing === true ? "o runner de testes não está instalado" : `a suíte falhou (${testes.length > 0 ? `${testes.length} teste(s)` : "sem nome de teste legível"})`,
+        detail: causa,
+        evidenceId: evidencia.evidenceId,
+      });
+      await validarDoGate("G2", new Map([[defeito.defectId, { assinatura: defeito.anchors.signature, testes: testes.length }]]), false);
+      return "vermelho";
+    }
+  };
 
+  /** As tasks e o que cada uma precisa agora: nada, confirmação dirigida, ou verificação completa. */
+  const planoDoG3 = async () => {
+    const aprovadas: { index: number; title: string; mudancas?: string[] }[] = [];
+    const confirmar: { index: number; title: string; mudancas: string[] | null }[] = [];
+    const verificar: number[] = [];
+    /** Aprovação sem conteúdo conhecido (anterior ao campo, ou de outro run) nunca dispensa a chamada. */
+    let incerta = false;
+    for (const task of tasksDestaFase) {
+      const atual = livro.atual(session.id, `task-${task.index}`);
+      const aprovacao = options.aprovadas?.aprovacao(session.id, task, options.architecture?.sha12) ?? null;
+      const passou = atual && (atual.evidence.outcome === "PASS" || atual.evidence.outcome === "PASS_WITH_WARNING") && atual.validity.state !== "INVALIDATED";
+      // A aprovação entre runs só sustenta o MESMO código sob o MESMO contrato compartilhado; senão é desconhecida.
+      const arvoreDaProva = passou ? atual.evidence.inputs.code?.tree ?? null : aprovacao?.contratoSha === contratoSha ? aprovacao?.tree ?? null : null;
+      // A prova deste run que caiu (documento revisado, reparo) é informação mais nova que o cache entre runs.
+      if (!passou && (atual !== null || !aprovacao)) {
+        verificar.push(task.index);
+        continue;
+      }
+      if (arvoreDaProva !== null && arvoreDaProva === codigo.atual.tree) {
+        aprovadas.push({ index: task.index, title: task.title });
+        continue;
+      }
+      const arquivos = await arquivosMudados(arvore, arvoreDaProva, codigo.atual.tree);
+      if (arquivos === null) incerta = true;
+      const impacto = arvoreDaProva === null ? { impacto: "UNKNOWN" as const, arquivos: [] as string[] } : impactoNaTask(arquivos, escopoDe(task));
       /*
-       * A saída do Playwright vira arquivo SEMPRE, verde ou vermelho.
-       *
-       * O evento do run guarda só a primeira linha da causa e o painel some com
-       * o resto: quando a fase 3 do MCP_teste reprovou três vezes, não havia no
-       * disco uma linha do que tinha acontecido. Um gate que decide sobre o
-       * produto precisa deixar a prova no lugar onde já se procura.
+       * Desconhecido nunca é aprovado em silêncio (spec §3.3): a task vai à
+       * consulta limitada — confirmada contra o que mudou, com TASK line própria
+       * —, e não ao bloco "já DONE, siga em frente".
        */
-      const evidencia = g4.output || (!g4.green ? g4.cause : "");
-      if (evidencia !== "") {
-        await writeAtomic(`${paths.logs}/${evidencePrefix}.flow-run-${passagem}.log`, evidencia);
-      }
+      if (impacto.impacto === "AFFECTED") verificar.push(task.index);
+      else confirmar.push({ index: task.index, title: task.title, mudancas: arquivos });
+    }
+    const exigeChamada = incerta || verificar.length > 0 || confirmar.length > 0;
+    return { aprovadas, confirmar, verificar, exigeChamada };
+  };
 
-      gate("G4", g4.green ? "verde" : "vermelho", cycleAtual);
-      if (g4.green) {
-        fluxosQueFalharamPorUltimo = [];
-        if (g4.skipped !== "") announce(`[${session.id}] gate 4 pulado: ${g4.skipped}`);
-        else announce(`[${session.id}] gate 4: ${g4.scripts.length} fluxo(s) percorrido(s) na aplicação de pé`);
-        return true;
-      }
+  const g3Valido = async (): Promise<boolean> => {
+    if (estado.defects.some((defeito) => defeito.status === "AWAITING_VALIDATION" && (defeito.gates.at(-1) ?? defeito.discovered.gate) === "G3")) return false;
+    return !(await planoDoG3()).exigeChamada;
+  };
 
-      fluxosQueFalharamPorUltimo = g4.falharam ?? [];
-      lastGate = "gate 4 — fluxos na aplicação";
-      lastCause = g4.toolMissing === true || falhaDoRoteiro ? g4.cause : `${noChangeNote}${g4.cause}`;
-      if (g4.toolMissing === true) {
-        announce(`[${session.id}] o runner de fluxos não está instalado; o executor vai instalá-lo no projeto`);
-      } else if (g4.startupFailed === true) {
-        // Dito na tela também: quem olha o log precisa saber que o produto não
-        // subiu, e não que um fluxo reprovou.
-        announce(`[${session.id}] gate 4: a aplicação não subiu; nenhum fluxo foi percorrido`);
-      } else if (g4.scriptFailed === true) {
-        announce(`[${session.id}] gate 4: o roteiro falhou por si mesmo, não o produto — defeito do harness`);
-      }
-      if (falhaDoRoteiro && cycleAtual < maxCycles) {
-        const reprovados = fluxosQueFalharamPorUltimo.length > 0 ? fluxosQueFalharamPorUltimo
-          : [...new Set([...(fluxos.regressao ?? []), ...fluxos.workflows].map(workflow => workflow.number))];
-        for (const number of reprovados) causasDosRoteiros.set(number, g4.cause);
-        return await avancar(g4.cause, reprovados);
-      }
-      return false;
-    };
+  /** Uma leitura do verificador; a que cai por sessão ganha UMA sessão nova, e depois para (§125 C). */
+  const leituraDoVerificador = async (prompt: string, nome: string): Promise<{ resposta: EngineResult; g0: GateResult; log: string }> => {
+    for (let tentativa = 1; ; tentativa += 1) {
+      const sufixo = tentativa === 1 ? "" : `.session-${tentativa}`;
+      await writeAtomic(`${paths.prompts}/${nome}${sufixo}.txt`, prompt);
+      const resposta = await chamarLeitor({ role: "verifier", phase: session, attempt: ordinal(), prompt });
+      const log = await gravarUnico(`${paths.logs}/${nome}${sufixo}.log`, `${resposta.stdout}\n${resposta.stderr}`);
+      const g0 = gate0(resposta, options.engine);
+      if (g0.green || resposta.providerFailure || tentativa >= 2) return { resposta, g0, log };
+      announce(`[${session.id}] a sessão do verificador não concluiu (${g0.cause.split("\n")[0] ?? ""}); uma sessão nova, só deste gate, sem reabrir a construção`);
+    }
+  };
 
-    /*
-     * O executor pode dizer que o roteiro é que está errado.
-     *
-     * Ele é a única parte do ciclo que leu o produto E o erro do seletor. Sem
-     * esta saída, a única resposta possível a um gate 4 vermelho é mexer no
-     * produto — e na fase 4 do MCP_teste2 isso moveu um título para dentro de um
-     * `form` só porque o seletor o procurava ali.
-     *
-     * Uma vez por fase: a contestação manda reescrever o roteiro antes de rodar,
-     * e se o produto estiver mesmo errado o roteiro novo reprova igual.
-     */
-    const declarada = declarouRoteiroErrado(result.stdout);
-    let contestacao: string | null = null;
-    if (declarada) {
-      /*
-       * Quais versões esta contestação atinge: as dos roteiros que falharam na
-       * última passagem. Sem essa informação — a primeira passagem de um run
-       * retomado —, vale uma vez, como antes.
-       */
+  /** G3 — o verificador independente, só sobre o que não tem prova válida. */
+  const verificarTasks = async (): Promise<"verde" | "vermelho" | { parar: PhaseOutcome }> => {
+    gate("G3", "corrente", ciclosAbertos);
+    const plano = await planoDoG3();
+    const pendentesDoG3 = estado.defects.filter((defeito) => defeito.status === "AWAITING_VALIDATION" && (defeito.gates.at(-1) ?? defeito.discovered.gate) === "G3");
+    if (!plano.exigeChamada && pendentesDoG3.length === 0) {
+      gate("G3", "verde", ciclosAbertos);
+      return "verde";
+    }
+    if (plano.aprovadas.length > 0) {
+      announce(`[${session.id}] ${plano.aprovadas.length} de ${session.taskCount} task(s) já verificadas com este texto; não vou reperguntar sobre elas`);
+    }
+    if (plano.confirmar.length > 0) {
+      announce(`[${session.id}] ${plano.confirmar.length} task(s) aprovada(s) antes voltam à verificação: um reparo mudou o código desde então`);
+    }
+    const passagem = passagemAtual();
+    const nome = `${evidencePrefix}.verify-${passagem}`;
+    const verificationPrompt = verifyPrompt({
+      language: options.language,
+      sharedContract,
+      ...(options.architecture ? { architectureSlice: options.architecture.texto } : {}),
+      phaseMarkdown: session.markdown,
+      taskCount: session.taskCount,
+      ...(plano.aprovadas.length > 0 ? { tasksJaAprovadas: plano.aprovadas } : {}),
+      ...(plano.confirmar.length > 0 ? { tasksParaConfirmar: plano.confirmar } : {}),
+      ...(estado.defects.length > 0 ? { defeitosConhecidos: defeitosConhecidos() } : {}),
+    });
+    const indicesAprovados = new Set([...plano.aprovadas, ...plano.confirmar].map((task) => task.index));
+    let { resposta: verification, g0: g0Verifier, log } = await leituraDoVerificador(verificationPrompt, nome);
+    let g3 = gate3(verification.stdout, session.taskCount, indicesAprovados);
+    const formatPrefix = `${nome}.format-1`;
+    if (g0Verifier.green && !g3.green && g3.repairable !== true) {
+      announce(`[${session.id}] resposta do verificador com protocolo inválido; pedindo uma correção de formato somente-leitura, sem reabrir o executor`);
+      const retryPrompt = verifyRetryPrompt(verificationPrompt, verification.stdout, g3.cause);
+      await writeAtomic(`${paths.prompts}/${formatPrefix}.txt`, retryPrompt);
+      verification = await chamarLeitor({ role: "verifier", phase: session, attempt: ordinal(), prompt: retryPrompt });
+      log = await gravarUnico(`${paths.logs}/${formatPrefix}.log`, `${verification.stdout}\n${verification.stderr}`);
+      g0Verifier = gate0(verification, options.engine);
+      g3 = gate3(verification.stdout, session.taskCount, indicesAprovados);
+    }
+    if (!g0Verifier.green) {
+      gate("G3", "vermelho", ciclosAbertos);
+      return { parar: await pararPorSessao("gate 0 — engine", `A sessão de verificação independente não concluiu: ${g0Verifier.cause}`) };
+    }
+    if (!g3.green && g3.repairable !== true) {
+      gate("G3", "vermelho", ciclosAbertos);
+      return {
+        parar: await pararPorSessao(
+          g3.gate,
+          "O verificador devolveu protocolo inválido após uma recuperação somente-leitura; " +
+            `não é diagnóstico de implementação e não será enviado ao executor como reparo.\n${g3.cause}\n` +
+            `Resposta preservada em ${paths.logs}/${formatPrefix}.log`,
+        ),
+      };
+    }
+    verificadorEscreveuDesdeOG3 = false;
+    const vereditos = parseVerification(verification.stdout);
+    for (const verdict of vereditos) {
+      if (verdict.done && verdict.missing.startsWith("ADVISORY:")) {
+        announce(`[${session.id}] TASK ${verdict.index} — observação não bloqueante: ${verdict.missing.slice("ADVISORY:".length).trim()}`);
+      }
+    }
+    for (const reaberta of g3.reabertas) {
+      announce(`[${session.id}] TASK ${reaberta.index} já estava aprovada e foi reaberta pelo verificador: ${reaberta.missing}`);
+    }
+    if (g3.reabertas.length > 0) await options.aprovadas?.revogar(session.id, tasksDestaFase, g3.reabertas.map((task) => task.index));
+    // Aprovação com a árvore de agora só para quem o verificador JULGOU DONE nesta leitura; a omitida não ganha prova nova.
+    const julgadasDone = new Set(parseVerification(verification.stdout).filter((verdict) => verdict.done).map((verdict) => verdict.index));
+    const aprovadasAgora = g3.done.filter((indice) => julgadasDone.has(indice) || !plano.confirmar.some((task) => task.index === indice));
+    if (aprovadasAgora.length > 0) {
+      await options.aprovadas?.aprovar(session.id, tasksDestaFase, aprovadasAgora, ciclosAbertos, now, options.architecture?.sha12 ?? "", codigo.atual.tree ?? undefined, contratoSha);
+    }
+    const refs = await refDe(log);
+    const provaDaTask = new Map<number, string>();
+    for (const verdict of vereditos) {
+      const task = tasksDestaFase.find((cada) => cada.index === verdict.index);
+      if (!task) continue;
+      const prova = await livro.registrar({
+        phaseId: session.id, gate: "G3", checkId: `task-${verdict.index}`, now,
+        claim: `a task ${verdict.index} (${task.title}) cumpre os critérios de aceite e a fatia da arquitetura`,
+        outcome: verdict.done ? (verdict.missing.startsWith("ADVISORY:") ? "PASS_WITH_WARNING" : "PASS") : "REPAIR_REQUIRED",
+        inputs: { documents: [...documentosDaFase(), { name: "task", sha12: shaDaTask(task) }], code: codigo.atual },
+        scope: emptyScope({ tasks: [verdict.index], components: options.architecture?.componentes ?? [], artifacts: escopoDe(task).map((item) => item.path) }),
+        supports: [], artifactRefs: refs,
+      });
+      provaDaTask.set(verdict.index, prova.evidenceId);
+    }
+    gate("G3", g3.green ? "verde" : "vermelho", ciclosAbertos);
+    const reproduzidos = new Map<string, { assinatura: string }>();
+    let novos = false;
+    const conhecidos = estado.defects.map((defeito) => defeito.defectId);
+    for (const verdict of vereditos.filter((cada) => !cada.done)) {
+      const task = tasksDestaFase.find((cada) => cada.index === verdict.index);
+      const antes = estado.defects.length;
+      const defeito = await achar(
+        {
+          gate: "G3",
+          nature: "task",
+          severity: severidadeDoAchado(verdict.missing),
+          anchors: { task: verdict.index, ...(task ? { taskSha: shaDaTask(task) } : {}), quotes: citacoes(verdict.missing) },
+          // A mesma falha reescrita em outras palavras não é progresso: o que identifica é o critério que não se cumpre.
+          // Sem o rótulo, a identidade é a task: prosa diferente para a mesma task não é progresso (spec §5.3).
+          assinaturaDe: camposDoDiagnostico(verdict.missing).criterion || `task ${verdict.index} incompleta`,
+          ...(provaDaTask.get(verdict.index) ? { evidenceId: provaDaTask.get(verdict.index)! } : {}),
+          ...(options.architecture ? { components: options.architecture.componentes } : {}),
+          summary: `TASK ${verdict.index}${task ? ` (${task.title})` : ""}: ${verdict.missing.split(/[;\n]/u)[0]?.slice(0, 160) ?? ""}`,
+          detail: `TASK ${verdict.index}: INCOMPLETE — ${verdict.missing}${indicesAprovados.has(verdict.index) ? " (já tinha sido aprovada; o verificador a reabriu)" : ""}`,
+          ...(defeitoCitado(verdict.missing, conhecidos) ? { tag: defeitoCitado(verdict.missing, conhecidos)! } : {}),
+          diagnosedBy: { role: "verifier", ...(verification.sessionId ? { sessionId: verification.sessionId } : {}), log: relative(paths.root, log) },
+        },
+        { raw: `TASK ${verdict.index}: INCOMPLETE — ${verdict.missing}`, ...(verification.sessionId ? { sessionId: verification.sessionId } : {}), log: relative(paths.root, log) },
+      );
+      if (estado.defects.length > antes) novos = true;
+      reproduzidos.set(defeito.defectId, { assinatura: defeito.anchors.signature });
+    }
+    await validarDoGate("G3", reproduzidos, novos);
+    return g3.green ? "verde" : "vermelho";
+  };
+
+  // ------------------------------------------------------------------- G4
+
+  /**
+   * O G4 se aplica? Só a decisão — antes de qualquer porta, servidor, navegador
+   * ou roteirista (§125 C; spec §3.2): sem fluxos, ou com a regressão inteira de
+   * pé e nenhum fluxo próprio, é NOT_APPLICABLE sem custo.
+   */
+  const aplicabilidadeDoG4 = async (): Promise<{ aplicavel: false; motivo: string; apoios: string[] } | { aplicavel: true; regressao: SkeletonWorkflow[] }> => {
+    const fluxos = options.flows;
+    if (!fluxos) return { aplicavel: false, motivo: "build sem gate de fluxos", apoios: [] };
+    const proprios = fluxos.workflows;
+    const regressao = fluxos.regressao ?? [];
+    if (proprios.length === 0 && regressao.length === 0) {
+      return { aplicavel: false, motivo: "a fase não declara fluxos e nenhuma anterior deixou fluxo a revalidar", apoios: [] };
+    }
+    if (proprios.length > 0) return { aplicavel: true, regressao };
+    const donos = await arquivosDasFases(arvore);
+    let ultimoNecessario = -1;
+    const apoios: string[] = [];
+    for (const [indice, workflow] of regressao.entries()) {
+      const prova = [...livro.historico()].reverse().find((evidencia) => evidencia.checkId === `fluxo-${workflow.number}` && evidencia.outcome === "PASS");
+      if (!prova) {
+        ultimoNecessario = indice;
+        continue;
+      }
+      const arquivos = await arquivosMudados(arvore, prova.inputs.code?.tree ?? null, codigo.atual.tree);
+      const doMapa = options.territorioDoFluxo?.(workflow.number, donos) ?? null;
+      // Só o arquivo NOVO desde a prova é atribuído à fase corrente; o que já existia e nenhum commit de fase escreveu tem dono desconhecido.
+      const semAutor = (arquivos ?? []).filter((arquivo) => ![...donos.values()].some((escritos) => escritos.has(arquivo)));
+      const preexistentes = new Set(await existiamNaArvore(arvore, prova.inputs.code?.tree ?? null, semAutor));
+      const territorio = doMapa === null ? null : { ...doMapa, classificar: (arquivo: string) => (preexistentes.has(arquivo) ? "desconhecido" as const : doMapa.classificar(arquivo)) };
+      const roteiro = await readFile(join(arvore, FLOWS_DIR, flowScriptName(workflow.number)), "utf8").catch(() => "");
+      const mesmoRoteiro = prova.inputs.documents.find((doc) => doc.name === `roteiro-${workflow.number}`)?.sha12 === sha12(roteiro);
+      const impacto = impactoNoFluxo(arquivos, territorio);
+      if (impacto.impacto !== "NONE" || !mesmoRoteiro) ultimoNecessario = indice;
+      else apoios.push(prova.evidenceId);
+    }
+    if (ultimoNecessario < 0) {
+      return { aplicavel: false, motivo: `a regressão (${regressao.map((workflow) => workflow.number).join(", ")}) continua provada: as mudanças desta fase ficam fora do território dos fluxos`, apoios };
+    }
+    return { aplicavel: true, regressao: regressao.slice(0, ultimoNecessario + 1) };
+  };
+
+  const g4Valido = async (): Promise<boolean> => {
+    if (estado.defects.some((defeito) => defeito.status === "AWAITING_VALIDATION" && (defeito.gates.at(-1) ?? defeito.discovered.gate) === "G4")) return false;
+    if (proximoG4 !== null || contestacaoPendente !== null) return false;
+    const decisao = await aplicabilidadeDoG4();
+    if (!decisao.aplicavel) {
+      const atual = livro.atual(session.id, "fluxos");
+      if (!atual || atual.evidence.outcome !== "NOT_APPLICABLE" || atual.evidence.inputs.code?.tree !== codigo.atual.tree) {
+        await livro.registrar({
+          phaseId: session.id, gate: "G4", checkId: "fluxos", now,
+          claim: `G4 não se aplica: ${decisao.motivo}`, outcome: "NOT_APPLICABLE",
+          inputs: { documents: documentosDaFase(), code: codigo.atual }, scope: emptyScope(), supports: decisao.apoios, artifactRefs: [],
+        });
+        if (options.flows) {
+          gate("G4", "neutro", ciclosAbertos);
+          await transicao({ tipo: "nao-aplicavel", gate: "G4", motivo: `${decisao.motivo}; nenhum servidor, navegador ou roteirista foi iniciado`, ...(decisao.apoios.length > 0 ? { preservadas: decisao.apoios } : {}) });
+        }
+      }
+      return true;
+    }
+    const atual = livro.atual(session.id, "fluxos");
+    if (atual === null || atual.validity.state !== "VALID" || atual.evidence.inputs.code?.tree !== codigo.atual.tree) return false;
+    // NOT_APPLICABLE só vale aqui quando foi o PRÓPRIO G4 que decidiu (roteiro de regressão ausente), com a marca dele.
+    return atual.evidence.outcome === "PASS" || (atual.evidence.outcome === "NOT_APPLICABLE" && atual.evidence.inputs.extra?.["marca"] === FLOW_MARK);
+  };
+
+  /** G4 — os fluxos na aplicação de pé: o que já existia, com a decisão e a evidência novas. */
+  const verificarFluxos = async (): Promise<"verde" | "vermelho"> => {
+    const fluxos = options.flows!;
+    const decisao = await aplicabilidadeDoG4();
+    const regressao = decisao.aplicavel ? decisao.regressao : [];
+    const pedido = proximoG4;
+    proximoG4 = null;
+    const contestacao = contestacaoPendente;
+    contestacaoPendente = null;
+    let contestar: string | undefined;
+    if (contestacao) {
       const versoes =
         fluxosQueFalharamPorUltimo.length > 0
           ? await Promise.all(
@@ -745,372 +1183,691 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
           : ["sem-falha-conhecida"];
       if (versoes.some((versao) => !versoesContestadas.has(versao))) {
         for (const versao of versoes) versoesContestadas.add(versao);
-        contestacao = declarada;
-        announce(`[${session.id}] o executor contestou o roteiro em vez de mexer no produto: ${declarada}`);
+        contestar = contestacao;
+        announce(`[${session.id}] o executor contestou o roteiro em vez de mexer no produto: ${contestacao}`);
       } else {
         announce(`[${session.id}] contestação ignorada: este mesmo roteiro já foi contestado e reescrito nesta fase`);
       }
     }
-    const contestacaoDoRoteiro = contestacao ?? undefined;
+    const passagemBase = passagemAtual();
+    execucoesG4NaPassagem = ultimaPassagemG4 === passagemBase ? execucoesG4NaPassagem + 1 : 1;
+    ultimaPassagemG4 = passagemBase;
+    const passagem = execucoesG4NaPassagem === 1 ? passagemBase : `${passagemBase}.${execucoesG4NaPassagem}`;
+    gate("G4", "corrente", ciclosAbertos);
+    const startCommand = await fluxos.resolveStart();
+    let g4: Awaited<ReturnType<typeof gate4>>;
+    try {
+      g4 = await gate4({
+        projectRoot: arvore,
+        workflows: fluxos.workflows,
+        ...(contestar ? { roteiroContestado: contestar, roteirosQueFalharam: fluxosQueFalharamPorUltimo } : {}),
+        ...(regressao.length > 0 ? { regressao } : {}),
+        ...(pedido?.rejeitados ? { rejectedScripts: pedido.rejeitados } : {}),
+        startCommand,
+        author: async (workflow, rejected, baseUrl, contextoDaPassagem) => {
+          const priorCause = causasDosRoteiros.get(workflow.number);
+          const previousScript = rascunhosDosFluxos.get(workflow.number) ?? (rejected.length > 0 || priorCause
+            ? await readFile(join(arvore, FLOWS_DIR, flowScriptName(workflow.number)), "utf8").catch(() => undefined)
+            : undefined);
+          const prompt = flowPrompt({
+            language: options.language,
+            workflow: { number: workflow.number, name: workflow.name, steps: workflow.steps },
+            baseUrl,
+            sharedContract: contratoDosFluxos,
+            phaseMarkdown: session.markdown,
+            ...((rejected.length > 0 || priorCause) ? { rejected: [...rejected, ...(priorCause ? [priorCause] : [])] } : {}),
+            ...(previousScript ? { previousScript } : {}),
+            passagem: contextoDaPassagem,
+          });
+          const arquivo = `${evidencePrefix}.flow-${workflow.number}-${passagem}-${randomUUID()}`;
+          const response = await chamarRevisao("flow-author", prompt, arquivo, ciclosAbertos);
+          const draft = extractFlowScript(response);
+          if (draft && checkFlowScript(draft, workflow).length > 0) rascunhosDosFluxos.set(workflow.number, draft);
+          else rascunhosDosFluxos.delete(workflow.number);
+          return response;
+        },
+        triagem: async (entrada) => {
+          triagensNoCiclo += 1;
+          return await chamarRevisao("flow-triage", triagePrompt({
+              language: options.language,
+              phaseMarkdown: session.markdown,
+              sharedContract: contratoDosFluxos,
+              workflow: { number: entrada.workflow.number, name: entrada.workflow.name, steps: entrada.workflow.steps },
+              script: entrada.script,
+              failure: entrada.failure,
+              snapshot: entrada.snapshot,
+              serverErrors: entrada.serverErrors,
+            }), `${evidencePrefix}.triagem-${passagem}-${triagensNoCiclo}`, ciclosAbertos);
+        },
+        ...(fluxos.runner !== undefined ? { runner: fluxos.runner } : {}),
+        ...(fluxos.port !== undefined ? { port: fluxos.port } : {}),
+        ...(fluxos.preferredPort !== undefined ? { preferredPort: fluxos.preferredPort } : {}),
+        announce: (message) => announce(`[${session.id}] ${message}`),
+      });
+    } catch (erro) {
+      if (!(erro instanceof FalhaDeRevisao) || !erro.retryable) throw erro;
+      gate("G4", "vermelho", ciclosAbertos);
+      const defeito = await achar({ gate: "G4", nature: "fluxo-revisao", anchors: {}, summary: "a sessão de revisão do G4 não concluiu", detail: erro.message });
+      await validarDoGate("G4", new Map([[defeito.defectId, { assinatura: defeito.anchors.signature }]]), false);
+      return "vermelho";
+    }
+    triagensNoCiclo = 0;
+    if (g4.green === false && g4.triagem?.tipo === "CRITERIO") await registrarDecisaoDoBuild(options.projectRoot, session.id, ciclosAbertos, g4.triagem);
+    const evidenciaDoG4 = g4.output || (!g4.green ? g4.cause : "");
+    const logDoG4 = evidenciaDoG4 !== "" ? await gravarUnico(`${paths.logs}/${evidencePrefix}.flow-run-${passagem}.log`, evidenciaDoG4) : null;
+    gate("G4", g4.green ? (g4.skipped !== "" ? "neutro" : "verde") : "vermelho", ciclosAbertos);
+    const ordem = [...regressao, ...fluxos.workflows].filter((workflow, indice, todos) => todos.findIndex((outro) => outro.number === workflow.number) === indice);
+    const roteiros: { name: string; sha12: string }[] = [];
+    for (const workflow of ordem) {
+      const conteudo = await readFile(join(arvore, FLOWS_DIR, flowScriptName(workflow.number)), "utf8").catch(() => "");
+      roteiros.push({ name: `roteiro-${workflow.number}`, sha12: sha12(conteudo) });
+    }
+    const entradasDoG4: EvidenceInputs = {
+      documents: [...documentosDaFase(), ...roteiros],
+      code: codigo.atual,
+      ...(startCommand ? { command: startCommand } : {}),
+      extra: { marca: FLOW_MARK },
+    };
+    const refs = logDoG4 ? await refDe(logDoG4) : [];
+    if (g4.green) {
+      fluxosQueFalharamPorUltimo = [];
+      if (g4.skipped !== "") announce(`[${session.id}] gate 4 pulado: ${g4.skipped}`);
+      else announce(`[${session.id}] gate 4: ${g4.scripts.length} fluxo(s) percorrido(s) na aplicação de pé`);
+      const geral = await livro.registrar({
+        phaseId: session.id, gate: "G4", checkId: "fluxos", now,
+        claim: g4.skipped !== "" ? `G4 não se aplica: ${g4.skipped}` : `os fluxos ${ordem.map((workflow) => workflow.number).join(", ")} passam na aplicação de pé`,
+        outcome: g4.skipped !== "" ? "NOT_APPLICABLE" : "PASS",
+        inputs: entradasDoG4, scope: emptyScope({ flows: ordem.map((workflow) => workflow.number), components: options.architecture?.componentes ?? [] }),
+        supports: [], artifactRefs: refs,
+      });
+      if (g4.skipped === "") {
+        for (const workflow of ordem) {
+          await livro.registrar({
+            phaseId: session.id, gate: "G4", checkId: `fluxo-${workflow.number}`, now,
+            claim: `o fluxo ${workflow.number} (${workflow.name}) passa na aplicação de pé`, outcome: "PASS",
+            inputs: entradasDoG4, scope: emptyScope({ flows: [workflow.number] }), supports: [geral.evidenceId], artifactRefs: refs,
+          });
+        }
+      }
+      await validarDoGate("G4", new Map(), false);
+      return "verde";
+    }
+    fluxosQueFalharamPorUltimo = g4.falharam ?? [];
+    const falhaDoRoteiro = g4.scriptFailed === true || g4.triagem?.tipo === "ROTEIRO";
+    const causa = g4.toolMissing === true || falhaDoRoteiro ? g4.cause : `${previousWroteNothing ? "A sessão anterior terminou sem alterar nenhum arquivo. " : ""}${g4.cause}`;
+    if (g4.toolMissing === true) announce(`[${session.id}] o runner de fluxos não está instalado; o executor vai instalá-lo no projeto`);
+    else if (g4.startupFailed === true) announce(`[${session.id}] gate 4: a aplicação não subiu; nenhum fluxo foi percorrido`);
+    else if (g4.scriptFailed === true) announce(`[${session.id}] gate 4: o roteiro falhou por si mesmo, não o produto — defeito do harness`);
+    if (falhaDoRoteiro) {
+      const reprovados = fluxosQueFalharamPorUltimo.length > 0 ? fluxosQueFalharamPorUltimo : [...new Set(ordem.map((workflow) => workflow.number))];
+      for (const number of reprovados) causasDosRoteiros.set(number, g4.cause);
+    }
+    const evidencia = await livro.registrar({
+      phaseId: session.id, gate: "G4", checkId: "fluxos", now,
+      claim: "os fluxos declarados passam na aplicação de pé", outcome: "REPAIR_REQUIRED",
+      inputs: entradasDoG4, scope: emptyScope({ flows: ordem.map((workflow) => workflow.number) }), supports: [], artifactRefs: refs,
+    });
+    const workflow = fluxosQueFalharamPorUltimo[0];
+    const natureza: NaturezaDoDefeito = falhaDoRoteiro ? "fluxo-roteiro" : g4.toolMissing === true ? "fluxo-ferramenta" : g4.startupFailed === true || startCommand === null ? "fluxo-subida" : g4.triagem?.tipo === "CRITERIO" ? "fluxo-criterio" : "fluxo-produto";
+    const tarefaDoCriterio = g4.triagem?.criterio ? tarefaPeloCriterio(tasksDestaFase, g4.triagem.criterio) : undefined;
+    const triagemCrua = g4.triagem ? [`CAPIVARA_TRIAGEM: ${g4.triagem.tipo}`, `CRITERION: ${g4.triagem.criterio}`, `EVIDENCE: ${g4.triagem.evidencia}`, `LOCATION: ${g4.triagem.onde}`, `FIX: ${g4.triagem.correcao}`].join("\n") : "";
+    const defeito = await achar(
+      {
+        gate: "G4",
+        nature: natureza,
+        anchors: {
+          ...(workflow ? { workflow } : {}),
+          ...(g4.triagem?.onde ? { step: g4.triagem.onde.slice(0, 120) } : {}),
+          ...(tarefaDoCriterio ? { task: tarefaDoCriterio } : {}),
+          quotes: citacoes(`${g4.triagem?.evidencia ?? ""}\n${g4.cause}`),
+          version: roteiros.map((roteiro) => `${roteiro.name}@${roteiro.sha12}`).join(","),
+        },
+        summary: `${workflow ? `fluxo ${workflow}: ` : ""}${g4.cause.split("\n")[0]?.slice(0, 160) ?? ""}`,
+        // A versão dos roteiros entra no texto: a mesma falha com outro roteiro é informação nova.
+        detail: `${causa}\n\n(roteiros desta passagem: ${roteiros.map((roteiro) => `${roteiro.name}@${roteiro.sha12}`).join(", ") || "nenhum"})`,
+        evidenceId: evidencia.evidenceId,
+        ...(g4.triagem && natureza === "fluxo-produto" ? { diagnosedBy: { role: "verifier" as const, purpose: "flow-triage", ...(sessoesDasRevisoes.get("flow-triage") ? { sessionId: sessoesDasRevisoes.get("flow-triage")! } : {}) } } : {}),
+      },
+      g4.triagem && (natureza === "fluxo-produto" || natureza === "fluxo-criterio")
+        ? { raw: triagemCrua, purpose: "flow-triage", ...(sessoesDasRevisoes.get("flow-triage") ? { sessionId: sessoesDasRevisoes.get("flow-triage")! } : {}), ...(logDoG4 ? { log: relative(paths.root, logDoG4) } : {}) }
+        : undefined,
+    );
+    await validarDoGate("G4", new Map([[defeito.defectId, { assinatura: defeito.anchors.signature }]]), false);
+    return "vermelho";
+  };
 
-    /**
-     * Reparar e julgar são sessões diferentes, ainda que usem o mesmo modelo.
-     * O orçamento pertence à fase e não renova a cada tentativa do executor.
-     * Instalar dependências pode corrigir G2 sem mudar arquivos versionados:
-     * quem confirma o reparo são os gates executados novamente, nunca a fala
-     * do reparador nem a presença de um diff.
-     */
-    const repararComVerificador = async (cause: string): Promise<boolean> => {
-      if (verifierRepairs >= maxVerifierRepairs) return false;
-      verifierRepairs += 1;
-      if (options.integrationFailure) options.integrationFailure.repairBudget.used = verifierRepairs;
-      verificarTudo = true;
-      const tasks = tasksDaFase(session.markdown);
-      await options.aprovadas?.revogar(session.id, tasks, tasks.map((task) => task.index));
+  // ------------------------------------------------------------------ ações
+
+  /** A ação planejada, executada; quem a valida é a próxima verificação do gate de cada defeito. */
+  const executarAcao = async (acao: AcaoPlanejada): Promise<{ parar: PhaseOutcome } | null> => {
+    const gates = [...new Set(acao.defeitos.map((defeito) => defeito.gates.at(-1) ?? defeito.discovered.gate))];
+    const uso = registro.uso();
+    const orcamentoDaAcao = [
+      { escopo: "ciclo", usado: uso.repairs + 1, max: orcamento.porCiclo },
+      ...gates.map((gate) => ({ escopo: gate, usado: (uso.byGate[gate] ?? 0) + 1, max: orcamento.porGate })),
+      ...acao.defeitos.map((defeito) => ({ escopo: defeito.defectId, usado: (uso.byDefect[defeito.defectId] ?? 0) + 1, max: orcamento.porDefeito })),
+    ];
+    const rotuloDaEstrategia: Record<Estrategia, string> = {
+      executor: acao.defeitos.length > 1 ? "executor, correção localizada agrupada" : "executor, correção localizada",
+      verificador: "verificador que diagnosticou",
+      roteiro: "reescrita do roteiro do G4",
+      revisao: "nova sessão de revisão do G4",
+      conciliacao: "conciliação dos trechos em conflito",
+    };
+    const testesFalhando = acao.defeitos.some((defeito) => defeito.nature === "suite" || defeito.nature === "integracao-teste")
+      ? testesQueFalharam(acao.defeitos.map((defeito) => defeito.detail).join("\n")).length
+      : undefined;
+
+    if (acao.estrategia === "executor") {
+      const ctx = await contexto();
+      const gateTexto = gates.map(nomeDoGate).join(" + ");
+      const causa = await causaDosDefeitos(acao.defeitos);
+      const prompt = fixPrompt({
+        ...ctx,
+        gate: gateTexto,
+        cause: causa + (ultimoRelatorioDeReparo ? `\n\nRelatório do último reparo assistido pelo verificador (confira os gates; o relatório não é aprovação):\n${ultimoRelatorioDeReparo}` : "") +
+          (falhaNaPreparacaoNode ? `\n\n## Dependency preparation — unresolved environment failure\n${falhaNaPreparacaoNode}` : ""),
+        previousWroteNothing,
+      });
+      registro.consumir(acao, { role: "builder", attempt: sessoesNestaExecucao + 1 }, testesFalhando);
+      await registro.salvar();
+      await transicao({ tipo: "estrategia", gate: gates.join("+"), defeitos: acao.defeitos.map((defeito) => defeito.defectId), estrategia: rotuloDaEstrategia.executor, agente: "executor", orcamento: orcamentoDaAcao, motivo: "reparo localizado com o handoff de cada defeito; não reabre a fase nem repete gates com prova válida", proximo: gates.join(", ") });
+      announce(`[${session.id}] nova chamada de construção ${sessoesNestaExecucao + 1}; motivo: ${gateTexto}: ${acao.defeitos[0]?.summary ?? ""}`);
+      await event("retry", `${gateTexto}: ${acao.defeitos.map((defeito) => defeito.detail).join("\n\n")}`, ciclosAbertos);
+      progressoDaFase(`ciclo ${ciclosAbertos}/${maxCycles} · correção`);
+      const ambienteAntes = testeAgora ? await identidadeDoAmbiente(testeAgora.command, testeAgora.source) : "";
+      const comecou = Date.now();
+      const sessao = await sessaoDoExecutor(prompt);
+      contarCusto(acao.defeitos, [sessao.result], comecou);
+      const g0 = gate0(sessao.result, options.engine);
+      if (!g0.green && (sessao.result.timedOut || sessao.result.providerFailure)) return { parar: await pararPorSessao("gate 0 — engine", g0.cause) };
+      const mudouAmbiente = testeAgora ? ambienteAntes !== (await identidadeDoAmbiente(testeAgora.command, testeAgora.source)) : false;
+      for (const defeito of acao.defeitos) {
+        const tentativa = defeito.attempts.at(-1);
+        if (tentativa) tentativa.changed = sessao.escreveu || mudouAmbiente || contestacaoPendente !== null;
+      }
+      registro.aguardarValidacao(acao.defeitos);
+      // O defeito de engine se valida aqui mesmo: a sessão de correção terminou, ou não.
+      const doEngine = acao.defeitos.filter((defeito) => defeito.nature === "engine");
+      for (const defeito of doEngine) {
+        registro.validar(defeito, g0.green ? null : { assinatura: assinaturaDaFalha(g0.cause) }, false);
+        if (!g0.green) defeito.anchors.signature = assinaturaDaFalha(g0.cause);
+      }
+      if (!g0.green && doEngine.length === 0) {
+        await achar({ gate: "G0", nature: "engine", anchors: {}, summary: "a sessão do executor não terminou com resultado utilizável", detail: g0.cause });
+      }
+      await registro.salvar();
+      return null;
+    }
+
+    if (acao.estrategia === "verificador") {
+      reparosNestaExecucao += 1;
+      if (options.integrationFailure) options.integrationFailure.repairBudget.used = reparosNestaExecucao;
+      verificadorEscreveuDesdeOG3 = true;
+      const diagnostico = acao.defeitos[0]!.diagnosedBy;
+      const contrato = options.verifierResume ?? null;
+      const podeRetomar = diagnostico?.sessionId !== undefined && contrato !== null &&
+        (contrato.estado === "garantido" || options.verifierResumeUnverified === true) && contrato.elevacao === "por-invocacao";
+      const causa = await causaDosDefeitos(acao.defeitos);
       const repairPrompt = verifierRepairPrompt({
         language: options.language,
         sharedContract,
         ...(options.architecture ? { architectureSlice: options.architecture.texto } : {}),
         phaseMarkdown: session.markdown,
-        cause: integrationGuidance ? `${cause}\n\nOrientação do validador já levantada para a integração:\n${integrationGuidance}` : cause,
+        cause: causa,
         testCommand: testeAgora?.command ?? null,
-        ...(context.e2eCommand ? { e2eCommand: context.e2eCommand } : {}),
+        ...((await resolveE2eCommand(arvore)) ? { e2eCommand: (await resolveE2eCommand(arvore))! } : {}),
         systemInstall: options.systemInstall === true,
       });
-      const nome = `${evidencePrefix}.repair-${verifierRepairs}-cycle-${cycle}`;
+      const nome = `${evidencePrefix}.repair-${reparosNestaExecucao}-cycle-${ordinal()}`;
       await writeAtomic(`${paths.prompts}/${nome}.txt`, repairPrompt);
-      announce(`[${session.id}] verificador corrigindo a falha (${verifierRepairs}/${maxVerifierRepairs}); os gates serão executados novamente por sessões independentes`);
-      await event("retry", `reparo ${verifierRepairs}/${maxVerifierRepairs} pelo verificador: ${cause.split("\n")[0] ?? ""}`, cycle);
-      gate("G0", "corrente", cycle);
-      const repairSignatureBefore = await treeSignature(arvore);
-      const repair = await chamarLeitor({ role: "verifier", repair: true, phase: session, attempt: cycle, prompt: repairPrompt });
-      lastRepairGuidance = `${repair.stdout}\n${repair.stderr}`.trim();
-      await writeAtomic(`${paths.logs}/${nome}.log`, `${repair.stdout}\n${repair.stderr}`);
-      const repairWrote = gate1(repairSignatureBefore, await treeSignature(arvore));
-      gate("G1", repairWrote ? "verde" : "neutro", cycle);
-      if (repairWrote) {
-        previousWroteNothing = false;
-        noChangeNote = "";
+      registro.consumir(acao, { role: "verifier", attempt: ordinal() }, testesFalhando);
+      await registro.salvar();
+      await transicao({
+        tipo: "estrategia", gate: gates.join("+"), defeitos: acao.defeitos.map((defeito) => defeito.defectId), estrategia: rotuloDaEstrategia.verificador,
+        agente: podeRetomar ? `verificador, pedindo a retomada da sessão ${diagnostico!.sessionId} (só confirmada pelo id que o provider devolver)` : "verificador, sessão nova do mesmo modelo com o handoff",
+        orcamento: [...orcamentoDaAcao, ...gates.map((gate) => ({ escopo: `verificador ${gate}`, usado: (uso.verifierByGate[gate] ?? 0) + 1, max: orcamento.reparosDoVerificador }))],
+        motivo: "o executor não resolveu (ou o defeito não tem diagnóstico do verificador); quem reparar não valida a própria mudança", proximo: `${gates.join(", ")} por sessão independente`,
+      });
+      announce(`[${session.id}] verificador corrigindo a falha (${reparosNestaExecucao}); os gates serão executados novamente por sessões independentes`);
+      await event("retry", `reparo ${reparosNestaExecucao}/${orcamento.reparosDoVerificador} pelo verificador: ${acao.defeitos[0]?.summary ?? ""}`, ciclosAbertos);
+      gate("G0", "corrente", ciclosAbertos);
+      const antes = codigo.atual;
+      const ambienteAntesDoReparo = testeAgora ? await identidadeDoAmbiente(testeAgora.command, testeAgora.source) : "";
+      const comecouReparo = Date.now();
+      let repair = await chamarLeitor({ role: "verifier", repair: true, phase: session, attempt: ordinal(), prompt: repairPrompt, ...(podeRetomar ? { resumeSession: diagnostico!.sessionId! } : {}) });
+      const sessoesDoReparo: EngineResult[] = [repair];
+      let retomada = podeRetomar && repair.sessionId === diagnostico!.sessionId;
+      if (podeRetomar && !retomada) {
+        // Outra sessão não é retomada — mas o prompt leva o handoff inteiro: ela É a sessão nova do fallback, e o trabalho dela fica.
+        announce(`[${session.id}] a sessão ${diagnostico!.sessionId} não foi retomada (${repair.sessionId ? `o provider abriu ${repair.sessionId}` : "sem id no envelope"}); a sessão aberta recebeu o handoff e vale como a sessão nova`);
       }
-      const reparoTerminou = gate0(repair, options.engine);
-      gate("G0", reparoTerminou.green ? "verde" : "vermelho", cycle);
-      if (!reparoTerminou.green) {
-        // O trabalho parcial fica na árvore. A correção seguinte recebe o
-        // diagnóstico original e o erro desta tentativa, sem afirmar sucesso.
-        lastCause = `${cause}\n\nO reparo assistido pelo verificador não concluiu: ${reparoTerminou.cause}`;
-        falhaDeSessao ||= Boolean(repair.timedOut || repair.providerFailure);
+      if (podeRetomar && !gate0(repair, options.engine).green) {
+        // A sessão pedida não entregou resultado utilizável: UMA sessão nova com o handoff, e o transcrito da primeira fica.
+        await gravarUnico(`${paths.logs}/${nome}.retomada.log`, `${repair.stdout}\n${repair.stderr}`);
+        announce(`[${session.id}] a sessão pedida não concluiu; sessão nova do mesmo modelo com o handoff`);
+        repair = await chamarLeitor({ role: "verifier", repair: true, phase: session, attempt: ordinal(), prompt: repairPrompt });
+        sessoesDoReparo.push(repair);
+        retomada = false;
+      }
+      contarCusto(acao.defeitos, sessoesDoReparo, comecouReparo);
+      for (const defeito of acao.defeitos) {
+        const tentativa = defeito.attempts.at(-1);
+        if (tentativa) tentativa.agent = { ...tentativa.agent, ...(repair.sessionId ? { sessionId: repair.sessionId } : {}), resumed: retomada };
+      }
+      ultimoRelatorioDeReparo = `${repair.stdout}\n${repair.stderr}`.trim();
+      const log = await gravarUnico(`${paths.logs}/${nome}.log`, `${repair.stdout}\n${repair.stderr}`);
+      codigo.atual = await estadoDoCodigo(arvore);
+      const escreveu = antes.tree !== codigo.atual.tree;
+      const mudouAmbiente = testeAgora ? ambienteAntesDoReparo !== (await identidadeDoAmbiente(testeAgora.command, testeAgora.source)) : false;
+      for (const defeito of acao.defeitos) {
+        const tentativa = defeito.attempts.at(-1);
+        // O reparo pode mudar o ambiente sem rastro que o harness meça (instalação de sistema): só "nada" quando nada mesmo.
+        if (tentativa) tentativa.changed = escreveu || mudouAmbiente || options.systemInstall === true;
+      }
+      gate("G1", escreveu ? "verde" : "neutro", ciclosAbertos);
+      if (escreveu) previousWroteNothing = false;
+      const terminou = gate0(repair, options.engine);
+      gate("G0", terminou.green ? "verde" : "vermelho", ciclosAbertos);
+      await livro.registrar({
+        phaseId: session.id, gate: "G0", checkId: `reparo-${reparosNestaExecucao}`, now,
+        claim: "a sessão de reparo do verificador terminou com resultado utilizável (o relatório dela não é aprovação)",
+        outcome: terminou.green ? "PASS" : "REPAIR_REQUIRED",
+        inputs: { documents: documentosDaFase(), code: codigo.atual }, scope: emptyScope(), supports: [], artifactRefs: await refDe(log),
+      });
+      registro.aguardarValidacao(acao.defeitos);
+      await registro.salvar();
+      /*
+       * O reparo do verificador pode instalar, recompilar e mexer no ambiente
+       * fora do código (§114): quem confirma é a suíte rodando de novo, nunca a
+       * fala do reparador nem a ausência de diff.
+       */
+      const suiteAtual = livro.atual(session.id, "suite");
+      if (suiteAtual && suiteAtual.validity.state !== "INVALIDATED") {
+        await livro.alterarValidade(suiteAtual.evidence.evidenceId, "INVALIDATED", "o reparo do verificador pode ter mudado o ambiente fora do código", `reparo ${reparosNestaExecucao}`, now);
+      }
+      if (!terminou.green) {
+        if (repair.timedOut || repair.providerFailure) return { parar: await pararPorSessao("gate 0 — engine", `${acao.defeitos[0]?.detail ?? ""}\n\nO reparo assistido pelo verificador não concluiu: ${terminou.cause}`) };
         announce(`[${session.id}] reparo do verificador não concluiu; o trabalho foi preservado para o executor`);
-        return false;
       }
       if (options.resolveTest) testeAgora = await options.resolveTest();
-      return true;
-    };
+      return null;
+    }
 
-    const g0 = gate0(result, options.engine);
-    gate("G0", g0.green ? "verde" : "vermelho", cycle);
-    /*
-     * O gate 1 é sinal, não veredito: não escrever nada não reprova a fase, mas
-     * muda tudo na leitura de quem olha a tela. Vem depois do gate 0 porque a
-     * ordem na tela é a ordem dos gates, não a da avaliação.
-     *
-     * E por isso ele nunca fica vermelho. Numa fase já implementada — o caso
-     * comum de todo build retomado e de todo `change` — não escrever é o certo,
-     * e a bolinha vermelha ao lado de quatro verdes fazia a tela relatar uma
-     * falha que não houve. Cinza: rodou, e não há o que reportar.
-     */
-    gate("G1", wrote ? "verde" : "neutro", cycle);
-    if (!g0.green) {
-      lastGate = g0.gate;
-      lastCause = g0.cause;
+    // Roteiro e revisão do G4: a ação é a próxima passagem do G4, com o que foi decidido.
+    registro.consumir(acao, { role: "verifier", attempt: ordinal() });
+    registro.aguardarValidacao(acao.defeitos);
+    await registro.salvar();
+    if (acao.estrategia === "roteiro") {
+      const reprovados = acao.defeitos.map((defeito) => defeito.anchors.workflow).filter((numero): numero is string => numero !== undefined);
+      proximoG4 = { rejeitados: reprovados.length > 0 ? reprovados : fluxosQueFalharamPorUltimo };
     } else {
-      for (;;) {
-        /*
-         * Antes de qualquer gate rodar o produto: configuração e esquema.
-         *
-         * Aqui e não no preflight porque quem entrega o `.env.example` e a
-         * migração é o executor, e ele os entrega no meio da fase. A cada ciclo
-         * porque cada fase acrescenta tabela.
-         */
-        const passagem = verifierRepairs > 0 ? `${cycle}-after-repair-${verifierRepairs}` : `${cycle}`;
-        const g2 = await comBancosDeTeste(arvore, options.testRunner ?? defaultTestRunner, async testar => {
-          const ambiente = await prepararAmbiente(arvore, testar);
-          for (const aviso of ambiente.anuncios) announce(`[${session.id}] ${aviso}`);
-          /*
-           * A saída da migração vai ao disco SEMPRE que ela roda.
-           *
-           * Ela saía só na tela, e a tela corta: no `assitencia` a linha terminou em
-           * "> gestao-assistencia-tec…" e a causa real não existia em lugar nenhum.
-           * Mensagem que só cabe na tela é mensagem que se perde no primeiro caso
-           * interessante.
-           */
-          if (ambiente.saidaDaMigracao !== "") {
-            await writeAtomic(`${paths.logs}/${evidencePrefix}.migrate-${passagem}.log`, ambiente.saidaDaMigracao);
-          }
+      proximoG4 = {};
+    }
+    await transicao({ tipo: "estrategia", gate: "G4", defeitos: acao.defeitos.map((defeito) => defeito.defectId), estrategia: rotuloDaEstrategia[acao.estrategia], agente: "roteirista G4", orcamento: orcamentoDaAcao, motivo: "corrige só a verificação G4; produto e provas de G2/G3 preservados", proximo: "G4" });
+    await event("retry", `correção do roteiro G4 no próximo ciclo, preservando produto e G2/G3 aprovados: ${acao.defeitos[0]?.detail ?? ""}`, ciclosAbertos);
+    progressoDaFase(`ciclo ${ciclosAbertos}/${maxCycles} · correção do G4`);
+    return null;
+  };
 
-          if (await prepararDependenciasNode(cycle)) {
-            if (options.resolveTest) testeAgora = await options.resolveTest();
-          }
-          gate("G2", "corrente", cycle);
-          return gate2(arvore, testeAgora?.command ?? null, testar, options.systemInstall === true);
+  // --------------------------------------------------------------- paradas
+
+  /**
+   * A causa de quem para: o gate é o do defeito que está vermelho AGORA — o
+   * aberto mais recente, antes dos que só esperam validação —, e o texto traz
+   * todos, com ele primeiro.
+   */
+  const causaDaParada = (): { gate: GateName; cause: string } => {
+    const pendentes = estado.defects.filter((defeito) => defeito.status !== "RESOLVED");
+    const vermelhos = pendentes.filter((defeito) => defeito.status === "OPEN" || defeito.status === "ESCALATED");
+    const primeiro = vermelhos.at(-1) ?? pendentes.at(-1);
+    const abertos = primeiro ? [primeiro, ...pendentes.filter((defeito) => defeito !== primeiro)] : pendentes;
+    return {
+      // A revisão do G4 que caiu é falha de sessão de um leitor: gate 0, como sempre foi relatada.
+      gate: primeiro ? (primeiro.nature === "fluxo-revisao" ? "gate 0 — engine" : nomeDoGate(primeiro.gates.at(-1) ?? primeiro.discovered.gate)) : "gate 0 — engine",
+      cause: abertos.map((defeito) => defeito.detail).join("\n\n") || "a fase parou sem defeito registrado",
+    };
+  };
+
+  const fecharFalha = async (gateDaFalha: GateName, causa: string, motivo: string): Promise<PhaseOutcome> => {
+    for (const defeito of estado.defects) registro.escalar(defeito);
+    estado.ultimoEstado = { tree: codigo.atual.tree, at: now().toISOString() };
+    await registro.salvar();
+    await transicao({ tipo: "parada", gate: gateDaFalha, defeitos: estado.defects.filter((defeito) => defeito.status === "ESCALATED").map((defeito) => defeito.defectId), motivo });
+    await recolher(ciclosAbertos);
+    await event("blocked", `${gateDaFalha}: ${causa.split("\n")[0] ?? ""}`, ciclosAbertos);
+    relatar({ kind: "phase", id: session.id, state: "falhou", cycle: ciclosAbertos, detail: gateDaFalha });
+    if (!noWorktree && (await hasPendingChanges(options.projectRoot))) {
+      announce(`[${session.id}] o trabalho parcial desta fase ficou na árvore. Antes de rodar de novo, escolha uma:`);
+      announce("           git add -A && git commit -m \"wip: trabalho parcial\"   → o loop revalida a fase e segue");
+      announce("           git checkout -- . && git clean -fd                      → descarta e a fase recomeça do zero");
+      announce("           ou rode `capivara build` de novo sem mexer: o Core reconhece o próprio parcial e continua dos defeitos registrados");
+    }
+    return { status: "failed", gate: gateDaFalha, cause: causa, cycles: ciclosAbertos };
+  };
+
+  /** A sessão não entregou resultado utilizável: para com o parcial preservado (§115.17). */
+  const pararPorSessao = async (gateDaFalha: GateName, causa: string): Promise<PhaseOutcome> => {
+    announce(`[${session.id}] a sessão não entregou resultado utilizável; parando com o parcial preservado, sem abrir outra chamada de construção automaticamente`);
+    return fecharFalha(gateDaFalha, causa, "a sessão de um agente não entregou resultado utilizável; parcial e defeitos preservados para a retomada");
+  };
+
+  /** Todas as provas válidas: commit pelo Core e conclusão. */
+  const fechar = async (): Promise<PhaseOutcome> => {
+    delete estado.ultimoEstado;
+    await registro.salvar();
+    const commit = options.commitsEnabled
+      ? await commitPhase(arvore, session.number, session.title)
+      : { committed: false, message: "commits desabilitados: nenhum repositório Git" };
+    if (commit.bloqueios && commit.bloqueios.length > 0) {
+      await recolher(ciclosAbertos);
+      await event("blocked", `commit bloqueado: ${commit.bloqueios.map((bloqueio) => bloqueio.caminho).join(", ")}`, ciclosAbertos);
+      relatar({ kind: "phase", id: session.id, state: "falhou", cycle: ciclosAbertos, detail: "commit bloqueado" });
+      announce(`[${session.id}] gates verdes, mas o commit foi BLOQUEADO — ${commit.message}`);
+      return { status: "commit-blocked", bloqueios: commit.bloqueios, cause: commit.message, cycles: ciclosAbertos };
+    }
+    if (!commit.committed && commit.message.includes("já estava implementada")) {
+      await concluir("já implementada em HEAD", ciclosAbertos);
+      relatar({ kind: "phase", id: session.id, state: "concluído", cycle: ciclosAbertos, detail: "já implementada" });
+      announce(`[${session.id}] JÁ IMPLEMENTADA — gates verdes, nada a commitar`);
+      return { status: "already-implemented", cycles: ciclosAbertos };
+    }
+    await recolher(ciclosAbertos);
+    await concluir(commit.message, ciclosAbertos);
+    relatar({ kind: "phase", id: session.id, state: "concluído", cycle: ciclosAbertos, detail: commit.committed ? "commitada" : "completa" });
+    announce(`[${session.id}] COMPLETA${commit.committed ? ` — ${commit.message}` : ""}`);
+    return { status: "complete", committed: commit.committed, message: commit.message, cycles: ciclosAbertos };
+  };
+
+  // ------------------------------------------------------------------ laço
+
+  try {
+    if (options.integrationFailure) {
+      /*
+       * A falha de integração chega com o diagnóstico do verificador (§114),
+       * que vira o handoff do defeito ANTES de qualquer reparo; a escada decide
+       * quem repara — o executor guiado por ele, ou o próprio verificador.
+       */
+      const recovery = options.integrationFailure;
+      // Uma janela própria: o orçamento que a fase gastou no worktree não recusa a recuperação da integração.
+      if (estado.implementation === "done") registro.novoCiclo();
+      estado.implementation = "done";
+      /*
+       * A suíte que passou no worktree anterior não prova nada agora: a cópia
+       * limpa reprovou, e a diferença costuma estar no que o Git não vê
+       * (artefato de build ignorado, dependência aquecida). A suíte deste
+       * worktree roda de novo depois da ação.
+       */
+      const suiteAnterior = livro.atual(session.id, "suite");
+      if (suiteAnterior && suiteAnterior.validity.state !== "INVALIDATED") {
+        await livro.alterarValidade(suiteAnterior.evidence.evidenceId, "INVALIDATED", "a suíte da árvore integrada reprovou: a prova do worktree anterior não vale para a cópia limpa", `integração ${recovery.attempt}`, now);
+      }
+      const guidancePrompt = testRepairGuidancePrompt({ language: options.language, sharedContract, ...(options.architecture ? { architectureSlice: options.architecture.texto } : {}), phaseMarkdown: session.markdown, cause: recovery.cause, testCommand: (await options.resolveTest?.())?.command ?? options.testCommand?.command ?? null });
+      await writeAtomic(`${paths.prompts}/${evidencePrefix}.guidance.txt`, guidancePrompt);
+      announce(`[${session.id}] validador diagnosticando a falha de integração; devolverá evidência, ação concreta e comando de regressão`);
+      const diagnosis = await chamarLeitor({ role: "verifier", phase: session, attempt: 1, prompt: guidancePrompt });
+      const logDoDiagnostico = await gravarUnico(`${paths.logs}/${evidencePrefix}.guidance.log`, `${diagnosis.stdout}\n${diagnosis.stderr}`);
+      const g0Diagnostico = gate0(diagnosis, options.engine);
+      if (!g0Diagnostico.green) return await pararPorSessao("gate 0 — engine", g0Diagnostico.cause);
+      await achar(
+        {
+          gate: "G2", nature: "integracao-teste",
+          anchors: { tests: testesQueFalharam(recovery.cause), quotes: citacoes(recovery.cause) },
+          summary: "a suíte da árvore integrada reprovou",
+          detail: `${recovery.cause}\n\nOrientação do validador para esta falha (não é aprovação):\n${diagnosis.stdout}`,
+          diagnosedBy: { role: "verifier", ...(diagnosis.sessionId ? { sessionId: diagnosis.sessionId } : {}), log: relative(paths.root, logDoDiagnostico) },
+        },
+        { raw: diagnosis.stdout, ...(diagnosis.sessionId ? { sessionId: diagnosis.sessionId } : {}), log: relative(paths.root, logDoDiagnostico) },
+      );
+      /*
+       * A falha é da cópia limpa da árvore integrada, não deste worktree quente:
+       * rodar a suíte aqui antes de agir poderia dar verde e mandar integrar de
+       * novo o mesmo defeito. A primeira coisa é a ação; a prova final é a
+       * integração.
+       */
+      // A integração reprovou de novo: é a validação da tentativa anterior (progresso, ou não).
+      const doDefeito = estado.defects.filter((defeito) => defeito.nature === "integracao-teste" && defeito.status !== "RESOLVED").at(-1);
+      if (doDefeito) await validarDoGate("G2", new Map([[doDefeito.defectId, { assinatura: doDefeito.anchors.signature }]]), false, true);
+      // A segunda volta da integração começa pelo verificador (§114); o executor continua na escada.
+      if (doDefeito && recovery.repairByVerifier) doDefeito.order = ["verificador", "executor"];
+      const acao = registro.planejar(orcamento, disponivel);
+      if (acao === null) {
+        // Sem ação possível, integrar de novo seria repetir a mesma falha: para com o diagnóstico.
+        const { gate: gateDaFalha, cause } = causaDaParada();
+        return await fecharFalha(gateDaFalha, cause, "a recuperação da integração não tem estratégia disponível com informação nova");
+      }
+      const parada = await executarAcao(acao);
+      if (parada) return parada.parar;
+      await revalidar(`ação ${estado.actions}`);
+    } else if (options.revalidar !== undefined) {
+      if (estado.implementation === "done") registro.novoCiclo();
+      estado.implementation = "done";
+      await registro.salvar();
+      const efeito = await revalidar("revalidação documental");
+      await transicao({
+        tipo: "retomada",
+        motivo: `revalidação: ${options.revalidar}; o código é o que já passou, sem sessão de implementação`,
+        ...(efeito.invalidadas.length > 0 ? { invalidadas: efeito.invalidadas } : {}),
+        ...(efeito.preservadas.length > 0 ? { preservadas: efeito.preservadas } : {}),
+      });
+    } else if (estado.implementation === "done" && estado.inicio !== undefined && estado.inicio !== null && estado.inicio === codigo.atual.tree && estado.ultimoEstado !== undefined) {
+      // O parcial foi descartado, como a parada oferece: o código é o de antes da implementação, e a fase recomeça do zero.
+      estado.implementation = "pending";
+      await registro.salvar();
+      await transicao({ tipo: "retomada", motivo: "o código voltou a ser o de antes da implementação (parcial descartado): a fase recomeça do zero; o histórico dos defeitos fica" });
+    } else if (estado.implementation === "done") {
+      registro.novoCiclo();
+      await registro.salvar();
+      const quandoParou = estado.ultimoEstado?.tree ?? null;
+      await revalidar("retomada");
+      const abertos = estado.defects.filter((defeito) => defeito.status !== "RESOLVED");
+      /*
+       * Retomar sem sessão de implementação só vale sobre o MESMO código em que
+       * a fase parou. Se ele mudou — a árvore integrada andou, o parcial voltou
+       * em parte ou nem voltou —, quem retoma é o executor, com o handoff dos
+       * defeitos e o que mudou, e só então os gates julgam.
+       */
+      const mudouDesde = quandoParou === null ? null : await arquivosMudados(arvore, quandoParou, codigo.atual.tree);
+      const mesmoCodigo = quandoParou !== null && quandoParou === codigo.atual.tree;
+      await transicao({
+        tipo: "retomada",
+        motivo: mesmoCodigo
+          ? `a implementação já aconteceu neste run (${estado.builderSessions} sessão(ões) do executor) e o código é o mesmo de quando a fase parou: segue das provas que não valem${abertos.length > 0 ? ` e dos defeitos ${abertos.map((defeito) => defeito.defectId).join(", ")}` : ""}, sem nova sessão de implementação`
+          : `a implementação já aconteceu neste run, mas o código mudou desde que a fase parou${mudouDesde && mudouDesde.length > 0 ? ` (${mudouDesde.slice(0, 6).join(", ")}${mudouDesde.length > 6 ? ", …" : ""})` : ""}: o executor retoma com o handoff dos defeitos antes de os gates julgarem`,
+      });
+      if (!mesmoCodigo) retomarPeloExecutor = { defeitos: abertos, mudouDesde };
+    }
+
+    await event("started", estado.implementation === "done" ? `retomada: ${estado.defects.filter((defeito) => defeito.status !== "RESOLVED").length} defeito(s) aberto(s)` : "implementação", ciclosAbertos);
+    announce(estado.implementation === "done" ? `[${session.id}] ${session.title} — retomada` : `[${session.id}] ${session.title}`);
+    progressoDaFase(estado.implementation === "done" ? "retomada" : "implementação");
+
+    if (estado.implementation !== "done") {
+      gate("G0", "corrente", ciclosAbertos);
+      if (!options.environmentApproved) await prepararDependenciasNode(1);
+      if (runtimeRecusado) {
+        const cause = `O ambiente Node/npm foi recusado por engines. Reinicie a Capivara com uma versão compatível com o projeto; nenhuma sessão de construção foi iniciada.\n${falhaNaPreparacaoNode}`;
+        gate("G0", "neutro", ciclosAbertos);
+        gate("G2", "vermelho", ciclosAbertos);
+        await event("blocked", cause, ciclosAbertos);
+        relatar({ kind: "phase", id: session.id, state: "falhou", cycle: ciclosAbertos, detail: cause });
+        return { status: "failed", gate: "gate 2 — suíte do projeto", cause, cycles: 0 };
+      }
+      const ctx = await contexto();
+      const prompt = implementPrompt(ctx) + (falhaNaPreparacaoNode ? `\n\n## Dependency preparation — unresolved environment failure\n${falhaNaPreparacaoNode}` : "");
+      if (estado.inicio === undefined) estado.inicio = codigo.atual.tree;
+      const sessao = await sessaoDoExecutor(prompt);
+      // Sessão que caiu sem entregar nada não é implementação feita: a retomada a refaz.
+      if (!sessao.result.providerFailure && !(sessao.result.timedOut && !sessao.escreveu)) estado.implementation = "done";
+      await registro.salvar();
+      if (options.resolveTest) {
+        const detectado = await options.resolveTest();
+        if (detectado && detectado.command !== options.testCommand?.command) announce(`[${session.id}] comando de teste detectado: ${detectado.command} (${detectado.source})`);
+        testeAgora = detectado;
+      }
+      const g0 = gate0(sessao.result, options.engine);
+      if (sessao.result.providerFailure) return await pararPorSessao("gate 0 — engine", (g0 as { cause: string }).cause);
+      if (sessao.result.timedOut) {
+        if (!sessao.escreveu) return await pararPorSessao("gate 0 — engine", (g0 as { cause: string }).cause);
+        // O tempo acabou com trabalho escrito: o parcial é julgado uma vez, sem outra sessão de construção.
+        julgandoParcial = true;
+        announce(`[${session.id}] a sessão do executor foi encerrada pelo limite do harness depois de escrever; julgando o parcial uma vez, sem outra sessão de construção`);
+      } else if (!g0.green) {
+        await achar({ gate: "G0", nature: "engine", anchors: {}, summary: "a sessão do executor não terminou com resultado utilizável", detail: g0.cause });
+      }
+    } else if (options.resolveTest) {
+      testeAgora = await options.resolveTest();
+    }
+
+    if (retomarPeloExecutor !== null) {
+      const { defeitos, mudouDesde } = retomarPeloExecutor;
+      if (defeitos.length > 0) {
+        const parada = await executarAcao({ estrategia: "executor", defeitos });
+        if (parada) return parada.parar;
+      } else {
+        const ctx = await contexto();
+        const prompt = fixPrompt({
+          ...ctx,
+          gate: "gate 0 — engine",
+          cause: `A fase parou numa execução anterior sem defeito registrado (a sessão não concluiu). O código mudou desde então${mudouDesde && mudouDesde.length > 0 ? `: ${mudouDesde.join(", ")}` : ""}. Leia o código atual e complete a fase.`,
+          previousWroteNothing: false,
         });
-        gate("G2", g2.green ? "verde" : "vermelho", cycle);
-        if (!g2.green) {
-          if (await prepararDependenciasNode(cycle, g2.cause)) {
-            if (options.resolveTest) testeAgora = await options.resolveTest();
-            continue;
-          }
-          lastGate = g2.gate;
-          // Ferramenta ausente não ganha o prefixo de "não escreveu nada": a sessão
-          // corretamente não mexeu no código, porque o defeito é de ambiente.
-          lastCause = (g2.toolMissing === true ? g2.cause : `${noChangeNote}${g2.cause}`) +
-            (falhaNaPreparacaoNode ? `\n\n${falhaNaPreparacaoNode}` : "");
-          if (g2.toolMissing === true) {
-            announce(
-              `[${session.id}] o runner de testes não está instalado; ` +
-                (options.systemInstall === true
-                  ? "o executor tem acesso de sistema para instalá-lo"
-                  : "o executor vai instalá-lo como dependência do projeto"),
+        const sessao = await sessaoDoExecutor(prompt);
+        const g0 = gate0(sessao.result, options.engine);
+        if (!g0.green && (sessao.result.timedOut || sessao.result.providerFailure)) return await pararPorSessao("gate 0 — engine", g0.cause);
+      }
+      await revalidar("retomada pelo executor");
+    }
+
+    for (;;) {
+      // A ordem é a dependência técnica: o G3 parte da suíte verde, o G4 do G3.
+      const g0Aberto = estado.defects.some((defeito) => defeito.nature === "engine" && defeito.status === "OPEN");
+      const pendente = g0Aberto ? null : !(await g2Valido()) ? "G2" : !(await g3Valido()) ? "G3" : !(await g4Valido()) ? "G4" : null;
+      if (pendente === null && !g0Aberto) return await fechar();
+      if (pendente !== null) {
+        const resultado = pendente === "G2" ? await verificarSuite() : pendente === "G3" ? await verificarTasks() : await verificarFluxos();
+        if (typeof resultado === "object") return resultado.parar;
+        if (resultado === "verde") {
+          // Se o gate passa e a validade dele continua falsa para o mesmo conteúdo, o defeito é do harness: parar, não repetir.
+          verdesSemProva.set(pendente, (verdesSemProva.get(pendente) ?? 0) + 1);
+          if ((verdesSemProva.get(pendente) ?? 0) > 3) {
+            return await fecharFalha(
+              nomeDoGate(pendente),
+              `Isto é do harness: o ${pendente} passou ${verdesSemProva.get(pendente)} vezes seguidas sem que a prova dele valesse para o mesmo conteúdo; a fase para em vez de repetir o gate.`,
+              "defeito do harness: verde sem prova que se sustente",
             );
           }
-          if (await repararComVerificador(lastCause)) continue;
-          break;
-        } else {
-          if (!g2.skipped) {
-            await registrarInstalacaoNode(arvore);
-            falhaNaPreparacaoNode = "";
-          }
-          if (g2.skipped) announce(`[${session.id}] gate 2 pulado: nenhum comando de teste resolvido`);
-          gate("G3", "corrente", cycle);
-          /*
-           * O que já passou não volta à fila.
-           *
-           * O verificador é sem memória, e é o que o torna independente. Mas
-           * reperguntar sobre um código que ninguém tocou não é independência: é
-           * pagar por um sorteio. Medido em P01 do `assitencia`: três ciclos, seis
-           * tasks diferentes, nunca mais de duas por vez, todas fechadas — e duas
-           * novas em cada volta, entre as que ele mesmo havia aprovado.
-           */
-          const tasksDestaFase = tasksDaFase(session.markdown);
-          const jaAprovadas = verificarTudo ? [] : options.aprovadas?.jaAprovadas(session.id, tasksDestaFase, options.architecture?.sha12) ?? [];
-          const indicesAprovados = new Set(jaAprovadas.map((task) => task.index));
-          if (jaAprovadas.length > 0) {
-            announce(
-              `[${session.id}] ${jaAprovadas.length} de ${session.taskCount} task(s) já verificadas com este texto; ` +
-                "não vou reperguntar sobre elas",
-            );
-          }
-
-          const verificationPrompt = verifyPrompt({
-            language: options.language,
-            sharedContract,
-            ...(options.architecture ? { architectureSlice: options.architecture.texto } : {}),
-            phaseMarkdown: session.markdown,
-            taskCount: session.taskCount,
-            ...(jaAprovadas.length > 0
-              ? { tasksJaAprovadas: jaAprovadas.map((task) => ({ index: task.index, title: task.title })) }
-              : {}),
-          });
-          await writeAtomic(`${paths.prompts}/${evidencePrefix}.verify-${passagem}.txt`, verificationPrompt);
-          let verification = await chamarLeitor({
-            role: "verifier",
-            phase: session,
-            attempt: cycle,
-            prompt: verificationPrompt,
-          });
-          await writeAtomic(`${paths.logs}/${evidencePrefix}.verify-${passagem}.log`, `${verification.stdout}\n${verification.stderr}`);
-          let g0Verifier = gate0(verification, options.engine);
-          let g3 = gate3(verification.stdout, session.taskCount, indicesAprovados);
-          const formatPrefix = `${evidencePrefix}.verify-${passagem}.format-1`;
-          if (g0Verifier.green && !g3.green && g3.repairable !== true) {
-            announce(`[${session.id}] resposta do verificador com protocolo inválido; pedindo uma correção de formato somente-leitura, sem reabrir o executor`);
-            const retryPrompt = verifyRetryPrompt(verificationPrompt, verification.stdout, g3.cause);
-            await writeAtomic(`${paths.prompts}/${formatPrefix}.txt`, retryPrompt);
-            verification = await chamarLeitor({
-              role: "verifier",
-              phase: session,
-              attempt: cycle,
-              prompt: retryPrompt,
-            });
-            await writeAtomic(`${paths.logs}/${formatPrefix}.log`, `${verification.stdout}\n${verification.stderr}`);
-            g0Verifier = gate0(verification, options.engine);
-            g3 = gate3(verification.stdout, session.taskCount, indicesAprovados);
-            if (!g0Verifier.green) falhaDeSessao = true;
-          }
-          if (!g0Verifier.green) {
-            gate("G3", "vermelho", cycle);
-            lastGate = g0Verifier.gate;
-            lastCause = `A sessão de verificação independente não concluiu: ${g0Verifier.cause}`;
-            falhaDeSessao ||= Boolean(verification.timedOut || verification.providerFailure);
-            break;
-          }
-
-          if (!g3.green && g3.repairable !== true) {
-            gate("G3", "vermelho", cycle);
-            lastGate = g3.gate;
-            lastCause = `O verificador devolveu protocolo inválido após uma recuperação somente-leitura; ` +
-              `não é diagnóstico de implementação e não será enviado ao executor como reparo.\n${g3.cause}\n` +
-              `Resposta preservada em ${paths.logs}/${formatPrefix}.log`;
-            falhaDeSessao = true;
-            break;
-          }
-          // O reparo exige uma leitura completa, não leituras completas para sempre.
-          // Só um veredito com cobertura e índices válidos encerra essa obrigação.
-          verificarTudo = false;
-          for (const verdict of parseVerification(verification.stdout)) {
-            if (verdict.done && verdict.missing.startsWith("ADVISORY:")) {
-              announce(`[${session.id}] TASK ${verdict.index} — observação não bloqueante: ${verdict.missing.slice("ADVISORY:".length).trim()}`);
-            }
-          }
-          /*
-           * Desconsiderar não pode ser calado: o texto fica no log da verificação e
-           * a linha sai na tela. Se o veredito velho estiver errado, é aqui que o
-           * desenvolvedor vê o rastro.
-           */
-          for (const reaberta of g3.reabertas) {
-            announce(`[${session.id}] TASK ${reaberta.index} já estava aprovada e foi reaberta pelo verificador: ${reaberta.missing}`);
-          }
-          /*
-           * A reaberta sai do registro: no ciclo seguinte ela volta a ser verificada,
-           * em vez de aparecer na lista do que o verificador não precisa olhar.
-           */
-          if (g3.reabertas.length > 0) {
-            await options.aprovadas?.revogar(session.id, tasksDestaFase, g3.reabertas.map((task) => task.index));
-          }
-          if (g3.done.length > 0) await options.aprovadas?.aprovar(session.id, tasksDestaFase, g3.done, cycle, now, options.architecture?.sha12);
-          gate("G3", g3.green ? "verde" : "vermelho", cycle);
-          if (!g3.green) {
-            lastGate = g3.gate;
-            lastCause = `${noChangeNote}${g3.cause}`;
-            if (g3.repairable === true && await repararComVerificador(lastCause)) continue;
-            break;
-          } else if (!(await passouNosFluxos(cycle, contestacaoDoRoteiro))) {
-            // A causa já foi registrada por `passouNosFluxos`; o ciclo segue.
-            if (reparoDeFluxo && await repararComVerificador(lastCause)) continue;
-            break;
-          } else {
-            const commit = options.commitsEnabled
-              ? await commitPhase(arvore, session.number, session.title)
-              : { committed: false, message: "commits desabilitados: nenhum repositório Git" };
-
-            if (commit.bloqueios && commit.bloqueios.length > 0) {
-              await recolher(cycle);
-              await event("blocked", `commit bloqueado: ${commit.bloqueios.map((bloqueio) => bloqueio.caminho).join(", ")}`, cycle);
-              relatar({ kind: "phase", id: session.id, state: "falhou", cycle, detail: "commit bloqueado" });
-              announce(`[${session.id}] gates verdes, mas o commit foi BLOQUEADO — ${commit.message}`);
-              return { status: "commit-blocked", bloqueios: commit.bloqueios, cause: commit.message, cycles: cycle };
-            }
-
-            if (!commit.committed && commit.message.includes("já estava implementada")) {
-              await concluir("já implementada em HEAD", cycle);
-              relatar({ kind: "phase", id: session.id, state: "concluído", cycle, detail: "já implementada" });
-              announce(`[${session.id}] JÁ IMPLEMENTADA — gates verdes, nada a commitar`);
-              return { status: "already-implemented", cycles: cycle };
-            }
-
-            await recolher(cycle);
-            await concluir(commit.message, cycle);
-            relatar({ kind: "phase", id: session.id, state: "concluído", cycle, detail: commit.committed ? "commitada" : "completa" });
-            announce(`[${session.id}] COMPLETA${commit.committed ? ` — ${commit.message}` : ""}`);
-            return { status: "complete", committed: commit.committed, message: commit.message, cycles: cycle };
-          }
+          continue;
         }
       }
+      if (julgandoParcial) {
+        const { gate: gateDaFalha, cause } = causaDaParada();
+        return await pararPorSessao(gateDaFalha, cause);
+      }
+      for (;;) {
+        const acao = registro.planejar(orcamento, disponivel);
+        if (acao !== null) {
+          const parada = await executarAcao(acao);
+          if (parada) return parada.parar;
+          verdesSemProva.clear();
+          const efeito = await revalidar(`ação ${estado.actions}`);
+          if (efeito.invalidadas.length > 0 || efeito.desconhecidas.length > 0) {
+            await transicao({
+              tipo: "revalidacao",
+              motivo: "a ação mudou o código: só o que ela atingiu volta a ser verificado",
+              ...(efeito.preservadas.length > 0 ? { preservadas: [...new Set(efeito.preservadas)] } : {}),
+              invalidadas: [...new Set([...efeito.invalidadas, ...efeito.desconhecidas])],
+            });
+          } else if (efeito.preservadas.length > 0) {
+            await transicao({ tipo: "preservada", preservadas: [...new Set(efeito.preservadas)], motivo: "a ação não mudou o código do produto: as provas continuam valendo" });
+          }
+          break;
+        }
+        if (registro.semSaida(possivel)) {
+          const { gate: gateDaFalha, cause } = causaDaParada();
+          if (declaredComplete(estado.defects.map((defeito) => defeito.detail).join("\n"))) announce(`[${session.id}] o executor declarou conclusão, mas ${gateDaFalha} reprovou`);
+          return await fecharFalha(gateDaFalha, cause, "esgotamento técnico: nenhuma estratégia restante tem informação nova para os defeitos abertos");
+        }
+        if (ciclosAbertos >= maxCycles) {
+          const { gate: gateDaFalha, cause } = causaDaParada();
+          return await fecharFalha(gateDaFalha, cause, `os ${maxCycles} ciclo(s) desta execução se esgotaram; estado, código e evidências preservados para a retomada`);
+        }
+        ciclosAbertos += 1;
+        registro.novoCiclo();
+        await registro.salvar();
+        await event("started", `ciclo de correção ${ciclosAbertos}`, ciclosAbertos);
+        announce(`[${session.id}] ciclo de correção ${ciclosAbertos}/${maxCycles}`);
+        progressoDaFase(`ciclo ${ciclosAbertos}/${maxCycles}`);
+        const preservadas = livro.daFase(session.id).filter((evidencia) => evidencia.validity.state === "VALID" && evidencia.evidence.outcome !== "REPAIR_REQUIRED" && (evidencia.evidence.gate === "G2" || evidencia.evidence.gate === "G3" || evidencia.evidence.gate === "G4"));
+        // Verde é o gate cuja prova vale para ESTE conteúdo — não o que tem alguma evidência válida.
+        if (await g2Valido()) gate("G2", "verde", ciclosAbertos);
+        if (await g3Valido()) gate("G3", "verde", ciclosAbertos);
+        const fluxosAgora = livro.atual(session.id, "fluxos");
+        if (options.flows && fluxosAgora && fluxosAgora.validity.state === "VALID" && fluxosAgora.evidence.outcome !== "REPAIR_REQUIRED" && fluxosAgora.evidence.inputs.code?.tree === codigo.atual.tree) gate("G4", "verde", ciclosAbertos);
+        await transicao({
+          tipo: "ciclo",
+          defeitos: estado.defects.filter((defeito) => defeito.status === "OPEN" || defeito.status === "ESCALATED").map((defeito) => defeito.defectId),
+          motivo: "o orçamento do ciclo anterior se esgotou; contadores renovados, código, histórico e evidências preservados, sem voltar à implementação",
+          ...(preservadas.length > 0 ? { preservadas: [...new Set(preservadas.map((evidencia) => evidencia.evidence.checkId))] } : {}),
+        });
+      }
     }
-
-    if (falhaDeSessao) {
-      announce(`[${session.id}] a sessão não entregou resultado utilizável; parando com o parcial preservado, sem abrir outra chamada de construção automaticamente`);
-      break;
-    }
-    if (falhaDoRoteiro) break;
-
-    if (declaredComplete(result.stdout) && lastGate) {
-      // A palavra do executor nunca supera um gate vermelho.
-      announce(`[${session.id}] o executor declarou conclusão, mas ${lastGate} reprovou`);
-    }
-    if (cycle >= maxCycles) break;
-    announce(`[${session.id}] nova chamada de construção ${cycle + 1}/${maxCycles}; motivo: ${lastGate}: ${lastCause.split("\n").slice(0, 3).join(" ")}`);
-    await event("retry", `${lastGate}: ${lastCause}`, cycle);
-    cycle += 1;
-  }
   } catch (erro) {
     if (erro instanceof LimiteEsgotado) return { status: "rate-limit-exhausted", waits };
     if (erro instanceof FalhaDeRevisao) {
-      await event("blocked", `gate 0 — engine: ${erro.message}`, cicloCorrente);
-      relatar({ kind: "phase", id: session.id, state: "falhou", cycle: cicloCorrente, detail: "sessão de revisão G4 interrompida" });
+      await event("blocked", `gate 0 — engine: ${erro.message}`, ciclosAbertos);
+      relatar({ kind: "phase", id: session.id, state: "falhou", cycle: ciclosAbertos, detail: "sessão de revisão G4 interrompida" });
       announce(`[${session.id}] ${erro.message}`);
-      return { status: "failed", gate: "gate 0 — engine", cause: erro.message, cycles: cicloCorrente };
+      return { status: "failed", gate: "gate 0 — engine", cause: erro.message, cycles: ciclosAbertos };
     }
     if (erro instanceof PrincipalAlterada) {
       const cause = `a árvore principal mudou durante o trabalho em worktree (${erro.caminhos.join(", ")}). ` +
         `A fase foi interrompida antes de aceitar o resultado do agente. Nada foi apagado, registrado ou integrado. ` +
         `As alterações da principal continuam em ${options.projectRoot}; o trabalho isolado, se houver, será preservado separadamente. ` +
         "Confira as alterações antes de retomar; com agentes concorrentes, esta conferência não determina quem escreveu.";
-      await event("blocked", cause, cicloCorrente);
+      await event("blocked", cause, ciclosAbertos);
       announce(`[${session.id}] PARADA DE ISOLAMENTO — ${cause}`);
-      return { status: "commit-blocked", bloqueios: erro.caminhos.map((caminho) => ({ caminho, motivo: "árvore principal alterada durante trabalho isolado" })), cause, cycles: cicloCorrente };
+      return { status: "commit-blocked", bloqueios: erro.caminhos.map((caminho) => ({ caminho, motivo: "árvore principal alterada durante trabalho isolado" })), cause, cycles: ciclosAbertos };
     }
     if (erro instanceof AutoridadeViolada) {
-      /*
-       * O agente mexeu no Git por conta própria. Nada desta fase é registrado
-       * nem integrado, e nada é desfeito: mover a ref de volta seria reescrever
-       * o que a pessoa pode já ter visto — ou publicado.
-       */
       const publicou = publicacaoProvavel(erro.movidas);
       const cause =
         `o ${erro.papel} mexeu no Git por conta própria — referências movidas durante a chamada: ${erro.movidas.join(", ")}. ` +
         "Só o Core registra e publica: nada desta fase foi registrado nem integrado, e o que o agente fez não foi desfeito. " +
         `${publicou ? "O rastreio remoto mudou: o agente provavelmente fez push — confira o remoto. " : ""}` +
         "Confira com `git log --all --oneline -10` e `git reflog`, decida o que manter, e rode `capivara build` de novo.";
-      await event("blocked", `referências movidas pelo agente: ${erro.movidas.join(", ")}`, cicloCorrente);
-      relatar({ kind: "phase", id: session.id, state: "falhou", cycle: cicloCorrente, detail: "git por fora do Core" });
+      await event("blocked", `referências movidas pelo agente: ${erro.movidas.join(", ")}`, ciclosAbertos);
+      relatar({ kind: "phase", id: session.id, state: "falhou", cycle: ciclosAbertos, detail: "git por fora do Core" });
       announce(`[${session.id}] PARADA DE AUTORIDADE — ${cause}`);
       return {
         status: "commit-blocked",
         bloqueios: erro.movidas.map((ref) => ({ caminho: ref, motivo: "referência movida pelo agente durante a chamada" })),
         cause,
-        cycles: cicloCorrente,
+        cycles: ciclosAbertos,
       };
     }
     if (!(erro instanceof CredencialRecusada)) throw erro;
 
-    /*
-     * Pára aqui, diz o que fazer, e não culpa a fase.
-     *
-     * O trabalho que a fase já fez fica na árvore e é bom — nenhum gate o
-     * reprovou por mérito. O caminho de volta é renovar a credencial e commitar
-     * o parcial, porque o preflight da próxima execução exige árvore limpa e o
-     * loop revalida a fase a partir do que estiver commitado.
-     */
-    await event("blocked", `credencial recusada pelo provider ${options.engine}: ${erro.evidencia}`, cicloCorrente);
-    relatar({ kind: "phase", id: session.id, state: "falhou", cycle: cicloCorrente, detail: "credencial recusada" });
+    await event("blocked", `credencial recusada pelo provider ${options.engine}: ${erro.evidencia}`, ciclosAbertos);
+    relatar({ kind: "phase", id: session.id, state: "falhou", cycle: ciclosAbertos, detail: "credencial recusada" });
     announce(`[${session.id}] o provider ${options.engine} recusou a credencial — isto não é defeito da fase:`);
     announce(`           ${erro.evidencia}`);
     announce(`           renove com \`${options.engine} login\` e rode \`capivara build\` de novo`);
-    // No worktree, quem guarda o parcial é o build paralelo, num branch da fase.
     if (!noWorktree && (await hasPendingChanges(options.projectRoot))) {
       announce("           o trabalho desta fase ficou na árvore; antes de rodar de novo:");
       announce("           git add -A && git commit -m \"wip: trabalho parcial\"   → o loop revalida a fase e segue");
     }
-    return { status: "credential-rejected", engine: options.engine, evidence: erro.evidencia, cycles: cicloCorrente };
+    return { status: "credential-rejected", engine: options.engine, evidence: erro.evidencia, cycles: ciclosAbertos };
   }
+}
 
-  await recolher(cicloCorrente);
-  await event("blocked", `${lastGate ?? "desconhecido"}: ${lastCause.split("\n")[0] ?? ""}`, cicloCorrente);
-  relatar({ kind: "phase", id: session.id, state: "falhou", cycle: cicloCorrente, detail: lastGate ?? "sem gate" });
-
-  /*
-   * A fase parou deixando trabalho na árvore, e o preflight da próxima execução
-   * exige árvore limpa. Sem dizer isto aqui, o operador cai num beco: o loop
-   * para por causa do trabalho parcial e depois se recusa a retomar por causa do
-   * mesmo trabalho parcial.
-   */
-  if (!noWorktree && (await hasPendingChanges(options.projectRoot))) {
-    announce(`[${session.id}] o trabalho parcial desta fase ficou na árvore. Antes de rodar de novo, escolha uma:`);
-    announce("           git add -A && git commit -m \"wip: trabalho parcial\"   → o loop revalida a fase e segue");
-    announce("           git checkout -- . && git clean -fd                      → descarta e a fase recomeça do zero");
-  }
-
-  return { status: "failed", gate: lastGate ?? "gate 0 — engine", cause: lastCause, cycles: cicloCorrente };
+/** A task cujo critério a triagem citou — a âncora comum entre G3 e G4 (§125 D). */
+function tarefaPeloCriterio(tasks: readonly TaskBlock[], criterio: string): number | undefined {
+  const normal = (texto: string): string => texto.toLowerCase().replace(/[^a-z0-9à-ú]+/gu, " ").trim();
+  const alvo = normal(criterio);
+  if (alvo.length < 12) return undefined;
+  const achadas = tasks.filter((task) => task.acceptanceCriteria.some((linha) => normal(linha).includes(alvo) || alvo.includes(normal(linha))));
+  return achadas.length === 1 ? achadas[0]!.index : undefined;
 }
 
 /**

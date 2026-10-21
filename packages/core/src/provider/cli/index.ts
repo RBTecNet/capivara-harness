@@ -13,7 +13,7 @@ import { codexAdapter } from "./codex.js";
 import { cursorAdapter } from "./cursor.js";
 import { customAdapter } from "./custom.js";
 import { opencodeAdapter } from "./opencode.js";
-import type { CliAdapter, ContratoDoWorkspace } from "./types.js";
+import type { CliAdapter, ContratoDaRetomada, ContratoDoWorkspace } from "./types.js";
 
 export const CLI_ADAPTERS = [codexAdapter, claudeAdapter, opencodeAdapter, agyAdapter, cursorAdapter, customAdapter] as const;
 
@@ -34,4 +34,12 @@ export function contratoDoWorkspace(id: string, platform: NodeJS.Platform = proc
   return isCliProvider(id) ? cliAdapter(id).workspace(platform) : null;
 }
 
-export type { AccessLevel, CliAdapter, CliInvocation, CliInvocationInput, ContratoDoWorkspace } from "./types.js";
+/**
+ * Como o provider retoma uma sessão gravada (§125 E); null quando não retoma —
+ * API direta, adaptador custom, ou CLI que não declara. Nunca simular.
+ */
+export function contratoDaRetomada(id: string): ContratoDaRetomada | null {
+  return isCliProvider(id) ? cliAdapter(id).retomada ?? null : null;
+}
+
+export type { AccessLevel, CliAdapter, CliInvocation, CliInvocationInput, ContratoDaRetomada, ContratoDoWorkspace } from "./types.js";

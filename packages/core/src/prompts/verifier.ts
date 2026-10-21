@@ -30,7 +30,18 @@ export interface VerifierContext {
    * diferentes em três ciclos, nunca mais de duas por vez, todas fechadas pelo
    * executor e substituídas por outras duas que ele mesmo tinha aprovado antes.
    */
-  tasksJaAprovadas?: readonly { index: number; title: string }[];
+  tasksJaAprovadas?: readonly { index: number; title: string; mudancas?: readonly string[] }[];
+  /**
+   * Tasks que ele aprovou antes, sob verificação agora porque o código mudou
+   * desde então por um reparo (§125): a lista do que mudou dirige a releitura,
+   * e a linha TASK conta como qualquer outra.
+   */
+  tasksParaConfirmar?: readonly { index: number; title: string; mudancas: readonly string[] | null }[];
+  /**
+   * Os defeitos desta fase que o build já conhece — abertos e resolvidos —,
+   * para o verificador dizer quando um achado é o mesmo: `[P03-D1]` na linha.
+   */
+  defeitosConhecidos?: readonly { id: string; status: string; gate: string; summary: string }[];
 }
 
 /**
@@ -41,7 +52,7 @@ export interface VerifierContext {
  * julgaria de novo, acharia algo novo, e o harness teria de descartar um veredito
  * que acabou de pagar.
  */
-function aprovadasBlock(tasks: readonly { index: number; title: string }[]): string[] {
+function aprovadasBlock(tasks: readonly { index: number; title: string; mudancas?: readonly string[] }[]): string[] {
   if (tasks.length === 0) return [];
   return [
     "",
@@ -49,7 +60,10 @@ function aprovadasBlock(tasks: readonly { index: number; title: string }[]): str
     "",
     "You judged these tasks DONE in an earlier cycle of this same phase, and their text in the plan",
     "has not changed since. They are here only so the phase reads whole:",
-    ...tasks.map((task) => `- task ${task.index}: ${task.title}`),
+    ...tasks.map((task) =>
+      `- task ${task.index}: ${task.title}` +
+      (task.mudancas && task.mudancas.length > 0 ? ` (files changed since your approval: ${task.mudancas.slice(0, 12).join(", ")}${task.mudancas.length > 12 ? ", …" : ""})` : ""),
+    ),
     "",
     "Emit `TASK <n>: DONE` for each of them and move on. Re-reading them is not thoroughness — a",
     "second reading of the same code always finds something the first did not, and that is how a",
@@ -82,6 +96,37 @@ function verifierArchitectureBlock(slice: string | undefined): string[] {
     "the contracts is not a gap.",
     "",
     slice.trim(),
+  ];
+}
+
+/**
+ * As aprovadas que voltam à verificação porque um reparo mudou o código (§125).
+ *
+ * Não é o bloco de cima: estas estão SOB verificação, e a linha delas conta.
+ * Mas a releitura é dirigida — o que mudou desde a aprovação —, e não uma
+ * auditoria nova de tudo o que já tinha passado.
+ */
+function confirmarBlock(tasks: readonly { index: number; title: string; mudancas: readonly string[] | null }[]): string[] {
+  if (tasks.length === 0) return [];
+  return [
+    "",
+    "## Previously approved — confirm against what changed",
+    "",
+    "You approved these tasks earlier in this phase. A repair changed the code since then, so they are",
+    "under verification again: check whether the change affects each one, starting from the files below.",
+    ...tasks.map((task) => `- task ${task.index}: ${task.title} — changed since: ${task.mudancas === null ? "unknown (read the current code)" : task.mudancas.slice(0, 20).join(", ") || "nothing versioned"}`),
+    "Emit their TASK lines like any other: DONE if the requirement still holds, INCOMPLETE with evidence if the change broke it.",
+  ];
+}
+
+/** Os defeitos que o build já conhece, para o achado repetido manter a identidade (§125). */
+function defeitosBlock(defeitos: readonly { id: string; status: string; gate: string; summary: string }[]): string[] {
+  if (defeitos.length === 0) return [];
+  return [
+    "",
+    "## Defects of this phase the harness already knows",
+    ...defeitos.map((defeito) => `- [${defeito.id}] ${defeito.gate}, ${defeito.status}: ${defeito.summary}`),
+    "When an INCOMPLETE finding is one of these, start its text with the id in brackets, e.g. `[" + (defeitos[0]?.id ?? "P01-D1") + "]`.",
   ];
 }
 
@@ -133,6 +178,11 @@ export function verifyPrompt(context: VerifierContext): string {
     "## Findings must be executable repair instructions",
     "Inspect EVERY acceptance criterion of each task under verification before answering. Report ALL",
     "the gaps you can substantiate now on its one TASK line, not one gap per correction cycle.",
+    "Write each finding with labeled fields, so the repair can start from your diagnosis without rediscovering it:",
+    "`B1: CRITERION: <unmet requirement>; OBSERVED: <file, symbol or test and its actual behaviour>; EXPECTED: <required behaviour>;",
+    "LOCATION: <where>; HYPOTHESIS: <likely cause>; FIX: <smallest change>; CHECK: <regression scenario and command>`.",
+    "Start with B0 instead of B1 when required functionality is absent or essential behaviour cannot be proven at all.",
+    "A finding without the unmet requirement, the observed behaviour and the expected behaviour is not a material block.",
     "For each missing criterion include: (1) which requirement is unmet, (2) the file, symbol or test",
     "and its actual behaviour, (3) the smallest concrete change that closes it, and (4) the exact",
     "regression scenario/assertion and command that would prove it. Separate findings with semicolons.",
@@ -155,6 +205,8 @@ export function verifyPrompt(context: VerifierContext): string {
     "a failure from the checks, or changing the specification to pass. Preserve fixes already delivered.",
     "",
     ...aprovadasBlock(context.tasksJaAprovadas ?? []),
+    ...confirmarBlock(context.tasksParaConfirmar ?? []),
+    ...defeitosBlock(context.defeitosConhecidos ?? []),
     "",
     "## The phase to verify",
     context.phaseMarkdown,

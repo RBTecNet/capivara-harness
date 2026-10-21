@@ -35,10 +35,10 @@ export const opencodeAdapter = {
   transcript: "opencode-jsonl",
   // JSONL evento a evento, como o codex.
   streams: true,
-  build: ({ model, effort, access, env }) => {
+  build: ({ model, effort, access, env, resumeSessionId }) => {
     // OpenCode 2 usa o cwd do processo: --dir e --variant foram removidos.
     // O servidor privado recebe o ambiente e as permissões desta chamada.
-    const args = ["run", "--standalone", "--format", "json"];
+    const args = ["run", "--standalone", "--format", "json", ...(resumeSessionId ? ["--session", resumeSessionId] : [])];
     if (effort && !model) throw new Error("o OpenCode exige um modelo explícito para configurar a intensidade de raciocínio");
     if (model) args.push("--model", effort ? `${model}#${effort}` : model);
     // --auto evita prompts restantes; o wildcard acima também libera os denies
@@ -58,6 +58,11 @@ export const opencodeAdapter = {
       ...env, OPENCODE_PERMISSION: JSON.stringify(permission),
       OPENCODE_CONFIG_CONTENT: JSON.stringify({ ...config, permission }),
     } };
+  },
+  retomada: {
+    estado: "nao-verificado",
+    elevacao: "por-invocacao",
+    motivo: "`opencode run --session <id>` existe na 2.0.32; não validado que o servidor --standalone enxerga a sessão gravada",
   },
   // Não há sandbox: o executor recebe bash e diretório externo liberados, e o build segue (§112).
   workspace: () => ({

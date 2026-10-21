@@ -13,6 +13,7 @@ export {
 export type {
   NewRunOptions,
   RunCommand,
+  RunBudgets,
   RunRoleSnapshot,
   RunStage,
   RunState,

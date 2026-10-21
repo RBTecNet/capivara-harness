@@ -16,6 +16,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  type ArchitectureComponent,
   architectureSliceForPhase,
   architectureViewForPhase,
   checkArchitectureBinding,
@@ -38,10 +39,27 @@ export interface FatiaDaArquitetura {
   componentes: string[];
   /** Os arquivos que a arquitetura fixa para esses componentes; vazio é "livre". */
   arquivos: string[];
+  /** Os contratos que a fase entrega e os que consome, uma linha cada, com o componente: o roteirista e a triagem os recebem. */
+  contratos: string[];
+}
+
+/**
+ * O território de um fluxo, para dizer se uma mudança o atinge (§125 C).
+ *
+ * `classificar` responde, para um arquivo mudado: é do fluxo (algum componente
+ * do fecho dele o fixa ou o commitou), está demonstradamente fora (todo dono
+ * conhecido fica fora do fecho), ou não se sabe — e não saber nunca vira fora.
+ */
+export interface TerritorioDoFluxo {
+  componentes: string[];
+  arquivos: string[];
+  commitados: string[];
+  classificar(arquivo: string): "dentro" | "fora" | "desconhecido";
 }
 
 /** O caminho de um fluxo pela arquitetura. */
 export interface FluxoNaArquitetura {
+  /** Os componentes que ele atravessa e tudo de que eles dependem, direta ou indiretamente. */
   componentes: string[];
   /** Os arquivos fixados para esses componentes. */
   arquivos: string[];
@@ -55,6 +73,12 @@ export interface ArquiteturaDoBuild {
   fatia(phaseNumber: number): FatiaDaArquitetura | null;
   /** O fluxo pela arquitetura, quando ela o mapeia e o vínculo vale. */
   fluxo(workflow: string): FluxoNaArquitetura | null;
+  /**
+   * O território do fluxo para a fase corrente: `donos` são os arquivos que cada
+   * fase commitou (`arquivosDasFases`); o arquivo que nenhum commit de fase
+   * escreveu é atribuído à fase corrente, que é quem o tem na árvore.
+   */
+  territorio(workflow: string, donos: ReadonlyMap<number, ReadonlySet<string>>, faseAtual: number): TerritorioDoFluxo | null;
 }
 
 export async function vincularArquitetura(
@@ -86,16 +110,20 @@ export async function vincularArquitetura(
       const texto = architectureSliceForPhase(architecture, phaseNumber);
       return {
         texto,
-        sha12: sha12(texto),
+        sha12: identidadeDaFatia(architecture, view),
         componentes: view.own.map((component) => component.name),
         arquivos: [...new Set(view.own.flatMap((component) => component.files))],
+        contratos: [
+          ...view.own.flatMap((component) => component.contracts.map((contract) => `${component.name} (desta fase): ${contract}`)),
+          ...view.consumed.flatMap((component) => component.contracts.map((contract) => `${component.name} (consumido): ${contract}`)),
+        ],
       };
     },
     fluxo(workflow) {
       if (architecture === null || vinculadas.size === 0) return null;
       const flow = architecture.flows.find((entry) => entry.workflow === workflow);
       if (!flow) return null;
-      const nomes = new Set(flow.components.map((nome) => nome.toLowerCase()));
+      const nomes = fechoDeDependencias(architecture, flow.components);
       const componentes = architecture.components.filter((component) => nomes.has(component.name.toLowerCase()));
       return {
         componentes: componentes.map((component) => component.name),
@@ -105,5 +133,76 @@ export async function vincularArquitetura(
           .map((phase) => phase.number),
       };
     },
+    territorio(workflow, donos, faseAtual) {
+      if (architecture === null || vinculadas.size === 0) return null;
+      const flow = architecture.flows.find((entry) => entry.workflow === workflow);
+      if (!flow) return null;
+      const fecho = fechoDeDependencias(architecture, flow.components);
+      const componentesDaFase = (numero: number): string[] | null =>
+        architecture.phases.find((phase) => phase.number === numero)?.components.map((nome) => nome.toLowerCase()) ?? null;
+      const fasesDoFluxo = architecture.phases.filter((phase) => phase.components.some((nome) => fecho.has(nome.toLowerCase()))).map((phase) => phase.number);
+      const fixados = new Map<string, string>();
+      for (const component of architecture.components) for (const arquivo of component.files) fixados.set(arquivo, component.name.toLowerCase());
+      const daFase = (componentes: string[] | null): "dentro" | "fora" | "desconhecido" =>
+        componentes === null || componentes.length === 0 ? "desconhecido" : componentes.some((nome) => fecho.has(nome)) ? "dentro" : "fora";
+      return {
+        componentes: [...fecho],
+        arquivos: architecture.components.filter((component) => fecho.has(component.name.toLowerCase())).flatMap((component) => component.files),
+        commitados: fasesDoFluxo.flatMap((numero) => [...(donos.get(numero) ?? [])]),
+        classificar(arquivo) {
+          const fixo = fixados.get(arquivo);
+          if (fixo !== undefined) return fecho.has(fixo) ? "dentro" : "fora";
+          const autoras = [...donos.entries()].filter(([, arquivos]) => arquivos.has(arquivo)).map(([numero]) => numero);
+          if (autoras.length > 0) {
+            const vereditos = autoras.map((numero) => daFase(componentesDaFase(numero)));
+            return vereditos.includes("dentro") ? "dentro" : vereditos.includes("desconhecido") ? "desconhecido" : "fora";
+          }
+          return daFase(componentesDaFase(faseAtual));
+        },
+      };
+    },
   };
 }
+
+/**
+ * Os componentes citados e todos os de que eles dependem, transitivamente.
+ *
+ * Um fluxo que atravessa a api atravessa também o que a api usa: uma mudança
+ * num módulo de dados que só a api importa atinge o fluxo tanto quanto uma na
+ * própria rota.
+ */
+export function fechoDeDependencias(architecture: Architecture, nomes: readonly string[]): Set<string> {
+  const porNome = new Map(architecture.components.map((component) => [component.name.toLowerCase(), component]));
+  const fecho = new Set<string>();
+  const fila = nomes.map((nome) => nome.toLowerCase());
+  while (fila.length > 0) {
+    const nome = fila.shift()!;
+    if (fecho.has(nome)) continue;
+    fecho.add(nome);
+    for (const dependencia of porNome.get(nome)?.dependsOn ?? []) fila.push(dependencia.toLowerCase());
+  }
+  return fecho;
+}
+
+/**
+ * A identidade da fatia, para as memórias de fase e de task.
+ *
+ * Não é o sha do markdown: ele carrega a visão geral, TODAS as decisões de dados,
+ * a infraestrutura inteira e os números das fases que estendem cada componente
+ * — e mudar qualquer uma dessas coisas reabriria todas as fases. A identidade é
+ * só o que a fase entrega e consome: os componentes próprios (contratos,
+ * arquivos, entidades, dependências), o contrato dos consumidos, e as decisões
+ * de dados sobre as entidades deles.
+ */
+export function identidadeDaFatia(architecture: Architecture, view: { own: ArchitectureComponent[]; consumed: ArchitectureComponent[] }): string {
+  const entidades = new Set([...view.own, ...view.consumed].flatMap((component) => component.owns.map((entidade) => entidade.toLowerCase())));
+  const decisoes = architecture.dataDecisions
+    .filter((decisao) => entidades.has((decisao.subject.split(/[.\s]/u)[0] ?? "").toLowerCase()))
+    .map((decisao) => [decisao.subject, decisao.statement]);
+  return sha12(JSON.stringify({
+    own: view.own.map((component) => [component.name, [...component.contracts], [...component.files], [...component.owns], [...component.dependsOn]]),
+    consumed: view.consumed.map((component) => [component.name, [...component.contracts]]),
+    decisoes,
+  }));
+}
+

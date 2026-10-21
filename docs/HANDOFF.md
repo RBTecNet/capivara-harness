@@ -14,7 +14,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `main`; o BUILD vNext (§125) está em `feat/build-vnext`, sobre a `fix/triagem-124`, sem merge; a §126 em `fix/impasse-init-plan-126`, sobre a `feat/build-vnext`, sem merge; a §127 em `fix/coerencia-temporal-127`, sobre a `fix/impasse-init-plan-126`, sem merge; a §128 em `fix/convergencia-plan-128`, sobre a `fix/coerencia-temporal-127`, sem commit |
+| branch | `main`; o BUILD vNext (§125) está em `feat/build-vnext`, sobre a `fix/triagem-124`, sem merge; a §126 em `fix/impasse-init-plan-126`, sobre a `feat/build-vnext`, sem merge; a §127 em `fix/coerencia-temporal-127`, sobre a `fix/impasse-init-plan-126`, sem merge; a §128 em `fix/convergencia-plan-128`, sobre a `fix/coerencia-temporal-127`, sem merge |
 | versão | 0.7.1 (`capivara --version`) na `fix/coerencia-temporal-127` (§126 + §127), 0.7.0 na `feat/build-vnext`, 0.6.2 na `main`; planos da 0.6.x e da 0.7.0 valem na 0.7.1; os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
 | suíte | 2866 testes em 152 arquivos na `feat/build-vnext`; 2889 em 153 na `fix/impasse-init-plan-126`; 2933 em 157 na `fix/coerencia-temporal-127`; 2989 em 161 na `fix/convergencia-plan-128`; `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
@@ -66,8 +66,8 @@ dentro. Nenhum teto mudou. Detalhe na §128; 56 cenários em
 29 primeiros RED contra `629ae11`, os 23 da revisão RED contra a primeira
 versão. Validado só com provider falso; o efeito das mudanças de prompt (F5–F8)
 precisa de run real. Branch `fix/convergencia-plan-128` sobre a
-`fix/coerencia-temporal-127`; sem commit (a especificação pede autorização
-explícita), sem merge, push, release nem mudança de versão.
+`fix/coerencia-temporal-127`; commits `7b86b47` (correção) e `0b3fdb9` (documentação),
+push feito em 21/10/2026; sem merge, release nem mudança de versão.
 
 ## 2026-10-21 — coerência temporal: o fluxo é cobrado quando o plano diz que ele existe, e a oscilação entre gates é diagnóstico (§127)
 

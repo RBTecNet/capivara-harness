@@ -11448,3 +11448,450 @@ rodou modelo.
   mudança de comportamento leva a versão a 0.7.0 (nesta branch, sem
   publicação); o carimbo do `environment.json` grava a versão mas não a
   confere, então planos da 0.6.x entram no build da 0.7.0.
+
+## §126 — O impasse INIT → PLAN: o procedimento da execução de teste não é requisito, e o envelope de fase se corrige na arquitetura
+
+### 126.1 A evidência: Luna, Parallel Lab (0.7.0)
+
+Run `init-dc741f0d7b92`, projeto `laravel/luna`, 0.7.0. O pedido do Parallel
+Lab diz, sobre o banco dos testes, uma frase: "Os testes precisam utilizar
+banco isolado dos dados normais da aplicação." O PLAN, que nas versões
+anteriores fechava em ~15 minutos, terminou em "Impasse em
+project-phases.md após 1 devoluções" na tentativa 11, depois de onze
+leituras em que o auditor repetia, com outras palavras: "O Goal e as
+descrições das fases mantêm instruções operacionais de criação e destruição
+de banco descartável e configuração de DATABASE_PATH, contrariando a decisão
+aceita de manter apenas o requisito de isolamento dos dados nos testes." O
+desenvolvedor já tinha reiniciado uma vez, e o problema voltou.
+
+Lidos `events.tsv`, os 100 logs e os 100 prompts do run (a pasta
+`.capivara` foi removida no meio da investigação e restaurada pelo
+desenvolvedor sem `handoffs/`; o que dependeria deles está marcado como
+incerto abaixo), a sequência é esta (horário local):
+
+1. **09:45–09:46, INIT.** Cinco respostas aceitas, entre elas a de banco:
+   "Ainda não existe: o projeto cria o dele, embutido em arquivo". O escritor
+   do esqueleto (log `027b515b`) escreveu a regra "testes automatizados: Os
+   testes automatizados de cada módulo usam banco isolado dos dados normais da
+   aplicação e demonstram …" — sem `DATABASE_PATH`, sem "descartável", sem
+   "cria e destrói". Na publicação, `orchestrator.ts` acrescenta, DEPOIS do
+   parser, `regrasDeBanco("embutido")` (`interview/banco.ts`): entre elas "o
+   exemplo precisa RODAR: … testes e fluxos fornecem pela mesma variável de
+   ambiente outro arquivo temporário, criado e destruído pela própria
+   execução …" (§115.10) e "banco dos testes: a suíte automatizada e os fluxos
+   rodam contra um banco descartável, criado e destruído pela própria execução
+   dos testes …" — as linhas 92 e 94 do `skeleton.md` publicado. Quem
+   acrescentou o procedimento foi o HARNESS: não o escritor, não o
+   renderizador, não o auditor.
+2. **09:47–09:52, arquitetura.** Aprovada em três rodadas, com o lado da
+   aplicação — "O caminho do banco é obtido de DATABASE_PATH", "A aplicação
+   aceita DATABASE_PATH apontando para outro arquivo SQLite local" — e goals
+   que diziam "atendendo ao requisito de testes automatizados com banco
+   descartável".
+3. **09:57–09:58, fases, rodada 1.** Dois achados endereçados a
+   "Architecture" (a fase 4 consome a integração que só a 5 entrega) →
+   reorganização 1 de 2.
+4. **10:04, auditoria da arquitetura refeita, rodada 5** (log `63383eb0`):
+   "O skeleton exige que os testes e os fluxos usem um banco descartável
+   criado e destruído pela própria execução. A arquitetura exige apenas um
+   caminho DATABASE_PATH …; não atribui a nenhum componente ou fase a criação
+   e a destruição do arquivo | Atribuir ao mecanismo de execução dos testes e
+   dos fluxos a criação e a destruição do banco descartável, mantendo o uso de
+   DATABASE_PATH". O arquiteto obedeceu (10:05): o procedimento entrou na
+   responsabilidade e no contrato dos três módulos, numa decisão de dados
+   ("banco descartável"), num requisito de ambiente e no goal das fases 2 a 5.
+   A rodada 6 aprovou "porque a arquitetura atribui à execução dos testes e
+   fluxos a criação e destruição". `aplicarArquitetura` republicou o
+   `skeleton.md` com esses goals (linhas 99–102).
+5. **10:07–10:11, fases, rodadas 3 a 5.** Os auditores de fase, aplicando a
+   responsabilidade do planejamento ("no criterion saying … how test execution
+   is organised", "validation procedures"), mandam tirar o procedimento (P4 r3,
+   P2 r5 "Goal e critério da tarefa de exclusão"); o da fase 3 (r4) manda
+   ACRESCENTÁ-LO "como determina a arquitetura". Duas auditorias, a mesma
+   autoridade, leituras opostas. O escritor não fecha em quatro devoluções →
+   reparo pelo auditor (1/2), verifier, reparo (2/2).
+6. **O reparo não podia fechar.** A emenda — do escritor e do auditor que
+   repara — devolve só as tasks: "Return only its tasks; the harness owns its
+   envelope" (prompt `authoring.phase-p02.auditor.8`; em código,
+   `planoAutorado` → `extractTasks` + `assemblePhase(envelope, …)`). O Goal é
+   envelope, e o envelope vem da arquitetura. `ehDeArquitetura` só leva à
+   arquitetura o achado cujo `where` começa por "Architecture"; "Goal",
+   "Phase 4, Goal" e "Phase 2 vs Phase 3 vs Phase 4 vs Phase 5" iam à emenda.
+   A segunda reorganização, a única saída que alcançava o texto, nunca foi
+   usada.
+7. **10:13, rodada 7.** Verifier de P2: "Goal | Determina que a execução dos
+   testes e dos fluxos crie e destrua o banco descartável e forneça seu caminho
+   por DATABASE_PATH, prescrevendo como a execução é organizada | Remova essa
+   instrução operacional e mantenha apenas o requisito de que os testes
+   automatizados e os fluxos usem um banco isolado". A triagem manteve (com a
+   razão contraditória "a instrução operacional do Goal é exigida pelas
+   fontes"); com os dois reparos gastos, `maxReturns` 0 → impasse →
+   `levantamentoDeAuditoria(todos)` → três pontos arbitrados ("Qual dos dois
+   entendimentos vale?", a leitura do auditor recomendada) e gravados como
+   decisões ACEITAS. É ESTA a "decisão aceita" que os auditores passam a
+   citar: ela aparece em "## Confirmed decisions" do prompt seguinte ("Goal:
+   Remova essa instrução operacional e mantenha apenas o requisito …",
+   "(o desenvolvedor confirmou esta leitura: ela é autoridade)"). O
+   `ACCEPTED: none` do prompt da entrevista não a mostra porque ela nasceu
+   depois. Se foi número digitado ou o Enter que aceita a recomendada, o
+   handoff que diria não foi recuperado.
+8. **Rodadas 8 a 11.** O mesmo Goal, reescrito, na fase 2 e depois nas 3, 4
+   e 5 e na coerência ("as descrições das quatro fases …"): mais duas
+   arbitragens (2 e 4 pontos), o teto de arbitragem, o impasse, o "reiniciar"
+   do desenvolvedor — e, com os reparos já gastos e `modoReparo` mantido, o
+   impasse seguinte veio na primeira reprovação: "após 1 devoluções" conta só
+   a história zerada pelo reinício.
+
+### 126.2 As perguntas do pedido
+
+1. **Sequência.** Acima.
+2. **Quem introduziu as instruções.** O procedimento ("criado e destruído
+   pela própria execução") entrou pelo harness (`regrasDeBanco`, publicação do
+   INIT). `DATABASE_PATH` entrou pelo arquiteto, do lado da aplicação, na
+   primeira arquitetura — legítimo. A junção dos dois no goal das fases ("a
+   execução … cria e destrói … e fornece seu caminho por DATABASE_PATH") foi
+   do arquiteto, sob a ordem da auditoria da arquitetura na rodada 5, e chegou
+   ao `skeleton.md` por `aplicarArquitetura`.
+3. **Decisão posterior à entrevista.** Sim: as arbitragens das rodadas 7, 8
+   e 9, gravadas como ACEITAS por `levantamentoDeAuditoria`/`decisaoGravada`.
+4. **Como as decisões viajam.** `allAnswers` ACEITAS → `writer.decisions` →
+   "Confirmed decisions" em todo prompt de escrita, emenda, reparo e
+   auditoria, e no do arquiteto (`promptDoArquiteto`); handoff
+   `project-phases.md.json`, recarregado pelo `plan` seguinte. A autoridade
+   de I-16 (`autoridadeDeTeste`) exclui as decisões de auditoria/impasse/
+   ensaio — mas os prompts as recebem com "the confirmed decision wins".
+5. **Por que a auditoria anterior aprovou, e reforçou.** A regra do harness
+   dizia o procedimento; o `MECHANISM_BOUNDARY` (`prompts/architecture.ts`,
+   §123) dizia ao arquiteto e ao auditor que as regras de banco, "the
+   disposable database for tests and flows", eram "requirements the harness's
+   gates depend on: keep them exactly"; e a I-16 não tinha forma para "a
+   execução dos testes cria/destrói/fornece" — nem a arquitetura nem a
+   correção do auditor (`semPrescricaoDeTeste`) foram conferidas.
+6. **Por que a recuperação não aplicou a correção.** O envelope (item 6
+   acima).
+7. **Os quatro apontamentos do Goal.** Não eram falsos: os quatro goals
+   continham a frase, e a decisão aceita mandava tirá-la. Eram UM defeito de
+   origem (a divisão de fases da arquitetura) em quatro endereços, cada um
+   inalcançável pela emenda. A identidade por vocabulário (§122) não os
+   juntava — as leituras reais do Goal da fase 2 nas rodadas 7 e 8 têm Jaccard
+   0,24 —, e a arbitragem guarda o que já perguntou pelo texto exato
+   (`marcaDoProblema`), então cada redação nova voltava ao desenvolvedor.
+
+### 126.3 A causa-raiz
+
+Duas metades, uma em cada estágio.
+
+**No INIT, a regra do harness.** As regras de banco existem porque os gates
+dependem delas: a aplicação lê o banco do ambiente, o `.env.example` sobe a
+aplicação sozinho, a migração tem nome, e os testes nunca abrem o banco de
+quem os roda. "Criado e destruído pela própria execução dos testes" não é
+nada disso: é o PROCEDIMENTO da execução, exatamente o que a responsabilidade
+do planejamento reserva ao build ("validation procedures", "how test
+execution is organised"). O harness escreveu, como produto, o que ele mesmo
+proíbe o plano de prescrever — e a §123 ainda mandou o PLAN mantê-lo
+"exactly". As duas regras do harness se contradiziam, e a auditoria da
+arquitetura obedeceu a uma e a de fase à outra.
+
+**No PLAN, o caminho de volta.** Um achado sobre o envelope de fase — goal,
+título, dependências, cobertura — é um achado sobre `architecture.md`, por
+mais que seja lido em `project-phases.md`. O ciclo do plano não tinha esse
+caminho: o achado ia à emenda da fase (que não alcança o envelope), ao reparo
+pelo auditor (idem), ao verifier, à arbitragem do desenvolvedor e ao impasse.
+O desenvolvedor virou a única saída de uma contradição interna da Capivara.
+
+### 126.4 O que muda
+
+**A regra do harness** (`interview/banco.ts`). "banco dos testes": "a suíte
+automatizada e os fluxos rodam contra um banco descartável, isolado do banco
+normal da aplicação; nenhum teste lê, escreve ou migra o banco configurado no
+`.env` do desenvolvedor. Como cada execução obtém e descarta esse banco é
+decisão do build, não do plano nem desta regra: não é responsabilidade de
+componente nem objetivo de fase" — a mesma forma da ressalva da migração
+(§123). "o exemplo precisa RODAR" (embutido): "testes e fluxos usam outro
+arquivo temporário, isolado, que a aplicação aceita pela mesma variável de
+ambiente, sem tocar o banco normal …" — o arquivo isolado e a variável
+continuam (§115.10); quem cria e destrói sai. O que os gates precisam está
+inteiro: `loop/ambiente.ts` semeia o `.env` do exemplo e roda `migrate`, o G4
+sobe a aplicação do exemplo, e a suíte do projeto não toca o banco do
+desenvolvedor.
+
+**A fronteira dos prompts da arquitetura** (`MECHANISM_BOUNDARY`). As regras
+de banco continuam requisito dos gates, mas o que se mantém "exactly" é o que
+elas exigem da APLICAÇÃO (ler o banco do ambiente e aceitar por ele um banco
+isolado separado; o nome da migração). "How a test run obtains, points to and
+discards its database is neither yours nor a phase's: the build decides it …
+It is never a component's responsibility or contract, a data decision, an
+infrastructure requirement or a phase goal, and an architecture that leaves it
+out is missing nothing." Dito aos dois papéis: o auditor também precisa saber
+que a ausência não é defeito.
+
+**I-16, o procedimento da execução** (`contract/test-prescription.ts`). Forma
+nova, a das frases do run: a execução de teste (ou "os testes", "a suíte",
+"cada teste") como sujeito de verbo de ciclo de vida — criar, destruir,
+remover, apagar, descartar, fornecer, definir, configurar, preparar, apontar,
+exportar —, no indicativo, no subjuntivo ou com modal ("devem criar"), até
+quatro palavras depois, sem negação; a atribuição nominal ("atribuir à
+execução dos testes a criação e a destruição"); e o mesmo em inglês — SEMPRE
+com um recurso no resto da oração (banco, base, arquivo, caminho, variável,
+SQLite ou um nome de variável de ambiente). O recurso é o que separa o
+procedimento do produto: "os testes definem a nota mínima" é um sistema de
+provas, "a execução do fluxo 2 cria a tarefa" é um workflow. Fluxo só conta
+como teste ao lado dele ("dos testes e dos fluxos") ou automatizado;
+"testes" depois de outro substantivo ("o cadastro de testes cria") não é
+sujeito; a negação ou o "como" antes do sujeito ("não cabe à execução dos
+testes criar o banco", "como a execução dos testes cria o banco é decisão do
+build") anulam a frase. O que não é tocado: a propriedade passiva do banco ("um banco descartável, criado e
+destruído pela própria execução" — a calibração da §118 e da §122), o lado da
+aplicação ("a aplicação aceita DATABASE_PATH apontando para outro arquivo"),
+"os testes usam banco isolado", "os testes demonstram …", a negação, o
+comando de migração. A autoridade é de PROCEDIMENTO, não de termo: se o
+pedido ou uma decisão do desenvolvedor prescreve o que a execução de teste
+faz com um recurso ("os testes devem criar um arquivo temporário …"),
+nenhuma redação do plano que o repita conta; "os testes criam seus próprios
+dados de exemplo" não autoriza nada. A fronteira de palavra é Unicode — o `\b` do
+JavaScript vê "cria" dentro de "criação". Por ser `testPrescriptions`, vale
+nos mesmos lugares que as outras formas: stack, regras, stories e fases do
+esqueleto; overview, componentes, decisões de dados e fases da arquitetura;
+tasks do plano; decisões e correções do auditor (`semPrescricaoDeTeste` —
+a correção da rodada 5 teria chegado ao arquiteto como a regra, não como
+"atribuir à execução …"). Duas metades irmãs: a I-16 da arquitetura passa a
+ler também os requisitos de ambiente (compatibilidade e pré-condições), a
+única prosa que ela não lia — e onde o run escreveu o procedimento; e quem
+APAGA por I-16 (item de infraestrutura, entrada de stack rotulada como teste)
+apaga ferramenta, não procedimento: `testToolPrescriptions` decide a remoção,
+e um item cujo propósito só descreve o procedimento ("better-sqlite3 — … a
+execução dos testes cria e destrói o banco temporário com ele") fica e volta
+ao arquiteto como defeito, em vez de levar a dependência da aplicação com ele.
+No esqueleto, o procedimento segue o destino do MECANISMO, não o da
+ferramenta: volta ao escritor nomeado ("a regra … prescreve o procedimento da
+execução de teste (I-16)") e, depois da escada, é publicado com ressalva —
+nunca bloqueia, como a §123 decidiu para o I-17. A primeira versão desta
+correção o tratava como a ferramenta, e dois testes da §123 pegaram: a regra
+do Haiku "os testes automatizados definem APP_DB_PATH para um arquivo
+temporário … e o removem ao fim", que a §123 publica com ressalva na terceira
+tentativa, passava a parar o esqueleto. Na arquitetura não há modo tolerante
+(nunca houve para a I-16): a prosa volta ao arquiteto dentro da escada que ele
+já tem.
+
+**O envelope vai à origem** (`audit/envelope.ts`, `auditLoop`). Um achado
+cujo endereço nomeia um campo do envelope ("Goal", "Phase 4, Goal", "Phase 3 ·
+Depends on", "Objetivo", "Covers", "Áreas"), ou cujo endereço só nomeia fases
+e cujo problema fala do goal ou das "descrições das fases" (a coerência), é do
+envelope — salvo quando a correção pede task ou critério ("inclua nesta fase
+uma tarefa …": o goal promete, quem entrega é a task) ou o achado é mecânico.
+Pela prosa, só quando nem o endereço nem o problema citam task ou critério
+("P2.T1.C2 exige … P3.T1.C2 exclui …" é contradição entre tasks, e pode ser
+decisão de produto). A correção que o auditor escreveu citando a frase chega
+ao laço já trocada pela da regra (`semPrescricaoDeTeste`), que fala em
+"critério de uma task"; o que decide é a correção ORIGINAL, citada dentro da
+troca. Na PRIMEIRA aparição ele segue a emenda de sempre — uma vez é defeito
+(§70), e o reconhecimento por forma pode errar para o lado de uma fase que a
+emenda conserta. Quando ele VOLTA ao mesmo lugar, em qualquer redação, é
+herança. O lugar é a fase, o campo e a assinatura do envelope que está na
+mesa (`P2·goal·<sha12 da fase>`): é a identidade que o vocabulário não dava,
+e depois de uma reorganização o goal é outro, então um achado sobre ele volta
+a ser primeira aparição. Herança:
+`achadoNaOrigem` o endereça a "Architecture · Phase 2 · goal (envelope da
+fase, escrito por architecture.md)" e ele segue pela reorganização que já
+existia (`reorganizar`, §116: arquitetura refeita, auditada, aplicada; as
+fases cujo envelope e fatia não mudaram voltam do cache). No fim da escada
+(`ask-developer`), qualquer achado do envelope vai à arquitetura ANTES do
+reparo, da arbitragem e do impasse. Nunca é arbitrado. Esgotadas as
+reorganizações, `planoAutorado` para com o diagnóstico da origem — "o envelope
+é escrito por architecture.md, não por project-phases.md … Isto é um defeito
+técnico herdado da arquitetura, não uma decisão de produto: nada aqui é seu
+para decidir" —, com as estratégias tentadas, os achados de fase que
+esperavam a divisão nova e o estado em disco, em vez de "eles seguem para a
+sua arbitragem". Quando o roteamento acontece no caminho normal, o ciclo
+recomeça sobre a divisão nova (a história zera, como no ramo do impasse), e
+não se conta reparo: a reescrita foi a reorganização.
+
+**A arquitetura guardada passa pelo contrato de hoje.** `arquitetar` reaproveitava
+o estado em disco quando o esqueleto e a autoridade eram os mesmos, sem
+reler: uma arquitetura aprovada pela 0.7.0 com o procedimento no goal voltaria
+inteira num `plan` retomado. Agora ela passa pelo mesmo `parseArchitecture`
+que um desenho novo — sem chamada — e, se não passa, é desenhada de novo
+(o cache por prompt pode devolver o desenho válido sem custo).
+
+**O esqueleto de outra versão do harness** (`plan`). O `plan` lê o esqueleto
+gravado, não o reescreve. Quando as regras de banco gravadas diferem das que
+`regrasDeBanco` escreveria hoje para a mesma decisão, ele diz quais, segue com
+o que está publicado e deixa a rota no relatório: `capivara init` republica o
+esqueleto reaproveitando as respostas e a chamada do esqueleto em disco, e
+depois `capivara plan`. Só o texto que as versões anteriores escreviam conta
+("criado e destruído pela própria execução") — uma regra do escritor com o
+mesmo assunto é mantida pelo init e não é "de outra versão" —, e o aviso vai
+ao RELATÓRIO, não às ressalvas que todo auditor de fase lê como defeito a
+resolver: ninguém no plano corrige a versão do harness que gravou o esqueleto. Trocar a regra dentro do `plan` mudaria o documento
+por baixo do desenvolvedor e a identidade de tudo o que foi aprovado sobre
+ele; não há garantia de que isso seja seguro, então não é feito.
+
+**O contrato** (`invariants.ts`, `docs/capivara-phases-v2.md` regenerado): o
+título e o racional da I-16 nomeiam o procedimento da execução.
+
+### 126.5 O que NÃO muda, de propósito
+
+- `DATABASE_PATH` não é proibido em lugar nenhum. O lado da aplicação — de onde
+  ela lê o banco, que aceita outro arquivo por ele — é decisão técnica legítima
+  do plano e é publicada como antes (cenário 3).
+- Nenhum teto aumentou: devoluções, reparos (2), reorganizações (2),
+  arbitragens. O envelope que a arquitetura não conserta para o run dentro
+  do orçamento que já existia.
+- Nenhum auditor, registro de decisões ou estado novo. O caminho é a
+  reorganização da §116; a identidade é um `Set` de endereços no laço.
+- A arbitragem dos achados que não são do envelope, a identidade por
+  vocabulário (§122), a triagem (§124), o build (`loop/`).
+- O prompt do esqueleto, o das fases e o `planningScopeBlock`: intocados, e os
+  caches de fase continuam valendo. Os prompts do arquiteto e do auditor da
+  arquitetura mudam (a fronteira), e com eles as chaves de cache e de
+  aprovação da arquitetura — que, num `plan` retomado com o mesmo esqueleto e
+  as mesmas decisões, nem é chamada (o estado é reaproveitado).
+- Os esqueletos e decisões já publicados não são editados.
+
+### 126.6 Testes: RED → GREEN
+
+`test/init/impasse-126.spec.ts` (23), provider falso sobre a fixture do run
+real: o pedido, a regra do escritor e a US-2.2 byte a byte, um esqueleto de
+três fases (fundação, tarefas, categorias) com a decisão de banco embutido, e
+três arquiteturas — a legítima (o lado da aplicação com `DATABASE_PATH`), a
+contaminada (os textos aprovados na rodada 6: goals, responsabilidade,
+contrato, decisão de dados, requisito de ambiente) e uma em prosa sem forma
+("cada rodada de testes e de fluxos recebe um banco descartável próprio,
+preparado antes e apagado depois"), que só o roteamento alcança. Os achados
+são os reais: o da arquitetura na rodada 5, o da fase 3 na rodada 4, e o Goal
+rodada a rodada (P2 nas rodadas 7, 8, 9 e 10, P3, P4, a coerência nas rodadas
+10 e 11). Cobrem os doze do pedido: (1) o isolamento fica no produto, nas
+palavras do escritor e na regra do harness; (2) o esqueleto publicado não
+ganha procedimento (as regras passam na I-16 com o pedido como autoridade);
+(3) o `DATABASE_PATH` do lado da aplicação passa e é publicado; (4) o goal com
+o procedimento volta ao arquiteto (fase, componente, decisão de dados,
+requisitos de ambiente nomeados) e não chega ao esqueleto nem à arquitetura;
+(5) o auditor da arquitetura que manda atribuir e o de fase que manda
+acrescentar recebem a correção da regra, e a mesma frase é julgada igual na
+arquitetura e nas tasks; (6) as leituras reais do Goal têm a mesma chave,
+embora `mesmoPonto` as separe, e três endereços (P2, P3, coerência)
+reescritos a cada leitura são UMA reorganização, com a altura pinada (três
+leituras de cada); (7) a origem é dita — no anúncio, no endereço que o
+arquiteto recebe e no diagnóstico; (8) nenhuma pergunta de auditoria e nenhum
+impasse; (9) a fase 1 aprovada não é reescrita nem reauditada; (10) a fase 2
+que mudou de envelope é reescrita e reauditada, e a arquitetura aprovada sobre
+um esqueleto com a regra anterior não é reaproveitada; (11) o pedido que fixa o
+procedimento o mantém — a mesma arquitetura contaminada passa sem emenda; (12)
+o caminho limpo com a lista exata de chamadas da 0.7.0. E as duas metades
+irmãs: a dependência com o procedimento no propósito fica e volta como
+defeito, a ferramenta continua saindo contando; no esqueleto, a regra que só
+descreve o procedimento volta nomeada e, tolerada, é publicada, e a que nomeia
+ferramenta continua bloqueando. Os cinco da revisão adversarial (126.7):
+falsos positivos de produto e falsos negativos realistas, autoridade de
+procedimento sobre recurso, a correção que cita a frase, o achado sobre o
+goal novo depois da reorganização, e a arquitetura guardada.
+
+RED contra a 0.7.0 (o `src/` da `feat/build-vnext`, com o módulo novo do
+envelope presente): 17 de 23 falham; no 7–10 o desenvolvedor recebe
+exatamente "Qual dos dois entendimentos vale?" sobre o Goal, e no 6, sete
+perguntas. Verdes antes e depois, de propósito: o requisito intocado pela
+I-16, o caminho limpo com as mesmas chamadas, o pedido explícito mantido, o
+esqueleto do escritor válido e as duas unidades do módulo novo. Expectativas antigas que mudaram: nenhuma. Os dois testes da
+§123 que a primeira versão desta correção quebrou ("tolerado, o mecanismo não
+derruba a leitura" e "o resíduo depois da escada não bloqueia") voltaram a
+passar pela correção do CÓDIGO — o procedimento tolerado no esqueleto —, não
+pela troca da expectativa. `docs/capivara-phases-v2.md` foi regenerado (título
+e racional da I-16).
+
+`npm run check`: 2889 testes em 153 arquivos, rc=0 (2866 em 152 antes).
+
+### 126.7 A revisão adversarial
+
+Um revisor independente (um agente, sem escrever na árvore) leu a primeira
+versão desta correção e reproduziu sete defeitos, todos corrigidos com
+cenário próprio: (1) a correção do auditor que citava a frase era trocada pela
+da regra antes do laço, e a troca, que fala em "critério de uma task", tirava
+o Goal do envelope — o run voltava ao caminho da 0.7.0, com arbitragem e
+impasse; (2) "Phase 2 vs Phase 3 | o goal da fase 2 e o da fase 3 … P2.T1.C2
+exige … P3.T1.C2 exclui" virava envelope e parava o run, quando é contradição
+entre tasks que a 0.7.0 levava ao desenvolvedor; (3) os lugares do envelope
+nunca eram esquecidos, e um achado sobre o goal NOVO, depois da
+reorganização, ia direto à arquitetura; (4) qualquer frase do pedido com a
+forma ("os testes criam seus próprios dados de exemplo") desligava a
+checagem inteira; (5) falsos positivos de produto ("a execução do fluxo 2
+cria a tarefa", "o cadastro de testes cria um registro", "os testes definem a
+nota mínima", o eco da própria regra) e falsos negativos realistas ("os
+testes de cada módulo criam e destroem o banco", "cada teste cria seu banco");
+(6) um reparo contado quando a reescrita era a reorganização; (7) a
+arquitetura guardada reaproveitada sem passar pelo contrato. Das preocupações
+não confirmadas, três viraram correção: o aviso de versão fora das ressalvas
+dos auditores e restrito ao texto antigo, a história zerada no roteamento
+normal, e `` `Goal` `` e "Descrição da fase" reconhecidos como endereço. A
+primeira versão também tratava o procedimento, no esqueleto, como a
+ferramenta, e dois testes da §123 pegaram (126.4).
+
+### 126.8 Custo
+
+Caminho limpo: zero chamadas a mais (cenário 3/12, lista exata). No caminho do
+run real, com a correção: a arquitetura não sai aprovada com o procedimento
+(a I-16 a devolve ao arquiteto na mesma escada de três tentativas, ou a
+correção do auditor chega já substituída), e o Goal não chega às fases. Se
+uma prosa sem forma passar, o custo é uma emenda de fase (a primeira
+aparição) e uma reorganização — arquitetura, uma leitura, as fases que
+mudaram —, contra as rodadas 5 a 11 do run: dois reparos, seis leituras de
+verifier, três arbitragens, nove perguntas e o impasse.
+
+### 126.9 O run original
+
+Não pode ser retomado com segurança. O `handoffs/` do run não foi restaurado
+(`skeleton-state.json`, as respostas da entrevista, o estado da arquitetura e
+o cache), e o `plan` sem o estado do esqueleto para com "esqueleto ausente".
+Mesmo com ele, o esqueleto gravado carrega a regra anterior e o handoff do
+plano carrega as decisões arbitradas ("Goal: Remova essa instrução
+operacional…", "P4.T8.C2: … apenas os testes automatizados"), que o `plan`
+recarrega como autoridade. A rota é recomeçar: `capivara init --fresh` (a
+entrevista são as cinco perguntas, ~1 minuto) e `capivara plan`. Ao validar,
+ler: o `skeleton.md` (as regras "banco dos testes" e "o exemplo precisa
+RODAR" no texto novo, a regra do escritor intacta); os eventos `authoring
+architecture … retry` (um "prescreve teste" do arquiteto é a I-16 nova
+trabalhando); o `architecture.md` (`DATABASE_PATH` do lado da aplicação, nenhum
+"cria e destrói" em componente, decisão de dados, requisito de ambiente ou
+goal); e, se um achado de Goal aparecer, o anúncio "apontam o envelope de
+fase … vai à arquitetura — não a você" e um `authoring architecture retry`
+em vez de "arbitrados por você".
+
+### 126.10 Limitações e riscos
+
+- A forma nova da I-16 é por padrão: sujeito de execução de teste + verbo de
+  ciclo de vida a até quatro palavras. "Cada rodada de testes recebe um banco
+  preparado antes e apagado depois" escapa — é o caso que o roteamento do
+  envelope cobre, e o cenário 7–10 o usa de propósito. A propriedade passiva
+  ("criado e destruído pela própria execução") continua fora, pela calibração
+  das §118 e §122; se um escritor de esqueleto a escrever numa regra, a
+  auditoria da arquitetura ainda pode cobrar um dono — a fronteira nova diz a
+  ela que a ausência não é defeito, e a correção que mandar atribuir é
+  substituída pela regra.
+- A autoridade de procedimento é por forma e recurso, não por recurso
+  igual: um pedido que prescreve o procedimento sobre um arquivo autoriza
+  também a redação sobre o banco.
+- O envelope é reconhecido pela forma do endereço. Um "Goal" cuja correção
+  pede trabalho de task sem dizer "task", "tarefa" ou "critério" ("garanta que
+  a fase entregue X") vai à emenda na primeira vez e, se voltar, à arquitetura
+  — que pode não ter o que mudar; o custo é uma reorganização, e o fim é o
+  diagnóstico, nunca a pergunta.
+- Achado de envelope sem fase em lugar nenhum (nem declarada, nem no
+  endereço) divide uma chave só (`*·goal`).
+- O esqueleto tolera o procedimento e o publica com ressalva; a arquitetura e
+  o plano o devolvem. Uma regra de esqueleto escrita assim pode levar o
+  auditor da arquitetura a cobrar um dono de novo: a fronteira nova lhe diz
+  que a ausência não é defeito, e a correção que mandar atribuir chega ao
+  arquiteto já trocada pela regra; se ainda assim não convergir, é a escada
+  da arquitetura que termina, em diagnóstico.
+- Não corrigidos, observados no run e anotados aqui: a arbitragem guarda o que
+  perguntou pelo texto exato (`marcaDoProblema`), então um ponto que não é do
+  envelope e volta reescrito é perguntado de novo (P4.T8.C2 na rodada 8); a
+  triagem pode manter um achado com uma razão que o contradiz ("KEEP: … é
+  exigida pelas fontes"); "reiniciar" com os reparos gastos e `modoReparo`
+  ligado leva ao impasse na primeira reprovação, e o impasse diz "após 1
+  devoluções" contando só a história zerada; e a oscilação sobre a lista de
+  comportamentos da US-2.2 ("os testes demonstram criação válida, …") — o
+  pedido exige que cada módulo demonstre, a responsabilidade do planejamento
+  proíbe dizer o que a suíte cobre — foi arbitrada pelo desenvolvedor no run
+  e não é tratada aqui.
+- Validado só com o provider falso sobre os textos reais; nenhum run real
+  depois desta implementação.

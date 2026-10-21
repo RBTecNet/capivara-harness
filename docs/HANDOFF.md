@@ -14,12 +14,54 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `main`; o BUILD vNext (§125) está em `feat/build-vnext`, sobre a `fix/triagem-124`, sem merge |
+| branch | `main`; o BUILD vNext (§125) está em `feat/build-vnext`, sobre a `fix/triagem-124`, sem merge; a §126 em `fix/impasse-init-plan-126`, sobre a `feat/build-vnext`, sem merge |
 | versão | 0.7.0 (`capivara --version`) na `feat/build-vnext`, 0.6.2 na `main`; planos da 0.6.x valem na 0.7.0; os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
-| suíte | 2866 testes em 152 arquivos na `feat/build-vnext`, `npm run check` verde |
+| suíte | 2866 testes em 152 arquivos na `feat/build-vnext`; 2889 em 153 na `fix/impasse-init-plan-126`; `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-21 — o impasse INIT → PLAN: o procedimento da execução de teste não é requisito, e o envelope de fase se corrige na arquitetura (§126)
+
+O Parallel Lab com Luna (0.7.0, run `init-dc741f0d7b92`) parou o PLAN na
+tentativa 11 com "Impasse em project-phases.md após 1 devoluções": o Goal
+das fases 2 a 5 dizia que "a execução automatizada dos testes e dos fluxos
+cria e destrói o banco descartável … e fornece seu caminho por
+DATABASE_PATH"; os auditores de fase mandavam tirar; o desenvolvedor foi
+chamado a arbitrar três vezes. A cadeia, lida nos logs: o pedido só exigia
+banco isolado e o escritor do esqueleto escreveu só isso; quem pôs "criado e
+destruído pela própria execução dos testes" no `skeleton.md` foi o HARNESS
+(`regrasDeBanco`, §115.10), e a fronteira da §123 mandava o PLAN manter essas
+regras "exactly"; a auditoria da arquitetura cobrou um dono para o ciclo de
+vida e o arquiteto o escreveu no goal das fases; e o goal é envelope, que a
+emenda e o reparo da fase não alcançam — só um `where` "Architecture" levava
+à reorganização, e a segunda nunca foi usada. A "decisão aceita" que os
+auditores citavam era a arbitragem da rodada 7, gravada como ACEITA.
+Agora: as regras de banco dizem o isolamento e deixam o procedimento ao
+build; a fronteira do arquiteto/auditor diz que o procedimento nunca é
+responsabilidade de componente nem goal de fase; I-16 ganhou a forma do
+procedimento da execução (a execução de testes, "os testes", "a suíte" como
+sujeito de criar/destruir/fornecer/definir…, e "atribuir à execução dos
+testes a criação"), com o pedido como autoridade — no esqueleto ela é
+tolerada como o I-17, na arquitetura volta ao arquiteto, nas correções do
+auditor é substituída pela regra, e quem apaga por I-16 só apaga ferramenta;
+e o achado sobre o envelope de fase (`audit/envelope.ts`) vai à emenda na
+primeira vez e, quando VOLTA ao mesmo lugar (`P2·goal`, em qualquer redação),
+à reorganização da arquitetura — nunca à arbitragem; esgotadas as
+reorganizações, o run para com o diagnóstico que nomeia `architecture.md`. O
+`plan` diz (e põe no relatório) quando o esqueleto em disco tem regras de
+banco de outra versão do harness, com a rota (`capivara init`, que reaproveita
+respostas e esqueleto em disco). Zero chamadas a mais no caminho limpo; nenhum
+teto aumentou; nenhuma proibição de `DATABASE_PATH`. A forma nova exige um
+recurso na oração (banco, arquivo, caminho, variável): "os testes definem a
+nota mínima" é produto. A arquitetura guardada passa pelo contrato atual antes
+de ser reaproveitada. Uma revisão adversarial (um agente) sobre a primeira
+versão reproduziu sete defeitos, todos corrigidos com cenário. Detalhe na
+§126; 23 cenários em `test/init/impasse-126.spec.ts`, 17 RED contra a 0.7.0. O run do
+Luna não pode ser retomado (o `handoffs/` não voltou; e o esqueleto gravado e
+as decisões arbitradas carregariam a contradição): `capivara init --fresh` e
+`capivara plan`. Branch `fix/impasse-init-plan-126` sobre a
+`feat/build-vnext`; sem merge, push nem release.
 
 ## 2026-10-21 — BUILD vNext: prova, defeito e recuperação localizada (§125)
 

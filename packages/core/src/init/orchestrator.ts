@@ -16,7 +16,7 @@ import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, blocoDaDisponibilidade, disponibilidadeDaArquitetura, tabelaDaDisponibilidade, buildStamp, checkCoverage, checkDesignRefs, checkTestPrescription, checkWriteOwnership, testPrescriptionHint, testPrescriptions, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parseArchitecture, parsePhaseFragment, parseSkeleton, phaseHeading, phasesFromArchitecture, renderArchitecture, renderSkeleton, requirementsFromArchitecture, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12 } from "../contract/index.js";
+import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, fasesIntactas, blocoDaDisponibilidade, disponibilidadeDaArquitetura, tabelaDaDisponibilidade, buildStamp, checkCoverage, checkDesignRefs, checkTestPrescription, checkWriteOwnership, testPrescriptionHint, testPrescriptions, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parseArchitecture, parsePhaseFragment, parseSkeleton, phaseHeading, phasesFromArchitecture, renderArchitecture, renderSkeleton, requirementsFromArchitecture, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12 } from "../contract/index.js";
 import { CoherenceMemory } from "../audit/coherence.js";
 import { achadoNaOrigem, alvoNoEnvelope, chavesDoEnvelope, veioDoEnvelope } from "../audit/envelope.js";
 import { applyMaterialityReview, materialityInput, materialityPrompt } from "../audit/materiality.js";
@@ -27,7 +27,7 @@ import { tasksBlock } from "../contract/templates.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, isRepairable, publish, repairDeterministically, stripAllMarkers, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, decisaoDeBanco, isNonAnswer, leituraInsistente, naoObjetivos, perguntaDeLacuna, perguntaDoBanco, perguntaInsistente, regrasDeBanco, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, suposicaoDelegada, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Assumption, Question } from "../interview/index.js";
-import { DOCUMENTO_DO_TEMPO, repairBlock, amendPhasePrompt, architectPrompt, architectureAuditPrompt, assessRehearsal, auditRetryPrompt, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
+import { DOCUMENTO_DO_TEMPO, planningScopeBlock, repairBlock, amendPhasePrompt, architectPrompt, architectureAuditPrompt, assessRehearsal, auditRetryPrompt, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
 import type { AskedQuestion, CriterionRef, RehearsalResult, WriterContext } from "../prompts/index.js";
 import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEvents, runIdFor, runPaths, writeAtomic, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
@@ -1067,8 +1067,17 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           ]
         : upstream;
 
-    const aReauditar = fases.filter((fase) => !fasesAprovadas.has(sha12(fase.markdown.trim())));
-    for (const fase of fases.filter((fase) => fasesAprovadas.has(sha12(fase.markdown.trim())))) {
+    /*
+     * Uma aprovação vale para o texto E para a fatia contra a qual ele foi
+     * julgado (§128). Enquanto toda reorganização reescrevia todas as fases, o
+     * sha do texto bastava: texto igual era fatia igual. Desde que a fase
+     * intocada mantém o texto, a fatia muda por baixo dele — e a aprovação
+     * dada contra a arquitetura anterior não pode pular a releitura.
+     */
+    const chaveDaFase = (fase: { number: number; markdown: string }): string =>
+      sha12(`${fase.markdown.trim()}\n${JSON.stringify(fatia(fase.number))}`);
+    const aReauditar = fases.filter((fase) => !fasesAprovadas.has(chaveDaFase(fase)));
+    for (const fase of fases.filter((fase) => fasesAprovadas.has(chaveDaFase(fase)))) {
       relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
     }
     const puladas = fases.length - aReauditar.length;
@@ -1086,11 +1095,15 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * cai sozinha.
      */
     const autoridade = shaDaAutoridade(base.decisions);
+    /** A autoridade de uma task aprovada leva a fatia da fase, pela mesma razão da chave da fase (§128). */
+    const autoridadeDaFase = (numero: number): string => sha12(`${autoridade}\n${JSON.stringify(fatia(numero))}`);
+    /** E a da coerência leva a arquitetura: um par aprovado contra a anterior é relido. */
+    const autoridadeDaCoerencia = sha12(`${autoridade}\n${arquiteturaMd}`);
 
     /** As tasks desta fase que já passaram, com este texto e estas decisões. */
     const jaAprovadas = (fase: { number: number; markdown: string }): TaskBlock[] => {
       const lido = parsePhaseFragment(fase.markdown);
-      return lido === null ? [] : tasksJulgadas.jaAprovadas(lido.tasks, autoridade);
+      return lido === null ? [] : tasksJulgadas.jaAprovadas(lido.tasks, autoridadeDaFase(fase.number));
     };
 
     const promptDaFase = (fase: { number: number; markdown: string }): string => {
@@ -1118,7 +1131,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
     const reaproveitadas = aReauditar.filter((fase) => memoria.jaAprovada(chaveDeAprovacao(fase)));
     for (const fase of reaproveitadas) {
-      fasesAprovadas.add(sha12(fase.markdown.trim()));
+      fasesAprovadas.add(chaveDaFase(fase));
       relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
     }
     if (reaproveitadas.length > 0) {
@@ -1127,7 +1140,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
     const tarefas: (() => Promise<AuditVerdict>)[] = [
       ...aReauditar
-        .filter((fase) => !fasesAprovadas.has(sha12(fase.markdown.trim())))
+        .filter((fase) => !fasesAprovadas.has(chaveDaFase(fase)))
         .map((fase) => () => {
           relatarFase({ kind: "audit", number: fase.number, state: "corrente" });
           return auditCall(`project-phases.md#P${fase.number}`, attempt, () => promptDaFase(fase), papel).then((bruto) => {
@@ -1152,13 +1165,13 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             };
             // Aprovada é fato do run: o texto exato que passou não volta à fila.
             if (veredicto.findings.length === 0) {
-              fasesAprovadas.add(sha12(fase.markdown.trim()));
+              fasesAprovadas.add(chaveDaFase(fase));
               memoria.guardarAprovacao(chaveDeAprovacao(fase));
               // Fase aprovada é TASK aprovada, uma a uma: é o que sobrevive à
               // próxima emenda, que vai mudar só uma delas — e à próxima execução.
               const lido = parsePhaseFragment(fase.markdown);
               if (lido !== null) {
-                tasksJulgadas.aprovar(lido.tasks, autoridade);
+                tasksJulgadas.aprovar(lido.tasks, autoridadeDaFase(fase.number));
                 memoria.guardarTasksAprovadas(tasksJulgadas.chaves());
               }
               relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
@@ -1169,7 +1182,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           });
         }),
       async () => {
-        const changed = coerencia.changed(criteria, autoridade);
+        const changed = coerencia.changed(criteria, autoridadeDaCoerencia);
         /*
          * Índice idêntico ao aprovado, sob as mesmas decisões: a resposta já é
          * conhecida. Reperguntar não acrescenta rigor, acrescenta variância — e
@@ -1197,7 +1210,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           }),
           papel,
         );
-        const reconciliado = coerencia.reconcile(verdict, criteria, autoridade);
+        const reconciliado = coerencia.reconcile(verdict, criteria, autoridadeDaCoerencia);
         memoria.guardarCoerencia(coerencia.exportar());
         return reconciliado;
       },
@@ -1237,13 +1250,15 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
     const input = materialityInput(original, {
       request: options.request.text, decisions: writer.decisions, phases: fases,
-      ...(skeletonAtual ? { skeleton: `${renderSkeleton(skeletonAtual)}${arquiteturaMd === "" ? "" : `\n\n${arquiteturaMd}`}` } : {}),
+      ...(skeletonAtual ? { skeleton: renderSkeleton(skeletonAtual) } : {}),
+      ...(arquiteturaMd !== "" ? { architecture: arquiteturaMd } : {}),
+      harness: planningScopeBlock(),
     });
     relatarFase({ kind: "documento", etapa: "triagem dos bloqueios" });
     announce(`  conferindo a materialidade de ${input.items.length} bloqueio(s)/decisão(ões) antes de gastar outra escrita`);
     await event("audit", "project-phases.md#materialidade", "started", `${input.items.length} item(s)`, attempt);
     const output = await track({ role: "verifier", stage: "audit", subject: "project-phases.md#materialidade", attempt, prompt: materialityPrompt(input) });
-    const review = applyMaterialityReview(original, input, output);
+    const review = applyMaterialityReview(original, input, output, autoridadeDeTeste());
     if (review.defects.length > 0) {
       announce("  parecer sem prova válida na triagem: o bloqueio correspondente continua valendo");
     }
@@ -1256,16 +1271,16 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     if (original.findings.some(finding => finding.phase === undefined)
       && !review.verdict.findings.some(finding => finding.phase === undefined)
       && (review.verdict.decisions?.length ?? 0) === 0) {
-      coerencia.reconcile({ ...review.verdict, status: "APPROVED", findings: [] }, criteria, autoridade);
+      coerencia.reconcile({ ...review.verdict, status: "APPROVED", findings: [] }, criteria, autoridadeDaCoerencia);
       memoria.guardarCoerencia(coerencia.exportar());
     }
     for (const fase of fases) {
       if (!original.findings.some(finding => finding.phase === fase.number) || review.verdict.findings.some(finding => finding.phase === fase.number)) continue;
-      fasesAprovadas.add(sha12(fase.markdown.trim()));
+      fasesAprovadas.add(chaveDaFase(fase));
       memoria.guardarAprovacao(chaveDeAprovacao(fase));
       const lido = parsePhaseFragment(fase.markdown);
       if (lido !== null) {
-        tasksJulgadas.aprovar(lido.tasks, autoridade);
+        tasksJulgadas.aprovar(lido.tasks, autoridadeDaFase(fase.number));
         memoria.guardarTasksAprovadas(tasksJulgadas.chaves());
       }
       relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
@@ -1928,6 +1943,17 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       const md = renderArchitecture(atual, esqueletoDeOrigem!);
       const papelDaAuditoria: "auditor" | "verifier" = arquiteturaReparada ? "verifier" : "auditor";
       const ultimaDevolucao = history.at(-1)?.verdict.findings ?? [];
+      /*
+       * O que as rodadas antes da última fecharam (§128). O arquiteto recebe
+       * essa lista ("keep it fixed") e o auditor não recebia: no Parallel Lab
+       * a validação dos formulários, pedida na rodada 1 e escrita na 2, sumiu
+       * na reescrita da 3 — que tratava dos serviços — e as rodadas 3 e 4,
+       * que só conheciam o achado anterior, aprovaram sem ela.
+       */
+      const daUltima = new Set(ultimaDevolucao.map(fingerprint));
+      const anteriores = [...new Map(history.slice(0, -1).flatMap((tentativa) => tentativa.verdict.findings)
+        .filter((finding) => !daUltima.has(fingerprint(finding)))
+        .map((finding) => [fingerprint(finding), finding] as const)).values()];
       const promptDeAuditoria = architectureAuditPrompt({
         language: options.language,
         request: options.request.text,
@@ -1936,6 +1962,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         architecture: md,
         maxTasksPerPhase: MAX_TASKS_PER_PHASE,
         ...(ultimaDevolucao.length > 0 ? { previousFindings: ultimaDevolucao } : {}),
+        ...(anteriores.length > 0 ? { earlierFindings: anteriores } : {}),
         tempoDosFluxos: tempoDosFluxos(atual, esqueletoDeOrigem!),
       });
       if (memoria.jaAprovada(promptDeAuditoria)) {
@@ -2074,9 +2101,10 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   /**
    * As fases escritas, cada uma da sua fatia — reaproveitadas do cache quando o
    * prompt não mudou. Serve à primeira escrita e à reescrita depois de uma
-   * reorganização: a fase cujo envelope e fatia não mudaram custa zero.
+   * reorganização: a fase cujo prompt não mudou custa zero, e a que a
+   * reorganização não tocou (`mantidas`, §128) também.
    */
-  async function escreverFases(promptDeFase: (number: number) => string): Promise<string[]> {
+  async function escreverFases(promptDeFase: (number: number) => string, mantidas: ReadonlyMap<number, string> = new Map()): Promise<string[]> {
     const esqueleto = skeletonAtual!;
     const fases = new Array<string>(esqueleto.phases.length).fill("");
     const fila = esqueleto.phases.map((fase, posicao) => ({ fase, posicao }));
@@ -2117,6 +2145,20 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           relatarFase({ kind: "authoring", number: fase.number, state: "corrente" });
 
           const promptDaFase = promptDeFase(fase.number);
+
+          /*
+           * Intocada pela reorganização (§128): o texto atual vale, guardado sob
+           * o prompt novo para que a retomada encontre o mesmo.
+           */
+          const mantida = mantidas.get(fase.number);
+          if (mantida !== undefined) {
+            fases[posicao] = mantida;
+            memoria.guardarFase(promptDaFase, mantida);
+            relatarFase({ kind: "authoring", number: fase.number, state: "reused" });
+            announce(`  fase ${fase.number} mantida: a reorganização não mudou o envelope, os componentes nem o tempo dela; a auditoria a relê se a fatia dela mudou`);
+            await event("authoring", marca, "complete", "mantida: envelope, componentes e tempo iguais");
+            continue;
+          }
 
           /*
            * Já escrita por este mesmo prompt? Então ela não mudou, e a chamada
@@ -2252,7 +2294,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
         if (deArquitetura.length > 0) {
           if (reorganizacoes < maxArchitectureReturns) {
-            const novas = await reorganizar(deArquitetura, promptDeFase);
+            // `affectedPhases` de uma lista vazia são todas as fases: sem achado de fase, nenhuma está aberta.
+            const novas = await reorganizar(deArquitetura, promptDeFase, partes, deFase.length > 0 ? affectedPhases(deFase, partes.length) : []);
             /*
              * Depois de uma reorganização os números de fase podem ter mudado, e
              * um achado de fase da divisão anterior não tem mais endereço. Eles
@@ -2401,11 +2444,19 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
   /**
    * A reorganização: a arquitetura refeita com os achados, auditada, aplicada ao
-   * esqueleto, e as fases reescritas — as que não mudaram de envelope nem de
-   * fatia voltam do cache. É o que permite dividir, fundir e reordenar fases no
-   * meio da auditoria sem repagar o que já estava certo.
+   * esqueleto, e as fases reescritas — as que ela não tocou mantêm o texto
+   * (§128). É o que permite dividir, fundir e reordenar fases no meio da
+   * auditoria sem repagar o que já estava certo.
    */
-  async function reorganizar(findings: readonly Finding[], promptDeFase: (number: number) => string): Promise<string[]> {
+  async function reorganizar(
+    findings: readonly Finding[],
+    promptDeFase: (number: number) => string,
+    atuais: readonly string[],
+    /** As fases com achado de fase aberto nesta rodada: são reescritas, como antes — o achado não as segue. */
+    comAchadoAberto: readonly number[] = [],
+  ): Promise<string[]> {
+    const arquiteturaAntes = arquiteturaAtual;
+    const esqueletoAntes = skeletonAtual;
     reorganizacoes += 1;
     announce(`  ${findings.length} achado(s) pedem reorganização das fases; refazendo a arquitetura (${reorganizacoes}/${maxArchitectureReturns})`);
     await event("authoring", "architecture", "retry", findings.map((finding) => finding.problem).join("; "), reorganizacoes);
@@ -2429,7 +2480,32 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     await publicarArquitetura(auditada, autoridade);
     skeletonAtual = await aplicarArquitetura(auditada);
     arquiteturaAtual = auditada;
-    return await escreverFases(promptDeFase);
+    /*
+     * A fase que a reorganização não tocou mantém o texto que tem — com as
+     * emendas que já recebeu (§128). "Não tocou" é o envelope, os componentes
+     * dela e o tempo dos fluxos que ela cobre (§127): o build percorre o
+     * workflow ao fim da mesma fase, contra o mesmo caminho. O resto da fatia
+     * mudou, e por isso a auditoria a relê: a aprovação dela é chaveada pela
+     * fatia, e nada aprovado contra a arquitetura anterior vale aqui.
+     */
+    /*
+     * A fase com achado aberto nesta rodada não é mantida. Os achados de fase
+     * que chegam junto com uma reorganização "ficam para a próxima auditoria",
+     * e a próxima auditoria de uma fase aprovada e intacta não acontece: a
+     * revisão da primeira versão mostrou a decisão do desenvolvedor, levantada
+     * pelo auditor da fase 4 na mesma rodada, sumindo do plano publicado.
+     * Reescrita, a fase recebe a decisão no prompt — como recebia antes.
+     */
+    const mantidas = new Map<number, string>();
+    if (arquiteturaAntes && esqueletoAntes) {
+      for (const numero of fasesIntactas(arquiteturaAntes, auditada, atuais)) {
+        if (comAchadoAberto.includes(numero)) continue;
+        if (tempoDaFase(arquiteturaAntes, esqueletoAntes, numero) !== tempoDaFase(auditada, skeletonAtual, numero)) continue;
+        const texto = atuais[numero - 1] ?? "";
+        if (texto.trim() !== "") mantidas.set(numero, texto);
+      }
+    }
+    return await escreverFases(promptDeFase, mantidas);
   }
 
   /**

@@ -24,4 +24,5 @@ export type { SurveyDomainContext, SurveyMapContext } from "./survey.js";
 export { CHANGE_HEADER, changePrompt } from "./change.js";
 export type { ChangeContext } from "./change.js";
 export { REPAIR_MARKER, repairBlock } from "./repair.js";
+export { planningScopeBlock } from "./planning-scope.js";
 export type { RepairContext } from "./repair.js";

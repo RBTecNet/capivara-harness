@@ -1,0 +1,482 @@
+{
+ "contract": "capivara-architecture/v1",
+ "overview": "A aplicação separa a fundação compartilhada de três módulos independentes. A fundação fornece persistência SQLite e API REST, com descoberta de rotas próprias de cada módulo; a interface React descobre páginas em `src/modules/*/page.tsx` por meio de `src/App.tsx`. Cada módulo mantém rotas, serviços, componentes e página em arquivos próprios. A interface chama a API pelo prefixo /api, encaminhado pelo Vite ao servidor Node.js. Um comando de desenvolvimento inicia juntos a API e a interface. Essa organização mantém os módulos isolados e deixa os fluxos acessíveis pela aplicação integrada.",
+ "components": [
+  {
+   "name": "dados",
+   "responsibility": "Manter o esquema SQLite, abrir o banco indicado pelo ambiente e fornecer acesso persistente às três entidades independentes.",
+   "areas": [
+    "dados",
+    "backend"
+   ],
+   "dependsOn": [],
+   "contracts": [
+    "Tabela tarefas: id inteiro gerado, titulo obrigatório, descricao opcional, status obrigatório, data_criacao em data e hora.",
+    "Tabela categorias: id inteiro gerado, nome obrigatório e único, cor, data_criacao em data e hora.",
+    "Tabela anotacoes: id inteiro gerado, titulo e conteudo obrigatórios, data_criacao e data_atualizacao em data e hora.",
+    "DB_PATH seleciona o arquivo SQLite; um caminho diferente seleciona outro arquivo local.",
+    "npm run migrate cria o esquema completo em banco vazio e pode ser repetido sem erro."
+   ],
+   "files": [
+    "src/database",
+    "src/migrations"
+   ],
+   "owns": [
+    "tarefas",
+    "categorias",
+    "anotacoes"
+   ]
+  },
+  {
+   "name": "api-base",
+   "responsibility": "Iniciar a API REST, fornecer o prefixo compartilhado, descobrir e montar as rotas próprias de cada módulo e participar da inicialização integrada da API com a interface.",
+   "areas": [
+    "backend"
+   ],
+   "dependsOn": [
+    "dados"
+   ],
+   "contracts": [
+    "Todas as rotas REST usam o prefixo /api.",
+    "Rotas de módulo são descobertas em src/server/modules/*/routes.ts e montadas no prefixo /api.",
+    "GET /api/resumo → 200 {tarefas: número, categorias: número, anotacoes: número}.",
+    "A API escuta na porta 3001 durante o desenvolvimento; npm run dev inicia a API e a interface em conjunto.",
+    "Erros da API usam JSON {\"erro\":\"mensagem\"}."
+   ],
+   "files": [
+    "src/server",
+    "package.json"
+   ],
+   "owns": []
+  },
+  {
+   "name": "web-shell",
+   "responsibility": "Fornecer a aplicação React responsiva, navegação lateral, identidade visual própria, rotas de página e painel inicial; encaminhar as chamadas da interface à API integrada.",
+   "areas": [
+    "frontend"
+   ],
+   "dependsOn": [
+    "api-base"
+   ],
+   "contracts": [
+    "Rotas de navegação: /, /tarefas, /categorias e /anotacoes.",
+    "src/App.tsx descobre e monta as páginas dos módulos em src/modules/*/page.tsx.",
+    "O Vite encaminha requisições do navegador iniciadas por /api ao servidor da API na porta 3001.",
+    "A página inicial obtém os totais de GET /api/resumo.",
+    "A interface usa português brasileiro e apresenta estados de carregamento, lista vazia e feedback visual de sucesso ou erro."
+   ],
+   "files": [
+    "src/App.tsx",
+    "src/main.tsx",
+    "src/styles",
+    "vite.config.ts"
+   ],
+   "owns": []
+  },
+  {
+   "name": "tarefas",
+   "responsibility": "Implementar as rotas, o serviço e os componentes próprios da interface para cadastro, consulta, edição, alteração de status e exclusão confirmada de tarefas.",
+   "areas": [
+    "backend",
+    "frontend"
+   ],
+   "dependsOn": [
+    "dados",
+    "api-base",
+    "web-shell"
+   ],
+   "contracts": [
+    "GET /api/tarefas → 200 matriz JSON.",
+    "GET /api/tarefas/{id} → 200 objeto JSON; identificador inexistente → 404 {\"erro\":\"mensagem\"}.",
+    "POST /api/tarefas → 201 objeto JSON criado; entrada inválida → 400 {\"erro\":\"mensagem\"}.",
+    "PUT /api/tarefas/{id} → 200 objeto JSON atualizado; entrada inválida → 400 e identificador inexistente → 404, ambos com JSON {\"erro\":\"mensagem\"}.",
+    "DELETE /api/tarefas/{id} → 204 sem conteúdo; identificador inexistente → 404 {\"erro\":\"mensagem\"}.",
+    "O serviço do módulo expõe listTarefas(), getTarefa(id), criarTarefa(entrada), atualizarTarefa(id, entrada) e excluirTarefa(id), e concentra o acesso à entidade tarefas e as regras de validação da API.",
+    "A página e seus componentes próprios permitem criar, consultar, editar, alterar status e excluir após confirmação; os formulários enviam as operações e apresentam os erros retornados pela API.",
+    "O módulo possui testes automatizados próprios como requisito do produto."
+   ],
+   "files": [
+    "src/server/modules/tarefas/routes.ts",
+    "src/server/modules/tarefas/service.ts",
+    "src/modules/tarefas/page.tsx",
+    "src/modules/tarefas/components"
+   ],
+   "owns": [
+    "tarefas"
+   ]
+  },
+  {
+   "name": "categorias",
+   "responsibility": "Implementar as rotas, o serviço e os componentes próprios da interface para cadastro, consulta, edição e exclusão confirmada de categorias.",
+   "areas": [
+    "backend",
+    "frontend"
+   ],
+   "dependsOn": [
+    "dados",
+    "api-base",
+    "web-shell"
+   ],
+   "contracts": [
+    "GET /api/categorias → 200 matriz JSON.",
+    "GET /api/categorias/{id} → 200 objeto JSON; identificador inexistente → 404 {\"erro\":\"mensagem\"}.",
+    "POST /api/categorias → 201 objeto JSON criado; entrada inválida → 400 e nome repetido → 409, ambos com JSON {\"erro\":\"mensagem\"}.",
+    "PUT /api/categorias/{id} → 200 objeto JSON atualizado; entrada inválida → 400, nome repetido → 409 e identificador inexistente → 404, todos com JSON {\"erro\":\"mensagem\"}.",
+    "DELETE /api/categorias/{id} → 204 sem conteúdo; identificador inexistente → 404 {\"erro\":\"mensagem\"}.",
+    "O serviço do módulo expõe listCategorias(), getCategoria(id), criarCategoria(entrada), atualizarCategoria(id, entrada) e excluirCategoria(id), e concentra o acesso à entidade categorias e as regras de validação da API.",
+    "A página e seus componentes próprios permitem criar, consultar, editar e excluir após confirmação; nomes não se repetem. Os formulários enviam as operações e apresentam os erros retornados pela API.",
+    "O módulo possui testes automatizados próprios como requisito do produto."
+   ],
+   "files": [
+    "src/server/modules/categorias/routes.ts",
+    "src/server/modules/categorias/service.ts",
+    "src/modules/categorias/page.tsx",
+    "src/modules/categorias/components"
+   ],
+   "owns": [
+    "categorias"
+   ]
+  },
+  {
+   "name": "anotacoes",
+   "responsibility": "Implementar as rotas, o serviço e os componentes próprios da interface para cadastro, consulta, edição e exclusão confirmada de anotações.",
+   "areas": [
+    "backend",
+    "frontend"
+   ],
+   "dependsOn": [
+    "dados",
+    "api-base",
+    "web-shell"
+   ],
+   "contracts": [
+    "GET /api/anotacoes → 200 matriz JSON.",
+    "GET /api/anotacoes/{id} → 200 objeto JSON; identificador inexistente → 404 {\"erro\":\"mensagem\"}.",
+    "POST /api/anotacoes → 201 objeto JSON criado; entrada inválida → 400 {\"erro\":\"mensagem\"}.",
+    "PUT /api/anotacoes/{id} → 200 objeto JSON atualizado; entrada inválida → 400 e identificador inexistente → 404, ambos com JSON {\"erro\":\"mensagem\"}.",
+    "DELETE /api/anotacoes/{id} → 204 sem conteúdo; identificador inexistente → 404 {\"erro\":\"mensagem\"}.",
+    "O serviço do módulo expõe listAnotacoes(), getAnotacao(id), criarAnotacao(entrada), atualizarAnotacao(id, entrada) e excluirAnotacao(id), e concentra o acesso à entidade anotacoes e as regras de validação da API.",
+    "A página e seus componentes próprios permitem criar, consultar, editar e excluir após confirmação; data_atualizacao muda a cada atualização. Os formulários enviam as operações e apresentam os erros retornados pela API.",
+    "O módulo possui testes automatizados próprios como requisito do produto."
+   ],
+   "files": [
+    "src/server/modules/anotacoes/routes.ts",
+    "src/server/modules/anotacoes/service.ts",
+    "src/modules/anotacoes/page.tsx",
+    "src/modules/anotacoes/components"
+   ],
+   "owns": [
+    "anotacoes"
+   ]
+  }
+ ],
+ "dataDecisions": [
+  {
+   "subject": "identificadores",
+   "statement": "Usar inteiros gerados pelo SQLite como identificadores das três entidades, conforme o tipo inteiro indicado no esqueleto."
+  },
+  {
+   "subject": "persistência",
+   "statement": "Usar SQLite local em arquivo, com tabelas sem relações entre si. DB_PATH é lida do ambiente e permite selecionar tanto o arquivo persistente da aplicação quanto outro arquivo local."
+  },
+  {
+   "subject": "migrações",
+   "statement": "Manter migrações versionadas no projeto e disponibilizar npm run migrate para criar todo o esquema em banco vazio de forma repetível. A aplicação não aplica o esquema automaticamente ao iniciar."
+  },
+  {
+   "subject": "tarefas.status",
+   "statement": "Armazenar status como texto e aceitar somente pendente, em andamento ou concluída ao criar ou atualizar."
+  },
+  {
+   "subject": "categorias.nome",
+   "statement": "Impor unicidade do nome no armazenamento e responder com conflito quando uma criação ou atualização repetir nome existente."
+  },
+  {
+   "subject": "anotacoes.data_atualizacao",
+   "statement": "Definir data_atualizacao na criação e atualizar seu valor em toda atualização da anotação."
+  },
+  {
+   "subject": "configuração",
+   "statement": "Carregar DB_PATH do arquivo .env na raiz. Manter .env no .gitignore desde a primeira fase e versionar .env.example com todas as variáveis lidas e valores inofensivos. A cópia do exemplo para .env permite iniciar e migrar a aplicação sem serviço externo. Somente .env pode conter credenciais; nenhum outro arquivo do projeto pode conter senha, token ou string de conexão real."
+  }
+ ],
+ "flows": [
+  {
+   "workflow": "1",
+   "components": [
+    "web-shell",
+    "tarefas",
+    "api-base",
+    "dados"
+   ],
+   "notes": "A página do módulo consulta e altera registros pela API; a API valida as entradas e persiste as alterações no SQLite. A interface só remove após confirmação."
+  },
+  {
+   "workflow": "2",
+   "components": [
+    "web-shell",
+    "categorias",
+    "api-base",
+    "dados"
+   ],
+   "notes": "A página do módulo consulta e altera registros pela API; a API valida a unicidade do nome e persiste as alterações no SQLite. A interface só remove após confirmação."
+  },
+  {
+   "workflow": "3",
+   "components": [
+    "web-shell",
+    "anotacoes",
+    "api-base",
+    "dados"
+   ],
+   "notes": "A página do módulo consulta e altera registros pela API; a API valida campos obrigatórios, atualiza data_atualizacao e persiste as alterações no SQLite. A interface só remove após confirmação."
+  },
+  {
+   "workflow": "4",
+   "components": [
+    "web-shell",
+    "api-base",
+    "dados"
+   ],
+   "notes": "O painel inicial consulta GET /api/resumo por meio do encaminhamento do Vite à API; a API obtém os totais persistidos das três tabelas."
+  }
+ ],
+ "infrastructure": {
+  "runtimes": [
+   {
+    "name": "Node.js",
+    "version": "",
+    "purpose": "Executar o servidor, as ferramentas de desenvolvimento e a compilação TypeScript.",
+    "basis": "esqueleto: Runtime do servidor Node.js; ambiente de desenvolvimento exige node --version."
+   }
+  ],
+  "tools": [
+   {
+    "name": "TypeScript",
+    "version": "",
+    "purpose": "Compilar a aplicação escrita em TypeScript.",
+    "basis": "esqueleto: linguagem TypeScript."
+   },
+   {
+    "name": "Vite",
+    "version": "",
+    "purpose": "Servir a interface React, encaminhar as chamadas /api ao servidor e compilar a interface.",
+    "basis": "esqueleto: interface web React com Vite; contrato de integração entre interface e API."
+   }
+  ],
+  "packageManagers": [
+   {
+    "name": "npm",
+    "version": "",
+    "purpose": "Instalar dependências declaradas e executar os comandos documentados do projeto.",
+    "basis": "esqueleto: ambiente de desenvolvimento exige npm --version."
+   }
+  ],
+  "dependencies": [
+   {
+    "name": "react",
+    "version": "",
+    "purpose": "Construir a interface web.",
+    "basis": "esqueleto: interface web React.",
+    "kind": "app"
+   },
+   {
+    "name": "react-dom",
+    "version": "",
+    "purpose": "Montar a aplicação React no navegador.",
+    "basis": "esqueleto: interface web React.",
+    "kind": "app"
+   },
+   {
+    "name": "vite",
+    "version": "",
+    "purpose": "Servir e compilar a interface e encaminhar chamadas à API durante o desenvolvimento.",
+    "basis": "esqueleto: interface web com Vite; contrato de integração entre interface e API.",
+    "kind": "dev"
+   },
+   {
+    "name": "typescript",
+    "version": "",
+    "purpose": "Verificar e compilar código TypeScript.",
+    "basis": "esqueleto: linguagem TypeScript.",
+    "kind": "dev"
+   },
+   {
+    "name": "express",
+    "version": "",
+    "purpose": "Fornecer o servidor HTTP e as rotas REST.",
+    "basis": "esqueleto: servidor Node.js com API REST.",
+    "kind": "app"
+   },
+   {
+    "name": "better-sqlite3",
+    "version": "",
+    "purpose": "Acessar o banco SQLite embutido em arquivo local.",
+    "basis": "esqueleto: persistência SQLite em arquivo local, sem serviço externo.",
+    "kind": "app"
+   },
+   {
+    "name": "dotenv",
+    "version": "",
+    "purpose": "Carregar DB_PATH do arquivo .env na raiz.",
+    "basis": "regra transversal: configuração do banco lida do arquivo .env na raiz.",
+    "kind": "app"
+   },
+   {
+    "name": "concurrently",
+    "version": "",
+    "purpose": "Iniciar juntos os processos de desenvolvimento da API e da interface pelo comando npm run dev.",
+    "basis": "contrato de integração: npm run dev inicia a API e a interface em conjunto.",
+    "kind": "app"
+   }
+  ],
+  "services": [],
+  "databases": [
+   {
+    "name": "SQLite",
+    "version": "",
+    "purpose": "Persistir localmente tarefas, categorias e anotações em arquivo.",
+    "basis": "esqueleto: persistência SQLite em arquivo local; decisão aceita: banco embutido em arquivo criado pelo projeto."
+   }
+  ],
+  "compatibility": [
+   "A aplicação deve iniciar localmente sem servidor de banco de dados instalado ou serviço externo.",
+   "O caminho SQLite vem de DB_PATH, permitindo que a aplicação use outro arquivo local selecionado pelo ambiente.",
+   "Copiar .env.example para .env e executar a migração deixa a aplicação pronta para iniciar.",
+   "A aplicação possui testes automatizados e os fluxos acessam um banco SQLite isolado do banco normal da aplicação.",
+   "Somente .env pode conter credenciais; nenhum outro arquivo do projeto pode conter senha, token ou string de conexão real. .env.example contém apenas valores de exemplo inofensivos."
+  ],
+  "preconditions": [
+   "Node.js e npm estão disponíveis no ambiente de desenvolvimento.",
+   "O projeto pode instalar dependências dentro de sua própria pasta."
+  ],
+  "requirements": [
+   {
+    "technology": "Node.js",
+    "binary": "node",
+    "systemLevel": false,
+    "checkArgs": [
+     "--version"
+    ],
+    "installHint": "Instalar uma versão do Node.js compatível com a stack escolhida."
+   },
+   {
+    "technology": "npm",
+    "binary": "npm",
+    "systemLevel": false,
+    "checkArgs": [
+     "--version"
+    ],
+    "installHint": "Instalar junto com o Node.js."
+   }
+  ]
+ },
+ "phases": [
+  {
+   "number": 1,
+   "title": "Fundação e dados persistentes",
+   "goal": "Disponibilizar o projeto Node.js e React com Vite, a configuração ambiental do banco, o esquema persistente das três entidades, o comando de migração, a API compartilhada e o ponto de descoberta de rotas da API.",
+   "dependsOn": "none",
+   "covers": [
+    "tarefas",
+    "categorias",
+    "anotacoes"
+   ],
+   "areas": [
+    "infra",
+    "dados",
+    "backend"
+   ],
+   "taskCount": 8,
+   "components": [
+    "dados",
+    "api-base"
+   ],
+   "rationale": "É a base necessária para a interface e os módulos. Mantém no mesmo lugar as decisões de persistência, ambiente e contratos compartilhados que os trabalhos seguintes consomem."
+  },
+  {
+   "number": 2,
+   "title": "Estrutura da interface e painel",
+   "goal": "Entregar a interface responsiva em português brasileiro, a navegação lateral, as páginas de entrada dos módulos descobertas por src/App.tsx em src/modules/*/page.tsx, o painel inicial com totais reais obtidos pela API e a inicialização integrada da interface com a API.",
+   "dependsOn": "Phase 1",
+   "covers": [
+    "US-4.1",
+    "workflow 4"
+   ],
+   "areas": [
+    "frontend",
+    "backend"
+   ],
+   "taskCount": 7,
+   "components": [
+    "web-shell",
+    "api-base"
+   ],
+   "rationale": "Depende da fundação para obter os totais e entrega o contrato compartilhado de descoberta de páginas em src/App.tsx, que as fases dos módulos usam em src/modules/*/page.tsx. Também inclui a configuração compartilhada necessária para iniciar a aplicação integrada."
+  },
+  {
+   "number": 3,
+   "title": "Gestão de tarefas",
+   "goal": "Entregar o fluxo de tarefas integrado à aplicação, com cadastro, consulta, edição, alteração de status, validação e exclusão confirmada.",
+   "dependsOn": "Phase 1, Phase 2",
+   "covers": [
+    "tarefas",
+    "US-1.1",
+    "workflow 1"
+   ],
+   "areas": [
+    "backend",
+    "frontend",
+    "dados"
+   ],
+   "taskCount": 10,
+   "components": [
+    "tarefas"
+   ],
+   "rationale": "Implementa um módulo isolado que usa os contratos da fundação e o contrato de descoberta de páginas entregue pela interface. Seus arquivos próprios permitem execução em paralelo com as outras fases de módulo."
+  },
+  {
+   "number": 4,
+   "title": "Gestão de categorias",
+   "goal": "Entregar o fluxo de categorias integrado à aplicação, com cadastro, consulta, edição, validação de nome único e exclusão confirmada.",
+   "dependsOn": "Phase 1, Phase 2",
+   "covers": [
+    "categorias",
+    "US-2.1",
+    "workflow 2"
+   ],
+   "areas": [
+    "backend",
+    "frontend",
+    "dados"
+   ],
+   "taskCount": 9,
+   "components": [
+    "categorias"
+   ],
+   "rationale": "Implementa um módulo isolado que usa os contratos da fundação e o contrato de descoberta de páginas entregue pela interface. A unicidade fica concentrada no próprio módulo e seus arquivos não se sobrepõem aos demais."
+  },
+  {
+   "number": 5,
+   "title": "Gestão de anotações",
+   "goal": "Entregar o fluxo de anotações integrado à aplicação, com cadastro, consulta, edição, validação dos campos obrigatórios, atualização da data e exclusão confirmada.",
+   "dependsOn": "Phase 1, Phase 2",
+   "covers": [
+    "anotacoes",
+    "US-3.1",
+    "workflow 3"
+   ],
+   "areas": [
+    "backend",
+    "frontend",
+    "dados"
+   ],
+   "taskCount": 9,
+   "components": [
+    "anotacoes"
+   ],
+   "rationale": "Implementa um módulo isolado que usa os contratos da fundação e o contrato de descoberta de páginas entregue pela interface. Seus arquivos próprios evitam edição concorrente de componentes compartilhados."
+  }
+ ],
+ "mvpCutPhase": 5
+}

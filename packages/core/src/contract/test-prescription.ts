@@ -70,6 +70,31 @@ const VERBOS_DE_IMPLEMENTACAO =
   "implementar|entregar|criar|escrever|acrescentar|adicionar|incluir|configurar|definir|montar|produzir|desenvolver|elaborar|organizar|estruturar|implement|deliver|create|write|add|include|configure|define|set\\s+up|build|develop";
 const OBJETO_DE_TESTE = "su[ií]te\\s+(?:de\\s+)?(?:testes?|automatizada|automatizado|automated|test|de\\s+regress[aã]o|e2e)|test\\s+suite|testes?|tests?|cobertura(?:\\s+de\\s+testes?)?|test\\s+coverage";
 const INICIO_DE_FRASE = "(?:^|[.;:!?]\\s+|\\n)\\s*(?:-\\s*)?";
+/*
+ * A segunda oração de uma frase também é ordem (§128). No Parallel Lab a Task
+ * 10 da fase 3 era "implementar a exclusão com confirmação e concluir a
+ * cobertura automatizada própria do módulo": o verbo de teste vinha depois de
+ * "e", e "concluir" não estava na lista. Passou pelo contrato, o auditor da
+ * fase o apontou, e a triagem o descartou citando a própria frase.
+ */
+const INICIO_DE_ORACAO = `(?:${INICIO_DE_FRASE}|,?\\s+(?:e|and)\\s+)`;
+/** Os verbos de conclusão, que só a segunda leitura conhece: "concluir a cobertura". */
+const VERBOS_DE_CONCLUSAO = "concluir|completar|finalizar|terminar|complete|finish";
+/*
+ * Na segunda oração e com os verbos de conclusão, o objeto precisa ser teste
+ * DE SOFTWARE pelo nome: "adicionar a cobertura escolhida" é bolo, "concluir o
+ * teste de nivelamento" é escola, "finalizar a cobertura" é seguro — a revisão
+ * da primeira versão mostrou os três recusados como prescrição. "A suíte",
+ * "os testes automatizados", "a cobertura automatizada", "test coverage" não
+ * são produto de ninguém que não seja o harness.
+ */
+const OBJETO_DE_SOFTWARE =
+  "su[ií]te\\s+(?:de\\s+)?(?:testes?|automatizada|automatizado|automated|test|de\\s+regress[aã]o|e2e)|test\\s+suite|testes?\\s+(?:automatizad[oa]s?|unit[aá]rios?|de\\s+unidade|de\\s+integra[cç][aã]o|end-to-end|e2e|de\\s+ponta\\s+a\\s+ponta)|(?:automated|unit|integration|end-to-end|e2e)\\s+tests?|cobertura\\s+(?:de\\s+testes?|automatizada|dos\\s+testes)|test\\s+coverage";
+/** A mesma forma, para quem vem depois de "e" ou começa por um verbo de conclusão. */
+const TEST_WORK_SEGUNDA = new RegExp(
+  `(?:${INICIO_DE_ORACAO}(?:${VERBOS_DE_IMPLEMENTACAO}|${VERBOS_DE_CONCLUSAO})|${INICIO_DE_FRASE}(?:${VERBOS_DE_CONCLUSAO}))\\b(?:[,:]?\\s+[^\\s.;:]+){0,3}?[,:]?\\s+(?:(?:a|o|as|os|uma|um|the|all|todos|todas)\\s+)?(${OBJETO_DE_SOFTWARE})\\b((?:\\s+(?:de|do|da|dos|das|of)\\s+[^\\s.;:,]+|\\s+[^\\s.;:,]+)?)`,
+  "giu",
+);
 /** Trabalho de teste como tarefa: verbo de implementação com teste como objeto, a até três palavras. */
 const TEST_WORK = new RegExp(
   `${INICIO_DE_FRASE}(?:${VERBOS_DE_IMPLEMENTACAO})\\b(?:[,:]?\\s+[^\\s.;:]+){0,3}?[,:]?\\s+(?:(?:a|o|as|os|uma|um|the|all|todos|todas)\\s+)?(${OBJETO_DE_TESTE})\\b((?:\\s+(?:de|do|da|dos|das|of)\\s+[^\\s.;:,]+|\\s+[^\\s.;:,]+)?)`,
@@ -179,8 +204,8 @@ export function testPrescriptions(text: string, authority: TestAuthority = []): 
     const termo = (match[1] ?? "").replace(/[.,;:)\]}]+$/u, "");
     if (termo !== "" && !fontes.includes(termo.toLowerCase())) achados.set(termo.toLowerCase(), termo);
   }
-  const normalizar = (trecho: string): string => trecho.replace(/\s+/g, " ").replace(/^[\s.;:!?-]+/u, "").trim();
-  for (const match of text.matchAll(TEST_WORK)) {
+  const normalizar = (trecho: string): string => trecho.replace(/\s+/g, " ").replace(/^[\s.;:!?,-]+/u, "").replace(/^(?:e|and)\s+/iu, "").trim();
+  for (const match of [...text.matchAll(TEST_WORK), ...text.matchAll(TEST_WORK_SEGUNDA)]) {
     const objeto = normalizar(`${match[1] ?? ""}${match[2] ?? ""}`);
     // O composto do domínio do produto que o pedido contém é o produto, não a prova.
     if (!COMPOSTO_DE_SOFTWARE.test(objeto) && fontes.includes(objeto.toLowerCase())) continue;

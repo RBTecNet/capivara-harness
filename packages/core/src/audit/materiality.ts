@@ -1,4 +1,4 @@
-import { STRUCTURAL_LABELS, affectedPhases, phaseReferences } from "../contract/index.js";
+import { STRUCTURAL_LABELS, affectedPhases, phaseReferences, testPrescriptions } from "../contract/index.js";
 import type { PhaseBlock } from "../contract/index.js";
 import type { AuditVerdict } from "./protocol.js";
 
@@ -9,6 +9,10 @@ export interface MaterialityInput {
 
 export function materialityInput(verdict: AuditVerdict, context: {
   request: string; decisions: readonly string[]; phases: readonly PhaseBlock[]; skeleton?: string;
+  /** `architecture.md`, como fonte própria: a triagem a citava sob o nome do esqueleto e errava o rótulo (§128). */
+  architecture?: string;
+  /** A regra do planejamento do próprio harness, que nenhuma outra fonte suspende (§128). */
+  harness?: string;
 }): MaterialityInput {
   const items: MaterialityInput["items"] = [
     ...verdict.findings.map((finding, index) => ({ id: `F${index + 1}`, kind: "finding" as const,
@@ -39,7 +43,9 @@ export function materialityInput(verdict: AuditVerdict, context: {
     sources: [
       { id: "request", content: context.request },
       { id: "decisions", content: context.decisions.join("\n") },
+      ...(context.harness ? [{ id: "harness", content: context.harness }] : []),
       ...(context.skeleton ? [{ id: "skeleton", content: context.skeleton }] : []),
+      ...(context.architecture ? [{ id: "architecture", content: context.architecture }] : []),
       ...context.phases.filter(phase => related.has(phase.number)).map(phase => ({ id: `P${phase.number}`, content: phase.markdown })),
     ],
   };
@@ -62,8 +68,14 @@ export function materialityPrompt(input: MaterialityInput): string {
     "ADVISORY is for a false positive only: the accused passage does not say what the finding claims, or an explicit",
     "contract in the documents already settles it. Quote THAT passage. Never dismiss on an interpretation the documents",
     "do not state, and never on the architecture's intention alone when the phase text contradicts it.",
+    "The `harness` source is the harness's own planning rule, and no other source suspends it: a request for automated",
+    "tests makes that requirement product, never the work of writing, completing or organising tests. A finding that a",
+    "passage prescribes tests — test work in a task, a test tool, file, directory, strategy, coverage or organisation —",
+    "is ADVISORY only when the accused passage does not do that: quote it. The harness refuses an ADVISORY whose own",
+    "quotation shows the plan prescribing a test. The `harness` source is context, never evidence: it says what the plan",
+    "may not prescribe, not what the developer did not ask for. Quote the request, the decisions or the documents.",
     "A finding that names two or more phases is a contradiction between them: to dismiss it, quote each of those phases.",
-    "The harness refuses an ADVISORY that quotes only one side or only the skeleton/architecture.",
+    "The harness refuses an ADVISORY that quotes only one side or only the skeleton or the architecture.",
     "Compare allowed sets, not preferred choices: 204 is compatible with '200 or 204', even across modules.",
     "Validation before POST and showing errors after GET are different operations and may coexist.",
     "An empty database fixture and persistence in another test scenario may coexist; do not assume tests share state or ordering.",
@@ -72,8 +84,9 @@ export function materialityPrompt(input: MaterialityInput): string {
     "replacement nobody orders is not a sequence.",
     "Do not demand an extra test for every sentence or an exact constructor/signature/setup technique when compatible implementations exist.",
     "A task description is evidence too; acceptance criteria need not duplicate every descriptive sentence.",
-    "Unspecified implementation details with a compatible choice (sidebar initial mode, function vs class, test organization)",
-    "are ADVISORY, not business decisions for the developer. Do not reopen a choice already settled by sources.",
+    "Unspecified implementation details with a compatible choice (sidebar initial mode, function vs class) are ADVISORY,",
+    "not business decisions for the developer, and so is a demand that the plan say how tests are organised: that is the",
+    "build's. Do not reopen a choice already settled by sources.",
     "Never dismiss required behavior or choose an unresolved business policy on the developer's behalf.",
     "",
     "Return only JSON: {\"reviews\":[{\"id\":\"F1\",\"disposition\":\"KEEP\"|\"ADVISORY\",\"reason\":\"em português\",",
@@ -99,9 +112,11 @@ function citacaoSubstantiva(quote: string): boolean {
 }
 
 /** Ausência ou prova inválida conserva o bloqueio original; nunca aprova por omissão. */
-export function applyMaterialityReview(original: AuditVerdict, input: MaterialityInput, output: string): {
+export function applyMaterialityReview(original: AuditVerdict, input: MaterialityInput, output: string, testAuthority?: readonly string[]): {
   verdict: AuditVerdict; defects: string[]; advisory: number;
 } {
+  // O que autoriza nomear teste (I-16): o pedido e as decisões do desenvolvedor; sem quem chame dizendo, o que está na mesa.
+  const autoridadeDeTeste = testAuthority ?? input.sources.filter((source) => source.id === "request" || source.id === "decisions").map((source) => source.content);
   const invalid = (problem: string) => ({ verdict: original, defects: [problem], advisory: 0 });
   let parsed: unknown;
   try { parsed = JSON.parse(output.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "")); }
@@ -120,6 +135,17 @@ export function applyMaterialityReview(original: AuditVerdict, input: Materialit
       continue;
     }
     const quotes: string[] = [];
+    /*
+     * A regra do harness é contexto, não prova (§128). A revisão da primeira
+     * versão descartou "a fase 4 não carrega os testes próprios do módulo",
+     * que o pedido exige, citando só "Do not reject a plan for not specifying
+     * tests". A regra diz o que o plano não prescreve, nunca o que o
+     * desenvolvedor deixou de pedir.
+     */
+    if ((raw.evidence as unknown[]).some((evidence) => record(evidence) && evidence.source === "harness")) {
+      defects.push(`${raw.id}: a triagem citou a regra do harness como prova; ela é contexto, e o bloqueio fica`);
+      continue;
+    }
     for (const evidence of raw.evidence) {
       if (!record(evidence) || typeof evidence.source !== "string" || typeof evidence.quote !== "string"
         || !citacaoSubstantiva(evidence.quote) || !sources.get(evidence.source)?.includes(normalized(evidence.quote))) {
@@ -129,6 +155,23 @@ export function applyMaterialityReview(original: AuditVerdict, input: Materialit
       quotes.push(`${evidence.source}: ${evidence.quote}`);
     }
     if (quotes.length !== raw.evidence.length) continue;
+    /*
+     * A citação que mostra o plano prescrevendo teste confirma o bloqueio (§128).
+     *
+     * No Parallel Lab a triagem descartou "a Task 10 prescreve a entrega de
+     * testes" citando a Task 10: "implementar a exclusão com confirmação e
+     * concluir a cobertura automatizada própria do módulo" — o texto exato,
+     * a prova válida, e a prova era do achado. Ela não tinha a regra do
+     * planejamento entre as fontes e leu "a fonte não proíbe". A regra é do
+     * harness; o I-16 a conta, e a mesma conta vale aqui.
+     */
+    const prescreve = (raw.evidence as { source: string; quote: string }[])
+      .filter((evidence) => /^P\d+$/.test(evidence.source) || evidence.source === "architecture")
+      .flatMap((evidence) => testPrescriptions(evidence.quote, autoridadeDeTeste));
+    if (prescreve.length > 0) {
+      defects.push(`${raw.id}: a citação da triagem mostra o plano prescrevendo teste (I-16: ${prescreve.join(", ")}) — ela confirma o bloqueio, não o remove`);
+      continue;
+    }
     /*
      * Um conflito entre fases só é falso positivo com o texto das duas na mesa (§124).
      *

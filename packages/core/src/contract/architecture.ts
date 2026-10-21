@@ -28,6 +28,7 @@ import { testPrescriptionHint, testPrescriptions, testToolPrescriptions } from "
 import type { TestAuthority } from "./test-prescription.js";
 import { jsonDaResposta } from "./resposta.js";
 import { sha12 } from "./stamps.js";
+import { casaComPadrao, trechosEntreCrases } from "./drift.js";
 import { AREAS_VALIDAS, type Skeleton, type SkeletonPhase } from "./skeleton.js";
 import { environmentRequirements, renderEnvironmentRequirements, type EnvironmentRequirement } from "./environment.js";
 import { contradicoesTemporais, disponibilidadeDosFluxos, fechoDosComponentes, type Disponibilidade, type EntradaDaDisponibilidade } from "./disponibilidade.js";
@@ -711,6 +712,62 @@ export function architectureSliceForPhase(architecture: Architecture, phaseNumbe
 
   linhas.push("## Infraestrutura", ...renderInfrastructure(architecture.infrastructure));
   return linhas.join("\n");
+}
+
+/**
+ * As fases que uma reorganização não tocou (§128): o mesmo número e o mesmo
+ * envelope — título, goal, dependências, cobertura, áreas, tamanho e
+ * componentes —, cada componente com a mesma definição, os mesmos fluxos
+ * atravessando-os, as mesmas decisões de dados e a mesma infraestrutura, e
+ * nenhum trecho que a fase cita sumiu da fatia dela.
+ *
+ * O prompt promete ao arquiteto e aos auditores que "a fase cujo envelope não
+ * muda mantém o que já foi escrito", e a escrita cumpria outra coisa: o cache é
+ * o prompt inteiro, e a fatia de toda fase leva a visão geral e os contratos
+ * das dependências. No Parallel Lab a reorganização mudou o goal das fases 1 e
+ * 2 e o contrato do `web-shell`; as fases 3, 4 e 5 — mesmo envelope, mesmos
+ * componentes — foram reescritas do zero, a 4 e a 5 já aprovadas, e a 3 voltou
+ * pedindo uma confirmação para alterar o status que ninguém pediu.
+ *
+ * O que muda fora disto — a justificativa, a visão geral, a redação de um
+ * contrato consumido — não reescreve a fase: a auditoria a relê contra a fatia
+ * nova, e o que não servir mais volta como emenda. Decisão de dados e
+ * infraestrutura valem para todas as fases, e a mudança delas não deixa
+ * nenhuma intacta; um caminho, rota ou variável que saiu da fatia e que a
+ * fase ainda cita (a revisão da primeira versão mostrou o status trocado
+ * na decisão de dados publicado com os valores antigos) também não.
+ * `textos[n - 1]` é a fase n como está; sem ele, só a estrutura conta.
+ */
+export function fasesIntactas(antes: Architecture, depois: Architecture, textos: readonly string[] = []): number[] {
+  if (JSON.stringify(antes.dataDecisions) !== JSON.stringify(depois.dataDecisions)) return [];
+  if (JSON.stringify(antes.infrastructure) !== JSON.stringify(depois.infrastructure)) return [];
+  const envelope = (fase: ArchitecturePhase): string =>
+    JSON.stringify([fase.title, fase.goal, fase.dependsOn, fase.covers, fase.areas, fase.taskCount, fase.components]);
+  const componente = (arquitetura: Architecture, nome: string): ArchitectureComponent | null =>
+    arquitetura.components.find((entrada) => entrada.name.toLowerCase() === nome.toLowerCase()) ?? null;
+  const fluxos = (arquitetura: Architecture, nomes: ReadonlySet<string>): ArchitectureFlow[] =>
+    arquitetura.flows.filter((fluxo) => fluxo.components.some((nome) => nomes.has(nome.toLowerCase())));
+  /** Os nomes que localizam alguma coisa: caminho, rota, arquivo, variável, padrão. */
+  const nomes = (texto: string): Set<string> =>
+    new Set([...texto.matchAll(/[^\s`'"(),;]+/g)].map((match) => match[0].replace(/[.:]+$/u, "")).filter((nome) => nome.length >= 5 && /[/._*]/.test(nome)));
+  return depois.phases
+    .filter((fase) => {
+      const anterior = antes.phases.find((entrada) => entrada.number === fase.number);
+      if (!anterior || envelope(anterior) !== envelope(fase)) return false;
+      if (fase.components.some((nome) => {
+        const deAntes = componente(antes, nome);
+        return deAntes === null || JSON.stringify(deAntes) !== JSON.stringify(componente(depois, nome));
+      })) return false;
+      const proprios = new Set(fase.components.map((nome) => nome.toLowerCase()));
+      if (JSON.stringify(fluxos(antes, proprios)) !== JSON.stringify(fluxos(depois, proprios))) return false;
+      const texto = textos[fase.number - 1];
+      if (texto === undefined) return true;
+      const agora = nomes(architectureSliceForPhase(depois, fase.number));
+      const sairam = [...nomes(architectureSliceForPhase(antes, fase.number))].filter((nome) => !agora.has(nome));
+      const citados = trechosEntreCrases(texto);
+      return !citados.some((citado) => sairam.some((nome) => casaComPadrao(citado, nome) || casaComPadrao(nome, citado)));
+    })
+    .map((fase) => fase.number);
 }
 
 /** O que o build pode afirmar sobre a arquitetura que o `plan` publicou. */

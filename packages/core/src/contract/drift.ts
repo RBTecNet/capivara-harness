@@ -106,6 +106,75 @@ export function checkRewriteDrift(input: DriftInput): string[] {
   return desvios;
 }
 
+/**
+ * O que um achado manda usar, entre crases, e localiza uma linha: caminho,
+ * arquivo, padrão, rota, variável. `/api` e `id` estão em toda parte e não
+ * localizam nada; por isso o trecho precisa de cinco caracteres e de uma
+ * barra, um ponto, um asterisco ou um sublinhado. Só a correção (`fix`)
+ * conta: o trecho que o achado acusa está errado, e trazê-lo não corrige nada.
+ */
+function trechosDaCorrecao(findings: DriftInput["findings"]): string[] {
+  const trechos = new Set<string>();
+  for (const finding of findings) {
+    for (const trecho of trechosEntreCrases(finding.fix)) if (trecho.length >= 5 && /[/.*_]/.test(trecho)) trechos.add(trecho);
+  }
+  return [...trechos];
+}
+
+/** Os trechos de um texto entre crases. */
+export function trechosEntreCrases(texto: string): string[] {
+  return [...texto.matchAll(/`([^`\n]+)`/g)].map((match) => (match[1] ?? "").trim());
+}
+
+/**
+ * Um trecho com `*` é um padrão de caminho: `src/modules/*\/page.tsx` cobre
+ * `src/modules/painel/page.tsx`. Um segmento entre `<` e `>` é o mesmo
+ * curinga escrito por extenso: o auditor que manda mover a página "para
+ * `src/pages/<módulo>/page.tsx`" está citando um padrão.
+ */
+export function casaComPadrao(trecho: string, padrao: string): boolean {
+  if (trecho === padrao) return true;
+  const comCuringa = padrao.replace(/<[^<>/\s`]+>/g, "*");
+  if (!comCuringa.includes("*")) return false;
+  const expressao = comCuringa.split("*").map((parte) => parte.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join("[^/\\s`]+");
+  return new RegExp(`^${expressao}$`).test(trecho);
+}
+
+/**
+ * A task vizinha que a correção do achado alcança (§128): a mesma quantidade
+ * de linhas, e toda linha que mudou passou a citar um trecho que a correção
+ * manda usar e que ela não citava.
+ *
+ * No Parallel Lab o achado da coerência dizia "`index.html` monta
+ * `src/web/main.tsx` … mantenha a descoberta de páginas em `src/App.tsx` e
+ * `src/modules/*\/page.tsx`", com endereço `P1.T1.C3`. O escritor corrigiu a
+ * Task 1 e também as Tasks 7 e 8, que escreviam `src/web/main.tsx` e a
+ * descoberta em `src/web/`; o endereço só nomeava a 1, e as duas voltaram com
+ * os bytes antigos. A coerência acusou o mesmo conflito na rodada seguinte,
+ * endereçado à arquitetura, e a reorganização reescreveu as cinco fases.
+ *
+ * Linha a linha, e não a task inteira: a revisão da primeira versão mostrou
+ * que um achado sobre `package.json` destravava a reescrita de toda task que
+ * citasse o arquivo, e um critério de migração sumia sem ninguém pedir. Agora
+ * critério apagado, acrescentado ou reescrito sem o trecho da correção volta
+ * como estava.
+ */
+function alcancadaPelaCorrecao(original: string, emendada: string, trechos: readonly string[]): boolean {
+  if (trechos.length === 0) return false;
+  const antes = original.trimEnd().split("\n");
+  const depois = emendada.trimEnd().split("\n");
+  if (antes.length !== depois.length) return false;
+  let mudou = false;
+  for (let linha = 0; linha < antes.length; linha += 1) {
+    if (antes[linha] === depois[linha]) continue;
+    const tinha = trechosEntreCrases(antes[linha]!);
+    const trouxe = trechosEntreCrases(depois[linha]!).filter((trecho) => !tinha.includes(trecho));
+    if (!trouxe.some((trecho) => trechos.some((padrao) => casaComPadrao(trecho, padrao)))) return false;
+    mudou = true;
+  }
+  return mudou;
+}
+
 /** Mantém os bytes das tasks que não pertencem a uma emenda endereçada. */
 export function preserveUnaddressedTasks(before: string, after: string, phase: number, findings: DriftInput["findings"]): string {
   const targets = new Set<number>();
@@ -142,24 +211,53 @@ export function preserveUnaddressedTasks(before: string, after: string, phase: n
   const original = blocks(before);
   const candidate = blocks(after);
   if ([...targets].some(task => task < 1 || task > original.length)) return after;
-  let result = before;
-  for (let index = original.length - 1; index >= 0; index -= 1) {
-    if (!targets.has(index + 1)) continue;
-    const block = original[index]!;
-    const matching = candidate.filter(entry => entry.title === block.title);
-    const correction = original.length === candidate.length ? candidate[index] : matching.length === 1 ? matching[0] : undefined;
-    /*
-     * A task endereçada sumiu ou mudou de nome numa reescrita que também
-     * mudou a contagem: a emenda a reestruturou (apagou a task que era a
-     * suíte, fundiu-a noutra), e não há bloco para pôr no lugar dela. Antes
-     * isto deixava o bloco ORIGINAL — e a correção pedida era descartada em
-     * silêncio: o I-16 voltava a cada rodada sobre a mesma task que o
-     * escritor tinha removido (§124). A reescrita inteira vale, como já valia
-     * para a divisão pedida; o que se perde é a proteção das vizinhas nesta
-     * emenda, que é o menor dos dois males.
-     */
-    if (!correction) return after;
-    result = result.slice(0, block.start) + correction.text + result.slice(block.end);
-  }
-  return result;
+  const montar = (alvos: ReadonlySet<number>): string => {
+    let result = before;
+    for (let index = original.length - 1; index >= 0; index -= 1) {
+      if (!alvos.has(index + 1)) continue;
+      const block = original[index]!;
+      const matching = candidate.filter(entry => entry.title === block.title);
+      const correction = original.length === candidate.length ? candidate[index] : matching.length === 1 ? matching[0] : undefined;
+      /*
+       * A task endereçada sumiu ou mudou de nome numa reescrita que também
+       * mudou a contagem: a emenda a reestruturou (apagou a task que era a
+       * suíte, fundiu-a noutra), e não há bloco para pôr no lugar dela. Antes
+       * isto deixava o bloco ORIGINAL — e a correção pedida era descartada em
+       * silêncio: o I-16 voltava a cada rodada sobre a mesma task que o
+       * escritor tinha removido (§124). A reescrita inteira vale, como já valia
+       * para a divisão pedida; o que se perde é a proteção das vizinhas nesta
+       * emenda, que é o menor dos dois males.
+       */
+      if (!correction) return after;
+      result = result.slice(0, block.start) + correction.text + result.slice(block.end);
+    }
+    return result;
+  };
+  const enderecadas = montar(targets);
+  /*
+   * As vizinhas alcançadas pela correção (§128). O par é pelo título, ou pela
+   * posição só quando nenhuma task mudou de lugar: com uma removida e outra
+   * acrescentada, a contagem é a mesma e a posição aponta para a task errada.
+   */
+  const trechos = trechosDaCorrecao(findings);
+  if (trechos.length === 0) return enderecadas;
+  const titulosAntes = new Set(original.map(block => block.title));
+  const titulosDepois = new Set(candidate.map(block => block.title));
+  const alinhadas = original.length === candidate.length && original.every((block, index) =>
+    candidate[index]!.title === block.title || (!titulosDepois.has(block.title) && !titulosAntes.has(candidate[index]!.title)));
+  const comAlcance = new Set(targets);
+  original.forEach((block, index) => {
+    if (targets.has(index + 1)) return;
+    const mesmoTitulo = candidate.filter(entry => entry.title === block.title);
+    const emendada = alinhadas ? candidate[index] : mesmoTitulo.length === 1 ? mesmoTitulo[0] : undefined;
+    if (emendada !== undefined && alcancadaPelaCorrecao(block.text, emendada.text, trechos)) comAlcance.add(index + 1);
+  });
+  if (comAlcance.size === targets.size) return enderecadas;
+  const resultado = montar(comAlcance);
+  // Seguro contra o par errado: uma task repetida que não estava repetida antes desfaz o alcance.
+  const repetidas = (texto: string): number => {
+    const titulos = [...texto.matchAll(/^- \[[ xX]\] \*\*Task:\*\* (.+)$/gm)].map(match => match[1]!.trim());
+    return titulos.length - new Set(titulos).size;
+  };
+  return repetidas(resultado) > repetidas(before) ? enderecadas : resultado;
 }

@@ -1,0 +1,338 @@
+{
+ "contract": "capivara-skeleton/v2",
+ "projectName": "Parallel Lab",
+ "stack": [
+  {
+   "component": "Runtime do servidor",
+   "decision": "Node.js"
+  },
+  {
+   "component": "Linguagem",
+   "decision": "TypeScript"
+  },
+  {
+   "component": "Interface web",
+   "decision": "React com Vite"
+  },
+  {
+   "component": "Servidor",
+   "decision": "Node.js com API REST"
+  },
+  {
+   "component": "Persistência",
+   "decision": "SQLite em arquivo local"
+  }
+ ],
+ "environment": [
+  {
+   "technology": "Node.js",
+   "binary": "node",
+   "systemLevel": false,
+   "checkArgs": [
+    "--version"
+   ],
+   "installHint": "Instalar uma versão do Node.js compatível com a stack escolhida."
+  },
+  {
+   "technology": "npm",
+   "binary": "npm",
+   "systemLevel": false,
+   "checkArgs": [
+    "--version"
+   ],
+   "installHint": "Instalar junto com o Node.js."
+  }
+ ],
+ "entities": [
+  {
+   "name": "tarefas",
+   "fields": [
+    {
+     "name": "id",
+     "type": "inteiro, identificador"
+    },
+    {
+     "name": "titulo",
+     "type": "texto, obrigatório"
+    },
+    {
+     "name": "descricao",
+     "type": "texto, opcional"
+    },
+    {
+     "name": "status",
+     "type": "texto, obrigatório: pendente, em andamento ou concluída"
+    },
+    {
+     "name": "data_criacao",
+     "type": "data e hora"
+    }
+   ],
+   "relations": []
+  },
+  {
+   "name": "categorias",
+   "fields": [
+    {
+     "name": "id",
+     "type": "inteiro, identificador"
+    },
+    {
+     "name": "nome",
+     "type": "texto, obrigatório e único"
+    },
+    {
+     "name": "cor",
+     "type": "texto"
+    },
+    {
+     "name": "data_criacao",
+     "type": "data e hora"
+    }
+   ],
+   "relations": []
+  },
+  {
+   "name": "anotacoes",
+   "fields": [
+    {
+     "name": "id",
+     "type": "inteiro, identificador"
+    },
+    {
+     "name": "titulo",
+     "type": "texto, obrigatório"
+    },
+    {
+     "name": "conteudo",
+     "type": "texto, obrigatório"
+    },
+    {
+     "name": "data_criacao",
+     "type": "data e hora"
+    },
+    {
+     "name": "data_atualizacao",
+     "type": "data e hora"
+    }
+   ],
+   "relations": []
+  }
+ ],
+ "stories": [
+  {
+   "id": "US-1.1",
+   "statement": "Como pessoa usuária, quero cadastrar, consultar, editar, alterar o status e excluir tarefas para manter uma lista persistente de tarefas."
+  },
+  {
+   "id": "US-2.1",
+   "statement": "Como pessoa usuária, quero cadastrar, consultar, editar e excluir categorias para organizar nomes e cores de identificação."
+  },
+  {
+   "id": "US-3.1",
+   "statement": "Como pessoa usuária, quero cadastrar, consultar, editar e excluir anotações para manter títulos e conteúdos persistentes."
+  },
+  {
+   "id": "US-4.1",
+   "statement": "Como pessoa usuária, quero acessar um painel inicial com totais de tarefas, categorias e anotações."
+  }
+ ],
+ "workflows": [
+  {
+   "number": "1",
+   "name": "Gerenciar tarefas",
+   "steps": [
+    "Abrir a página de tarefas e consultar a lista persistida.",
+    "Cadastrar uma tarefa com título obrigatório, descrição opcional e status.",
+    "Editar os dados de uma tarefa ou alterar seu status.",
+    "Solicitar a exclusão e confirmar para remover a tarefa."
+   ]
+  },
+  {
+   "number": "2",
+   "name": "Gerenciar categorias",
+   "steps": [
+    "Abrir a página de categorias e consultar a lista persistida.",
+    "Cadastrar uma categoria com nome obrigatório e único e cor de identificação.",
+    "Editar uma categoria.",
+    "Solicitar a exclusão e confirmar para remover a categoria."
+   ]
+  },
+  {
+   "number": "3",
+   "name": "Gerenciar anotações",
+   "steps": [
+    "Abrir a página de anotações e consultar a lista persistida.",
+    "Cadastrar uma anotação com título e conteúdo obrigatórios.",
+    "Editar uma anotação.",
+    "Solicitar a exclusão e confirmar para remover a anotação."
+   ]
+  },
+  {
+   "number": "4",
+   "name": "Consultar painel",
+   "steps": [
+    "Abrir o painel inicial.",
+    "Consultar os totais persistidos de tarefas, categorias e anotações."
+   ]
+  }
+ ],
+ "rules": [
+  {
+   "subject": "tarefas.status",
+   "statement": "Ao cadastrar ou atualizar uma tarefa, status aceita somente pendente, em andamento ou concluída."
+  },
+  {
+   "subject": "tarefas.titulo",
+   "statement": "Ao cadastrar ou atualizar uma tarefa, titulo é obrigatório."
+  },
+  {
+   "subject": "categorias.nome",
+   "statement": "Ao cadastrar ou atualizar uma categoria, nome é obrigatório e não pode repetir o nome de outra categoria."
+  },
+  {
+   "subject": "anotacoes.titulo e anotacoes.conteudo",
+   "statement": "Ao cadastrar ou atualizar uma anotação, titulo e conteudo são obrigatórios; data_atualizacao reflete cada atualização."
+  },
+  {
+   "subject": "persistencia",
+   "statement": "Os registros de tarefas, categorias e anotações permanecem disponíveis após reinicializações da aplicação, em um arquivo SQLite local. Os módulos não possuem relações entre suas entidades."
+  },
+  {
+   "subject": "interface",
+   "statement": "A interface é responsiva, usa português brasileiro e um sistema visual próprio; contém navegação lateral, painel inicial e páginas separadas para tarefas, categorias e anotações. Formulários apresentam validação; ações apresentam feedback visual de sucesso ou erro; listas apresentam estados de carregamento e vazio. Nenhuma funcionalidade concluída é simulada com dados fictícios."
+  },
+  {
+   "subject": "interface.exclusao",
+   "statement": "Antes de remover uma tarefa, categoria ou anotação, a interface solicita confirmação; a remoção ocorre somente após confirmação."
+  },
+  {
+   "subject": "navegacao",
+   "statement": "Os caminhos de navegação são /, /tarefas, /categorias e /anotacoes."
+  },
+  {
+   "subject": "api.prefixo",
+   "statement": "O prefixo compartilhado da API é /api."
+  },
+  {
+   "subject": "api.tarefas",
+   "statement": "A API oferece GET /api/tarefas para listar recursos como matriz JSON; GET /api/tarefas/{id} para consultar um recurso como objeto JSON; POST /api/tarefas para criar e retornar o objeto JSON criado; PUT /api/tarefas/{id} para atualizar e retornar o objeto JSON atualizado; DELETE /api/tarefas/{id} para remover e responder sem conteúdo. Criação ou atualização inválida responde 400, identificador inexistente responde 404. Erros retornam JSON no formato {\"erro\":\"mensagem\"}."
+  },
+  {
+   "subject": "api.categorias",
+   "statement": "A API oferece GET /api/categorias para listar recursos como matriz JSON; GET /api/categorias/{id} para consultar um recurso como objeto JSON; POST /api/categorias para criar e retornar o objeto JSON criado; PUT /api/categorias/{id} para atualizar e retornar o objeto JSON atualizado; DELETE /api/categorias/{id} para remover e responder sem conteúdo. Criação ou atualização inválida responde 400, nome repetido responde 409 e identificador inexistente responde 404. Erros retornam JSON no formato {\"erro\":\"mensagem\"}."
+  },
+  {
+   "subject": "api.anotacoes",
+   "statement": "A API oferece GET /api/anotacoes para listar recursos como matriz JSON; GET /api/anotacoes/{id} para consultar um recurso como objeto JSON; POST /api/anotacoes para criar e retornar o objeto JSON criado; PUT /api/anotacoes/{id} para atualizar e retornar o objeto JSON atualizado; DELETE /api/anotacoes/{id} para remover e responder sem conteúdo. Criação ou atualização inválida responde 400, identificador inexistente responde 404. Erros retornam JSON no formato {\"erro\":\"mensagem\"}."
+  },
+  {
+   "subject": "api.resumo",
+   "statement": "GET /api/resumo retorna um objeto JSON com os totais de tarefas, categorias e anotações persistidas."
+  },
+  {
+   "subject": "testes_automatizados",
+   "statement": "A aplicação possui testes automatizados executados com banco isolado dos dados normais. Para cada módulo, os critérios incluem criação válida, rejeição de entradas inválidas, consulta persistida, atualização, exclusão com confirmação na interface e persistência após reinicialização. A aplicação completa permite observar inicialização por comandos documentados, compilação sem erros, navegação entre módulos, integração entre API e interface e fluxos reais no navegador."
+  },
+  {
+   "subject": "restricoes",
+   "statement": "A aplicação não inclui autenticação, multi-tenancy, serviços externos, credenciais reais, Docker obrigatório ou funcionalidades além das solicitadas; não usa mocks para substituir funcionalidades reais e não altera o código-fonte da Capivara."
+  }
+ ],
+ "phases": [
+  {
+   "number": 1,
+   "title": "Fundação e dados persistentes",
+   "goal": "Disponibilizar a base compartilhada da aplicação e o armazenamento persistente das três entidades independentes.",
+   "dependsOn": "none",
+   "covers": [
+    "tarefas",
+    "categorias",
+    "anotacoes"
+   ],
+   "areas": [
+    "backend",
+    "dados",
+    "infra"
+   ],
+   "taskCount": 8
+  },
+  {
+   "number": 2,
+   "title": "Estrutura da interface",
+   "goal": "Disponibilizar a interface responsiva em português, com navegação lateral e acesso às páginas dos três módulos e ao painel inicial.",
+   "dependsOn": "Phase 1",
+   "covers": [
+    "US-4.1"
+   ],
+   "areas": [
+    "frontend"
+   ],
+   "taskCount": 7
+  },
+  {
+   "number": 3,
+   "title": "Gestão de tarefas",
+   "goal": "Disponibilizar os fluxos reais de cadastro, consulta, edição, alteração de status e exclusão confirmada de tarefas.",
+   "dependsOn": "Phase 1, Phase 2",
+   "covers": [
+    "tarefas",
+    "US-1.1",
+    "workflow 1"
+   ],
+   "areas": [
+    "frontend",
+    "backend"
+   ],
+   "taskCount": 10
+  },
+  {
+   "number": 4,
+   "title": "Gestão de categorias",
+   "goal": "Disponibilizar os fluxos reais de cadastro, consulta, edição e exclusão confirmada de categorias, respeitando a unicidade do nome.",
+   "dependsOn": "Phase 1, Phase 2",
+   "covers": [
+    "categorias",
+    "US-2.1",
+    "workflow 2"
+   ],
+   "areas": [
+    "frontend",
+    "backend"
+   ],
+   "taskCount": 9
+  },
+  {
+   "number": 5,
+   "title": "Gestão de anotações",
+   "goal": "Disponibilizar os fluxos reais de cadastro, consulta, edição e exclusão confirmada de anotações.",
+   "dependsOn": "Phase 1, Phase 2",
+   "covers": [
+    "anotacoes",
+    "US-3.1",
+    "workflow 3"
+   ],
+   "areas": [
+    "frontend",
+    "backend"
+   ],
+   "taskCount": 9
+  },
+  {
+   "number": 6,
+   "title": "Resumo do painel",
+   "goal": "Apresentar no painel inicial os totais persistidos dos três módulos.",
+   "dependsOn": "Phase 3, Phase 4, Phase 5",
+   "covers": [
+    "US-4.1",
+    "workflow 4"
+   ],
+   "areas": [
+    "frontend",
+    "backend"
+   ],
+   "taskCount": 4
+  }
+ ],
+ "mvpCutPhase": 5
+}

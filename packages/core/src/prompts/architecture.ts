@@ -213,6 +213,14 @@ export function architectPrompt(context: ArchitectContext): string {
     "  consumes, then interface shell, then the product flows.",
     "- Every phase names the components it implements or extends, and says in `rationale` why it has",
     "  this size and this position. `dependsOn` is `none` or `Phase N, Phase M`.",
+    "- Every phase covers at least one story, entity or workflow of the skeleton — the harness rejects",
+    "  a phase whose `covers` is empty. Work that makes none of them real belongs with the phase that",
+    "  first needs it.",
+    "- A phase's goal promises only what its own components deliver. Its writer sees the components",
+    "  the phase names and the ones they depend on, nothing else: a goal that promises the work of a",
+    "  component the phase does not name — its pages, its files, its extension point — sends that",
+    "  writer to guess where the work lives, and the guess contradicts the phase that owns it. Name",
+    "  the component in the phase, or leave the work to the phase that names it.",
     `- \`areas\` comes from this closed list: ${areas}. It decides which skills the executor receives.`,
     "",
     CONCURRENT_PHASES,
@@ -306,6 +314,12 @@ export interface ArchitectureAuditContext {
   decisions: readonly string[];
   /** O que a leitura anterior apontou, quando é uma reauditoria. */
   previousFindings?: readonly { where: string; problem: string; fix: string }[];
+  /**
+   * O que as leituras ANTES da anterior apontaram e o arquiteto fechou (§128).
+   * Ele recebe essa lista para não desfazer; o auditor a recebe para conferir
+   * que nada foi desfeito.
+   */
+  earlierFindings?: readonly { where: string; problem: string; fix: string }[];
   /** O esqueleto inteiro, em markdown. */
   skeleton: string;
   /** A arquitetura sob auditoria, em markdown. */
@@ -379,7 +393,8 @@ export function architectureAuditPrompt(context: ArchitectureAuditContext): stri
     "6. CONCURRENT WORK — phases with no dependency between them run at the same time. The harness",
     "   already orders any two unordered phases that name the same component, so what you check is",
     "   the PROPERTY, not the mechanism: does every phase name every component whose files it will",
-    "   change (an undeclared shared edit is the defect), and does every contract a module phase",
+    "   change (an undeclared shared edit is the defect, and so is a goal that promises the work of a",
+    "   component the phase does not name), and does every contract a module phase",
     "   consumes exist on a phase it depends on? Ordering phases by dependency, an integration",
     "   phase that depends on the modules, and an extension point in the foundation are all valid",
     "   resolutions of a shared-file conflict. Never demand one of them when another is in place,",
@@ -413,13 +428,28 @@ export function architectureAuditPrompt(context: ArchitectureAuditContext): stri
           "not a new discovery.",
         ]
       : []),
+    ...(context.earlierFindings && context.earlierFindings.length > 0
+      ? [
+          "",
+          "## Fixed in earlier readings — check it is still fixed",
+          ...context.earlierFindings.map((finding) => `- ${finding.where}: ${finding.problem}\n  asked: ${finding.fix}`),
+          "The architect closed these before the last reading, and every correction rewrites the",
+          "architecture: a later one can undo an earlier one. Check each against the architecture",
+          "below and repeat, word for word, any that holds again. A later reading that asked for the",
+          "opposite on purpose is not an undoing: judge that point against the sources, not against",
+          "the earlier wording.",
+        ]
+      : []),
     "",
     "## Doubt rule",
     "Reject only on a material defect you can demonstrate by citing the component, contract, phase",
     "or item and the evidence. Taste, naming, a structure you would have drawn differently and a",
     "detail the architecture legitimately leaves free are never a rejection: emit them as",
     "CAPIVARA_REMARK. Never demand tests, test files or a validation strategy: they are not",
-    "architecture — and an architecture that prescribes them (a component whose job is to configure a",
+    "architecture. The developer's own requirement that the product, or each module, has automated",
+    "tests is not one of them: it is a requirement, stated once on the component it applies to, and",
+    "its absence is a fidelity defect to report in the same reading as everything else. An",
+    "architecture that prescribes tests (a component whose job is to configure a",
     "test tool, test files in `files`, a test runner in the infrastructure) is a defect to reject, never",
     "a decision to raise: the developer is not asked whether that rule applies.",
     "When in doubt, approve and remark.",

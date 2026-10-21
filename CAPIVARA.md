@@ -72,8 +72,14 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-Na versão 0.7.1, `npm run check` passa: build, typecheck e **2933 testes**, incluindo o catálogo de
+Na versão 0.7.2, `npm run check` passa: build, typecheck e **2989 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
+
+A 0.7.2 corrige a convergência do PLAN que o Parallel Lab no Luna mostrou na
+0.7.1 (§128): a emenda guarda a correção que o achado alcança pelos caminhos
+que cita, a fase que a reorganização não tocou mantém o texto e é relida contra
+a arquitetura nova, a triagem recebe a regra do planejamento, e o I-16 lê o
+trabalho de teste na segunda oração. Planos e runs da 0.7.1 continuam valendo.
 
 A 0.7.1 corrige o que o Parallel Lab com Luna expôs na 0.7.0: o procedimento
 da execução de teste não é requisito e o envelope de fase se corrige na

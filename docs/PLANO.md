@@ -12583,7 +12583,7 @@ voltou a gastar 61 chamadas, uma emenda atrás da outra. Os dois têm cenário.
 ### 128.9 Compatibilidade
 
 Nenhum formato de documento muda; planos e runs da 0.7.1 continuam válidos, e
-nenhuma versão foi alterada. Os prompts do `init` e do `plan` mudaram (a regra
+a §128 leva a versão a 0.7.2, sem publicação. Os prompts do `init` e do `plan` mudaram (a regra
 do planejamento vai em todos), então caches e aprovações por sha de prompt não
 se reaproveitam numa retomada, como em toda mudança de prompt; as chaves das
 aprovações de task e de coerência mudaram de forma, e uma retomada de um run

@@ -14,9 +14,9 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `main`; o BUILD vNext (§125) está em `feat/build-vnext`, sobre a `fix/triagem-124`, sem merge; a §126 em `fix/impasse-init-plan-126`, sobre a `feat/build-vnext`, sem merge; a §127 em `fix/coerencia-temporal-127`, sobre a `fix/impasse-init-plan-126`, sem merge; a §128 em `fix/convergencia-plan-128`, sobre a `fix/coerencia-temporal-127`, sem merge |
-| versão | 0.7.1 (`capivara --version`) na `fix/coerencia-temporal-127` (§126 + §127), 0.7.0 na `feat/build-vnext`, 0.6.2 na `main`; planos da 0.6.x e da 0.7.0 valem na 0.7.1; os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
-| suíte | 2866 testes em 152 arquivos na `feat/build-vnext`; 2889 em 153 na `fix/impasse-init-plan-126`; 2933 em 157 na `fix/coerencia-temporal-127`; 2989 em 161 na `fix/convergencia-plan-128`; `npm run check` verde |
+| branch | `main`, só ela: em 21/10/2026 a cadeia §122–§128 (com o BUILD vNext, §125) entrou na `main` por fast-forward e as outras branches foram apagadas, local e remotamente — todas já estavam contidas na `main` |
+| versão | 0.7.2 (`capivara --version`) na `main` (§125–§128); planos da 0.6.x e da 0.7.x valem na 0.7.2; os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
+| suíte | 2989 testes em 161 arquivos na `main` (2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
@@ -67,7 +67,9 @@ dentro. Nenhum teto mudou. Detalhe na §128; 56 cenários em
 versão. Validado só com provider falso; o efeito das mudanças de prompt (F5–F8)
 precisa de run real. Branch `fix/convergencia-plan-128` sobre a
 `fix/coerencia-temporal-127`; commits `7b86b47` (correção) e `0b3fdb9` (documentação),
-push feito em 21/10/2026; sem merge, release nem mudança de versão.
+push feito em 21/10/2026. No mesmo dia, a pedido do Bruno, a versão subiu para
+0.7.2 e a cadeia inteira entrou na `main` por fast-forward; as outras branches
+foram apagadas. Sem release.
 
 ## 2026-10-21 — coerência temporal: o fluxo é cobrado quando o plano diz que ele existe, e a oscilação entre gates é diagnóstico (§127)
 

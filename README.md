@@ -2,9 +2,11 @@
 
 Do prompt à aplicação final, em três comandos.
 
-Versão **0.7.1**: o `build` recupera por defeito e revalida só a prova que a
+Versão **0.7.2**: o `build` recupera por defeito e revalida só a prova que a
 correção atingiu (§125), e cobra cada fluxo quando o plano diz que ele existe
-(§127). Planos e runs da 0.6.x e da 0.7.0 continuam valendo.
+(§127); o `plan` mantém a correção que o achado alcança e a fase que a
+reorganização não tocou (§128). Planos e runs da 0.6.x e da 0.7.x continuam
+valendo.
 Planejamentos da 0.5.0 e anteriores são incompatíveis: o plano deixou de prescrever testes (`capivara-phases/v2`) e passou a vir com a
 arquitetura e a infraestrutura decididas pelo `plan` (`capivara-planning/v3`).
 Em projetos existentes, gere novamente com `capivara init --fresh` e depois

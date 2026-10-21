@@ -12217,7 +12217,8 @@ real: no Luna, a P04 gastou 28 chamadas na oscilação; com a correção, o flux
 ### 127.8 Compatibilidade e o run original
 
 Planos da 0.7.0 continuam válidos: nada muda no formato de nenhum documento,
-e o adiamento é derivado do que já está publicado. O contrato da arquitetura
+e o adiamento é derivado do que já está publicado. As §126 e §127 levam a
+versão a 0.7.1, sem publicação. O contrato da arquitetura
 ganhou duas recusas; uma arquitetura guardada que caia numa delas é desenhada
 de novo (a §126 já a passa pelo contrato atual antes de reaproveitar). Os
 prompts do plano mudaram, então aprovações e caches do plano por sha de

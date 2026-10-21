@@ -38,6 +38,7 @@ import { falhaDeInstalacaoNode, inspecionarInstalacaoNode, registrarInstalacaoNo
 import { comandoDeInstalacao } from "./worktree.js";
 import { parseVerification, testRepairGuidancePrompt, verifyRetryPrompt } from "../prompts/verifier.js";
 import { FLOW_REVIEWS, type FlowReviewPurpose } from "../provider/flow-review.js";
+import type { FatiaDaArquitetura } from "./arquitetura.js";
 
 /** Janela limitada para um defeito novo que só apareceu na integração. */
 export interface IntegrationFailure {
@@ -109,6 +110,12 @@ export interface PhaseRunOptions {
   language: string;
   engine: string;
   session: PhaseSession;
+  /**
+   * A fatia da arquitetura aprovada para esta fase (§125), já conferida contra o
+   * documento publicado. Vai ao executor, ao verificador e ao reparo; ausente,
+   * eles leem `architecture.md` inteiro, como o preâmbulo manda.
+   */
+  architecture?: FatiaDaArquitetura;
   testCommand: TestCommand | null;
   /**
    * Redetecta o comando de teste DEPOIS da sessão do executor.
@@ -476,6 +483,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     const context = {
       language: options.language,
       sharedContract,
+      ...(options.architecture ? { architectureSlice: options.architecture.texto } : {}),
       testCommand: (options.integrationFailure ? (await options.resolveTest?.())?.command : null) ?? options.testCommand?.command ?? null,
       containerized: options.testCommand?.containerized ?? false,
       ...(await resolveE2eCommand(arvore).then((comando) => (comando ? { e2eCommand: comando } : {}))),
@@ -502,7 +510,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     const recovery = options.integrationFailure;
     const repairingIntegration = recovery?.repairByVerifier === true;
     if (recovery) {
-      const guidancePrompt = testRepairGuidancePrompt({ language: options.language, sharedContract, phaseMarkdown: session.markdown, cause: recovery.cause, testCommand: context.testCommand });
+      const guidancePrompt = testRepairGuidancePrompt({ language: options.language, sharedContract, ...(options.architecture ? { architectureSlice: options.architecture.texto } : {}), phaseMarkdown: session.markdown, cause: recovery.cause, testCommand: context.testCommand });
       await writeAtomic(`${paths.prompts}/${evidencePrefix}.guidance.txt`, guidancePrompt);
       announce(`[${session.id}] validador diagnosticando a falha de integração; devolverá evidência, ação concreta e comando de regressão`);
       diagnosis = await chamarLeitor({ role: "verifier", phase: session, attempt: cycle, prompt: guidancePrompt });
@@ -512,7 +520,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       lastCause = cause;
       lastGate = "gate 2 — suíte do projeto";
       prompt = repairingIntegration
-        ? verifierRepairPrompt({ language: options.language, phaseMarkdown: session.markdown, cause, testCommand: context.testCommand, systemInstall: options.systemInstall === true, ...(context.e2eCommand ? { e2eCommand: context.e2eCommand } : {}) })
+        ? verifierRepairPrompt({ language: options.language, sharedContract, ...(options.architecture ? { architectureSlice: options.architecture.texto } : {}), phaseMarkdown: session.markdown, cause, testCommand: context.testCommand, systemInstall: options.systemInstall === true, ...(context.e2eCommand ? { e2eCommand: context.e2eCommand } : {}) })
         : fixPrompt({ ...context, gate: "gate 2 — suíte do projeto", cause, previousWroteNothing: false });
     }
     if (falhaNaPreparacaoNode) prompt += `\n\n## Dependency preparation — unresolved environment failure\n${falhaNaPreparacaoNode}`;
@@ -762,6 +770,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       const repairPrompt = verifierRepairPrompt({
         language: options.language,
         sharedContract,
+        ...(options.architecture ? { architectureSlice: options.architecture.texto } : {}),
         phaseMarkdown: session.markdown,
         cause: integrationGuidance ? `${cause}\n\nOrientação do validador já levantada para a integração:\n${integrationGuidance}` : cause,
         testCommand: testeAgora?.command ?? null,
@@ -882,7 +891,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
            * novas em cada volta, entre as que ele mesmo havia aprovado.
            */
           const tasksDestaFase = tasksDaFase(session.markdown);
-          const jaAprovadas = verificarTudo ? [] : options.aprovadas?.jaAprovadas(session.id, tasksDestaFase) ?? [];
+          const jaAprovadas = verificarTudo ? [] : options.aprovadas?.jaAprovadas(session.id, tasksDestaFase, options.architecture?.sha12) ?? [];
           const indicesAprovados = new Set(jaAprovadas.map((task) => task.index));
           if (jaAprovadas.length > 0) {
             announce(
@@ -894,6 +903,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
           const verificationPrompt = verifyPrompt({
             language: options.language,
             sharedContract,
+            ...(options.architecture ? { architectureSlice: options.architecture.texto } : {}),
             phaseMarkdown: session.markdown,
             taskCount: session.taskCount,
             ...(jaAprovadas.length > 0
@@ -966,7 +976,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
           if (g3.reabertas.length > 0) {
             await options.aprovadas?.revogar(session.id, tasksDestaFase, g3.reabertas.map((task) => task.index));
           }
-          if (g3.done.length > 0) await options.aprovadas?.aprovar(session.id, tasksDestaFase, g3.done, cycle, now);
+          if (g3.done.length > 0) await options.aprovadas?.aprovar(session.id, tasksDestaFase, g3.done, cycle, now, options.architecture?.sha12);
           gate("G3", g3.green ? "verde" : "vermelho", cycle);
           if (!g3.green) {
             lastGate = g3.gate;

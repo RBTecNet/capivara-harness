@@ -12,7 +12,8 @@ import { appendFile, mkdir, readFile, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { sha12 } from "../contract/stamps.js";
-import { workflowsForPhase, type Skeleton, type SkeletonWorkflow } from "../contract/index.js";
+import { workflowsForPhase, type Architecture, type Skeleton, type SkeletonWorkflow } from "../contract/index.js";
+import { vincularArquitetura } from "./arquitetura.js";
 import {
   escolherSkills,
   escreverIndice,
@@ -80,6 +81,15 @@ export interface BuildOptions {
    * Ausente ou nulo: o build roda sem o gate que abre a aplicação, e diz isso.
    */
   skeleton?: Skeleton | null;
+  /**
+   * A arquitetura estruturada que o `plan` guardou (§125).
+   *
+   * Vem de fora pelo mesmo motivo do esqueleto: quem a guarda é o estágio de
+   * documentação. O build a confere contra o `architecture.md` publicado e o
+   * carimbo do `environment.json` antes de qualquer sessão, e só então entrega
+   * a fatia de cada fase ao executor e ao verificador.
+   */
+  architecture?: Architecture | null;
   /** Substituível nos testes: rodar navegador de verdade a cada cenário é inviável. */
   flowRunner?: FlowRunner;
   /** Desliga o gate 4 mesmo havendo esqueleto. */
@@ -237,6 +247,17 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
     const reason = error instanceof Error ? error.message : String(error);
     announce(`erro: ${reason}`);
     return { runId, exitCode: 1, phases: [], warnings: [], errors: [reason], acceptance: null };
+  }
+
+  /*
+   * A arquitetura aprovada, conferida antes de qualquer sessão (§125): o
+   * documento publicado tem de ser o carimbado, e a forma estruturada só vira
+   * fatia se renderizar igual a ele.
+   */
+  const arquitetura = await vincularArquitetura(options.projectRoot, plan, options.architecture ?? null, options.skeleton ?? null);
+  if (arquitetura.vinculo.errors.length > 0) {
+    for (const erro of arquitetura.vinculo.errors) announce(`erro: ${erro}`);
+    return { runId, exitCode: 1, phases: [], warnings: [], errors: arquitetura.vinculo.errors, acceptance: null };
   }
 
   /*
@@ -470,6 +491,10 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
     announce("         Use --no-system-install para mantê-lo dentro do workspace.");
   }
   for (const warning of checked.warnings) announce(`aviso: ${warning.message}`);
+  for (const aviso of arquitetura.vinculo.warnings) announce(`aviso: ${aviso}`);
+  if (arquitetura.vinculo.bound.length > 0) {
+    announce(`arquitetura do plan vinculada: ${arquitetura.vinculo.bound.length} de ${checked.sessions.length} fase(s) recebem a fatia com componentes e contratos`);
+  }
 
   /*
    * O que está garantido sobre o Git do executor, dito antes da primeira
@@ -772,7 +797,9 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
     const opcoesDaFase = (session: PhaseSession, execucao?: ExecucaoDaFase): Parameters<typeof runPhase>[0] => {
       const arvore = execucao?.workRoot ?? options.projectRoot;
       const fluxos = fluxosDaFase ? fluxosDaFase(session.number) : null;
+      const fatia = arquitetura.fatia(session.number);
       return {
+        ...(fatia ? { architecture: fatia } : {}),
         projectRoot: options.projectRoot,
         runId,
         language: options.language,
@@ -836,12 +863,14 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
     /** O que toda fase verde deixa: o registro no ledger e os fluxos como regressão das seguintes. */
     const aposVerde = async (session: PhaseSession): Promise<void> => {
       const fechadaEm = now().toISOString();
+      const fatia = arquitetura.fatia(session.number);
       await registrarFaseFechada(options.projectRoot, {
         id: session.id,
         title: session.title,
         sha: shaDaFase(session.markdown),
         runId,
         closedAt: fechadaEm,
+        ...(fatia ? { sliceSha12: fatia.sha12 } : {}),
       });
       cumprir(session, fechadaEm);
     };
@@ -852,7 +881,20 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
      * mesmo caminho — duas cópias desta regra divergiriam na primeira correção.
      */
     const pularSeFechada = (session: PhaseSession): boolean => {
-      const fechadaAntes = shaFechado.get(shaDaFase(session.markdown));
+      const registrada = shaFechado.get(shaDaFase(session.markdown));
+      const fatiaAtual = arquitetura.fatia(session.number);
+      /*
+       * Mesmo texto, outra arquitetura: o contrato que a fase entrega ou
+       * consome mudou, e a aprovação dela não viu o contrato novo (§125). Ela
+       * volta a ser construída sobre o que já existe, em vez de ser pulada.
+       */
+      const fatiaMudou = registrada?.sliceSha12 !== undefined && fatiaAtual !== null && registrada.sliceSha12 !== fatiaAtual.sha12;
+      if (registrada && fatiaMudou) {
+        // Vale também para a fase fechada neste mesmo run: o plano é o mesmo, a arquitetura não.
+        announce(`[${session.id}] fechada no run ${registrada.runId} com o mesmo texto, mas a fatia da arquitetura mudou desde então; volta a ser verificada`);
+        return false;
+      }
+      const fechadaAntes = registrada;
       if (!done.has(session.id) && fechadaAntes) {
         announce(`[${session.id}] já fechada no run ${fechadaAntes.runId}, com este mesmo texto; não vou refazer`);
         options.onProgress?.({ kind: "phase", id: session.id, state: "concluído", cycle: 0, detail: "fechada antes" });

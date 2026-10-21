@@ -27,6 +27,7 @@
 import { testPrescriptionHint, testPrescriptions } from "./test-prescription.js";
 import type { TestAuthority } from "./test-prescription.js";
 import { jsonDaResposta } from "./resposta.js";
+import { sha12 } from "./stamps.js";
 import { AREAS_VALIDAS, type Skeleton, type SkeletonPhase } from "./skeleton.js";
 import { environmentRequirements, renderEnvironmentRequirements, type EnvironmentRequirement } from "./environment.js";
 
@@ -561,23 +562,53 @@ export function renderArchitecture(architecture: Architecture, skeleton: Skeleto
 }
 
 /**
+ * O que uma fase recebe da arquitetura, ainda como dado.
+ *
+ * É a mesma escolha que a fatia em markdown sempre fez — os componentes que a
+ * fase implementa, as dependências diretas deles (só o contrato), os fluxos que
+ * os atravessam —, exposta para quem precisa decidir com ela e não só ler: o
+ * build usa os componentes e os arquivos para dizer o que uma mudança atinge
+ * sem montar um segundo grafo.
+ */
+export interface ArchitecturePhaseView {
+  phase: ArchitecturePhase;
+  /** Os componentes que a fase implementa ou estende, na ordem do plano. */
+  own: ArchitectureComponent[];
+  /** As dependências diretas dos próprios: contratos a consumir, nunca a reescrever. */
+  consumed: ArchitectureComponent[];
+  /** Os fluxos que atravessam algum componente próprio. */
+  flows: ArchitectureFlow[];
+}
+
+export function architectureViewForPhase(architecture: Architecture, phaseNumber: number): ArchitecturePhaseView | null {
+  const phase = architecture.phases.find((entry) => entry.number === phaseNumber);
+  if (!phase) return null;
+
+  const porNome = new Map(architecture.components.map((component) => [component.name.toLowerCase(), component]));
+  const own = phase.components.map((nome) => porNome.get(nome.toLowerCase())).filter((component): component is ArchitectureComponent => component !== undefined);
+  const nomesProprios = new Set(own.map((component) => component.name.toLowerCase()));
+  const consumed = [...new Set(own.flatMap((component) => component.dependsOn.map((nome) => nome.toLowerCase())))]
+    .filter((nome) => !nomesProprios.has(nome))
+    .map((nome) => porNome.get(nome))
+    .filter((component): component is ArchitectureComponent => component !== undefined);
+  const flows = architecture.flows.filter((flow) => flow.components.some((nome) => nomesProprios.has(nome.toLowerCase())));
+  return { phase, own, consumed, flows };
+}
+
+/**
  * A fatia da arquitetura que uma fase precisa ver.
  *
  * Os componentes que ela implementa, inteiros; os de que eles dependem, só o
  * contrato — é o que a fase consome sem reescrever; os fluxos que atravessam
  * os componentes dela; e a infraestrutura, que é curta e vale para todas.
+ *
+ * O texto é chave de cache do `plan` (a fatia entra no prompt de quem escreve
+ * a fase): ele sai de `architectureViewForPhase` sem mudar um byte.
  */
 export function architectureSliceForPhase(architecture: Architecture, phaseNumber: number): string {
-  const phase = architecture.phases.find((entry) => entry.number === phaseNumber);
-  if (!phase) return "";
-
-  const porNome = new Map(architecture.components.map((component) => [component.name.toLowerCase(), component]));
-  const proprios = phase.components.map((nome) => porNome.get(nome.toLowerCase())).filter((component): component is ArchitectureComponent => component !== undefined);
-  const nomesProprios = new Set(proprios.map((component) => component.name.toLowerCase()));
-  const dependencias = [...new Set(proprios.flatMap((component) => component.dependsOn.map((nome) => nome.toLowerCase())))]
-    .filter((nome) => !nomesProprios.has(nome))
-    .map((nome) => porNome.get(nome))
-    .filter((component): component is ArchitectureComponent => component !== undefined);
+  const view = architectureViewForPhase(architecture, phaseNumber);
+  if (!view) return "";
+  const { phase, own: proprios, consumed: dependencias, flows: fluxos } = view;
   const fasesDoComponente = (nome: string): number[] =>
     architecture.phases.filter((entry) => entry.components.some((cada) => cada.toLowerCase() === nome.toLowerCase())).map((entry) => entry.number);
 
@@ -613,7 +644,6 @@ export function architectureSliceForPhase(architecture: Architecture, phaseNumbe
     }
   }
 
-  const fluxos = architecture.flows.filter((flow) => flow.components.some((nome) => nomesProprios.has(nome.toLowerCase())));
   if (fluxos.length > 0) {
     linhas.push("## Fluxos que atravessam estes componentes");
     for (const flow of fluxos) linhas.push(`- workflow ${flow.workflow}: ${flow.components.join(" → ")}${flow.notes === "" ? "" : ` — ${flow.notes}`}`);
@@ -626,4 +656,79 @@ export function architectureSliceForPhase(architecture: Architecture, phaseNumbe
 
   linhas.push("## Infraestrutura", ...renderInfrastructure(architecture.infrastructure));
   return linhas.join("\n");
+}
+
+/** O que o build pode afirmar sobre a arquitetura que o `plan` publicou. */
+export interface ArchitectureBinding {
+  /** Impedem o build antes de qualquer sessão de agente. */
+  errors: string[];
+  /** Ditos ao operador; a fase afetada segue sem fatia, e quem a executa lê `architecture.md` inteiro. */
+  warnings: string[];
+  /** As fases do plano cuja fatia vem de uma arquitetura comprovadamente igual à publicada. */
+  bound: number[];
+}
+
+/**
+ * O vínculo entre a arquitetura estruturada e os documentos publicados.
+ *
+ * A fatia que vai ao executor sai da forma estruturada guardada pelo `plan`; o
+ * que foi aprovado é o `architecture.md` carimbado no `environment.json`. As
+ * duas coisas só servem juntas se forem a mesma: a estruturada é renderizada
+ * de novo e comparada byte a byte com a publicada. Diverge, e nenhuma fatia sai
+ * dela — uma fatia de arquitetura que ninguém aprovou é pior que fatia nenhuma.
+ *
+ * O documento publicado divergir do carimbo é outra coisa: alguém alterou o
+ * plano aprovado. Isso é erro, antes de qualquer sessão, e sem conversão.
+ */
+export function checkArchitectureBinding(input: {
+  architecture: Architecture | null;
+  /** O `architecture.md` em disco; null quando não existe. */
+  published: string | null;
+  /** `architectureSha12` do `environment.json`; null quando o plan não o gravou. */
+  declaredSha12: string | null;
+  /** O esqueleto publicado: a renderização usa o nome do produto e o dos fluxos. */
+  skeleton: Skeleton | null;
+  phases: readonly { number: number; title: string }[];
+}): ArchitectureBinding {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (input.declaredSha12 !== null) {
+    if (input.published === null) {
+      errors.push(`o environment.json carimba a arquitetura (architecture.md@${input.declaredSha12}), mas .capivara/init/architecture.md não existe; rode \`capivara plan\``);
+    } else if (sha12(input.published) !== input.declaredSha12) {
+      errors.push(
+        `.capivara/init/architecture.md não é o que o plan aprovou (${sha12(input.published)} ≠ ${input.declaredSha12}): o documento mudou depois do RALPH READY. ` +
+          "Rode `capivara plan` de novo; o build não aceita nem converte arquitetura divergente.",
+      );
+    }
+  }
+  if (errors.length > 0) return { errors, warnings, bound: [] };
+  if (input.architecture === null) {
+    if (input.published !== null) {
+      warnings.push("a forma estruturada da arquitetura não está disponível: nenhuma fatia por fase — o executor e o verificador leem .capivara/init/architecture.md inteiro");
+    }
+    return { errors, warnings, bound: [] };
+  }
+  if (input.published === null) {
+    warnings.push("há arquitetura estruturada sem architecture.md publicado: as fatias não são usadas");
+    return { errors, warnings, bound: [] };
+  }
+  if (input.skeleton === null || sha12(renderArchitecture(input.architecture, input.skeleton)) !== sha12(input.published)) {
+    warnings.push(
+      "a arquitetura estruturada não corresponde ao architecture.md publicado: nenhuma fatia por fase — o executor e o verificador leem o documento inteiro",
+    );
+    return { errors, warnings, bound: [] };
+  }
+  const bound: number[] = [];
+  for (const phase of input.phases) {
+    const daArquitetura = input.architecture.phases.find((entry) => entry.number === phase.number);
+    if (!daArquitetura) {
+      warnings.push(`Phase ${phase.number} não está na arquitetura (acrescentada depois dela): segue sem fatia, e quem a executa lê architecture.md`);
+    } else if (daArquitetura.title.trim() !== phase.title.trim()) {
+      warnings.push(`Phase ${phase.number} tem outro título na arquitetura ("${daArquitetura.title}" ≠ "${phase.title}"): segue sem fatia`);
+    } else {
+      bound.push(phase.number);
+    }
+  }
+  return { errors, warnings, bound };
 }

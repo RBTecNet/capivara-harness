@@ -45,6 +45,8 @@ export { AREAS_VALIDAS, SKELETON_CONTRACT, coverageFromSkeleton, parseSkeleton, 
 export {
   ARCHITECTURE_CONTRACT,
   architectureSliceForPhase,
+  architectureViewForPhase,
+  checkArchitectureBinding,
   parseArchitecture,
   phasesFromArchitecture,
   renderArchitecture,
@@ -53,10 +55,12 @@ export {
 } from "./architecture.js";
 export type {
   Architecture,
+  ArchitectureBinding,
   ArchitectureComponent,
   ArchitectureDefect,
   ArchitectureFlow,
   ArchitecturePhase,
+  ArchitecturePhaseView,
   ArchitectureResult,
   Infrastructure,
   InfrastructureDependency,

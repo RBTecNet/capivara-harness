@@ -31,6 +31,16 @@ export interface FaseFechada {
   sha: string;
   runId: string;
   closedAt: string;
+  /**
+   * O sha da fatia da arquitetura com que ela fechou (§125), quando havia.
+   *
+   * O texto da fase pode ficar igual e o contrato que ela entrega ou consome
+   * mudar — numa revisão da arquitetura, por exemplo. A aprovação anterior não
+   * vale para um contrato que ela não viu: fase com fatia registrada diferente
+   * da atual volta a ser construída. Entrada sem o campo (anterior a ele) vale
+   * pelo texto, como sempre valeu.
+   */
+  sliceSha12?: string;
 }
 
 function caminho(projectRoot: string): string {

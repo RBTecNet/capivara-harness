@@ -20,6 +20,16 @@ export interface BuilderContext {
   phaseMarkdown: string;
   sharedContract?: string;
   /**
+   * A fatia da arquitetura que o `plan` aprovou para esta fase (§125).
+   *
+   * Sem ela, o executor recebia o markdown da fase e a Stack e as Regras do
+   * esqueleto, e redescobria pelo código as decisões que o `plan` já tinha
+   * tomado — quais componentes são desta fase, o que eles expõem, de quais
+   * contratos ela só consome. Ausente quando a arquitetura não foi comprovada
+   * igual à publicada: aí ele lê `architecture.md` inteiro.
+   */
+  architectureSlice?: string;
+  /**
    * As skills desta fase, já escolhidas por área e materializadas no disco.
    *
    * Vem pronto porque quem escolhe não é quem executa: o §34 decidiu que a
@@ -151,7 +161,9 @@ export function discoveryPreamble(): string {
     "1. CAPIVARA.md or AGENTS.md — conventions, commands and project rules",
     "2. .capivara/init/skeleton.md — the stack, the data model, the stories, the workflows, and the",
     "   cross-cutting rules that every phase of this project has to honour",
-    "3. any document the phase text itself cites",
+    "3. .capivara/init/architecture.md — the components, contracts and infrastructure the plan decided",
+    "   for the whole product",
+    "4. any document the phase text itself cites",
     "Use the build, test and run commands those documents and the existing tooling define.",
     "",
     "## Authority you may not touch",
@@ -159,6 +171,28 @@ export function discoveryPreamble(): string {
     ".capivara/runs/ is the orchestrator's control plane: never create, edit or delete anything",
     "under it. Writing there invalidates this attempt.",
   ].join("\n");
+}
+
+/**
+ * A arquitetura decidida pelo `plan` para a fase, como o executor a recebe (§125).
+ *
+ * Quem implementa não decide de novo o que o `plan` já decidiu: componentes,
+ * contratos, dependências e infraestrutura vêm prontos, e o que a fase consome
+ * de outra é consumido como está. Se o código já diverge, a saída é dizer com
+ * evidência — não escolher outro desenho em silêncio.
+ */
+export function architectureSliceBlock(slice: string | undefined): string[] {
+  if (!slice || slice.trim() === "") return [];
+  return [
+    "",
+    "## Architecture decided by the plan for this phase",
+    "The plan already decided the components, contracts, dependencies and infrastructure below; do not re-decide them.",
+    "Implement the components of this phase and provide the contracts listed for them. Consume the contracts of the",
+    "components this phase depends on exactly as declared: never rewrite, rename or redesign them. If the code already",
+    "diverges from a contract below, report it with evidence instead of silently choosing another design.",
+    "",
+    slice.trim(),
+  ];
 }
 
 /** Como o gate 4 sobe a aplicação — só para quem será percorrido nele (§107). */
@@ -256,6 +290,7 @@ export function implementPrompt(context: BuilderContext): string {
     "",
     "You are a senior developer implementing one phase of this project.",
     ...(context.sharedContract ? ["## Published shared contracts", context.sharedContract] : []),
+    ...architectureSliceBlock(context.architectureSlice),
     "",
     discoveryPreamble(),
     testBlock(context),
@@ -322,6 +357,7 @@ export function fixPrompt(context: FixContext): string {
     "",
     "You are a senior developer completing a partially implemented phase.",
     ...(context.sharedContract ? ["## Published shared contracts", context.sharedContract] : []),
+    ...architectureSliceBlock(context.architectureSlice),
     "",
     discoveryPreamble(),
     testBlock(context),

@@ -11,7 +11,7 @@
  */
 
 import { languageBlock } from "./language.js";
-import { completionBlock, processBlock } from "./builder.js";
+import { architectureSliceBlock, completionBlock, processBlock } from "./builder.js";
 import { desgrudarChaves } from "../contract/protocolo.js";
 import { functionalAcceptanceBlock, proportionateChecksBlock } from "./acceptance-policy.js";
 
@@ -19,6 +19,8 @@ export interface VerifierContext {
   language: string;
   phaseMarkdown: string;
   sharedContract?: string;
+  /** A fatia da arquitetura aprovada para a fase (§125): o verificador a confronta com o código. */
+  architectureSlice?: string;
   taskCount: number;
   /**
    * As tasks que ele já declarou DONE em ciclo anterior, com o mesmo texto.
@@ -61,6 +63,28 @@ function aprovadasBlock(tasks: readonly { index: number; title: string }[]): str
   ];
 }
 
+/**
+ * A fatia da arquitetura, do lado de quem julga (§125).
+ *
+ * O G3 confronta os critérios de aceite E a arquitetura com o código real. Um
+ * contrato que a fase devia oferecer e não oferece, ou um contrato consumido
+ * que foi reescrito, é lacuna material; organização interna diferente com o
+ * contrato honrado não é.
+ */
+function verifierArchitectureBlock(slice: string | undefined): string[] {
+  if (!slice || slice.trim() === "") return [];
+  return [
+    "",
+    "## Architecture decided by the plan for this phase",
+    "Confront the acceptance criteria AND this architecture slice with the real code. A contract this phase must",
+    "provide that is missing or contradicted, or a dependency contract that was rewritten instead of consumed, is a",
+    "material gap: report it on the task it belongs to, with evidence. A different internal organization that honours",
+    "the contracts is not a gap.",
+    "",
+    slice.trim(),
+  ];
+}
+
 export const VERIFY_HEADER = "CAPIVARA_VERIFY";
 
 export function verifyPrompt(context: VerifierContext): string {
@@ -69,6 +93,7 @@ export function verifyPrompt(context: VerifierContext): string {
     "",
     VERIFY_HEADER,
     ...(context.sharedContract ? ["## Published shared contracts", context.sharedContract] : []),
+    ...verifierArchitectureBlock(context.architectureSlice),
     "",
     "You are an independent verifier. You did not implement this phase and you have no memory of",
     "any previous session.",
@@ -140,6 +165,8 @@ export interface VerifierRepairContext {
   language: string;
   phaseMarkdown: string;
   sharedContract?: string;
+  /** A mesma fatia da arquitetura que o executor recebe (§125). */
+  architectureSlice?: string;
   /** O diagnóstico completo, inclusive como corrigir e verificar cada pendência. */
   cause: string;
   testCommand: string | null;
@@ -155,6 +182,7 @@ export function testRepairGuidancePrompt(context: VerifierRepairContext): string
   return [
     languageBlock(context.language), "", "CAPIVARA_TEST_REPAIR_GUIDANCE", "",
     ...(context.sharedContract ? ["## Published shared contracts", context.sharedContract] : []),
+    ...architectureSliceBlock(context.architectureSlice),
     "The harness test command failed after integrating this phase into a checkout.",
     "Read the source and the complete failure below. Do not write, edit, delete or repair files in this session.",
     "Give the executor a concrete solution so it does not have to rediscover your diagnosis.",
@@ -183,6 +211,7 @@ export function verifierRepairPrompt(context: VerifierRepairContext): string {
     "",
     VERIFY_REPAIR_HEADER,
     ...(context.sharedContract ? ["## Published shared contracts", context.sharedContract] : []),
+    ...architectureSliceBlock(context.architectureSlice),
     "",
     "You are repairing explicit findings from an independent verification of this phase.",
     functionalAcceptanceBlock(),

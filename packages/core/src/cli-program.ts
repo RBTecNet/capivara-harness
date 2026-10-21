@@ -15,6 +15,7 @@ import { BUILD_ROLES, INIT_ROLES, describeRoles, renderUnresolved, rolesFromFlag
 import {
   InitBlockedError,
   baseRegistrada,
+  readArchitectureState,
   readRequestState,
   readSkeletonState,
   requestFromLibrary,
@@ -2084,6 +2085,14 @@ export function createProgram(): Command {
     const esqueletoDoBuild = pedidoRegistrado
       ? await readSkeletonState(projectRoot, runIdFor("init", pedidoRegistrado.sha12))
       : null;
+    /*
+     * E a arquitetura estruturada que o `plan` guardou ao lado dela (§125): o
+     * build a confere contra o `architecture.md` publicado antes de entregar a
+     * fatia de cada fase.
+     */
+    const arquiteturaDoBuild = pedidoRegistrado
+      ? (await readArchitectureState(projectRoot, runIdFor("init", pedidoRegistrado.sha12)))?.architecture ?? null
+      : null;
 
     /*
      * O build também consulta a base — é dela que vêm as skills que serão
@@ -2158,6 +2167,7 @@ export function createProgram(): Command {
           }
         : {}),
       skeleton: esqueletoDoBuild,
+      architecture: arquiteturaDoBuild,
       skipFlows: flags.flows === false,
       ...(flags.rebuildAll === true ? { rebuildAll: true } : {}),
       ...(flags.git === false ? { gitInit: false } : {}),

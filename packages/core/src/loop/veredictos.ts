@@ -43,6 +43,19 @@ export interface TaskAprovada {
   runId: string;
   cycle: number;
   at: string;
+  /**
+   * O sha da fatia da arquitetura que o verificador tinha na mesa (§125).
+   *
+   * O DONE foi dado contra a task E contra a fatia: com a fatia mudada, ele não
+   * vale mais. Entrada sem o campo — anterior a ele, ou de build sem
+   * arquitetura — continua valendo pelo texto da task.
+   */
+  sliceSha12?: string;
+}
+
+/** Uma aprovação vale para a fatia atual? Ausente de um dos lados: vale pelo texto. */
+function mesmaFatia(entrada: TaskAprovada, sliceSha12: string | undefined): boolean {
+  return entrada.sliceSha12 === undefined || sliceSha12 === undefined || entrada.sliceSha12 === sliceSha12;
 }
 
 function caminho(projectRoot: string): string {
@@ -91,16 +104,16 @@ export class TasksAprovadas {
     return new TasksAprovadas(projectRoot, runId, await ler(projectRoot));
   }
 
-  /** As tasks desta fase que já passaram, com este texto. */
-  jaAprovadas(phaseId: string, tasks: readonly TaskBlock[]): TaskBlock[] {
+  /** As tasks desta fase que já passaram, com este texto (e esta fatia da arquitetura, quando há). */
+  jaAprovadas(phaseId: string, tasks: readonly TaskBlock[], sliceSha12?: string): TaskBlock[] {
     return tasks.filter((task) =>
-      this.registro.some((entrada) => entrada.phase === phaseId && entrada.sha === shaDaTask(task)),
+      this.registro.some((entrada) => entrada.phase === phaseId && entrada.sha === shaDaTask(task) && mesmaFatia(entrada, sliceSha12)),
     );
   }
 
   /** Os índices já aprovados, que é o que o gate 3 precisa saber. */
-  indicesAprovados(phaseId: string, tasks: readonly TaskBlock[]): Set<number> {
-    return new Set(this.jaAprovadas(phaseId, tasks).map((task) => task.index));
+  indicesAprovados(phaseId: string, tasks: readonly TaskBlock[], sliceSha12?: string): Set<number> {
+    return new Set(this.jaAprovadas(phaseId, tasks, sliceSha12).map((task) => task.index));
   }
 
   async aprovar(
@@ -109,8 +122,9 @@ export class TasksAprovadas {
     indices: readonly number[],
     cycle: number,
     now = () => new Date(),
+    sliceSha12?: string,
   ): Promise<void> {
-    return this.emFila(() => this.gravarAprovacao(phaseId, tasks, indices, cycle, now));
+    return this.emFila(() => this.gravarAprovacao(phaseId, tasks, indices, cycle, now, sliceSha12));
   }
 
   private async gravarAprovacao(
@@ -119,10 +133,11 @@ export class TasksAprovadas {
     indices: readonly number[],
     cycle: number,
     now: () => Date,
+    sliceSha12: string | undefined,
   ): Promise<void> {
-    const novas = tasks
+    const novas: TaskAprovada[] = tasks
       .filter((task) => indices.includes(task.index))
-      .filter((task) => !this.registro.some((entrada) => entrada.phase === phaseId && entrada.sha === shaDaTask(task)))
+      .filter((task) => !this.registro.some((entrada) => entrada.phase === phaseId && entrada.sha === shaDaTask(task) && entrada.sliceSha12 === sliceSha12))
       .map((task) => ({
         phase: phaseId,
         index: task.index,
@@ -131,6 +146,7 @@ export class TasksAprovadas {
         runId: this.runId,
         cycle,
         at: now().toISOString(),
+        ...(sliceSha12 !== undefined ? { sliceSha12 } : {}),
       }));
     if (novas.length === 0) return;
 

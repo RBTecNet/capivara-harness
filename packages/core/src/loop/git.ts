@@ -12,13 +12,17 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
-import { admitirArvore, alteracoesParaCommit, commitAdmitido, descreverBloqueios, lerStatus, orientacaoDeBloqueio, type Bloqueio } from "./admissao.js";
+import { adicionarExatamente, admitirArvore, alteracoesParaCommit, commitAdmitido, descreverBloqueios, lerStatus, orientacaoDeBloqueio, type Bloqueio } from "./admissao.js";
 import { renderEscolhaNumerada, type EscolhaNumerada } from "./escolha.js";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
+
+/** Saída de diff e de log de projeto grande cabe aqui; o padrão do execFile (1 MiB) não. */
+const GRANDE = { maxBuffer: 64 * 1024 * 1024, encoding: "utf8" as const };
 
 /**
  * O plano de controle nunca conta como trabalho da fase.
@@ -275,6 +279,90 @@ export async function treeSignature(projectRoot: string): Promise<string> {
   } catch {
     return walkSignature(projectRoot);
   }
+}
+
+/**
+ * O estado do código como CONTEÚDO, para as evidências (§125 B).
+ *
+ * `treeSignature` responde "algo mudou durante esta sessão?" e é relativa ao
+ * HEAD: duas árvores limpas em commits diferentes dão a mesma assinatura. Uma
+ * evidência precisa do contrário — dizer contra QUE código foi tirada, e que o
+ * mesmo código continua lá depois de um commit de WIP ou de uma integração que
+ * não tocou nele. Então: um índice temporário a partir do HEAD recebe exatamente
+ * o que um commit da fase levaria (`alteracoesParaCommit`: sem `.capivara/`,
+ * sem o `.env` do harness, sem artefato local ignorado) e `write-tree` dá o id
+ * do conteúdo. O índice de quem chamou e as refs não são tocados; os objetos
+ * ficam soltos no banco local, como os do commit admitido.
+ *
+ * Sem Git não há como dizer o que mudou: o estado vem prefixado pela assinatura
+ * de varredura, igualdade ainda vale, e o impacto de qualquer mudança é
+ * desconhecido.
+ */
+export async function estadoDoCodigo(projectRoot: string): Promise<{ head: string | null; tree: string | null }> {
+  if (!(await isRepository(projectRoot))) return { head: null, tree: `sem-git:${await walkSignature(projectRoot)}` };
+  const head = await run("git", ["rev-parse", "-q", "--verify", "HEAD"], { cwd: projectRoot }).then((r) => r.stdout.trim(), () => null);
+  const pasta = await mkdtemp(join(tmpdir(), "capivara-estado-"));
+  try {
+    const comIndice = { ...process.env, GIT_INDEX_FILE: join(pasta, "index") };
+    const git = (args: string[]) => run("git", args, { cwd: projectRoot, env: comIndice, ...GRANDE }).then((r) => r.stdout.trim());
+    await git(head ? ["read-tree", head] : ["read-tree", "--empty"]);
+    const caminhos = (await alteracoesParaCommit(projectRoot, CONTROL_PLANE_PATHSPEC)).map((entrada) => entrada.caminho);
+    await adicionarExatamente(projectRoot, caminhos, "-A", comIndice);
+    return { head, tree: await git(["write-tree"]) };
+  } catch {
+    return { head, tree: `sem-arvore:${await treeSignature(projectRoot)}` };
+  } finally {
+    await rm(pasta, { recursive: true, force: true });
+  }
+}
+
+const ID_DE_ARVORE = /^[0-9a-f]{40,64}$/;
+
+/**
+ * Os arquivos que diferem entre dois estados de conteúdo; null quando não dá
+ * para saber (sem Git, ou árvore que não é do Git) — e aí ninguém pode afirmar
+ * que uma prova continua valendo.
+ */
+export async function arquivosMudados(projectRoot: string, de: string | null, para: string | null): Promise<string[] | null> {
+  if (de === null || para === null) return null;
+  if (de === para) return [];
+  if (!ID_DE_ARVORE.test(de) || !ID_DE_ARVORE.test(para)) return null;
+  try {
+    const { stdout } = await run("git", ["diff-tree", "-r", "--name-only", "--no-renames", de, para], { cwd: projectRoot, ...GRANDE });
+    return stdout.split("\n").map((linha) => linha.trim()).filter(Boolean).sort();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Os arquivos que cada fase escreveu, pelos commits `feat(phase-N)` do histórico.
+ *
+ * É a autoria que o Core já registra: cada fase verde vira um commit com o
+ * número dela, no serial e no paralelo (o cherry-pick mantém a mensagem). O
+ * build usa isto para saber de quem é um arquivo sem montar um grafo próprio.
+ */
+export async function arquivosDasFases(projectRoot: string): Promise<Map<number, Set<string>>> {
+  const fases = new Map<number, Set<string>>();
+  if (!(await isRepository(projectRoot))) return fases;
+  try {
+    const { stdout } = await run(
+      "git",
+      ["log", "--no-renames", "--name-only", "--format=%x00%s", "--grep=^feat(phase-[0-9][0-9]*):", "HEAD"],
+      { cwd: projectRoot, ...GRANDE },
+    );
+    for (const bloco of stdout.split("\0").slice(1)) {
+      const [assunto = "", ...arquivos] = bloco.split("\n");
+      const numero = /^feat\(phase-(\d+)\):/.exec(assunto.trim());
+      if (!numero) continue;
+      const conjunto = fases.get(Number(numero[1])) ?? new Set<string>();
+      for (const arquivo of arquivos.map((linha) => linha.trim()).filter(Boolean)) conjunto.add(arquivo);
+      fases.set(Number(numero[1]), conjunto);
+    }
+  } catch {
+    // Sem histórico legível, ninguém é dono de nada: o impacto fica desconhecido.
+  }
+  return fases;
 }
 
 export async function hasPendingChanges(projectRoot: string): Promise<boolean> {

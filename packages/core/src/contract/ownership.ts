@@ -215,6 +215,24 @@ function caminhosDaFrase(frase: string): Caminho[] {
   return caminhos.sort((a, b) => a.inicio - b.inicio);
 }
 
+/**
+ * Os caminhos de projeto que um texto cita — para escrever, ler ou conferir.
+ *
+ * É o mesmo leitor das obrigações de escrita, sem a gramática da oração: o
+ * build o usa para dizer quais arquivos uma task menciona (§125, escopo das
+ * evidências), e duas leituras de caminho divergiriam na primeira correção.
+ */
+export function projectPaths(text: string): { path: string; directory: boolean }[] {
+  const vistos = new Set<string>();
+  const saida: { path: string; directory: boolean }[] = [];
+  for (const caminho of caminhosDaFrase(text)) {
+    if (vistos.has(caminho.texto)) continue;
+    vistos.add(caminho.texto);
+    saida.push({ path: caminho.texto, directory: caminho.diretorio });
+  }
+  return saida;
+}
+
 /* ---------------------------------------------------------------- orações */
 
 /** As fronteiras de oração do texto mascarado, em posições crescentes. */

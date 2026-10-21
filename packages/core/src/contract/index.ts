@@ -20,7 +20,7 @@ export type { CoverageSources } from "./coverage.js";
 export { checkTestPrescription, testPrescriptionHint, testPrescriptions } from "./test-prescription.js";
 export type { TestAuthority } from "./test-prescription.js";
 export { mechanismPrescriptionHint, mechanismPrescriptions } from "./mechanism-prescription.js";
-export { WRITE_OWNERSHIP_INVARIANT, checkWriteOwnership, effectiveDependencies, writeConflicts, writeIntents, writeOwnershipHint } from "./ownership.js";
+export { WRITE_OWNERSHIP_INVARIANT, checkWriteOwnership, effectiveDependencies, projectPaths, writeConflicts, writeIntents, writeOwnershipHint } from "./ownership.js";
 export type { WriteConflict, WriteIntent, WriteKind, WriteOwnershipOptions } from "./ownership.js";
 export { renderContractDocument } from "./doc.js";
 export { TASKS_BLOCK, assemblePhase, tasksBlock } from "./templates.js";

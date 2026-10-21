@@ -14,12 +14,56 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `main` — é onde tudo está |
+| branch | `main`; o BUILD vNext (§125) está em `feat/build-vnext`, sobre a `fix/triagem-124`, sem merge |
 | versão | 0.6.2 (`capivara --version`); planos da 0.5.0 e anteriores incompatíveis, ver §116 e §115.26 |
-| suíte | 2725 testes em 143 arquivos, `npm run check` verde |
+| suíte | 2866 testes em 152 arquivos na `feat/build-vnext`, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-21 — BUILD vNext: prova, defeito e recuperação localizada (§125)
+
+Implementação integral do contrato `BUILD_VNEXT_ESPECIFICACAO.md` na branch
+`feat/build-vnext` (sobre a `fix/triagem-124`), sem merge, push nem release.
+O BUILD deixa de ser uma esteira que refaz G2→G3→G4 a cada correção e passa
+a trabalhar com quatro registros do Core: a fatia da arquitetura de cada
+fase (vai a executor e verificador, e entra na identidade das aprovações), o
+livro de evidências (`runs/<id>/evidence.jsonl`, só acréscimo; o estado do
+código é a árvore Git do que o commit levaria), o registro de defeitos
+(`runs/<id>/defects/<Pxx>.json`: identidade entre gates, tentativas, escada,
+orçamento derivado) e o handoff imutável do verificador (gravado antes de
+qualquer reparo). Depois de cada ação, só a prova atingida perde a validade;
+o desconhecido vai à consulta limitada, nunca é aprovado em silêncio; o G4
+sem fluxo próprio e com a regressão provada fora do território da mudança é
+NOT_APPLICABLE sem subir nada. Orçamentos por defeito (3), gate (2) e ciclo
+(6), independentes, configuráveis (`--repairs-per-*`, Wizard) e fotografados
+no `run.json`; o ciclo esgotado abre o seguinte sem voltar à implementação;
+estratégia sem progresso não se repete no mesmo ciclo, e a que não muda
+nada para a fase antes do fim (impossibilidade real). O reparo pelo
+verificador é por gate e ciclo; a retomada de sessão é declarada por CLI e
+opt-in (`--verifier-resume`), só contada pelo id devolvido, com fallback; quem
+repara nunca valida. No paralelo, o conflito de cherry-pick é conciliado só
+nos arquivos em conflito (marcadores diff3, escopo imposto pelo Core,
+revalidação pelo que mudou) e os dois commits ficam; o escalonador evita
+rodar juntas fases que a arquitetura põe nos mesmos arquivos. A entrega só
+conclui com todas as fases fechadas (o `--keep-going` declarava "todas
+verdes"), commita o reparo da aceitação e escreve `entrega.md` (como rodar,
+limitações); `relatorio.md/json` sai das mesmas linhas da TUI. O reparo
+documental (BUILD → PLAN; o INIT ainda não) só existe com pacote validado em
+`.capivara/repairs/upstream/`, conferido de novo na entrada do `plan`, com a
+pergunta de escopo quando o impacto passa do defeito; a edição automática do
+documento não foi implementada (§8.3: a troca segura não é demonstrável).
+
+Duas revisões adversariais em workflow: 20 defeitos confirmados no C/D/E,
+corrigidos com teste RED→GREEN; 16 no F/G/H, idem. Nenhum formato antigo
+deixa de ser lido: o que entrou é campo opcional, arquivo novo no plano de
+controle, ou a versão 2 do checkpoint de integração (o leitor aceita a 1);
+nenhuma migração.
+
+Ainda sem run com modelo real: as provas são o provider falso, o catálogo e
+os cenários do §13 da especificação. O primeiro run real deve ser lido em
+`runs/<id>/relatorio.md`, `defects/` e `evidence.jsonl` antes de culpar o
+modelo.
 
 ## 2026-10-20 — integridade da triagem: finding material só está resolvido quando o plano está coerente (§124)
 
@@ -762,7 +806,7 @@ código**. Todas já corrigidas — estão aqui para não serem reintroduzidas.
 ## Como verificar que nada quebrou
 
 ```bash
-npm run check     # build + typecheck + 2725 testes
+npm run check     # build + typecheck + 2866 testes
 ```
 
 O teste que mais protege a tese está em `test/architecture.spec.ts`: ele falha se

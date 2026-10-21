@@ -11128,3 +11128,322 @@ primeira leitura já tinha descrito. O caminho limpo não muda.
   `haiku` retomado vai pagar — anotado aqui para não parecer defeito.
 - Validado só com o provider falso sobre os textos reais e com a calibração
   sobre o plano real como fixture; nenhum run real depois desta implementação.
+
+## §125 — BUILD vNext: prova, defeito e recuperação localizada
+
+### 125.1 O pedido e o ponto de partida
+
+O pedido foi a implementação integral do contrato `BUILD_VNEXT_ESPECIFICACAO.md`
+(na raiz do repositório, fora do histórico; sha256 `63e3b14e…`), numa
+empreitada só, em branch própria — `feat/build-vnext`, sobre a
+`fix/triagem-124` @ `988bbdb`, 0.6.2 —, sem merge, push nem release. A
+especificação é a autoridade, e os contratos do INIT e do PLAN
+(`capivara-skeleton/v2`, `capivara-architecture/v1`, `capivara-phases/v2`)
+não mudaram.
+
+O BUILD da 0.6.2 tinha cinco gates bons e uma recuperação em esteira:
+
+- o runner guardava UMA causa (`lastGate`/`lastCause`, sobrescritos a cada
+  volta), e um reparo em qualquer gate refazia G2→G3→G4 inteiros
+  (`verificarTudo`) — a correção de um roteiro do G4 pagava suíte e
+  verificação de novo;
+- o mesmo defeito ganhava cara nova em cada gate, e a estratégia que não
+  funcionou era tentada outra vez sem informação nova;
+- o reparo pelo verificador tinha um orçamento por FASE: o G2 gastava a vez
+  do G3;
+- o ciclo esgotado encerrava a fase; cada ciclo novo voltava ao executor
+  com a fase inteira;
+- o diagnóstico do verificador só existia como texto dentro do prompt
+  seguinte — nada persistido, nada imutável, nada que sobrevivesse a uma
+  queda;
+- a arquitetura que o PLAN decidiu (`architecture.md`) não chegava a quem
+  implementa nem a quem verifica (a lacuna que a própria especificação
+  aponta no §11);
+- um conflito de cherry-pick no paralelo desfazia a integração e mandava a
+  fase refazer sozinha, com o arquivo em conflito na versão da árvore
+  integrada — o trabalho aprovado da fase naquele arquivo ia embora;
+- com `--keep-going`, uma fase falhada terminava em "todas as fases
+  verdes", código 0; o reparo da aceitação ficava fora do histórico; a
+  parada apontava logs pelo número do ciclo; "fechada antes" era afirmado
+  só pelo texto da fase.
+
+### 125.2 A forma da solução: quatro registros do Core, o resto reaproveitado
+
+| peça | onde | contrato |
+|---|---|---|
+| fatia da arquitetura | `contract/architecture.ts`, `loop/arquitetura.ts` | `architectureSliceForPhase()` (o da 0.6.2, byte a byte) vai a executor e verificador; a identidade da fatia é o JSON canônico do que a fase entrega e consome |
+| livro de evidências | `loop/evidencias.ts` | `capivara-evidence/v1`: JSONL só de acréscimo em `runs/<id>/evidence.jsonl`; prova com entradas (documentos, código como árvore Git, ambiente), escopo e artefatos; validade em linhas próprias, com motivo |
+| registro de defeitos | `loop/defeitos.ts` | `capivara-defects/v1`: instantâneo atômico por fase em `runs/<id>/defects/<Pxx>.json`; tentativas, estratégias sem progresso e rediagnósticos dentro dele; orçamento DERIVADO das tentativas |
+| handoff do verificador | `loop/handoff.ts` | `capivara-verifier-handoff/v1`: o diagnóstico original, imutável (`link`), por run+fase+gate+ciclo+defeito, gravado antes de qualquer reparo |
+
+E o narrador (`loop/narrador.ts`): uma transição relevante é um objeto, uma
+função pura faz a linha, e a MESMA linha vai à TUI (`onProgress` de
+recuperação e `announce`), ao `events.tsv` (assunto `Pxx:recuperacao`,
+status `started`, para não mexer na retomada nem nas contagens de retry) e
+ao relatório.
+
+Reaproveitado sem reescrever: o parser e o splitter das fases, os stamps e o
+preflight, os cinco gates (`gates.ts`, `flows.ts`), o ledger de fases, a
+memória de tasks (`TasksAprovadas`, §75), o worktree e a integração do
+paralelo, a política de admissão de commits, o escalonador, a escrita
+atômica e os caminhos do plano de controle.
+
+### 125.3 Checkpoints
+
+**A — a arquitetura chega a quem faz e a quem julga** (`ef92e8e`). O CLI lê
+a arquitetura estruturada que o `plan` guardou; `checkArchitectureBinding`
+a confere contra `architecture.md` e o carimbo do `environment.json` ANTES de
+qualquer sessão (divergência é erro, código 1). Cada fase recebe a fatia
+(contratos próprios, consumidos, fluxos, decisões de dados) nos prompts de
+implementação, correção, verificação e reparo. Fase fechada com fatia
+diferente da atual volta em modo revalidação: sem sessão de implementação,
+o verificador julga contra o contrato novo.
+
+**B — evidências e impacto** (`aec6a4e`). O estado do código é conteúdo: um
+índice temporário a partir do HEAD recebe exatamente o que o commit da fase
+levaria (`alteracoesParaCommit`) e `write-tree` dá o id — um WIP commitado ou
+uma integração que não tocou nada não mudam a prova. O impacto de uma
+mudança é NONE (mesmo conteúdo), AFFECTED (toca o que a prova cobre) ou
+UNKNOWN (não se demonstra nem uma coisa nem outra). Sem grafo próprio e sem
+análise semântica: arquivos que a task cita, arquivos que a arquitetura fixa
+para os componentes, commits `feat(phase-N)`.
+
+**C — revalidação seletiva e G4 condicional** (`bdb7d94`). Depois de cada
+ação, `revalidar` invalida só a prova atingida, com o motivo; o que não foi
+atingido continua de pé. G2 roda quando não há prova PASS válida para o
+conteúdo e o ambiente de agora (identidade do ambiente: runtime e ABI, marca
+de instalação Node, lockfiles instalados, `.env`, bancos declarados,
+comando). G3 recebe três blocos: "Already DONE" para o mesmo conteúdo,
+"Previously approved — confirm against what changed" com a lista dos
+arquivos para o desconhecido, e o resto sob verificação; o desconhecido
+NUNCA é aprovado em silêncio. G4 é NOT_APPLICABLE sem porta, servidor,
+navegador nem roteirista quando a fase não tem fluxo próprio e a regressão
+continua provada: todo arquivo mudado tem dono demonstrado fora do fecho de
+dependências dos componentes que o fluxo atravessa, não é manifesto, lock,
+migração ou configuração, não divide pasta com arquivo do fluxo, e — da
+revisão — não é arquivo preexistente que nenhum commit de fase escreveu
+(dono desconhecido é desconhecido, nunca "fora").
+
+**D — defeitos, escada e orçamento** (`bdb7d94`). Identidade determinística
+entre gates: a mesma task, o mesmo fluxo e passo (com a mesma natureza —
+roteiro errado e produto errado são defeitos diferentes), a suíte enquanto
+não fecha, a citação literal da mesma mensagem, ou o id `[Pxx-Dn]` que o
+verificador cita e o Core confere. Escada por natureza: o achado do
+verificador vai primeiro ao executor e depois ao verificador que o
+diagnosticou (§6); a suíte vermelha começa pelo reparo assistido (§114);
+roteiro e revisão do G4 têm as próprias. Orçamento em três escalas
+independentes — defeito, gate, ciclo — derivado das tentativas; padrões 3,
+2 e 6 (a soma dos três gates que reparam), configuráveis por
+`--repairs-per-cycle/gate/defect`, pelo Wizard ("Reparos por ciclo") e
+fotografados no `run.json` (`budgets`). A regra de progresso (§5.3): falha
+diferente sem regressão E ação que mudou algo; a mesma falha reescrita em
+outras palavras não é progresso (a assinatura do G3 é o critério rotulado,
+ou a própria task). Estratégia sem progresso não se repete no MESMO ciclo;
+o ciclo seguinte abre sozinho, com contadores novos, código e evidências
+intactos, sem voltar à implementação, e recomeça a escada com a história
+inteira no handoff — a informação nova. Antes do fim dos ciclos, só para o
+que é impossibilidade real: nenhuma estratégia possível, ou tentativas que
+não mudaram nada.
+
+**E — handoff, verificador reparador, retomada** (`bdb7d94`). Toda falha
+material do verificador grava o handoff ANTES do primeiro reparo, mesmo com
+retomada disponível; o prompt do reparo leva o diagnóstico original, o que
+mudou desde então, as tentativas e as estratégias que falharam, montado do
+que já está registrado (nenhuma chamada de resumo). Cada CLI declara se
+retoma (`ContratoDaRetomada`: `--resume`, `--session`, `--conversation`,
+`codex exec resume`); nenhuma está "garantida" sem chamada real, então a
+retomada é opt-in (`--verifier-resume`). Retomada só é retomada quando o id
+que o envelope devolve é o pedido; outra sessão aberta pelo provider recebeu
+o handoff no prompt e vale como a sessão nova; a sessão pedida que não
+conclui cai em UMA sessão nova. Quem repara nunca valida: a ponte recusa
+retomada fora do reparo.
+
+**F — conflito de integração conciliado** (`7be8640`). O conflito de
+cherry-pick grava o checkpoint v2 (`integracoes/<Pxx>.json`: arquivos, HEAD
+da principal, commit aprovado no branch dele); a reabertura reaplica o
+aprovado sobre a árvore integrada mantendo os marcadores (diff3) só nos
+arquivos em conflito, e o runner entra em modo conciliação: o defeito
+`integracao-conflito` com a escada [conciliação, executor]. A conciliação é
+uma sessão do executor limitada aos arquivos em conflito (`conflictPrompt`):
+o Core desfaz o que ela mexer fora deles, confere que não sobrou marcador
+(prova textual) e revalida pelas evidências o que a resolução e a árvore
+integrada mudaram (prova funcional) — aprovações da fase ficam, presas à
+árvore em que foram dadas, e o verificador confere contra o que mudou.
+Conflito não consome ciclo de implementação. O escalonador passa a usar o
+mapa de componentes do PLAN: duas fases cujos componentes a arquitetura fixa
+nos mesmos arquivos não rodam ao mesmo tempo.
+
+**G — transparência e entrega proporcional** (`7be8640`). `relatorio.md` e
+`relatorio.json` por run, derivados do `events.tsv`, do livro e dos
+instantâneos — as mesmas linhas da TUI. A parada aponta o handoff e o log
+da evidência que reprovou (`PhaseOutcome.evidencia`), não um nome adivinhado
+pelo número do ciclo. A aplicação só é concluída com TODAS as fases
+fechadas (o `--keep-going` declarava "todas verdes" com fase falhada). O
+reparo da aceitação é provado pela suíte uma vez e commitado pelo Core
+(`fix(entrega): …`, com a política de admissão). `entrega.md` diz como rodar
+(os passos que a aceitação de fato executou) e as limitações: banco que o
+PLAN declara sem migração que a aceitação rodou, fluxo cuja última prova não
+vale para o conteúdo entregue, G3/G4 não repetidos sobre o reparo da
+aceitação. O ledger guarda o HEAD em que a fase fechou, e "fechada antes"
+só é anunciada se esse commit continua no histórico.
+
+**H — reparo documental com pacote validado** (`7be8640`). O verificador
+pode alegar, no achado, `UPSTREAM: PLAN|INIT — <documento e trecho>: <por
+quê>`. Só com a escada do BUILD esgotada o Core monta o pacote
+`.capivara/repairs/upstream/<id>/{manifest.json, diagnosis.md,
+evidence.json}` do que está registrado, valida com a função pura
+`checkUpstreamPackage` (forma, hashes amarrando o conjunto, seções do
+diagnóstico, artefatos, histórico de recuperação, documento ainda na versão
+diagnosticada, autoridade certa) e publica de uma vez (pasta temporária,
+relida, renomeada); só então o defeito vira `UPSTREAM_REPAIR_REQUIRED`.
+Pacote recusado não vira estado e nenhum agente é chamado. O impacto sai do
+grafo da arquitetura (as fases que consomem os componentes do contrato
+reparado), não da redação da alegação. A entrada do `plan` confere de novo
+cada pacote; o que alcança além do defeito pergunta `CONTINUAR COM ESCOPO
+AMPLIADO` / `ABORTAR A RECUPERAÇÃO E INICIAR NOVAMENTE`, e a decisão fica
+presa ao hash do impacto mostrado. Na retomada, o defeito que espera o
+reparo é reconferido: pacote ainda válido para a fase sem gastar ciclos;
+documento revisado, pacote abortado ou sumido devolve o defeito à escada.
+
+### 125.4 O que NÃO muda, de propósito
+
+- Os contratos do INIT e do PLAN, os stamps e o `environment.json`; nenhum
+  hash é reescrito para parecer compatível.
+- **A edição automática do PLAN/INIT a partir do pacote não existe.** A
+  especificação manda não automatizar quando a troca segura não é
+  demonstrável (§8.3), e ela não é: a identidade do run do BUILD é o sha do
+  plano, o carimbo do `environment.json` amarra plano, esqueleto e
+  arquitetura, e o PLAN publica pelo pipeline de escritor, auditor e
+  triagem — uma edição localizada fora dele quebraria a certificação, e
+  dentro dele a reprodução de uma fase só não está provada. O que existe é o
+  diagnóstico transferível, validado na saída e na entrada, e o estado
+  recuperável. A fase cujo texto ou fatia mudar depois é revalidada pelo
+  BUILD (a fatia e o texto entram na identidade das aprovações).
+- O G0 continua sendo o que era; falha de sessão (timeout sem escrita,
+  recusa do provider) para com o parcial preservado (§115.17).
+- Sem G5: a entrega reaproveita as provas e a aceitação que já existia.
+
+### 125.5 A revisão adversarial
+
+Duas revisões em workflow (lentes independentes, cada achado refutado por
+outro agente antes de valer). Sobre o C/D/E: 20 defeitos confirmados por
+reprodução, todos corrigidos com teste RED→GREEN
+(`test/loop/vnext-revisao.spec.ts`): o G4 que o próprio gate julgou sem
+nada a percorrer entrava em laço; o comando de teste que sumia depois da
+suíte vermelha também; defeitos de roteiro e de produto no mesmo fluxo se
+fundiam; a recuperação da integração herdava o orçamento gasto no worktree;
+a prosa reescrita contava como progresso; ação interrompida (credencial,
+limite, queda) deixava o defeito em REPAIRING para sempre; o defeito
+consertado por outra ação nunca era validado; a implementação que caía por
+cota ficava "feita"; a aprovação de outro run valia sob uma regra revisada
+do esqueleto (agora presa ao sha do contrato compartilhado); o arquivo
+preexistente sem fase autora era dado como fora do fluxo; o fallback da
+retomada jogava fora uma sessão que tinha funcionado; o `--rebuild-all`
+deixava o handoff antigo para o defeito novo; o parcial descartado como a
+parada oferece não recomeçava a fase. Quatro achados foram rejeitados — dois
+como desenho (alternância de estratégias entre ciclos; ciclo novo quando o
+gate esgota), dois como inalcançáveis ou já cobertos —, e três deles
+ganharam reforço mesmo assim: a aprovação dada sem fatia é registrada com
+fatia vazia e não vale sob uma fatia que apareça depois; a ação
+interrompida reabre o defeito; pedir mais reparos por ciclo dá a cada gate
+a sua parte. Sobre o F/G/H: 16 confirmados, também corrigidos com RED→GREEN (nos
+arquivos do F/G/H e no `paralelo.spec.ts`): o Git devolve entre aspas o nome
+com acento ou espaço, e o marcador não era visto nem o escopo imposto
+(agora `-z` em todo caminho que alimenta leitura); conflito binário ou
+apagado de um lado contava como resolvido sem decisão; a retomada trocava a
+lista do checkpoint pela do conflito novo e o marcador do parcial passava;
+o `--rebuild-all` apagava o checkpoint da própria execução; o reparo da
+aceitação que quebrava a suíte era absolvido pela tentativa seguinte que
+não mudava nada, rodava a suíte crua na raiz (sem banco de teste nem
+preparo), não resolvia o comando de teste que só apareceu depois do
+preflight, e sem Git não era dito; o commit que o git recusava no worktree
+virava "nada a integrar" e o código sumia; o ledger guardava o HEAD de
+antes de uma fase sem commit; o relatório não mostrava a falha da
+integração nem as fases que não rodaram; o defeito encaminhado ao PLAN não
+voltava à escada depois da revisão do documento; o impacto copiava a origem
+e nunca pedia autorização; o INIT recebia pacote que ninguém conferia (o
+encaminhamento ao INIT foi desligado: §8.3 manda o PLAN primeiro); o
+documento era escolhido fora da etapa destino. Um achado foi rejeitado
+(evidência `null` — inalcançável).
+
+### 125.6 Testes
+
+`npm run check`: 2866 testes em 152 arquivos (eram 2725 em 143). Arquivos
+novos, todos de comportamento (runner de verdade, Git real, provider falso
+que escreve no disco; nada de asserção sobre frase de prompt sozinha):
+`vnext-arquitetura` (11, A), `vnext-evidencias` (9, B), `vnext-recuperacao`
+(17, cenários 1 a 10 do §13 da especificação), `defeitos` (19, o registro
+sozinho), `provider/retomada` (16, id de sessão por CLI, flags de retomada,
+a ponte que recusa retomada fora do reparo), `vnext-revisao` (15, os 20
+achados do C/D/E), `vnext-relatorio` (1, §13.15), `vnext-entrega` (10, §10
+e §13.16), `vnext-upstream` (23, §13.12 e §13.13); e no `paralelo.spec` os
+cenários do §13.11 e as regressões do F. O §13.14 é provado pelos testes de
+fatia do A (fatia mudada volta à verificação sem implementação;
+`architecture.md` alterado depois do RALPH READY para o build antes de
+qualquer chamada). RED: 13 dos 15 cenários do §13.1–10 falham contra o
+runner da B (os dois que passam são controles); 15 dos 15 do
+`vnext-revisao` contra o C/D/E sem as correções; 16 das 20 regressões do
+F/G/H contra o protótipo (as quatro restantes são controles). Testes
+existentes mudados, cada um com comentário §125: a sequência de chamadas
+onde o executor agora tenta antes do verificador no G3 (§6), a correção
+local que não abre ciclo, o desconhecido que vai ao bloco de confirmação em
+vez de "Already DONE", a mesma falha que passa pelos ciclos quando o código
+muda e para antes quando nada muda.
+
+Instabilidade conhecida, preexistente e alheia ao BUILD:
+`test/init/integridade-122.spec.ts` › "15. o plano correto não ganha
+chamada nenhuma" falha em cerca de 1 de 7 execuções isoladas pela ordem de
+duas chamadas concorrentes de `writer:authoring:phase-*` — 2 falhas em 14
+na base `988bbdb`, 2 em 14 no `bdb7d94`. Não foi tocado.
+
+### 125.7 Medição: antes × depois
+
+Os mesmos cenários de provider falso contra o runner da base (`988bbdb`) e o
+do vNext (`_medicao.spec.ts`, fora da suíte). Chamadas por papel, suítes do
+G2 e passagens do G4:
+
+| cenário | 0.6.2 | vNext |
+|---|---|---|
+| S1 uma task incompleta, corrigida | 1 executor, 2 leituras, 1 reparo do verificador; 2 suítes | 2 executores, 2 leituras; 2 suítes (o executor tenta primeiro, §6) |
+| S2 roteiro do G4 errado | 1 executor, 1 leitura; 1 suíte; 2 passagens | igual |
+| S3 suíte vermelha, reparo do verificador | 1 executor, 1 reparo, 1 leitura; 2 suítes | igual |
+| S4 a mesma falha, nada muda | 3 executores, 4 leituras, 1 reparo; 4 suítes; falha | 2 executores, 3 leituras, 1 reparo; 2 suítes; falha |
+| S5 correção que não muda o código | 1 executor, 2 leituras, 1 reparo; 2 suítes; 2º prompt de 12 244 caracteres | 2 executores, 2 leituras; 1 suíte; 2º prompt de 10 360 |
+| S6 regressão do G4 provada, mudança fora do território | 1 passagem do G4 (sobe a aplicação) | nenhuma |
+| S7 suíte vermelha e task incompleta, cada uma precisando do verificador | 3 executores, 1 reparo, 3 leituras; 4 suítes; **a fase falha** (o G2 gastou o único reparo) | 2 executores, 2 reparos, 3 leituras; 3 suítes; **a fase fecha** |
+
+O tempo de parede nos cenários falsos não mede o produto (não há modelo); o
+custo do Core por ação ficou entre 50 e 150 ms a mais (write-tree e livro
+de evidências). Tokens e custo em US$ só aparecem com provider real — o
+registro de custo por defeito existe (`costs`), mas esta empreitada não
+rodou modelo.
+
+### 125.8 Limitações e riscos
+
+- **Nada disto rodou com modelo real.** A retomada de sessão é declarada
+  "não verificada" em todas as CLIs (a flag existe na versão instalada;
+  nenhuma chamada real provou que a sessão somente leitura volta com
+  escrita); por isso é opt-in. O `opencode --session` cria sessão quando o
+  id não existe — a conferência pelo id devolvido não detecta isso nele.
+- **Edição automática do PLAN/INIT a partir do pacote: adiada por
+  inviabilidade demonstrada** (125.4). O encaminhamento ao INIT está
+  desligado; o validador e o pacote já o suportam.
+- O impacto é por arquivo citado, arquivo fixado pela arquitetura e commit
+  de fase — sem análise semântica. Por isso o desconhecido é frequente, e é
+  resolvido pela consulta limitada ao verificador (uma chamada que já ia
+  acontecer, com a lista do que mudou), nunca por aprovação.
+- A identidade da fatia não inclui a responsabilidade textual do componente
+  nem a infraestrutura (decisão do A: só o que a fase entrega e consome
+  reabre a fase).
+- O ciclo mostrado na TUI é o da execução (`ciclosAbertos`); o dos defeitos
+  e handoffs é o absoluto do run. Numa retomada, os dois diferem.
+- O relatório e a entrega são derivados e reescritos a cada execução; a
+  autoridade continua sendo `events.tsv`, o livro e os instantâneos.
+- Nenhum formato persistido mudou de versão: `evidence.jsonl`, `defects/`,
+  os handoffs, `relatorio.*`, `entrega.md` e `.capivara/repairs/` são
+  novos; `fases.json` ganhou `head` e `semCommit` opcionais, `tasks.json`
+  ganhou `tree` e `contratoSha` opcionais, `run.json` ganhou `budgets`
+  opcional, `integracoes/<Pxx>.json` ganhou a versão 2 (o leitor aceita a 1).
+  Runs anteriores são lidos como antes; nenhuma migração é necessária. A
+  mudança de comportamento é grande o bastante para uma versão nova
+  (0.7.0), que não foi publicada.

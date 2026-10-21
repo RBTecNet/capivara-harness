@@ -12280,3 +12280,339 @@ build`; as fases cujo texto não mudar continuam fechadas.
   §118/§122/§126.
 - Validado só com provider falso e Git real; nenhum run real depois desta
   implementação.
+
+## §128 — Convergência do PLAN: a correção que o achado alcança fica, a fase que a reorganização não tocou também, e a triagem recebe a regra do harness
+
+### 128.1 A evidência: Parallel Lab no Luna (0.7.1)
+
+Projeto `laravel/luna`, run `init-dc741f0d7b92` (21/10, 18:41–18:55 UTC),
+0.7.1 (§126 + §127). O plano saiu RALPH READY e o build
+`build-8db7f43ee531` concluiu; o que não fecha é o custo do PLAN diante do
+produto (três CRUDs sem relação, uma fundação e um painel): **64 chamadas** —
+entrevista 1, esqueleto 1, arquiteto 6, auditor da arquitetura 5, escritor de
+fase 17, auditor de fase 16, coerência 4, triagem 3, ensaio 11. Os artefatos
+foram copiados para o scratchpad antes de qualquer leitura; o `.capivara` do
+projeto não foi tocado. A sequência, pelos `events.tsv`, `prompts/` e `logs/`:
+
+1. arquiteto v1: seis fases, a 2 (estrutura da interface) com `covers` vazio
+   — o contrato devolve "a fase 2 não cobre nada"; a v2 é desenhada do zero
+   (a retentativa por contrato não leva a anterior), com outros caminhos;
+2. quatro auditorias da arquitetura, um ponto por rodada: validação nos
+   formulários (v2 → v3); serviços próprios de cada módulo e ligação
+   interface–API (v3 → v4); testes próprios de cada módulo e "só o `.env` tem
+   credencial" (v4 → v5); aprovada. **A v4, que tratava dos serviços, perdeu
+   a validação dos formulários que a v3 tinha escrito.** O arquiteto recebia
+   "Already fixed in earlier rounds — keep it fixed"; o auditor recebia só o
+   achado da última rodada, e as rodadas 3 e 4 aprovaram sem a validação;
+3. fases, rodada 1 (cinco escritas). O goal da P1 prometia "o projeto Node.js
+   e React com Vite … e os pontos de descoberta de rotas e páginas", mas a P1
+   nomeava só `dados` e `api-base`: o `web-shell` (P2), dono de `src/App.tsx`,
+   `src/main.tsx` e do contrato "páginas descobertas em `src/modules/*/page.tsx`",
+   não estava na fatia dela. O escritor da P1 adivinhou `src/web/main.tsx`,
+   `src/web/app.tsx` e `src/web/modules/*/page.tsx`. A Task 10 da P3 dizia
+   "implementar a exclusão com confirmação **e concluir a cobertura
+   automatizada própria do módulo**"; a P4 e a P5 não traziam o requisito de
+   testes do módulo;
+4. auditoria, rodada 1: o auditor da P3 aponta a Task 10; a coerência aponta
+   `src/web/main.tsx` × `src/main.tsx` (F8) e de novo a Task 10 (F9). A
+   **triagem** descarta F1 e F9 citando a própria Task 10 ("a fonte não
+   proíbe atribuir testes à fase"): ela recebia pedido, decisões, esqueleto
+   (com a arquitetura colada) e fases — nunca a regra do planejamento. A P3,
+   sem achado restante, é marcada aprovada com a Task 10 dentro;
+5. rodada 2: o escritor da P1 corrige a Task 1 **e as Tasks 7 e 8** (para
+   `src/App.tsx`, `src/modules/*/page.tsx` e `src/modules/painel/page.tsx`),
+   que é o que o achado pedia ("mantenha a descoberta de páginas nos caminhos
+   `src/App.tsx` e `src/modules/*/page.tsx`"). O endereço do achado era
+   `P1.T1.C3 vs P2.T4.C1`, e `preserveUnaddressedTasks` devolveu as Tasks 7 e
+   8 com os bytes antigos. A coerência acusa a descoberta em `src/web/app.tsx`,
+   endereçada a `Architecture`, e a Task 10 de novo (agora KEEP: a citação da
+   triagem não existia na fonte);
+6. reorganização: a v6 muda o goal da P1 e da P2, a visão geral, um contrato
+   do `web-shell` e só a justificativa da P3–P5. **As cinco fases são
+   reescritas do zero** — o cache da escrita é o prompt inteiro, e a visão
+   geral entra em toda fatia —, embora os prompts prometam ao arquiteto e aos
+   auditores que "a fase cujo envelope não muda mantém o que já foi escrito".
+   A P4 e a P5 estavam aprovadas;
+7. rodada 3, sobre textos novos: P3 com uma "confirmação da alteração de
+   status" que ninguém pediu e sem a validação do formulário (a regressão da
+   v4 chegando às fases); P2 com o painel em `src/modules/dashboard/page.tsx`
+   sem ligação a `/`; P1 sem "só o `.env` tem credencial" (omissão que as
+   rodadas 1 e 2 aprovaram — só a reescrita fez alguém reler) e com uma
+   restrição no esquema que a triagem achou compatível, citando a arquitetura
+   sob o rótulo "request": a prova foi recusada, fail-closed correto;
+8. rodada 4: P1, P2 e P3 emendadas; aprovado; ensaio em 11 lotes.
+
+Nenhuma decisão de produto foi levada ao desenvolvedor nesse run (zero
+CAPIVARA_DECISION; as "Confirmed decisions" ficaram vazias): a autoridade não
+foi o problema.
+
+### 128.2 A matriz dos incidentes
+
+| id | evidência | quem introduziu | quem detectou | causa demonstrada | classe | custo | correção |
+|---|---|---|---|---|---|---|---|
+| A1a | events 18:43, "a fase 2 não cobre nada" | arquiteto | contrato | a regra do contrato (toda fase cobre algo) não estava no prompt | contrato não comunicado | 1 escrita da arquitetura | F7 |
+| A1b | auditorias 1–3 da arquitetura | arquiteto | auditor, um ponto por rodada | os requisitos estavam no pedido e nas regras, e o prompt já pedia leitura completa | defeito real; fragmentação do modelo | 3 rodadas | F5 (a parte dos testes), F6; o resto é amostragem — não corrigido |
+| A1c | v3 → v4 | arquiteto, ao reescrever | ninguém na arquitetura; o auditor da P3 na rodada 3 | o auditor recebia só a última rodada; o arquiteto, todas | requisito perdido numa arquitetura aprovada | um achado de fase | F6 |
+| A2 | coerência R1 F8 e R2; emenda da P1 | arquitetura (goal da P1 promete obra do `web-shell`) + fatiamento | coerência | o escritor adivinhou caminhos que a arquitetura fixava noutra fatia; a correção dele foi desfeita pelo harness | defeito real + falha de orquestração | a reorganização inteira | F1, F8 |
+| A3 | rodadas 1 e 3 | vários | auditores e triagem | ver 128.3 | misto | — | — |
+| A4 | P3 T10; R1 F1/F9; R2 F2 | escritor da P3, sob regra ambígua | auditor da P3, coerência | o I-16 não lia o verbo depois de "e" nem "concluir"; a regra do planejamento proibia "organização dos testes por módulo" e mandava preservar o pedido de testes por módulo sem dizer onde | contrato incompleto + prompt ambíguo | 4 achados; a P3 aprovada com teste dentro | F4, F5 |
+| A5 | triagem R1 F1/F9 | triagem | a coerência da R2, de novo | a triagem não tinha a regra do harness entre as fontes; a citação válida da frase acusada removia o bloqueio | supressão indevida de achado | a Task 10 sobreviveu à rodada | F3 |
+| A6 | events 18:51:40–18:52:46 | orquestração | — | cache da escrita = prompt inteiro; a visão geral e um contrato consumido mudaram | falha de orquestração | 3 escritas, 2 aprovações perdidas, 2 defeitos novos | F2 |
+
+O que o harness já sabia e deixava para modelo: que toda fase precisa cobrir
+algo (A1a); quais fases a reorganização não tocou (A6); que "concluir a
+cobertura automatizada" é trabalho de teste (A4); que a citação do parecer
+mostra a prescrição que o achado acusa (A5); e quais tasks o achado alcançava
+pelos caminhos que citava (A2).
+
+### 128.3 A3 — os achados sobre requisito herdado, um a um
+
+| achado | onde | classificação | o que aconteceu |
+|---|---|---|---|
+| validação nos formulários | arquitetura R1; P3 R3 | requisito material herdado (regra `interface` do esqueleto) | omitido pela v2, escrito na v3, perdido na v4; o auditor da arquitetura não reconferiu (F6) |
+| confirmação de exclusão | P3 R3 | requisito introduzido pelo modelo ("confirmação da alteração de status") | só as exclusões pedem confirmação; nasceu da reescrita do zero |
+| acesso à edição | P5 R1 F4 | obrigação redundante (a descrição da task já dizia "cadastrar e editar pela API") | a triagem descartou com citação válida — correto, preservado |
+| responsividade | P2 R1 F2 | obrigação redundante (o goal declara) | a triagem descartou — correto, preservado |
+| painel na rota inicial | P2 R3 | requisito material omitido | nasceu da reescrita da P2 depois da reorganização (o envelope dela mudou; sem a reorganização, F1, não haveria reescrita) |
+| testes automatizados | arquitetura R3; P3, P4, P5 R1; coerência R1 e R2 | requisito material + prescrição | regra do harness ambígua (F5), I-16 incompleto (F4), triagem sem a regra (F3) |
+| isolamento de dados e ambiente | arquitetura R3; P1 R3 | regra herdada do próprio harness (`regrasDeBanco`) | na arquitetura, redundante (a regra chega a toda fase pela fatia); na fase, material (o build cobra critérios) — omitida desde a rodada 1, aprovada duas vezes, achada na terceira leitura: variância do auditor, não corrigida |
+| restrição no esquema | P1 R3 F2 | falso positivo provável | a triagem tinha razão e citou certo, sob o rótulo errado; recusada, como deve ser. Com a arquitetura como fonte própria, o rótulo certo passa a existir |
+
+### 128.4 O que muda
+
+- **F1 — a emenda guarda o que o achado alcança** (`contract/drift.ts`).
+  `preserveUnaddressedTasks` continua devolvendo byte a byte as tasks que o
+  achado não toca, e passa a aceitar a emenda de uma task vizinha quando ela
+  tem as mesmas linhas e toda linha que mudou passou a citar, entre crases, um
+  trecho que a correção (`fix`) manda usar e que ela não citava — um padrão
+  com `*`, ou com um segmento `<módulo>`, casa caminhos. O trecho precisa de cinco caracteres e de `/`, `.`,
+  `*` ou `_` (`/api` e `id` não localizam nada). O par entre a task antiga e a
+  emendada é o título, ou a posição só quando nenhuma task mudou de lugar; uma
+  task repetida que não estava repetida desfaz o alcance. Critério apagado,
+  acrescentado ou reescrito sem o trecho da correção volta como estava.
+- **F2 — a fase que a reorganização não tocou mantém o texto**
+  (`contract/architecture.ts` `fasesIntactas`; `init/orchestrator.ts`
+  `reorganizar`, `escreverFases`). "Não tocou" é: o mesmo número e o mesmo
+  envelope (título, goal, dependências, cobertura, áreas, tamanho e
+  componentes); cada componente dela com a mesma definição; os mesmos fluxos
+  sobre eles e o mesmo tempo dos fluxos (§127); as mesmas decisões de dados e
+  a mesma infraestrutura (valem para todas as fases); nenhum caminho, rota ou
+  variável que a fase cita saiu da fatia dela; e nenhum achado de fase aberto
+  sobre ela na rodada da reorganização (esse achado "fica para a próxima
+  auditoria", e a fase reescrita recebe a decisão no prompt, como antes). A
+  justificativa, a visão geral e a redação de um contrato consumido não
+  reescrevem a fase. O texto mantido é o atual, com as emendas, e vai ao cache
+  sob o prompt novo. Para que nada aprovado contra a arquitetura anterior valha
+  por herança, as aprovações passaram a ser chaveadas pelo que foi julgado: a
+  fase por texto + fatia, a task por autoridade + fatia, e a coerência por
+  autoridade + `architecture.md`.
+- **F3 — a triagem recebe a regra do harness** (`audit/materiality.ts`). As
+  fontes ganham `harness` (a responsabilidade do planejamento) e
+  `architecture` (antes colada ao esqueleto). A regra é contexto, nunca prova:
+  o parecer que a cita como evidência é recusado, porque ela diz o que o plano
+  não prescreve, nunca o que o desenvolvedor deixou de pedir. O exemplo "test
+  organization" saiu da lista de detalhes ADVISORY. Um ADVISORY cuja própria
+  citação, de uma fase ou da arquitetura, mostra prescrição de teste pelo I-16
+  é recusado: a citação confirma o bloqueio.
+- **F4 — o I-16 lê a segunda oração** (`contract/test-prescription.ts`). O
+  verbo de trabalho de teste vale também depois de "e"/"and" no meio da
+  frase, e concluir, completar, finalizar, terminar, complete e finish entram
+  — mas nessas formas novas o objeto tem de ser teste de software pelo nome
+  (suíte de testes ou automatizada, testes automatizados/unitários/de
+  integração, cobertura automatizada ou de testes, test coverage, automated
+  tests): "adicionar a cobertura
+  escolhida" é sorvete, "concluir o teste de nivelamento" é escola. A forma de
+  sempre (verbo de implementação no começo da frase) não mudou. É o mesmo
+  detector do contrato das fases, do gate de prontidão, da arquitetura, do
+  esqueleto e da correção do auditor.
+- **F5 — onde vive o requisito de testes do desenvolvedor**
+  (`prompts/planning-scope.ts`, em todo prompt do `init` e do `plan`): na
+  arquitetura, no componente a que se aplica; na fase, como um critério da
+  task do produto que entrega o componente; nunca como trabalho. Dizer que
+  cada módulo tem os próprios testes, quando o pedido diz isso, é requisito
+  dele, não organização escolhida pelo plano. A regra da dúvida do auditor da
+  arquitetura diz o mesmo: a ausência do requisito é defeito de fidelidade,
+  para a mesma leitura que todo o resto.
+- **F6 — o auditor da arquitetura confere o que as rodadas anteriores
+  fecharam** (`orchestrator.ts` `auditarArquitetura`; `prompts/architecture.ts`):
+  "Fixed in earlier readings — check it is still fixed", com o problema e o que
+  foi pedido de cada achado das rodadas antes da última — a lista que o
+  arquiteto já recebia. Uma rodada posterior que pediu o contrário de propósito
+  não é desfazer: o ponto é julgado pelas fontes, não pela redação antiga.
+- **F7, F8 — o arquiteto sabe o que o contrato cobra e o que a fatia mostra**
+  (`prompts/architecture.ts`): toda fase cobre ao menos uma story, entidade ou
+  workflow; o goal de uma fase só promete o que os componentes dela entregam,
+  porque o escritor dela vê só esses componentes e os de que eles dependem. O
+  eixo 6 do auditor da arquitetura acusa o goal que promete obra de componente
+  não nomeado.
+
+### 128.5 O que NÃO muda, de propósito
+
+- Nenhum teto (devoluções, reorganizações, rodadas mecânicas) foi tocado, e
+  nenhum critério de RALPH READY.
+- A fragmentação da auditoria da arquitetura (um ponto por rodada) não ganhou
+  mecanismo: o prompt já exigia a leitura completa, e o auditor tinha o pedido
+  e o esqueleto inteiros. "Cada módulo tem serviços próprios" e "os formulários
+  validam" não viram contrato determinístico sem impor uma checklist a outros
+  projetos. A parte da fragmentação que era do harness — a regra ambígua dos
+  testes e a regressão que ninguém reconferia — foi corrigida; o resto é
+  amostragem do modelo e continua possível.
+- Nenhuma convenção de diretórios: F1 vale para o caminho que o achado citar,
+  em qualquer stack (há cenário com `routes/web.php`).
+- Não foi criada a checagem "fase escreve arquivo de componente que ela não
+  nomeia": daria falso positivo em fases ordenadas que estendem um arquivo
+  compartilhado (o I-18 permite) e não teria pegado `src/web/` (arquivos de
+  componente nenhum). Também não foi dado a cada fase o mapa dos arquivos dos
+  outros componentes: aumentaria todo prompt e não resolve o envelope
+  inconsistente — a correção foi na origem (F8) e no guarda (F1).
+- O achado endereçado a `Architecture` continua indo ao arquiteto: o da
+  rodada 2 era também de envelope (P1 e P2 entregavam a mesma descoberta), e
+  a §126 já trata o envelope que não converge.
+- `checkRewriteDrift` continua sem chamador (anotado na §127); o I-16
+  continua lendo só o infinitivo.
+
+### 128.6 Testes: RED → GREEN
+
+56 cenários novos, com os textos do run (`test/fixtures/parallel-lab-128.*`:
+o pedido, o esqueleto, as arquiteturas v5 e v6, as fases das rodadas 1 e 3 e a
+emenda real da P1). 32 estão em `test/contract/convergencia-128.spec.ts` (21)
+e `test/init/convergencia-128.spec.ts` (11, `runInit` + `runPlan` com provider
+falso que responde pelo conteúdo, com as palavras exatas dos achados do run) —
+29 escritos antes da revisão e 3 depois dela.
+Contra a base (`629ae11`), 19 dos 29 escritos antes da revisão falham: 7 de 11
+de ponta a ponta e 12 de 18 de contrato (5 destes são de `fasesIntactas`, que
+não existe na base e foi substituída por um stub). Os que passam na base são
+preservação: o caminho limpo com a mesma lista de chamadas, a decisão de
+produto que continua indo ao desenvolvedor, a reescrita gratuita que continua
+desfeita, o trecho genérico que não alcança nada, o requisito de teste que não
+é prescrição, o domínio do produto que o pedido nomeia, as outras nove fases do
+run sem falso positivo do I-16, a citação inventada que não remove bloqueio, o
+escritor que corrige só a Task 1 (a coerência ainda acusa e a arquitetura é
+refeita) e a fase mantida relida contra a fatia nova. Duas guardas foram
+provadas por mutação: chaveando a aprovação só pelo texto, a fase mantida pula
+a releitura e o teste cai; chaveando a coerência sem a arquitetura, o par
+aprovado contra a anterior deixa de ser relido e o teste cai. Os 24 da revisão
+estão em `test/contract/revisao-128.spec.ts` (21) e
+`test/init/revisao-128.spec.ts` (3): 23 são as sondas do revisor, com as
+expectativas seguras dele, que falhavam contra a primeira versão e passavam na
+base, e um é o hotel ("incluir a suíte presidencial"), que a primeira correção
+da revisão errou. Os três acrescentados ao `convergencia-128` depois da revisão
+cobrem a mesma brecha da fase mantida no nível do contrato (decisão de dados,
+caminho que sai da fatia) e o padrão escrito com placeholder.
+
+Cobertura dos doze itens pedidos: arquitetura completa na primeira geração e
+requisitos preservados (F5–F8: só o que o prompt entrega é verificável com
+provider falso); divergência de caminhos detectada e a correção mantida (A2);
+fases fiéis à arquitetura (o plano publicado sem `src/web/`); várias falhas
+independentes numa auditoria (o protocolo já as lê; F6 entrega a história);
+citação inexistente recusada; bloqueio material preservado (o ADVISORY que
+cita teste é recusado; o legítimo continua valendo); correção localizada sem
+reescrever fase não afetada (A6); projeto ambíguo ainda pergunta (9); projeto
+complexo ainda auditado inteiro (fase mantida relida, coerência relida); nenhum
+documento inconsistente aprovado (11 e a fase velha que volta como emenda); e
+as §125–§127 pela suíte inteira.
+
+### 128.7 Custo, medido
+
+Mesmos cenários, mesmas respostas roteirizadas (as do run, casadas pelo
+conteúdo), base (`629ae11`) contra a correção, provider falso:
+
+| cenário | base | correção | diferença |
+|---|---|---|---|
+| caminho limpo (v5, fases da rodada 1, todos aprovam) | 20 | 20 | nenhuma chamada a mais |
+| a cadeia A2 do run (emenda da P1 → coerência → reorganização) | 40 (arquiteto 2, auditor da arquitetura 2, fases do zero 10, reorganização 1) | 25 (1, 1, 5, 0) | −15 |
+| reorganização vinda da coerência na rodada 1 | 35 (fases do zero 10) | 31 (7) | −4 |
+| a mesma, com o contrato consumido mudando (as fases mantidas ficam velhas) | 65 (emendas 12, auditorias de fase 22) | 39 (3, 13) | −26 |
+| a Task 10 da P3 | 21, **publicado com "concluir a cobertura automatizada"** | 21, publicado sem ela (uma emenda mecânica no lugar de uma triagem) | mesmo custo, plano correto |
+| a validação desfeita na arquitetura | 24 | 24 | só o prompt muda |
+| escritor que corrige só a Task 1 | 40 | 36 | a reorganização acontece nos dois |
+
+O ensaio difere de 8 para 7 lotes porque os textos da rodada 3 têm mais
+critérios. Não medido com modelo real: no run, 21 das 64 chamadas vieram
+depois da reorganização (arquiteto e auditor dela, cinco escritas do zero, a
+rodada 3 de auditoria inteira — cinco fases, coerência e triagem — e a rodada
+4 — três emendas, três auditorias e a coerência), mas nem todas seriam
+evitadas: a Task 10 da P3 ainda pedia uma emenda. O efeito de F5–F8 sobre o
+arquiteto e os escritores não se mede com provider falso.
+
+### 128.8 A revisão adversarial
+
+Um agente independente revisou a primeira versão (sem Workflow, que exige
+opt-in), com o diff, a base num worktree e a evidência do run, e reproduziu por
+sonda — falhando no código novo, passando na base — dois defeitos altos e
+quatro médios, todos corrigidos:
+
+1. **alta** — a fase mantida perdia a decisão do desenvolvedor tomada na
+   mesma rodada da reorganização: o achado de fase "fica para a próxima
+   auditoria", e a fase aprovada e intacta não era auditada de novo; o texto
+   sem a decisão ia ao cache sob o prompt que já a tinha. Agora a fase com
+   achado aberto na rodada não é mantida;
+2. **alta** — o alcance da emenda casava tasks pela posição: com uma task
+   tirada e outra acrescentada (mesma contagem), a fase 1 saía sem a task das
+   migrações e com duas duplicadas, RALPH READY. Agora o par é pelo título, ou
+   pela posição só sem deslocamento, e a duplicata nova desfaz o alcance;
+3. **média** — um trecho genérico citado (`package.json`, `DB_PATH`,
+   `/api/resumo`) destravava a reescrita inteira de toda task que o citasse.
+   Agora o alcance é linha a linha e só pelo trecho da correção;
+4. **média** — a triagem aceitava a regra do harness como prova para descartar
+   o requisito de testes que o pedido exige. Agora ela é contexto;
+5. **média** — a fase mantida não comparava decisões de dados nem
+   infraestrutura: o status trocado na arquitetura publicada saía com os
+   valores antigos na fase. Agora isso e o caminho que sai da fatia contam;
+6. **média-baixa** — o I-16 novo acusava vocabulário de produto ("adicionar a
+   cobertura escolhida", "concluir o teste de nivelamento", "finalizar a
+   cobertura", "complete the test"), com efeito no esqueleto, nas decisões do
+   auditor e nas correções. Agora as formas novas exigem objeto de teste de
+   software pelo nome.
+
+Um plausível (o "repita, palavra por palavra" da F6 prendendo a arquitetura num
+vaivém se uma rodada pedir o contrário da anterior) foi tratado na redação: o
+auditor vê o que foi pedido e julga a reversão pelas fontes. Um anúncio
+enganoso ("a auditoria a relê contra a arquitetura nova" quando a fatia não
+mudou) foi corrigido. O revisor rodou, sem quebra, `test/contract`,
+`test/audit`, `test/init` (§119–§127 inclusive), `test/prompts`,
+`test/interview`, `architecture`, `change` e `authoring`.
+
+A correção da revisão tropeçou duas vezes, e a suíte pegou as duas: o objeto
+composto aceitava "suíte" sem qualificador e acusou "implementar a suíte
+presidencial no cadastro de quartos" (cenário da §122); e o alcance só pelo
+trecho da correção não reconhecia o padrão escrito com placeholder
+(`src/pages/<módulo>/page.tsx`), e o cenário da fase mantida que ficou velha
+voltou a gastar 61 chamadas, uma emenda atrás da outra. Os dois têm cenário.
+
+### 128.9 Compatibilidade
+
+Nenhum formato de documento muda; planos e runs da 0.7.1 continuam válidos, e
+nenhuma versão foi alterada. Os prompts do `init` e do `plan` mudaram (a regra
+do planejamento vai em todos), então caches e aprovações por sha de prompt não
+se reaproveitam numa retomada, como em toda mudança de prompt; as chaves das
+aprovações de task e de coerência mudaram de forma, e uma retomada de um run
+anterior relê o que já estava aprovado — mais rigor, pago uma vez. Um plano já
+publicado com trabalho de teste numa segunda oração passa a ser recusado pelo
+gate de prontidão no `plan` seguinte, que é o certo. O run do Luna terminou
+(RALPH READY e build concluído); não há o que retomar.
+
+### 128.10 Limitações e riscos
+
+- Validado só com provider falso, sobre os textos do run; nenhum run real
+  depois desta implementação. As reduções acima são dos cenários, não do
+  Luna.
+- F1: uma linha que passa a citar o trecho da correção pode, na mesma
+  passada, perder outra coisa (um critério reescrito com o caminho novo e sem
+  a porta antiga); o guarda protege as linhas que não citam, não o resto da
+  linha que cita.
+- F2: um contrato consumido que muda de sentido sem mudar caminho, rota ou
+  variável (valores de um campo descritos em prosa num contrato de outro
+  componente) não tira a fase da lista; quem pega é a auditoria, que relê a
+  fase mantida contra a fatia nova — o cenário prova que pega quando o auditor
+  vê a diferença. A coerência é relida inteira depois de toda reorganização.
+- F4: nas formas novas, teste de software sem nome composto ("e escrever os
+  testes do módulo") não é reconhecido; a forma no começo da frase continua
+  sendo.
+- A fragmentação da auditoria e a variância entre leituras (a regra do `.env`
+  aprovada duas vezes e acusada na terceira) continuam possíveis: dependem do
+  modelo.
+- Flake preexistente, não tocado: `test/loop/coerencia-temporal-127.spec.ts`,
+  "as fases de tarefas e de categorias correm juntas", mede a concorrência
+  pelo relógio e falha cerca de uma vez em quatro com a máquina carregada,
+  também na base.

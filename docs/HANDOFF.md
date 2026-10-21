@@ -14,12 +14,60 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `main`; o BUILD vNext (§125) está em `feat/build-vnext`, sobre a `fix/triagem-124`, sem merge; a §126 em `fix/impasse-init-plan-126`, sobre a `feat/build-vnext`, sem merge; a §127 em `fix/coerencia-temporal-127`, sobre a `fix/impasse-init-plan-126`, sem merge nem push |
+| branch | `main`; o BUILD vNext (§125) está em `feat/build-vnext`, sobre a `fix/triagem-124`, sem merge; a §126 em `fix/impasse-init-plan-126`, sobre a `feat/build-vnext`, sem merge; a §127 em `fix/coerencia-temporal-127`, sobre a `fix/impasse-init-plan-126`, sem merge; a §128 em `fix/convergencia-plan-128`, sobre a `fix/coerencia-temporal-127`, sem commit |
 | versão | 0.7.1 (`capivara --version`) na `fix/coerencia-temporal-127` (§126 + §127), 0.7.0 na `feat/build-vnext`, 0.6.2 na `main`; planos da 0.6.x e da 0.7.0 valem na 0.7.1; os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
-| suíte | 2866 testes em 152 arquivos na `feat/build-vnext`; 2889 em 153 na `fix/impasse-init-plan-126`; 2933 em 157 na `fix/coerencia-temporal-127`; `npm run check` verde |
+| suíte | 2866 testes em 152 arquivos na `feat/build-vnext`; 2889 em 153 na `fix/impasse-init-plan-126`; 2933 em 157 na `fix/coerencia-temporal-127`; 2989 em 161 na `fix/convergencia-plan-128`; `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-21 — convergência do PLAN: a correção que o achado alcança fica, a fase que a reorganização não tocou também (§128)
+
+O Parallel Lab no Luna (`init-dc741f0d7b92`, 0.7.1) saiu RALPH READY e o build
+concluiu, mas o PLAN custou 64 chamadas para três CRUDs, uma fundação e um
+painel. O que o harness fez a conta crescer, lido nos prompts e logs do run:
+a emenda da P1 corrigiu a Task 1 E as Tasks 7 e 8 (a descoberta de páginas em
+`src/web/`), e `preserveUnaddressedTasks` desfez as duas porque o endereço do
+achado só nomeava `P1.T1.C3` — a coerência devolveu o conflito à arquitetura;
+a reorganização mudou o envelope de P1 e P2, e P3–P5 (mesmo envelope, mesmos
+componentes, duas já aprovadas) foram reescritas do zero, porque o cache da
+escrita é o prompt inteiro; a Task 10 da P3 ("… e concluir a cobertura
+automatizada própria do módulo") passou pelo I-16, que só lia o verbo no
+começo da frase, e a triagem descartou o achado citando a própria frase — ela
+não recebia a regra do planejamento; o auditor da arquitetura só via a última
+rodada, e a validação dos formulários, escrita na v3 e perdida na v4, foi
+aprovada sem ninguém reconferir. A origem dos caminhos errados foi o goal da
+P1, que prometia a descoberta de páginas sem nomear o `web-shell`.
+Agora: a emenda guarda as tasks que o achado alcança pelo que cita entre
+crases (F1); a fase que a reorganização não tocou mantém o texto e é relida
+contra a fatia nova — aprovações chaveadas por texto + fatia, coerência por
+`architecture.md` (F2); a triagem recebe `harness` e `architecture` como
+fontes, e o ADVISORY cuja citação mostra prescrição de teste é recusado (F3);
+o I-16 lê o verbo depois de "e" e os verbos de conclusão (F4); a regra do
+planejamento diz onde vive o requisito de testes do desenvolvedor (F5); o
+auditor da arquitetura recebe os achados de todas as rodadas anteriores (F6);
+o arquiteto sabe que toda fase cobre algo e que o goal só promete o que os
+componentes da fase entregam (F7, F8). Uma revisão adversarial (um agente)
+reproduziu na primeira versão dois defeitos altos — a fase mantida perdia a
+decisão do desenvolvedor tomada na mesma rodada; o alcance casava tasks pela
+posição e publicava a fase 1 sem a task das migrações — e quatro médios
+(trecho genérico destravando a vizinha inteira, a regra do harness usada como
+prova, decisão de dados fora da comparação, vocabulário de produto acusado pelo
+I-16 novo); todos corrigidos com cenário: o alcance agora é linha a linha e só
+pelo trecho da correção, a fase com achado aberto ou com caminho que saiu da
+fatia não é mantida, a regra do harness é contexto, e as formas novas do I-16
+exigem teste de software pelo nome. Medido nos cenários, com as respostas do
+run: a cadeia A2 cai de 40 para 25 chamadas, a reorganização de 35 para 31, a
+fase mantida que ficou velha de 65 para 39, e o caminho limpo fica igual (20).
+Na base, o cenário da Task 10 publicava RALPH READY com a prescrição de teste
+dentro. Nenhum teto mudou. Detalhe na §128; 56 cenários em
+`test/contract/convergencia-128.spec.ts`, `test/init/convergencia-128.spec.ts`,
+`test/contract/revisao-128.spec.ts` e `test/init/revisao-128.spec.ts` — 19 dos
+29 primeiros RED contra `629ae11`, os 23 da revisão RED contra a primeira
+versão. Validado só com provider falso; o efeito das mudanças de prompt (F5–F8)
+precisa de run real. Branch `fix/convergencia-plan-128` sobre a
+`fix/coerencia-temporal-127`; sem commit (a especificação pede autorização
+explícita), sem merge, push, release nem mudança de versão.
 
 ## 2026-10-21 — coerência temporal: o fluxo é cobrado quando o plano diz que ele existe, e a oscilação entre gates é diagnóstico (§127)
 

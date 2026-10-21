@@ -120,6 +120,8 @@ defeito mais comum deste repositório, e a tabela só cresce:
 | fila de linhas no wizard | `init`, `plan`, `build` | um run morto na pergunta 1 de 6 |
 | cobertura no laço da auditoria do plano | laço de escrita do esqueleto | um run terminando em NOT READY |
 | identidade estável do defeito no G3 (task + sha, id citado) | G4 (o passo era a prosa da triagem) | 28 chamadas da P04 do Luna em oscilação (§127) |
+| "já corrigido em rodadas anteriores — mantenha" no prompt do arquiteto | o auditor da arquitetura, que só via a última rodada | a validação dos formulários perdida numa arquitetura aprovada (§128) |
+| a regra do planejamento em todo escritor e auditor | a triagem de materialidade | a task que entregava a suíte de testes descartada citando a si mesma (§128) |
 | commit da especificação no `init` | `plan`, que publica o plano executável | o artefato que o loop consome ficava fora do histórico |
 | `Phase N` e `Fase N` nas emendas | o endereço `P2.T2.C1`, no mesmo campo | a emenda do `cron5` foi para a fase 1 com o defeito na 2 |
 | o fim de texto sem `\Z` em `prerequisites.ts` | `acceptance.ts`, na leitura do `pyproject` | a aceitação de um projeto Python aprovava sem executar o produto |

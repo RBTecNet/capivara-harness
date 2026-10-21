@@ -17,7 +17,7 @@
  * senão ele levanta o mesmo ponto de novo, com toda a razão do mundo.
  */
 
-import type { AuditDecision, Finding } from "../audit/index.js";
+import { enderecoDaDecisao, type AuditDecision, type Finding } from "../audit/index.js";
 import type { Question } from "./types.js";
 
 export const PREFIXO_DO_LEVANTAMENTO = "Q-9";
@@ -177,7 +177,7 @@ export function perguntaDoAuditor(decisao: AuditDecision, indice: number): Quest
 /** O achado que leva a decisão do desenvolvedor ao escritor, como autoridade. */
 export function decisaoDoAuditorComoFinding(decisao: AuditDecision, decidido: string): Finding {
   return {
-    where: decisao.where,
+    where: enderecoDaDecisao(decisao),
     problem: `faltava uma decisão que nenhuma fonte continha: ${decisao.decision}`,
     fix: `o desenvolvedor decidiu, e esta decisão é a autoridade acima do auditor: ${decidido}`,
   };

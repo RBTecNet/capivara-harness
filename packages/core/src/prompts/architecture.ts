@@ -111,18 +111,43 @@ const CONCURRENT_PHASES = [
   "  scanned at startup, a per-module file the shell imports), so each module phase names only",
   "  its own components and they run in parallel;",
   "- an integration phase that depends on the module phases and is the only one to touch the",
-  "  shared component;",
+  "  shared component — and then the module phases do not make their workflows reachable (see",
+  "  below: cover each workflow in the integration phase, or name it in the module phase's goal);",
   "- naming the shared component in the module phases and accepting the order the harness gives.",
   "Choose by simplicity, correctness and cost. Parallelism is an optimization, not a requirement:",
   "a plain serial order beats an abstraction invented only to run phases at once, and a plan with",
   "some serial phases is a correct plan.",
 ].join("\n");
 
+/**
+ * O tempo da cobertura (§127): o build percorre o workflow ao fim da primeira
+ * fase que o cobre, e ninguém dizia isso ao arquiteto — que, no Luna, deixou a
+ * integração para uma fase final e o workflow coberto pela fase do módulo.
+ */
+const WORKFLOW_TIMING = [
+  "## When each workflow is walked",
+  "At the end of every phase the build starts the real application and walks, in a browser, each",
+  "workflow that phase covers — through the running application, end to end. So `covers` is also",
+  "a promise about TIME, and both integration styles keep it:",
+  "- progressive: the module phase wires its own page and API into the application, and covers its",
+  "  workflow — the build walks it at the end of that phase;",
+  "- later integration: the module phase only builds and exports its parts; the workflow is",
+  "  covered by the phase that integrates it. If the module phase still covers the workflow, its",
+  "  goal names the integrating phase (\"… connected to the application in Phase 6\"); that phase",
+  "  must cover the workflow too and depend on the module phase, and the build walks it there.",
+  "A workflow covered by a phase that runs before every component it crosses exists is walked",
+  "against parts nobody built yet, unless a later phase that covers it completes the path; and a",
+  "phase that names a later phase must be waited for by it. The harness checks both mechanically.",
+  "What no plan may do is leave the integration to a later phase while an earlier phase still",
+  "promises the workflow reachable.",
+].join("\n");
+
 const SERIALIZE_STRATEGY = [
   "## Change of strategy: resolve by order, not by mechanism",
   "The previous corrections did not converge. Do not design another extension mechanism. Resolve",
   "every conflict over shared files by ORDER: name the shared component in each phase that edits",
-  "it, or move the shared edits into one integration phase that depends on the module phases. The",
+  "it, or move the shared edits into one integration phase that depends on the module phases (and",
+  "then cover each workflow where it becomes reachable, as said above). The",
   "harness orders phases that share a component; a serial plan is a correct plan. Keep contracts,",
   "components and coverage as they are, and change only the division and dependencies of phases",
   "the findings name.",
@@ -191,6 +216,8 @@ export function architectPrompt(context: ArchitectContext): string {
     `- \`areas\` comes from this closed list: ${areas}. It decides which skills the executor receives.`,
     "",
     CONCURRENT_PHASES,
+    "",
+    WORKFLOW_TIMING,
     "",
     "## What you never do",
     "- Invent a feature, actor, limit, business rule or failure behaviour no source states.",
@@ -284,6 +311,8 @@ export interface ArchitectureAuditContext {
   /** A arquitetura sob auditoria, em markdown. */
   architecture: string;
   maxTasksPerPhase: number;
+  /** Quando o build percorre cada workflow, derivado da arquitetura sob auditoria (§127). */
+  tempoDosFluxos?: readonly string[];
 }
 
 const OUTPUT = [
@@ -355,6 +384,14 @@ export function architectureAuditPrompt(context: ArchitectureAuditContext): stri
     "   phase that depends on the modules, and an extension point in the foundation are all valid",
     "   resolutions of a shared-file conflict. Never demand one of them when another is in place,",
     "   and never reject a correct architecture because it runs fewer phases in parallel.",
+    "7. TIMING OF WORKFLOWS — the build walks each workflow through the running application at the",
+    "   end of the phase listed below. Is each workflow reachable end to end when that phase closes:",
+    "   does that phase (or an earlier one, or an extension point it uses) wire the pages and routes",
+    "   the workflow crosses? A plan that gives the integration to a later phase while the walking",
+    "   phase still owns the workflow is the defect; address it to `phases · Phase N` and say which",
+    "   of the two ways fixes it (that phase integrates, or the workflow is walked where it is",
+    "   integrated). Both integration styles are valid; never demand one when the other is coherent.",
+    ...(context.tempoDosFluxos && context.tempoDosFluxos.length > 0 ? ["", ...context.tempoDosFluxos] : []),
     "",
     "## One complete reading",
     "Walk EVERY axis above over the whole architecture before you write a line of the response, and",

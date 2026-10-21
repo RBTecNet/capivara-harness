@@ -1,0 +1,552 @@
+{
+ "contract": "capivara-architecture/v1",
+ "overview": "Aplicação monolítica modular em TypeScript, com API REST em Node.js, interface React servida durante o desenvolvimento pelo Vite e persistência local em SQLite. A fundação define contratos e pontos de integração antes da implementação dos módulos. A persistência oferece uma única conexão SQLite compartilhada, acessada pelo servidor central e pelos módulos por meio de uma função definida. Cada módulo mantém suas rotas, serviços e componentes; a aplicação seleciona o arquivo do banco pelo ambiente. Uma fase final conecta os módulos ao servidor e à navegação.",
+ "components": [
+  {
+   "name": "persistencia",
+   "responsibility": "Configurar a abertura do arquivo SQLite e fornecer a camada de persistência compartilhada. Manter o esquema das três entidades e o comando repetível de migração.",
+   "areas": [
+    "backend",
+    "dados"
+   ],
+   "dependsOn": [],
+   "contracts": [
+    "DATABASE_PATH → caminho do arquivo SQLite, lido do ambiente carregado pelo arquivo .env na raiz",
+    ".env.example → contém todas as variáveis lidas pelo projeto com valores de exemplo inofensivos; copiar esse arquivo para .env permite iniciar a aplicação com um arquivo SQLite local persistente",
+    ".env → incluído no .gitignore desde a fundação",
+    "npm run migrate → cria o esquema completo em banco vazio e pode ser repetido sem erro",
+    "tabelas tarefas, categorias e anotacoes → identificador inteiro autoincrementado; datas armazenadas em formato ISO-8601",
+    "server/persistencia/index.ts → exporta getDatabase(): BetterSqlite3.Database; a função retorna a conexão SQLite compartilhada, aberta com o caminho definido por DATABASE_PATH",
+    "api-central e os serviços dos módulos importam getDatabase de server/persistencia/index.ts e usam a conexão retornada para consultar e alterar as tabelas; api-central usa a mesma conexão para as contagens do painel"
+   ],
+   "files": [
+    "server/persistencia/"
+   ],
+   "owns": [
+    "tarefas",
+    "categorias",
+    "anotacoes"
+   ]
+  },
+  {
+   "name": "api-central",
+   "responsibility": "Fornecer o servidor HTTP, o prefixo /api, o registro de rotas dos módulos, o formato JSON comum e o endpoint agregado de contagens do painel.",
+   "areas": [
+    "backend"
+   ],
+   "dependsOn": [
+    "persistencia"
+   ],
+   "contracts": [
+    "GET /api/painel → 200 {tarefas: number, categorias: number, anotacoes: number}",
+    "Registro de módulo → cada módulo fornece um roteador montado sob seu prefixo em /api",
+    "Rotas da API → recebem e retornam JSON; listagens retornam arrays e consultas, criações e atualizações retornam objetos da entidade",
+    "Inicialização do servidor → aplica a migração idempotente antes de aceitar requisições",
+    "Contagens do painel → consultar as tabelas pela função getDatabase() exportada por server/persistencia/index.ts"
+   ],
+   "files": [
+    "server/api/"
+   ],
+   "owns": []
+  },
+  {
+   "name": "interface-base",
+   "responsibility": "Fornecer a estrutura visual compartilhada, a barra lateral, a navegação, o painel e os estados comuns da interface.",
+   "areas": [
+    "frontend"
+   ],
+   "dependsOn": [],
+   "contracts": [
+    "Caminhos de navegação: /, /tarefas, /categorias e /anotacoes",
+    "Shell React → registra páginas de módulo e apresenta barra lateral, estados de carregamento, listas vazias e feedback visual de sucesso e erro",
+    "GET /api/painel → consome contagens para exibir no painel inicial"
+   ],
+   "files": [
+    "src/app/"
+   ],
+   "owns": []
+  },
+  {
+   "name": "modulo-tarefas",
+   "responsibility": "Implementar as rotas, os serviços e a interface de gestão de tarefas, incluindo validação e confirmação de exclusão.",
+   "areas": [
+    "backend",
+    "frontend"
+   ],
+   "dependsOn": [
+    "api-central",
+    "interface-base",
+    "persistencia"
+   ],
+   "contracts": [
+    "GET /api/tarefas → 200 array de tarefas",
+    "POST /api/tarefas → 201 {id, titulo, descricao, status, data_criacao}; o status é atribuído automaticamente como pendente",
+    "GET /api/tarefas/{id} → 200 {id, titulo, descricao, status, data_criacao}",
+    "PUT /api/tarefas/{id} → 200 {id, titulo, descricao, status, data_criacao}",
+    "PUT /api/tarefas/{id}/status → 200 {id, titulo, descricao, status, data_criacao}",
+    "DELETE /api/tarefas/{id} → 204; a interface solicita confirmação explícita antes da operação",
+    "Títulos são obrigatórios; descrições são opcionais; status aceita pendente, em andamento ou concluída",
+    "Serviços do módulo importam getDatabase de server/persistencia/index.ts e usam a conexão retornada para acessar a tabela tarefas"
+   ],
+   "files": [
+    "server/modulos/tarefas/",
+    "src/modulos/tarefas/"
+   ],
+   "owns": [
+    "tarefas"
+   ]
+  },
+  {
+   "name": "modulo-categorias",
+   "responsibility": "Implementar as rotas, os serviços e a interface de gestão de categorias, incluindo validação e confirmação de exclusão.",
+   "areas": [
+    "backend",
+    "frontend"
+   ],
+   "dependsOn": [
+    "api-central",
+    "interface-base",
+    "persistencia"
+   ],
+   "contracts": [
+    "GET /api/categorias → 200 array de categorias",
+    "POST /api/categorias → 201 {id, nome, cor, data_criacao}",
+    "GET /api/categorias/{id} → 200 {id, nome, cor, data_criacao}",
+    "PUT /api/categorias/{id} → 200 {id, nome, cor, data_criacao}",
+    "DELETE /api/categorias/{id} → 204; a interface solicita confirmação explícita antes da operação",
+    "Nomes são obrigatórios e únicos entre as categorias cadastradas",
+    "Serviços do módulo importam getDatabase de server/persistencia/index.ts e usam a conexão retornada para acessar a tabela categorias"
+   ],
+   "files": [
+    "server/modulos/categorias/",
+    "src/modulos/categorias/"
+   ],
+   "owns": [
+    "categorias"
+   ]
+  },
+  {
+   "name": "modulo-anotacoes",
+   "responsibility": "Implementar as rotas, os serviços e a interface de gestão de anotações, incluindo validação e confirmação de exclusão.",
+   "areas": [
+    "backend",
+    "frontend"
+   ],
+   "dependsOn": [
+    "api-central",
+    "interface-base",
+    "persistencia"
+   ],
+   "contracts": [
+    "GET /api/anotacoes → 200 array de anotações",
+    "POST /api/anotacoes → 201 {id, titulo, conteudo, data_criacao, data_atualizacao}",
+    "GET /api/anotacoes/{id} → 200 {id, titulo, conteudo, data_criacao, data_atualizacao}",
+    "PUT /api/anotacoes/{id} → 200 {id, titulo, conteudo, data_criacao, data_atualizacao}",
+    "DELETE /api/anotacoes/{id} → 204; a interface solicita confirmação explícita antes da operação",
+    "Título e conteúdo são obrigatórios; data_atualizacao muda quando o registro é editado",
+    "Serviços do módulo importam getDatabase de server/persistencia/index.ts e usam a conexão retornada para acessar a tabela anotacoes"
+   ],
+   "files": [
+    "server/modulos/anotacoes/",
+    "src/modulos/anotacoes/"
+   ],
+   "owns": [
+    "anotacoes"
+   ]
+  }
+ ],
+ "dataDecisions": [
+  {
+   "subject": "tarefas.id, categorias.id, anotacoes.id",
+   "statement": "Usar identificadores inteiros autoincrementados do SQLite."
+  },
+  {
+   "subject": "tarefas.data_criacao, categorias.data_criacao, anotacoes.data_criacao, anotacoes.data_atualizacao",
+   "statement": "Armazenar datas em formato ISO-8601; definir data_criacao na criação e atualizar data_atualizacao ao editar uma anotação."
+  },
+  {
+   "subject": "esquema SQLite",
+   "statement": "Manter as três tabelas sem relações entre si. O comando npm run migrate cria o esquema completo e pode ser executado novamente sem erro. A aplicação abre o banco indicado por DATABASE_PATH; a inicialização do servidor também aplica a migração idempotente."
+  },
+  {
+   "subject": "configuração do banco",
+   "statement": "Carregar DATABASE_PATH do .env na raiz. Versionar .env.example com todas as variáveis lidas e valores inofensivos. Ignorar .env desde a fundação. O valor de exemplo aponta para um arquivo local persistente criado pelo projeto."
+  }
+ ],
+ "flows": [
+  {
+   "workflow": "1",
+   "components": [
+    "interface-base",
+    "api-central",
+    "persistencia"
+   ],
+   "notes": "A interface solicita as contagens agregadas à API central, que consulta as três entidades persistidas."
+  },
+  {
+   "workflow": "1",
+   "components": [
+    "interface-base",
+    "modulo-tarefas"
+   ],
+   "notes": "O atalho do painel ou a navegação lateral abre a página de tarefas."
+  },
+  {
+   "workflow": "1",
+   "components": [
+    "interface-base",
+    "modulo-categorias"
+   ],
+   "notes": "O atalho do painel ou a navegação lateral abre a página de categorias."
+  },
+  {
+   "workflow": "1",
+   "components": [
+    "interface-base",
+    "modulo-anotacoes"
+   ],
+   "notes": "O atalho do painel ou a navegação lateral abre a página de anotações."
+  },
+  {
+   "workflow": "2",
+   "components": [
+    "interface-base",
+    "api-central",
+    "modulo-tarefas",
+    "persistencia"
+   ],
+   "notes": "A interface envia operações de cadastro, consulta, edição, alteração de status e exclusão confirmada ao servidor central, que encaminha as requisições às rotas do módulo; o módulo obtém a conexão compartilhada por getDatabase e persiste os registros no SQLite."
+  },
+  {
+   "workflow": "3",
+   "components": [
+    "interface-base",
+    "api-central",
+    "modulo-categorias",
+    "persistencia"
+   ],
+   "notes": "A interface envia operações de cadastro, consulta, edição e exclusão confirmada ao servidor central, que encaminha as requisições às rotas do módulo; o módulo obtém a conexão compartilhada por getDatabase, aplica a obrigatoriedade e unicidade do nome e persiste os registros."
+  },
+  {
+   "workflow": "4",
+   "components": [
+    "interface-base",
+    "api-central",
+    "modulo-anotacoes",
+    "persistencia"
+   ],
+   "notes": "A interface envia operações de cadastro, consulta, edição e exclusão confirmada ao servidor central, que encaminha as requisições às rotas do módulo; o módulo obtém a conexão compartilhada por getDatabase, mantém as datas de criação e atualização e persiste os registros."
+  }
+ ],
+ "infrastructure": {
+  "runtimes": [
+   {
+    "name": "Node.js",
+    "version": "",
+    "purpose": "Executar a API REST, as ferramentas de desenvolvimento e os comandos do projeto.",
+    "basis": "Stack do skeleton: servidor e ambiente de execução Node.js."
+   }
+  ],
+  "tools": [
+   {
+    "name": "Vite",
+    "version": "",
+    "purpose": "Servir a interface React durante o desenvolvimento e compilar os recursos da interface.",
+    "basis": "Stack do skeleton: interface React com Vite."
+   },
+   {
+    "name": "TypeScript",
+    "version": "",
+    "purpose": "Compilar e verificar o código da aplicação.",
+    "basis": "Stack do skeleton: TypeScript."
+   }
+  ],
+  "packageManagers": [
+   {
+    "name": "npm",
+    "version": "",
+    "purpose": "Instalar dependências e executar os comandos documentados do projeto.",
+    "basis": "Stack do skeleton: gerenciador de pacotes npm."
+   }
+  ],
+  "dependencies": [
+   {
+    "name": "express",
+    "version": "",
+    "purpose": "Servidor HTTP e API REST.",
+    "basis": "Solicitação original: backend Node.js com API REST.",
+    "kind": "app"
+   },
+   {
+    "name": "better-sqlite3",
+    "version": "",
+    "purpose": "Persistência SQLite em arquivo local.",
+    "basis": "Stack do skeleton: SQLite em arquivo local.",
+    "kind": "app"
+   },
+   {
+    "name": "dotenv",
+    "version": "",
+    "purpose": "Carregar a variável de ambiente do banco a partir do arquivo .env na raiz.",
+    "basis": "Regra do skeleton: caminho do banco lido de variável carregada por .env.",
+    "kind": "app"
+   },
+   {
+    "name": "react",
+    "version": "",
+    "purpose": "Construir a interface web.",
+    "basis": "Stack do skeleton: React.",
+    "kind": "app"
+   },
+   {
+    "name": "react-dom",
+    "version": "",
+    "purpose": "Renderizar a interface React no navegador.",
+    "basis": "Stack do skeleton: interface React.",
+    "kind": "app"
+   },
+   {
+    "name": "react-router-dom",
+    "version": "",
+    "purpose": "Navegar entre o painel e as páginas dos módulos nos caminhos definidos.",
+    "basis": "Regra do skeleton: caminhos /, /tarefas, /categorias e /anotacoes.",
+    "kind": "app"
+   },
+   {
+    "name": "vite",
+    "version": "",
+    "purpose": "Servidor de desenvolvimento e compilação da interface.",
+    "basis": "Stack do skeleton: React com Vite.",
+    "kind": "dev"
+   },
+   {
+    "name": "typescript",
+    "version": "",
+    "purpose": "Compilador da linguagem TypeScript.",
+    "basis": "Stack do skeleton: TypeScript.",
+    "kind": "dev"
+   },
+   {
+    "name": "tsx",
+    "version": "",
+    "purpose": "Executar os comandos TypeScript do servidor e da migração.",
+    "basis": "Decisão arquitetural: servidor e migração implementados em TypeScript.",
+    "kind": "dev"
+   },
+   {
+    "name": "concurrently",
+    "version": "",
+    "purpose": "Executar em conjunto os servidores de desenvolvimento da API e da interface.",
+    "basis": "Decisão arquitetural: oferecer um comando documentado para iniciar a aplicação durante o desenvolvimento.",
+    "kind": "dev"
+   },
+   {
+    "name": "@types/node",
+    "version": "",
+    "purpose": "Fornecer definições de tipos de Node.js ao compilador TypeScript.",
+    "basis": "Stack do skeleton: Node.js com TypeScript; requisito de tipos para compilar o código do servidor.",
+    "kind": "dev"
+   },
+   {
+    "name": "@types/express",
+    "version": "",
+    "purpose": "Fornecer definições de tipos do Express ao compilador TypeScript.",
+    "basis": "Decisão arquitetural: API REST com Express implementada em TypeScript.",
+    "kind": "dev"
+   },
+   {
+    "name": "@types/better-sqlite3",
+    "version": "",
+    "purpose": "Fornecer definições de tipos do better-sqlite3 ao compilador TypeScript.",
+    "basis": "Stack do skeleton: persistência SQLite em arquivo local; requisito de tipos para compilar o módulo better-sqlite3 em TypeScript.",
+    "kind": "dev"
+   },
+   {
+    "name": "@types/react",
+    "version": "",
+    "purpose": "Fornecer definições de tipos do React ao compilador TypeScript.",
+    "basis": "Stack do skeleton: interface React em TypeScript.",
+    "kind": "dev"
+   },
+   {
+    "name": "@types/react-dom",
+    "version": "",
+    "purpose": "Fornecer definições de tipos da renderização React no navegador ao compilador TypeScript.",
+    "basis": "Stack do skeleton: interface React em TypeScript renderizada no navegador.",
+    "kind": "dev"
+   }
+  ],
+  "services": [],
+  "databases": [
+   {
+    "name": "SQLite",
+    "version": "",
+    "purpose": "Armazenar registros em arquivo local persistente.",
+    "basis": "Solicitação original e skeleton: SQLite em arquivo, persistência entre reinicializações e sem serviço externo."
+   }
+  ],
+  "compatibility": [
+   "A aplicação inicia com os valores inofensivos de .env.example em uma máquina sem servidor de banco de dados instalado.",
+   "O comando npm run migrate cria o esquema completo a partir de banco vazio e pode ser repetido sem erro.",
+   "A interface e a API são integradas; os registros exibidos e alterados vêm da API e do SQLite."
+  ],
+  "preconditions": [
+   "Node.js e npm estão disponíveis no ambiente de desenvolvimento.",
+   "As dependências declaradas estão instaladas na pasta do projeto."
+  ],
+  "requirements": [
+   {
+    "technology": "Node.js",
+    "binary": "node",
+    "systemLevel": false,
+    "checkArgs": [
+     "--version"
+    ],
+    "installHint": "Instalar Node.js compatível com a stack escolhida."
+   },
+   {
+    "technology": "npm",
+    "binary": "npm",
+    "systemLevel": false,
+    "checkArgs": [
+     "--version"
+    ],
+    "installHint": "Instalar npm junto com o Node.js."
+   }
+  ]
+ },
+ "phases": [
+  {
+   "number": 1,
+   "title": "Fundação persistente e contratos compartilhados",
+   "goal": "Disponibilizar a configuração de ambiente com carregamento de DATABASE_PATH do .env na raiz, .env.example versionado com valores inofensivos e .env ignorado pelo Git; fornecer a persistência SQLite, a função getDatabase() compartilhada para acesso de api-central e dos módulos, a migração repetível pelo comando npm run migrate e a aplicação da migração idempotente ao inicializar o servidor, além do servidor REST, do registro de rotas e do contrato de contagens do painel.",
+   "dependsOn": "none",
+   "covers": [
+    "tarefas",
+    "categorias",
+    "anotacoes",
+    "US-5.1"
+   ],
+   "areas": [
+    "backend",
+    "dados",
+    "infra"
+   ],
+   "taskCount": 8,
+   "components": [
+    "persistencia",
+    "api-central"
+   ],
+   "rationale": "Fica primeiro porque os módulos dependem dos contratos HTTP e da persistência compartilhada. Reúne decisões de infraestrutura e dados em uma única fundação."
+  },
+  {
+   "number": 2,
+   "title": "Estrutura visual e navegação",
+   "goal": "Criar a interface responsiva em português brasileiro, com sistema visual próprio, barra lateral, caminhos de navegação, estrutura do painel, contagens, atalhos e estados compartilhados.",
+   "dependsOn": "Phase 1",
+   "covers": [
+    "US-1.1",
+    "US-1.2",
+    "workflow 1"
+   ],
+   "areas": [
+    "frontend"
+   ],
+   "taskCount": 7,
+   "components": [
+    "interface-base"
+   ],
+   "rationale": "Vem após a fundação para consumir o contrato do painel e define a estrutura visual que os três módulos usarão. Fica isolada em um componente compartilhado."
+  },
+  {
+   "number": 3,
+   "title": "Gestão de tarefas",
+   "goal": "Implementar cadastro, consulta, edição, alteração de status e exclusão confirmada de tarefas persistidas, com validação de campos e estados da interface. Critério de aceite: o módulo possui testes automatizados e a aplicação aceita um banco isolado dos dados normais pela variável de ambiente DATABASE_PATH.",
+   "dependsOn": "Phase 1, Phase 2",
+   "covers": [
+    "tarefas",
+    "US-2.1",
+    "workflow 2"
+   ],
+   "areas": [
+    "backend",
+    "frontend",
+    "dados"
+   ],
+   "taskCount": 8,
+   "components": [
+    "modulo-tarefas"
+   ],
+   "rationale": "Pode ser desenvolvido sem editar componentes de categorias ou anotações, usando os contratos da fundação e da estrutura visual. Seu escopo fica limitado ao ciclo de vida de tarefas."
+  },
+  {
+   "number": 4,
+   "title": "Gestão de categorias",
+   "goal": "Implementar cadastro, consulta, edição e exclusão confirmada de categorias persistidas, com nome obrigatório e único e cor de identificação, entregando a página do módulo pronta para a integração da entrada compartilhada e da navegação na fase 6. Critério de aceite: o módulo possui testes automatizados e a aplicação aceita um banco isolado dos dados normais pela variável de ambiente DATABASE_PATH.",
+   "dependsOn": "Phase 1, Phase 2",
+   "covers": [
+    "categorias",
+    "US-3.1",
+    "workflow 3"
+   ],
+   "areas": [
+    "backend",
+    "frontend",
+    "dados"
+   ],
+   "taskCount": 7,
+   "components": [
+    "modulo-categorias"
+   ],
+   "rationale": "Usa os contratos compartilhados e altera somente o componente próprio de categorias. A página fica pronta para a fase 6 conectar a entrada compartilhada e a navegação, mantendo o módulo independente das outras gestões."
+  },
+  {
+   "number": 5,
+   "title": "Gestão de anotações",
+   "goal": "Implementar cadastro, consulta, edição e exclusão confirmada de anotações persistidas, com título e conteúdo obrigatórios e datas de criação e atualização. Critério de aceite: o módulo possui testes automatizados e a aplicação aceita um banco isolado dos dados normais pela variável de ambiente DATABASE_PATH.",
+   "dependsOn": "Phase 1, Phase 2",
+   "covers": [
+    "anotacoes",
+    "US-4.1",
+    "workflow 4"
+   ],
+   "areas": [
+    "backend",
+    "frontend",
+    "dados"
+   ],
+   "taskCount": 7,
+   "components": [
+    "modulo-anotacoes"
+   ],
+   "rationale": "Usa os contratos da fundação e da estrutura visual e modifica apenas o componente de anotações. Seu modelo temporal não depende dos demais módulos."
+  },
+  {
+   "number": 6,
+   "title": "Integração da aplicação",
+   "goal": "Conectar os roteadores e páginas dos três módulos ao servidor e à navegação compartilhada, integrar API e interface para viabilizar os fluxos reais no navegador e documentar os comandos de inicialização e compilação, incluindo a cópia de .env.example para .env; a aplicação compila sem erros.",
+   "dependsOn": "Phase 3, Phase 4, Phase 5",
+   "covers": [
+    "US-1.1",
+    "US-1.2",
+    "US-5.1",
+    "workflow 1",
+    "workflow 2",
+    "workflow 3",
+    "workflow 4"
+   ],
+   "areas": [
+    "backend",
+    "frontend",
+    "geral"
+   ],
+   "taskCount": 5,
+   "components": [
+    "api-central",
+    "interface-base"
+   ],
+   "rationale": "Fica após os módulos porque registra suas rotas e páginas nos pontos compartilhados. É a única fase posterior que altera esses componentes centrais e consolida a aplicação."
+  }
+ ],
+ "mvpCutPhase": 6
+}

@@ -30,6 +30,7 @@ import { jsonDaResposta } from "./resposta.js";
 import { sha12 } from "./stamps.js";
 import { AREAS_VALIDAS, type Skeleton, type SkeletonPhase } from "./skeleton.js";
 import { environmentRequirements, renderEnvironmentRequirements, type EnvironmentRequirement } from "./environment.js";
+import { contradicoesTemporais, disponibilidadeDosFluxos, fechoDosComponentes, type Disponibilidade, type EntradaDaDisponibilidade } from "./disponibilidade.js";
 
 export const ARCHITECTURE_CONTRACT = "capivara-architecture/v1" as const;
 
@@ -462,6 +463,15 @@ export function parseArchitecture(
     });
   }
 
+  /*
+   * E o tempo da cobertura (§127): o build percorre o workflow pela aplicação
+   * de pé ao fim da primeira fase que o cobre. A cobertura que existe mas
+   * chega antes do caminho, ou o adiamento para uma fase que não espera, é
+   * contradição que só a arquitetura — dona de covers, dependsOn e
+   * componentes — corrige, e que até aqui só aparecia no build.
+   */
+  defects.push(...contradicoesTemporais(entradaTemporal({ components, flows, phases }, skeleton)));
+
   const mvpCutPhase = typeof root.mvpCutPhase === "number" && root.mvpCutPhase >= 1 && root.mvpCutPhase <= phases.length ? root.mvpCutPhase : phases.length;
 
   const architecture: Architecture = {
@@ -479,6 +489,38 @@ export function parseArchitecture(
 }
 
 /** As fases como o esqueleto as carrega: é o que o build e o `change` leem. */
+/**
+ * A arquitetura como entrada da disponibilidade dos fluxos (§127): o texto de
+ * cada fase é o envelope que ela publica (título e goal), e o caminho de cada
+ * workflow são os componentes que ele atravessa com tudo de que eles dependem.
+ */
+export function entradaTemporal(
+  architecture: Pick<Architecture, "components" | "flows" | "phases">,
+  skeleton: Pick<Skeleton, "workflows">,
+): EntradaDaDisponibilidade {
+  const caminhos = new Map<string, string[]>();
+  for (const flow of architecture.flows) {
+    const anteriores = caminhos.get(flow.workflow) ?? [];
+    caminhos.set(flow.workflow, [...new Set([...anteriores, ...fechoDosComponentes(architecture.components, flow.components)])]);
+  }
+  return {
+    fases: architecture.phases.map((phase) => ({
+      number: phase.number,
+      dependsOn: phase.dependsOn,
+      covers: phase.covers,
+      texto: `${phase.title}\n${phase.goal}`,
+      componentes: phase.components,
+    })),
+    workflows: skeleton.workflows.map((workflow) => workflow.number),
+    caminhos,
+  };
+}
+
+/** Quando cada workflow é cobrado, pela arquitetura aprovada (§127). */
+export function disponibilidadeDaArquitetura(architecture: Architecture, skeleton: Pick<Skeleton, "workflows">): Disponibilidade {
+  return disponibilidadeDosFluxos(entradaTemporal(architecture, skeleton));
+}
+
 export function phasesFromArchitecture(architecture: Architecture): SkeletonPhase[] {
   return architecture.phases.map((phase) => ({
     number: phase.number,

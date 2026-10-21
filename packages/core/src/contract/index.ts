@@ -40,6 +40,8 @@ export { canonicalDependsOn, canonicalWorkflowTraces, phaseDependencies, extract
 export type { NormalizedPart, PhasePartExpectation } from "./phase-part.js";
 export { checkRewriteDrift, parsePhaseFragment, preserveUnaddressedTasks } from "./drift.js";
 export { affectedPhases, phaseReferences, planAddresses } from "./phase-references.js";
+export { blocoDaDisponibilidade, cobreWorkflow, contradicoesTemporais, disponibilidadeDosFluxos, fasesNomeadas, fechoDosComponentes, tabelaDaDisponibilidade } from "./disponibilidade.js";
+export type { Adiamento, ContradicaoTemporal, Disponibilidade, EntradaDaDisponibilidade, FaseNoTempo, Incerteza, MotivoDoAdiamento, Revisita } from "./disponibilidade.js";
 export type { DriftInput } from "./drift.js";
 export { AREAS_VALIDAS, SKELETON_CONTRACT, coverageFromSkeleton, parseSkeleton, renderSkeleton, repairSkeleton, sliceForPhase, workflowsForPhase } from "./skeleton.js";
 export {
@@ -47,6 +49,8 @@ export {
   architectureSliceForPhase,
   architectureViewForPhase,
   checkArchitectureBinding,
+  disponibilidadeDaArquitetura,
+  entradaTemporal,
   parseArchitecture,
   phasesFromArchitecture,
   renderArchitecture,

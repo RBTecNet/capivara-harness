@@ -16,18 +16,18 @@ import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, buildStamp, checkCoverage, checkDesignRefs, checkTestPrescription, checkWriteOwnership, testPrescriptionHint, testPrescriptions, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parseArchitecture, parsePhaseFragment, parseSkeleton, phaseHeading, phasesFromArchitecture, renderArchitecture, renderSkeleton, requirementsFromArchitecture, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12 } from "../contract/index.js";
+import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, blocoDaDisponibilidade, disponibilidadeDaArquitetura, tabelaDaDisponibilidade, buildStamp, checkCoverage, checkDesignRefs, checkTestPrescription, checkWriteOwnership, testPrescriptionHint, testPrescriptions, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parseArchitecture, parsePhaseFragment, parseSkeleton, phaseHeading, phasesFromArchitecture, renderArchitecture, renderSkeleton, requirementsFromArchitecture, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12 } from "../contract/index.js";
 import { CoherenceMemory } from "../audit/coherence.js";
 import { achadoNaOrigem, alvoNoEnvelope, chavesDoEnvelope, veioDoEnvelope } from "../audit/envelope.js";
 import { applyMaterialityReview, materialityInput, materialityPrompt } from "../audit/materiality.js";
 import type { Architecture, ContractError, CoverageSources, PhasesDocument, Skeleton, StampInput } from "../contract/index.js";
-import { DEFAULT_MAX_RETURNS, balancoDaRodada, descreverBalanco, fingerprint, nextAuditAction, parseAudit, persistentFindings, renderStandoff, writerDid } from "../audit/index.js";
+import { DEFAULT_MAX_RETURNS, enderecoDaDecisao, balancoDaRodada, descreverBalanco, fingerprint, nextAuditAction, parseAudit, persistentFindings, renderStandoff, writerDid } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark, Standoff } from "../audit/index.js";
 import { tasksBlock } from "../contract/templates.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, isRepairable, publish, repairDeterministically, stripAllMarkers, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
 import { buildAnswer, buildCheckpoint, classifyLocally, decisaoDeBanco, isNonAnswer, leituraInsistente, naoObjetivos, perguntaDeLacuna, perguntaDoBanco, perguntaInsistente, regrasDeBanco, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, suposicaoDelegada, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Assumption, Question } from "../interview/index.js";
-import { repairBlock, amendPhasePrompt, architectPrompt, architectureAuditPrompt, assessRehearsal, auditRetryPrompt, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
+import { DOCUMENTO_DO_TEMPO, repairBlock, amendPhasePrompt, architectPrompt, architectureAuditPrompt, assessRehearsal, auditRetryPrompt, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
 import type { AskedQuestion, CriterionRef, RehearsalResult, WriterContext } from "../prompts/index.js";
 import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEvents, runIdFor, runPaths, writeAtomic, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
@@ -238,6 +238,23 @@ function oQueOEscritorFez(documento: string, finding: Finding): string {
 
 function contaTasks(markdown: string): number {
   return [...markdown.matchAll(/^\s*-\s*\[[ xX]\]\s*\*\*Task:\*\*/gm)].length;
+}
+
+/**
+ * Quando o build percorre cada workflow, para quem audita o plano inteiro (§127).
+ * Derivado da arquitetura — que é dona de covers, dependsOn e componentes —,
+ * nunca escrito por modelo.
+ */
+function tempoDosFluxos(arquitetura: Architecture, esqueleto: Skeleton): string[] {
+  const nomes = new Map(esqueleto.workflows.map((workflow) => [workflow.number, workflow.name]));
+  return tabelaDaDisponibilidade(disponibilidadeDaArquitetura(arquitetura, esqueleto), arquitetura.phases.map((phase) => phase.number), nomes);
+}
+
+/** O mesmo, da fase: o que o escritor e o auditor dela precisam saber antes de escrever um critério. */
+function tempoDaFase(arquitetura: Architecture | null, esqueleto: Skeleton, numero: number): string {
+  if (arquitetura === null) return "";
+  const nomes = new Map(esqueleto.workflows.map((workflow) => [workflow.number, workflow.name]));
+  return blocoDaDisponibilidade(disponibilidadeDaArquitetura(arquitetura, esqueleto), numero, nomes).join("\n");
 }
 
 /**
@@ -1043,6 +1060,10 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         ? [
             { name: "fatia do esqueleto", content: sliceForPhase(skeletonAtual, numero) },
             ...(arquiteturaAtual ? [{ name: "fatia da arquitetura", content: architectureSliceForPhase(arquiteturaAtual, numero) }] : []),
+            // O tempo dos fluxos (§127): o auditor cobra o mesmo contrato que o escritor recebeu.
+            ...(arquiteturaAtual && tempoDaFase(arquiteturaAtual, skeletonAtual, numero) !== ""
+              ? [{ name: DOCUMENTO_DO_TEMPO, content: tempoDaFase(arquiteturaAtual, skeletonAtual, numero) }]
+              : []),
           ]
         : upstream;
 
@@ -1119,6 +1140,15 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             const veredicto: AuditVerdict = {
               ...bruto,
               findings: bruto.findings.map((finding) => ({ ...finding, phase: fase.number })),
+              /*
+               * E a decisão também (§127). No Luna a pergunta do status inicial
+               * da tarefa, levantada pelo auditor da fase 3, saiu sem fase; a
+               * resposta virou achado sem endereço, foi às fases 1, 4 e 6, e a
+               * emenda da fase 1 — que estava aprovada — devolveu três tasks a
+               * menos. As lacunas viraram reorganização da arquitetura: ~26
+               * chamadas.
+               */
+              ...(bruto.decisions ? { decisions: bruto.decisions.map((decisao) => ({ ...decisao, phase: fase.number })) } : {}),
             };
             // Aprovada é fato do run: o texto exato que passou não volta à fila.
             if (veredicto.findings.length === 0) {
@@ -1156,6 +1186,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
               ? [
                   { name: "skeleton.md", content: renderSkeleton(skeletonAtual) },
                   ...(arquiteturaMd !== "" ? [{ name: "architecture.md", content: arquiteturaMd }] : []),
+                  ...(arquiteturaAtual && tempoDosFluxos(arquiteturaAtual, skeletonAtual).length > 0
+                    ? [{ name: DOCUMENTO_DO_TEMPO, content: tempoDosFluxos(arquiteturaAtual, skeletonAtual).join("\n") }]
+                    : []),
                 ]
               : upstream,
             digest,
@@ -1687,6 +1720,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       request: options.request.text,
       slice: sliceForPhase(skeletonAtual!, number),
       ...(arquiteturaAtual ? { architecture: architectureSliceForPhase(arquiteturaAtual, number) } : {}),
+      ...(arquiteturaAtual && tempoDaFase(arquiteturaAtual, skeletonAtual!, number) !== "" ? { tempo: tempoDaFase(arquiteturaAtual, skeletonAtual!, number) } : {}),
       phaseNumber: number,
       totalPhases: skeletonAtual!.phases.length,
       decisions: depoisDoEsqueleto(),
@@ -1902,6 +1936,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         architecture: md,
         maxTasksPerPhase: MAX_TASKS_PER_PHASE,
         ...(ultimaDevolucao.length > 0 ? { previousFindings: ultimaDevolucao } : {}),
+        tempoDosFluxos: tempoDosFluxos(atual, esqueletoDeOrigem!),
       });
       if (memoria.jaAprovada(promptDeAuditoria)) {
         announce("  arquitetura aprovada numa execução anterior, com a mesma auditoria; não vou repagar");
@@ -3006,7 +3041,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       decisoesDoAuditor.add(`${decisao.where}::${decisao.decision}`.toLowerCase());
       announce(`  o auditor levantou como decisão uma regra do planejamento (${decisao.where}: prescrição de teste); não há o que decidir — vira correção`);
       decididas.push({
-        where: decisao.where,
+        where: enderecoDaDecisao(decisao),
         mechanical: true,
         problem: `I-16: o auditor apontou prescrição de teste em ${decisao.where} (${termos.join(", ")}) e a levantou como decisão; a regra não é opcional`,
         fix: testPrescriptionHint(termos),

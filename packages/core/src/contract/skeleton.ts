@@ -26,6 +26,7 @@ import type { TestAuthority } from "./test-prescription.js";
 import { MECHANISM_INVARIANT, mechanismPrescriptionHint, mechanismPrescriptions } from "./mechanism-prescription.js";
 import type { CoverageSources } from "./coverage.js";
 import { jsonDaResposta } from "./resposta.js";
+import { cobreWorkflow } from "./disponibilidade.js";
 import { environmentRequirements, renderEnvironmentRequirements, type EnvironmentRequirement } from "./environment.js";
 
 export const SKELETON_CONTRACT = "capivara-skeleton/v2" as const;
@@ -460,10 +461,8 @@ export function parseSkeleton(source: string, limits: SkeletonLimits): SkeletonR
 export function workflowsForPhase(skeleton: Skeleton, phaseNumber: number): SkeletonWorkflow[] {
   const phase = skeleton.phases.find((entry) => entry.number === phaseNumber);
   if (!phase) return [];
-  const cobre = new Set(phase.covers.map((item) => item.toLowerCase()));
-  return skeleton.workflows.filter(
-    (workflow) => cobre.has(`workflow ${workflow.number}`.toLowerCase()) || cobre.has(workflow.number.toLowerCase()),
-  );
+  // A mesma leitura da disponibilidade dos fluxos (§127): duas leituras de `covers` divergiriam na guarda final.
+  return skeleton.workflows.filter((workflow) => cobreWorkflow(phase.covers, workflow.number));
 }
 
 export function sliceForPhase(skeleton: Skeleton, phaseNumber: number): string {

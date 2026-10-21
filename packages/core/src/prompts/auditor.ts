@@ -385,6 +385,30 @@ export interface PhaseAuditContext extends AuditorContext {
   totalPhases: number;
 }
 
+/** O nome do documento derivado com o tempo dos fluxos (§127): a auditoria só fala dele quando ele está na mesa. */
+export const DOCUMENTO_DO_TEMPO = "quando o build percorre os fluxos";
+
+/*
+ * O contrato que o G4 cobra, posto diante de quem audita (§127). No Luna os
+ * auditores de fase apontaram quatro vezes "a fase antecipa a integração" e
+ * nenhum apontou que a fase 4 continuava cobrindo o workflow 3 — o build o
+ * percorreria antes da integração que o plano dava à fase 6.
+ */
+const TEMPO_NA_FASE = [
+  "## The timing of this phase's workflows",
+  `The upstream document "${DOCUMENTO_DO_TEMPO}" is derived by the harness from the architecture: it says`,
+  "which workflows the build walks through the RUNNING application at the end of this phase, and which",
+  "ones this phase leaves to a later phase. Hold the criteria to it:",
+  "- a workflow walked here must be reachable when the phase closes: a criterion that keeps its page or",
+  "  route out of the application (\"exported without registering\", \"not added to the navigation\") is a",
+  "  defect — address it to that task;",
+  "- a workflow left to a later phase must not be demanded here, whole, through the running application",
+  "  — address that to the task too; what this phase wires in is what its goal says, nothing more;",
+  "- when the defect is the timing itself (this phase should not walk the workflow, or the phase that",
+  "  integrates is the wrong one), address the finding to `Architecture`: covers, dependsOn and the goal",
+  "  are written by the architect, and no amendment of this phase reaches them.",
+].join("\n");
+
 export function phaseAuditPrompt(context: PhaseAuditContext): string {
   const upstream = context.upstream.map((document) => `## Upstream document: ${document.name}\n${document.content}`);
   return [
@@ -420,6 +444,7 @@ export function phaseAuditPrompt(context: PhaseAuditContext): string {
           "",
         ]
       : []),
+    ...(context.upstream.some((document) => document.name === DOCUMENTO_DO_TEMPO) ? [TEMPO_NA_FASE, ""] : []),
     "## What you are looking at",
     `This is ONE phase of a plan with ${context.totalPhases}. Judge this phase against the decisions and`,
     "the documents above it — nothing else. You are NOT looking for contradictions with other phases:",
@@ -496,6 +521,15 @@ export function coherencePrompt(context: CoherenceContext): string {
     "\"a later phase\" that no phase assumes (a package script, a configuration file); two phases that",
     "obtain the same shared resource in incompatible ways. Different ways that satisfy the same",
     "declared contract are NOT a contradiction: compare what each phase requires, not what it prefers.",
+    ...(context.upstream.some((document) => document.name === DOCUMENTO_DO_TEMPO)
+      ? [
+          `Timing is an integration obligation too. The upstream document "${DOCUMENTO_DO_TEMPO}" says at the`,
+          "end of which phase the build walks each workflow through the running application. A phase that",
+          "walks a workflow while another phase is the one that wires it into the application (one makes the",
+          "page reachable, a later one mounts the same router again; or one exports it unregistered while its",
+          "workflow is walked there) is a contradiction: name both addresses and say which phase integrates.",
+        ]
+      : []),
     "",
     "## What is NOT your job here",
     "- Whether a criterion is observable, well written, or traceable. Another pass owns that.",

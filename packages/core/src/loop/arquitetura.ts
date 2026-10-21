@@ -20,10 +20,13 @@ import {
   architectureSliceForPhase,
   architectureViewForPhase,
   checkArchitectureBinding,
+  disponibilidadeDosFluxos,
+  fechoDosComponentes,
   parsePhases,
   sha12,
   type Architecture,
   type ArchitectureBinding,
+  type Disponibilidade,
   type Skeleton,
 } from "../contract/index.js";
 import { artifactPaths } from "../state/paths.js";
@@ -83,6 +86,13 @@ export interface ArquiteturaDoBuild {
    * escreveu é atribuído à fase corrente, que é quem o tem na árvore.
    */
   territorio(workflow: string, donos: ReadonlyMap<number, ReadonlySet<string>>, faseAtual: number): TerritorioDoFluxo | null;
+  /**
+   * Os componentes de cada fase VINCULADA e o caminho de cada workflow, para a
+   * disponibilidade dos fluxos (§127). A fase que não se comprova (a que o
+   * `change` acrescentou fora da arquitetura) fica sem componentes — o que
+   * depende dela é desconhecido —, e as outras continuam valendo.
+   */
+  tempo(): { componentes: ReadonlyMap<number, readonly string[]>; caminhos: ReadonlyMap<string, readonly string[]> } | null;
 }
 
 export async function vincularArquitetura(
@@ -146,6 +156,14 @@ export async function vincularArquitetura(
           .map((phase) => phase.number),
       };
     },
+    tempo() {
+      if (architecture === null || vinculadas.size === 0) return null;
+      const caminhos = new Map<string, string[]>();
+      for (const flow of architecture.flows) {
+        caminhos.set(flow.workflow, [...new Set([...(caminhos.get(flow.workflow) ?? []), ...fechoDeDependencias(architecture, flow.components)])]);
+      }
+      return { componentes: new Map(architecture.phases.filter((phase) => vinculadas.has(phase.number)).map((phase) => [phase.number, phase.components])), caminhos };
+    },
     territorio(workflow, donos, faseAtual) {
       if (architecture === null || vinculadas.size === 0) return null;
       const flow = architecture.flows.find((entry) => entry.workflow === workflow);
@@ -178,6 +196,29 @@ export async function vincularArquitetura(
 }
 
 /**
+ * Quando cada fluxo é cobrado no build (§127): a mesma derivação do plano,
+ * sobre o envelope de cada fase do esqueleto (título e goal) e os componentes
+ * das fases que a arquitetura vinculada comprova — a fase fora dela fica
+ * desconhecida, e só o que depende dela deixa de ser decidido pelo caminho.
+ */
+export function disponibilidadeNoBuild(esqueleto: Skeleton, tempo: ReturnType<ArquiteturaDoBuild["tempo"]>): Disponibilidade {
+  return disponibilidadeDosFluxos({
+    fases: esqueleto.phases.map((phase) => {
+      const componentes = tempo?.componentes.get(phase.number);
+      return {
+        number: phase.number,
+        dependsOn: phase.dependsOn,
+        covers: phase.covers,
+        texto: `${phase.title ?? ""}\n${phase.goal ?? ""}`,
+        ...(componentes ? { componentes } : {}),
+      };
+    }),
+    workflows: esqueleto.workflows.map((workflow) => workflow.number),
+    ...(tempo ? { caminhos: tempo.caminhos } : {}),
+  });
+}
+
+/**
  * Os componentes citados e todos os de que eles dependem, transitivamente.
  *
  * Um fluxo que atravessa a api atravessa também o que a api usa: uma mudança
@@ -185,16 +226,7 @@ export async function vincularArquitetura(
  * própria rota.
  */
 export function fechoDeDependencias(architecture: Architecture, nomes: readonly string[]): Set<string> {
-  const porNome = new Map(architecture.components.map((component) => [component.name.toLowerCase(), component]));
-  const fecho = new Set<string>();
-  const fila = nomes.map((nome) => nome.toLowerCase());
-  while (fila.length > 0) {
-    const nome = fila.shift()!;
-    if (fecho.has(nome)) continue;
-    fecho.add(nome);
-    for (const dependencia of porNome.get(nome)?.dependsOn ?? []) fila.push(dependencia.toLowerCase());
-  }
-  return fecho;
+  return fechoDosComponentes(architecture.components, nomes);
 }
 
 /**

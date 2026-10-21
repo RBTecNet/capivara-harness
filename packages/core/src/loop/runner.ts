@@ -22,7 +22,7 @@ import { fotografarRefs, publicacaoProvavel, refsMovidas } from "./autoridade.js
 import { arquivosDasFases, arquivosMudados, comMarcadorDeConflito, commitPhase, estadoDoCodigo, existiamNaArvore, hasPendingChanges, restaurarDoEstado } from "./git.js";
 import { declaredComplete, defaultTestRunner, gate0, gate2, gate3, type GateName, type GateResult, type TestRunner } from "./gates.js";
 import { detectCredentialRejection, detectRateLimit, planWait } from "./ratelimit.js";
-import { checkFlowScript, FLOW_MARK, FLOWS_DIR, flowScriptName, gate4, type FlowRunner } from "./flows.js";
+import { checkFlowScript, FLOW_MARK, FLOWS_DIR, flowScriptName, gate4, passoQueFalhou, type FlowRunner } from "./flows.js";
 import { shaDaTask, TasksAprovadas, tasksDaFase } from "./veredictos.js";
 import { prepararAmbiente } from "./ambiente.js";
 import { comBancosDeTeste } from "./test-databases.js";
@@ -30,8 +30,8 @@ import { sharedContractFromSkeleton } from "../prompts/acceptance-policy.js";
 import { portaLivre } from "./ports.js";
 import { faltaOPacoteDoRunner } from "./dependencias.js";
 import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mcp/index.js";
-import { DOCUMENTOS_DA_ETAPA, ENVIRONMENT_CONTRACT, phaseReferences, sha12 } from "../contract/index.js";
-import type { SkeletonWorkflow, TaskBlock } from "../contract/index.js";
+import { DOCUMENTOS_DA_ETAPA, ENVIRONMENT_CONTRACT, fasesNomeadas, phaseReferences, sha12 } from "../contract/index.js";
+import type { Adiamento, SkeletonWorkflow, TaskBlock } from "../contract/index.js";
 import type { PhaseSession } from "./split.js";
 import { resolveE2eCommand, type TestCommand } from "./testcmd.js";
 import { falhaDeInstalacaoNode, inspecionarInstalacaoNode, MARCA_DE_INSTALACAO_NODE, registrarInstalacaoNode, runtimeNode } from "./instalacao-node.js";
@@ -45,6 +45,7 @@ import {
   citacoes,
   defeitoCitado,
   orcamentoEfetivo,
+  oscilacaoEntreGates,
   RegistroDeDefeitos,
   severidadeDoAchado,
   testesQueFalharam,
@@ -55,6 +56,7 @@ import {
   type Estrategia,
   type NaturezaDoDefeito,
   type OrcamentoDaRecuperacao,
+  type Oscilacao,
 } from "./defeitos.js";
 import { camposDoDiagnostico, gravarHandoff, HANDOFF_CONTRACT, lerHandoff, renderHandoff } from "./handoff.js";
 import { criarNarrador, type Transicao } from "./narrador.js";
@@ -182,6 +184,12 @@ export interface PhaseRunOptions {
     /** Os fluxos das fases já concluídas: a regressão desta fase. */
     regressao?: SkeletonWorkflow[];
     /**
+     * Os que a fase cobre e o plano deixa, explicitamente, para a fase que os
+     * completa (§127): não são percorridos aqui, e ficam registrados como
+     * obrigação pendente — com a fase e o motivo — até passarem lá.
+     */
+    adiados?: { workflow: SkeletonWorkflow; adiamento: Adiamento }[];
+    /**
      * Como a aplicação sobe — resolvido DEPOIS da sessão, não antes dela.
      *
      * Num greenfield o `package.json` não existe quando o build começa: é a
@@ -290,6 +298,9 @@ export type PhaseOutcome =
    * está; a retomada revalida a fase depois de o arquivo ser ignorado.
    */
   | { status: "commit-blocked"; bloqueios: Bloqueio[]; cause: string; cycles: number };
+
+/** A marca do registro de um fluxo adiado (§127): obrigação pendente, nunca prova. */
+export const MARCA_DO_ADIAMENTO = "capivara-adiado/v1";
 
 export const DEFAULT_MAX_CYCLES = 3;
 export const DEFAULT_MAX_LIMIT_WAITS = 20;
@@ -580,6 +591,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   let verificadorEscreveuDesdeOG3 = false;
   let previousWroteNothing = false;
   let ultimoRelatorioDeReparo = "";
+  /** A oscilação provada na última verificação (§127): a fase para antes do próximo reparo. */
+  let oscilacaoProvada: Oscilacao | null = null;
   let contestacaoPendente: string | null = null;
   let proximoG4: { rejeitados?: string[] } | null = null;
   let julgandoParcial = false;
@@ -638,6 +651,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     const docs = documentosDaFase();
     for (const { evidence, validity } of livro.daFase(session.id)) {
       if (validity.state === "INVALIDATED" || evidence.outcome === "REPAIR_REQUIRED" || evidence.gate === "G0" || evidence.gate === "G1") continue;
+      // O adiamento é obrigação do plano, não prova sobre o código: mudar o código não o invalida (§127).
+      if (evidence.inputs.extra?.["marca"] === MARCA_DO_ADIAMENTO) continue;
       const mudouDocumento = evidence.inputs.documents.find((doc) => {
         const atual = docs.find((cada) => cada.name === doc.name);
         return atual !== undefined && atual.sha12 !== doc.sha12;
@@ -754,6 +769,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   /** Registra o achado, grava o handoff quando o verificador diagnosticou, e diz na tela. */
   const achar = async (achado: DefeitoEncontrado, handoff?: { raw: string; sessionId?: string; purpose?: string; log?: string }): Promise<Defect> => {
     const { defeito, novo, reaberto } = registro.registrar(achado);
+    // O defeito que voltou pode estar voltando porque o reparo de outro gate o desfez (§127).
+    if (reaberto) oscilacaoProvada ??= oscilacaoEntreGates(estado, defeito);
     if (handoff) {
       const campos = camposDoDiagnostico(handoff.raw);
       const identidade = { runId: options.runId, phaseId: session.id, gate: achado.gate, cycle: estado.cycle, defectId: defeito.defectId };
@@ -1178,13 +1195,51 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
    * ou roteirista (§125 C; spec §3.2): sem fluxos, ou com a regressão inteira de
    * pé e nenhum fluxo próprio, é NOT_APPLICABLE sem custo.
    */
+  /**
+   * O fluxo que a fase deixa para outra é obrigação, não aprovação (§127): fica
+   * no livro, com a fase que o completa e o porquê, uma vez por fase — e não é
+   * prova de nada, por isso `adiado-N` e não `fluxo-N`.
+   */
+  let adiamentosRegistrados = false;
+  const registrarAdiamentos = async (): Promise<void> => {
+    if (adiamentosRegistrados) return;
+    adiamentosRegistrados = true;
+    for (const { workflow, adiamento } of options.flows?.adiados ?? []) {
+      const para = `P${String(adiamento.para).padStart(2, "0")}`;
+      const porque = adiamento.motivo.tipo === "texto"
+        ? `o plano da fase diz "${adiamento.motivo.trecho}"`
+        : `o caminho do fluxo pela arquitetura ainda não tem ${adiamento.motivo.faltam.join(", ")}`;
+      const atual = livro.atual(session.id, `adiado-${workflow.number}`);
+      if (atual?.validity.state === "VALID" && atual.evidence.inputs.extra?.["para"] === para && atual.evidence.inputs.documents.find((doc) => doc.name === "fase")?.sha12 === shaDaFase(session.markdown)) continue;
+      await livro.registrar({
+        phaseId: session.id, gate: "G4", checkId: `adiado-${workflow.number}`, now,
+        claim: `o fluxo ${workflow.number} (${workflow.name}) não é cobrado ao fim de ${session.id}: o PLAN o completa na ${para}${adiamento.via !== undefined ? ` (por meio da P${String(adiamento.via).padStart(2, "0")})` : ""} — ${porque}`,
+        outcome: "NOT_APPLICABLE",
+        inputs: { documents: documentosDaFase(), code: codigo.atual, extra: { marca: MARCA_DO_ADIAMENTO, para, motivo: porque } },
+        scope: emptyScope({ flows: [workflow.number] }), supports: [], artifactRefs: [],
+      });
+      await transicao({
+        tipo: "adiado", gate: "G4",
+        motivo: `o fluxo ${workflow.number} (${workflow.name}) fica para a ${para}, que o cobre e o completa — ${porque}; obrigação pendente, não aprovação`,
+        proximo: para,
+      });
+    }
+  };
+
   const aplicabilidadeDoG4 = async (): Promise<{ aplicavel: false; motivo: string; apoios: string[] } | { aplicavel: true; regressao: SkeletonWorkflow[] }> => {
     const fluxos = options.flows;
     if (!fluxos) return { aplicavel: false, motivo: "build sem gate de fluxos", apoios: [] };
     const proprios = fluxos.workflows;
     const regressao = fluxos.regressao ?? [];
     if (proprios.length === 0 && regressao.length === 0) {
-      return { aplicavel: false, motivo: "a fase não declara fluxos e nenhuma anterior deixou fluxo a revalidar", apoios: [] };
+      const adiados = fluxos.adiados ?? [];
+      return {
+        aplicavel: false,
+        motivo: adiados.length > 0
+          ? `os fluxos desta fase (${adiados.map(({ workflow, adiamento }) => `${workflow.number} → P${String(adiamento.para).padStart(2, "0")}`).join(", ")}) ficam para a fase que os completa, e nenhuma anterior deixou fluxo a revalidar`
+          : "a fase não declara fluxos e nenhuma anterior deixou fluxo a revalidar",
+        apoios: [],
+      };
     }
     if (proprios.length > 0) return { aplicavel: true, regressao };
     const donos = await arquivosDasFases(arvore);
@@ -1215,6 +1270,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   };
 
   const g4Valido = async (): Promise<boolean> => {
+    await registrarAdiamentos();
     if (estado.defects.some((defeito) => defeito.status === "AWAITING_VALIDATION" && (defeito.gates.at(-1) ?? defeito.discovered.gate) === "G4")) return false;
     if (proximoG4 !== null || contestacaoPendente !== null) return false;
     const decisao = await aplicabilidadeDoG4();
@@ -1395,7 +1451,14 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         nature: natureza,
         anchors: {
           ...(workflow ? { workflow } : {}),
-          ...(g4.triagem?.onde ? { step: g4.triagem.onde.slice(0, 120) } : {}),
+          /*
+           * O passo é o do roteiro, lido da saída do runner — nunca a prosa da
+           * triagem (§127). No Luna, a mesma falha (fluxo 3, passo 1, o mesmo
+           * localizador) ganhou cinco ids porque cada triagem escreveu o lugar
+           * com outras palavras; cada id novo resolvia o anterior "por não
+           * reproduzir", e a regra de progresso nunca viu a falha voltar.
+           */
+          ...(workflow && passoQueFalhou(g4.output ?? "", workflow) !== null ? { step: `passo ${passoQueFalhou(g4.output ?? "", workflow)}` } : {}),
           ...(tarefaDoCriterio ? { task: tarefaDoCriterio } : {}),
           quotes: citacoes(`${g4.triagem?.evidencia ?? ""}\n${g4.cause}`),
           version: roteiros.map((roteiro) => `${roteiro.name}@${roteiro.sha12}`).join(","),
@@ -1437,13 +1500,21 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       : undefined;
 
     if (acao.estrategia === "executor") {
+      /*
+       * O relatório do reparo do verificador vale para a correção SEGUINTE, uma
+       * vez (§127). No Luna o do ciclo 1 ("Removi a rota `/categorias`") nunca
+       * saiu do prompt: os ciclos 4 a 9 o receberam, e o do ciclo 6 pedia para
+       * restaurar a rota e, no mesmo texto, contava que ela tinha sido removida.
+       */
+      const relatorioDoReparo = ultimoRelatorioDeReparo;
+      ultimoRelatorioDeReparo = "";
       const ctx = await contexto();
       const gateTexto = gates.map(nomeDoGate).join(" + ");
       const causa = await causaDosDefeitos(acao.defeitos);
       const prompt = fixPrompt({
         ...ctx,
         gate: gateTexto,
-        cause: causa + (ultimoRelatorioDeReparo ? `\n\nRelatório do último reparo assistido pelo verificador (confira os gates; o relatório não é aprovação):\n${ultimoRelatorioDeReparo}` : "") +
+        cause: causa + (relatorioDoReparo ? `\n\nRelatório do último reparo assistido pelo verificador (confira os gates; o relatório não é aprovação):\n${relatorioDoReparo}` : "") +
           (falhaNaPreparacaoNode ? `\n\n## Dependency preparation — unresolved environment failure\n${falhaNaPreparacaoNode}` : ""),
         previousWroteNothing,
       });
@@ -1667,6 +1738,86 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
 
   /** O pacote de reparo documental publicado nesta parada, relativo à raiz do projeto. */
   let pacoteUpstream: string | null = null;
+
+  /**
+   * Dois gates provadamente puxando o mesmo código para lados opostos (§127):
+   * repetir a escada só alterna os estados. O Core para de reparar, preserva
+   * tudo — código, commits, branches, logs, provas — e encaminha ao PLAN um
+   * diagnóstico montado do que JÁ está registrado: os dois critérios, as três
+   * ações, os arquivos. Pelo mesmo contrato do reparo documental (§125 H);
+   * nenhum documento aprovado é tocado, e nenhum agente é chamado para
+   * escolher um lado.
+   */
+  const pararPorOscilacao = async (oscilacao: Oscilacao): Promise<PhaseOutcome> => {
+    const { voltou, por, acoes, arquivos } = oscilacao;
+    const gateDe = (defeito: Defect): DefectGate => defeito.gates.at(-1) ?? defeito.discovered.gate;
+    const exigencia = (defeito: Defect): string => (defeito.criterion || defeito.summary).split("\n")[0]!.slice(0, 300);
+    const [n1, n2, n3] = acoes;
+    const lista = arquivos.join(", ");
+    const resumo =
+      `${gateDe(por)} (${por.defectId}: ${exigencia(por)}) e ${gateDe(voltou)} (${voltou.defectId}: ${exigencia(voltou)}) puxam ${lista} para lados opostos: ` +
+      `a ação ${n1}, contra ${por.defectId}, mudou ${lista} e ${voltou.defectId} apareceu; a ação ${n2} o resolveu mudando os mesmos arquivos, e ${por.defectId} continuou reprovando; ` +
+      `a ação ${n3}, contra ${por.defectId} de novo, mexeu nos arquivos do reparo de ${voltou.defectId}, e ele voltou`;
+    await transicao({
+      tipo: "oscilacao", gate: `${gateDe(por)}+${gateDe(voltou)}`, defeitos: [por.defectId, voltou.defectId],
+      motivo: `${resumo}. Possível incompatibilidade de contrato entre os critérios, não regressão funcional comum: repetir os reparos só alterna os dois estados`,
+      proximo: "capivara plan",
+    });
+    const daRaiz = (relativo: string): string => relative(options.projectRoot, join(paths.root, relativo));
+    const gates = new Set<string>([gateDe(por), gateDe(voltou)]);
+    const artefatos = livro.daFase(session.id).map(({ evidence }) => evidence)
+      .filter((evidencia) => evidencia.outcome === "REPAIR_REQUIRED" && gates.has(evidencia.gate))
+      .flatMap((evidencia) => evidencia.artifactRefs.map((ref) => ({ path: daRaiz(ref.path), sha12: ref.sha12 })));
+    const tentativas = [...por.attempts, ...voltou.attempts].filter((tentativa) => tentativa.result !== "pending").sort((a, b) => a.action - b.action);
+    const diagnosis = [
+      "## Defeito", `${por.defectId} (${gateDe(por)}) × ${voltou.defectId} (${gateDe(voltou)}): o reparo de um desfaz o do outro — possível incompatibilidade de contrato`, "",
+      "## Observado", resumo, "",
+      "## Esperado", `um mesmo código que cumpra os dois: "${exigencia(por)}" e "${exigencia(voltou)}". Hoje um critério exige o que o outro proíbe nos mesmos arquivos (${lista}).`, "",
+      "## Contornos tentados", ...tentativas.map((tentativa) => `- ação ${tentativa.action}, ciclo ${tentativa.cycle}, ${tentativa.gate}, ${tentativa.strategy}: ${tentativa.result}${tentativa.files && tentativa.files.length > 0 ? ` (mudou ${tentativa.files.join(", ")})` : ""}`), "",
+      "## Limites da edição",
+      `o BUILD não altera documento aprovado e não escolhe um dos lados. O PLAN reconcilia os dois critérios da ${session.id} — ou a fase integra o que o fluxo percorre e o critério que o proíbe sai, ` +
+        "ou o fluxo passa a ser cobrado na fase que integra (o goal desta fase a nomeia) — sem tocar o que as outras fases já construíram.",
+      "",
+    ].join("\n");
+    const documentos = await documentosPublicados(options.projectRoot);
+    const publicado = await publicarReparo(options.projectRoot, {
+      origin: { runId: options.runId, phaseId: session.id, gate: gateDe(voltou), cycle: estado.cycle, defectId: voltou.defectId },
+      target: "plan",
+      document: { name: "project-phases.md", contract: "capivara-phases/v2", sha12: documentos["project-phases.md"] ?? "" },
+      impact: {
+        phases: [...new Set([session.number, ...fasesNomeadas(`${por.criterion}\n${voltou.criterion}`)])].sort((a, b) => a - b),
+        components: options.architecture?.componentes ?? [],
+        contracts: [],
+      },
+      diagnosis,
+      evidence: {
+        artifacts: artefatos,
+        handoffs: [...new Set([...por.handoffs, ...voltou.handoffs])].map(daRaiz),
+        recovery: tentativas.map((tentativa) => ({ strategy: tentativa.strategy, result: tentativa.result, cycle: tentativa.cycle })),
+        exhausted: true,
+      },
+      createdAt: now().toISOString(),
+    });
+    if (publicado.ok) {
+      for (const defeito of [por, voltou]) {
+        defeito.status = "UPSTREAM_REPAIR_REQUIRED";
+        defeito.upstream = publicado.manifest.repairId;
+      }
+      await registro.salvar();
+      pacoteUpstream = relative(options.projectRoot, publicado.caminho);
+      await transicao({ tipo: "upstream", gate: gateDe(voltou), defeitos: [por.defectId, voltou.defectId], motivo: `pacote ${publicado.manifest.repairId} validado e publicado em ${pacoteUpstream}`, proximo: "capivara plan" });
+    } else {
+      announce(`[${session.id}] o encaminhamento documental da oscilação foi recusado — ${publicado.errors.join("; ")}; o diagnóstico fica nesta parada, e nenhum agente é chamado para escolher um lado`);
+    }
+    return fecharFalha(
+      nomeDoGate(gateDe(voltou)),
+      `OSCILAÇÃO ENTRE GATES — ${resumo}.\n\nIsto é provável incompatibilidade de contrato no documento aprovado, não regressão funcional: o Core parou de repetir os reparos. ` +
+        (pacoteUpstream !== null
+          ? `O pacote de reparo documental validado está em ${pacoteUpstream}; nenhum documento foi alterado, e código, commits, logs e provas ficaram como estavam.`
+          : "Nenhum documento foi alterado, e código, commits, logs e provas ficaram como estavam; corrija o critério no PLAN (`capivara plan`) antes de retomar."),
+      "oscilação entre gates: reparos que se desfazem sobre os mesmos arquivos",
+    );
+  };
 
   /**
    * O último recurso (§125 H; spec §8): a escada do BUILD acabou sem
@@ -2111,13 +2262,32 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         const { gate: gateDaFalha, cause } = causaDaParada();
         return await pararPorSessao(gateDaFalha, cause);
       }
+      // Atribuída dentro de `achar`, que o fluxo de tipos não acompanha.
+      const candidata = oscilacaoProvada as Oscilacao | null;
+      if (candidata !== null) {
+        oscilacaoProvada = null;
+        /*
+         * A prova final é do Git: os arquivos que o reparo de Y mudou estão de
+         * novo com o conteúdo que Y rejeitou. Sem árvore (sem Git), ou com outro
+         * conteúdo, não há prova — e a escada segue como sempre.
+         */
+        const [antes, depois] = candidata.arvores;
+        const entre = antes !== null && depois !== null ? await arquivosMudados(arvore, antes, depois) : null;
+        if (entre !== null && candidata.desfeitos.some((arquivo) => !entre.includes(arquivo))) return await pararPorOscilacao(candidata);
+      }
       for (;;) {
         const acao = registro.planejar(orcamento, disponivel);
         if (acao !== null) {
+          const antesDaAcao = codigo.atual.tree;
           const parada = await executarAcao(acao);
           if (parada) return parada.parar;
           verdesSemProva.clear();
           const efeito = await revalidar(`ação ${estado.actions}`);
+          const mudados = await arquivosMudados(arvore, antesDaAcao, codigo.atual.tree);
+          if (mudados !== null) {
+            registro.anotarArquivos(estado.actions, mudados, codigo.atual.tree);
+            await registro.salvar();
+          }
           if (efeito.invalidadas.length > 0 || efeito.desconhecidas.length > 0) {
             await transicao({
               tipo: "revalidacao",

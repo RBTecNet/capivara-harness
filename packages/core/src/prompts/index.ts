@@ -1,7 +1,7 @@
 export { PROTOCOL_KEYS, languageBlock } from "./language.js";
 export { gapPrompt, interviewPrompt } from "./writer.js";
 export type { AskedQuestion, WriterContext } from "./writer.js";
-export { auditRetryPrompt, auditorPrompt, coherencePrompt, phaseAuditPrompt, rewriteInstruction } from "./auditor.js";
+export { DOCUMENTO_DO_TEMPO, auditRetryPrompt, auditorPrompt, coherencePrompt, phaseAuditPrompt, rewriteInstruction } from "./auditor.js";
 export type { AuditorContext, CoherenceContext, PhaseAuditContext } from "./auditor.js";
 export { BUILDER_COMPLETE_MARKER, BUILDER_FLOW_WRONG_MARKER, acceptancePrompt, conflictPrompt, declarouRoteiroErrado, fixPrompt, implementPrompt, installPrompt } from "./builder.js";
 export type { BuilderContext, ConflictContext, FixContext, InstallContext } from "./builder.js";

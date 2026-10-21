@@ -226,6 +226,12 @@ export interface PhaseFromSliceContext {
    */
   architecture?: string;
   /**
+   * Quando o build percorre os workflows desta fase (§127), derivado da
+   * arquitetura: o contrato que o G4 vai cobrar, entregue antes de o escritor
+   * escrever o primeiro critério — e não descoberto pelo auditor depois.
+   */
+  tempo?: string;
+  /**
    * Decisões fechadas DEPOIS de o esqueleto existir.
    *
    * O esqueleto é escrito das decisões e por isso as carrega — na stack, nas
@@ -293,7 +299,10 @@ export function phaseFromSlicePrompt(context: PhaseFromSliceContext): string {
     "  entry, this phase implements its own files and its criteria verify that the entry exists and",
     "  points at them. When the shared component is among THIS phase's own components, the",
     "  architecture ordered this phase after the others that edit it, and the task does write the",
-    "  registration. A task that says to add, register or edit in a file that another phase without an",
+    "  registration. When this phase's goal leaves the integration of this module to a later phase",
+  "  (it names that phase), this phase builds and exports its own parts and its criteria verify",
+  "  them in isolation: it never wires them into the application and never demands them through",
+  "  the running application. A task that says to add, register or edit in a file that another phase without an",
     "  order between them also edits is rejected mechanically (I-18): phases without a dependency",
     "  between them may run at the same time, and an executor following both texts literally would",
     "  duplicate the entry or clobber the file. The order between phases is the architecture's",
@@ -402,5 +411,6 @@ export function phaseFromSlicePrompt(context: PhaseFromSliceContext): string {
           context.architecture,
         ]
       : []),
+    ...(context.tempo ? ["", context.tempo] : []),
   ].join("\n");
 }

@@ -9,6 +9,7 @@
  * O escritor não paga por um erro de formato de quem o auditou.
  */
 
+import { phaseReferences } from "../contract/phase-references.js";
 import { desgrudarChaves } from "../contract/protocolo.js";
 
 export type AuditStatus = "APPROVED" | "REJECTED";
@@ -78,6 +79,25 @@ export interface AuditDecision {
   decision: string;
   /** As leituras possíveis, ao menos duas, cada uma respondendo a decisão inteira. */
   options: string[];
+  /**
+   * A fase de onde a decisão veio, quando o harness sabe — a auditoria do plano
+   * faz uma chamada por fase (§127). Sem ela, a resposta do desenvolvedor
+   * chegava como achado sem endereço e ia a TODAS as fases. Ela SOMA às fases
+   * que o endereço cita, nunca as substitui (`enderecoDaDecisao`).
+   */
+  phase?: number;
+}
+
+/**
+ * O endereço do achado que leva uma decisão de volta (§127): o `where` do
+ * auditor, com a fase que o levantou na frente quando ele não a cita. A emenda
+ * vai à fase que levantou E às que o endereço nomeia ("P1.T2 e P3.T4"); a
+ * triagem de materialidade põe as mesmas fases na mesa.
+ */
+export function enderecoDaDecisao(decisao: Pick<AuditDecision, "where" | "phase">): string {
+  if (decisao.phase === undefined) return decisao.where;
+  const citadas = phaseReferences(decisao.where);
+  return citadas.includes(decisao.phase) ? decisao.where : `Phase ${decisao.phase} · ${decisao.where}`;
 }
 
 export interface AuditVerdict {

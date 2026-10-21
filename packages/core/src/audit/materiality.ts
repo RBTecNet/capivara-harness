@@ -14,7 +14,7 @@ export function materialityInput(verdict: AuditVerdict, context: {
     ...verdict.findings.map((finding, index) => ({ id: `F${index + 1}`, kind: "finding" as const,
       where: finding.where, claim: finding.problem, proposed: [finding.fix], ...(finding.phase === undefined ? {} : { phase: finding.phase }) })),
     ...(verdict.decisions ?? []).map((decision, index) => ({ id: `D${index + 1}`, kind: "decision" as const,
-      where: decision.where, claim: decision.decision, proposed: decision.options })),
+      where: decision.where, claim: decision.decision, proposed: decision.options, ...(decision.phase === undefined ? {} : { phase: decision.phase }) })),
   ];
   const related = new Set<number>();
   /*
@@ -31,6 +31,8 @@ export function materialityInput(verdict: AuditVerdict, context: {
   }
   for (const decision of verdict.decisions ?? []) {
     for (const number of affectedPhases([{ where: decision.where, problem: "", fix: "" }], context.phases.length)) related.add(number);
+    // A fase que levantou a decisão também vai à mesa (§127), como a do achado.
+    if (decision.phase !== undefined && decision.phase >= 1 && decision.phase <= context.phases.length) related.add(decision.phase);
   }
   return {
     items,

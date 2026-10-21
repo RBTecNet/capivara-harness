@@ -89,13 +89,18 @@ export interface DefectAttempt {
    * medição seguinte pode ser outra (o worktree, depois da cópia limpa).
    */
   changed?: boolean;
+  /** Os arquivos do produto que a ação mudou (§127): é por eles que um reparo que desfaz outro se prova. */
+  files?: string[];
+  /** O conteúdo do código depois da ação (§127): é com ele que "o estado rejeitado voltou" se prova. */
+  tree?: string | null;
 }
 
 export interface Defect {
   defectId: string;
   phaseId: string;
   nature: NaturezaDoDefeito;
-  discovered: { gate: DefectGate; cycle: number; at: string };
+  /** `action`: a última ação de reparo antes de o gate o achar — a que o fez aparecer, se alguma (§127). */
+  discovered: { gate: DefectGate; cycle: number; at: string; action?: number };
   /** Os gates em que ele apareceu, na ordem. */
   gates: DefectGate[];
   severity: "B0" | "B1";
@@ -120,8 +125,8 @@ export interface Defect {
   evidence: string[];
   invalidated: string[];
   handoffs: string[];
-  /** Diagnósticos posteriores ao original, que é imutável no handoff: a evolução, separada. */
-  rediagnoses: { at: string; cycle: number; excerpt: string }[];
+  /** Diagnósticos posteriores ao original, que é imutável no handoff: a evolução, separada. `reopened`/`action`: voltou depois de resolvido, e depois de qual ação (§127). */
+  rediagnoses: { at: string; cycle: number; excerpt: string; reopened?: boolean; action?: number }[];
   diagnosedBy?: { role: "verifier"; purpose?: string; sessionId?: string; log?: string };
   costs: { calls: number; seconds: number; costUsd: number };
   /** A ordem da escada, quando quem chama a fixa (a integração que já passou pelo executor começa pelo verificador). */
@@ -265,6 +270,21 @@ export function citacoes(texto: string): string[] {
   return [...achadas];
 }
 
+/**
+ * Uma citação que é MENSAGEM — "esperava 409, recebeu 500" —, e não um nome:
+ * rota, arquivo, seletor (§127). A ponte entre gates existe para a mesma
+ * mensagem literal citada pelos dois; um nome solto é o que duas exigências
+ * opostas sobre a mesma coisa têm em comum. No Luna, "/categorias" uniu o
+ * fluxo 3 que pedia a página registrada e o critério do G3 que proibia o
+ * registro num defeito só.
+ */
+function ehMensagem(citacao: string): boolean {
+  const palavras = citacao.split(/\s+/u).filter((palavra) => /\p{L}{2,}/u.test(palavra));
+  // O código de erro também é mensagem, mesmo de um token só (citações chegam em minúsculas).
+  const codigo = citacao.split(/\s+/u).some((token) => /^(?:[a-z][a-z0-9]*(?:_[a-z0-9]+){2,}|e(?:connrefused|connreset|addrinuse|noent|acces|perm|timedout|pipe|notfound))$/u.test(token));
+  return codigo || (citacao.length >= 16 && palavras.length >= 3);
+}
+
 function grupoDaNatureza(natureza: NaturezaDoDefeito): string {
   // A falha da árvore integrada é outra prova (cópia limpa), com outra escada: não casa com a suíte do worktree.
   if (natureza === "integracao-teste") return "integracao";
@@ -306,8 +326,8 @@ export function mesmoDefeito(existente: Defect, achado: DefeitoEncontrado): bool
     if (grupoAchado === "engine" || grupoAchado === "integracao") return existente.status !== "RESOLVED";
     return false;
   }
-  const antes = new Set(existente.anchors.quotes ?? []);
-  return (achado.anchors.quotes ?? []).some((citacao) => antes.has(citacao));
+  const antes = new Set((existente.anchors.quotes ?? []).filter(ehMensagem));
+  return (achado.anchors.quotes ?? []).some((citacao) => ehMensagem(citacao) && antes.has(citacao));
 }
 
 /** O orçamento gasto no ciclo corrente, derivado das tentativas. */
@@ -479,7 +499,7 @@ export class RegistroDeDefeitos {
       if (achado.hypothesis) existente.hypothesis = achado.hypothesis;
       if (achado.evidenceId) existente.evidence.push(achado.evidenceId);
       if (achado.diagnosedBy) existente.diagnosedBy = achado.diagnosedBy;
-      existente.rediagnoses.push({ at, cycle: this.estado.cycle, excerpt: achado.detail.slice(0, 2000) });
+      existente.rediagnoses.push({ at, cycle: this.estado.cycle, excerpt: achado.detail.slice(0, 2000), ...(reaberto ? { reopened: true, action: this.estado.actions } : {}) });
       if (reaberto) existente.status = "OPEN";
       return { defeito: existente, novo: false, reaberto };
     }
@@ -488,7 +508,7 @@ export class RegistroDeDefeitos {
       defectId: `${this.estado.phaseId}-D${this.estado.seq}`,
       phaseId: this.estado.phaseId,
       nature: achado.nature,
-      discovered: { gate: achado.gate, cycle: this.estado.cycle, at },
+      discovered: { gate: achado.gate, cycle: this.estado.cycle, at, action: this.estado.actions },
       gates: [achado.gate],
       severity: achado.severity ?? "B1",
       anchors: { ...achado.anchors, signature: assinatura },
@@ -649,6 +669,17 @@ export class RegistroDeDefeitos {
     return action;
   }
 
+  /** Os arquivos que a ação mudou e o conteúdo em que ela deixou o código, gravados na tentativa de cada defeito que ela tratou (§127). */
+  anotarArquivos(action: number, arquivos: readonly string[], tree: string | null): void {
+    for (const defeito of this.estado.defects) {
+      for (const tentativa of defeito.attempts) {
+        if (tentativa.action !== action) continue;
+        tentativa.files = [...arquivos];
+        tentativa.tree = tree;
+      }
+    }
+  }
+
   /** A tentativa terminou; o defeito espera a validação pelo gate que o achou. */
   aguardarValidacao(defeitos: readonly Defect[]): void {
     for (const defeito of defeitos) if (defeito.status === "REPAIRING") defeito.status = "AWAITING_VALIDATION";
@@ -669,6 +700,84 @@ export class RegistroDeDefeitos {
   escalar(defeito: Defect): void {
     if (ATIVOS.has(defeito.status)) defeito.status = "ESCALATED";
   }
+}
+
+/**
+ * Dois gates puxando o mesmo código para lados opostos (§127).
+ *
+ * No Luna a P04 pôs e tirou a integração de categorias quatro vezes: o G4
+ * exigia a página e a API na aplicação, o G3 exigia o critério "exportar o
+ * roteador sem registrá-lo no servidor central", e cada reparo de um desfazia
+ * o do outro. A escada não via, porque cada lado parecia progredir; o que
+ * parou a fase foi o teto de ciclos, depois de 28 chamadas.
+ *
+ * Estado que volta não basta — código volta a um estado anterior por razões
+ * legítimas. O que se exige é a REVERSÃO CAUSAL, toda ela registrada: uma ação
+ * contra o defeito X (de um gate) mudou arquivos e o defeito Y (de outro gate)
+ * apareceu; a ação que resolveu Y mudou arquivos que aquela tinha mudado, e X
+ * continuou exigindo outra ação; essa nova ação contra X mexeu de novo nos
+ * arquivos do reparo de Y — e Y voltou, o MESMO defeito (identidade estável).
+ * Três reparos, dois gates, os mesmos arquivos — e quem confirma é o Core,
+ * com o Git: depois da terceira ação, os arquivos que o reparo de Y mudou
+ * voltaram ao conteúdo EXATO que Y rejeitou. É incompatibilidade provável entre
+ * os critérios, não regressão comum, que um reparo desajeitado produz uma vez
+ * e o seguinte conserta com outro conteúdo.
+ *
+ * Só entre os dois gates que trazem critério do PLAN: a task do G3 e o fluxo
+ * do G4 (produto ou critério). A suíte do G2 é escrita pelo próprio executor
+ * (I-16: o plano não prescreve teste), e o roteiro, a subida e a ferramenta do
+ * G4 são do build: nenhum deles é contradição que o PLAN reconcilie.
+ */
+const NATUREZAS_DO_PLANO: ReadonlySet<NaturezaDoDefeito> = new Set(["task", "fluxo-produto", "fluxo-criterio"]);
+
+export interface Oscilacao {
+  /** O defeito que voltou: a exigência que o reparo do outro desfez. */
+  voltou: Defect;
+  /** O defeito cujo reparo o trouxe de volta, de outro gate. */
+  por: Defect;
+  /** A ação contra `por` depois da qual `voltou` apareceu; a que resolveu `voltou`; a que o trouxe de volta. */
+  acoes: [number, number, number];
+  arquivos: string[];
+  /** Os arquivos que a ação contra Y mudou e a terceira ação tocou de novo: é neles que o estado rejeitado tem de ter voltado. */
+  desfeitos: string[];
+  /** O código depois da primeira e da terceira ação, para a conferência do Git. */
+  arvores: [string | null, string | null];
+}
+
+export function oscilacaoEntreGates(estado: EstadoDaRecuperacao, voltou: Defect): Oscilacao | null {
+  const n3 = estado.actions;
+  if (n3 < 1 || !NATUREZAS_DO_PLANO.has(voltou.nature)) return null;
+  const tentativasDa = (acao: number): { defeito: Defect; tentativa: DefectAttempt }[] =>
+    estado.defects.flatMap((defeito) => defeito.attempts.filter((tentativa) => tentativa.action === acao).map((tentativa) => ({ defeito, tentativa })));
+  const arquivosDa = (acao: number): Set<string> => new Set(tentativasDa(acao).flatMap(({ tentativa }) => tentativa.files ?? []));
+  const alvosDa = (acao: number): Defect[] => tentativasDa(acao).map(({ defeito }) => defeito);
+  const gateDe = (defeito: Defect): DefectGate => defeito.gates.at(-1) ?? defeito.discovered.gate;
+  const comuns = (a: Set<string>, b: Set<string>): string[] => [...a].filter((arquivo) => b.has(arquivo));
+
+  // A ação que acabou de rodar não tratou Y, e mexeu nos arquivos da ação que o tinha resolvido.
+  if (alvosDa(n3).includes(voltou)) return null;
+  const resolvida = [...voltou.attempts].reverse().find((tentativa) => tentativa.result === "resolved" && tentativa.action < n3);
+  if (!resolvida) return null;
+  const n2 = resolvida.action;
+  const desfez = comuns(arquivosDa(n2), arquivosDa(n3));
+  if (desfez.length === 0) return null;
+
+  const aparicoes = [voltou.discovered.action, ...voltou.rediagnoses.filter((item) => item.reopened).map((item) => item.action)]
+    .filter((acao): acao is number => acao !== undefined && acao >= 1 && acao < n2);
+  const gatesDoPlano = new Set<DefectGate>(["G3", "G4"]);
+  for (const { defeito: por, tentativa } of tentativasDa(n3)) {
+    if (por === voltou || tentativa.gate === gateDe(voltou) || !NATUREZAS_DO_PLANO.has(por.nature)) continue;
+    if (!gatesDoPlano.has(tentativa.gate) || !gatesDoPlano.has(gateDe(voltou))) continue;
+    for (const n1 of aparicoes) {
+      const contraX = tentativasDa(n1).some(({ defeito, tentativa: anterior }) => defeito === por && anterior.gate === tentativa.gate);
+      if (!contraX || alvosDa(n1).includes(voltou)) continue;
+      const exigiu = comuns(arquivosDa(n1), arquivosDa(n2));
+      if (exigiu.length === 0) continue;
+      const arvoreDe = (acao: number): string | null => tentativasDa(acao).find(({ tentativa: cada }) => cada.tree !== undefined)?.tentativa.tree ?? null;
+      return { voltou, por, acoes: [n1, n2, n3], arquivos: [...new Set([...exigiu, ...desfez])].sort(), desfeitos: desfez.sort(), arvores: [arvoreDe(n1), arvoreDe(n3)] };
+    }
+  }
+  return null;
 }
 
 /**

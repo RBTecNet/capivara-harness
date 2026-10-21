@@ -12,8 +12,8 @@ import { appendFile, mkdir, readFile, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { sha12 } from "../contract/stamps.js";
-import { workflowsForPhase, type Architecture, type Skeleton, type SkeletonWorkflow } from "../contract/index.js";
-import { vincularArquitetura } from "./arquitetura.js";
+import { cobreWorkflow, workflowsForPhase, type Adiamento, type Architecture, type Disponibilidade, type Skeleton, type SkeletonWorkflow } from "../contract/index.js";
+import { disponibilidadeNoBuild, vincularArquitetura } from "./arquitetura.js";
 import { LivroDeEvidencias } from "./evidencias.js";
 import { orcamentoEfetivo, type OrcamentoDaRecuperacao } from "./defeitos.js";
 import type { ContratoDaRetomada } from "../provider/cli/types.js";
@@ -658,10 +658,40 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
      */
     const fluxosCumpridos: SkeletonWorkflow[] = [];
 
+    /*
+     * Quando cada fluxo pode ser cobrado (§127): a mesma derivação que o plano
+     * usou para escrever e auditar. A fase cobra os fluxos que cobre — menos os
+     * que o plano deixa EXPLICITAMENTE para uma fase posterior que também os
+     * cobre e espera por ela (o texto da fase a nomeia; ou o caminho do fluxo
+     * pela arquitetura só fica de pé lá). No Luna a P4 cobria o workflow 3 e
+     * dizia "pronta para a integração … na fase 6", e o G4 o cobrou na P4.
+     */
+    const disponibilidade: Disponibilidade | null = esqueleto === null ? null : disponibilidadeNoBuild(esqueleto, arquitetura.tempo());
+    const cobradosNaFase = (phaseNumber: number): SkeletonWorkflow[] => {
+      if (esqueleto === null) return [];
+      const cobrados = new Set(disponibilidade?.cobrados(phaseNumber) ?? []);
+      return workflowsForPhase(esqueleto, phaseNumber).filter((workflow) => cobrados.has(workflow.number));
+    };
+    // O que a guarda final acusaria já se sabe aqui: o fluxo que nenhuma fase cobre é dito antes da primeira fase.
+    if (esqueleto !== null) {
+      const descobertos = esqueleto.workflows.filter((workflow) => !esqueleto.phases.some((phase) => cobreWorkflow(phase.covers, workflow.number)));
+      for (const workflow of descobertos) {
+        announce(`aviso: o fluxo ${workflow.number} (${workflow.name}) não é coberto por fase nenhuma do plano; o build não declara a aplicação concluída sem ele — corrija o plano (\`capivara plan\`)`);
+      }
+    }
+    const adiadosDaFase = (phaseNumber: number): { workflow: SkeletonWorkflow; adiamento: Adiamento }[] =>
+      esqueleto === null || disponibilidade === null
+        ? []
+        : disponibilidade.adiados(phaseNumber).flatMap((adiamento) => {
+            const workflow = esqueleto.workflows.find((cada) => cada.number === adiamento.workflow);
+            return workflow ? [{ workflow, adiamento }] : [];
+          });
+
     const fluxosDaFase =
       esqueleto !== null
         ? (phaseNumber: number) => ({
-            workflows: workflowsForPhase(esqueleto, phaseNumber),
+            workflows: cobradosNaFase(phaseNumber),
+            ...(adiadosDaFase(phaseNumber).length > 0 ? { adiados: adiadosDaFase(phaseNumber) } : {}),
             /*
              * TODOS os cumpridos, na ordem em que foram cumpridos — inclusive os
              * que esta fase cobre de novo (§103). A passagem roda em sequência
@@ -921,7 +951,8 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
     const cumpridoEm = new Map<string, string>();
     const cumprir = (session: PhaseSession, fechadaEm: string | undefined): void => {
       if (esqueleto === null) return;
-      for (const workflow of workflowsForPhase(esqueleto, session.number)) {
+      // Só o que a fase cobrou: o fluxo que ela deixou para depois não passou aqui, e não é regressão de ninguém ainda (§127).
+      for (const workflow of cobradosNaFase(session.number)) {
         if (fluxosCumpridos.some((cumprido) => cumprido.number === workflow.number)) continue;
         const anterior = fluxosCumpridos.at(-1);
         fluxosCumpridos.push(workflow);
@@ -960,6 +991,17 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
      */
     /** As fases fechadas que voltam só para revalidação documental (§125). */
     const revalidarFase = new Map<string, string>();
+    /**
+     * A fase fechou antes e nada a reabre: mesmo texto, mesma fatia, commit no
+     * histórico. É a pergunta que `pularSeFechada` faz, sem os efeitos — o
+     * paralelo a faz para todas as fases antes de rodar qualquer uma (§127).
+     */
+    const fechadaIntacta = (session: PhaseSession): boolean => {
+      const registrada = shaFechado.get(shaDaFase(session.markdown));
+      if (!registrada) return false;
+      if (registrada.sliceSha12 !== undefined && registrada.sliceSha12 !== (arquitetura.fatia(session.number)?.sha12 ?? "")) return false;
+      return registrada.semCommit !== true && historicoDaFechada.get(registrada.sha) !== false;
+    };
     const pularSeFechada = (session: PhaseSession): boolean => {
       const registrada = shaFechado.get(shaDaFase(session.markdown));
       const fatiaAtual = arquitetura.fatia(session.number);
@@ -987,6 +1029,26 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
       if (fechadaAntes && noHistorico === false) {
         announce(`[${session.id}] fechada no run ${fechadaAntes.runId} com este mesmo texto, mas o commit em que ela fechou (${fechadaAntes.head!.slice(0, 12)}) não está no histórico do HEAD; volta a ser verificada, sem nova implementação`);
         revalidarFase.set(session.id, `o commit em que a fase fechou no run ${fechadaAntes.runId} não está no histórico do HEAD`);
+        return false;
+      }
+      /*
+       * O fluxo que outra fase deixou para esta (§127). Se a que o deixou roda
+       * de novo — um `change` mudou um critério dela —, a prova que esta fase
+       * tirou do fluxo é de outro código, e pular esta fase deixaria o fluxo
+       * sem ser percorrido em lugar nenhum: ela volta a ser verificada, sem
+       * implementação, e o G4 dela o percorre sobre o código novo.
+       */
+      const deixadosAqui = (disponibilidade?.todosAdiados() ?? []).filter((adiado) => {
+        if (adiado.para !== session.number || !fechadaAntes) return false;
+        const origem = checked.sessions.find((outra) => outra.number === adiado.fase);
+        if (origem === undefined) return false;
+        // A origem roda nesta execução, ou fechou DEPOIS desta (numa execução anterior deste run): a prova desta é de código velho.
+        return !fechadaIntacta(origem) || (shaFechado.get(shaDaFase(origem.markdown))?.closedAt ?? "") > fechadaAntes.closedAt;
+      });
+      if (fechadaAntes && !done.has(session.id) && deixadosAqui.length > 0) {
+        const motivo = `${deixadosAqui.map((adiado) => `o fluxo ${adiado.workflow}, que a P${String(adiado.fase).padStart(2, "0")} deixa para esta fase,`).join(" e ")} volta a ser percorrido: a fase de origem roda de novo nesta execução`;
+        announce(`[${session.id}] fechada no run ${fechadaAntes.runId} com este mesmo texto, mas ${motivo}; volta a ser verificada, sem nova implementação`);
+        revalidarFase.set(session.id, motivo);
         return false;
       }
       if (!done.has(session.id) && fechadaAntes) {
@@ -1178,6 +1240,32 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
       const primeira = phases.find((fase) => !fechadas.has(fase.id))?.outcome ?? null;
       await registrarEstado(phases, checked.sessions, primeira);
       return { runId, exitCode: 2, phases, warnings: checked.warnings, errors: [detalhe], acceptance: null };
+    }
+
+    /*
+     * Nenhum fluxo fica devendo (§127): o que uma fase deixou para outra tem de
+     * ter passado na que o completa. Pela derivação, a fase de destino o cobre
+     * e o percorre; se, por qualquer caminho, ele não passou, a aplicação não é
+     * declarada concluída com um fluxo obrigatório nunca percorrido.
+     */
+    if (esqueleto !== null) {
+      const cumpridos = new Set(fluxosCumpridos.map((workflow) => workflow.number));
+      const adiados = disponibilidade?.todosAdiados() ?? [];
+      const fase = (numero: number): string => `P${String(numero).padStart(2, "0")}`;
+      const devidos = esqueleto.workflows.filter((workflow) => !cumpridos.has(workflow.number)).map((workflow) => {
+        const adiado = adiados.find((cada) => cada.workflow === workflow.number);
+        return adiado
+          ? `o fluxo ${workflow.number} (${workflow.name}), que a ${fase(adiado.fase)} deixou para a ${fase(adiado.para)}, nunca passou no gate 4`
+          : `o fluxo ${workflow.number} (${workflow.name}) nunca foi percorrido: nenhuma fase o cobrou`;
+      });
+      const unicos = [...new Set(devidos)];
+      if (unicos.length > 0) {
+        const detalhe = `fluxo obrigatório pendente: ${unicos.join("; ")}`;
+        announce(`aplicação NÃO concluída — ${detalhe}`);
+        await appendEvent(paths.events, { timestamp: now().toISOString(), stage: "implement", subject: "-", attempt: 1, status: "paused", detail: detalhe });
+        await registrarEstado(phases, checked.sessions, null);
+        return { runId, exitCode: 2, phases, warnings: checked.warnings, errors: [detalhe], acceptance: null };
+      }
     }
 
     await registrarEstado(phases, checked.sessions, null);

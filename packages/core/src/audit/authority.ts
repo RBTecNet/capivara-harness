@@ -31,7 +31,7 @@
  * duas opções — rara, e tratada pelo plano como engenharia.
  */
 
-import type { AuditDecision, Finding } from "./protocol.js";
+import { enderecoDaDecisao, type AuditDecision, type Finding } from "./protocol.js";
 
 export type Autoridade = "engenharia" | "indefinida";
 
@@ -111,7 +111,7 @@ export function comNotaDeEngenharia(finding: Finding): Finding {
  */
 export function decisaoDeEngenhariaComoFinding(decision: AuditDecision): Finding {
   return {
-    where: decision.where,
+    where: enderecoDaDecisao(decision),
     problem: `o auditor levantou como decisão do desenvolvedor uma escolha de engenharia: ${decision.decision}`,
     fix:
       "é o plano que decide: escolha a leitura compatível com a arquitetura e com o contrato da fase que o fixa, aplique-a em todas as fases envolvidas e deixe o documento sem contradição. " +

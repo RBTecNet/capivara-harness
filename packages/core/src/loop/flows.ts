@@ -645,6 +645,21 @@ export function fluxosQueFalharam(output: string, workflows: readonly SkeletonWo
   return workflows.filter((workflow) => falhos.has(workflow.number)).map((workflow) => workflow.number);
 }
 
+/**
+ * O passo do roteiro em que o fluxo falhou, lido da saída do Playwright
+ * (`… › workflow-3.spec.ts:23:1 › … › passo 1: Cadastrar…`) — determinístico,
+ * ao contrário do endereço que a triagem escreve em prosa (§127).
+ */
+export function passoQueFalhou(output: string, workflow: string): number | null {
+  const arquivo = flowScriptName(workflow);
+  for (const linha of output.split("\n")) {
+    if (!linha.includes(arquivo)) continue;
+    const casou = /›\s*passo\s+(\d+)(?:\s*:|\s*$)/iu.exec(linha);
+    if (casou) return Number(casou[1]);
+  }
+  return null;
+}
+
 export type FlowGateResult =
   /**
    * `output` é a saída crua do runner, quando ele chegou a correr.

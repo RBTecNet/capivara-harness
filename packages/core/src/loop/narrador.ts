@@ -28,6 +28,8 @@ export type TipoDeTransicao =
   | "revalidacao"
   | "preservada"
   | "nao-aplicavel"
+  | "adiado"
+  | "oscilacao"
   | "ciclo"
   | "retomada"
   | "conflito"
@@ -87,6 +89,8 @@ const ROTULO: Record<TipoDeTransicao, string> = {
   revalidacao: "revalidação",
   preservada: "evidência preservada",
   "nao-aplicavel": "não aplicável",
+  adiado: "fluxo adiado",
+  oscilacao: "oscilação entre gates",
   ciclo: "novo ciclo",
   retomada: "retomada",
   conflito: "integração",

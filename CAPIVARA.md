@@ -72,8 +72,13 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-Na versão 0.6.2, `npm run check` passa: build, typecheck e **2725 testes** (2866 na `feat/build-vnext`, com o BUILD vNext da §125), incluindo o catálogo de
+Na versão 0.7.0, `npm run check` passa: build, typecheck e **2866 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
+
+A 0.7.0 é a reformulação do `build` (§125): a fatia da arquitetura vai ao
+executor e ao verificador, cada prova fica registrada e só perde a validade
+quando a correção a atinge, os defeitos têm identidade e orçamento próprios, e
+o reparo do verificador deixa handoff. Planos e runs da 0.6.x continuam valendo.
 
 A 0.6.0 é a reformulação do `init` e do `plan` (§116): o `plan` decide a
 arquitetura e a infraestrutura antes de escrever fases (`architecture.md`,

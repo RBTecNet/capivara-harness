@@ -2,8 +2,9 @@
 
 Do prompt à aplicação final, em três comandos.
 
-Versão **0.6.2**: planejamentos de versões anteriores são incompatíveis.
-O plano deixou de prescrever testes (`capivara-phases/v2`) e passou a vir com a
+Versão **0.7.0**: o `build` recupera por defeito e revalida só a prova que a
+correção atingiu (§125). Planos e runs da 0.6.x continuam valendo.
+Planejamentos da 0.5.0 e anteriores são incompatíveis: o plano deixou de prescrever testes (`capivara-phases/v2`) e passou a vir com a
 arquitetura e a infraestrutura decididas pelo `plan` (`capivara-planning/v3`).
 Em projetos existentes, gere novamente com `capivara init --fresh` e depois
 `capivara plan --fresh` antes de executar o build. Código, dados e evidências

@@ -15,7 +15,7 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 | | |
 |---|---|
 | branch | `main`; o BUILD vNext (§125) está em `feat/build-vnext`, sobre a `fix/triagem-124`, sem merge |
-| versão | 0.6.2 (`capivara --version`); planos da 0.5.0 e anteriores incompatíveis, ver §116 e §115.26 |
+| versão | 0.7.0 (`capivara --version`) na `feat/build-vnext`, 0.6.2 na `main`; planos da 0.6.x valem na 0.7.0; os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
 | suíte | 2866 testes em 152 arquivos na `feat/build-vnext`, `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |

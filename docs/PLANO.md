@@ -11445,5 +11445,6 @@ rodou modelo.
   ganhou `tree` e `contratoSha` opcionais, `run.json` ganhou `budgets`
   opcional, `integracoes/<Pxx>.json` ganhou a versão 2 (o leitor aceita a 1).
   Runs anteriores são lidos como antes; nenhuma migração é necessária. A
-  mudança de comportamento é grande o bastante para uma versão nova
-  (0.7.0), que não foi publicada.
+  mudança de comportamento leva a versão a 0.7.0 (nesta branch, sem
+  publicação); o carimbo do `environment.json` grava a versão mas não a
+  confere, então planos da 0.6.x entram no build da 0.7.0.

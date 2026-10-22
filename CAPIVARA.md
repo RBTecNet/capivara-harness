@@ -72,8 +72,14 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-Na versão 0.7.3, `npm run check` passa: build, typecheck e **3020 testes**, incluindo o catálogo de
+Na versão 0.7.4, `npm run check` passa: build, typecheck e **3052 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
+
+A 0.7.4 entrega a fase grande ao executor em partes (§130): acima de 15
+critérios, a implementação vira sessões novas com grupos contíguos das tasks, na
+ordem do plano e no texto exato do plano, e os gates G2–G4 julgam a fase inteira
+depois da última parte. A fase que cabe numa sessão vai como antes. Planos e runs
+da 0.7.3 continuam valendo.
 
 A 0.7.3 acerta a fronteira dos testes e das dependências que o Parallel Lab em
 `laravel/claude` mostrou na 0.7.2 (§129): o plano não planeja teste em forma

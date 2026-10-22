@@ -2,9 +2,10 @@
 
 Do prompt à aplicação final, em três comandos.
 
-Versão **0.7.3**: o `build` recupera por defeito e revalida só a prova que a
-correção atingiu (§125), e cobra cada fluxo quando o plano diz que ele existe
-(§127); o `plan` mantém a correção que o achado alcança e a fase que a
+Versão **0.7.4**: o `build` recupera por defeito e revalida só a prova que a
+correção atingiu (§125), cobra cada fluxo quando o plano diz que ele existe
+(§127) e entrega a fase grande ao executor em partes, julgando-a inteira (§130);
+o `plan` mantém a correção que o achado alcança e a fase que a
 reorganização não tocou (§128), não planeja teste, escolhe todas as dependências
 do projeto — as de teste incluídas — e não devolve por teste (§129). Planos e
 runs da 0.6.x e da 0.7.x continuam valendo. O contrato dos três estágios está em

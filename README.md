@@ -2,11 +2,13 @@
 
 Do prompt à aplicação final, em três comandos.
 
-Versão **0.7.2**: o `build` recupera por defeito e revalida só a prova que a
+Versão **0.7.3**: o `build` recupera por defeito e revalida só a prova que a
 correção atingiu (§125), e cobra cada fluxo quando o plano diz que ele existe
 (§127); o `plan` mantém a correção que o achado alcança e a fase que a
-reorganização não tocou (§128). Planos e runs da 0.6.x e da 0.7.x continuam
-valendo.
+reorganização não tocou (§128), não planeja teste, escolhe todas as dependências
+do projeto — as de teste incluídas — e não devolve por teste (§129). Planos e
+runs da 0.6.x e da 0.7.x continuam valendo. O contrato dos três estágios está em
+[`docs/CONTRATO.md`](docs/CONTRATO.md).
 Planejamentos da 0.5.0 e anteriores são incompatíveis: o plano deixou de prescrever testes (`capivara-phases/v2`) e passou a vir com a
 arquitetura e a infraestrutura decididas pelo `plan` (`capivara-planning/v3`).
 Em projetos existentes, gere novamente com `capivara init --fresh` e depois
@@ -358,8 +360,9 @@ de reabrir uma regressão real.
 
 Com um verificador via CLI, o build também permite uma sessão de reparo por
 fase, por padrão. Nessa sessão separada, o verificador pode corrigir código,
-fortalecer testes e instalar dependências do projeto que o construtor não
-conseguiu preparar. Depois, o Core executa novamente a suíte, uma nova
+fortalecer testes e instalar as dependências declaradas do projeto que o
+construtor não conseguiu preparar — nunca uma que a infraestrutura aprovada não
+declare (§129). Depois, o Core executa novamente a suíte, uma nova
 verificação somente leitura e os fluxos. O reparador não aprova sua própria
 alteração nem faz commits. `--max-verifier-repairs 0` desliga os reparos;
 valores de 1 a 10 definem o orçamento por fase. Com API direta, o verificador

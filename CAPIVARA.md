@@ -72,8 +72,16 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-Na versão 0.7.2, `npm run check` passa: build, typecheck e **2989 testes**, incluindo o catálogo de
+Na versão 0.7.3, `npm run check` passa: build, typecheck e **3020 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
+
+A 0.7.3 acerta a fronteira dos testes e das dependências que o Parallel Lab em
+`laravel/claude` mostrou na 0.7.2 (§129): o plano não planeja teste em forma
+nenhuma — o que o pedido diz sobre testes fica nas regras "testes…" do esqueleto,
+que só o build lê —; a infraestrutura do plano escolhe todas as dependências, as
+de teste incluídas, e o build instala só as declaradas; nenhuma auditoria do plano
+devolve, pergunta ou pede teste. O contrato dos três estágios está em
+`docs/CONTRATO.md`. Planos e runs da 0.7.2 continuam valendo.
 
 A 0.7.2 corrige a convergência do PLAN que o Parallel Lab no Luna mostrou na
 0.7.1 (§128): a emenda guarda a correção que o achado alcança pelos caminhos

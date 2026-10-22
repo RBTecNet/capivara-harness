@@ -14,12 +14,60 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `main`, só ela: em 21/10/2026 a cadeia §122–§128 (com o BUILD vNext, §125) entrou na `main` por fast-forward e as outras branches foram apagadas, local e remotamente — todas já estavam contidas na `main` |
-| versão | 0.7.2 (`capivara --version`) na `main` (§125–§128); planos da 0.6.x e da 0.7.x valem na 0.7.2; os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
-| suíte | 2989 testes em 161 arquivos na `main` (2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
+| branch | `fix/testes-so-no-build-129` (§129, 0.7.3, push feito, sem merge) sobre a `main`; na `main`, a cadeia §122–§128 entrou por fast-forward em 21/10/2026 e as outras branches foram apagadas |
+| versão | 0.7.3 na branch da §129, 0.7.2 na `main`; planos da 0.6.x e da 0.7.x valem na 0.7.3 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
+| suíte | 3020 testes em 163 arquivos na branch da §129 (2989 em 161 na `main`; 2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-21 — o plano não planeja teste, escolhe todas as dependências, e teste não é motivo de devolução (§129)
+
+O Parallel Lab em `laravel/claude` (`init-dc741f0d7b92`, 0.7.2) parou na rodada
+4 do PLAN — o auditor da P3 respondeu três vezes com "·" no lugar do "|" e o
+`auditCall` bloqueou, fail-closed — mas o que fez as rodadas existirem foi a
+rodada 2: nove achados, seis sobre teste (três tasks de teste a tirar com "o
+requisito como critério" no lugar, e a P3 reprovada por NÃO ter o critério de
+testes), e a triagem manteve os nove. A causa era o harness: a regra do
+planejamento (o parágrafo F5 da §128) mandava carregar o requisito de testes do
+pedido no componente e num critério, o esqueleto o pôs na stack, em regras e no
+goal das fases, o auditor da arquitetura tratava a ausência como defeito, a dica
+da I-16 dizia "mova-o", e a I-16 não contava "o módulo tem os seus próprios
+testes automatizados". Decisões do Bruno no mesmo dia: o plano não planeja teste
+em forma nenhuma; o pedido de testes é instrução ao build, como compilar; TODAS as
+dependências do projeto, as de teste incluídas, são escolha do PLAN, e o BUILD
+usa só as declaradas; teste não é motivo de devolução. Veio junto uma instrução
+de restrição de escopo: inspecionar antes, usar os contratos existentes, corrigir
+só o comprovado.
+
+Agora: `testRequirements` conta o requisito de teste dentro do plano (I-16 nas
+fases, no esqueleto e na arquitetura), com qualificador de software para não pegar
+produto; o pedido de testes fica nas regras "testes…" e na stack, que o build já
+lia pelo contrato compartilhado, e o plano não o lê (`skeletonForPlanning`,
+também para esqueletos já publicados); `tirarPedidoDeTeste`, na saída de
+`auditCall`, tira o achado, a ressalva e a decisão que pedem teste e deixa o que
+manda tirar teste do texto; Vitest e Playwright ficam na infraestrutura da
+arquitetura, e a I-16 das fases aceita declará-los no manifesto; no build, o
+executor, o reparo, o G2 e o G4 instalam só o declarado, e a dependência não
+prevista vai ao plano pelo `UPSTREAM:` do verificador. Nenhum campo, formato,
+estado ou canal novo: o `skeleton.md` se lê byte a byte como antes. Uma revisão
+adversarial (um agente) achou treze defeitos na primeira versão — o detector
+contando texto de escola, laboratório, A/B e QA; o filtro aprovando fase por
+citar `teste.nota_minima`; a correção que tira só lida no começo da frase; "mova o
+requisito" sobrevivendo; o pedido de testes podendo sumir; a decisão de
+ferramenta descartada — todos os reproduzidos corrigidos com cenário. Detalhe e
+matriz na §129; 30 cenários em `test/contract/testes-no-build-129.spec.ts` e
+`test/init/testes-no-build-129.spec.ts`, com os textos do run
+(`test/fixtures/parallel-lab-129.*`); os 4 do orquestrador RED contra `e9c4431`
+(o cenário da P3 termina em impasse na base). Os cenários anteriores que
+codificavam a doutrina antiga foram reescritos; as fixtures do Luna e do
+Parallel Lab 128 chegam limpas aos cenários de outros mecanismos por
+`test/support/sem-testes.ts`. Validado só com provider falso. Versão 0.7.3 na
+branch `fix/testes-so-no-build-129`, com push; sem merge na `main`. O contrato
+completo dos três estágios, com o fluxograma, está em `docs/CONTRATO.md`.
+
+O resumo de funcionamento do Bruno foi conferido contra o build: ver "O que o
+resumo pede e o build ainda não faz", abaixo.
 
 ## 2026-10-21 — convergência do PLAN: a correção que o achado alcança fica, a fase que a reorganização não tocou também (§128)
 
@@ -763,6 +811,34 @@ colunas saiu — ele fazia o terminal estreito quebrar linha e invalidar a conta
 que a região viva usa para redesenhar.
 
 ## O que NÃO está feito
+
+### O que o resumo pede e o build ainda não faz (21/10/2026)
+
+O resumo do Bruno conferido contra o código do build (matriz completa na §129.4).
+A fronteira de dependências foi ajustada na §129; o resto foi preservado, de
+propósito, por ser contrato ou por não haver evidência de custo em run:
+
+1. **As dependências são validadas a cada `capivara build`, não uma vez por
+   projeto** (§115.25: "a aprovação vale para esta execução"); dentro do run, as
+   fases recebem o ambiente aprovado (`loop/build.ts:904`). O seed do `.env` e a
+   migração rodam antes de todo G2 e de toda passagem do G4, de propósito.
+2. **O ajuste das dependências com o agente é estreito**: só os pré-requisitos de
+   sistema do `environment.json`, em terminal interativo, em até 2 rodadas
+   (`loop/build.ts:431-497`); a preparação do projeto e do Chromium param na
+   primeira falha, sem agente (`loop/environment-prepare.ts`).
+3. **A fase vai inteira numa sessão** (até 15 tasks e 60 critérios); o PLAN a
+   dimensiona para modelo econômico, mas não há entrega gradual em pedaços.
+4. **O G4 para no primeiro fluxo que falha** (os roteiros são encadeados), e as
+   falhas do G4 chegam uma por vez.
+5. **A regressão volta ao G2** depois de uma correção do G3/G4 que muda código: é
+   a revalidação por impacto (a suíte prova o produto inteiro), exigida pelo
+   contrato. Mudar isso é decisão do Bruno.
+6. **Reparo upstream**: o PLAN não consome o pacote (por desenho, §125); a
+   alegação `UPSTREAM:` pode vir do trecho do último rediagnóstico, que num
+   defeito do G2 é a saída da suíte; a recuperação sugerida depois de documento
+   mudado é `init --fresh`, que não reaproveita as respostas da entrevista.
+
+### O que já estava pendente
 
 Em ordem de importância, não de esforço:
 

@@ -12616,3 +12616,275 @@ gate de prontidão no `plan` seguinte, que é o certo. O run do Luna terminou
   "as fases de tarefas e de categorias correm juntas", mede a concorrência
   pelo relógio e falha cerca de uma vez em quatro com a máquina carregada,
   também na base.
+
+## §129 — O plano não planeja teste, escolhe todas as dependências, e teste não é motivo de devolução
+
+### 129.1 A evidência: Parallel Lab em `laravel/claude` (0.7.2)
+
+Run `init-dc741f0d7b92` (21/10, 23:24–23:33 UTC), 0.7.2 (§128 inclusa). O
+PLAN parou na rodada 4: o auditor da P3 respondeu três vezes (auditor, auditor,
+verifier) com "·" no lugar do primeiro "|" do protocolo, e `auditCall` lançou
+`InitBlockedError` — fail-closed correto, sobre um erro de digitação
+(`ppagina`) que o escritor da P3 introduziu na emenda da rodada 3. O que fez as
+rodadas existirem foi a rodada 2: **nove achados, seis sobre teste, e a triagem
+manteve os nove**.
+
+- P4 (sub-fase 4.3 "Testes próprios do módulo"), P5 (5.3 "Testes do módulo") e
+  P6 (task "Garantir que o dashboard do módulo tenha testes automatizados
+  próprios"): tasks de teste. Os auditores mandaram tirar — e pôr no lugar um
+  critério "o módulo tem testes automatizados próprios…" numa task de produto.
+- P3: reprovada porque o requisito de testes do módulo estava "só no Goal" e
+  "nenhum critério o carrega". A coerência repetiu (F7) e repetiu as três
+  tasks (F8).
+- Os outros três (F3 `dist/web` × `outDir`; F4 shell × link "Voltar ao
+  dashboard"; F9 sidebar "após Dashboard" que só existe na P6) eram de
+  executabilidade.
+
+A I-16 da 0.7.2 não contou nenhuma das três tasks: "O módulo Categorias tem os
+seus próprios testes automatizados…" não começa por verbo. Os artefatos foram
+copiados para o scratchpad e para `test/fixtures/parallel-lab-129.*`; o
+`.capivara` do projeto não foi tocado.
+
+### 129.2 A causa: o harness mandava planejar o teste
+
+1. o pedido: "Cada módulo deve ter suas próprias rotas, componentes, serviços e
+   testes"; "Os testes precisam utilizar banco isolado"; "Testes automatizados
+   aprovados";
+2. a regra do planejamento (`planningScopeBlock`, em todo prompt do `init` e do
+   `plan`), no parágrafo da §128 (F5): "the architecture states it on the
+   component it applies to, and the phase that delivers that component carries
+   it as one acceptance criterion of a product task … leaving it out loses a
+   requirement" — e, antes dele, "Test tooling … is chosen in the build, not here:
+   it does not enter … the infrastructure";
+3. o prompt do esqueleto: "A request for automated tests becomes a story or a
+   rule" — o esqueleto escreveu "Testes" na stack, `testes.requisito` e
+   `persistencia.isolamento` nas regras, e "…com os testes automatizados próprios
+   do módulo" no goal das fases 3–5;
+4. a regra de dúvida do auditor da arquitetura: a ausência do requisito de
+   testes "is a fidelity defect" — e a arquitetura pôs os testes na
+   responsabilidade de cada componente de módulo;
+5. a dica da I-16 (`testPrescriptionHint`): "Não apague o requisito: mova-o"
+   para um critério; o filtro `semPrescricaoDeTeste` trocava a correção do
+   auditor por essa dica e mantinha o achado;
+6. o contrato da arquitetura apagava Vitest e Playwright da infraestrutura
+   (`semFerramentaDeTeste`), e o build mandava o executor instalá-los por conta
+   própria (`prompts/builder.ts`, G2 e G4).
+
+### 129.3 A decisão do desenvolvedor
+
+"No modo plan não planejamos testes, é terminantemente proibido planejar testes,
+isso é competência do build"; "por mais que tenha solicitação de testes no prompt
+original … esses testes são para ser executados somente no build … a lógica
+precisa ser igual" à do compilar; "o pedido de testes não deve ser encarado como
+motivo de devolução para um planejamento"; "como testes fazem parte do projeto,
+obviamente ferramentas de testes devem ser definidas na infraestrutura, o que é
+diferente de mandar o gate x testar se a tela está responsiva … a função do plan
+é dizer o que é para ser feito, quem define como fazer é o build". E, no
+esclarecimento do mesmo dia: a seleção de TODAS as ferramentas, bibliotecas,
+frameworks e dependências do projeto é do PLAN; o BUILD decide como implementar,
+executar e verificar usando só o que foi definido, não acrescenta, troca nem
+atualiza dependência por conta própria, e a necessidade comprovada de uma não
+prevista vai ao plano pelo reparo upstream. As ferramentas internas do harness
+(o Playwright privado do G4 em `.capivara/`) continuam do harness.
+
+A instrução de restrição de escopo do mesmo dia valeu para tudo o que segue:
+inspecionar antes, usar os contratos existentes, não criar estado, protocolo,
+orquestrador, canal ou formato persistido novo, corrigir só o comprovado.
+
+### 129.4 A matriz
+
+| requisito | estado antes | ação |
+|---|---|---|
+| INIT levanta lacunas e preenche por entrevista | ATENDIDO | preservado |
+| PLAN especifica toda a infraestrutura, ferramentas de teste incluídas | PARCIAL: a I-16 as apagava; a regra dizia que eram do build | ficam na infraestrutura; a I-16 das fases as autoriza |
+| PLAN não prescreve teste | PARCIAL: a regra mandava o requisito como critério; a I-16 não o contava | detector do requisito; regra reescrita |
+| teste não devolve o plano | NÃO ATENDIDO | filtro na saída de `auditCall` |
+| o pedido de testes chega ao build | ATENDIDO pelo contrato compartilhado (Stack e Regras do `skeleton.md`) | preservado: o pedido fica nas regras `testes…`, o plano deixa de lê-las |
+| fases em pedaços para modelos pequenos | ATENDIDO no PLAN (≤15 tasks, complexidade efetiva); a entrega gradual dentro da fase NÃO ATENDIDA | só registrado: nenhum run mostrou estouro de contexto |
+| dependências validadas uma vez | ATENDIDO no run (`environmentApproved`); a revalidação por invocação é contrato (§115.25) | preservado |
+| ajuste com o agente até satisfazer | NÃO COMPROVADO como causa de falha | preservado |
+| BUILD não escolhe dependência | PARCIAL: executor, G2, G4 e reparo mandavam instalar o não declarado | texto: instalar só o declarado; o não previsto vai ao plano |
+| cada gate testa só a sua obrigação | ATENDIDO (o G2 refeito depois de mudança de código é a revalidação por impacto) | preservado |
+| auditor corrige quando o executor não consegue | ATENDIDO (reparo pelo verificador, validação independente) | preservado |
+| todas as falhas de uma vez | ATENDIDO no G3; o G4 para no primeiro fluxo (roteiros encadeados) — custo NÃO COMPROVADO | preservado |
+| dependência não prevista → reparo upstream | PARCIAL: o `UPSTREAM:` do verificador não citava o caso | uma oração no prompt, sem canal novo |
+| reparo upstream, oito pontos | PARCIAL e documentado: o PLAN não consome o pacote por desenho (§125, 129.10) | nada alterado |
+
+### 129.5 O que muda
+
+- **O requisito de teste dentro do plano é contado** (`contract/test-prescription.ts`,
+  `testRequirements`): o produto ou o módulo como sujeito de posse de teste de
+  software ("o módulo tem testes automatizados", "cada módulo tem os seus próprios
+  testes automatizados"); "testes automatizados próprios"; os testes qualificados
+  de uma parte do produto, ou "os testes do módulo exercitam…"; a condição da
+  execução — teste de software contra qualquer banco, "os testes" só contra um
+  banco isolado, descartável, temporário ou separado; a suíte de testes
+  automatizados aprovada; "executar os testes automatizados". Teste sem
+  qualificador de software não conta (escola, laboratório, A/B, ferramenta de QA,
+  hotel). Entra em `testPrescriptions` — a I-16 das fases, do esqueleto e da
+  arquitetura — e fica fora de `testToolPrescriptions`, que decide apagar item de
+  lista. A dica da I-16 diz "remova … o que o pedido diz sobre testes é executado
+  pelo build … não o reescreva em outro lugar do plano".
+- **O pedido de testes fica onde o build já o lê**: a regra cujo assunto começa por
+  "testes" e a entrada de stack sobre testes. `sharedContractFromSkeleton` já
+  entregava Stack e Regras ao executor, ao verificador e ao G4, e
+  `functionalAcceptanceBlock` passa a dizer que essas regras são os testes que o
+  desenvolvedor pediu e que o build os honra fase a fase. Nenhum campo, seção ou
+  formato novo: o `skeleton.md` se lê byte a byte como antes. Fora desse lugar, o
+  pedido de testes volta ao escritor do esqueleto nomeado, no canal do mecanismo
+  (I-17), tolerado depois da escada; e o pedido que exige testes sem nenhuma regra
+  "testes." que o guarde também volta — sem isso o build não o veria.
+- **O plano não lê o pedido de testes** (`skeletonForPlanning`): a fatia de cada
+  fase e o esqueleto do arquiteto, do auditor da arquitetura, da coerência e da
+  triagem saem sem a regra e a entrada de stack de teste, sem a regra em que toda
+  oração fala de teste (o esqueleto anterior a esta seção a escrevia como
+  `persistencia.isolamento`) e sem a regra "banco dos testes", que diz de si mesma
+  ser do build. Os hashes e o `skeleton.md` não mudam.
+- **Teste não é motivo de devolução** (`audit/sem-teste.ts`, `tirarPedidoDeTeste`,
+  em toda saída de `auditCall` — o mesmo ponto onde `semPrescricaoDeTeste` já
+  agia): sai o achado que pede teste ou reprova pela falta dele; fica o que manda
+  tirar teste que está no texto, com as palavras do auditor menos as orações que
+  pedem teste ou levam "o requisito" a um critério, e a regra no fim; o achado de
+  produto cuja correção sugere teste fica sem o teste; sai a ressalva que pede
+  teste; sai a decisão que só pede teste, e a que aponta ferramenta ou arquivo de
+  teste segue o caminho de sempre (achado mecânico de remoção); REJECTED sem
+  achado restante vira APPROVED, com evento e anúncio. A ressalva do esqueleto
+  sobre o pedido de testes tolerado fora do lugar fica no relatório e não vai aos
+  auditores do plano.
+- **As dependências são do plano**: a infraestrutura da arquitetura mantém
+  Vitest, Playwright e afins; o propósito do item que descreve o procedimento da
+  execução volta ao arquiteto, o que diz o que o runner roda fica; o arquivo de
+  teste em `files` continua saindo contando. A I-16 das fases recebe na
+  autoridade os nomes da infraestrutura aprovada — a task que declara o runner no
+  manifesto cumpre a escolha do plano. No build, o executor instala o que a
+  infraestrutura aprovada e os manifestos declaram e nunca acrescenta, troca ou
+  atualiza dependência; o G2 com runner ausente manda instalar o declarado e não
+  escolher outro; o aviso e o defeito do G4 só mandam instalar `@playwright/test`
+  no projeto se a infraestrutura o declara (senão é ferramenta do harness, em
+  `.capivara/`); o reparo pelo verificador segue a mesma regra; e o `UPSTREAM:`
+  do verificador nomeia a dependência que a fase comprovadamente precisa e a
+  infraestrutura não declara.
+- **Prompts**: a regra do planejamento (o teste não faz parte do plano em forma
+  nenhuma; o pedido de testes é instrução ao build; a infraestrutura lista as
+  dependências de teste; teste não é motivo de devolução; a única leitura sobre
+  teste é pedir que saia); o esqueleto grava o pedido em regras "testes."; o
+  arquiteto declara o runner e o Playwright como dependências de desenvolvimento;
+  a regra de dúvida do auditor da arquitetura e a do auditor de fase deixam de
+  tratar a ausência como defeito; a triagem recebe a mesma regra.
+
+### 129.6 O que NÃO muda, de propósito
+
+- O comportamento funcional continua critério; o lado da aplicação que aceita o
+  banco descartável pelo ambiente continua produto e continua nas regras do harness.
+- A I-16 continua mecânica e antes de qualquer modelo; a ferramenta que nem o
+  pedido, nem a decisão, nem a infraestrutura aprovada nomeiam continua recusada.
+- O protocolo do auditor, os tetos, o fail-closed de `auditCall`, a preparação do
+  ambiente, os gates, o livro de evidências, a revalidação por impacto, a escada
+  de defeitos, o reparo pelo verificador, o paralelo e o reparo upstream não
+  mudaram. A parada da rodada 4 (três saídas inválidas) é a mesma.
+
+### 129.7 Testes: RED → GREEN
+
+- `test/contract/testes-no-build-129.spec.ts` (25) e
+  `test/init/testes-no-build-129.spec.ts` (5), com os textos do run; a suíte
+  inteira fica em 3020 testes em 163 arquivos, `npm run check` verde.
+- Contra `e9c4431` (a 0.7.2 na `main`), numa worktree: os 4 do orquestrador
+  falham — o cenário da P3 termina em "Impasse em project-phases.md após 1
+  devoluções", a task 4.3 é publicada, a correção leva "mova-o", o pedido de
+  testes chega ao arquiteto. A I-16 da base, sobre as seis fases da rodada 1, não
+  conta nada; a de agora conta as três tasks de teste e a condição de teste no
+  README da P6.
+- Os cenários anteriores que codificavam a doutrina antiga ("o requisito fica como
+  comportamento", "a ferramenta de teste sai da infraestrutura", "o executor
+  instala o runner") — em `autoridade-118`, `integridade-122`, `fronteira-123`,
+  `impasse-126`, `disponibilidade-127`, `convergencia-128` (contrato e init),
+  `revisao-128` (init), `loop/prompts`, `loop/runner`, `loop/flows` e dois de
+  prompt — foram reescritos para a decisão de 129.3, com o porquê no teste. As
+  fixtures reais do Luna e do Parallel Lab 128 carregam "o módulo possui testes
+  automatizados" porque a regra de então mandava; os cenários de outros mecanismos
+  as recebem limpas por `test/support/sem-testes.ts`, e os arquivos de fixture
+  continuam como os runs os escreveram.
+
+### 129.8 Custo, medido (provider falso)
+
+| cenário | antes (`e9c4431`) | depois |
+|---|---|---|
+| a fase reprovada por NÃO ter o critério de testes (F2, auditor insistente) | impasse, PLAN parado | 9 chamadas, 1 escrita e 1 auditoria da fase, sem triagem |
+| a task de teste 4.3 escrita na fase | publicada no plano, 9 chamadas | devolvida pela I-16 antes de qualquer auditor, 10 chamadas, plano sem teste |
+| a correção que tira a task e pede o critério no lugar (F1) | 12 chamadas, emenda com "mova-o" | 12 chamadas, emenda só tirando |
+
+No run, as três tasks de teste teriam voltado ao escritor pela I-16 na rodada 1,
+sem auditoria; F2 e F7 não existiriam; F1, F5, F6 e F8 não teriam o que apontar.
+Restariam F3, F4 e F9. É conta de cenário, não de run real.
+
+### 129.9 A revisão adversarial
+
+Um agente, sobre a primeira versão (com um campo `buildTests` no esqueleto, que a
+instrução de restrição de escopo trocou pelas regras "testes." que o build já
+lia). Treze achados; todos os reproduzidos foram corrigidos com cenário em
+`testes-no-build-129.spec.ts` ("a revisão adversarial, achado por achado"):
+
+1. (alto) o detector contava texto de produto — "os testes usam o banco de
+   questões", "cada módulo do curso tem seus próprios testes", "the A/B tests use
+   the events database", "a suíte de testes passa", "o sistema executa os testes
+   automatizados do repositório" — e `skeletonForPlanning` escondia regras de
+   produto: as formas passaram a exigir qualificador de software, e "os testes"
+   sozinho só conta contra banco isolado/descartável;
+2. (alto) o filtro tirava achado de produto que citava `teste.nota_minima` ou
+   `npm test` e aprovava a fase: a citação de regra e o comando saíram da conta;
+3. (médio-alto) a correção que tira só era reconhecida no começo da frase
+   ("Na task 2, remova o critério 3" era descartada): o verbo vale em qualquer
+   ponto, e "reescreva … sem" também;
+4. (médio-alto) "registre o requisito como critério da task 8" sobrevivia: sai em
+   qualquer forma, e a regra vai sempre no fim;
+5. (médio-alto) a regra "banco dos testes" escrita pelo escritor pulava a I-16 de
+   ferramenta: voltou a passar, como na base;
+6. (médio-alto) o pedido de testes podia sumir sem ninguém ver: o pedido que exige
+   testes sem regra "testes." volta ao escritor;
+7. (médio-alto) a decisão de teste era descartada sempre: a que aponta ferramenta
+   ou arquivo voltou a virar remoção mecânica;
+8. (médio) só na primeira versão (o campo novo);
+9. (baixo) o propósito de um runner era acusado: só o procedimento conta ali;
+10. (baixo) a ressalva tolerada do pedido de testes ia aos auditores do plano com o
+    rótulo do I-17: fica no relatório (cenário de ponta a ponta, RED com o filtro
+    desligado);
+11. (plausível) a infraestrutura listava as ferramentas de teste e a I-16 das fases
+    recusava declará-las: a autoridade das fases inclui a infraestrutura aprovada;
+12. (baixo, não corrigido) uma instrução de produto misturada na mesma oração de um
+    pedido de teste sai com ele;
+13. (baixo) o teste 10 de `impasse-126` mudou de comportamento e manteve o título:
+    renomeado.
+
+### 129.10 Compatibilidade
+
+- O `skeleton.md` de um esqueleto qualquer é byte a byte o mesmo (o do run é a
+  prova): stamps, `sourceSkeletonSha12` e caches continuam válidos.
+- Um esqueleto publicado antes desta seção é lido pelo plano sem o pedido de
+  testes; o build continua lendo-o pelas Regras e pela Stack.
+- Uma arquitetura aprovada antes, com os testes nos componentes ou nas fases, não
+  passa no contrato de hoje e é desenhada de novo com os defeitos nomeados — a rota
+  de §126. Uma fase publicada com critério de teste é recusada pela I-16 no `plan`
+  seguinte e emendada mecanicamente.
+- Os prompts mudaram para todos os papéis: escritas e aprovações guardadas por
+  prompt não são reaproveitadas na primeira execução depois da atualização.
+
+### 129.11 Limitações e riscos
+
+- Validado só com provider falso, sobre os textos do run.
+- Um produto cujo domínio é teste de software que descreva as próprias funções com
+  as formas contadas ("o módulo tem testes automatizados") será contado; as formas
+  exigem posse pelo produto ou qualificador de software para isso.
+- A prosa de teste que a I-16 não conta ("o módulo tem testes próprios", sem
+  qualificador) só sai se um auditor mandar tirar — e o achado que manda tirar é
+  mantido.
+- A parada da rodada 4 (o "·" no lugar do "|") não foi tratada: é defeito de forma
+  do modelo, e `recuperarTravessao` recusa de propósito o separador ambíguo.
+- Reparo upstream, conferido por leitura e não alterado: a alegação `UPSTREAM:`
+  pode vir também do trecho do último rediagnóstico, que num defeito do G2 é a
+  saída da suíte (uma suíte que imprima a linha forjaria a alegação); a correção
+  pediria guardar a origem de cada rediagnóstico, mudança de formato persistido.
+  O PLAN continua sem consumir o pacote (§125, por desenho), e a recuperação que o
+  build sugere depois de um documento mudado é `init --fresh`, que não reaproveita
+  as respostas da entrevista.
+- A entrega da fase em pedaços menores ao executor não existe: a fase vai inteira
+  numa sessão, dimensionada pelo PLAN.

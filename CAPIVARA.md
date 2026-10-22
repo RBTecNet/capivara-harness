@@ -72,8 +72,14 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-Na versão 0.7.5, `npm run check` passa: build, typecheck e **3121 testes**, incluindo o catálogo de
+Na versão 0.7.6, `npm run check` passa: build, typecheck e **3130 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
+
+A 0.7.6 faz o BUILD listar o catálogo da API direta como referência dos modelos
+(§131.12): pelo OpenCode, os que o executor roda são escolhidos normalmente; os
+que o OpenCode não roda aparecem com o motivo — no MiniMax, a interface
+compatível com Anthropic que ele usa só atende parte dos modelos — e digitar o
+nome continua valendo.
 
 A 0.7.5 corrige a integração do MiniMax que o `laravel/mmax` expôs (§131): a
 preparação do ambiente é adotada antes dos worktrees quando as sondas são

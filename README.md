@@ -2,11 +2,12 @@
 
 Do prompt à aplicação final, em três comandos.
 
-Versão **0.7.5**: o `build` recupera por defeito e revalida só a prova que a
+Versão **0.7.6**: o `build` recupera por defeito e revalida só a prova que a
 correção atingiu (§125), cobra cada fluxo quando o plano diz que ele existe
 (§127), entrega a fase grande ao executor em partes, julgando-a inteira (§130),
 e só aprova o ambiente que a instalação estrita aceita, com o MiniMax nos efforts
-que o modelo aceita da API direta ao OpenCode (§131);
+que o modelo aceita da API direta ao OpenCode e o catálogo da API como referência
+dos modelos no BUILD (§131);
 o `plan` mantém a correção que o achado alcança e a fase que a
 reorganização não tocou (§128), não planeja teste, escolhe todas as dependências
 do projeto — as de teste incluídas — e não devolve por teste (§129). Planos e

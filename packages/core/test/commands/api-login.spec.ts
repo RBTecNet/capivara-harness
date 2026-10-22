@@ -166,9 +166,9 @@ describe("configuração de API antes de escolher modelos", () => {
     const answers = ["10", "1", "1", "1", "n"];
     const output: string[] = [];
     const secret = "sk-build-chave-apenas-de-teste";
-    const listModels = vi.fn(async (_provider: string) => {
+    const listModels = vi.fn(async (provider: string) => {
       expect((await readCredentials(file))[0]?.secret).toBe(secret);
-      return ["deepseek/deepseek-flash", "opencode/outro"];
+      return provider === "deepseek" ? ["deepseek-flash"] : ["deepseek/deepseek-flash", "opencode/outro"];
     });
     const result = await runWizardDePapeis({
       cwd: directory, comando: "build", faltando: ["builder", "verifier"], fileExists: async () => false, directoryExists: async () => true,
@@ -176,7 +176,8 @@ describe("configuração de API antes de escolher modelos", () => {
       configureApi: (provider, io) => ensureApiCredential(provider, io, { environment: {}, credentialsFile: file }),
       listModels,
     });
-    expect(listModels.mock.calls).toEqual([["opencode"]]);
+    // A API é consultada como referência, e o OpenCode para saber o que o executor roda (§131) — ambos depois da chave.
+    expect(listModels.mock.calls).toEqual([["deepseek"], ["opencode"]]);
     expect(result?.global).toEqual({ provider: "opencode", model: "deepseek/deepseek-flash" });
     expect(output.join("")).not.toContain(secret);
     expect(JSON.stringify(result)).not.toContain(secret);

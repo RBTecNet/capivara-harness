@@ -270,7 +270,7 @@ describe("modelo pela lista", () => {
     const escolha = runWizardDePapeis({
       io: t.prompter, cwd: "/projeto", comando: "build", faltando: ["builder", "verifier"],
       fileExists: async () => false, directoryExists: async () => true,
-      listModels: async () => ["opencode/big-pickle", "deepseek/deepseek-flash"],
+      listModels: async (provider) => provider === "deepseek" ? ["deepseek-flash"] : ["opencode/big-pickle", "deepseek/deepseek-flash"],
       listEfforts: async () => ["none", "low", "high", "max"],
     });
     try {

@@ -72,6 +72,18 @@ const MINIMAX = DIRECT_CATALOG.find((provider) => provider.id === "minimax")!;
  */
 const ROTAS_DO_MINIMAX = [opencodeProviderId(MINIMAX.id), "minimax-coding-plan"];
 
+/**
+ * Por que um modelo que a API lista pode não rodar pelo OpenCode, quando a
+ * documentação do provider o diz (§131). A do MiniMax: a interface compatível
+ * com Anthropic — a que o OpenCode usa — atende só parte dos modelos, e os
+ * outros apenas pela API padrão.
+ */
+export function limiteDaRotaNoOpenCode(provider: string): string | null {
+  return provider === MINIMAX.id
+    ? "O OpenCode fala com o MiniMax pela API compatível com Anthropic, que a documentação do MiniMax restringe a uma parte dos modelos; os demais só pela API padrão, que o OpenCode não usa."
+    : null;
+}
+
 /** O raciocínio documentado de um modelo do OpenCode que leva ao MiniMax, com o provedor e o id como a configuração os nomeia. */
 export function raciocinioNoOpenCode(model: string): { provedor: string; id: string; raciocinio: RaciocinioDoModelo } | null {
   const barra = model.indexOf("/");

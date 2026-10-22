@@ -16,7 +16,7 @@
  *    com esse argv. Um wizard que executa por um caminho e ensina outro mente.
  */
 
-import { CLI_PROVIDERS, DIRECT_PROVIDERS, ROLES, ROLE_NAMES, isDirectProvider, opencodeProviderId, raciocinioNoOpenCode } from "../provider/index.js";
+import { CLI_PROVIDERS, DIRECT_PROVIDERS, ROLES, ROLE_NAMES, isDirectProvider, limiteDaRotaNoOpenCode, opencodeProviderId, raciocinioNoOpenCode } from "../provider/index.js";
 import type { RoleName, RoleConfig } from "../provider/index.js";
 import { readChoice, renderChoices, renderCommand, roleHint, toArgv } from "../tui/index.js";
 import type { Choice, WizardAnswers } from "../tui/index.js";
@@ -304,6 +304,8 @@ async function escolherModelo(
   providerId: string,
   rotulo: string,
   listar: (providerId: string) => Promise<string[]>,
+  /** Modelos listados que não se pode escolher da lista, com o porquê (§131); digitar o nome continua valendo. */
+  foraDoExecutor: ReadonlyMap<string, string> = new Map(),
 ): Promise<{ modelo: string } | "voltar"> {
   const { io } = deps;
   const api = isDirectProvider(providerId);
@@ -326,6 +328,7 @@ async function escolherModelo(
   }
 
   let candidatos = modelos;
+  const opcaoDoModelo = (modelo: string): Choice => foraDoExecutor.has(modelo) ? { label: modelo, hint: "fora do catálogo do OpenCode: o executor não o roda" } : { label: modelo };
   const muitos = modelos.length > MODELOS_SEM_FILTRO;
   const filtrar = async (): Promise<"voltar" | undefined> => {
     const filtro = (await pergunta(io, "Digite parte do nome para filtrar (vazio lista todos, 0 volta ao provider): ")).trim();
@@ -355,10 +358,14 @@ async function escolherModelo(
       { acao: "voltar", opcao: { label: "voltar ao provider" } },
     ];
     for (;;) {
-      const opcoes: Choice[] = candidatos.map((modelo) => ({ label: modelo }));
+      const opcoes: Choice[] = candidatos.map(opcaoDoModelo);
       const indice = await choose(io, muitos ? `${rotulo} — ${candidatos.length} modelos; no fim da lista: filtrar modelos` : rotulo,
         [...opcoes, ...extras.map((extra) => extra.opcao)], 0);
-      if (indice < candidatos.length) return { modelo: candidatos[indice]! };
+      if (indice < candidatos.length) {
+        const motivo = foraDoExecutor.get(candidatos[indice]!);
+        if (motivo) { io.write(`\n${motivo}\n`); continue; }
+        return { modelo: candidatos[indice]! };
+      }
       const acao = extras[indice - candidatos.length]?.acao;
       if (acao === "voltar") return "voltar";
       if (acao === "filtrar") {
@@ -369,14 +376,16 @@ async function escolherModelo(
     }
   }
 
-  const opcoes: Choice[] = candidatos.map((modelo) => ({ label: modelo }));
+  const opcoes: Choice[] = candidatos.map(opcaoDoModelo);
   io.write(`\n${renderChoices(rotulo, opcoes, 0)}\n`);
   for (;;) {
     const resposta = (await pergunta(io, "Escolha [1, 0 volta ao provider, ou digite o nome]: ")).trim();
     if (resposta === "0") return "voltar";
+    const escolhido = resposta === "" ? candidatos[0] : /^\d+$/.test(resposta) ? candidatos[Number(resposta) - 1] : undefined;
+    const motivo = escolhido === undefined ? undefined : foraDoExecutor.get(escolhido);
+    if (motivo) { io.write(`${motivo}\n`); continue; }
     if (resposta === "") return { modelo: candidatos[0] ?? "" };
     if (/^\d+$/.test(resposta)) {
-      const escolhido = candidatos[Number(resposta) - 1];
       if (escolhido) return { modelo: escolhido };
       io.write(`Responda com um número entre 1 e ${candidatos.length}, 0 para voltar, ou o nome do modelo.\n`);
       continue;
@@ -397,8 +406,31 @@ async function escolherProviderModelo(
   const listar = deps.listModels ?? (async () => []);
   const prefixo = `${opencodeProviderId(provider)}/`;
   if (viaOpenCode) deps.io.write(`${provider} será usado via OpenCode, com edição e shell.\n`);
+  /*
+   * A API é a referência dos modelos; o catálogo do OpenCode diz quais o
+   * executor roda (§131). Fora dele, o OpenCode recusa o modelo ("Model
+   * unavailable") antes de qualquer requisição, e a Capivara não o declara sem
+   * prova de que a rota o atende — no MiniMax, a documentação diz que não
+   * atende. Esses aparecem com o motivo, e não são escolhidos da lista. Sem
+   * resposta do OpenCode, a lista é a de sempre.
+   */
+  const foraDoExecutor = new Map<string, string>();
+  const limite = limiteDaRotaNoOpenCode(provider);
+  const listarParaOExecutor = async (): Promise<string[]> => {
+    const [daApi, doOpenCode] = await Promise.all([listar(provider).catch(() => []), listar("opencode").catch(() => [])]);
+    if (doOpenCode.length === 0) return [];
+    const executaveis = doOpenCode.filter((model) => model.startsWith(prefixo));
+    const naApi = daApi.map((id) => `${prefixo}${id}`);
+    foraDoExecutor.clear();
+    for (const model of naApi.filter((model) => !executaveis.includes(model))) {
+      foraDoExecutor.set(model,
+        `${model.slice(prefixo.length)} está no catálogo da API ${provider}, mas não no do OpenCode, que é por onde o executor edita e roda comandos: ` +
+        `o OpenCode recusa o modelo ("Model unavailable") antes de qualquer requisição.${limite ? ` ${limite}` : ""} Escolha outro modelo ou outro provider.`);
+    }
+    return [...new Set([...naApi.filter((model) => executaveis.includes(model)), ...executaveis, ...foraDoExecutor.keys()])];
+  };
   const choice = await escolherModelo(deps, provider, viaOpenCode ? `${rotulo} (${provider} via OpenCode)` : rotulo,
-    viaOpenCode ? async () => (await listar("opencode")).filter((model) => model.startsWith(prefixo)) : listar);
+    viaOpenCode ? listarParaOExecutor : listar, foraDoExecutor);
   if (choice === "voltar") return choice;
   return {
     provider: viaOpenCode ? "opencode" : provider,

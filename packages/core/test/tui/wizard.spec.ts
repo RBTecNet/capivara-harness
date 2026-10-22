@@ -168,7 +168,8 @@ describe("wizard", () => {
       const configured: string[] = [];
       const result = await runWizard({ ...deps,
         configureApi: async (provider) => { configured.push(provider); return true; },
-        listModels: async () => ["deepseek/deepseek-flash", "minimax/MiniMax-M3", "minimax-coding-plan/MiniMax-M3"],
+        // O catálogo da API e o do OpenCode, cada um com o seu formato (§131).
+        listModels: async (provider) => provider === "minimax" ? ["MiniMax-M3"] : ["deepseek/deepseek-flash", "minimax/MiniMax-M3", "minimax-coding-plan/MiniMax-M3"],
         listEfforts: async () => ["none", "thinking"],
       });
       expect(result?.answers.global).toEqual({ provider: "opencode", model: "minimax/MiniMax-M3", effort: "thinking" });
@@ -185,11 +186,12 @@ describe("wizard", () => {
       const result = await runWizard({
         ...deps,
         configureApi: async (provider) => { configured.push(provider); return true; },
-        listModels: async (provider) => { consulted.push(provider); return ["opencode/big-pickle", "deepseek/deepseek-flash"]; },
+        listModels: async (provider) => { consulted.push(provider); return provider === "deepseek" ? ["deepseek-flash"] : ["opencode/big-pickle", "deepseek/deepseek-flash"]; },
         listEfforts: async () => ["none", "low", "high", "max"],
       });
       expect(result?.argv).toEqual(["build", "--provider", "opencode", "--model", "deepseek/deepseek-flash", "--effort", "high", "--parallel", "3", "--workers-as-builder", "--save-execution"]);
-      expect(consulted).toEqual(["opencode"]);
+      // A API é a referência dos modelos; o OpenCode diz quais o executor roda (§131).
+      expect(consulted).toEqual(["deepseek", "opencode"]);
       expect(configured).toEqual(["deepseek"]);
       expect(tela()).toContain("a chave salva será reaproveitada");
       const menu = tela().split("Qual provider usar em todos os papéis?")[1]?.split("Escolha")[0];

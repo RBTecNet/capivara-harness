@@ -17,7 +17,7 @@ export type { StampInput } from "./stamps.js";
 export type { Workflow } from "./coverage.js";
 export { checkCoverage, checkEntities, checkStories, checkWorkflows } from "./coverage.js";
 export type { CoverageSources } from "./coverage.js";
-export { checkTestPrescription, testPrescriptionHint, testPrescriptions, testRunPrescriptions, testToolPrescriptions } from "./test-prescription.js";
+export { checkTestPrescription, testPrescriptionHint, testPrescriptions, testRequirements, testRunPrescriptions, testToolPrescriptions } from "./test-prescription.js";
 export type { TestAuthority } from "./test-prescription.js";
 export { mechanismPrescriptionHint, mechanismPrescriptions } from "./mechanism-prescription.js";
 export { WRITE_OWNERSHIP_INVARIANT, checkWriteOwnership, effectiveDependencies, projectPaths, writeConflicts, writeIntents, writeOwnershipHint } from "./ownership.js";
@@ -43,7 +43,7 @@ export { affectedPhases, phaseReferences, planAddresses } from "./phase-referenc
 export { blocoDaDisponibilidade, cobreWorkflow, contradicoesTemporais, disponibilidadeDosFluxos, fasesNomeadas, fechoDosComponentes, tabelaDaDisponibilidade } from "./disponibilidade.js";
 export type { Adiamento, ContradicaoTemporal, Disponibilidade, EntradaDaDisponibilidade, FaseNoTempo, Incerteza, MotivoDoAdiamento, Revisita } from "./disponibilidade.js";
 export type { DriftInput } from "./drift.js";
-export { AREAS_VALIDAS, SKELETON_CONTRACT, coverageFromSkeleton, parseSkeleton, renderSkeleton, repairSkeleton, sliceForPhase, workflowsForPhase } from "./skeleton.js";
+export { AREAS_VALIDAS, SKELETON_CONTRACT, SUBJECT_BANCO_DOS_TESTES, coverageFromSkeleton, parseSkeleton, renderSkeleton, repairSkeleton, skeletonForPlanning, sliceForPhase, workflowsForPhase } from "./skeleton.js";
 export {
   ARCHITECTURE_CONTRACT,
   architectureSliceForPhase,

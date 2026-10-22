@@ -176,12 +176,18 @@ export async function gate2(
      * era negado, e gastava o ciclo seguindo uma ordem impossível — três
      * executores do piloto 6 queimaram a fase 1 assim.
      */
+    /*
+     * O runner é o que o plano escolheu (§129): a infraestrutura aprovada e o
+     * manifesto o declaram. A correção é instalar o declarado, nunca escolher
+     * outro — sem nenhum declarado, a escolha volta ao plano.
+     */
     const comoInstalar = systemInstall
-      ? "Você tem acesso de sistema: instale o runner declarado pelo projeto, " +
+      ? "Você tem acesso de sistema: instale o runner que a infraestrutura aprovada e o manifesto do projeto declaram, " +
         "por exemplo criando e populando o ambiente do projeto ou instalando o pacote correspondente."
-      : "Você NÃO tem acesso de sistema neste run: instale o runner como dependência DO PROJETO, " +
-        "dentro desta pasta (por exemplo `npm install -D <runner>`, ou o equivalente do gerenciador que o " +
-        "projeto usa), e deixe-o declarado no manifesto. Não tente instalar nada fora do projeto.";
+      : "Você NÃO tem acesso de sistema neste run: instale como dependência DO PROJETO, " +
+        "dentro desta pasta, o runner que a infraestrutura aprovada e o manifesto declaram (por exemplo `npm install`, " +
+        "ou o equivalente do gerenciador que o projeto usa). Não tente instalar nada fora do projeto.";
+    const semEscolha = "Não escolha nem troque o runner: se a infraestrutura aprovada não declara nenhum, diga isso com a evidência — a escolha é do plano.";
 
     return {
       green: false,
@@ -190,7 +196,7 @@ export async function gate2(
       cause:
         `O runner de testes do projeto NÃO ESTÁ INSTALADO neste ambiente: '${testCommand}' terminou com código ` +
         `${result.exitCode}. Isto não é um teste vermelho — é uma ferramenta ausente, e a correção é instalá-la, ` +
-        `não mexer no código nem trocar o runner. ${comoInstalar} ` +
+        `não mexer no código nem trocar o runner. ${comoInstalar} ${semEscolha} ` +
         `Garanta que '${testCommand}' passe a funcionar a partir da raiz do projeto. Saída:\n${tail(result.output, 60)}`,
     };
   }

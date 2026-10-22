@@ -21,7 +21,7 @@
  * exatamente a ausência desse acordo que produziu os impasses do piloto 3.
  */
 
-import { testPrescriptionHint, testPrescriptions, testRunPrescriptions, testToolPrescriptions } from "./test-prescription.js";
+import { testPrescriptionHint, testPrescriptions, testRequirements, testRunPrescriptions, testToolPrescriptions } from "./test-prescription.js";
 import type { TestAuthority } from "./test-prescription.js";
 import { MECHANISM_INVARIANT, mechanismPrescriptionHint, mechanismPrescriptions } from "./mechanism-prescription.js";
 import type { CoverageSources } from "./coverage.js";
@@ -121,6 +121,66 @@ export interface Skeleton {
   nonGoals?: string[];
 }
 
+/**
+ * A regra do banco dos testes que o harness escreve a partir da decisão de
+ * banco (`interview/banco.ts`). Ela mesma diz que é do build; o plano não a lê.
+ */
+export const SUBJECT_BANCO_DOS_TESTES = "banco dos testes";
+
+/**
+ * O pedido de testes tem lugar no esqueleto, e um só (§129): a regra cujo
+ * assunto começa por "testes" e a entrada de stack sobre testes. O build já as
+ * lê no contrato compartilhado (Stack e Regras do `skeleton.md`); o plano não
+ * as lê (`skeletonForPlanning`). Escrito em outro lugar, volta ao escritor.
+ */
+const HINT_DO_PEDIDO_DE_TESTES =
+  "o que o pedido diz sobre testes — que existem, por módulo, contra que banco, que passam, como se executam — vai numa regra cujo assunto" +
+  " começa por \"testes.\", nas palavras do desenvolvedor; tire a menção daqui e deixe só o comportamento do produto. O build executa essas regras; o plano não as lê";
+
+/** A entrada de stack ou o assunto de regra que é SOBRE testes, e não um produto que fala de teste. */
+const ASSUNTO_DE_TESTE = /^(?:testes?|tests?|testing|qa)(?![\p{L}\p{N}])/iu;
+
+/** O texto fala do teste do próprio produto: a mesma conta da I-16, requisito incluso. */
+function falaDeTeste(texto: string, authority: TestAuthority): boolean {
+  return testPrescriptions(texto, authority).length > 0;
+}
+
+/**
+ * A regra que é toda sobre teste: cada oração dela fala do teste do produto.
+ * "As execuções de testes automatizados usam um banco separado: rodar os
+ * testes não altera o banco normal" — o esqueleto anterior à §129 a escrevia
+ * com assunto de produto ("persistencia.isolamento"). A que mistura produto e
+ * teste ("cada módulo tem rotas, serviços e testes") fica: tirar a oração seria
+ * editar o texto que o escritor publicou.
+ */
+function todaSobreTeste(texto: string): boolean {
+  const oracoes = texto.split(/(?<=[.;!?])\s+/u).map((oracao) => oracao.trim()).filter((oracao) => oracao !== "");
+  return oracoes.length > 0 && oracoes.every((oracao) => falaDeTeste(oracao, []));
+}
+
+/**
+ * O esqueleto que o plano lê: sem o pedido de testes (§129).
+ *
+ * O `skeleton.md` publicado continua inteiro — é de lá que o build lê, e os
+ * hashes do plano são dele. O que sai é só da leitura do plano: a entrada de
+ * stack e a regra cujo assunto é teste e que falam do teste do produto; a
+ * regra em que toda oração fala de teste, qualquer que seja o assunto (o
+ * esqueleto anterior à §129 a escrevia como "persistencia.isolamento"); e a
+ * regra do banco dos testes, que diz de si mesma ser do build. Uma regra de
+ * produto que se chama "teste…" — a nota mínima de um teste de nivelamento —
+ * fica.
+ */
+export function skeletonForPlanning(skeleton: Skeleton): Skeleton {
+  return {
+    ...skeleton,
+    stack: skeleton.stack.filter((item) => !(ASSUNTO_DE_TESTE.test(item.component.trim()) && falaDeTeste(`${item.component}\n${item.decision}`, []))),
+    rules: skeleton.rules.filter((rule) =>
+      rule.subject.trim().toLowerCase() !== SUBJECT_BANCO_DOS_TESTES &&
+      !(ASSUNTO_DE_TESTE.test(rule.subject.trim()) && falaDeTeste(rule.statement, [])) &&
+      !todaSobreTeste(rule.statement)),
+  };
+}
+
 export interface SkeletonDefect {
   problem: string;
   hint: string;
@@ -207,7 +267,7 @@ export function repairSkeleton(root: Record<string, unknown>, authority: TestAut
         // Sai a entrada que nomeia ferramenta; a que só descreve o procedimento da execução (§126) fica e vira defeito, abaixo.
         const termos = testToolPrescriptions(`${component}\n${decision}`, authority);
         if (termos.length > 0 && ROTULO_DE_TESTE.test(component)) {
-          applied.push(`removeu da stack "${component}: ${decision}": ferramenta de teste é decisão do build (I-16); a exigência de testes do pedido segue nas stories e regras`);
+          applied.push(`removeu da stack "${component}: ${decision}": ferramenta de teste é decisão do build (I-16); a exigência de testes do pedido segue nas regras de teste, que o build lê`);
           return false;
         }
         const mecanismos = mechanismPrescriptions(`${component}\n${decision}`, authority);
@@ -321,12 +381,22 @@ export function parseSkeleton(source: string, limits: SkeletonLimits): SkeletonR
    * esqueleto por uma frase sobre o banco dos testes é o mesmo "encontrar um
    * motivo para interromper" que a §123 tirou do I-17.
    */
-  const testeEm = (onde: string, texto: string, entrada = ""): void => {
+  const testeEm = (onde: string, texto: string, entrada = "", lugarDoPedido = false): void => {
     const ferramenta = testToolPrescriptions(texto, autoridade);
     if (ferramenta.length > 0) defects.push({ problem: `${onde} prescreve teste${entrada}: ${ferramenta.join(", ")}`, hint: testPrescriptionHint(ferramenta) });
     const procedimento = testRunPrescriptions(texto, autoridade);
     if (procedimento.length > 0) {
       mecanismos.push({ problem: `${onde} prescreve o procedimento da execução de teste${entrada} (I-16): ${procedimento.join(", ")}`, hint: testPrescriptionHint(procedimento) });
+    }
+    /*
+     * O pedido de testes fora do lugar dele (§129) volta ao escritor como o
+     * mecanismo volta (I-17): nomeado, e tolerado depois da escada — uma frase
+     * sobre testes não para o init. No lugar dele (a regra "testes…" e a
+     * entrada de stack sobre testes) ele fica: é o que o build lê.
+     */
+    const requisito = lugarDoPedido ? [] : testRequirements(texto);
+    if (requisito.length > 0) {
+      mecanismos.push({ problem: `${onde} carrega o pedido de testes para o plano${entrada} (I-16): ${requisito.join(", ")}`, hint: HINT_DO_PEDIDO_DE_TESTES });
     }
   };
 
@@ -337,7 +407,7 @@ export function parseSkeleton(source: string, limits: SkeletonLimits): SkeletonR
     defects.push({ problem: "a stack está vazia", hint: "declare ao menos linguagem e como a aplicação roda; o preflight verifica os pré-requisitos a partir daqui" });
   }
   for (const item of stack) {
-    testeEm("a stack", `${item.component}\n${item.decision}`, ` em "${item.component}: ${item.decision}"`);
+    testeEm("a stack", `${item.component}\n${item.decision}`, ` em "${item.component}: ${item.decision}"`, ASSUNTO_DE_TESTE.test(item.component.trim()));
     mecanismoEm(`a entrada de stack "${item.component}"`, `${item.component}\n${item.decision}`);
   }
 
@@ -372,8 +442,26 @@ export function parseSkeleton(source: string, limits: SkeletonLimits): SkeletonR
   }
   for (const workflow of workflows) mecanismoEm(`o workflow ${workflow.number}`, `${workflow.name}\n${workflow.steps.join("\n")}`);
   for (const rule of rules) {
-    testeEm(`a regra "${rule.subject}"`, `${rule.subject}\n${rule.statement}`);
+    // A regra do banco dos testes é do harness (`interview/banco.ts`): falar de teste é o assunto dela; ferramenta e procedimento continuam contados.
+    const lugarDoPedido = ASSUNTO_DE_TESTE.test(rule.subject.trim()) || rule.subject.trim().toLowerCase() === SUBJECT_BANCO_DOS_TESTES;
+    testeEm(`a regra "${rule.subject}"`, `${rule.subject}\n${rule.statement}`, "", lugarDoPedido);
     mecanismoEm(`a regra "${rule.subject}"`, rule.statement);
+  }
+
+  /*
+   * O pedido de testes não pode sumir no caminho (§129). O build não lê o
+   * pedido: lê o esqueleto. Se o pedido ou uma decisão exige testes e o
+   * esqueleto não guarda nenhuma regra "testes…" nem entrada de stack sobre
+   * testes, o que o desenvolvedor pediu não chega a quem constrói. Volta ao
+   * escritor nomeado, no canal do mecanismo — nunca para o init.
+   */
+  const exigidos = [...new Set(autoridade.flatMap((fonte) => testRequirements(fonte)))];
+  const guardado = rules.some((rule) => ASSUNTO_DE_TESTE.test(rule.subject.trim())) || stack.some((item) => ASSUNTO_DE_TESTE.test(item.component.trim()));
+  if (exigidos.length > 0 && !guardado) {
+    mecanismos.push({
+      problem: `o pedido exige testes (${exigidos.join(", ")}) e nenhuma regra de assunto "testes." o guarda para o build (I-16)`,
+      hint: HINT_DO_PEDIDO_DE_TESTES,
+    });
   }
 
   const phases: SkeletonPhase[] = list(root.phases).map((item, index) => ({
@@ -465,7 +553,9 @@ export function workflowsForPhase(skeleton: Skeleton, phaseNumber: number): Skel
   return skeleton.workflows.filter((workflow) => cobreWorkflow(phase.covers, workflow.number));
 }
 
-export function sliceForPhase(skeleton: Skeleton, phaseNumber: number): string {
+export function sliceForPhase(completo: Skeleton, phaseNumber: number): string {
+  // A fase é escrita e auditada sem o pedido de testes (§129): ele é do build.
+  const skeleton = skeletonForPlanning(completo);
   const phase = skeleton.phases.find((entry) => entry.number === phaseNumber);
   if (!phase) return "";
 

@@ -1073,8 +1073,9 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
       output: run.output,
       cause:
         "o runner de fluxos não está instalado: o gate 4 abre a aplicação com @playwright/test. " +
-        `Instale-o como dependência de desenvolvimento do projeto e garanta o navegador ` +
-        `(\`npx playwright install chromium\`). Saída:\n${tail(run.output)}`,
+        "Se a infraestrutura aprovada do projeto o declara, instale-o como declarado e garanta o navegador " +
+        "(`npx playwright install chromium`); se não declara, não o acrescente ao projeto — ele é ferramenta do harness, " +
+        `preparada em \`.capivara/\` antes do desenvolvimento, e as dependências do projeto são do plano. Saída:\n${tail(run.output)}`,
     };
   }
 

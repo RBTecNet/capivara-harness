@@ -76,7 +76,7 @@ describe("o prompt do auditor da arquitetura", () => {
   });
 
   it("não exige teste, não reprova por gosto, e responde pelo protocolo comum", () => {
-    expect(prompt).toContain("Never demand tests, test files or a validation strategy");
+    expect(prompt).toContain("Tests are not architecture, and never a reason to reject, remark or ask");
     expect(prompt).toContain("When in doubt, approve and remark");
     expect(prompt).toContain("CAPIVARA_AUDIT_STATUS: APPROVED|REJECTED");
     expect(prompt).toContain("CAPIVARA_DECISION is for a PRODUCT decision");

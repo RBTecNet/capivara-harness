@@ -16,9 +16,10 @@ import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, fasesIntactas, blocoDaDisponibilidade, disponibilidadeDaArquitetura, tabelaDaDisponibilidade, buildStamp, checkCoverage, checkDesignRefs, checkTestPrescription, checkWriteOwnership, testPrescriptionHint, testPrescriptions, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parseArchitecture, parsePhaseFragment, parseSkeleton, phaseHeading, phasesFromArchitecture, renderArchitecture, renderSkeleton, requirementsFromArchitecture, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12 } from "../contract/index.js";
+import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, fasesIntactas, blocoDaDisponibilidade, disponibilidadeDaArquitetura, tabelaDaDisponibilidade, buildStamp, checkCoverage, checkDesignRefs, checkTestPrescription, checkWriteOwnership, testPrescriptionHint, testPrescriptions, testToolPrescriptions, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parseArchitecture, parsePhaseFragment, parseSkeleton, phaseHeading, phasesFromArchitecture, renderArchitecture, renderSkeleton, requirementsFromArchitecture, skeletonForPlanning, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12 } from "../contract/index.js";
 import { CoherenceMemory } from "../audit/coherence.js";
 import { achadoNaOrigem, alvoNoEnvelope, chavesDoEnvelope, veioDoEnvelope } from "../audit/envelope.js";
+import { tirarPedidoDeTeste } from "../audit/sem-teste.js";
 import { applyMaterialityReview, materialityInput, materialityPrompt } from "../audit/materiality.js";
 import type { Architecture, ContractError, CoverageSources, PhasesDocument, Skeleton, StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, enderecoDaDecisao, balancoDaRodada, descreverBalanco, fingerprint, nextAuditAction, parseAudit, persistentFindings, renderStandoff, writerDid } from "../audit/index.js";
@@ -205,6 +206,11 @@ const MAX_ESPERAS_POR_CHAMADA = 2;
 const INDISPONIBILIDADE = /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed|network error|\b50[234]\b|bad gateway|gateway time-?out|overloaded|temporarily unavailable|service unavailable|server error/i;
 /** As esperas entre repetições por indisponibilidade, em segundos. Curtas e finitas. */
 const ESPERAS_POR_INDISPONIBILIDADE = [5, 20] as const;
+
+/** A ressalva do esqueleto que é o pedido de testes tolerado fora do lugar (§129): do relatório, não dos auditores. */
+function ehRessalvaDoPedidoDeTeste(remark: Remark): boolean {
+  return remark.observation.includes("carrega o pedido de testes para o plano");
+}
 
 /** Quantas tasks há neste markdown. Zero é resposta inválida do escritor. */
 /** Há decisão pendente no texto? O marcador é o contrato entre escritor e entrevista. */
@@ -1007,7 +1013,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       decisions: writer.decisions,
       dispositions: allAnswers.map((answer) => `${answer.questionId} ${answer.disposition}`),
       upstream,
-      upstreamRemarks: remarks.map((entry) => ({
+      // A ressalva do pedido de testes (§129) fica no relatório: aos auditores do plano ela seria um pedido de teste.
+      upstreamRemarks: remarks.filter((entry) => !ehRessalvaDoPedidoDeTeste(entry.remark)).map((entry) => ({
         document: entry.document,
         where: entry.remark.where,
         observation: entry.remark.observation,
@@ -1197,7 +1204,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             ...base,
             upstream: skeletonAtual
               ? [
-                  { name: "skeleton.md", content: renderSkeleton(skeletonAtual) },
+                  { name: "skeleton.md", content: renderSkeleton(skeletonForPlanning(skeletonAtual)) },
                   ...(arquiteturaMd !== "" ? [{ name: "architecture.md", content: arquiteturaMd }] : []),
                   ...(arquiteturaAtual && tempoDosFluxos(arquiteturaAtual, skeletonAtual).length > 0
                     ? [{ name: DOCUMENTO_DO_TEMPO, content: tempoDosFluxos(arquiteturaAtual, skeletonAtual).join("\n") }]
@@ -1250,7 +1257,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
 
     const input = materialityInput(original, {
       request: options.request.text, decisions: writer.decisions, phases: fases,
-      ...(skeletonAtual ? { skeleton: renderSkeleton(skeletonAtual) } : {}),
+      ...(skeletonAtual ? { skeleton: renderSkeleton(skeletonForPlanning(skeletonAtual)) } : {}),
       ...(arquiteturaMd !== "" ? { architecture: arquiteturaMd } : {}),
       harness: planningScopeBlock(),
     });
@@ -1328,7 +1335,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       if (parsed.ok) {
         // O que o parser consertou sozinho é dito: é uma chamada que não foi paga.
         for (const nota of parsed.applied) announce(`  ${nota}`);
-        return semPrescricaoDeTeste(subject, parsed.verdict);
+        return await semPedidoDeTeste(subject, parsed.verdict, attempt);
       }
       if (tentativa === 3) {
         const amostra = ultima.trim().slice(0, 300).replace(/\n/g, "\n  ");
@@ -1571,11 +1578,15 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
           announce(`    ressalva: ${residuo}`);
           // O procedimento da execução de teste (§126) tolerado é do build, não do plano.
           const deTeste = residuo.includes("procedimento da execução de teste");
+          // O pedido de testes tolerado fora do lugar (§129) também: a ressalva iria aos auditores do plano, que não leem teste.
+          const pedidoDeTeste = residuo.includes("carrega o pedido de testes para o plano");
           remarks.push({
             document: "skeleton.md",
-            remark: deTeste
-              ? { where: "I-16", observation: `${residuo} — como a execução dos testes obtém e descarta o banco é do build; a regra vale pelo isolamento` }
-              : { where: "I-17", observation: `${residuo} — o plano escolhe o mecanismo; a regra vale pelo comportamento` },
+            remark: pedidoDeTeste
+              ? { where: "I-16", observation: `${residuo} — o que o pedido diz sobre testes é executado pelo build; no plano, vale só o comportamento do produto` }
+              : deTeste
+                ? { where: "I-16", observation: `${residuo} — como a execução dos testes obtém e descarta o banco é do build; a regra vale pelo isolamento` }
+                : { where: "I-17", observation: `${residuo} — o plano escolhe o mecanismo; a regra vale pelo comportamento` },
           });
         }
       }
@@ -1795,7 +1806,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     return architectPrompt({
       language: options.language,
       request: options.request.text,
-      skeleton: renderSkeleton(esqueletoDeOrigem!),
+      skeleton: renderSkeleton(skeletonForPlanning(esqueletoDeOrigem!)),
       decisions: allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision),
       assumptions: allAssumptions.map((assumption) => `${assumption.topic}: ${assumption.statement} (${assumption.basis})`),
       inventory: inventoryText,
@@ -1958,7 +1969,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         language: options.language,
         request: options.request.text,
         decisions: writer.decisions,
-        skeleton: renderSkeleton(esqueletoDeOrigem!),
+        skeleton: renderSkeleton(skeletonForPlanning(esqueletoDeOrigem!)),
         architecture: md,
         maxTasksPerPhase: MAX_TASKS_PER_PHASE,
         ...(ultimaDevolucao.length > 0 ? { previousFindings: ultimaDevolucao } : {}),
@@ -2587,30 +2598,52 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         !/#(?:auditoria|standoff|ensaio)#/u.test(answer.questionId) &&
         !/^(?:auditoria|ensaio|impasse)\b/u.test(topico(answer.questionId)),
     );
-    return [options.request.text, ...doDesenvolvedor.map((answer) => answer.decision)];
+    /*
+     * E as dependências que a infraestrutura aprovada declara (§129): o plano
+     * escolhe todas, as de teste também, e a task da fundação que as declara no
+     * manifesto cumpre a escolha — não a faz. A arquitetura sob leitura não se
+     * autoriza: ela só entra aqui depois de aprovada.
+     */
+    const daInfraestrutura = arquiteturaAtual === null
+      ? []
+      : Object.values(arquiteturaAtual.infrastructure)
+        .flatMap((grupo) => (Array.isArray(grupo) ? grupo : []))
+        .map((item) => (typeof item === "object" && item !== null && "name" in item ? String((item as { name: unknown }).name) : ""))
+        .filter((nome) => nome.trim() !== "");
+    return [options.request.text, ...doDesenvolvedor.map((answer) => answer.decision), ...daInfraestrutura];
   }
 
   /**
-   * O achado cuja correção prescreve trabalho de teste (§122) volta ao
-   * escritor com a correção da regra, não com a do auditor.
+   * O plano não devolve por teste (§129).
    *
-   * No `minimax` o auditor pediu "acrescentar em Phase 3 uma task de testes
-   * equivalente a P2.T9/P4.T8": aplicada, a emenda criaria a task que I-16
-   * devolve mecanicamente na leitura seguinte — um laço entre o auditor e a
-   * regra, pago pelo escritor. O problema do auditor fica; a correção passa a
-   * ser a da regra, e o requisito do pedido segue como comportamento.
+   * O achado cuja correção prescrevia trabalho de teste voltava ao escritor
+   * com a correção da regra (§122) — e a correção da regra, até a §128, era
+   * "mova o requisito para um critério". No Parallel Lab com a 0.7.2 a rodada
+   * 2 teve nove achados e seis eram de teste: três tasks de teste a tirar, e a
+   * fase 3 reprovada duas vezes por NÃO trazer "o módulo tem testes
+   * automatizados próprios". A triagem manteve os seis, citando a regra. O
+   * desenvolvedor decidiu: o que o pedido diz sobre testes é executado pelo
+   * build, e nenhuma leitura do plan devolve, pergunta ou pede teste.
+   *
+   * O texto que esta auditoria leu já passou pela I-16, que conta o teste
+   * dentro do plano antes de qualquer modelo. Um achado SOBRE teste que pede
+   * para tirar o teste que está no texto — a prosa que a I-16 não conta —
+   * cumpre a regra e fica, com a correção da regra: tirar, nunca mover para
+   * outro lugar do plano. O que pede teste, ou reprova pela falta dele, sai
+   * inteiro, com as ressalvas e as decisões do mesmo assunto — a ressalva de
+   * hoje é o "achados anteriores" do prompt de amanhã. O achado de outro
+   * assunto cuja correção sugere um teste fica, com a correção trocada.
+   * Quando nada mais sobra, a devolução não tem motivo: aprovada.
    */
-  function semPrescricaoDeTeste(subject: string, verdict: AuditVerdict): AuditVerdict {
-    const autoridade = autoridadeDeTeste();
-    let corrigidos = 0;
-    const findings = verdict.findings.map((finding) => {
-      const termos = testPrescriptions(finding.fix, autoridade);
-      if (termos.length === 0) return finding;
-      corrigidos += 1;
-      return { ...finding, fix: `${testPrescriptionHint(termos)} (a correção que o auditor propôs — "${finding.fix}" — prescrevia teste e foi substituída pela regra I-16)` };
-    });
-    if (corrigidos > 0) announce(`  ${corrigidos} achado(s) de ${subject} pediam trabalho de teste na correção; a correção passa a ser a da regra (I-16), e o requisito fica como comportamento`);
-    return { ...verdict, findings };
+  async function semPedidoDeTeste(subject: string, verdict: AuditVerdict, attempt: number): Promise<AuditVerdict> {
+    const filtrado = tirarPedidoDeTeste(verdict, autoridadeDeTeste());
+    const tirados = filtrado.descartados.length;
+    if (tirados > 0) {
+      announce(`  ${tirados} apontamento(s) de ${subject} pediam ou julgavam teste (${filtrado.descartados.join("; ")}); o plano não devolve por teste — o build executa o que o pedido diz sobre testes`);
+      await event("audit", subject, "complete", `${tirados} apontamento(s) sobre teste descartado(s) (§129)`, attempt);
+    }
+    if (filtrado.corrigidos > 0) announce(`  ${filtrado.corrigidos} achado(s) de ${subject} traziam teste na correção; a correção fica só no produto, sem teste no lugar`);
+    return filtrado.verdict;
   }
 
   /**
@@ -3084,6 +3117,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * confirmada. O auditor não tem autoridade para tornar opcional uma regra
      * obrigatória, e o desenvolvedor não é perguntado se quer suspendê-la: a
      * decisão vira o achado mecânico que ela já era, endereçado a quem escreve.
+     * Desde a §129, a que só PEDE teste ("a fase deve ter os testes próprios do
+     * módulo?") não é do plano e sai, sem pergunta e sem correção.
      *
      * A detecção é a mesma checagem determinística do contrato (I-16), sobre o
      * texto da decisão e das leituras, com a mesma autoridade: o que o pedido e
@@ -3115,6 +3150,11 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         continue;
       }
       decisoesDoAuditor.add(`${decisao.where}::${decisao.decision}`.toLowerCase());
+      // A decisão que só pede teste não é do plano (§129): sai, sem pergunta e sem correção.
+      if (testToolPrescriptions([decisao.decision, ...decisao.options].join("\n"), autoridade).length === 0) {
+        announce(`  o auditor levantou como decisão um pedido de teste (${decisao.where}); não há o que decidir no plano — o build executa o que o pedido diz sobre testes`);
+        continue;
+      }
       announce(`  o auditor levantou como decisão uma regra do planejamento (${decisao.where}: prescrição de teste); não há o que decidir — vira correção`);
       decididas.push({
         where: enderecoDaDecisao(decisao),
@@ -4606,7 +4646,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         // Ressalva que atravessa a cadeia sem ser resolvida vira defeito que o
         // loop paga: no piloto 2, "a ausência de dependências não é
         // explicitada" custou três ciclos e parou o run três fases depois.
-        upstreamRemarks: remarks.map((entry) => ({
+        upstreamRemarks: remarks.filter((entry) => !ehRessalvaDoPedidoDeTeste(entry.remark)).map((entry) => ({
           document: entry.document,
           where: entry.remark.where,
           observation: entry.remark.observation,

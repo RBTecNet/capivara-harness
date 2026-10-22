@@ -52,9 +52,12 @@ describe("prompt de implementação", () => {
     expect(prompt).toContain("A test from an earlier phase that contradicts what this phase requires is out of date: update it.");
   });
 
-  it("libera rede para instalar dependências, mas proíbe stack nova", () => {
+  it("instala o que a infraestrutura aprovada declara, e nunca acrescenta, troca ou atualiza dependência por conta própria (§129)", () => {
     const prompt = implementPrompt(base);
-    expect(prompt).toContain("You may install dependencies");
+    expect(prompt).toContain("Install the dependencies the approved infrastructure declares");
+    expect(prompt).toContain("Never add, replace\nor upgrade a dependency it does not declare");
+    expect(prompt).toContain("that change belongs to the plan");
+    expect(prompt).not.toContain("You may install dependencies");
     expect(prompt).toContain("Never add a new stack");
   });
 
@@ -221,6 +224,7 @@ describe("reparo pelo validador separado da aprovação", () => {
     const prompt = verifierRepairPrompt(context);
     expect(prompt).toContain("Edit the project's code, tests");
     expect(prompt).toContain("including dependencies the builder could not install");
+    expect(prompt).toContain("Never add, replace or upgrade one they do not declare: the plan chose them");
     expect(prompt).toContain("Do not commit, stage files, change Git branches/refs");
     expect(prompt).toContain("Never edit the specification");
     expect(prompt).toContain("Never delete, skip or disable tests");

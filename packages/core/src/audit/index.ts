@@ -5,3 +5,4 @@ export type { AuditAction, AuditAttempt, AuditCycleState, Balanco, Identidade, S
 export { NOTA_DE_ENGENHARIA, autoridadeDaDecisao, autoridadeDoAchado, comNotaDeEngenharia, decisaoDeEngenhariaComoFinding, sinaisDeEngenharia } from "./authority.js";
 export type { Autoridade } from "./authority.js";
 export { TasksJulgadas, chaveDaTask, shaDaAutoridade, textoDaTask } from "./tasks.js";
+export { CORRECAO_SEM_TESTE, NADA_DE_TESTE_NO_LUGAR, falaDeTeste, semPedidoNaCorrecao, tirarPedidoDeTeste } from "./sem-teste.js";

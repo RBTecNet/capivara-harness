@@ -662,6 +662,9 @@ describe("o gate", () => {
     if (resultado.green) throw new Error("deveria reprovar");
     expect(resultado.toolMissing).toBe(true);
     expect(resultado.cause).toContain("@playwright/test");
+    // O runner do G4 é do harness; o projeto só o recebe se a infraestrutura aprovada o declara (§129).
+    expect(resultado.cause).toContain("se não declara, não o acrescente ao projeto");
+    expect(resultado.cause).not.toContain("Instale-o como dependência de desenvolvimento do projeto");
   });
 
   it("sem como subir a aplicação, o gate diz isso em vez de fingir que passou", async () => {

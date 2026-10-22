@@ -20,6 +20,8 @@ export function functionalAcceptanceBlock(): string {
     "Tests must use their own temporary data and preserve existing local databases and caches. Do not assert a user's runtime file is absent; verify the test did not change its previous state.",
     "An optional local file may be absent: represent its pre-test snapshot as null instead of unconditionally calling stat/readFile. Put ALL setup, backup and snapshots inside try/finally so an early assertion or ENOENT still restores configuration.",
     "Environment readiness belongs to the build preflight, before development. Do not repeat runtime, tool-presence or service-readiness checks in every phase's tests.",
+    "The tests the developer asked for are the shared contract's rules about tests (subject starting with \"testes\") and its stack entry about tests.",
+    "The plan does not carry them — no phase lists test tasks or test criteria — so the build honours them, for what each phase delivers and under the conditions they state.",
   ].join("\n");
 }
 

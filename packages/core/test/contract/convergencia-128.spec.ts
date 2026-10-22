@@ -22,8 +22,10 @@ import {
   parseSkeleton,
   preserveUnaddressedTasks,
   testPrescriptions,
+  testRequirements,
 } from "../../src/contract/index.js";
 import type { Architecture } from "../../src/contract/index.js";
+import { arquiteturaSemTestes, faseSemTestes } from "../support/sem-testes.js";
 import { applyMaterialityReview, materialityInput, materialityPrompt } from "../../src/audit/materiality.js";
 import type { AuditVerdict } from "../../src/audit/index.js";
 import { planningScopeBlock } from "../../src/prompts/index.js";
@@ -133,8 +135,9 @@ describe("§128 · A4 — o I-16 lê o trabalho de teste também depois de \"e\"
     expect(testPrescriptions("Implementar o formulário e escrever os testes de unidade.").length).toBeGreaterThan(0);
   });
 
-  it("requisito de teste não é trabalho, e verbo de conclusão sem objeto de teste não é nada", () => {
-    expect(testPrescriptions("O módulo possui testes automatizados próprios executados com banco SQLite isolado do banco normal da aplicação.", autoridade)).toEqual([]);
+  it("verbo de conclusão sem objeto de teste não é nada; o requisito de teste, desde a §129, é o pedido de testes dentro do plano", () => {
+    // Até a §128 o requisito ficava no plano como critério; agora é do build, e a I-16 o conta (`testes-no-build-129.spec.ts`).
+    expect(testPrescriptions("O módulo possui testes automatizados próprios executados com banco SQLite isolado do banco normal da aplicação.", autoridade)).toContain("módulo possui testes automatizados");
     expect(testPrescriptions("Implementar o cadastro e concluir a edição da tarefa pela interface.", autoridade)).toEqual([]);
     expect(testPrescriptions("Salvar a anotação e completar o formulário com a data de atualização.", autoridade)).toEqual([]);
   });
@@ -143,13 +146,19 @@ describe("§128 · A4 — o I-16 lê o trabalho de teste também depois de \"e\"
     expect(testPrescriptions("Cadastrar o paciente e criar os testes laboratoriais solicitados.", ["Sistema para cadastrar testes laboratoriais de pacientes"])).toEqual([]);
   });
 
-  it("nenhuma task das cinco fases da rodada 3 do run, nem as outras da rodada 1, vira prescrição", () => {
+  it("nenhuma task das cinco fases da rodada 3 do run, nem as outras da rodada 1, vira prescrição de TRABALHO; só o requisito de teste conta", () => {
     for (const [rodada, fases] of Object.entries(FASES)) {
       for (const [numero, texto] of Object.entries(fases)) {
         if (rodada === "r1" && numero === "3") continue;
         const plano = parsePhases(["# Parallel Lab — Project Phases", "", "<!-- inputs: a.md@sha256:000000000000 -->", "", fase(1, texto)].join("\n"));
         expect(plano.ok, `${rodada} fase ${numero}`).toBe(true);
-        if (plano.ok) expect(checkTestPrescription(plano.document, autoridade), `${rodada} fase ${numero}`).toEqual([]);
+        if (!plano.ok) continue;
+        // O que a I-16 conta no texto do run é o critério "o módulo possui testes automatizados próprios" (§129), e nada mais.
+        const termos = checkTestPrescription(plano.document, autoridade).flatMap((erro) => erro.message.split(" prescreve teste: ")[1]!.split(", "));
+        for (const termo of termos) expect(testRequirements(termo), `${rodada} fase ${numero}: ${termo}`).not.toEqual([]);
+        // Sem a frase, a fase é limpa.
+        const limpa = parsePhases(["# Parallel Lab — Project Phases", "", "<!-- inputs: a.md@sha256:000000000000 -->", "", fase(1, faseSemTestes(texto))].join("\n"));
+        if (limpa.ok) expect(checkTestPrescription(limpa.document, autoridade), `${rodada} fase ${numero}`).toEqual([]);
       }
     }
   });
@@ -159,7 +168,8 @@ describe("§128 · A6 — a reorganização sabe quais fases ela não tocou", ()
   const esqueleto = parseSkeleton(fixture("parallel-lab-128.skeleton.json"), { maxTasksPerPhase: 15, authority: [PEDIDO] });
   const ler = (nome: string): Architecture => {
     if (!esqueleto.ok) throw new Error("esqueleto do run não lido");
-    const lida = parseArchitecture(fixture(nome), esqueleto.skeleton, { maxTasksPerPhase: 15, authority: [PEDIDO] });
+    // A v5 e a v6 traziam "o módulo possui testes automatizados próprios" nos contratos; desde a §129 o contrato o recusa (`sem-testes.ts`).
+    const lida = parseArchitecture(arquiteturaSemTestes(fixture(nome)), esqueleto.skeleton, { maxTasksPerPhase: 15, authority: [PEDIDO] });
     if (!lida.ok) throw new Error(lida.defects.map((defeito) => defeito.problem).join("; "));
     return lida.architecture;
   };
@@ -186,7 +196,7 @@ describe("§128 · A6 — a reorganização sabe quais fases ela não tocou", ()
   });
 
   it("integração posterior (a arquitetura do Luna da §127): o contrato do componente que a fase 6 integra muda — 2 e 6 são reescritas, os módulos ficam", () => {
-    const luna = JSON.parse(fixture("luna-127.architecture.json")) as Architecture;
+    const luna = JSON.parse(arquiteturaSemTestes(fixture("luna-127.architecture.json"))) as Architecture;
     const outra: Architecture = {
       ...luna,
       components: luna.components.map((componente) => (componente.name === "interface-base" ? { ...componente, contracts: [...componente.contracts, "A navegação lateral marca a página ativa."] } : componente)),

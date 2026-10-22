@@ -132,8 +132,6 @@ const REGRAS_CORRIGIDAS = {
   "banco.arquivo":
     "Os dados dos três módulos persistem em um banco SQLite local, em arquivo criado pelo próprio projeto, e permanecem disponíveis após reiniciar a aplicação. As tabelas de tarefas, categorias e anotacoes existem antes de o servidor aceitar requisições. Nenhum registro é inserido automaticamente.",
   "banco.persistencia": REGRAS_DO_HAIKU["banco.persistencia"],
-  "banco.isolamento-de-testes":
-    "Os testes automatizados usam um banco isolado dos dados normais da aplicação, criado e descartado pela própria execução, e nunca o banco configurado para uso normal.",
   "servidor.porta": "A porta em que o servidor escuta é configurável; nenhuma porta fixa é exigida pelos fluxos.",
   "api.prefixo-e-rotas": REGRAS_DO_HAIKU["api.prefixo-e-rotas"],
   "api.cliente": "A interface acessa a API somente por um cliente compartilhado, que usa o prefixo /api em todas as chamadas e converte respostas de erro em exceção com status, mensagem e campos.",
@@ -143,7 +141,8 @@ const REGRAS_CORRIGIDAS = {
   "datas.exibicao": REGRAS_DO_HAIKU["datas.exibicao"],
   "exclusao": REGRAS_DO_HAIKU["exclusao"],
   "modulos.independencia":
-    "Os módulos tarefas, categorias e anotacoes não possuem chaves estrangeiras, consultas, rotas, componentes ou serviços que referenciem outro módulo, e cada um tem rotas, componentes, serviços e testes próprios.",
+    // "e testes próprios" saiu (§129): vai para as regras "testes.", abaixo.
+    "Os módulos tarefas, categorias e anotacoes não possuem chaves estrangeiras, consultas, rotas, componentes ou serviços que referenciem outro módulo, e cada um tem rotas, componentes e serviços próprios.",
   "arquivos.compartilhados": "A fundação compartilhada (servidor, conexão com o banco, cliente da API, layout e navegação) não é alterada por fase de módulo nenhuma.",
   "interface.tema": "Cores, espaçamentos e tipografia são definidos uma vez e usados por todos os componentes. Nenhum módulo define paleta própria.",
   "interface.navegacao": "A aplicação tem exatamente as rotas /, /tarefas, /categorias e /anotacoes. A sidebar contém links para Início, Tarefas, Categorias e Anotações e destaca a rota atual.",
@@ -169,8 +168,18 @@ function esqueletoCom(extras: { stack?: unknown[]; rules?: unknown[]; phases?: u
   return JSON.stringify({ ...JSON.parse(SKELETON), ...extras });
 }
 
+/**
+ * O isolamento do banco dos testes, como o escritor o devolve corrigido. Até a
+ * §128 era a regra "banco.isolamento-de-testes"; desde a §129 o pedido de
+ * testes vai em regras de assunto "testes.", que o build lê e o plano não.
+ */
+const REGRAS_DE_TESTE_CORRIGIDAS = [
+  { subject: "testes.modulos", statement: "Cada módulo tem os seus próprios testes." },
+  { subject: "testes.banco", statement: "Os testes automatizados usam um banco isolado dos dados normais da aplicação, e nunca o banco configurado para uso normal." },
+];
+
 const CONTAMINADO = esqueletoCom({ stack: STACK_DO_HAIKU, rules: regras(REGRAS_DO_HAIKU) });
-const LIMPO = esqueletoCom({ stack: STACK_DO_HAIKU.slice(0, 4), rules: regras(REGRAS_CORRIGIDAS) });
+const LIMPO = esqueletoCom({ stack: STACK_DO_HAIKU.slice(0, 4), rules: [...regras(REGRAS_CORRIGIDAS), ...REGRAS_DE_TESTE_CORRIGIDAS] });
 
 const LIMITES = { maxTasksPerPhase: 15 };
 
@@ -262,25 +271,30 @@ describe("I-17 no esqueleto: o que o Haiku escreveu volta nomeado; o que é prod
     expect(parseSkeleton(funcional, LIMITES).ok).toBe(true);
   });
 
-  it("a reescrita como comportamento passa, e conserva SQLite, isolamento do banco de testes e testes automatizados", () => {
-    const comTestes = esqueletoCom({
+  it("a reescrita como comportamento passa e conserva SQLite; o pedido de testes vai numa regra \"testes.\", nunca numa story (§129)", () => {
+    const pedidoDeTestes = "Como avaliador, quero que cada módulo tenha testes automatizados próprios, aprovados contra um banco isolado dos dados normais.";
+    const naStory = esqueletoCom({
       stack: STACK_DO_HAIKU.slice(0, 4),
       rules: regras(REGRAS_CORRIGIDAS),
-      stories: [...(JSON.parse(SKELETON).stories as unknown[]), { id: "US-0.4", statement: "Como avaliador, quero que cada módulo tenha testes automatizados próprios, aprovados contra um banco isolado dos dados normais." }],
+      stories: [...(JSON.parse(SKELETON).stories as unknown[]), { id: "US-0.4", statement: pedidoDeTestes }],
     });
-    const lido = parseSkeleton(comTestes, LIMITES);
+    const comStory = parseSkeleton(naStory, LIMITES);
+    expect(comStory.ok).toBe(false);
+    if (!comStory.ok) expect(comStory.defects.map((d) => d.problem).join(" ")).toContain("a story US-0.4 carrega o pedido de testes para o plano");
+
+    const comRegra = [...regras(REGRAS_CORRIGIDAS), ...REGRAS_DE_TESTE_CORRIGIDAS, { subject: "testes.avaliador", statement: pedidoDeTestes }];
+    const lido = parseSkeleton(esqueletoCom({ stack: STACK_DO_HAIKU.slice(0, 4), rules: comRegra }), LIMITES);
     expect(lido.ok, lido.ok ? "" : JSON.stringify(lido.defects)).toBe(true);
     if (!lido.ok) return;
     expect(lido.tolerated).toEqual([]);
-    const texto = lido.skeleton.rules.map((regra) => regra.statement).join("\n");
-    expect(texto).toContain("SQLite");
-    expect(texto).toContain("banco isolado dos dados normais");
-    expect(lido.skeleton.stories.some((story) => story.statement.includes("testes automatizados"))).toBe(true);
+    expect(lido.skeleton.rules.map((regra) => regra.statement).join("\n")).toContain("SQLite");
+    expect(lido.skeleton.rules.find((regra) => regra.subject === "testes.avaliador")?.statement).toBe(pedidoDeTestes);
   });
 
   it("o requisito explicitamente técnico do pedido continua autorizado", () => {
     const autoridade = [`${PEDIDO}\nO banco é apontado pela variável APP_DB_PATH e o esquema é criado por npm run migrate.`];
-    const regra = esqueletoCom({ rules: [{ subject: "banco", statement: "o caminho vem de APP_DB_PATH e o esquema é criado por npm run migrate antes de o servidor subir" }] });
+    // O pedido do Parallel Lab exige testes: o esqueleto os guarda numa regra "testes." (§129).
+    const regra = esqueletoCom({ rules: [{ subject: "banco", statement: "o caminho vem de APP_DB_PATH e o esquema é criado por npm run migrate antes de o servidor subir" }, ...REGRAS_DE_TESTE_CORRIGIDAS] });
     expect(parseSkeleton(regra, { ...LIMITES, authority: autoridade }).ok).toBe(true);
     expect(parseSkeleton(regra, LIMITES).ok).toBe(false);
   });
@@ -294,12 +308,13 @@ describe("I-17 no esqueleto: o que o Haiku escreveu volta nomeado; o que é prod
     expect(lido.skeleton.rules.some((regra) => regra.subject === "banco.arquivo")).toBe(true);
   });
 
-  it("I-16 continua: ferramenta e arquivo de teste numa regra ainda são defeito", () => {
+  it("I-16 continua: ferramenta e arquivo de teste numa regra ainda são defeito, também na regra de testes", () => {
     const comVitest = esqueletoCom({ rules: [{ subject: "testes", statement: "a suíte roda com Vitest a partir de vitest.config.ts" }] });
     const lido = parseSkeleton(comVitest, LIMITES);
     expect(lido.ok).toBe(false);
     if (!lido.ok) expect(lido.defects.map((d) => d.problem).join(" ")).toContain('a regra "testes" prescreve teste');
-    expect(testPrescriptions("os testes rodam contra um banco isolado")).toEqual([]);
+    // A condição da suíte, que até a §128 era requisito do plano, desde a §129 é o pedido de testes.
+    expect(testPrescriptions("os testes rodam contra um banco isolado")).not.toEqual([]);
   });
 });
 
@@ -409,7 +424,12 @@ describe("o laço do esqueleto: corrigir sem interromper", () => {
   });
 
   it("o caminho limpo não ganha chamada nenhuma", async () => {
-    const { agent, esqueleto } = await init(skeletonPath());
+    // O pedido do Parallel Lab exige testes; o esqueleto limpo os guarda numa regra "testes." (§129).
+    const comRegraDeTeste = esqueletoCom({ rules: [...(JSON.parse(SKELETON).rules as unknown[]), ...REGRAS_DE_TESTE_CORRIGIDAS] });
+    const { agent, esqueleto } = await init([
+      ...skeletonPath().filter((passo) => passo.match.subject !== "skeleton"),
+      { match: { role: "writer", stage: "authoring", subject: "skeleton" }, respond: { stdout: comRegraDeTeste }, repeat: true },
+    ]);
     expect(skeletonCalls(agent)).toHaveLength(1);
     expect(agent.calls.filter((call) => call.role !== "writer")).toHaveLength(0);
     expect(esqueleto).toContain("Pousada");

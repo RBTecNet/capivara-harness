@@ -182,6 +182,81 @@ const VARIAVEL_DE_AMBIENTE = /(?<![\p{L}\p{N}_])[A-Z][A-Z0-9]*_[A-Z0-9_]+(?![\p{
 /** O que, antes do sujeito na mesma oração, faz dela uma negação ou uma descrição de quem decide. */
 const ANTES_DO_SUJEITO = /(?<![\p{L}\p{N}_])(?:n[aã]o|nunca|jamais|como|never|not|how)(?![\p{L}\p{N}_])/iu;
 
+/*
+ * O REQUISITO de teste dentro do plano (§129).
+ *
+ * Até a §128 a regra separava o trabalho de teste (prescrição) da exigência
+ * do pedido (requisito, que ficava como critério de uma task de produto). No
+ * Parallel Lab com a 0.7.2 essa fronteira custou a rodada 2 inteira: seis de
+ * nove achados eram sobre teste — três tasks de teste a tirar, e a fase 3
+ * reprovada por NÃO ter o critério "o módulo tem testes automatizados
+ * próprios". A decisão do desenvolvedor é outra: o que o pedido diz sobre
+ * testes é executado pelo build, como o "compilar sem erros"; o plano não o
+ * carrega em lugar nenhum, e ninguém no plan devolve nada por causa disso.
+ *
+ * O que se conta é a forma em que o próprio produto TEM, ORGANIZA ou
+ * CONDICIONA os testes dele — nunca a palavra "teste" sozinha, que é produto
+ * numa escola, num laboratório ou num executor de testes:
+ * - o produto ou o módulo como sujeito de posse: "o módulo tem testes", "cada
+ *   módulo deve ter suas próprias rotas, componentes, serviços e testes";
+ * - os testes próprios: "testes automatizados próprios", "seus próprios testes";
+ * - os testes de uma parte do produto: "os testes do módulo", "testes do dashboard";
+ * - a condição de execução: "testes … executados contra um banco isolado";
+ * - a aprovação da suíte: "testes automatizados aprovados", "a suíte passa".
+ * Um composto do domínio depois de "testes de" ("testes de nivelamento",
+ * "testes de laboratório") não conta; o de software ("de integração") conta.
+ * Nenhuma autoridade escapa: o pedido que diz "testes automatizados" é
+ * justamente o que vai para o build.
+ */
+const NAO_E_DOMINIO = "(?!\\s+(?:de|do|da|dos|das)\\s+(?!integra|unidade|aceita|regress|carga|fuma|contrato|interface|componente|snapshot|ponta|software|api|backend|frontend|m[oó]dulo|produto|projeto|aplica|sistema|dashboard)[\\p{L}])(?!\\s+a\\/b)";
+const SUJEITO_DO_PRODUTO =
+  "(?:produto|projeto|aplica[cç][aã]o|aplicativo|sistema|reposit[oó]rio|c[oó]digo|m[oó]dulos?|backend|frontend|servidor|componentes?|dashboard|product|project|application|app|system|repository|codebase|modules?|components?|server)";
+const VERBO_DE_POSSE =
+  "(?:tem|t[eê]m|possui|possuem|possuir|ter[aá]|ter[aã]o|tenha|tenham|ter|traz|trazem|inclui|incluem|has|have|includes?|ships?|contains?)";
+const TESTE = `${NAO_COMPLEMENTO}(?:testes?|tests?)`;
+/** "Teste" com o qualificador que só software tem: sozinho, é produto numa escola. */
+const TESTE_DE_SOFTWARE =
+  `(?:${TESTE}\\s+(?:automatizad[oa]s?|automated|unit[aá]rios?|de\\s+unidade|de\\s+integra[cç][aã]o|e2e|end-to-end|de\\s+ponta\\s+a\\s+ponta)|(?:automated|unit|integration|e2e|end-to-end)\\s+tests?)`;
+const PARTE_DO_PRODUTO =
+  "(?:cada\\s+)?(?:m[oó]dulos?|produto|projeto|aplica[cç][aã]o|aplicativo|backend|frontend|servidor|api|dashboard)";
+/** O que faz de um banco o banco DOS TESTES: "isolado", "descartável", "separado" — "o banco de questões" é produto. */
+const BANCO_DE_TESTE =
+  "(?:bancos?|base\\s+de\\s+dados|databases?|db|sqlite)(?:[^.;:\\n]{0,40}?(?:isolad|descart|tempor[aá]ri|separad|exclusiv|isolated|disposable|temporary|separate|throwaway)\\p{L}*)";
+const VERBO_DA_EXECUCAO =
+  "(?:contra|against|usa|usam|usar|usem|utiliza|utilizam|utilizar|utilizem|uses?|use|(?:rodam|roda|rodem|executad[oa]s?|executam|executa|executem)\\s+(?:contra|em|sobre|num|numa)|(?:run|runs|executed|executes)\\s+(?:against|on))";
+const TEST_REQUIREMENT = new RegExp(
+  [
+    // o produto como sujeito de posse de teste de software: "o módulo tem testes automatizados", "cada módulo tem os seus próprios testes automatizados"
+    `${INICIO}(${SUJEITO_DO_PRODUTO}${FIM}[^.;:\\n]{0,60}?${INICIO}${VERBO_DE_POSSE}${FIM}[^.;:\\n]{0,90}?(?:${TESTE_DE_SOFTWARE}|${INICIO}pr[oó]prios?\\s+testes\\s+(?:automatizad[oa]s?|unit[aá]rios?|de\\s+integra[cç][aã]o|e2e)|${INICIO}own\\s+(?:automated|unit|integration|e2e)\\s+tests?))${FIM}`,
+    // os testes próprios, com o qualificador: "os testes automatizados próprios do módulo"
+    `${INICIO}((?:testes?\\s+automatizad[oa]s?|automated\\s+tests?)\\s+pr[oó]prios?|(?:its|their)\\s+own\\s+automated\\s+tests?)${FIM}`,
+    // os testes de uma parte do produto: qualificados, ou exercitando-a; em inglês, só no possessivo ("the module's tests")
+    `${INICIO}(${TESTE_DE_SOFTWARE}\\s+d[oa]s?\\s+${PARTE_DO_PRODUTO}|${TESTE}\\s+d[oa]s?\\s+${PARTE_DO_PRODUTO}\\s+exercit\\p{L}*|(?:module|product|project|application|app|backend|frontend|server|api)'s\\s+(?:own\\s+)?(?:automated\\s+)?tests?)${FIM}`,
+    // a condição da execução: teste de software contra qualquer banco; "os testes" só contra o banco isolado dos testes
+    `${INICIO}((?:${TESTE_DE_SOFTWARE}|su[ií]tes?\\s+(?:de\\s+testes?|automatizad[oa]s?)|test\\s+suites?|execu[cç](?:[aã]o|[oõ]es)\\s+(?:automatizadas?\\s+)?d[eoa]s?\\s+testes)${FIM}[^.;:\\n]{0,60}?${INICIO}${VERBO_DA_EXECUCAO}${FIM}[^.;:\\n]{0,30}?${INICIO}(?:bancos?|base\\s+de\\s+dados|databases?|db|sqlite)|${TESTE}${FIM}${NAO_E_DOMINIO}[^.;:\\n]{0,60}?${INICIO}${VERBO_DA_EXECUCAO}${FIM}[^.;:\\n]{0,30}?${INICIO}${BANCO_DE_TESTE})${FIM}`,
+    // a aprovação da suíte: "testes automatizados aprovados"
+    `${INICIO}(${TESTE_DE_SOFTWARE}[^.;:\\n]{0,40}?${INICIO}(?:aprovad[oa]s?|passa|passam|passando|pass|passes|passing|verdes?|green))${FIM}`,
+    // executar os testes de software como obra do produto: "documenta os comandos para … executar os testes automatizados".
+    // "A execução dos testes" sozinha não conta: é também o eco da regra ("como a execução dos testes cria o banco é do build").
+    `${INICIO}((?:executar|rodar|run|running)\\s+(?:os\\s+|the\\s+)?(?:testes\\s+(?:automatizad[oa]s?|unit[aá]rios?|de\\s+integra[cç][aã]o|e2e)|(?:automated|unit|integration|e2e)\\s+tests?))${FIM}`,
+  ].join("|"),
+  "giu",
+);
+
+/**
+ * O requisito de teste que este texto carrega para dentro do plano (§129).
+ *
+ * Vazio significa que o texto não fala dos testes do próprio produto.
+ */
+export function testRequirements(text: string): string[] {
+  const termos = new Map<string, string>();
+  for (const match of text.matchAll(TEST_REQUIREMENT)) {
+    const termo = (match.slice(1).find((grupo) => grupo !== undefined) ?? match[0]).replace(/\s+/g, " ").trim();
+    if (termo !== "") termos.set(termo.toLowerCase(), termo);
+  }
+  return [...termos.values()];
+}
+
 /** O composto que não escapa pela autoridade: teste de software, genérico. */
 const COMPOSTO_DE_SOFTWARE =
   /automatizad|automated|unit|integra|e2e|end-to-end|ponta\s+a\s+ponta|aceita|acceptance|regress|carga|load|fuma|smoke|contrato|contract|snapshot|funciona|su[ií]te|suite|cobertura|coverage|manua|cen[aá]rio|scenario|execu|organiza|configura|estrutura/iu;
@@ -221,6 +296,7 @@ export function testPrescriptions(text: string, authority: TestAuthority = []): 
     if (!fontes.includes(termo.toLowerCase())) achados.set(termo.toLowerCase(), termo);
   }
   for (const termo of testRunPrescriptions(text, authority)) achados.set(termo.toLowerCase(), termo);
+  for (const termo of testRequirements(text)) achados.set(termo.toLowerCase(), termo);
   return [...achados.values()];
 }
 
@@ -256,20 +332,31 @@ function procedimentos(text: string): string[] {
   return [...termos.values()];
 }
 
-/** Os termos de I-16 que nomeiam ferramenta, arquivo ou estratégia — tudo menos o procedimento da execução. */
+/**
+ * Os termos de I-16 que nomeiam ferramenta, arquivo ou estratégia — tudo menos
+ * o procedimento da execução e o requisito (§129). É por eles que se APAGA uma
+ * entrada de lista; "better-sqlite3 — banco da aplicação e dos testes
+ * automatizados" é dependência da aplicação, e a frase volta a quem escreveu.
+ */
 export function testToolPrescriptions(text: string, authority: TestAuthority = []): string[] {
-  const procedimento = new Set(testRunPrescriptions(text, authority).map((termo) => termo.toLowerCase()));
-  return testPrescriptions(text, authority).filter((termo) => !procedimento.has(termo.toLowerCase()));
+  const fora = new Set([...testRunPrescriptions(text, authority), ...testRequirements(text)].map((termo) => termo.toLowerCase()));
+  return testPrescriptions(text, authority).filter((termo) => !fora.has(termo.toLowerCase()));
 }
 
-/** A correção, a mesma em todo documento: comportamento fica, ferramenta sai. */
+/**
+ * A correção, a mesma em todo documento do plano: o teste sai, inteiro (§129).
+ *
+ * Até a §128 ela terminava em "não apague o requisito: mova-o" para um critério
+ * de task de produto — e era o próprio harness pedindo teste dentro do plano.
+ * O que o pedido diz sobre testes é executado pelo build, que o lê do esqueleto;
+ * reescrevê-lo em outro lugar do plano é a mesma prescrição com outra forma.
+ */
 export function testPrescriptionHint(terms: readonly string[]): string {
   return (
-    `remova ${terms.map((termo) => `"${termo}"`).join(", ")} e descreva só o comportamento observável do produto;` +
-    " como o produto é provado — estratégia, ferramenta, arquivos, cenários, tipo e organização de teste, e em que fase o trabalho de teste acontece — é decisão do build, não do plano." +
-    " O que o pedido exige sobre testes continua valendo como REQUISITO do produto, escrito como critério de aceite de uma task do produto" +
-    " (por exemplo: \"o módulo possui testes automatizados, executados contra um banco descartável apontado pela variável de ambiente\")," +
-    " sem task de escrever testes, sem escolher ferramenta, sem nomear arquivo e sem dizer o que a suíte cobre. Não apague o requisito: mova-o"
+    `remova ${terms.map((termo) => `"${termo}"`).join(", ")} e descreva só o comportamento observável do produto.` +
+    " O plano não fala de teste: nenhuma task, critério, responsabilidade, goal ou condição de execução sobre testes —" +
+    " nem os que o pedido exige. O que o pedido diz sobre testes é executado pelo build, como a compilação, e chega a ele pelo esqueleto;" +
+    " não o reescreva em outro lugar do plano"
   );
 }
 

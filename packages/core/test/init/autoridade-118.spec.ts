@@ -101,9 +101,10 @@ describe("I-16 — a checagem determinística de prescrição de teste", () => {
     expect(testPrescriptions("os casos ficam em __tests__/")).toEqual(["__tests__/"]);
   });
 
-  it("não toca a exigência escrita como comportamento", () => {
-    expect(testPrescriptions("a suíte automatizada roda contra um banco descartável, criado e destruído pela própria execução")).toEqual([]);
+  it("não toca o lado da aplicação; a condição da suíte, desde a §129, é o pedido de testes dentro do plano", () => {
     expect(testPrescriptions("Com DATABASE_PATH apontando para um arquivo temporário, a aplicação sobe sem tocar o banco do .env")).toEqual([]);
+    // Até a §128 isto era "a exigência escrita como comportamento" e ficava no plano; agora é do build.
+    expect(testPrescriptions("a suíte automatizada roda contra um banco descartável, criado e destruído pela própria execução")).toEqual(["suíte automatizada roda contra um banco"]);
   });
 
   it("o pedido e a entrevista são a autoridade: o que eles nomeiam não é prescrição do plano", () => {
@@ -122,7 +123,8 @@ describe("I-16 — a checagem determinística de prescrição de teste", () => {
     expect(erros[0]?.message).toContain("da fase 2 prescreve teste");
     expect(erros[0]?.message).toContain("Vitest");
     expect(erros[0]?.line).toBeGreaterThan(0);
-    expect(erros[0]?.hint).toContain("decisão do build");
+    expect(erros[0]?.hint).toContain("executado pelo build");
+    expect(erros[0]?.hint).not.toContain("mova-o");
     expect(checkTestPrescription(plano.document, ["use Vitest e Playwright e guarde em src/quality/reservas/api.test.ts"])).toEqual([]);
   });
 });
@@ -153,18 +155,31 @@ describe("I-16 no esqueleto: a stack não escolhe a ferramenta de teste", () => 
   });
 });
 
-describe("I-16 na arquitetura: infraestrutura e arquivos saem contando; prosa volta ao arquiteto", () => {
-  it("remove a ferramenta da infraestrutura e o arquivo de teste de files, anunciando", () => {
+describe("I-16 na arquitetura: o arquivo de teste sai contando; a dependência de teste fica na infraestrutura; prosa volta ao arquiteto", () => {
+  it("a ferramenta de teste fica na infraestrutura, para o build validá-la uma vez (§129); o arquivo de teste sai de files, anunciando", () => {
     const lida = parseArchitecture(ARQUITETURA_CONTAMINADA, esqueleto(), { maxTasksPerPhase: 15 });
     expect(lida.ok, lida.ok ? "" : JSON.stringify(lida.defects)).toBe(true);
     if (!lida.ok) return;
-    expect(lida.architecture.infrastructure.tools.map((item) => item.name)).toEqual(["TypeScript"]);
-    expect(lida.architecture.infrastructure.dependencies.map((item) => item.name)).toEqual(["pg"]);
+    // Até a §128 elas saíam; agora a infraestrutura lista todas as dependências, as de teste também.
+    expect(lida.architecture.infrastructure.tools.map((item) => item.name)).toEqual(["TypeScript", "Vitest"]);
+    expect(lida.architecture.infrastructure.dependencies.map((item) => item.name)).toEqual(["pg", "playwright"]);
     expect(lida.architecture.components.find((c) => c.name === "api")?.files).toEqual(["src/api/reservas.ts"]);
     const notas = lida.applied.join("\n");
-    expect(notas).toContain("removeu Vitest de infrastructure.tools");
-    expect(notas).toContain("removeu playwright de infrastructure.dependencies");
+    expect(notas).not.toContain("removeu Vitest");
     expect(notas).toContain('removeu de api.files "vitest.config.ts", "src/quality/reservas/api.test.ts"');
+  });
+
+  it("o propósito de um runner diz o que ele roda e fica; o procedimento da execução volta ao arquiteto; a compatibilidade da ferramenta fica, o requisito não", () => {
+    const base = JSON.parse(ARCHITECTURE);
+    const comPropositos = (purpose: string) => JSON.stringify({ ...base, infrastructure: { ...base.infrastructure, dependencies: [...base.infrastructure.dependencies, { name: "vitest", version: "", kind: "dev", purpose, basis: "exigência técnica: o build executa os testes que o pedido exige" }] } });
+    expect(parseArchitecture(comPropositos("roda os testes automatizados do backend contra um banco descartável"), esqueleto(), { maxTasksPerPhase: 15 }).ok).toBe(true);
+    const comProcedimento = parseArchitecture(comPropositos("a execução dos testes cria e destrói o banco temporário"), esqueleto(), { maxTasksPerPhase: 15 });
+    expect(comProcedimento.ok).toBe(false);
+    if (!comProcedimento.ok) expect(comProcedimento.defects.map((d) => d.problem).join(" ")).toContain("o item vitest de infrastructure.dependencies prescreve teste");
+    const comCompatibilidade = { ...base, infrastructure: { ...base.infrastructure, compatibility: [...(base.infrastructure.compatibility ?? []), "O Playwright exige Node 18 ou superior"] } };
+    expect(parseArchitecture(JSON.stringify(comCompatibilidade), esqueleto(), { maxTasksPerPhase: 15 }).ok).toBe(true);
+    const comRequisito = { ...base, infrastructure: { ...base.infrastructure, compatibility: [...(base.infrastructure.compatibility ?? []), "A aplicação possui testes automatizados e os fluxos acessam um banco isolado"] } };
+    expect(parseArchitecture(JSON.stringify(comRequisito), esqueleto(), { maxTasksPerPhase: 15 }).ok).toBe(false);
   });
 
   it("um componente cuja responsabilidade é configurar a ferramenta é defeito, não conserto", () => {
@@ -265,11 +280,11 @@ describe("no orquestrador, com o provider falso", () => {
     // Ninguém foi perguntado se a regra do planejamento vale.
     expect(perguntadas.filter((pergunta) => pergunta.topic.startsWith("auditoria ·"))).toEqual([]);
     expect(anunciado).toContain("levantou como decisão uma regra do planejamento");
-    // A correção chegou ao escritor da fase 2, como achado mecânico, com a regra e a preservação do requisito.
+    // A correção chegou ao escritor da fase 2, como achado mecânico: tirar a prescrição (a ferramenta), nada no lugar.
     const escritas = por(agent, { role: "writer", stage: "authoring", subject: "phase-p02" });
     expect(escritas).toHaveLength(2);
     expect(escritas[1]?.prompt).toContain("I-16");
-    expect(escritas[1]?.prompt).toContain("decisão do build");
+    expect(escritas[1]?.prompt).toContain("executado pelo build");
     // Nada do auditor virou decisão confirmada do desenvolvedor.
     const handoff = await readHandoff(projectRoot, outcome.runId, "project-phases.md");
     expect((handoff?.answers ?? []).filter((answer) => answer.decision.includes("Vitest"))).toEqual([]);
@@ -292,14 +307,17 @@ describe("no orquestrador, com o provider falso", () => {
     const { outcome, agent, anunciado } = await plan(passos);
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
 
-    expect(anunciado).toContain("removeu Vitest de infrastructure.tools");
+    // A infraestrutura lista as dependências de teste (§129): o build as tem antes da primeira fase.
+    expect(anunciado).not.toContain("removeu Vitest de infrastructure.tools");
     const arquitetura = await readFile(join(projectRoot, ".capivara/init/architecture.md"), "utf8");
-    expect(arquitetura).not.toMatch(/vitest|playwright/i);
+    expect(arquitetura).toMatch(/vitest/i);
+    expect(arquitetura).not.toContain("vitest.config.ts");
+    // As fases continuam sem dizer como testar: nem ferramenta, nem arquivo.
     const plano = await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8");
     expect(plano).not.toMatch(/vitest|playwright|\.test\.ts/i);
     expect(plano).toContain("Uma reserva criada permanece consultável após reiniciar a aplicação");
     const ambiente = JSON.parse(await readFile(join(projectRoot, ".capivara/init/environment.json"), "utf8")) as { infrastructure?: { tools?: { name: string }[] } };
-    expect((ambiente.infrastructure?.tools ?? []).map((item) => item.name)).not.toContain("Vitest");
+    expect((ambiente.infrastructure?.tools ?? []).map((item) => item.name)).toContain("Vitest");
 
     // A emenda foi mecânica, só na fase 2, antes de qualquer auditor ler a prescrição.
     const escritas = por(agent, { role: "writer", stage: "authoring", subject: "phase-p02" });

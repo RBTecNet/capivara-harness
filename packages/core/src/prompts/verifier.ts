@@ -184,7 +184,8 @@ export function verifyPrompt(context: VerifierContext): string {
     "Start with B0 instead of B1 when required functionality is absent or essential behaviour cannot be proven at all.",
     "Only when the code CANNOT satisfy the requirement because the approved documentation itself is wrong — an",
     "acceptance criterion contradicts the architecture, a contract cannot be honoured as written, two documents",
-    "contradict each other — add `UPSTREAM: PLAN — <document and exact passage>: <why no compatible implementation",
+    "contradict each other, the phase demonstrably needs a dependency the approved infrastructure does not",
+    "declare — add `UPSTREAM: PLAN — <document and exact passage>: <why no compatible implementation",
     "exists>` (INIT instead of PLAN when the product definition in skeleton.md is the source). It is a claim, not a",
     "way out: the harness forwards it only after the build exhausted every repair, and keeps the task INCOMPLETE.",
     "A finding without the unmet requirement, the observed behaviour and the expected behaviour is not a material block.",
@@ -281,9 +282,10 @@ export function verifierRepairPrompt(context: VerifierRepairContext): string {
     "",
     "## Allowed actions and boundaries",
     "- Edit the project's code, tests and required local configuration to close the explicit findings.",
-    "- Install, rebuild or restore project-local dependencies with this project's package manager,",
-    "  including dependencies the builder could not install. Use existing manifests and lockfiles;",
-    "  do not introduce a new stack or unrelated packages.",
+    "- Install, rebuild or restore, with this project's package manager, the project-local dependencies the",
+    "  approved infrastructure and the manifests declare, including dependencies the builder could not install.",
+    "  Never add, replace or upgrade one they do not declare: the plan chose them. Use existing manifests and",
+    "  lockfiles; do not introduce a new stack or unrelated packages.",
     ...(context.systemInstall === true
       ? [
           "- System installation is enabled for this run: you may install a demonstrated missing system",

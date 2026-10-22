@@ -113,10 +113,16 @@ const COM_TASK_DE_SUITE = `${PHASE_2.trimEnd()}
   - **Traces:** US-1.1, reservations, workflow 1
 `;
 
-/** O mesmo requisito, como comportamento do produto: é o que fica. */
+/** O mesmo requisito escrito como critério: até a §128 era o que ficava; desde a §129 é do build, e a I-16 o conta. */
 const COM_REQUISITO = PHASE_2.replace(
   "    - Datas sobrepostas no mesmo quarto devolvem erro e não persistem nada",
   "    - Datas sobrepostas no mesmo quarto devolvem erro e não persistem nada\n    - O módulo possui testes automatizados, executados contra um banco descartável apontado por DATABASE_PATH, sem ler nem migrar o banco do .env",
+);
+
+/** O lado da APLICAÇÃO, que é produto e fica: a aplicação aceita o banco descartável (§126, §129). */
+const COM_LADO_DA_APLICACAO = PHASE_2.replace(
+  "    - Datas sobrepostas no mesmo quarto devolvem erro e não persistem nada",
+  "    - Datas sobrepostas no mesmo quarto devolvem erro e não persistem nada\n    - A aplicação aceita um banco descartável apontado por DATABASE_PATH, sem ler nem migrar o banco do .env",
 );
 
 const COM_MARCADOR = PHASE_2.replace(
@@ -401,16 +407,18 @@ describe("I-16 sem ferramenta: o plano não aloca trabalho de teste", () => {
       "Definir como os testes de integração serão executados",
       "Entregar a suíte automatizada do módulo Tarefas como requisito do próprio módulo",
       TASK_DE_TESTES_FIX,
+      // Até a §128 estes eram "exigências legítimas" que ficavam no plano; desde a §129 o pedido de testes é do build.
+      "O produto deve possuir testes automatizados",
+      "O módulo possui testes automatizados, executados contra um banco descartável apontado pela variável de ambiente",
+      "A execução de testes deve utilizar banco descartável",
+      "a suíte automatizada roda contra um banco descartável, criado e destruído pela própria execução",
     ]) {
       expect(testPrescriptions(prescricao, pedido), prescricao).not.toEqual([]);
     }
     for (const legitimo of [
-      "O produto deve possuir testes automatizados",
-      "O módulo possui testes automatizados, executados contra um banco descartável apontado pela variável de ambiente",
-      "A execução de testes deve utilizar banco descartável",
       "O produto deve preservar dados entre reinicializações",
       "O produto deve respeitar contratos observáveis",
-      "a suíte automatizada roda contra um banco descartável, criado e destruído pela própria execução",
+      "A aplicação aceita um banco descartável apontado por DATABASE_PATH, sem ler nem migrar o banco do .env",
       "README.md menciona `npm test` como o comando documentado",
     ]) {
       expect(testPrescriptions(legitimo, pedido), legitimo).toEqual([]);
@@ -431,8 +439,8 @@ describe("I-16 sem ferramenta: o plano não aloca trabalho de teste", () => {
     const erros = checkTestPrescription(lido.document, [request.text]);
     expect(erros).toHaveLength(1);
     expect(erros[0]?.message).toContain("Entregar a suíte automatizada");
-    expect(erros[0]?.hint).toContain("Não apague o requisito");
-    expect(checkTestPrescription(parsePhases(assemblePhasesDocument({ projectName: "Pousada", stamp: "<!-- inputs: skeleton.md@sha256:aaaaaaaaaaaa architecture.md@sha256:bbbbbbbbbbbb -->", overview: "Base", phases: [PHASE_1, COM_REQUISITO], openQuestions: [] })).ok ? (parsePhases(assemblePhasesDocument({ projectName: "Pousada", stamp: "<!-- inputs: skeleton.md@sha256:aaaaaaaaaaaa architecture.md@sha256:bbbbbbbbbbbb -->", overview: "Base", phases: [PHASE_1, COM_REQUISITO], openQuestions: [] })) as { ok: true; document: Parameters<typeof checkTestPrescription>[0] }).document : (() => { throw new Error("fixture"); })(), [request.text])).toEqual([]);
+    expect(erros[0]?.hint).toContain("executado pelo build");
+    expect(checkTestPrescription(parsePhases(assemblePhasesDocument({ projectName: "Pousada", stamp: "<!-- inputs: skeleton.md@sha256:aaaaaaaaaaaa architecture.md@sha256:bbbbbbbbbbbb -->", overview: "Base", phases: [PHASE_1, COM_LADO_DA_APLICACAO], openQuestions: [] })).ok ? (parsePhases(assemblePhasesDocument({ projectName: "Pousada", stamp: "<!-- inputs: skeleton.md@sha256:aaaaaaaaaaaa architecture.md@sha256:bbbbbbbbbbbb -->", overview: "Base", phases: [PHASE_1, COM_LADO_DA_APLICACAO], openQuestions: [] })) as { ok: true; document: Parameters<typeof checkTestPrescription>[0] }).document : (() => { throw new Error("fixture"); })(), [request.text])).toEqual([]);
 
     const esqueleto = JSON.parse(SKELETON);
     esqueleto.phases[1].goal = "o hóspede cria uma reserva; incluir, também neste módulo, os testes automatizados de Reservas executados contra banco isolado";
@@ -448,24 +456,26 @@ describe("I-16 sem ferramenta: o plano não aloca trabalho de teste", () => {
     if (!lidaArquitetura.ok) expect(lidaArquitetura.defects.map((d) => d.problem).join(" ")).toContain("a fase 2 prescreve teste");
   });
 
-  it("8, 9. no orquestrador: a task que é a suíte é devolvida mecanicamente, e o requisito de testes do pedido fica como comportamento", async () => {
+  it("8, 9. no orquestrador: a task que é a suíte é devolvida mecanicamente, e o plano publicado fica com o lado da aplicação, sem teste (§129)", async () => {
     await init();
     let escritas = 0;
     const { run, agent, perguntadas } = await plan(roteiro({
-      writer: () => ((escritas += 1) === 1 ? COM_TASK_DE_SUITE : COM_REQUISITO),
+      writer: () => ((escritas += 1) === 1 ? COM_TASK_DE_SUITE : COM_LADO_DA_APLICACAO),
     }));
     const outcome = await run;
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
     expect(deAuditoria(perguntadas)).toEqual([]);
     const emenda = por(agent, { role: "writer", stage: "authoring", subject: "phase-p02" })[1]?.prompt ?? "";
     expect(emenda).toContain("I-16");
-    expect(emenda).toContain("Não apague o requisito");
+    expect(emenda).toContain("executado pelo build");
+    expect(emenda).not.toContain("Não apague o requisito");
     const publicado = await plano();
     expect(publicado).not.toContain("Entregar a suíte automatizada");
-    expect(publicado).toContain("testes automatizados, executados contra um banco descartável");
+    expect(publicado).not.toContain("testes automatizados");
+    expect(publicado).toContain("A aplicação aceita um banco descartável apontado por DATABASE_PATH");
   });
 
-  it("8. a correção do auditor que pede uma task de testes chega ao escritor como a correção da regra", async () => {
+  it("8. a correção do auditor que pede uma task de testes chega ao escritor sem o teste: o achado fica, a correção fica no produto (§129)", async () => {
     await init();
     let auditorias = 0;
     const { run, agent, anunciado } = await plan(roteiro({
@@ -474,10 +484,10 @@ describe("I-16 sem ferramenta: o plano não aloca trabalho de teste", () => {
     }));
     const outcome = await run;
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(anunciado()).toContain("pediam trabalho de teste na correção");
+    expect(anunciado()).toContain("traziam teste na correção");
     const emenda = por(agent, { role: "writer", stage: "authoring", subject: "phase-p02" })[1]?.prompt ?? "";
-    expect(emenda).toContain("decisão do build");
-    expect(emenda).toContain("foi substituída pela regra I-16");
+    expect(emenda).toContain("sem acrescentar nada sobre testes");
+    expect(emenda).not.toContain("a suíte automatizada de Reservas");
     expect(await plano()).not.toContain("task de testes");
   });
 });

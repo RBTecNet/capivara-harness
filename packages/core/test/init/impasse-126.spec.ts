@@ -32,7 +32,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mesmoPonto } from "../../src/audit/cycle.js";
 import { alvoNoEnvelope, chavesDoEnvelope } from "../../src/audit/envelope.js";
 import type { Finding } from "../../src/audit/protocol.js";
-import { parseArchitecture, parseSkeleton, testPrescriptionHint, testPrescriptions } from "../../src/contract/index.js";
+import { parseArchitecture, parseSkeleton, testPrescriptionHint, testPrescriptions, testRunPrescriptions, testToolPrescriptions } from "../../src/contract/index.js";
 import { runInit, runPlan } from "../../src/init/index.js";
 import type { AgentCall } from "../../src/init/index.js";
 import { ID_DO_BANCO, regrasDeBanco } from "../../src/interview/index.js";
@@ -108,7 +108,7 @@ const REGRA_DO_ESCRITOR =
 const US_2_2 =
   "O módulo de tarefas inclui testes automatizados que demonstram criação válida, rejeição de entradas inválidas, consulta persistida, atualização, exclusão confirmada na interface e persistência após reinicialização, usando banco isolado dos dados normais da aplicação.";
 
-const ESQUELETO = JSON.stringify({
+const ESQUELETO_DO_RUN = JSON.stringify({
   contract: "capivara-skeleton/v2",
   environment: [{ technology: "Node.js", binary: "node", systemLevel: false, checkArgs: ["--version"] }],
   projectName: "Parallel Lab",
@@ -143,6 +143,21 @@ const ESQUELETO = JSON.stringify({
     { number: 3, title: "Gerenciamento de categorias", goal: GOAL_3, dependsOn: "Phase 1", covers: ["US-3.1"], taskCount: 1 },
   ],
   mvpCutPhase: 3,
+});
+
+/**
+ * O mesmo esqueleto como o escritor da §129 o devolve: a story US-2.2 fica com
+ * o comportamento, e o pedido de testes fica em regras de assunto "testes",
+ * que o build lê e o plano não. É o que os cenários de outros mecanismos
+ * recebem; o texto do run (`ESQUELETO_DO_RUN`) é o que prova a recusa, no fim
+ * do arquivo.
+ */
+const US_2_2_PRODUTO =
+  "O módulo de tarefas demonstra criação válida, rejeição de entradas inválidas, consulta persistida, atualização, exclusão confirmada na interface e persistência após reinicialização.";
+const ESQUELETO = JSON.stringify({
+  ...JSON.parse(ESQUELETO_DO_RUN),
+  stories: (JSON.parse(ESQUELETO_DO_RUN).stories as { id: string; statement: string }[]).map((story) => (story.id === "US-2.2" ? { ...story, statement: US_2_2_PRODUTO } : story)),
+  rules: [...(JSON.parse(ESQUELETO_DO_RUN).rules as unknown[]), { subject: "testes.tarefas", statement: US_2_2 }],
 });
 
 /* ---------- a arquitetura: a legítima, a contaminada (textos reais) e a em prosa sem forma ---------- */
@@ -255,7 +270,6 @@ const FASE_2 = `## Phase 2: Gerenciamento de tarefas
   - **Acceptance criteria:**
     - \`POST /api/tarefas\` sem título retorna HTTP 400 e não grava nada
     - Excluir uma tarefa pede confirmação na interface antes de enviar \`DELETE /api/tarefas/{id}\`
-    - Os testes automatizados do módulo usam banco isolado dos dados normais da aplicação
   - **Traces:** US-2.1, US-2.2, tarefas, workflow 2
 `;
 
@@ -371,7 +385,11 @@ describe("a regra do harness: isolamento, sem o procedimento da execução", () 
       expect(regrasDoBanco.find((regra) => regra.subject === "a aplicação escolhe o banco pelo ambiente")?.statement, decisao).toContain("o banco DESCARTÁVEL é uma das origens que a APLICAÇÃO aceita");
       for (const regra of regrasDoBanco) {
         expect(regra.statement, `${decisao} · ${regra.subject}`).not.toMatch(PROCEDIMENTO);
-        expect(testPrescriptions(`${regra.subject}\n${regra.statement}`), `${decisao} · ${regra.subject}`).toEqual([]);
+        // Nenhuma diz o procedimento nem nomeia ferramenta (§126).
+        expect(testRunPrescriptions(`${regra.subject}\n${regra.statement}`), `${decisao} · ${regra.subject}`).toEqual([]);
+        expect(testToolPrescriptions(`${regra.subject}\n${regra.statement}`), `${decisao} · ${regra.subject}`).toEqual([]);
+        // Só a do banco dos testes fala do teste do produto — e ela é do build: o plano não a lê (§129).
+        if (regra.subject !== "banco dos testes") expect(testPrescriptions(`${regra.subject}\n${regra.statement}`), `${decisao} · ${regra.subject}`).toEqual([]);
       }
     }
     const exemplo = regrasDeBanco("embutido").find((regra) => regra.subject === "o exemplo precisa RODAR")?.statement ?? "";
@@ -397,18 +415,24 @@ describe("a regra do harness: isolamento, sem o procedimento da execução", () 
     for (const texto of real) expect(testPrescriptions(texto, [PEDIDO]), texto).not.toEqual([]);
   });
 
-  it("I-16 não toca o requisito, o lado da aplicação, nem o que a calibração anterior manteve", () => {
+  it("I-16 não toca o lado da aplicação nem o que a calibração anterior manteve; o requisito de teste, desde a §129, é o pedido de testes", () => {
+    // Até a §128 estes eram o requisito que ficava no plano; agora são do build, e a I-16 os conta.
     for (const texto of [
       "Os testes precisam utilizar banco isolado dos dados normais da aplicação.",
       REGRA_DO_ESCRITOR,
       US_2_2,
-      CONTRATO_DA_APLICACAO,
-      "O caminho do banco é obtido de DATABASE_PATH.",
-      "Usar DATABASE_PATH como única variável de ambiente para o caminho do banco. O servidor e a aplicação aceitam caminhos diferentes por essa variável.",
       "Os testes automatizados do módulo usam banco isolado dos dados normais da aplicação",
       "o módulo possui testes automatizados, executados contra um banco descartável apontado pela variável de ambiente",
       "A execução de testes deve utilizar banco descartável",
       "a suíte automatizada roda contra um banco descartável, criado e destruído pela própria execução",
+    ]) {
+      expect(testPrescriptions(texto, [PEDIDO]), texto).not.toEqual([]);
+    }
+    for (const texto of [
+      CONTRATO_DA_APLICACAO,
+      US_2_2_PRODUTO,
+      "O caminho do banco é obtido de DATABASE_PATH.",
+      "Usar DATABASE_PATH como única variável de ambiente para o caminho do banco. O servidor e a aplicação aceitam caminhos diferentes por essa variável.",
       "A execução dos testes não cria nem destrói o banco configurado no .env do desenvolvedor",
       "O comando npm run migrate cria o esquema completo em banco vazio",
       "O fluxo cria uma tarefa e a exclui depois de confirmar",
@@ -424,14 +448,14 @@ describe("a regra do harness: isolamento, sem o procedimento da execução", () 
     const lida = parseArchitecture(JSON.stringify(comProcedimento), esqueleto, { maxTasksPerPhase: 15, authority: [PEDIDO] });
     expect(lida.ok).toBe(false);
     if (!lida.ok) expect(lida.defects.map((defeito) => defeito.problem).join("\n")).toContain("o item better-sqlite3 de infrastructure.dependencies prescreve teste");
-    // A ferramenta de teste continua saindo contando, como sempre (§118).
+    // A ferramenta de teste saía contando (§118); desde a §129 ela fica: a infraestrutura lista as dependências de teste.
     const comFerramenta = JSON.parse(arquitetura("limpa"));
     comFerramenta.infrastructure.dependencies.push({ name: "vitest", version: "", kind: "dev", purpose: "rodar a suíte", basis: "escolha do arquiteto" });
     const limpa = parseArchitecture(JSON.stringify(comFerramenta), esqueleto, { maxTasksPerPhase: 15, authority: [PEDIDO] });
-    expect(limpa.ok).toBe(true);
+    expect(limpa.ok, limpa.ok ? "" : JSON.stringify(limpa.defects)).toBe(true);
     if (limpa.ok) {
-      expect(limpa.applied.some((conserto) => conserto.startsWith("removeu vitest de infrastructure.dependencies"))).toBe(true);
-      expect(limpa.architecture.infrastructure.dependencies.map((item) => item.name)).toEqual(["better-sqlite3"]);
+      expect(limpa.applied.some((conserto) => conserto.startsWith("removeu vitest"))).toBe(false);
+      expect(limpa.architecture.infrastructure.dependencies.map((item) => item.name)).toEqual(["better-sqlite3", "vitest"]);
     }
   });
 
@@ -534,11 +558,12 @@ describe("INIT: o esqueleto publicado", () => {
     const md = await publicado("skeleton.md");
     const regrasPublicadas = regras(md);
     expect(regrasPublicadas).not.toMatch(PROCEDIMENTO);
-    expect(testPrescriptions(regrasPublicadas, [PEDIDO])).toEqual([]);
+    expect(testRunPrescriptions(regrasPublicadas, [PEDIDO])).toEqual([]);
+    expect(testToolPrescriptions(regrasPublicadas, [PEDIDO])).toEqual([]);
     // O requisito do pedido, nas palavras do escritor, e o isolamento que a regra do harness garante.
     expect(regrasPublicadas).toContain(REGRA_DO_ESCRITOR);
     expect(regrasPublicadas).toContain("nenhum teste lê, escreve ou migra");
-    expect(md).toContain(US_2_2);
+    expect(regrasPublicadas).toContain(US_2_2);
   });
 });
 
@@ -590,25 +615,21 @@ describe("PLAN: a arquitetura e as auditorias com a mesma autoridade", () => {
     expect(perguntadas).toEqual([]);
   });
 
-  it("5. o auditor da arquitetura que manda atribuir a criação e a destruição à execução dos testes, e o de fase que manda acrescentá-la, recebem a mesma regra", async () => {
+  it("5. o auditor da arquitetura que manda atribuir a criação e a destruição à execução dos testes, e o de fase que manda acrescentá-la, não devolvem nada: teste não é motivo de devolução (§129)", async () => {
     await init();
     let leituras = 0;
     let leiturasP3 = 0;
-    const { run, agent, perguntadas } = await plan({
+    const { run, agent, perguntadas, anunciado } = await plan({
       auditorDaArquitetura: () => ((leituras += 1) === 1 ? ACHADO_DA_ARQUITETURA : approve()),
       p3: () => ((leiturasP3 += 1) === 1 ? ACHADO_P3_ACRESCENTE : approve()),
     });
     const outcome = await run;
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    // O arquiteto recebe o problema, e a correção que a regra permite — não a do auditor.
-    const emenda = arquitetos(agent)[1]?.prompt ?? "";
-    expect(emenda).toContain("não atribui a nenhum componente ou fase a criação e a destruição");
-    expect(emenda).toContain("substituída pela regra I-16");
-    expect(emenda).not.toContain(`what to do: ${FIX_DA_ARQUITETURA}`);
-    // O escritor da fase 3, idem: o achado que mandava acrescentar o procedimento chega com a correção da regra.
-    const emendaP3 = por(agent, { role: "writer", stage: "authoring", subject: "phase-p03" })[1]?.prompt ?? "";
-    expect(emendaP3).toContain("substituída pela regra I-16");
-    expect(emendaP3).not.toMatch(/what to do: Acrescente ao critério que a execução automatizada/u);
+    // Até a §128 os dois voltavam com a correção da regra (I-16); desde a §129 os dois pediam teste, e saem.
+    expect(anunciado()).toContain("pediam ou julgavam teste");
+    expect(arquitetos(agent)).toHaveLength(1);
+    expect(por(agent, { role: "writer", stage: "authoring", subject: "phase-p03" })).toHaveLength(1);
+    expect(agent.calls.some((call) => call.prompt.includes(`what to do: ${FIX_DA_ARQUITETURA}`))).toBe(false);
     // E a mesma frase é julgada igual nos três documentos.
     const autoridade = [PEDIDO];
     expect(testPrescriptions(REAL.goal2, autoridade)).not.toEqual([]);
@@ -770,7 +791,7 @@ describe("retomada: a arquitetura guardada passa pelo contrato de hoje", () => {
 });
 
 describe("retomada: o esqueleto de uma versão anterior", () => {
-  it("10. a regra de banco anterior à §126 é diagnosticada com a rota de recuperação, e a arquitetura aprovada sobre o outro esqueleto não é reaproveitada", async () => {
+  it("10. a regra de banco anterior à §126 é diagnosticada com a rota de recuperação; como o plano não a lê (§129), nada aprovado sobre o esqueleto anterior precisa ser refeito", async () => {
     const { outcome: doInit } = await init();
     const primeiro = await plan({});
     expect((await primeiro.run).readiness.ready).toBe(true);
@@ -790,12 +811,13 @@ describe("retomada: o esqueleto de uma versão anterior", () => {
     expect(segundo.anunciado()).toContain("banco dos testes");
     expect(segundo.anunciado()).toContain("capivara init");
     expect(outcome.report.remarks.some((entrada) => entrada.document === "skeleton.md" && entrada.remark.observation.includes("capivara init"))).toBe(true);
-    // Vai ao relatório, não ao auditor de fase: ninguém no plano corrige a versão do harness que gravou o esqueleto.
-    expect(por(segundo.agent, { stage: "audit", subject: "project-phases.md#P1" })[0]?.prompt).not.toContain("capivara init");
-    // O esqueleto mudou: a arquitetura e as fases são refeitas e reauditadas, nada aprovado sobre o anterior é reaproveitado.
-    expect(arquitetos(segundo.agent)).toHaveLength(1);
-    expect(por(segundo.agent, { stage: "audit", subject: "architecture" })).toHaveLength(1);
-    expect(por(segundo.agent, { stage: "audit", subject: "project-phases.md#P1" })).toHaveLength(1);
+    // A regra que mudou é a do banco dos testes, que o plano não lê (§129): o prompt do arquiteto, a fatia
+    // da fase e a auditoria são os mesmos, e o que foi aprovado contra eles vale — zero chamadas. Até a §128
+    // a regra chegava ao plano, e o esqueleto mudado refazia arquitetura e fases.
+    expect(segundo.anunciado()).toContain("arquitetura reaproveitada do cache: o prompt não mudou");
+    expect(arquitetos(segundo.agent)).toHaveLength(0);
+    expect(por(segundo.agent, { stage: "audit", subject: "architecture" })).toHaveLength(0);
+    expect(por(segundo.agent, { stage: "audit", subject: "project-phases.md#P1" })).toHaveLength(0);
   });
 });
 
@@ -821,8 +843,23 @@ describe("no esqueleto, o procedimento segue o destino do mecanismo (§123): vol
 });
 
 describe("o esqueleto do escritor passa pelo contrato como estava", () => {
-  it("a resposta real reduzida é um esqueleto válido, sem defeito nem conserto", () => {
-    const lido = parseSkeleton(ESQUELETO, { maxTasksPerPhase: 15, authority: [PEDIDO] });
-    expect(lido.ok, lido.ok ? "" : lido.defects.map((d) => d.problem).join("; ")).toBe(true);
+  it("a resposta real reduzida: a regra de testes fica, é o lugar do pedido; a story de testes volta nomeada (§129)", () => {
+    const rejeitado = parseSkeleton(ESQUELETO_DO_RUN, { maxTasksPerPhase: 15, authority: [PEDIDO] });
+    expect(rejeitado.ok).toBe(false);
+    if (!rejeitado.ok) {
+      const problemas = rejeitado.defects.map((d) => d.problem).join("; ");
+      expect(problemas).toContain("a story US-2.2 carrega o pedido de testes para o plano");
+      expect(problemas).not.toContain('a regra "testes automatizados"');
+    }
+    const tolerado = parseSkeleton(ESQUELETO_DO_RUN, { maxTasksPerPhase: 15, authority: [PEDIDO], mechanisms: "tolerate" });
+    expect(tolerado.ok).toBe(true);
+    if (tolerado.ok) {
+      expect(tolerado.skeleton.rules.find((regra) => regra.subject === "testes automatizados")?.statement).toBe(REGRA_DO_ESCRITOR);
+      expect(tolerado.tolerated.join("\n")).toContain("a story US-2.2 carrega o pedido de testes para o plano");
+    }
+    // Como o escritor da §129 o devolve: válido, sem defeito nem conserto.
+    const limpo = parseSkeleton(ESQUELETO, { maxTasksPerPhase: 15, authority: [PEDIDO] });
+    expect(limpo.ok, limpo.ok ? "" : limpo.defects.map((d) => d.problem).join("; ")).toBe(true);
+    if (limpo.ok) expect(limpo.applied).toEqual([]);
   });
 });

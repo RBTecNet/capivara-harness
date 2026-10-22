@@ -22,9 +22,11 @@ import {
   tabelaDaDisponibilidade,
 } from "../../src/contract/index.js";
 import type { Architecture, Skeleton } from "../../src/contract/index.js";
+import { arquiteturaSemTestes } from "../support/sem-testes.js";
 
 const FIXTURES = join(import.meta.dirname, "..", "fixtures");
-const LUNA_ARQ = JSON.parse(readFileSync(join(FIXTURES, "luna-127.architecture.json"), "utf8")) as Architecture;
+// O goal das fases 3–5 do Luna trazia "o módulo possui testes automatizados"; desde a §129 o contrato o recusa (`sem-testes.ts`).
+const LUNA_ARQ = JSON.parse(arquiteturaSemTestes(readFileSync(join(FIXTURES, "luna-127.architecture.json"), "utf8"))) as Architecture;
 const LUNA_ESQ = JSON.parse(readFileSync(join(FIXTURES, "luna-127.skeleton.json"), "utf8")) as Skeleton;
 const LIMITES = { maxTasksPerPhase: 8 };
 

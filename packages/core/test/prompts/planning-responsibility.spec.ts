@@ -12,7 +12,10 @@ it("o planejamento descreve comportamento sem prescrever testes", () => {
   expect(phase).not.toContain("names are IDENTIFIERS");
   expect(phase).not.toContain("feature tests");
   for (const prompt of [phase, skeleton]) {
-    expect(prompt).toContain("It never prescribes tests");
+    expect(prompt).toContain("Tests are not part of it, in any form");
+    // §129: o pedido de testes é do build, e a infraestrutura lista as dependências de teste.
+    expect(prompt).toContain("is an instruction to the BUILD");
+    expect(prompt).toContain("the test ones included");
     expect(prompt).toContain("Describing expected functional behaviour is not a test");
     expect(prompt).not.toContain("Legacy test prescriptions");
   }

@@ -37,14 +37,26 @@ import type { AgentCall } from "../../src/init/index.js";
 import type { Question } from "../../src/interview/index.js";
 import { NO_QUESTIONS, approve, fakeAgent, materialityKeeps, rehearsalApproves, reject } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
+import { arquiteturaSemTestes, faseSemTestes } from "../support/sem-testes.js";
 
 const fixture = (nome: string): string => readFileSync(join(import.meta.dirname, "..", "fixtures", nome), "utf8");
 
 const PEDIDO = fixture("parallel-lab-128.pedido.md");
 const ESQUELETO = fixture("parallel-lab-128.skeleton.json");
-const V5 = fixture("parallel-lab-128.architecture-v5.json");
-const V6 = fixture("parallel-lab-128.architecture-v6.json");
-const FASES = JSON.parse(fixture("parallel-lab-128.fases.json")) as { r1: Record<string, string>; r3: Record<string, string> };
+/*
+ * A v5, a v6 e as fases do run traziam "o módulo possui testes automatizados
+ * próprios" em contratos e critérios — a regra de então mandava. Desde a §129 o
+ * contrato e a I-16 recusam a frase, e estes cenários provam outros
+ * mecanismos: recebem o texto do run sem ela, e só sem ela (`sem-testes.ts`).
+ * A Task 10, que é o assunto de um cenário daqui, continua.
+ */
+const V5 = arquiteturaSemTestes(fixture("parallel-lab-128.architecture-v5.json"));
+const V6 = arquiteturaSemTestes(fixture("parallel-lab-128.architecture-v6.json"));
+const FASES_DO_RUN = JSON.parse(fixture("parallel-lab-128.fases.json")) as { r1: Record<string, string>; r3: Record<string, string> };
+const FASES = {
+  r1: Object.fromEntries(Object.entries(FASES_DO_RUN.r1).map(([numero, texto]) => [numero, faseSemTestes(texto)])),
+  r3: Object.fromEntries(Object.entries(FASES_DO_RUN.r3).map(([numero, texto]) => [numero, faseSemTestes(texto)])),
+};
 const EMENDA_P1 = fixture("parallel-lab-128.p1-emenda-rodada2.md");
 
 /** A oração da Task 10 da fase 3 que o I-16 deixava passar. */
@@ -324,8 +336,8 @@ describe("§128 · A4/A5 — o trabalho de teste numa task não chega à auditor
     const medida = custo(agent);
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
     expect(publicado).not.toContain("concluir a cobertura automatizada");
-    // O requisito do pedido continua na task, como critério do produto.
-    expect(publicado).toContain("O módulo possui testes automatizados próprios executados com banco SQLite isolado");
+    // Desde a §129 o requisito de testes do pedido não fica no plano: é do build (o texto do run sem ele, `sem-testes.ts`).
+    expect(publicado).not.toContain("O módulo possui testes automatizados próprios");
     expect(medida.emendasDeFase).toBe(1);
     // Nenhum auditor leu a Task 10 com a oração de teste, e a triagem não foi chamada.
     expect(por(agent, { stage: "audit", subject: "project-phases.md#P3" }).every((call) => !call.prompt.includes(ORACAO_DE_TESTE))).toBe(true);
@@ -375,12 +387,13 @@ describe("§128 · C1/C2 — o que o harness sabe chega a quem escreve antes da 
     expect(arquiteto).toContain("Every phase covers at least one story, entity or workflow of the skeleton");
     // O goal da fase 1 prometia a descoberta de páginas sem nomear o `web-shell`.
     expect(arquiteto).toContain("A phase's goal promises only what its own components deliver.");
-    // Os testes de cada módulo, que o pedido exige, têm lugar: o componente e o critério — nunca a task.
+    // Os testes de cada módulo, que o pedido exige, são do build (§129): nem componente, nem critério, nem task.
     for (const prompt of [arquiteto, por(agent, { stage: "authoring", subject: "phase-p03" })[0]!.prompt]) {
-      expect(prompt).toContain("When the developer requires automated tests — for the product, or for each module — that requirement");
+      expect(prompt).toContain("is an instruction to the BUILD, exactly like \"compile without errors\"");
+      expect(prompt).not.toContain("When the developer requires automated tests — for the product, or for each module — that requirement");
     }
     const auditor = por(agent, { stage: "audit", subject: "architecture" })[0]!.prompt;
-    expect(auditor).toContain("The developer's own requirement that the product, or each module, has automated");
+    expect(auditor).toContain("Tests are not architecture, and never a reason to reject, remark or ask");
     expect(auditor).toContain("and so is a goal that promises the work of a");
   });
 });

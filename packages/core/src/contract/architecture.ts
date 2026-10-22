@@ -24,7 +24,7 @@
  * produto é o avaliador do build, lendo o código entregue.
  */
 
-import { testPrescriptionHint, testPrescriptions, testToolPrescriptions } from "./test-prescription.js";
+import { testPrescriptionHint, testPrescriptions, testRequirements, testRunPrescriptions } from "./test-prescription.js";
 import type { TestAuthority } from "./test-prescription.js";
 import { jsonDaResposta } from "./resposta.js";
 import { sha12 } from "./stamps.js";
@@ -198,9 +198,9 @@ export function parseArchitecture(
   /*
    * I-16 na arquitetura, nos dois modos da recuperação.
    *
-   * O que é LISTA e se separa sem julgamento — um arquivo de teste em `files`,
-   * uma ferramenta de teste na infraestrutura — sai contando, com o conserto
-   * anunciado. O que é PROSA — um componente cuja responsabilidade é
+   * O que é LISTA e se separa sem julgamento — um arquivo de teste em `files`
+   * — sai contando, com o conserto anunciado. A ferramenta de teste na
+   * infraestrutura saía também, até a §129; agora ela fica (abaixo). O que é PROSA — um componente cuja responsabilidade é
    * "configurar Vitest e Playwright", uma fase cujo goal é a automação — não
    * tem como ser consertado sem decidir o que o componente passa a ser; isso
    * volta ao arquiteto como defeito nomeado, dentro das tentativas que já tem.
@@ -222,6 +222,11 @@ export function parseArchitecture(
   });
   const prosaDeTeste = (rotulo: string, texto: string): void => {
     const termos = testPrescriptions(texto, authority);
+    if (termos.length > 0) defects.push({ problem: `${rotulo} prescreve teste: ${termos.join(", ")}`, hint: testPrescriptionHint(termos) });
+  };
+  /** Na infraestrutura, só o que diz o que se testa e como (§129): a dependência de teste é dela. */
+  const requisitoDeTeste = (rotulo: string, texto: string): void => {
+    const termos = [...new Set([...testRequirements(texto), ...testRunPrescriptions(texto, authority)])];
     if (termos.length > 0) defects.push({ problem: `${rotulo} prescreve teste: ${termos.join(", ")}`, hint: testPrescriptionHint(termos) });
   };
   prosaDeTeste("o overview", text(root.overview));
@@ -301,24 +306,30 @@ export function parseArchitecture(
   }
 
   const infraBruta = (root.infrastructure ?? {}) as Record<string, unknown>;
-  const semFerramentaDeTeste = <T extends InfrastructureItem>(grupo: string, itens: T[]): T[] =>
-    itens.filter((entrada) => {
-      const texto = `${entrada.name}\n${entrada.purpose}`;
-      if (testPrescriptions(texto, authority).length === 0) return true;
-      // Só o procedimento da execução (§126) não faz do item uma ferramenta de teste: ele fica, e a frase volta ao arquiteto.
-      if (testToolPrescriptions(texto, authority).length === 0) {
-        prosaDeTeste(`o item ${entrada.name} de infrastructure.${grupo}`, texto);
-        return true;
-      }
-      applied.push(`removeu ${entrada.name} de infrastructure.${grupo}: ferramenta de teste é decisão do build (I-16)`);
-      return false;
-    });
+  /*
+   * A infraestrutura lista TODAS as dependências do projeto, as de teste
+   * também (§129, decisão do desenvolvedor): o runner da stack, o Playwright
+   * dos fluxos. É com essa lista que o build prepara e valida o ambiente UMA
+   * vez, antes da primeira fase; uma dependência que só aparece no meio do
+   * build é instalada e conferida no meio dele. Até a §128 a ferramenta de
+   * teste saía daqui contando (I-16, §118). O que continua fora é o plano
+   * dizendo o que se testa, como e contra o quê: o requisito e o procedimento
+   * da execução no propósito de um item voltam ao arquiteto.
+   */
+  const dependenciasDeTesteFicam = <T extends InfrastructureItem>(grupo: string, itens: T[]): T[] => {
+    // O propósito de um runner diz o que ele roda ("roda os testes automatizados do backend"): só o procedimento volta.
+    for (const entrada of itens) {
+      const termos = testRunPrescriptions(`${entrada.name}\n${entrada.purpose}`, authority);
+      if (termos.length > 0) defects.push({ problem: `o item ${entrada.name} de infrastructure.${grupo} prescreve teste: ${termos.join(", ")}`, hint: testPrescriptionHint(termos) });
+    }
+    return itens;
+  };
   const infrastructure: Infrastructure = {
     runtimes: list(infraBruta.runtimes).map(item),
-    tools: semFerramentaDeTeste("tools", list(infraBruta.tools).map(item)),
+    tools: dependenciasDeTesteFicam("tools", list(infraBruta.tools).map(item)),
     packageManagers: list(infraBruta.packageManagers).map(item),
-    dependencies: semFerramentaDeTeste("dependencies", list(infraBruta.dependencies).map((entry) => ({ ...item(entry), kind: text(entry.kind).toLowerCase() === "dev" ? "dev" : "app" as const }))),
-    services: semFerramentaDeTeste("services", list(infraBruta.services).map((entry) => ({ ...item(entry), kind: text(entry.kind).toLowerCase() === "local" ? "local" : "external" as const }))),
+    dependencies: dependenciasDeTesteFicam("dependencies", list(infraBruta.dependencies).map((entry) => ({ ...item(entry), kind: text(entry.kind).toLowerCase() === "dev" ? "dev" : "app" as const }))),
+    services: dependenciasDeTesteFicam("services", list(infraBruta.services).map((entry) => ({ ...item(entry), kind: text(entry.kind).toLowerCase() === "local" ? "local" : "external" as const }))),
     databases: list(infraBruta.databases).map(item),
     compatibility: strings(infraBruta.compatibility),
     preconditions: strings(infraBruta.preconditions),
@@ -345,7 +356,8 @@ export function parseArchitecture(
    * estava no goal das fases, nos módulos, na decisão de dados — e aqui, onde
    * nada o conferia.
    */
-  prosaDeTeste("a infraestrutura (requisitos de ambiente)", [...infrastructure.compatibility, ...infrastructure.preconditions].join("\n"));
+  // A compatibilidade de uma dependência de teste ("o Playwright exige Node 18") é infraestrutura; o requisito e o procedimento, não.
+  requisitoDeTeste("a infraestrutura (requisitos de ambiente)", [...infrastructure.compatibility, ...infrastructure.preconditions].join("\n"));
   if (infrastructure.runtimes.length === 0) {
     defects.push({ problem: "a infraestrutura não declara runtime nenhum", hint: "declare ao menos o runtime da stack decidida no esqueleto" });
   }

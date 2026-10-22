@@ -666,18 +666,20 @@ describe("o runner de fluxos é dito antes, não depois", () => {
     return chamadas;
   }
 
-  it("avisa na primeira sessão da fase que declara fluxo", async () => {
+  it("avisa na primeira sessão da fase que declara fluxo — e só manda instalar se a infraestrutura aprovada o declara (§129)", async () => {
     const chamadas = await comFluxos(false);
     const implementacao = chamadas.find((chamada) => chamada.role === "builder");
     expect(implementacao?.prompt).toContain("@playwright/test");
-    expect(implementacao?.prompt).toContain("saves a whole cycle");
+    expect(implementacao?.prompt).toContain("If the approved\ninfrastructure declares it, install it as declared");
+    expect(implementacao?.prompt).toContain("If it does not, do not add it");
+    expect(implementacao?.prompt).not.toContain("saves a whole cycle");
     // E diz qual pacote é: ter `playwright` não satisfaz `@playwright/test`.
     expect(implementacao?.prompt).toContain("not `playwright`, the library");
   });
 
   it("não avisa quando o runner já está lá — aviso inútil é ruído", async () => {
     const chamadas = await comFluxos(true);
-    expect(chamadas.find((chamada) => chamada.role === "builder")?.prompt).not.toContain("saves a whole cycle");
+    expect(chamadas.find((chamada) => chamada.role === "builder")?.prompt).not.toContain("which this project does not have installed");
   });
 });
 

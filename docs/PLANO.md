@@ -13427,3 +13427,73 @@ Ficaram, com o motivo:
   `--engine-strict` já era a política do harness, e a recusa vem antes da
   primeira fase, com a evidência.
 - **Retomada do run do mmax.** Ver 131.9.
+
+### 131.12 Complemento: o catálogo de modelos do BUILD
+
+**O defeito.** No INIT, o wizard lista o que a API do MiniMax devolve (dez
+modelos). No BUILD, `escolherProviderModelo` trocava essa consulta pela
+listagem do OpenCode filtrada por `minimax/`, que traz dois. A API sumia como
+referência.
+
+**O que se verificou antes de mudar**, com o OpenCode 2.0.32 real contra servidor
+local:
+
+- Modelo fora do catálogo dele (`minimax/MiniMax-M2.7`,
+  `deepseek/deepseek-modelo-fora`, `anthropic/claude-fora-do-catalogo`) morre em
+  `Model unavailable` com código 1, antes de qualquer requisição.
+- Declarado em `provider.<id>.models.<modelo>` do `OPENCODE_CONFIG_CONTENT`, ele
+  vai ao endpoint do provider.
+- A documentação do MiniMax diz que a interface compatível com Anthropic, por
+  onde o OpenCode fala com ele, "currently only supports the MiniMax-M3.1-Flash
+  MiniMax-M3 models. For other models, please use the standard MiniMax API
+  interface". Declarar os M2.x mandaria o modelo a um endpoint que a
+  documentação diz não atendê-lo.
+- No OpenRouter, a integração da Capivara já recusa o modelo cujo limite o
+  catálogo do OpenCode não traz.
+
+Declarar modelo fora do catálogo seria, então, mecanismo novo sem necessidade
+comprovada, e no caso que motivou a correção, compatibilidade inventada.
+
+**O que muda** (só `escolherProviderModelo` e `escolherModelo`, em
+`commands/wizard.ts`):
+
+- No BUILD, a API direta pelo OpenCode lista o catálogo da API
+  (`listarModelos(provider)`) traduzido para `<opencodeProviderId>/<modelo>`.
+- Os que o catálogo do OpenCode traz (`listarModelos("opencode")`) vêm primeiro
+  e são escolhidos normalmente. O OpenCode pode conhecer modelos que a API não
+  listou; esses continuam.
+- Os demais aparecem com "fora do catálogo do OpenCode: o executor não o roda".
+  Escolhê-los da lista mostra o diagnóstico ("Model unavailable" antes de
+  qualquer requisição, mais o motivo documentado da rota, em
+  `limiteDaRotaNoOpenCode`, por ora só o do MiniMax) e volta à escolha.
+- Digitar o nome continua valendo, como antes.
+- Sem resposta da API, a lista é a do OpenCode. Sem resposta do OpenCode, o nome
+  é pedido. Nos dois casos, como era.
+- Os efforts são os do modelo escolhido, pelo `listarEfforts` de sempre.
+- Vale para toda API direta pelo OpenCode, inclusive no pool do paralelo e no
+  ajuste por papel, que passam pela mesma função.
+
+**O que não muda:** o INIT e o PLAN (a lista da API direta, sem marca), a CLI no
+BUILD (só a própria CLI é consultada), os adapters de inferência, os gates, o
+preflight e a §130.
+
+**Testes.** `test/tui/catalogo-build-131.spec.ts` tem 9 cenários, com a API dando
+dez modelos e o OpenCode dois. Contra a 0.7.5, 4 falham pelo motivo da
+divergência, e o teste do DeepSeek no BUILD também falha, porque agora a API é
+consultada. Os 5 de compatibilidade passam nos dois: digitar o nome, API sem
+resposta, OpenCode sem resposta, INIT e CLI. Três testes antigos tinham o mesmo
+mock devolvendo a mesma lista para a API e para o OpenCode. Eles passaram a ter
+um catálogo por provider, com as mesmas asserções de intenção. Um deles conferia
+que só o OpenCode era consultado, e agora confere a API e o OpenCode, nessa
+ordem, depois da chave.
+
+**Limitações.**
+
+- **M2.x pelo executor.** Os modelos M2.x do MiniMax continuam sem rota pelo
+  OpenCode. Usá-los exigiria um provider do OpenCode pela API padrão
+  (compatível com OpenAI) do MiniMax, com raciocínio e ferramentas a validar com
+  chamada real: decisão e custo que não cabem nesta correção.
+- **Comparação exata de identificadores.** A documentação do Gemini não diz se a
+  listagem compatível com OpenAI devolve `models/…`. Se devolver, os modelos da
+  API aparecem como fora do OpenCode, e os do catálogo dele continuam listados e
+  escolhíveis.

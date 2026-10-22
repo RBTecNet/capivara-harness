@@ -14,9 +14,9 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `fix/minimax-integracao-131` (§131, 0.7.5, push feito, sem merge) sobre a `feat/execucao-progressiva-130` (§130, 0.7.4, push feito, sem merge), sobre a `fix/testes-so-no-build-129` (§129, 0.7.3, push feito, sem merge), que está sobre a `main`; na `main`, a cadeia §122–§128 entrou por fast-forward em 21/10/2026 e as outras branches foram apagadas |
-| versão | 0.7.5 na branch da §131, 0.7.4 na da §130, 0.7.3 na da §129, 0.7.2 na `main`; planos da 0.6.x e da 0.7.x valem na 0.7.5 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
-| suíte | 3121 testes em 166 arquivos na branch da §131, `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na branch da §130, `npm run check` verde (rc=0); 3020 em 163 na branch da §129 (2989 em 161 na `main`; 2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
+| branch | `fix/minimax-integracao-131` (§131, 0.7.6, push feito, sem merge) sobre a `feat/execucao-progressiva-130` (§130, 0.7.4, push feito, sem merge), sobre a `fix/testes-so-no-build-129` (§129, 0.7.3, push feito, sem merge), que está sobre a `main`; na `main`, a cadeia §122–§128 entrou por fast-forward em 21/10/2026 e as outras branches foram apagadas |
+| versão | 0.7.6 na branch da §131 (0.7.5 sem o complemento 131.12), 0.7.4 na da §130, 0.7.3 na da §129, 0.7.2 na `main`; planos da 0.6.x e da 0.7.x valem na 0.7.6 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
+| suíte | 3130 testes em 167 arquivos na branch da §131 (0.7.6; 3121 em 166 na 0.7.5), `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na branch da §130, `npm run check` verde (rc=0); 3020 em 163 na branch da §129 (2989 em 161 na `main`; 2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
@@ -57,6 +57,12 @@ tokens) é mais que o dobro da saída. São 69 cenários novos, e 51 falham cont
 código anterior. O mmax não foi tocado: retomar exige Node 22.12+/24/26, porque a
 P01 fixou o Vitest 5. Detalhe na §131 do PLANO. Versão 0.7.5 na branch
 `fix/minimax-integracao-131`, com push; sem merge na `main`.
+
+Complemento (131.12, 0.7.6, com push): no BUILD, o wizard lista o catálogo da API
+(dez modelos do MiniMax), e não só os dois que o OpenCode traz. Os que o
+executor não roda aparecem com o motivo e não são escolhidos da lista: o
+OpenCode recusa modelo fora do catálogo, e a interface compatível com Anthropic
+do MiniMax só atende parte deles. Digitar o nome continua valendo.
 
 ## 2026-10-22 — execução progressiva: a fase grande vai ao executor em partes, e continua uma entrega só (§130)
 

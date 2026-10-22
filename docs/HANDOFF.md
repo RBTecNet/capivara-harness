@@ -14,12 +14,43 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `fix/testes-so-no-build-129` (§129, 0.7.3, push feito, sem merge) sobre a `main`; na `main`, a cadeia §122–§128 entrou por fast-forward em 21/10/2026 e as outras branches foram apagadas |
-| versão | 0.7.3 na branch da §129, 0.7.2 na `main`; planos da 0.6.x e da 0.7.x valem na 0.7.3 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
-| suíte | 3020 testes em 163 arquivos na branch da §129 (2989 em 161 na `main`; 2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
+| branch | `feat/execucao-progressiva-130` (§130, 0.7.4, push feito, sem merge) sobre a `fix/testes-so-no-build-129` (§129, 0.7.3, push feito, sem merge), que está sobre a `main`; na `main`, a cadeia §122–§128 entrou por fast-forward em 21/10/2026 e as outras branches foram apagadas |
+| versão | 0.7.4 na branch da §130, 0.7.3 na da §129, 0.7.2 na `main`; planos da 0.6.x e da 0.7.x valem na 0.7.4 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
+| suíte | 3052 testes em 164 arquivos na branch da §130, `npm run check` verde (rc=0); 3020 em 163 na branch da §129 (2989 em 161 na `main`; 2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-22 — execução progressiva: a fase grande vai ao executor em partes, e continua uma entrega só (§130)
+
+O BUILD entregava a fase inteira numa sessão (`implementPrompt` com
+`session.markdown`): nos planos do disco, até 40 critérios numa sessão só. Agora a
+fase acima do orçamento — 15 critérios, ou o prompt acima de 48 mil caracteres
+(o contexto fixo mais 16 mil, quando contrato e fatia já são grandes) — é
+implementada em partes: grupos contíguos das tasks, na ordem do plano,
+preferindo a fronteira de sub-fase, nunca cortando task; uma sessão nova por
+parte, com o texto exato das tasks dela (`recorteDaFase`, no contract), a fatia e
+o contrato inteiros, os títulos das tasks das partes feitas e os arquivos que as
+sessões das partes mudaram (Git). A divisão é feita em código (`loop/partes.ts`),
+a mesma para todo modelo — nenhum adapter informa a janela de contexto. Os gates
+G2–G4 julgam a fase inteira depois da última parte; as partes não registram
+defeito nem consomem orçamento de reparo; a parte que cai ganha uma sessão nova
+(§125 C) e depois a fase para nela. O progresso é o campo opcional `partes` do
+estado da fase; a retomada segue da primeira parte não feita, e a divisão é
+refeita quando documento muda, o parcial é descartado ou o que as partes
+escreveram muda por fora. A fase que cabe numa sessão vai com o prompt byte a
+byte da 0.7.3.
+
+Medido sem modelo nos planos do disco: 27 de 30 fases divididas em 2 ou 3 partes,
+30 → 69 sessões, critérios por sessão 40 → 15, total enviado 1,9–2,2× (o contexto
+fixo vai a cada parte). A medição derrubou o piso de 8 mil caracteres da primeira
+versão (sete sessões para fases de contexto pesado). Uma revisão adversarial (um
+agente) achou onze defeitos — o grave: a parte com G0 vermelho contava como feita
+e era anunciada às seguintes —, todos corrigidos com cenário. 32 cenários em
+`test/loop/execucao-progressiva-130.spec.ts`; 27 falham com a divisão desligada.
+Validado só com provider falso. Detalhe na §130 do PLANO; o contrato e o
+fluxograma do BUILD em `docs/CONTRATO.md`. Versão 0.7.4 na branch
+`feat/execucao-progressiva-130`, com push; sem merge na `main`.
 
 ## 2026-10-21 — o plano não planeja teste, escolhe todas as dependências, e teste não é motivo de devolução (§129)
 
@@ -826,8 +857,11 @@ propósito, por ser contrato ou por não haver evidência de custo em run:
    sistema do `environment.json`, em terminal interativo, em até 2 rodadas
    (`loop/build.ts:431-497`); a preparação do projeto e do Chromium param na
    primeira falha, sem agente (`loop/environment-prepare.ts`).
-3. **A fase vai inteira numa sessão** (até 15 tasks e 60 critérios); o PLAN a
-   dimensiona para modelo econômico, mas não há entrega gradual em pedaços.
+3. ~~A fase vai inteira numa sessão~~ — resolvido na §130: a fase acima de 15
+   critérios vai ao executor em partes, e os gates a julgam inteira. Ficam: as
+   sessões de correção ainda recebem a fase inteira como referência, e a
+   política de orçamento é a mesma para todo modelo (nenhum adapter informa a
+   janela).
 4. **O G4 para no primeiro fluxo que falha** (os roteiros são encadeados), e as
    falhas do G4 chegam uma por vez.
 5. **A regressão volta ao G2** depois de uma correção do G3/G4 que muda código: é

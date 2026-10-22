@@ -1,6 +1,6 @@
 # O contrato da Capivara — INIT, PLAN e BUILD
 
-Versão **0.7.3**. Este documento descreve, num lugar só, o que cada estágio da
+Versão **0.7.4** (com a execução progressiva das fases, §130). Este documento descreve, num lugar só, o que cada estágio da
 Capivara recebe, decide, produz e não pode fazer, e como o trabalho passa de um
 para o outro. O porquê de cada regra está numerado em `docs/PLANO.md` (§NNN); o
 estado do trabalho, em `docs/HANDOFF.md`. Quando este documento e o código
@@ -58,7 +58,7 @@ flowchart TD
 
     subgraph BUILD["BUILD — como"]
         B1["Preflight: ambiente contratado, preparado e sondado uma vez"] --> B2["Fases em ordem ou em paralelo, pelas dependências"]
-        B2 --> B3["Por fase: implementação e gates G0–G4"]
+        B2 --> B3["Por fase: implementação, numa sessão ou em partes, e gates G0–G4"]
         B3 -- "todos verdes" --> B4["Commit ou integração da fase"]
         B3 -- "sem estratégia possível" --> B5["Pacote de reparo UPSTREAM para o PLAN"]
         B4 --> B6["Aceitação final do produto"]
@@ -76,6 +76,7 @@ flowchart TD
 | stack (linguagem, framework, banco) | registra o que o pedido e a entrevista definem | detalha versões e dependências | usa |
 | caminhos de arquivo, variáveis de ambiente, comandos, funções | não escreve, salvo se o pedido fixar (I-17) | **decide** (arquitetura e tasks) | implementa |
 | componentes, contratos entre eles, divisão em fases | propõe fases preliminares | **decide**; pode dividir, fundir e reordenar | executa a divisão |
+| quantas sessões do executor uma fase leva, e quais tasks vão em cada uma | — | define as tasks, os critérios e a ordem | **decide** a divisão em partes; nunca muda task, critério nem ordem |
 | todas as dependências do projeto, as de teste incluídas | — | **decide** (infraestrutura) | instala as declaradas; nunca acrescenta, troca nem atualiza |
 | o que o pedido diz sobre testes | **registra** em regras de assunto `testes.` | não carrega nem repete | **executa** |
 | como testar, que testes, que ferramenta de teste usar dentre as contratadas | — | nunca | **decide** |
@@ -210,8 +211,13 @@ ao esqueleto atuais.
 ```mermaid
 flowchart TD
     PF["Preflight: sondas do environment.json, uma vez por execução"] --> PE["Preparação: dependências declaradas, Chromium e runner do G4 do harness"]
-    PE --> FA["Fase N: sessão de implementação, com a fatia da arquitetura"]
-    FA --> G0{"G0: o engine terminou de verdade"}
+    PE --> FA{"Fase N cabe numa sessão? até 15 critérios e o prompt no orçamento"}
+    FA -- sim --> UM["Uma sessão de implementação com a fase inteira e a fatia da arquitetura"]
+    FA -- não --> PT["Partes: grupos contíguos das tasks, na ordem do plano; uma sessão nova por parte, com o texto exato das suas tasks"]
+    PT --> PG{"G0 e G1 da sessão; mais partes?"}
+    PG -- sim --> PT
+    PG -- "não: a fase inteira foi implementada" --> G0
+    UM --> G0{"G0: o engine terminou de verdade"}
     G0 --> G1["G1: a sessão escreveu código — sinal, não veredito"]
     G1 --> G2{"G2: a suíte do projeto, rodada pelo loop"}
     G2 -- verde --> G3{"G3: verificador independente, task a task"}
@@ -243,7 +249,24 @@ flowchart TD
    repetem as sondas.
 2. **Fases**: na ordem das dependências, ou em paralelo, em worktrees próprias, com
    integração na árvore principal.
-3. **Gates por fase**:
+3. **Implementação em partes** (§130): a fase que passa do orçamento de uma sessão
+   — 15 critérios, ou o prompt acima de 48 mil caracteres (o contexto fixo mais 16
+   mil, quando o contrato e a fatia já são grandes) — é implementada em partes.
+   Cada parte é um grupo contíguo de tasks, na ordem do plano, preferindo a
+   fronteira de sub-fase; uma task nunca é cortada. Cada parte é uma sessão nova,
+   sem memória, que recebe o texto exato das suas tasks, a fatia e o contrato
+   inteiros, os títulos das tasks das partes feitas e os arquivos que as sessões
+   das partes mudaram (do Git). A divisão é feita em código, sem chamada de modelo, e é a mesma para
+   qualquer modelo: nenhum adapter informa a janela de contexto do executor. As
+   partes não são aprovação: nenhum gate além do G0 e do G1 roda entre elas, nada
+   consome orçamento de reparo, e a fase continua uma entrega só, julgada inteira
+   depois da última. A parte cuja sessão cai ganha uma sessão nova, como a
+   leitura do verificador que cai (§125 C); caindo de novo, a fase para nela, e
+   a parte que não terminou nunca é dita feita às seguintes. O progresso fica no
+   estado da fase (`runs/<run>/defects/`); a retomada segue da primeira parte não
+   feita, e o progresso deixa de valer quando a fase, a fatia ou o contrato
+   mudam, ou quando o que as partes escreveram mudou por fora.
+4. **Gates por fase**:
 
    | gate | prova | não faz |
    |---|---|---|
@@ -253,24 +276,24 @@ flowchart TD
    | G3 | cada task contra os critérios, por um verificador read-only | rodar a suíte inteira |
    | G4 | cada fluxo declarado, num navegador, com a aplicação de pé | duplicar teste unitário |
 
-4. **Evidências e impacto**: cada prova vale para a árvore, o comando e o ambiente em
+5. **Evidências e impacto**: cada prova vale para a árvore, o comando e o ambiente em
    que foi obtida; uma mudança refaz só a prova que atingiu (a suíte prova o produto
    inteiro, então código mudado refaz o G2).
-5. **Recuperação por defeito**: cada defeito tem identidade, causa e evidência, e uma
+6. **Recuperação por defeito**: cada defeito tem identidade, causa e evidência, e uma
    escada de estratégias, que depende do tipo do defeito — o executor recebe todas
    as pendências de uma vez; o verificador repara em sessão própria (antes do
    executor, na suíte e na ferramenta ausente; depois dele, quando o executor não
    progride) e não valida o próprio reparo; o roteiro do G4 é corrigido pelo harness. Orçamentos: 3
    ciclos por fase, 6 reparos por ciclo, 2 por gate, 3 por defeito, reparos do
    verificador configuráveis (1 por padrão com verificador por CLI).
-6. **Dependências**: o executor, o reparo, o G2 e o G4 instalam só o que a
+7. **Dependências**: o executor, o reparo, o G2 e o G4 instalam só o que a
    infraestrutura aprovada e os manifestos declaram. Nunca acrescentam, trocam nem
    atualizam uma dependência; a necessidade comprovada de uma não prevista é dita
    pelo verificador como `UPSTREAM: PLAN — architecture.md, infraestrutura: …`.
-7. **Testes**: o executor escreve e roda os testes que a fase precisa — os que o
+8. **Testes**: o executor escreve e roda os testes que a fase precisa — os que o
    pedido exige estão nas regras `testes.` do contrato compartilhado —, com as
    ferramentas contratadas; o G2 roda a suíte; o G3 lê; o G4 percorre os fluxos.
-8. **Reparo documental**: quando nenhuma estratégia resta e o verificador apontou que
+9. **Reparo documental**: quando nenhuma estratégia resta e o verificador apontou que
    o documento aprovado é a causa, o build publica um pacote de reparo
    (`.capivara/repairs/`) com o defeito, o observado, o esperado, os contornos
    tentados e o trecho a rever. Nenhum documento certificado é editado pelo build;
@@ -293,8 +316,10 @@ foi publicado ou aprovado se perde numa parada.
 
 ## O que ainda não existe
 
-- A entrega de uma fase em pedaços menores ao executor: a fase vai inteira numa
-  sessão, dimensionada pelo PLAN.
+- A janela de contexto do executor como entrada da divisão em partes: nenhum
+  adapter a informa, e a política é a fixa e conservadora para todo modelo.
+- Partes nas sessões de correção: a escada ainda manda a fase inteira como
+  referência, com o handoff do defeito como foco.
 - O consumo automático do pacote de reparo pelo PLAN: hoje o desenvolvedor revisa o
   trecho indicado e roda o `plan`.
 - O encaminhamento de reparo ao INIT.

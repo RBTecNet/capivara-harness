@@ -12888,3 +12888,265 @@ lia). Treze achados; todos os reproduzidos foram corrigidos com cenário em
   as respostas da entrevista.
 - A entrega da fase em pedaços menores ao executor não existe: a fase vai inteira
   numa sessão, dimensionada pelo PLAN.
+
+## §130 — Execução progressiva: a fase grande vai ao executor em partes, e continua uma entrega só
+
+### 130.1 O defeito
+
+O runner entregava a fase inteira ao executor numa sessão: a implementação
+inicial de `runPhase` montava `implementPrompt(ctx)` com `phaseMarkdown:
+session.markdown` e chamava `sessaoDoExecutor` uma vez. O PLAN já limita a fase
+(15 tasks, 4 critérios por task, 60 por fase), mas o limite é o da entrega, não o
+de uma sessão: nos planos do disco a mediana é de 9 tasks e 36 critérios por
+fase, e nas 30 fases que o parser de hoje lê, uma sessão chegava a receber 40
+critérios. Numa CLI agêntica, o contexto de uma sessão cresce com o trabalho —
+cada task traz leituras, escritas e saídas de teste —, e é aí que um modelo menor
+se perde. O tamanho do prompt pesa menos do que parece: no `laravel/haiku`, a
+fatia da arquitetura (15–28 KB) e o contrato compartilhado (10 KB) eram maiores do
+que a fase (7–11 KB), e repartir as tasks não encolhe nenhum dos dois.
+
+### 130.2 O que já existia e foi reaproveitado
+
+| mecanismo | onde | uso na §130 |
+|---|---|---|
+| sessão do executor com G0 e G1 por chamada | `sessaoDoExecutor` (`loop/runner.ts`) | cada parte é uma chamada dela, sem mudança |
+| montagem do prompt | `implementPrompt` (`prompts/builder.ts`) | o mesmo prompt; a parte é um campo opcional |
+| leitura de uma fase solta | `parsePhaseFragment` (`contract/drift.ts`) | base do recorte, no módulo da gramática |
+| tasks, critérios e linhas | `TaskBlock`, `PhaseBlock.subPhases` | a divisão e o recorte saem deles |
+| estado da fase no plano de controle | `EstadoDaRecuperacao` (`runs/<run>/defects/<fase>.json`): `implementation`, `inicio` | o progresso é um campo opcional dele |
+| conteúdo do código e o que mudou | `estadoDoCodigo`, `arquivosMudados` (Git) | estado verificável para a sessão; validade do progresso |
+| narrador e `events.tsv` | `criarNarrador`; o tipo `"entrega"`, que existia e nunca era emitido | observabilidade das partes, separada da recuperação |
+| parada retomável | `pararPorSessao`, `fecharFalha` | falha de engine numa parte |
+| gates, escada, revalidação por impacto, reparo upstream | o laço de `runPhase` | intocados: rodam depois da última parte |
+| paralelo e worktrees | `loop/paralelo.ts` | intocados: a parte roda dentro de `runPhase`, no worktree da fase |
+
+A janela de contexto do executor não chega ao runner por nenhum caminho: os
+adapters e o `RoleConfig` não a declaram. O único lugar que a conhece é o adapter
+do OpenCode, que consulta `limit.context` dos modelos OpenRouter dentro da
+chamada, para limitar a saída.
+
+### 130.3 O desenho
+
+- **O ponto de intervenção** é o bloco da implementação inicial de `runPhase`. A
+  fase que cabe no orçamento segue o caminho de antes, com o mesmo prompt — byte a
+  byte o da 0.7.3, conferido contra o arquivo da `c0f77f0` — e uma chamada.
+- **A divisão** (`loop/partes.ts`, `dividirEmPartes`) é feita em código, a partir
+  do plano estruturado, sem chamada de modelo: grupos contíguos das tasks, na
+  ordem do plano (a única dependência entre tasks que o documento expressa). A
+  sub-fase que começa vai inteira com a parte atual, se couber; senão abre a
+  próxima. Uma task nunca é cortada; a que sozinha passa do orçamento vai inteira,
+  numa parte só, e o excesso é dito numa transição.
+- **O recorte** (`contract/drift.ts`, `recorteDaFase`) fica no módulo da
+  gramática, que é o único que pode conhecê-la: cabeçalho e metadados da fase, o
+  heading e a prosa da sub-fase quando alguma task dela entra, e cada task
+  escolhida inteira, linha a linha como o plano a escreveu. O texto canônico de
+  cada task — e o sha que as aprovações usam — é o mesmo da fase inteira.
+- **O prompt de uma parte** é o `implementPrompt` com o recorte e um bloco: a
+  parte k de N, as posições das tasks dela na fase, os títulos das tasks das
+  partes feitas, os arquivos que as sessões das partes mudaram (do Git, até 40),
+  as posições das tasks que ficam para depois, que não devem ser implementadas
+  agora, e, quando a parte já teve sessão que não terminou, o aviso de que pode
+  haver parcial dela. Nenhum resumo escrito por modelo; nenhuma task seguinte
+  repetida.
+- **O progresso** é o campo opcional `partes` do estado da fase: a chave (sha dos
+  documentos da fase: o texto, a fatia, o contrato), os grupos, quantas partes
+  foram feitas, a última que teve sessão, a que tem sessão aberta (só fica
+  gravada quando o processo cai no meio dela), o conteúdo do código quando a
+  última sessão voltou, e os arquivos que as sessões das partes mudaram. Feita é
+  a parte cuja sessão terminou com resultado utilizável — feita, não aprovada —,
+  e só a feita é dita às seguintes como já implementada.
+- **A retomada** segue da primeira parte não feita; se ela já teve sessão, roda de
+  novo sobre o parcial dela. A divisão gravada deixa de valer — e a fase é
+  dividida de novo, sem apagar código — quando a fase, a fatia ou o contrato
+  mudaram; quando o código voltou ao de antes da implementação; quando um arquivo
+  que as partes escreveram mudou por fora (o parcial que voltou ao worktree com a
+  versão da árvore integrada, uma edição do desenvolvedor); ou quando, sem Git, o
+  código mudou e não se sabe o quê. Mudança por fora em arquivo que nenhuma parte
+  escreveu (outra fase integrada) não a invalida: a próxima parte lê o código.
+  Quando o processo cai com uma sessão aberta, a diferença é atribuída a ela —
+  o Core não chegou a registrá-la —, e os arquivos dela passam a ser das partes.
+- **Os gates** não mudaram e não rodam entre as partes. G0 e G1 continuam por
+  chamada (`sessao-N`, `entrega-N`); G2, G3 e G4 julgam a fase inteira depois da
+  última parte, com a revalidação por impacto e a escada de sempre. As partes não
+  consomem orçamento de reparo, não abrem ciclo e não gravam `retry` no
+  `events.tsv`: são `started` com "implementação: parte k/N" e transições
+  `entrega`.
+- **As falhas numa parte** (falha do engine, distinta de trabalho incompleto):
+  G0 vermelho sem recusa do provider nem tempo esgotado — a regra da leitura do
+  verificador que cai (§125 C): uma sessão nova, só daquela parte, sobre o que a
+  primeira deixou; caindo de novo, a fase para. Recusa do provider ou tempo
+  esgotado — a fase para como sempre parou, menos o tempo esgotado depois de
+  escrever na última parte, que é julgado uma vez, como a sessão única. Em todos
+  os casos a parte que não terminou não conta como feita, nenhum defeito é
+  registrado, e a retomada começa nela. Trabalho incompleto aparece no G3; falha
+  técnica, no G2 e na escada; incompatibilidade com o plano, no `UPSTREAM:` do
+  verificador — nada disso mudou.
+- **A identificação**: a chamada leva `parte: "k/N"`, que a CLI escreve no
+  `calls.jsonl` e no log do agente no lugar de "tentativa N"; prompt e log da
+  sessão se chamam `<fase>.part-k-of-N`, não `cycle-N`.
+
+### 130.4 A política do orçamento
+
+Sem a janela do modelo, a política é fixa, a mesma para todo engine, e os números
+são de política (`ORCAMENTO_DA_PARTE`):
+
+| limite | valor | de onde |
+|---|---|---|
+| critérios por sessão | 15 | um quarto dos 60 que o plano aceita numa fase |
+| prompt da parte | 48 mil caracteres | medido no prompt real de cada parte |
+| piso das tasks | 16 mil caracteres além do contexto fixo | quando o contrato e a fatia já passam do teto |
+
+A primeira versão tinha piso de 8 mil. Medida nos planos reais com contexto
+pesado (30 mil caracteres de contrato e fatia, como no `laravel/haiku`), ela
+dividia fases de 15 tasks em sete sessões e marcava doze tasks comuns como
+"acima do orçamento": a lista das tasks anteriores comia o piso. Com 16 mil, o
+critério volta a mandar, e os dois cenários dão o mesmo número de sessões.
+
+### 130.5 O que muda
+
+- `contract/drift.ts`: `recorteDaFase`; o envelope de `parsePhaseFragment` virou
+  uma constante, usada pelos dois.
+- `loop/partes.ts` (novo): `ORCAMENTO_DA_PARTE` e `dividirEmPartes`, puros.
+- `loop/defeitos.ts`: o campo opcional `partes` (`PartesDaImplementacao`) no
+  estado da fase.
+- `loop/runner.ts`: `divisaoInvalida`, `divisaoDaImplementacao`,
+  `implementarEmPartes`; `redetectarTeste` extraído do caminho único, que o usa
+  igual; `sessaoDoExecutor(prompt, parte?)` e o campo `parte` de `EngineCall`; o
+  parcial descartado apaga também a divisão.
+- `prompts/builder.ts`: o campo `parte` de `BuilderContext` e o `parteBlock`; sem
+  ele, o prompt é o da 0.7.3.
+- `cli-program.ts`: "parte k/N" no log do agente e `part` no `calls.jsonl`.
+
+### 130.6 O que NÃO muda, de propósito
+
+INIT, a geração da arquitetura e das fases no PLAN, os contratos da §129 e as
+dependências contratadas. Os gates G0–G4, o livro de evidências, a escada de
+recuperação (§125), os orçamentos (3 ciclos; 6 reparos por ciclo, 2 por gate, 3
+por defeito; os reparos do verificador), o `UPSTREAM_REPAIR_REQUIRED`, o
+`tasks.json`. O escalonador, os worktrees, a integração e a conciliação do
+paralelo. O formato do `project-phases.md`. As sessões de correção, que continuam
+recebendo a fase inteira como referência, com o handoff do defeito como foco.
+
+### 130.7 Testes: RED → GREEN
+
+`test/loop/execucao-progressiva-130.spec.ts`, 32 cenários, Git real e provider
+falso que escreve o arquivo de cada task que o prompt lhe entrega. Os quinze da
+especificação: fase pequena numa sessão com o prompt de antes (130.1); fase
+grande em cinco partes, cada task com o sha da original e nenhum critério de
+outra parte (130.2); ordem, sub-fase e o que veio antes (130.3); task acima do
+orçamento inteira (130.4); sessões sem memória, com o estado do Git (130.5);
+retomada depois da queda do provider e do tempo esgotado (130.6); falha numa
+parte com sessão nova e sem defeito, e a parte que cai duas vezes (130.7);
+nenhuma aprovação antes dos gates (130.8); uma suíte e uma leitura do verificador
+para cinco partes, G0/G1 por sessão, nenhum `retry` (130.9); revalidação por
+impacto sobre a fase feita em partes (130.10); duas fases paralelas em partes,
+cada uma no seu worktree (130.11); a fatia e o contrato inteiros a cada parte, os
+documentos byte a byte (130.12); contrato, fatia e parcial descartado invalidando
+o progresso (130.13); a política fixa e determinística, a mesma para dois engines
+(130.14); a fase que só fecha inteira (130.15). Mais três de compatibilidade,
+dois do recorte e seis dos achados da revisão.
+
+Com a divisão desligada no runner (a fase de volta numa sessão), 27 falham. Os
+cinco que passam dos dois jeitos são guardas e unidades puras: a fase pequena, o
+estado antigo com a implementação feita, o piso da política e os dois do recorte.
+O prompt sem parte foi comparado, para os dois contextos que exercitam todos os
+campos, com o `prompts/builder.ts` da `c0f77f0`: idêntico, na implementação e na
+correção.
+
+### 130.8 Custo, medido sem modelo
+
+Nos planos do disco que o parser de hoje lê (30 fases, 26 projetos), com o
+prompt real de cada parte; "leve" é o prompt sem contrato e fatia, "pesado" com
+30 mil caracteres de contrato e fatia, como no `laravel/haiku`. A coluna "teto"
+conta a lista de arquivos mudados com os 40 itens que ela pode ter.
+
+| | antes | depois | depois, teto |
+|---|---:|---:|---:|
+| fases divididas (leve e pesado) | — | 27 de 30, em 2 ou 3 partes | 27 de 30 |
+| sessões de implementação | 30 | 69 | 69 |
+| critérios por sessão, máximo | 40 | 15 | 15 |
+| maior prompt, leve | 33.289 | 26.866 | 29.424 |
+| prompt médio, leve | 20.849 | 16.853 | 19.299 |
+| total enviado, leve | 1× | 1,86× | 2,13× |
+| maior prompt, pesado | 63.320 | 56.897 | 59.455 |
+| prompt médio, pesado | 50.880 | 46.884 | 49.330 |
+| total enviado, pesado | 1× | 2,12× | 2,23× |
+| contexto fixo repetido, pesado | — | 1,61 M caracteres | 1,71 M |
+
+Nos cenários do provider falso: nenhuma chamada de recuperação a mais no caminho
+limpo, nenhuma parte refeita na retomada, uma suíte e uma leitura do verificador
+por fase, os mesmos resultados de gate. Tokens e tempo de modelo não existem com
+provider falso; o custo do harness por parte é um `estadoDoCodigo` e um
+`arquivosMudados` (Git) e três gravações do estado. O ganho é de trabalho por
+sessão — de até 40 critérios para até 15 —, não de tokens: o total enviado
+dobra, porque o contexto fixo vai a cada parte. Um provider com cache de prefixo
+pode reaproveitar esse trecho, que abre o prompt de todas as partes; não foi
+medido.
+
+### 130.9 A revisão adversarial
+
+Um agente revisou o diff com testes temporários: onze achados, oito confirmados.
+
+1. (alto) A parte cuja sessão caía no G0 sem escrever contava como feita, e a
+   seguinte ouvia que as tasks dela estavam implementadas; duas assim paravam a
+   fase com as duas marcadas como feitas. Agora a parte que não terminou não conta,
+   ganha uma sessão nova (§125 C) e, caindo de novo, a fase para nela.
+2. (médio) Um G0 vermelho numa parte registrava defeito de engine, e a escada
+   gastava uma ação e uma sessão da fase inteira antes de qualquer gate. Agora não
+   há defeito no meio das partes.
+3. (médio) O parcial reaplicado em parte ao worktree (o arquivo em conflito com a
+   versão da árvore integrada) não invalidava o progresso. Agora a mudança por
+   fora em qualquer arquivo que as partes escreveram invalida.
+4. (médio-baixo) Sem Git, uma parte "em curso" mantinha o progresso válido
+   depois de qualquer mudança. Agora a parte em curso só fica gravada na queda do
+   processo; a parada registrada a limpa, e sem Git código mudado invalida.
+5. (baixo-médio) A lista de arquivos mudados, contada desde `inicio`, trazia os
+   de outras fases. Agora é a dos arquivos que as sessões das partes mudaram.
+6. (baixo) A parada no meio das partes deixava `ultimoEstado` velho, e a retomada
+   depois dos gates abria uma sessão da fase inteira. Agora a implementação
+   completa atualiza o registro, quando ele existe.
+7. (baixo) O defeito escalado por essa parada ficava ESCALATED numa fase
+   concluída. Some com o 2.
+8. (baixo) A nota sob um `###` que não é sub-fase, entre tasks, ia só com a task
+   anterior. Agora vai a toda parte.
+9. (baixo) A parte aparecia como "tentativa N" e `cycle-N`. Agora é `parte k/N` e
+   `part-k-of-N`.
+10. (baixo) A medida da parte não contava a falha da preparação nem a lista de
+    arquivos. Agora conta as duas, a lista pelo teto.
+11. (baixo) A narração dizia que a sessão "recebe o que mudou". Agora diz o que
+    ela recebe.
+
+Cada um tem cenário na seção "o que a revisão adversarial achou" (o 2 e o 7, no
+130.7). A revisão conferiu e achou correto: o prompt da fase pequena, a ausência
+de aprovação antes dos gates, a retomada depois de queda em qualquer ponto da
+gravação, a invalidação por documento e o parcial descartado, o recorte de fase
+com outro número, as partes em ordem no worktree e a regra da gramática.
+
+### 130.10 Compatibilidade
+
+- O campo `partes` é opcional: o estado de antes da §130 se lê como sempre. Com a
+  implementação começada e sem ele, a fase é dividida e começa da parte 1; com a
+  implementação feita, nenhuma parte roda (os dois com cenário).
+- Uma 0.7.3 que leia um estado com `partes` ignora o campo e refaz a
+  implementação inteira, como fazia.
+- Plano sem sub-fases e sem `Areas` é dividido só pelos critérios (cenário).
+- O prompt da fase que cabe numa sessão é byte a byte o da 0.7.3.
+
+### 130.11 Limitações e riscos
+
+- Validado só com provider falso. Não há run real com modelo pequeno: o ganho
+  para ele não está demonstrado, só a pressão de trabalho por sessão, que cai.
+- O total enviado na implementação inicial dobra, e todo modelo divide a fase do
+  mesmo jeito: nenhum adapter informa a janela, e não há como o desenvolvedor
+  declarar que o executor é grande. Expor isso (opção ou configuração) é decisão
+  de produto, não tomada aqui.
+- As sessões de correção continuam com a fase inteira.
+- Quando o processo cai com uma sessão aberta, a diferença no código é atribuída
+  a ela; uma mudança por fora entre essa queda e a retomada, nos arquivos das
+  partes, não é distinguida — os gates a pegam, depois.
+- A lista de arquivos mudados é cumulativa e não separa o parcial da parte que
+  roda de novo.
+- No caminho de sessão única, a parada antes de a implementação terminar continua
+  deixando `ultimoEstado` velho (anterior à §130, não mudado).
+- Os números da política são de política: o piso das tasks foi corrigido pela
+  medição (130.4), e o resto não foi calibrado com modelo.

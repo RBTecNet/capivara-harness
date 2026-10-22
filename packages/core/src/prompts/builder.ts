@@ -64,6 +64,29 @@ export interface BuilderContext {
    * ciclo cada. O harness sabe antes do ciclo 1, e agora diz.
    */
   entrypointAusente?: boolean;
+  /**
+   * Esta sessão implementa uma parte da fase, não a fase inteira (§130).
+   *
+   * Ausente é a sessão única de sempre. Presente, `phaseMarkdown` é o recorte
+   * com as tasks desta parte no texto do plano, e o estado do trabalho já feito
+   * vem do plano e do Git — nunca de um resumo escrito por outra sessão.
+   */
+  parte?: ParteDoPrompt;
+}
+
+export interface ParteDoPrompt {
+  numero: number;
+  total: number;
+  /** As posições das tasks desta parte na fase, as do plano. */
+  indices: number[];
+  /** Quantas tasks a fase tem. */
+  taskCount: number;
+  /** As tasks das partes anteriores, pela posição e pelo título. */
+  anteriores: { index: number; title: string }[];
+  /** Os arquivos que as sessões desta fase já mudaram, do Git; null quando não se sabe. */
+  mudados: string[] | null;
+  /** Esta parte já teve uma sessão que não terminou: pode haver parcial dela na árvore. */
+  retomada?: boolean;
 }
 
 export interface FixContext extends BuilderContext {
@@ -263,6 +286,57 @@ export function processBlock(): string {
   ].join("\n");
 }
 
+/** Até quantos arquivos mudados a parte lista; o resto é contado. */
+export const MUDADOS_NA_PARTE = 40;
+
+function posicoes(indices: readonly number[]): string {
+  if (indices.length === 0) return "no task";
+  return indices.length === 1 ? `task ${indices[0]}` : `tasks ${indices.slice(0, -1).join(", ")} and ${indices.at(-1)}`;
+}
+
+/** O que a sessão de uma parte precisa saber da fase além das tasks dela (§130). */
+export function parteBlock(parte: ParteDoPrompt | undefined): string[] {
+  if (!parte) return [];
+  // As partes são contíguas, na ordem do plano: o que vem depois da última desta é das sessões seguintes.
+  const ultima = parte.indices.length > 0 ? Math.max(...parte.indices) : parte.taskCount;
+  const depois = Array.from({ length: Math.max(0, parte.taskCount - ultima) }, (_, posicao) => ultima + posicao + 1);
+  const mudados = parte.mudados ?? [];
+  return [
+    `## This session builds part ${parte.numero} of ${parte.total} of the phase`,
+    `The plan approved this phase as one delivery. The harness builds it in ${parte.total} sessions, in the plan's order,`,
+    "and the independent gates judge the whole phase only after the last one: nothing finished here is approved by itself.",
+    `This session implements ${posicoes(parte.indices)} of the phase's ${parte.taskCount} — their positions in the plan —,`,
+    "shown at the end exactly as approved, with every acceptance criterion.",
+    ...(parte.retomada
+      ? [
+          "An earlier session of this part did not finish. Some of these tasks may already be partly in this tree:",
+          "read the code first, complete what is missing and do not redo what is correct.",
+        ]
+      : []),
+    ...(parte.anteriores.length > 0
+      ? [
+          "",
+          "Earlier sessions of this phase implemented:",
+          ...parte.anteriores.map((task) => `- Task ${task.index} — ${task.title}`),
+          "Their code is already in this tree. You are a new session with no memory of them: read the code before writing,",
+          "reuse it and keep it working. Do not re-implement or rewrite it.",
+        ]
+      : []),
+    ...(mudados.length > 0
+      ? [
+          "",
+          "Files this phase has changed so far:",
+          ...mudados.slice(0, MUDADOS_NA_PARTE).map((arquivo) => `- ${arquivo}`),
+          ...(mudados.length > MUDADOS_NA_PARTE ? [`- and ${mudados.length - MUDADOS_NA_PARTE} more`] : []),
+        ]
+      : []),
+    ...(depois.length > 0
+      ? ["", `${depois.length === 1 ? `Task ${depois[0]}` : `Tasks ${depois[0]} to ${depois.at(-1)}`} belong to later sessions: do not implement or stub them now.`]
+      : []),
+    "",
+  ];
+}
+
 /** O executor entrega a implementação; os gates independentes julgam se ela basta. */
 export function completionBlock(): string {
   return [
@@ -321,7 +395,7 @@ export function implementPrompt(context: BuilderContext): string {
       : []),
     "",
     "## Your task now",
-    "Implement the phase below COMPLETELY.",
+    context.parte ? "Implement the tasks of this part, at the end, COMPLETELY." : "Implement the phase below COMPLETELY.",
     "",
     "For each item:",
     "1. Write the complete code. No TODO, no placeholder, no stub.",
@@ -341,12 +415,13 @@ export function implementPrompt(context: BuilderContext): string {
     "- Never skip an item marked [ ].",
     "- Finish after relevant regression checks; the harness runs the complete suite independently.",
     "",
-    "When the phase is genuinely finished, end your answer with this line, alone:",
+    `When ${context.parte ? "this part" : "the phase"} is genuinely finished, end your answer with this line, alone:`,
     BUILDER_COMPLETE_MARKER,
     "",
     ...(context.skills && context.skills.trim() !== "" ? [context.skills, ""] : []),
     ...memoriaBlock(context),
-    "## The phase to implement",
+    ...parteBlock(context.parte),
+    context.parte ? "## The part of the phase to implement" : "## The phase to implement",
     context.phaseMarkdown,
   ].join("\n");
 }

@@ -2352,7 +2352,7 @@ export function createProgram(): Command {
         painelBuild.beginCall(quem);
         repaintBuild();
         const slot = logsDosAgentes && call.worker !== undefined ? call.worker : null;
-        const papel = `${review?.label ?? (call.role === "builder" ? "executor" : "verificador")} · ${call.phase.id} · tentativa ${call.attempt}`;
+        const papel = `${review?.label ?? (call.role === "builder" ? "executor" : "verificador")} · ${call.phase.id} · ${call.parte ? `parte ${call.parte}` : `tentativa ${call.attempt}`}`;
         if (slot !== null) marcarNoLog(slot, papel, true);
         const comecou = Date.now();
         let resposta: Awaited<ReturnType<typeof bridge>>;
@@ -2362,7 +2362,7 @@ export function createProgram(): Command {
             await appendFile(join(pastaDosLogs, "calls.jsonl"), `${JSON.stringify({
               timestamp: new Date().toISOString(), role: call.role, repair: call.repair === true,
               purpose: call.purpose ?? null, resumeSession: call.resumeSession ?? null, wallSeconds: DEFAULT_LIMITS.wallSeconds,
-              phase: call.phase.id, attempt: call.attempt, worker: call.worker ?? null,
+              phase: call.phase.id, attempt: call.attempt, part: call.parte ?? null, worker: call.worker ?? null,
               provider: effective.provider, model: effective.model, effort: effective.effort,
               root: call.root ?? projectRoot, node: process.version, abi: process.versions.modules,
               e2ePort: call.environment?.E2E_PORT ?? null,

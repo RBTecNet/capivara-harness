@@ -15,6 +15,9 @@ import { parsePhases } from "./phases.js";
 import type { PhaseBlock, TaskBlock } from "./phases.js";
 import { planAddresses } from "./phase-references.js";
 
+/** O mínimo que o parser exige antes de uma fase solta; as linhas da fase começam depois dele. */
+const ENVELOPE = ["# X — Project Phases", "", "<!-- inputs: a.md@sha256:000000000000 -->", ""];
+
 /**
  * Lê uma fase solta, cercando-a do mínimo que o parser exige.
  *
@@ -42,12 +45,54 @@ export function parsePhaseFragment(phaseMarkdown: string): PhaseBlock | null {
           // Numa fase solta não há fase anterior a que se referir.
           .replace(/(\*\*Depends on:\*\*\s*)[^·\n]*?(\s*(?:·|$))/m, "$1none$2")
       : phaseMarkdown;
-  const envelope = ["# X — Project Phases", "", "<!-- inputs: a.md@sha256:000000000000 -->", "", comoPrimeira, ""].join("\n");
+  const envelope = [...ENVELOPE, comoPrimeira, ""].join("\n");
   const lido = parsePhases(envelope);
   const fase = lido.ok ? (lido.document.phases[0] ?? null) : null;
   return fase !== null && original !== null && original !== 1
     ? { ...fase, number: original, subPhases: fase.subPhases.map(section => ({ ...section, phase: original })), ...(dependencia !== undefined ? { dependsOn: dependencia } : {}) }
     : fase;
+}
+
+/**
+ * A fase com só algumas das suas tasks, no texto exato do plano (§130).
+ *
+ * O build entrega uma fase grande ao executor em partes, e cada parte precisa
+ * ser a fase aprovada — não um resumo dela. Vai sempre o cabeçalho (heading,
+ * metadados e o que vier antes da primeira task ou sub-fase), e toda nota que o
+ * plano pôs entre as tasks sob um `###` que não é sub-fase — não se sabe a quais
+ * tasks ela se aplica; cada sub-fase vai com o heading e a prosa dela quando
+ * alguma task escolhida mora nela; cada task escolhida vai inteira, linha por
+ * linha, com todos os critérios. Nada é
+ * reescrito, então o texto canônico de cada task — e o sha que as aprovações
+ * usam — é o mesmo da fase inteira. Sem índice, só o cabeçalho: é o que se
+ * mede como contexto fixo. Null quando a fase não lê ou um índice não existe.
+ */
+export function recorteDaFase(phaseMarkdown: string, indices: readonly number[]): string | null {
+  const fase = parsePhaseFragment(phaseMarkdown);
+  if (fase === null) return null;
+  const escolhidas = new Set(indices);
+  if ([...escolhidas].some((indice) => !fase.tasks.some((task) => task.index === indice))) return null;
+  const linhas = phaseMarkdown.split(/\r?\n/);
+  // As linhas do parser contam o envelope; as do recorte começam na fase.
+  const posicao = (linha: number): number => linha - 1 - ENVELOPE.length;
+  const subs = new Set(fase.subPhases.map((sub) => posicao(sub.line)));
+  const notas = linhas.flatMap((linha, indice) => (/^### /u.test(linha) && !subs.has(indice) ? [indice] : []));
+  const marcos = [
+    ...[...subs].map((inicio) => ({ inicio, tipo: "sub" as const, task: null as TaskBlock | null })),
+    ...notas.map((inicio) => ({ inicio, tipo: "nota" as const, task: null as TaskBlock | null })),
+    ...fase.tasks.map((task) => ({ inicio: posicao(task.line), tipo: "task" as const, task })),
+  ].sort((a, b) => a.inicio - b.inicio);
+  const saida = linhas.slice(0, marcos[0]?.inicio ?? linhas.length);
+  marcos.forEach((marco, ordem) => {
+    const fim = marcos[ordem + 1]?.inicio ?? linhas.length;
+    if (marco.tipo === "nota") saida.push(...linhas.slice(marco.inicio, fim));
+    if (marco.tipo === "task" && escolhidas.has(marco.task!.index)) saida.push(...linhas.slice(marco.inicio, fim));
+    if (marco.tipo !== "sub") return;
+    const proximaSub = marcos.slice(ordem + 1).find((outro) => outro.tipo === "sub")?.inicio ?? linhas.length;
+    const temEscolhida = marcos.some((outro) => outro.task !== null && outro.inicio > marco.inicio && outro.inicio < proximaSub && escolhidas.has(outro.task.index));
+    if (temEscolhida) saida.push(...linhas.slice(marco.inicio, fim));
+  });
+  return `${saida.join("\n").replace(/\s+$/u, "")}\n`;
 }
 
 export interface DriftInput {

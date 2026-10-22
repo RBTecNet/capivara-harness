@@ -38,7 +38,7 @@ export {
 export type { PhasesDocumentParts } from "./templates.js";
 export { canonicalDependsOn, canonicalWorkflowTraces, phaseDependencies, extractTasks, joinPhaseMetadata, repairInlineCriteria, repairLabelLists, repairMissingBullets, normalizePhasePart, stripLegacyFeatureTests } from "./phase-part.js";
 export type { NormalizedPart, PhasePartExpectation } from "./phase-part.js";
-export { casaComPadrao, checkRewriteDrift, parsePhaseFragment, preserveUnaddressedTasks, trechosEntreCrases } from "./drift.js";
+export { casaComPadrao, checkRewriteDrift, parsePhaseFragment, preserveUnaddressedTasks, recorteDaFase, trechosEntreCrases } from "./drift.js";
 export { affectedPhases, phaseReferences, planAddresses } from "./phase-references.js";
 export { blocoDaDisponibilidade, cobreWorkflow, contradicoesTemporais, disponibilidadeDosFluxos, fasesNomeadas, fechoDosComponentes, tabelaDaDisponibilidade } from "./disponibilidade.js";
 export type { Adiamento, ContradicaoTemporal, Disponibilidade, EntradaDaDisponibilidade, FaseNoTempo, Incerteza, MotivoDoAdiamento, Revisita } from "./disponibilidade.js";

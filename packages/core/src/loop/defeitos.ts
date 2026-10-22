@@ -366,7 +366,33 @@ export interface EstadoDaRecuperacao {
    * não existe mais.
    */
   inicio?: string | null;
+  /**
+   * A implementação em partes (§130), quando a fase não coube numa sessão só.
+   *
+   * Não é aprovação de nada: diz só quais sessões planejadas já rodaram, para a
+   * retomada seguir da próxima em vez de refazer as anteriores. Vale enquanto a
+   * chave — a fase, a fatia e o contrato — for a mesma e o código sustentar o
+   * que foi feito; senão a fase é dividida de novo, e o código fica.
+   */
+  partes?: PartesDaImplementacao;
   updatedAt: string;
+}
+
+export interface PartesDaImplementacao {
+  /** O sha dos documentos contra os quais a divisão foi feita. */
+  chave: string;
+  /** As posições das tasks de cada parte, na ordem em que rodam. */
+  grupos: number[][];
+  /** Quantas partes, em ordem, tiveram a sessão terminada com resultado utilizável — terminada, não aprovada. */
+  feitas: number;
+  /** A parte (a partir de 1) com a sessão aberta agora; fica gravada só quando o processo cai no meio dela. */
+  emCurso: number | null;
+  /** A última parte que já teve sessão, terminada ou não: a que roda de novo sabe que pode haver parcial dela. */
+  tentada: number;
+  /** O conteúdo do código quando a última sessão de parte voltou (ou quando a divisão foi feita). */
+  tree: string | null;
+  /** Os arquivos que as sessões das partes mudaram, do Git; null quando não se sabe (sem Git). */
+  arquivos: string[] | null;
 }
 
 export interface AcaoPlanejada {

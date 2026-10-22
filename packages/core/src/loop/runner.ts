@@ -15,7 +15,7 @@ import { join, relative } from "node:path";
 import { appendEvent } from "../state/events.js";
 import { runPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
-import { conflictPrompt, declarouRoteiroErrado, extractFlowScript, fixPrompt, flowPrompt, implementPrompt, triagePrompt, verifierRepairPrompt, verifyPrompt, type Triagem } from "../prompts/index.js";
+import { conflictPrompt, declarouRoteiroErrado, extractFlowScript, fixPrompt, flowPrompt, implementPrompt, MUDADOS_NA_PARTE, triagePrompt, verifierRepairPrompt, verifyPrompt, type Triagem } from "../prompts/index.js";
 import type { BuildProgressListener, LoopGate, LoopGateState } from "./progress.js";
 import { alteracoesParaCommit, type Bloqueio } from "./admissao.js";
 import { fotografarRefs, publicacaoProvavel, refsMovidas } from "./autoridade.js";
@@ -30,7 +30,7 @@ import { sharedContractFromSkeleton } from "../prompts/acceptance-policy.js";
 import { portaLivre } from "./ports.js";
 import { faltaOPacoteDoRunner } from "./dependencias.js";
 import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mcp/index.js";
-import { DOCUMENTOS_DA_ETAPA, ENVIRONMENT_CONTRACT, fasesNomeadas, phaseReferences, sha12 } from "../contract/index.js";
+import { DOCUMENTOS_DA_ETAPA, ENVIRONMENT_CONTRACT, fasesNomeadas, phaseReferences, recorteDaFase, sha12 } from "../contract/index.js";
 import type { Adiamento, SkeletonWorkflow, TaskBlock } from "../contract/index.js";
 import type { PhaseSession } from "./split.js";
 import { resolveE2eCommand, type TestCommand } from "./testcmd.js";
@@ -57,7 +57,9 @@ import {
   type NaturezaDoDefeito,
   type OrcamentoDaRecuperacao,
   type Oscilacao,
+  type PartesDaImplementacao,
 } from "./defeitos.js";
+import { dividirEmPartes, ORCAMENTO_DA_PARTE } from "./partes.js";
 import { camposDoDiagnostico, gravarHandoff, HANDOFF_CONTRACT, lerHandoff, renderHandoff } from "./handoff.js";
 import { criarNarrador, type Transicao } from "./narrador.js";
 import { escopoDaTask, impactoNaSuite, impactoNaTask, impactoNoFluxo } from "./impacto.js";
@@ -115,6 +117,8 @@ export interface EngineCall {
   root?: string;
   /** Qual agente do pool atende, a partir de 0. Ausente é o builder de sempre. */
   worker?: number;
+  /** A parte da implementação que esta sessão do executor faz (§130), "k/N": trabalho planejado, não correção. */
+  parte?: string;
   /** Variáveis de recursos privados desta chamada; nunca process.env global. */
   environment?: Record<string, string>;
 }
@@ -831,18 +835,21 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     await registro.salvar();
   };
 
-  /** Uma sessão de escrita do executor: implementação ou correção localizada. */
-  const sessaoDoExecutor = async (prompt: string): Promise<{ result: EngineResult; escreveu: boolean; ordinal: number }> => {
+  /** Uma sessão de escrita do executor: implementação, parte da implementação (§130) ou correção localizada. */
+  const sessaoDoExecutor = async (prompt: string, parte?: { numero: number; total: number }): Promise<{ result: EngineResult; escreveu: boolean; ordinal: number }> => {
     estado.builderSessions += 1;
     sessoesNestaExecucao += 1;
     const ordinal = sessoesNestaExecucao;
     if (estado.implementation === "pending") estado.implementation = "started";
     await registro.salvar();
-    await writeAtomic(`${paths.prompts}/${evidencePrefix}.cycle-${ordinal}.txt`, prompt);
+    // A parte tem nome de parte: `cycle-N` nos arquivos se lê como ciclo de correção.
+    const nome = parte ? `${evidencePrefix}.part-${parte.numero}-of-${parte.total}` : `${evidencePrefix}.cycle-${ordinal}`;
+    if (parte) await gravarUnico(`${paths.prompts}/${nome}.txt`, prompt);
+    else await writeAtomic(`${paths.prompts}/${nome}.txt`, prompt);
     const antes = codigo.atual;
     gate("G0", "corrente", ciclosAbertos);
-    const result = await chamarLeitor({ role: "builder", phase: session, attempt: ordinal, prompt });
-    const log = await gravarUnico(`${paths.logs}/${evidencePrefix}.cycle-${ordinal}.log`, `${result.stdout}\n${result.stderr}`);
+    const result = await chamarLeitor({ role: "builder", phase: session, attempt: ordinal, prompt, ...(parte ? { parte: `${parte.numero}/${parte.total}` } : {}) });
+    const log = await gravarUnico(`${paths.logs}/${nome}.log`, `${result.stdout}\n${result.stderr}`);
     const negacoes = result.negacoes ?? [];
     if (negacoes.length > 0) {
       const lista = negacoes.slice(0, 6).join(", ") + (negacoes.length > 6 ? ` e mais ${negacoes.length - 6}` : "");
@@ -891,6 +898,185 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       ...(options.skills !== undefined && options.skills !== "" ? { skills: options.skills } : {}),
       ...(options.onMemorias ? { memoriasDir: MEMORIAS_DIR } : {}),
     };
+  };
+
+  /** Por que uma divisão em partes gravada não vale mais; null quando vale (§130). */
+  const divisaoInvalida = async (gravada: PartesDaImplementacao, chave: string): Promise<string | null> => {
+    if (gravada.chave !== chave) return "a fase, a fatia da arquitetura ou o contrato mudou desde a divisão";
+    const indices = gravada.grupos.flat();
+    if (indices.length !== tasksDestaFase.length || tasksDestaFase.some((task) => !indices.includes(task.index))) return "a divisão não cobre as tasks da fase";
+    if (gravada.tentada === 0 || codigo.atual.tree === gravada.tree) return null;
+    if (estado.inicio !== undefined && estado.inicio !== null && codigo.atual.tree === estado.inicio && gravada.tree !== estado.inicio) {
+      return "o código voltou a ser o de antes da implementação: o parcial foi descartado";
+    }
+    // O processo caiu com uma sessão aberta: a diferença é o parcial dela, que o Core não chegou a registrar, e ela roda de novo sobre ele.
+    if (gravada.emCurso !== null) return null;
+    // Tudo o que as sessões fizeram foi registrado: a diferença veio de fora, e não pode ter tocado o que as partes escreveram.
+    const mudados = await arquivosMudados(arvore, gravada.tree, codigo.atual.tree);
+    if (mudados === null) return "o código mudou desde a última parte, e sem histórico Git não se sabe o quê";
+    const tocados = mudados.filter((arquivo) => gravada.arquivos === null || gravada.arquivos.includes(arquivo));
+    if (tocados.length > 0) return `o que as partes escreveram mudou por fora em ${tocados.slice(0, 4).join(", ")}${tocados.length > 4 ? ` e mais ${tocados.length - 4}` : ""}`;
+    return null;
+  };
+
+  /**
+   * A divisão da implementação em partes (§130), ou null: a fase cabe numa
+   * sessão só e vai como sempre foi.
+   *
+   * A divisão gravada vale enquanto os documentos forem os mesmos e o código
+   * sustentar o que as partes deixaram. Mudança por fora em arquivo que nenhuma
+   * parte escreveu (outra fase integrada, um arquivo do desenvolvedor) não a
+   * invalida: a próxima parte lê o código. O documento mudado, o parcial
+   * descartado, a mudança por fora no que as partes escreveram e o que não se
+   * pode saber invalidam — e a fase é dividida de novo, sem apagar nada.
+   */
+  const divisaoDaImplementacao = async (ctx: Awaited<ReturnType<typeof contexto>>, preparacao: string): Promise<PartesDaImplementacao | null> => {
+    const chave = sha12(JSON.stringify(documentosDaFase()));
+    const gravada = estado.partes;
+    if (gravada !== undefined) {
+      const invalida = await divisaoInvalida(gravada, chave);
+      if (invalida === null) {
+        const mudouPorFora = codigo.atual.tree !== gravada.tree && gravada.emCurso === null;
+        if (gravada.emCurso !== null) {
+          // O parcial da sessão que caiu passa a ser das partes: é com ele que a próxima conferência compara.
+          const doParcial = await arquivosMudados(arvore, gravada.tree, codigo.atual.tree);
+          gravada.arquivos = gravada.arquivos === null || doParcial === null ? null : [...new Set([...gravada.arquivos, ...doParcial])].sort();
+          gravada.tree = codigo.atual.tree;
+          gravada.emCurso = null;
+          await registro.salvar();
+        }
+        if (gravada.tentada > 0) {
+          await transicao({
+            tipo: "retomada",
+            motivo: `implementação em partes: ${gravada.feitas} de ${gravada.grupos.length} feitas; segue da parte ${gravada.feitas + 1}` +
+              (gravada.tentada > gravada.feitas ? ", que roda de novo sobre o que a sessão interrompida dela deixou" : "") +
+              ", sem refazer as anteriores" +
+              (mudouPorFora ? "; o código mudou fora do que as partes escreveram, e a sessão lê o código atual" : ""),
+          });
+        }
+        return gravada;
+      }
+      delete estado.partes;
+      await registro.salvar();
+      await transicao({ tipo: "retomada", motivo: `a divisão anterior em partes não vale mais (${invalida}): a fase é dividida de novo, e o código que existe fica` });
+    }
+    const anterioresA = (indices: readonly number[]): { index: number; title: string }[] =>
+      tasksDestaFase.filter((task) => indices.length > 0 && task.index < Math.min(...indices)).map((task) => ({ index: task.index, title: task.title }));
+    // A medida é a do prompt real, com o que ele leva além das tasks: a falha da preparação e a lista inteira de arquivos mudados, reservada.
+    const reserva = Array.from({ length: MUDADOS_NA_PARTE }, () => "x".repeat(60));
+    const medir = (indices: readonly number[]): number =>
+      implementPrompt({
+        ...ctx,
+        phaseMarkdown: recorteDaFase(session.markdown, indices) ?? "",
+        parte: { numero: 1, total: 2, indices: [...indices], taskCount: tasksDestaFase.length, anteriores: anterioresA(indices), mudados: reserva },
+      }).length + preparacao.length;
+    const divisao = dividirEmPartes(session.markdown, medir);
+    if (divisao.partes.length <= 1) return null;
+    estado.partes = { chave, grupos: divisao.partes.map((parte) => parte.indices), feitas: 0, emCurso: null, tentada: 0, tree: codigo.atual.tree, arquivos: [] };
+    await registro.salvar();
+    const criterios = tasksDestaFase.reduce((soma, task) => soma + task.acceptanceCriteria.length, 0);
+    await transicao({
+      tipo: "entrega",
+      motivo:
+        `a fase não cabe numa sessão do executor (${criterios} critérios; o prompt único teria ${implementPrompt(ctx).length + preparacao.length} caracteres; ` +
+        `por sessão: até ${ORCAMENTO_DA_PARTE.criterios} critérios e ${divisao.limite} caracteres): ${divisao.partes.length} partes na ordem do plano — ` +
+        `${divisao.partes.map((parte, posicao) => `parte ${posicao + 1}: tasks ${parte.indices.join(", ")}`).join("; ")}. ` +
+        "A fase continua uma entrega só: os gates a julgam inteira depois da última parte",
+    });
+    for (const parte of divisao.partes.filter((cada) => cada.excede)) {
+      await transicao({
+        tipo: "entrega",
+        motivo: `a task ${parte.indices[0]} sozinha passa do orçamento (${parte.criterios} critérios, ${parte.caracteres} caracteres): vai inteira, numa sessão só, sem corte de critério, e os gates a julgam como qualquer outra`,
+      });
+    }
+    return estado.partes;
+  };
+
+  /**
+   * As partes que faltam, uma sessão nova cada, na ordem do plano (§130).
+   *
+   * Cada parte é trabalho planejado, não recuperação: não registra defeito, não
+   * consome orçamento de reparo nem abre ciclo, e nenhum gate além do G0 e do
+   * G1 de cada sessão roda entre elas — a suíte, o verificador e os fluxos
+   * julgam a fase inteira depois da última. Feita é a parte cuja sessão
+   * terminou com resultado utilizável (feita, não aprovada); só a feita é dita
+   * à seguinte como já implementada. A sessão que não terminou segue a regra da
+   * leitura do verificador que cai (§125 C): uma sessão nova, só daquela parte,
+   * e depois a fase para. Recusa do provider e tempo esgotado param na hora,
+   * como sempre pararam — menos o tempo esgotado depois de escrever na última
+   * parte, que é julgado uma vez, como a sessão única.
+   */
+  const implementarEmPartes = async (divisao: PartesDaImplementacao, preparacao: string): Promise<PhaseOutcome | null> => {
+    const total = divisao.grupos.length;
+    const novaSessao = new Set<number>();
+    for (let parte = divisao.feitas; parte < total;) {
+      const numero = parte + 1;
+      const indices = divisao.grupos[parte]!;
+      const ctx = await contexto();
+      const anteriores = divisao.grupos.slice(0, parte).flat()
+        .flatMap((indice) => tasksDestaFase.filter((task) => task.index === indice))
+        .map((task) => ({ index: task.index, title: task.title }));
+      const prompt = implementPrompt({
+        ...ctx,
+        phaseMarkdown: recorteDaFase(session.markdown, indices) ?? session.markdown,
+        parte: { numero, total, indices, taskCount: tasksDestaFase.length, anteriores, mudados: divisao.arquivos, ...(divisao.tentada >= numero ? { retomada: true } : {}) },
+      }) + preparacao;
+      divisao.emCurso = numero;
+      divisao.tentada = Math.max(divisao.tentada, numero);
+      await registro.salvar();
+      await event("started", `implementação: parte ${numero}/${total} (tasks ${indices.join(", ")})`, ciclosAbertos);
+      await transicao({
+        tipo: "entrega",
+        motivo: `parte ${numero}/${total}: tasks ${indices.join(", ")} de ${tasksDestaFase.length} — trabalho planejado, sem orçamento de reparo`,
+        proximo: numero < total ? `parte ${numero + 1}/${total}` : "os gates sobre a fase inteira",
+      });
+      progressoDaFase(`implementação · parte ${numero}/${total}`);
+      const antes = codigo.atual.tree;
+      const sessao = await sessaoDoExecutor(prompt, { numero, total });
+      const escritos = await arquivosMudados(arvore, antes, codigo.atual.tree);
+      divisao.emCurso = null;
+      divisao.tree = codigo.atual.tree;
+      divisao.arquivos = divisao.arquivos === null || escritos === null ? null : [...new Set([...divisao.arquivos, ...escritos])].sort();
+      const g0 = gate0(sessao.result, options.engine);
+      const causa = g0.green ? "" : g0.cause;
+      if (g0.green || (sessao.result.timedOut && sessao.escreveu && numero === total)) {
+        divisao.feitas = numero;
+        if (numero === total) {
+          estado.implementation = "done";
+          // A parada no meio das partes gravou o código daquela hora; com a implementação completa, é este o código de onde a retomada parte.
+          if (estado.ultimoEstado !== undefined) estado.ultimoEstado = { tree: codigo.atual.tree, at: now().toISOString() };
+        }
+        await registro.salvar();
+        if (!g0.green) {
+          julgandoParcial = true;
+          announce(`[${session.id}] a sessão do executor foi encerrada pelo limite do harness depois de escrever; julgando o parcial uma vez, sem outra sessão de construção`);
+        }
+        parte += 1;
+        continue;
+      }
+      await registro.salvar();
+      // A parte não terminou: não conta como feita, e nenhuma sessão seguinte ouve que as tasks dela existem.
+      if (sessao.result.providerFailure || sessao.result.timedOut || novaSessao.has(numero)) {
+        return await pararPorSessao(
+          "gate 0 — engine",
+          `${causa}\nA parte ${numero}/${total} não terminou: ela não conta como feita, e a retomada começa nela, sobre o que a sessão deixou, sem refazer as anteriores.`,
+        );
+      }
+      novaSessao.add(numero);
+      await transicao({
+        tipo: "entrega",
+        motivo: `parte ${numero}/${total}: a sessão não terminou com resultado utilizável (${causa.split("\n")[0] ?? ""}); uma sessão nova, só desta parte, sobre o que ela deixou — a regra da sessão que cai (§125 C), não reparo de defeito`,
+      });
+    }
+    return null;
+  };
+
+  /** Depois da implementação, a suíte pode ter passado a existir: a própria fase cria o manifesto. */
+  const redetectarTeste = async (): Promise<void> => {
+    if (!options.resolveTest) return;
+    const detectado = await options.resolveTest();
+    if (detectado && detectado.command !== options.testCommand?.command) announce(`[${session.id}] comando de teste detectado: ${detectado.command} (${detectado.source})`);
+    testeAgora = detectado;
   };
 
   /** O que vai ao prompt de quem repara: o handoff de cada defeito, com o que mudou desde ele. */
@@ -2151,6 +2337,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     } else if (estado.implementation === "done" && estado.inicio !== undefined && estado.inicio !== null && estado.inicio === codigo.atual.tree && estado.ultimoEstado !== undefined) {
       // O parcial foi descartado, como a parada oferece: o código é o de antes da implementação, e a fase recomeça do zero.
       estado.implementation = "pending";
+      delete estado.partes;
       await registro.salvar();
       await transicao({ tipo: "retomada", motivo: "o código voltou a ser o de antes da implementação (parcial descartado): a fase recomeça do zero; o histórico dos defeitos fica" });
     } else if (estado.implementation === "done") {
@@ -2192,26 +2379,30 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         return { status: "failed", gate: "gate 2 — suíte do projeto", cause, cycles: 0 };
       }
       const ctx = await contexto();
-      const prompt = implementPrompt(ctx) + (falhaNaPreparacaoNode ? `\n\n## Dependency preparation — unresolved environment failure\n${falhaNaPreparacaoNode}` : "");
+      const preparacao = falhaNaPreparacaoNode ? `\n\n## Dependency preparation — unresolved environment failure\n${falhaNaPreparacaoNode}` : "";
       if (estado.inicio === undefined) estado.inicio = codigo.atual.tree;
-      const sessao = await sessaoDoExecutor(prompt);
-      // Sessão que caiu sem entregar nada não é implementação feita: a retomada a refaz.
-      if (!sessao.result.providerFailure && !(sessao.result.timedOut && !sessao.escreveu)) estado.implementation = "done";
-      await registro.salvar();
-      if (options.resolveTest) {
-        const detectado = await options.resolveTest();
-        if (detectado && detectado.command !== options.testCommand?.command) announce(`[${session.id}] comando de teste detectado: ${detectado.command} (${detectado.source})`);
-        testeAgora = detectado;
-      }
-      const g0 = gate0(sessao.result, options.engine);
-      if (sessao.result.providerFailure) return await pararPorSessao("gate 0 — engine", (g0 as { cause: string }).cause);
-      if (sessao.result.timedOut) {
-        if (!sessao.escreveu) return await pararPorSessao("gate 0 — engine", (g0 as { cause: string }).cause);
-        // O tempo acabou com trabalho escrito: o parcial é julgado uma vez, sem outra sessão de construção.
-        julgandoParcial = true;
-        announce(`[${session.id}] a sessão do executor foi encerrada pelo limite do harness depois de escrever; julgando o parcial uma vez, sem outra sessão de construção`);
-      } else if (!g0.green) {
-        await achar({ gate: "G0", nature: "engine", anchors: {}, summary: "a sessão do executor não terminou com resultado utilizável", detail: g0.cause });
+      const divisao = await divisaoDaImplementacao(ctx, preparacao);
+      if (divisao !== null) {
+        const parada = await implementarEmPartes(divisao, preparacao);
+        if (parada) return parada;
+        await redetectarTeste();
+      } else {
+        const prompt = implementPrompt(ctx) + preparacao;
+        const sessao = await sessaoDoExecutor(prompt);
+        // Sessão que caiu sem entregar nada não é implementação feita: a retomada a refaz.
+        if (!sessao.result.providerFailure && !(sessao.result.timedOut && !sessao.escreveu)) estado.implementation = "done";
+        await registro.salvar();
+        await redetectarTeste();
+        const g0 = gate0(sessao.result, options.engine);
+        if (sessao.result.providerFailure) return await pararPorSessao("gate 0 — engine", (g0 as { cause: string }).cause);
+        if (sessao.result.timedOut) {
+          if (!sessao.escreveu) return await pararPorSessao("gate 0 — engine", (g0 as { cause: string }).cause);
+          // O tempo acabou com trabalho escrito: o parcial é julgado uma vez, sem outra sessão de construção.
+          julgandoParcial = true;
+          announce(`[${session.id}] a sessão do executor foi encerrada pelo limite do harness depois de escrever; julgando o parcial uma vez, sem outra sessão de construção`);
+        } else if (!g0.green) {
+          await achar({ gate: "G0", nature: "engine", anchors: {}, summary: "a sessão do executor não terminou com resultado utilizável", detail: g0.cause });
+        }
       }
     } else if (options.resolveTest) {
       testeAgora = await options.resolveTest();

@@ -13150,3 +13150,280 @@ com outro número, as partes em ordem no worktree e a regra da gramática.
   deixando `ultimoEstado` velho (anterior à §130, não mudado).
 - Os números da política são de política: o piso das tasks foi corrigido pela
   medição (130.4), e o resto não foi calibrado com modelo.
+
+## §131 — MiniMax: a preparação que integra, o raciocínio que o modelo aceita, e o effort que o BUILD consegue escolher
+
+### 131.1 A evidência
+
+O `laravel/mmax` (0.7.4, MiniMax-M3.1-Flash por API direta no INIT e no PLAN, e
+pelo OpenCode 2.0.32 no BUILD paralelo) chegou ao RALPH READY
+(`init-dc741f0d7b92`) e parou no `build-dd15cc4a810d` depois de a P01 passar em
+todos os gates no worktree:
+
+- **A integração.** A sessão de preparação criou `package.json` e
+  `package-lock.json` mínimos na raiz. Eles não foram adotados, ficaram como
+  não versionados na principal, e o worktree da P01 nasceu de um HEAD sem eles —
+  o executor listou a raiz e viu só `.capivara/`, `node_modules/` e `.git`. A P01
+  criou o próprio manifesto, e a integração parou: "a árvore principal tem
+  alterações que não são do integrador (package-lock.json, package.json)".
+- **O engines.** A preparação instalou `vitest@5.0.5`, cujo `engines.node` é
+  `^22.12.0 || ^24.0.0 || >=26.0.0`, com o harness no Node 25.9.0. O npm só
+  avisou (EBADENGINE), a sonda `vitest --version` passou, e o preflight aprovou.
+  A preparação Node do worktree (`npm ci --engine-strict`) recusou a instalação.
+  O G2 passou mesmo assim, com o `node_modules` que o executor tinha montado sem
+  `--engine-strict`. A instalação da integração usa o mesmo `--engine-strict` e
+  teria parado ali, mesmo sem os arquivos soltos.
+- **O 400.** A primeira chamada do PLAN morreu em HTTP 400: `model
+  "MiniMax-M3.1-Flash" requires adaptive thinking; thinking.type="disabled"
+  (including reasoning.effort=none) is not allowed (2013)`.
+- **O effort do BUILD.** O run registrou `effort: ""` em todos os papéis.
+
+### 131.2 As causas, comprovadas
+
+| defeito | causa comprovada | evidência |
+|---|---|---|
+| preparação não adotada | `adoptPreparedDependencies` só reconhecia pacotes de sondas `node -e require(...)` (`packagesInReadinessProbe`). TypeScript, Vite, Vitest e Playwright eram sondados por `./node_modules/.bin/X`, então só o `better-sqlite3` contava, e o manifesto declarava pacotes "não sondados" | `environment-preflight.log`, o `package.json` da raiz, `git status` do mmax; reproduzido em teste com a mesma mensagem |
+| preflight aprova engines incompatível | `checkPrerequisites` só executava a sonda. O `engines` do pacote instalado nunca era lido, e o build instala com `--engine-strict` | `P01.dependencies-prepare-1.log` |
+| HTTP 400 no PLAN | a guarda de `direct-api.ts` conhecia `MiniMax-M3.1-Flash-Preview`, não `MiniMax-M3.1-Flash`. Sem effort, o corpo levava `thinking: {type: "disabled"}` | log `interview.skeleton.writer.1-1.6540ac42…`; `/v1/models` atual só tem o nome sem `-Preview` |
+| BUILD sem effort escolhível | o catálogo do OpenCode 2.0.32 traz o `minimax/MiniMax-M3.1-Flash` com `variants: []`: o wizard só oferecia "padrão do modelo", e `#low` morre em "Variant unavailable". Sem variante, o OpenCode não manda campo nenhum, e a API usa o `max` dela | CLI real contra servidor local, sem chamada paga |
+
+A documentação oficial (platform.minimax.io, APIs compatíveis com OpenAI e com
+Anthropic, conferida em 22/10/2026) estabelece o seguinte. Os mesmos fatos foram
+reproduzidos na CLI.
+
+| modelo | desliga o raciocínio | intensidade | omitida |
+|---|---|---|---|
+| `MiniMax-M3.1-Flash` | não (400, código 2013) | `reasoning_effort` (OpenAI) ou `output_config.effort` (Anthropic): low, medium, high, xhigh, max | max |
+| `MiniMax-M3` | sim | não tem | ligado na API OpenAI; desligado na Anthropic |
+| `MiniMax-M2.x` | não (o `disabled` é ignorado) | não tem | ligado |
+
+O `/v1/models` devolve só identificadores, sem capacidade. O OpenCode fala com o
+MiniMax pela API compatível com Anthropic (`@opencode/ai/providers/minimax/messages`,
+`https://api.minimax.io/anthropic/v1`). Variantes declaradas em
+`OPENCODE_CONFIG_CONTENT` aparecem no `model.list`, e o corpo da requisição leva
+os `settings` delas.
+
+### 131.3 O que já existia e foi reaproveitado
+
+| mecanismo | onde | uso |
+|---|---|---|
+| adoção da preparação | `adoptPreparedDependencies` + `commitAdmitido` | mesmo critério de conteúdo e a mesma admissão; o conjunto de pacotes passa a incluir os das sondas `.bin` |
+| registro da sessão de preparação | `runs/<run>/preparation/<id>.json` | ganha `pendentesAntes` e `criados`, campos novos e opcionais num registro que nenhum código lia |
+| laço de preparação | `resolvePrerequisites` (2 tentativas) + `installPrompt` | a recusa de engines é evidência da sonda: a segunda sessão a recebe |
+| catálogo de raciocínio | `ReasoningPolicy` (`provider/registry.ts`) | a regra por modelo sai da regex de `direct-api.ts` e vai para o catálogo, como o cabeçalho dele manda |
+| injeção de configuração no OpenCode | `opencode-limits.ts` (o teto do OpenRouter) | o mesmo padrão de mescla, para as variantes |
+| listagem | `listarEfforts`, `opencodeProviderId` | para a API direta, a documentação; para o OpenCode, a própria CLI, com a mesma configuração da chamada |
+
+### 131.4 O que muda
+
+- **Adoção** (`loop/prepared-dependencies.ts`, `loop/prerequisite-workspace.ts`).
+  `packageBehindBinary` segue o link de `node_modules/.bin/X` até a pasta do
+  pacote, dentro do `node_modules` que guarda o `.bin`. O link diz o pacote, e o
+  nome da ferramenta não: `tsc` é do `typescript`, `playwright` é do
+  `@playwright/test`. A adoção passa a exigir proveniência por conteúdo:
+  `criadosPelaPreparacao` reúne, dos registros do run, cada caminho com o
+  sha256 que a sessão deixou, e só entra no commit o arquivo cujo conteúdo atual
+  é um desses. Sem registro com `criados` (sessão interrompida, ou registro de
+  antes desta versão), nada é adotado. O critério de conteúdo, a exigência de
+  nada mais pendente e a admissão continuam iguais.
+- **Proveniência** (`loop/build.ts`). Antes da sessão de instalação, o Core lê os
+  pendentes, com `node_modules` excluído já na consulta. Depois, `criados` são
+  os pendentes novos e os que uma sessão anterior já tinha atestado, cada um com
+  o seu sha256. A segunda tentativa, então, atesta o manifesto que mexeu da
+  primeira. O que já estava na árvore continua do desenvolvedor, e o que ele
+  reescrever no mesmo caminho entre duas execuções também. Falha nessa leitura
+  deixa a sessão sem proveniência, e não derruba a preparação.
+- **A preparação que não se adota para o build** (`loop/build.ts`). Se, depois
+  dela, a árvore que estava limpa ficou com alterações que a adoção recusou, o
+  build para antes da primeira fase, sem commitar nem apagar nada, e diz o que
+  ficou. Antes ele seguia: no serial, o manifesto (e, sem exclusão, o
+  `node_modules`) ia para o commit da fase. No paralelo, a fase verde era barrada
+  na integração. Com registro de preparação no run e árvore suja, o erro do
+  preflight diz por que nada foi adotado (`explicarPreparacaoNaoAdotada`).
+- **Engines** (`loop/prerequisites.ts`). Quando a sonda passa, o Core lê o
+  `engines.node` do pacote comprovado (o do link `.bin`, ou o do `require`) e da
+  árvore que o lockfile da pasta registra, menos os opcionais, que o npm pula.
+  `satisfiesNodeRange` confere cada um contra `process.version`, o Node que roda
+  npm, scripts e gates (`runtimeEnvironment`). Se algum recusa, a sonda não está
+  pronta, e a evidência diz quais. Intervalo que a leitura não cobre não tem
+  veredito e não recusa nada.
+- **Raciocínio documentado** (`provider/registry.ts`). `MINIMAX_MODELOS`,
+  `raciocinioDoModelo` e `effortsDoModelo` ficam num lugar só, consumido por
+  `direct-api.ts`, que recusa antes do HTTP com os efforts aceitos o raciocínio
+  desligado onde o modelo não desliga e, no M3.1-Flash, o effort fora dos níveis
+  (`minimal` seria 400; `thinking` cairia no `max` sem ninguém escolher). Também
+  é consumido por `listarEfforts` (API direta) e por
+  `withDocumentedEffortVariants` (`provider/cli/opencode-limits.ts`). Esta
+  última injeta no OpenCode as variantes `low`…`max` do M3.1-Flash com
+  `output_config.effort`, na chamada (`commands/agent.ts`) e na listagem, para
+  as rotas `minimax/` e `minimax-coding-plan/`, que vão ao mesmo endereço
+  documentado. A variante que a pessoa configurou vale sobre a documentada.
+  Quando a CLI não responde à listagem, os níveis injetados continuam valendo.
+- **Wizard** (`commands/wizard.ts`). Modelo de API direta que não desliga o
+  raciocínio não ganha "desligado": aparecem só os níveis aceitos, e o padrão é
+  o mais econômico. Pelo OpenCode, a lista vem da CLI, já com as variantes
+  injetadas, e o "padrão do modelo" diz o que a API usa sem escolha (no
+  M3.1-Flash, `max`).
+
+### 131.5 O que NÃO muda, de propósito
+
+- O default do effort. Sem `--effort`, a API direta continua sem raciocínio onde
+  o modelo desliga, e recusa onde não desliga. Pelo OpenCode, "padrão do
+  modelo" continua sendo o da CLI, que no M3.1-Flash é o `max` da API. Baixar o
+  effort do executor tira tempo e custo, mas pode tirar qualidade, e nada aqui
+  mede isso. A escolha é de quem roda.
+- Os gates, o G0 que não exige o marcador de conclusão (a parte 3 terminou num
+  turno vazio, e o G3 decidiu), a §130, o paralelo, a escada de recuperação e o
+  UPSTREAM_REPAIR_REQUIRED.
+- O comportamento dos outros providers e dos outros modelos MiniMax: o M3 sem
+  effort continua desligando, e o M3 e o M2.x continuam aceitando o effort que já
+  aceitavam. O único texto que muda é a orientação da recusa do M2.x, que dizia
+  `--effort low` (parâmetro que o M2 não tem) e agora diz `thinking`.
+- O INIT, o PLAN e os contratos de infraestrutura. Nenhuma dependência nova.
+
+### 131.6 Infraestrutura: nenhuma contradição no plano
+
+O plano declara "Node.js 20 ou posterior" e `vitest` sem versão. O `vitest@4.1.12`
+declara `^20.0.0 || ^22.0.0 || >=24.0.0`, que aceita o Node 25. Existe, então,
+instalação que cumpre o plano no Node do harness: o caso é de defeito
+recuperável de instalação, aprovado em falso pelo preflight. Não é
+UPSTREAM_REPAIR_REQUIRED. Contradição real só existiria se nenhuma versão
+admitida pelo plano aceitasse nenhum Node admitido por ele, e não há aqui como
+demonstrá-la. Se a segunda sessão também não achar versão compatível, o build
+para antes da primeira fase, com a evidência. A saída então é reiniciar com um
+Node que o pacote aceita, como já dizia a mensagem de `runtimeRecusado`.
+
+### 131.7 Desempenho, medido nos logs do run
+
+O stream JSON do OpenCode (`logs/agente-1.out.log`) dá, por passo, os tokens e os
+tempos das ferramentas. A coluna "inferência" é o tempo dentro dos passos menos
+as ferramentas. O "intervalo" é o tempo entre um passo e o seguinte: overhead do
+OpenCode somado à espera pelo início da resposta, que o log não separa.
+
+| sessão | parede | inferência | ferramentas | intervalo | passos | raciocínio | saída | entrada sem cache | cache lido | US$ |
+|---|---|---|---|---|---|---|---|---|---|---|
+| preparação | 550 s | — | — | — | — | 22.782 | 11.364 | 97.435 | 2.933.504 | 0,079 |
+| parte 1/3 | 1674 s | 970 s | 393 s | 311 s | 79 | 54.053 | 25.286 | 157.516 | 7.056.128 | 0,177 |
+| parte 2/3 | 307 s | 146 s | 64 s | 97 s | 48 | 25.139 | 18.130 | 101.289 | 2.922.752 | 0,085 |
+| parte 3/3 | 993 s | 691 s | 209 s | 93 s | 52 | 44.051 | 18.523 | 56.242 | 4.222.848 | 0,109 |
+| verificador | 312 s | 163 s | 29 s | 120 s | 24 | 18.170 | 3.672 | 80.946 | 1.226.112 | 0,044 |
+
+- A preparação não tem stream no log, só o total, e incluiu trabalho de
+  sistema: bibliotecas do WebKit, `apt` e navegadores do Playwright.
+- A preparação Node do worktree falhou em segundos (EBADENGINE), e o G2 levou
+  3,2 s. Nenhuma instalação de integração chegou a rodar.
+- Não houve retry nem falha HTTP no BUILD. O PLAN teve o 400 da primeira
+  chamada e um `fetch failed` de rede na auditoria, repetido com sucesso.
+- O cache lido é cobrado a outra tarifa. O custo da coluna é o que o OpenCode
+  calculou, e somar o cache à entrada inflaria o volume e o preço.
+- Nas sessões do BUILD, 60% do tempo é inferência, 21% são ferramentas locais e
+  19% são intervalo.
+- O raciocínio é 141 mil tokens contra 66 mil de saída visível, com mediana de
+  127 tokens/s nos passos de muito raciocínio. São cerca de 18 dos ~33 minutos
+  de inferência. O passo mais lento (417 s, parte 1) raciocinou 20 mil tokens a
+  48 tokens/s.
+- Isso é o `max` que a API usa quando o OpenCode não manda intensidade. Não dá
+  para chamar a API de lenta sem separar esse efeito, e também não dá para
+  afirmar que um effort menor manteria a qualidade.
+
+### 131.8 Testes: RED → GREEN
+
+`test/loop/preparacao-131.spec.ts` e `test/provider/minimax-131.spec.ts` têm 69
+cenários. Contra o código anterior, com só os símbolos novos como stub, 51 falham
+pelo motivo do defeito. Os 18 que passam nos dois são os de compatibilidade e as
+guardas de "não adotar", que o código antigo cumpre por não adotar nada. Entre
+as falhas:
+
+- a integração repete a mensagem real "não são do integrador";
+- o manifesto do desenvolvedor é commitado pela adoção antiga;
+- o `fetch` com `thinking: disabled` é chamado;
+- a ponte morre em "Variant unavailable";
+- o wizard oferece "desligado".
+
+A CLI falsa reproduz o que a CLI real fez contra o servidor local. Os testes
+existentes de `adoptPreparedDependencies` passam a declarar o que a preparação
+criou, e a recusa do M2.x passa a orientar `thinking`.
+
+### 131.9 Retomar o `build-dd15cc4a810d`
+
+O projeto de evidência não foi modificado. Para ele, três coisas valem:
+
+- A P01 fixou `vitest 5.0.5` (e `better-sqlite3 13.0.3`, `engines >=22`), então
+  o entregável dela não instala com `--engine-strict` no Node 25. Retomar exige
+  um Node que o Vitest 5 aceita: 22.12+, 24 ou 26.
+- O manifesto solto da preparação antiga não tem registro de proveniência e não
+  será adotado. O build vai parar na árvore suja, e a decisão é de quem roda:
+  são arquivos gerados pela preparação, reproduzíveis.
+- O branch `capivara/build-dd15cc4a810d/P01` continua guardando a fase. Quando
+  a preparação recriar e adotar um manifesto, a reaplicação da P01 sobre ele
+  conflita no `package.json`. O arquivo fica com a versão do HEAD, e o da fase
+  continua no branch preservado (§113).
+
+### 131.10 A revisão adversarial
+
+Dois revisores independentes, um para Git e preflight e outro para providers e
+wizard, leram o diff, rodaram cenários próprios e, no de Git, compararam
+`satisfiesNodeRange` com o `semver.satisfies` do npm em 200 mil intervalos
+aleatórios, sem divergência fora dos casos de borda abaixo. O que mudou por
+causa deles, com cenário:
+
+1. **Proveniência só por caminho.** O run é do plano, e os registros de uma
+   execução anterior ficam. O manifesto que o desenvolvedor escrevesse depois,
+   no mesmo caminho, seria adotado. Agora a prova é o conteúdo (sha256).
+2. **Engines só do pacote sondado.** O `--engine-strict` confere a árvore toda,
+   então a árvore do lockfile entra na conferência, menos os opcionais.
+3. **A consulta de pendentes percorria o `node_modules`**, e uma falha dela
+   derrubava a preparação. Agora o `node_modules` é excluído já na consulta, e
+   a falha só deixa a sessão sem proveniência.
+4. **Seguir com a preparação recusada** (defeito anterior à §131, reproduzido
+   pelo revisor: no serial, o commit da fase levou o manifesto, o lock e o
+   `node_modules`). Agora o build para antes da primeira fase.
+5. **A rota `minimax-coding-plan/`** tem o mesmo modelo sem variantes no mesmo
+   endereço, e entrou na injeção. As `-cn` vão a outro endereço, não conferido,
+   e ficaram como a CLI as declara.
+6. **Effort fora dos níveis do M3.1-Flash na API direta** passava: `minimal` dava
+   400, e `thinking` caía no `max` em silêncio. Agora é recusado antes do HTTP.
+7. **O "padrão do modelo" do BUILD** não dizia que era `max`, e a CLI que não
+   respondia fazia o wizard oferecer um "desligado" que era o `max`.
+8. **Detalhes:**
+   - um comparador falso ao lado de um ilegível agora derruba a alternativa;
+   - o link de `.bin` só vale dentro do `node_modules` que o guarda;
+   - os testes da recusa mockam o `fetch`, para uma regressão nunca virar
+     chamada real.
+
+Ficaram, com o motivo:
+
+- **A sessão de preparação interrompida (Ctrl-C) não é adotada na retomada.**
+  Ela não chegou a dizer o que criou, e o que apareceu depois dela pode ser do
+  desenvolvedor. É fail-closed por escolha. O erro agora diz isso e o que fazer
+  (apagar, que a preparação refaz; ou commitar).
+- **O effort por papel continua herdando o global.** "Ajustar algum papel" não
+  pergunta o effort, e a CLI não tem como dizer "sem effort" a um papel
+  (`overridesFor` ignora o vazio). Com `xhigh`/`max` no M3.1-Flash, um papel
+  trocado para outro provider pode herdar um nível que aquele recusa. O
+  desenho é anterior, e mudá-lo é mudar a semântica das flags.
+- **`engines.npm` não é conferido**, porque pediria executar o npm. Também não
+  são conferidos lockfile v1 nem shims que não são link (pnpm no Windows).
+- **Intervalos inválidos para o npm** (`">=18 || latest"`, `"> = 25"`) aqui não
+  recusam, e o npm os recusaria. Em todos os casos sem veredito, o
+  comportamento é o de antes.
+
+### 131.11 Limitações e riscos
+
+- **Sem modelo real.** Nada foi validado com o MiniMax de verdade: as chamadas
+  foram contra servidor local e CLI falsa, e a CLI real só contra servidor
+  local. O efeito de um effort menor sobre tempo e qualidade não está medido.
+- **Dependências externas.** A tabela do MiniMax é a documentação de
+  22/10/2026, e um modelo novo da família fica sem regra até entrar nela. A
+  injeção depende de o OpenCode aceitar variantes por configuração (2.0.32) e
+  de usar a API compatível com Anthropic. Se o catálogo do OpenCode passar a
+  declarar as variantes, a configuração da pessoa e a do catálogo continuam
+  valendo sobre a injetada.
+- **Janela da sessão.** Um arquivo que o desenvolvedor crie ou mude durante a
+  sessão de preparação conta como dela. Entre duas sessões, mudança num
+  arquivo já atestado é atestada de novo pela sessão seguinte.
+- **Preflight mais estrito.** Ele passa a recusar ambiente que o build serial
+  às vezes atravessava, enquanto nenhuma instalação estrita rodava. O
+  `--engine-strict` já era a política do harness, e a recusa vem antes da
+  primeira fase, com a evidência.
+- **Retomada do run do mmax.** Ver 131.9.

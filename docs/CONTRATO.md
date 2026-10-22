@@ -1,6 +1,6 @@
 # O contrato da Capivara — INIT, PLAN e BUILD
 
-Versão **0.7.4** (com a execução progressiva das fases, §130). Este documento descreve, num lugar só, o que cada estágio da
+Versão **0.7.5** (com a execução progressiva das fases, §130, e a preparação e o raciocínio do §131). Este documento descreve, num lugar só, o que cada estágio da
 Capivara recebe, decide, produz e não pode fazer, e como o trabalho passa de um
 para o outro. O porquê de cada regra está numerado em `docs/PLANO.md` (§NNN); o
 estado do trabalho, em `docs/HANDOFF.md`. Quando este documento e o código
@@ -246,7 +246,15 @@ flowchart TD
    (com o laço de instalação de pré-requisitos de sistema, assistido pelo agente,
    quando há terminal), instalação das dependências declaradas nos manifestos,
    Chromium e o runner privado do G4. As fases recebem o ambiente aprovado e não
-   repetem as sondas.
+   repetem as sondas. Uma sonda só está pronta quando o pacote que ela comprova
+   (o do link em `node_modules/.bin`, ou o do `require`) aceita no `engines.node`
+   o Node do harness, e quando a árvore do lockfile também o aceita. É a mesma
+   recusa que o `--engine-strict` das instalações do build faria depois (§131).
+   O manifesto mínimo que a sessão de preparação deixou vira commit antes dos
+   worktrees, e só com o conteúdo que ela foi vista deixando. O que já estava
+   pendente é do desenvolvedor e não é adotado. Se a preparação deixou alteração
+   que não se adota, o build para antes da primeira fase, sem commitar nem
+   apagar (§131).
 2. **Fases**: na ordem das dependências, ou em paralelo, em worktrees próprias, com
    integração na árvore principal.
 3. **Implementação em partes** (§130): a fase que passa do orçamento de uma sessão

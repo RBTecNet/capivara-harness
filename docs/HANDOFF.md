@@ -14,12 +14,49 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `feat/execucao-progressiva-130` (§130, 0.7.4, push feito, sem merge) sobre a `fix/testes-so-no-build-129` (§129, 0.7.3, push feito, sem merge), que está sobre a `main`; na `main`, a cadeia §122–§128 entrou por fast-forward em 21/10/2026 e as outras branches foram apagadas |
-| versão | 0.7.4 na branch da §130, 0.7.3 na da §129, 0.7.2 na `main`; planos da 0.6.x e da 0.7.x valem na 0.7.4 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
-| suíte | 3052 testes em 164 arquivos na branch da §130, `npm run check` verde (rc=0); 3020 em 163 na branch da §129 (2989 em 161 na `main`; 2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
+| branch | `fix/minimax-integracao-131` (§131, 0.7.5, push feito, sem merge) sobre a `feat/execucao-progressiva-130` (§130, 0.7.4, push feito, sem merge), sobre a `fix/testes-so-no-build-129` (§129, 0.7.3, push feito, sem merge), que está sobre a `main`; na `main`, a cadeia §122–§128 entrou por fast-forward em 21/10/2026 e as outras branches foram apagadas |
+| versão | 0.7.5 na branch da §131, 0.7.4 na da §130, 0.7.3 na da §129, 0.7.2 na `main`; planos da 0.6.x e da 0.7.x valem na 0.7.5 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
+| suíte | 3121 testes em 166 arquivos na branch da §131, `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na branch da §130, `npm run check` verde (rc=0); 3020 em 163 na branch da §129 (2989 em 161 na `main`; 2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-22 — MiniMax: a preparação que integra, o raciocínio que o modelo aceita, e o effort que o BUILD escolhe (§131)
+
+O `laravel/mmax` (MiniMax-M3.1-Flash: API direta no INIT/PLAN, OpenCode no
+BUILD paralelo) parou com a P01 verde, barrada na integração pelos manifestos
+que a preparação deixou soltos na principal. Os quatro defeitos:
+
+- **Adoção.** `adoptPreparedDependencies` só via pacotes de sondas `require`.
+  Agora segue o link de `node_modules/.bin/X` até o pacote, e só adota o que uma
+  sessão de preparação foi vista criando (`criados` no registro da sessão).
+- **Engines.** O preflight aprovava o `vitest@5.0.5`, que recusa o Node 25, e o
+  `--engine-strict` do build falhava depois. Agora a sonda que passa ainda
+  confere o `engines.node` do pacote contra o Node do harness, e a recusa vira
+  evidência da segunda sessão de preparação.
+- **Raciocínio.** A guarda do raciocínio obrigatório conhecia só o nome da
+  prévia (`-Preview`), e o PLAN levou HTTP 400. A regra por modelo agora está no
+  catálogo (`registry.ts`), conferida na documentação oficial.
+- **Effort no BUILD.** O OpenCode não declara variantes para o M3.1-Flash, que
+  rodava sempre no `max` da API. O Core injeta as variantes documentadas
+  (`output_config.effort`) na chamada e na listagem, e o wizard oferece os
+  mesmos níveis no INIT, no PLAN e no BUILD, sem "desligado" onde a API recusa.
+
+A revisão adversarial (dois agentes) levou a três correções:
+
+- a proveniência passou a ser por conteúdo (sha256), porque os registros de
+  outra execução do mesmo plano adotariam um manifesto reescrito pelo
+  desenvolvedor;
+- o preflight passou a ler os engines da árvore do lockfile;
+- a preparação que não se adota agora para o build antes da primeira fase.
+  Antes ela seguia, e no serial levava o manifesto (e o `node_modules`) para o
+  commit da fase.
+
+Medido no log, 60% do tempo das sessões é inferência, e o raciocínio (141 mil
+tokens) é mais que o dobro da saída. São 69 cenários novos, e 51 falham contra o
+código anterior. O mmax não foi tocado: retomar exige Node 22.12+/24/26, porque a
+P01 fixou o Vitest 5. Detalhe na §131 do PLANO. Versão 0.7.5 na branch
+`fix/minimax-integracao-131`, com push; sem merge na `main`.
 
 ## 2026-10-22 — execução progressiva: a fase grande vai ao executor em partes, e continua uma entrega só (§130)
 

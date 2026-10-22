@@ -72,8 +72,16 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-Na versão 0.7.4, `npm run check` passa: build, typecheck e **3052 testes**, incluindo o catálogo de
+Na versão 0.7.5, `npm run check` passa: build, typecheck e **3121 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
+
+A 0.7.5 corrige a integração do MiniMax que o `laravel/mmax` expôs (§131): a
+preparação do ambiente é adotada antes dos worktrees quando as sondas são
+`node_modules/.bin`, e só com o conteúdo que a sessão de preparação deixou; o
+preflight confere o `engines.node` do que instalou contra o Node do harness; a
+API direta recusa, antes da requisição, desligar o raciocínio do
+MiniMax-M3.1-Flash; e o BUILD pelo OpenCode passa a escolher o effort dele. Planos
+e runs da 0.7.4 continuam valendo.
 
 A 0.7.4 entrega a fase grande ao executor em partes (§130): acima de 15
 critérios, a implementação vira sessões novas com grupos contíguos das tasks, na

@@ -103,12 +103,12 @@ describe("API direta executada pelo supervisor", () => {
   });
 
   it("não cobra raciocínio obrigatório de MiniMax M2 sem autorização explícita", async () => {
-    const fetcher = vi.spyOn(globalThis, "fetch");
+    const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue(answer());
     const call = invocation();
     call.directApi!.model = "MiniMax-M2.7";
     const result = await runProvider({ invocation: call, prompt: "Teste", limits });
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("--effort low");
+    expect(result.stderr).toContain("--effort explicitamente (thinking)");
     expect(fetcher).not.toHaveBeenCalled();
   });
 

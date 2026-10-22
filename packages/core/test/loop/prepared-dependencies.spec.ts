@@ -4,12 +4,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { adoptPreparedDependencies } from "../../src/loop/prepared-dependencies.js";
+import { adoptPreparedDependencies, conteudoDe } from "../../src/loop/prepared-dependencies.js";
 
 const run = promisify(execFile);
 let root: string;
 const requirement = { technology: "SQLite", binary: "node", systemLevel: false,
   checkArgs: ["-e", "require('better-sqlite3')"] };
+/** O que a sessão de preparação foi vista deixando (§131): o manifesto mínimo e seu lock, com o conteúdo de agora. */
+const criados = async () => {
+  const atestados = new Map<string, Set<string>>();
+  for (const caminho of ["backend/package.json", "backend/package-lock.json"]) {
+    const conteudo = await conteudoDe(join(root, caminho));
+    if (conteudo) atestados.set(caminho, new Set([conteudo]));
+  }
+  return atestados;
+};
 const git = async (args: string[]) => (await run("git", args, { cwd: root })).stdout.trim();
 const write = async (path: string, content: string) => {
   await mkdir(join(root, path, ".."), { recursive: true });
@@ -30,17 +39,17 @@ it("admite só o manifesto mínimo e seu lock, mantendo módulos no disco", asyn
   await write("backend/package-lock.json", JSON.stringify({ lockfileVersion: 3, packages: {
     "": { dependencies: { "better-sqlite3": "^11.10.0" } }, "node_modules/better-sqlite3": { version: "11.10.0" },
   } }));
-  expect(await adoptPreparedDependencies(root, [requirement])).toBe(true);
+  expect(await adoptPreparedDependencies(root, [requirement], await criados())).toBe(true);
   expect(await git(["ls-tree", "-r", "--name-only", "HEAD"])).toBe("backend/package-lock.json\nbackend/package.json");
   expect(await git(["status", "--porcelain"])).toBe("");
   expect(await readFile(join(root, "backend/node_modules/driver/index.js"), "utf8")).toBe("instalado");
-  expect(await adoptPreparedDependencies(root, [requirement])).toBe(false);
+  expect(await adoptPreparedDependencies(root, [requirement], await criados())).toBe(false);
 });
 
 it.each(["src/app.ts", ".env", "backend/extra.txt"])("não publica preparação junto de alteração alheia em %s", async path => {
   await write(path, "preservar");
   const head = await git(["rev-parse", "HEAD"]);
-  expect(await adoptPreparedDependencies(root, [requirement])).toBe(false);
+  expect(await adoptPreparedDependencies(root, [requirement], await criados())).toBe(false);
   expect(await git(["rev-parse", "HEAD"])).toBe(head);
   expect(await readFile(join(root, path), "utf8")).toBe("preservar");
 });
@@ -50,7 +59,7 @@ it.each([
   { dependencies: { "better-sqlite3": "11" }, scripts: { start: "node app.js" } },
 ])("manifesto que excede a instalação declarada continua pendente", async manifest => {
   await write("backend/package.json", JSON.stringify(manifest));
-  expect(await adoptPreparedDependencies(root, [requirement])).toBe(false);
+  expect(await adoptPreparedDependencies(root, [requirement], await criados())).toBe(false);
 });
 
 it("não adota alteração de manifesto já rastreado", async () => {
@@ -58,6 +67,6 @@ it("não adota alteração de manifesto já rastreado", async () => {
   await git(["commit", "-qm", "manifesto anterior"]);
   await write("backend/package.json", JSON.stringify({ dependencies: { "better-sqlite3": "12" } }));
   const head = await git(["rev-parse", "HEAD"]);
-  expect(await adoptPreparedDependencies(root, [requirement])).toBe(false);
+  expect(await adoptPreparedDependencies(root, [requirement], await criados())).toBe(false);
   expect(await git(["rev-parse", "HEAD"])).toBe(head);
 });

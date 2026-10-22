@@ -1,5 +1,5 @@
 /** APIs de texto dos papéis de leitura. Não executa ferramentas nem subprocessos. */
-import type { DirectProvider, ReasoningDecision } from "./registry.js";
+import { effortsDoModelo, raciocinioDoModelo, type DirectProvider, type ReasoningDecision } from "./registry.js";
 import type { RunOptions, RunResult } from "./supervisor.js";
 import type { TokenUsage } from "./transcript.js";
 import { redact } from "./redact.js";
@@ -93,8 +93,18 @@ export async function runDirectApi(options: RunOptions): Promise<RunResult> {
   if ((configuredTokens && !/^\d+$/.test(configuredTokens)) || !Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0) {
     return finish("CAPIVARA_API_MAX_OUTPUT_TOKENS deve ser um inteiro positivo seguro; nenhuma requisição foi enviada.", true);
   }
-  if (provider.id === "minimax" && !api.reasoning.enabled && /^(?:MiniMax-M2(?:[.-]|$)|MiniMax-M3\.1-Flash-Preview$)/.test(api.model)) {
-    return finish(`minimax: ${api.model} não permite desligar raciocínio. Informe --effort low explicitamente ou escolha MiniMax-M3; nenhuma requisição foi enviada.`, true);
+  /*
+   * O que a documentação do modelo diz (§131). Modelo que não desliga: pedir
+   * `disabled` é HTTP 400, ou raciocínio cobrado sem ninguém ter pedido. Modelo
+   * com níveis: outro valor é 400, e `thinking` (sem nível) cairia no padrão da
+   * API — o `max` do M3.1-Flash — sem ninguém ter escolhido.
+   */
+  const documentado = raciocinioDoModelo(provider, api.model);
+  if (documentado && !documentado.desligavel && !api.reasoning.enabled) {
+    return finish(`${provider.id}: ${api.model} não permite desligar o raciocínio. Informe --effort explicitamente (${effortsDoModelo(documentado).join(", ")}); nenhuma requisição foi enviada.`, true);
+  }
+  if (documentado && documentado.niveis.length > 0 && api.reasoning.enabled && !documentado.niveis.includes(api.reasoning.effort ?? "")) {
+    return finish(`${provider.id}: ${api.model} não aceita o effort "${api.reasoning.effort ?? ""}". Informe --effort com um destes: ${documentado.niveis.join(", ")}; nenhuma requisição foi enviada.`, true);
   }
   const abort = (): void => controller.abort();
   options.signal?.addEventListener("abort", abort, { once: true });

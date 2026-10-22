@@ -15,7 +15,7 @@ import { promisify } from "node:util";
 import { renderEscolhaNumerada, type EscolhaNumerada } from "./escolha.js";
 import type { EnvironmentRequirement } from "../contract/environment.js";
 import { runtimeEnvironment } from "../provider/runtime-env.js";
-import { packagesInReadinessProbe, probeManifests } from "./prerequisite-workspace.js";
+import { lockedPackages, packagesInReadinessProbe, probedPackages, probeManifests, satisfiesNodeRange } from "./prerequisite-workspace.js";
 import { prepareReadinessProbe } from "./readiness-probe.js";
 
 const run = promisify(execFile);
@@ -99,9 +99,35 @@ export async function checkPrerequisites(prerequisites: readonly Prerequisite[],
           await probe.cleanup();
         }
       }
-      statuses.push({ ...prerequisite, path, present: checks.every(check => check.present),
+      /*
+       * A sonda passou, mas o pacote que ela comprova aceita este Node? (§131)
+       *
+       * `vitest --version` responde mesmo quando o `engines` do pacote recusa o
+       * runtime — o npm comum só avisa. O build instala com `--engine-strict`
+       * no worktree e na integração, e lá a recusa é erro: aprovar aqui era
+       * deixar a falha para depois da primeira fase pronta.
+       */
+      /*
+       * E a árvore que o lockfile da pasta registra, porque o `--engine-strict`
+       * confere todos os pacotes, não só o sondado: o Vitest aceito com uma
+       * dependência que recusa o Node falharia do mesmo jeito, depois.
+       */
+      const sondados = checks.every(check => check.present) ? await probedPackages(prerequisite, directories) : [];
+      const conferidos = sondados.length > 0 ? [...sondados, ...(await Promise.all(directories.map(lockedPackages))).flat()] : [];
+      const vistos = new Set<string>();
+      const recusados = conferidos.filter(pacote => {
+        const chave = `${pacote.name}@${pacote.version}`;
+        if (vistos.has(chave) || pacote.engine === null || satisfiesNodeRange(pacote.engine, process.version) !== false) return false;
+        vistos.add(chave);
+        return true;
+      });
+      const recusa = recusados.slice(0, 8).map(pacote =>
+        `${pacote.name}@${pacote.version} declara engines.node "${pacote.engine}", e o Node que roda o harness e o projeto é ${process.version}: ` +
+        `a instalação estrita do build (npm --engine-strict) recusa esta versão. Escolha, dentro do que o plano declara, versões cuja árvore de dependências aceite ${process.version}.`);
+      if (recusados.length > 8) recusa.push(`e mais ${recusados.length - 8} pacote(s) com engines.node que recusa ${process.version}.`);
+      statuses.push({ ...prerequisite, path, present: checks.every(check => check.present) && recusa.length === 0,
         ...(directories.length === 1 ? { cwd: directories[0]! } : {}),
-        evidence: checks.map(check => `cwd: ${check.cwd}\n${check.evidence}`).join("\n\n") });
+        evidence: [...checks.map(check => `cwd: ${check.cwd}\n${check.evidence}`), ...recusa].join("\n\n") });
     } else statuses.push({ ...prerequisite, present: path !== null, path });
   }
   return statuses;

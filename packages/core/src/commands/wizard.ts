@@ -16,7 +16,7 @@
  *    com esse argv. Um wizard que executa por um caminho e ensina outro mente.
  */
 
-import { CLI_PROVIDERS, DIRECT_PROVIDERS, ROLES, ROLE_NAMES, isDirectProvider, opencodeProviderId } from "../provider/index.js";
+import { CLI_PROVIDERS, DIRECT_PROVIDERS, ROLES, ROLE_NAMES, isDirectProvider, opencodeProviderId, raciocinioNoOpenCode } from "../provider/index.js";
 import type { RoleName, RoleConfig } from "../provider/index.js";
 import { readChoice, renderChoices, renderCommand, roleHint, toArgv } from "../tui/index.js";
 import type { Choice, WizardAnswers } from "../tui/index.js";
@@ -700,10 +700,21 @@ async function perguntarPapeis(deps: WizardDeps, usados: readonly RoleName[]): P
 async function escolherEffort(deps: WizardDeps, provider: string, model: string, titulo: string): Promise<string> {
   const aceitos = model ? await (deps.listEfforts ?? (async () => null))(provider, model).catch(() => null) : null;
   const none = aceitos?.includes("none") === true;
+  /*
+   * API direta com modelo que não desliga o raciocínio (§131): "desligado"
+   * seria um comando que a API recusa — o MiniMax-M3.1-Flash volta HTTP 400.
+   * Só os níveis que ele aceita, e o primeiro, o mais econômico, é o padrão.
+   */
+  if (aceitos !== null && aceitos.length > 0 && !none && isDirectProvider(provider)) {
+    const niveis: Choice[] = aceitos.map((nivel, indice) => ({ label: nivel, ...(indice === 0 ? { hint: `${model} não desliga o raciocínio` } : {}) }));
+    return niveis[await choose(deps.io, titulo, niveis, 0)]?.label ?? "";
+  }
   const padrao = provider === "opencode" && aceitos !== null && !none ? "padrão do modelo" : "desligado";
+  // O padrão do modelo não é "desligado" quando a documentação diz o que a API usa sem escolha: no M3.1-Flash, max (§131).
+  const daApi = padrao === "padrão do modelo" ? raciocinioNoOpenCode(model)?.raciocinio.padrao : undefined;
   const opcoes: Choice[] =
     aceitos !== null
-      ? [{ label: padrao, hint: aceitos.length ? `${model} aceita: ${aceitos.join(", ")}` : "este modelo não declara variantes de raciocínio" }, ...aceitos.filter((nivel) => nivel !== "none").map((nivel) => ({ label: nivel }))]
+      ? [{ label: padrao, hint: aceitos.length ? `${model} aceita: ${aceitos.join(", ")}${daApi ? `; sem escolha, a API usa ${daApi}` : ""}` : "este modelo não declara variantes de raciocínio" }, ...aceitos.filter((nivel) => nivel !== "none").map((nivel) => ({ label: nivel }))]
       : EFFORTS_GENERICOS;
   const index = await choose(deps.io, titulo, opcoes, 0);
   return index === 0 ? (none ? "none" : "") : opcoes[index]?.label ?? "";

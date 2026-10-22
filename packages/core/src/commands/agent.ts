@@ -12,7 +12,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { withApiCredentials } from "../provider/credentials.js";
-import { withOpenRouterOutputLimit } from "../provider/cli/opencode-limits.js";
+import { withDocumentedEffortVariants, withOpenRouterOutputLimit } from "../provider/cli/opencode-limits.js";
 import {
   buildInvocation,
   createLineSplitter,
@@ -141,7 +141,7 @@ export function createAgentBridge(options: AgentBridgeOptions): (request: Bridge
     await mkdir(options.projectRoot, { recursive: true });
     const scopedEnvironment = options.environment ? { ...process.env, ...options.environment } : process.env;
     const environment = config.provider === "opencode"
-      ? await withOpenRouterOutputLimit(config.model, withApiCredentials(stored, scopedEnvironment, [config.model.split("/")[0] ?? ""], config.credential), options.projectRoot)
+      ? await withOpenRouterOutputLimit(config.model, withDocumentedEffortVariants(config.model, withApiCredentials(stored, scopedEnvironment, [config.model.split("/")[0] ?? ""], config.credential)), options.projectRoot)
       : options.environment ? scopedEnvironment : undefined;
     const invocation = buildInvocation(request.role, config, {
       projectRoot: options.projectRoot,

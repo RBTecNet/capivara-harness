@@ -19,7 +19,8 @@
 import { execFile } from "node:child_process";
 import { promisify, stripVTControlCharacters } from "node:util";
 import { CLI_ADAPTERS } from "./cli/index.js";
-import { directProvider, isDirectProvider } from "./registry.js";
+import { directProvider, effortsDoModelo, isDirectProvider, raciocinioDoModelo } from "./registry.js";
+import { raciocinioNoOpenCode, withDocumentedEffortVariants } from "./cli/opencode-limits.js";
 import { credentialsPath, readCredentials, selectCredential, withApiCredentials } from "./credentials.js";
 
 const run = promisify(execFile);
@@ -233,18 +234,37 @@ export async function listarEfforts(
   env: NodeJS.ProcessEnv = process.env,
   credentialsFile?: string,
 ): Promise<string[] | null> {
+  // API direta: a listagem dela não diz capacidade; vale o que a documentação do provider declara (§131).
+  if (isDirectProvider(providerId)) {
+    const documentado = raciocinioDoModelo(directProvider(providerId), modelo);
+    return documentado ? effortsDoModelo(documentado) : null;
+  }
   const listagem = MODEL_LISTINGS[providerId];
   if (!listagem?.efforts || listagem.command.length === 0) return null;
-  if (!(await cliDisponivel(providerId, env))) return null;
+  /*
+   * Os níveis que a chamada injeta no OpenCode (§131) valem mesmo quando a CLI
+   * não responde à consulta: sem eles, o wizard cairia na lista genérica, cujo
+   * "desligado" é, para o M3.1-Flash, o `max` da API.
+   */
+  const niveis = providerId === "opencode" ? raciocinioNoOpenCode(modelo)?.raciocinio.niveis ?? [] : [];
+  const injetados = niveis.length > 0 ? [...niveis] : null;
+  if (!(await cliDisponivel(providerId, env))) return injetados;
 
   const adapter = CLI_ADAPTERS.find((entrada) => entrada.id === providerId);
   const binary = env[adapter?.binaryEnv ?? ""]?.trim() || adapter?.defaultBinary || providerId;
 
+  let childEnv: NodeJS.ProcessEnv;
   try {
-    const childEnv = providerId === "opencode" ? withApiCredentials(await readCredentials(credentialsFile ?? credentialsPath(undefined, env)), env, [modelo.split("/")[0] ?? ""]) : env;
-    const { stdout } = await run(binary, listagem.command, { env: childEnv, timeout: TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
-    return listagem.efforts(stdout)[modelo] ?? null;
+    // A mesma configuração que a chamada recebe: o OpenCode lista as variantes que de fato aceitaria.
+    childEnv = providerId === "opencode" ? withDocumentedEffortVariants(modelo, withApiCredentials(await readCredentials(credentialsFile ?? credentialsPath(undefined, env)), env, [modelo.split("/")[0] ?? ""])) : env;
   } catch {
+    // Configuração do OpenCode ilegível: a chamada também a recusaria, e nada se oferece.
     return null;
+  }
+  try {
+    const { stdout } = await run(binary, listagem.command, { env: childEnv, timeout: TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+    return listagem.efforts(stdout)[modelo] ?? injetados;
+  } catch {
+    return injetados;
   }
 }

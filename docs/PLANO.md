@@ -13938,4 +13938,28 @@ Os pontos confirmados como corretos incluem:
   opcionais e compatíveis com os registros anteriores;
 - o caminho limpo de um produto web não ganhou chamada.
 
-Uma terceira revisão, só da segunda rodada, foi pedida antes do commit.
+Uma terceira revisão, só da segunda rodada, terminou depois do commit da 0.7.7.
+Ela reproduziu quatro defeitos novos, e estes vão por cima da 0.7.7:
+
+| achado | gravidade | correção |
+|---|---|---|
+| a pergunta sem `start` se gastava numa passagem que reprovou antes de fazê-la; o desktop voltava ao beco do Luna, com o executor mandado criar `start` | alta | o gate devolve `perguntouSemStart` só quando a pergunta chegou ao roteirista |
+| a reescrita pela triagem ROTEIRO que respondia com a marca virava "o roteirista não alterou" e gastava orçamento do G4 | média | o fluxo que saiu do navegador pula essa conferência |
+| a decisão tomada na contestação, na pergunta ou na reescrita não alcançava a passagem seguinte, porque o roteiro inventado ficava no disco e rodava | média | aceita a marca, o roteiro do harness sai do disco, e o atalho do runner responde |
+| um build com `--no-flows` reabria a fase e regravava o registro sem a pendência; a execução seguinte fechava com código 0 | baixa/média | sem gate de fluxos, nada reabre pela Stack e o registro anterior é mantido |
+| a citação podia costurar duas linhas da Stack ou o título | baixa | a citação vale dentro de uma linha |
+| `--rebuild-all` reaproveitava a decisão sem perguntar | baixa | sem semear a decisão do livro quando se refaz tudo |
+| G4 verde na fase fechada neste run e no ciclo novo com NOT_APPLICABLE | baixa | neutro, como no ramo vizinho |
+
+São 6 testes novos, os 6 RED contra a 0.7.7, e 37 ao todo nos dois arquivos da §133.
+`npm run check` deu rc=0, com 3240 testes em 170 arquivos.
+
+Fica registrado, sem mudança, o custo apontado na mesma revisão. Um produto web
+sem `start` paga, na primeira passagem do G4 da fase, a redação e a pergunta sem
+`start`: duas sessões de roteirista por fluxo, uma vez por fase. Não perguntar
+sobre o roteiro recém-escrito pouparia isso, mas custaria ao desktop uma ação do
+executor e uma passagem a mais, justamente o caminho do incidente. Num
+ecossistema que `startCommandFor` não reconhece, o `start` falta sempre e o G4
+web reprova de qualquer forma; isso já era assim antes da §133. Também já
+existia, e continua, a lacuna da fase fechada com `--no-flows`: os fluxos dela
+contam como cumpridos depois. Não é desta §.

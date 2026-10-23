@@ -72,8 +72,20 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-Na versão 0.7.8, `npm run check` passa: build, typecheck e **3240 testes**, incluindo o catálogo de
+Na versão 0.7.9, `npm run check` passa: build, typecheck e **3321 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
+
+A 0.7.9 traz a §134, que conclui o fluxo do produto usado fora do navegador
+com evidência que a plataforma permite, sem dispensá-lo.
+- O G2 roda a suíte .NET que o PLAN contratou, com o relatório TRX de cada
+  teste.
+- Fora do navegador, o roteirista cita o teste que prova cada passo, e o Core
+  só aceita o que o relatório do runner mostra aprovado nesta execução. Hoje
+  isso vale para .NET; nas outras suítes o passo fica pendente e nomeado.
+- O produto puramente de terminal é percorrido por comandos, sem servidor.
+- A fase com pendência volta a ser verificada na execução seguinte.
+
+Foram cinco rodadas de revisão adversarial.
 
 A 0.7.8 fecha o que a terceira revisão adversarial da §133 reproduziu na 0.7.7
 (§133.9). A pergunta ao roteirista sem `start` só se gasta quando é feita, e a

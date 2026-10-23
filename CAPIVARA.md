@@ -72,8 +72,13 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-Na versão 0.7.7, `npm run check` passa: build, typecheck e **3234 testes**, incluindo o catálogo de
+Na versão 0.7.8, `npm run check` passa: build, typecheck e **3240 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
+
+A 0.7.8 fecha o que a terceira revisão adversarial da §133 reproduziu na 0.7.7
+(§133.9). A pergunta ao roteirista sem `start` só se gasta quando é feita, e a
+decisão de produto fora do navegador alcança toda passagem e toda execução;
+`--no-flows` e `--rebuild-all` não a apagam nem a reaproveitam às cegas.
 
 A 0.7.7 traz duas correções.
 

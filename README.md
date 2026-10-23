@@ -2,7 +2,7 @@
 
 Do prompt à aplicação final, em três comandos.
 
-Versão **0.7.7**: o `build` recupera por defeito e revalida só a prova que a
+Versão **0.7.8**: o `build` recupera por defeito e revalida só a prova que a
 correção atingiu (§125), cobra cada fluxo quando o plano diz que ele existe
 (§127), entrega a fase grande ao executor em partes, julgando-a inteira (§130),
 e só aprova o ambiente que a instalação estrita aceita, com o MiniMax nos efforts

@@ -1,6 +1,6 @@
 {
   "name": "@capivara/core",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "description": "Harness documental e loop de execucao: do prompt a aplicacao final",
   "type": "module",
   "bin": {

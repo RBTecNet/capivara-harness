@@ -928,6 +928,27 @@ describe("ensaio do verificador", () => {
     const { outcome } = await run(steps);
     expect(outcome.readiness.checks.find((check) => check.id === "ensaio")?.detail).toContain("NÃO ENSAIADO");
   });
+
+  it("veredito logo depois do espelho do colchete é lido na primeira passada (§132)", async () => {
+    // A forma do MiniMax no mmax: `CRITERION P4.T2.C1 [fase · task] OBSERVABLE — …`, sem dois-pontos.
+    const steps = happyPath().filter((step) => step.match.role !== "verifier");
+    steps.push({
+      match: { role: "verifier", stage: "verify" },
+      respond: {
+        stdout: (call) =>
+          [...call.prompt.matchAll(/^(P\d+\.T\d+\.C\d+) (\[[^\]\n]* · [^\]\n]*\]) /gm)]
+            .map(([, address, espelho]) => `CRITERION ${address} ${espelho} OBSERVABLE — dá para abrir o arquivo e olhar`)
+            .join("\n"),
+      },
+      repeat: true,
+    });
+
+    const { outcome, agent } = await run(steps);
+    expect(outcome.readiness.checks.find((check) => check.id === "ensaio")?.passed).toBe(true);
+    const ensaios = agent.calls.filter((call) => call.role === "verifier" && call.stage === "verify");
+    expect(ensaios.length).toBeGreaterThan(0);
+    expect(ensaios.some((call) => call.prompt.includes("The previous answer left criteria unjudged"))).toBe(false);
+  });
 });
 
 describe("quando o provider falha, o que ele disse chega a quem chamou", () => {

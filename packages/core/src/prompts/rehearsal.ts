@@ -180,6 +180,38 @@ export interface CriterionVerdict {
  */
 const CRITERION_LINE = /^CRITERION\s+(P\d+\.T\d+\.C\d+)\b[^:]*:\s*(OBSERVABLE|UNSATISFIABLE|UNOBSERVABLE)\b\s*(?:[—:-]\s*(.*))?$/;
 
+/*
+ * O veredito logo depois do espelho do colchete (§132).
+ *
+ * No `mmax` o MiniMax espelhou o `[fase · task]` do prompt e pôs o veredito
+ * logo depois — sem o dois-pontos, ou com um título que traz dois-pontos
+ * dentro ("Phase 4: …", `obterAnotacao(id: number)`). A chave acima exige o
+ * primeiro dois-pontos da linha colado ao veredito: a fase 4 inteira voltou
+ * como não ensaiada, a segunda chance renumerou os endereços, e o plano parou
+ * com o verificador tendo julgado os dezoito critérios.
+ *
+ * É extensão, não outra chave: só para a linha que a de cima recusa, só com o
+ * ` · ` do prompt dentro do colchete, e só quando há um único lugar na linha em
+ * que um veredito segue um `]`. O texto do critério ecoado depois do colchete
+ * continua recusado — onde ele termina, o parser não sabe.
+ *
+ * Lido em partes, e não num regex só: com `.*? · .*?` uma linha de 150 KB
+ * cheia de ` · ` levou vinte segundos para ser recusada.
+ */
+const INICIO_DO_ESPELHO = /^CRITERION\s+(P\d+\.T\d+\.C\d+)\s+\[/;
+const VEREDITO_APOS_COLCHETE = /\](?::\s*|\s+)(?:OBSERVABLE|UNSATISFIABLE|UNOBSERVABLE)\b/g;
+const FIM_DO_ESPELHO = /^\](?::\s*|\s+)(OBSERVABLE|UNSATISFIABLE|UNOBSERVABLE)\b\s*(?:[—:-]\s*(.*))?$/;
+
+function lerEspelho(line: string): CriterionVerdict | null {
+  const inicio = INICIO_DO_ESPELHO.exec(line);
+  const fechamentos = inicio ? [...line.matchAll(VEREDITO_APOS_COLCHETE)] : [];
+  if (!inicio || fechamentos.length !== 1) return null;
+  const fim = fechamentos[0]?.index ?? -1;
+  if (fim < inicio[0].length || !line.slice(inicio[0].length, fim).includes(" · ")) return null;
+  const veredito = FIM_DO_ESPELHO.exec(line.slice(fim));
+  return veredito ? { address: inicio[1] ?? "", ruling: veredito[1] as CriterionRuling, reason: (veredito[2] ?? "").trim() } : null;
+}
+
 /**
  * Lê as linhas CRITERION, ignorando prosa em volta e indentação acidental.
  *
@@ -191,16 +223,23 @@ const CRITERION_LINE = /^CRITERION\s+(P\d+\.T\d+\.C\d+)\b[^:]*:\s*(OBSERVABLE|UN
  */
 export function parseRehearsal(output: string): CriterionVerdict[] {
   const verdicts = new Map<string, CriterionVerdict>();
+  const espelhados = new Map<string, CriterionVerdict>();
   for (const rawLine of desgrudarChaves(output, String.raw`CRITERION\s+P\d+\.T\d+\.C\d+`).split("\n")) {
-    const match = CRITERION_LINE.exec(rawLine.replace(/\r$/, "").trim());
-    if (!match) continue;
+    const line = rawLine.replace(/\r$/, "").trim();
+    const match = CRITERION_LINE.exec(line);
+    if (!match) {
+      const espelho = lerEspelho(line);
+      if (espelho && !espelhados.has(espelho.address)) espelhados.set(espelho.address, espelho);
+      continue;
+    }
     const address = match[1] ?? "";
     // Repetição é erro de formatação, não voto duplo: a primeira linha vale.
     if (!verdicts.has(address)) {
       verdicts.set(address, { address, ruling: match[2] as CriterionRuling, reason: (match[3] ?? "").trim() });
     }
   }
-  return [...verdicts.values()];
+  // O espelho só preenche o endereço que a chave não leu, e vem depois: o que ela lia não muda.
+  return [...verdicts.values(), ...[...espelhados.values()].filter((verdict) => !verdicts.has(verdict.address))];
 }
 
 export interface RehearsalResult {

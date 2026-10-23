@@ -1,0 +1,20 @@
+CRITERION P6.T1.C1: OBSERVABLE — leio `backend/src/anotacoes/anotacoesServico.ts` e confiro os cinco exports que operam sobre `anotacoes`, que a conexão vem de import da fundação e que não há `CREATE TABLE` nem `ALTER TABLE`.
+CRITERION P6.T1.C2: OBSERVABLE — executo a listagem com registros de mesmo `criado_em` e confiro a ordenação `criado_em` decrescente e, no empate, `id` decrescente.
+CRITERION P6.T1.C3: OBSERVABLE — procuro no arquivo referências a `tarefas` ou `categorias` e confiro no esquema que a tabela `anotacoes` não tem `FOREIGN KEY`.
+CRITERION P6.T2.C1: OBSERVABLE — envio `titulo` e `conteudo` com espaços nas pontas e quebras de linha internas e confiro o valor gravado sem as pontas e com as quebras internas preservadas.
+CRITERION P6.T2.C2: OBSERVABLE — envio os casos ausente, vazio e só com espaços de `titulo` e `conteudo` e confiro HTTP 400 com a chave do campo em `erro.campos`.
+CRITERION P6.T2.C3: OBSERVABLE — leio a função de validação e testo `titulo` e `conteudo` muito longos, confirmando que não existe checagem de tamanho máximo.
+CRITERION P6.T3.C1: OBSERVABLE — chamo GET e POST em `/api/anotacoes` e PUT e DELETE em `/api/anotacoes/:id` e confiro os status 200, 201, 200 e 204 com os corpos correspondentes.
+CRITERION P6.T3.C2: OBSERVABLE — crio uma anotação e faço PUT com conteúdo idêntico, conferindo `criado_em` igual a `atualizado_em` na criação, `atualizado_em` reescrito no PUT, `criado_em` preservado e campos do corpo ignorados.
+CRITERION P6.T3.C3: OBSERVABLE — chamo PUT e DELETE com id inexistente e um corpo inválido, conferindo 404 e 400 no envelope `{"erro":...}`, a chave do campo em `erro.campos` e `id` devolvido como número.
+CRITERION P6.T4.C1: OBSERVABLE — leio o setup dos testes e confiro o arquivo SQLite próprio da execução, distinto do banco do `.env`, criado no início e removido ao final.
+CRITERION P6.T4.C2: OBSERVABLE — rodo a suíte e confiro a criação válida e a recusa dos quatro casos inválidos, cada um com a chave correspondente em `erro.campos`.
+CRITERION P6.T4.C3: OBSERVABLE — confiro os testes que verificam a remoção dos espaços das pontas e a preservação das quebras de linha internas do conteúdo.
+CRITERION P6.T5.C1: OBSERVABLE — confiro os testes de consulta do registro persistido, de PUT reescrevendo `atualizado_em` e mantendo `criado_em` e de DELETE removendo a linha definitivamente.
+CRITERION P6.T5.C2: OBSERVABLE — leio o teste que fecha a conexão e reabre o mesmo arquivo do banco de testes, confirmando o registro com os mesmos valores.
+CRITERION P6.T5.C3: OBSERVABLE — confiro os testes que esperam 404 em PUT e DELETE com id inexistente.
+CRITERION P6.T6.C1: OBSERVABLE — leio os arquivos do módulo no frontend e confiro o serviço com listar, criar, atualizar e excluir sobre `/api/anotacoes` usando o cliente HTTP da fundação e nenhuma chamada direta a `fetch`.
+CRITERION P6.T6.C2: OBSERVABLE — confiro os métodos e URLs (GET e POST em `/api/anotacoes`, PUT e DELETE em `/api/anotacoes/:id`) e que devolvem os dados das respostas de sucesso.
+CRITERION P6.T6.C3: OBSERVABLE — simulo uma resposta de erro e confiro que o serviço entrega `erro.mensagem` e o mapa de `erro.campos`.
+CRITERION P6.T7.C1: OBSERVABLE — leio `frontend/src/fundacao/App.tsx` e confiro a rota `/anotacoes` renderizando `frontend/src/modulos/anotacoes/PaginaAnotacoes.tsx`, que mora fora da pasta da fundação.
+CRITERION P6.T7.C2: OBSERVABLE — carrego a página e confiro título, conteúdo e as duas datas em `dd/mm/aaaa hh:mm` convertidas do ISO 8601 em UTC, sem alterar o valor armazenado nem o trafegado na API.

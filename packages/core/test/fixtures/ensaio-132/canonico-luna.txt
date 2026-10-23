@@ -1,0 +1,3 @@
+CRITERION P1.T8.C1: OBSERVABLE — Verificar em `index.html` e `src/main.tsx` que a aplicação React é montada por meio de `src/App.tsx`.
+CRITERION P1.T8.C2: OBSERVABLE — Verificar em `vite.config.ts` que requisições iniciadas por `/api` são encaminhadas para `http://localhost:3001`.
+CRITERION P1.T8.C3: OBSERVABLE — Verificar em `src/App.tsx` a descoberta de `src/modules/*/page.tsx`, o vínculo das páginas aos quatro caminhos especificados e a ausência de registros dessas páginas em arquivo compartilhado pertencente a outro módulo.

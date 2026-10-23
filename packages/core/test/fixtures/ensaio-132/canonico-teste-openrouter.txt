@@ -1,0 +1,2 @@
+CRITERION P5.T4.C3: OBSERVABLE — ler o teste E2E da fase e confirmar que ele configura `CAPIVARA_DB_PATH` para um arquivo fora de `server/data/app.db`, sobe a aplicação nesse banco, navega para `'/'` e assere que os três rótulos `tarefas`, `categorias` e `anotacoes` aparecem com valor numérico.
+CRITERION P5.T5.C2: OBSERVABLE — ler o teste E2E de navegação e confirmar que, com banco vazio, ele assere para `'/tarefas'`, `'/categorias'` e `'/anotacoes'` o respectivo texto de lista vazia e que `'/'` exibe as três contagens iguais a 0.

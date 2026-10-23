@@ -818,6 +818,9 @@ export function testesQueFalharam(saida: string): string[] {
     /^\s*FAILED\s+(\S+::\S+)/gmu,
     /^--- FAIL:\s+(\S+)/gmu,
     /^\s*\d+\)\s+(.+?)$/gmu,
+    // .NET (§134): a linha do xUnit não depende do idioma; a do VSTest, sim.
+    /^\[xUnit\.net [^\]]*\]\s+(\S+)\s+\[FAIL\]/gmu,
+    /^[ \t]+(?:Failed|Com falha)[ \t]+(\S+)[ \t]+\[\d/gmu,
   ];
   for (const padrao of padroes) {
     for (const match of saida.matchAll(padrao)) {

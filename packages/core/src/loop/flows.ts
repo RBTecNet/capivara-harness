@@ -19,12 +19,13 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdir, readFile, readdir, rm, writeFile, stat } from "node:fs/promises";
-import { join, resolve as resolvePath } from "node:path";
+import { mkdir, readFile, readdir, realpath, rm, writeFile, stat } from "node:fs/promises";
+import { isAbsolute, join, posix, relative, resolve as resolvePath } from "node:path";
 import type { SkeletonWorkflow } from "../contract/index.js";
-import { FORA_DO_NAVEGADOR, extractFlowScript, lerForaDoNavegador, lerTriagem, stepLabel, type Triagem } from "../prompts/index.js";
+import { FORA_DO_NAVEGADOR, extractFlowScript, lerForaDoNavegador, lerProvas, lerTriagem, stepLabel, type PassoSemProva, type ProvaCitada, type Triagem } from "../prompts/index.js";
 import { comandoDeMigracao } from "./ambiente.js";
 import { FLOW_HELPER, VARIAVEL_DO_INICIO, bancosDeclarados, criarAmbienteDaPassagem, renderFlowHelper } from "./passagem.js";
+import { testeDotnetAprovado } from "./teste-declarado.js";
 import { runtimeEnvironment } from "../provider/runtime-env.js";
 import { portaLivre } from "./ports.js";
 import { invalidFlowNetwork } from "./flow-network.js";
@@ -238,6 +239,19 @@ export function checkFlowScript(
    * certo, e foi recusado em todas as tentativas de todos os ciclos. URL absoluta
    * para outro host é de terceiro; relativa, glob ou local é do produto.
    */
+  /*
+   * Percorrer o fluxo é rodar o PRODUTO, não a suíte de testes dele (§134). Na
+   * revisão adversarial, um roteiro "de terminal" num desktop rodava
+   * `dotnet test --filter …` passo a passo e virava PASS de percurso — filtro que
+   * não casa nada, ou só teste pulado, também sai com código 0.
+   */
+  if (rodaASuite(script)) {
+    defects.push({
+      problem: "o roteiro roda a suíte de testes do projeto em vez de percorrer o fluxo",
+      hint: "percorra o fluxo rodando os comandos do próprio produto e afirmando o que ele faz; a suíte já roda no gate 2",
+    });
+  }
+
   if (invalidFlowNetwork(script)) {
     defects.push({
       problem: "o roteiro intercepta o backend do próprio produto",
@@ -255,6 +269,37 @@ export function checkFlowScript(
   }
 
   return defects;
+}
+
+/**
+ * O roteiro roda a suíte de testes do projeto? (§134) O `comandoDoProjeto` roda um
+ * executável sem shell, e o fluxo se percorre pelo produto: a ferramenta de teste
+ * com `test` como primeiro argumento (`dotnet test`, `npm test`/`t`, `go test`,
+ * `cargo test`/`t`, `make test`), o runner de teste chamado direto, um shell com
+ * `-c`, ou um argumento que aponta um projeto ou pasta de teste.
+ */
+function rodaASuite(script: string): boolean {
+  const suiteNoTexto = /\b(?:dotnet|npm|pnpm|yarn|bun|go|cargo|make|just|rake|mvn|gradle\w*|composer|swift|mix|flutter)\s+(?:t|test|tests|tst|vstest)\b|\b(?:pytest|vitest|jest|mocha|phpunit|pest|rspec)\b|python\d?\s+-m\s+(?:pytest|unittest)/u;
+  for (const chamada of script.matchAll(/comandoDoProjeto\s*\(\s*(['"`])([^'"`]+)\1\s*(?:,\s*\[([^\]]*)\])?/gu)) {
+    const ferramenta = (chamada[2] ?? "").split("/").pop()!.toLowerCase();
+    const argumentos = [...(chamada[3] ?? "").matchAll(/(['"`])((?:(?!\1).)*)\1/gu)].map((argumento) => argumento[2] ?? "");
+    // Um shell só roda a suíte quando o `-c` dele a chama; `bash install.sh` é passo do produto.
+    if (/^(?:bash|sh|zsh|dash|fish|cmd|cmd\.exe|pwsh|powershell)$/u.test(ferramenta)) {
+      if (argumentos.some((argumento) => suiteNoTexto.test(argumento))) return true;
+      continue;
+    }
+    if (/^(?:pytest|py\.test|vitest|jest|mocha|ava|tap|phpunit|pest|paratest|rspec|vstest\.console)$/u.test(ferramenta)) return true;
+    const primeiro = argumentos.find((argumento) => !argumento.startsWith("-")) ?? "";
+    if (/^(?:dotnet|npm|pnpm|yarn|bun|deno|go|cargo|make|just|rake|gradle|gradlew|mvn|mvnw|composer|swift|mix|flutter|dart)$/u.test(ferramenta) && /^(?:t|test|tests|tst|vstest|check|verify)$|^test:/u.test(primeiro)) return true;
+    // `npm run test:unit`, `yarn run test`; e o script do projeto chamado com `test` (`./build.sh test`).
+    if (/^(?:npm|pnpm|yarn|bun)$/u.test(ferramenta) && primeiro === "run" && /^test(?::|$)/u.test(argumentos[argumentos.indexOf(primeiro) + 1] ?? "")) return true;
+    if (/\.(?:sh|bash|ps1|cmd|bat)$/u.test(ferramenta) && /^(?:t|test|tests)$/u.test(primeiro)) return true;
+    if (/^python\d?(?:\.\d+)?$/u.test(ferramenta) && argumentos[0] === "-m" && /^(?:pytest|unittest|nose2?)$/u.test(argumentos[1] ?? "")) return true;
+    // A ferramenta de execução apontada para um projeto ou script de teste (`dotnet run --project tests/X.Tests`, `node tests/x.test.js`).
+    if (/^(?:dotnet|node|deno|bun|python\d?(?:\.\d+)?|go|java|ruby|php)$/u.test(ferramenta) &&
+      argumentos.some((argumento) => /\.Tests?(?:\.(?:cs|fs|vb)proj)?\/?$|(?:^|\/)(?:tests?|specs?|__tests__)\/[^ ]*\.(?:(?:cs|fs|vb)proj|[cm]?[jt]s|py|go|rb|php|java)$|[._-](?:test|spec)\.[cm]?[jt]s$/u.test(argumento))) return true;
+  }
+  return false;
 }
 
 /** Os nomes que o runner disse não existirem. */
@@ -292,7 +337,8 @@ function usaSemDeclarar(script: string, nome: string): boolean {
  * nunca tocar no produto construído.
  */
 export function renderFlowConfig(options: {
-  startCommand: string;
+  /** `null`: nenhum roteiro da passagem abre a aplicação (§134) — sem `webServer`, nada sobe. */
+  startCommand: string | null;
   port: number;
   timeoutSeconds?: number;
   /** Os roteiros NA ORDEM em que rodam. Cada um depende do anterior. */
@@ -338,11 +384,18 @@ export function renderFlowConfig(options: {
     "    video: 'off',",
     "    trace: 'off',",
     "  },",
+    ...(options.startCommand === null ? ["};", ""] : servidorDoGate(options.startCommand, url, options.port, options.timeoutSeconds)),
+  ].join("\n");
+}
+
+/** Como o gate sobe a aplicação que o roteiro abre. */
+function servidorDoGate(startCommand: string, url: string, port: number, timeoutSeconds: number | undefined): string[] {
+  return [
     "  webServer: {",
-    `    command: ${JSON.stringify(options.startCommand)},`,
+    `    command: ${JSON.stringify(startCommand)},`,
     `    url: '${url}',`,
     "    reuseExistingServer: false,",
-    `    timeout: ${(options.timeoutSeconds ?? 180) * 1000},`,
+    `    timeout: ${(timeoutSeconds ?? 180) * 1000},`,
     /*
      * PORT e HOST, e mais nada.
      *
@@ -353,7 +406,7 @@ export function renderFlowConfig(options: {
      * definiu e não subia; o executor levou "a aplicação não subiu" por culpa da
      * nossa configuração. O fluxo percorre o produto como ele é.
      */
-    `    env: { PORT: '${options.port}', HOST: '127.0.0.1' },`,
+    `    env: { PORT: '${port}', HOST: '127.0.0.1' },`,
     /*
      * A saída da aplicação entra na do gate (§111). O padrão do runner é jogar o
      * stdout fora: no `build-6e34384deccd` a aplicação escreveu "Parallel Lab em
@@ -365,7 +418,30 @@ export function renderFlowConfig(options: {
     "  },",
     "};",
     "",
-  ].join("\n");
+  ];
+}
+
+/**
+ * O roteiro abre a aplicação servida? (§134)
+ *
+ * O roteiro de um programa de terminal percorre o fluxo só com `comandoDoProjeto`:
+ * não abre página, não fala HTTP, não sobe instância. Para ele o gate não sobe
+ * servidor — subir um CLI como `webServer` é esperar uma porta que ele nunca abre.
+ * Qualquer sinal de navegador, de requisição ou de endereço, ou uma assinatura que
+ * não se lê, mantém o servidor: na dúvida, o roteiro roda como sempre rodou.
+ */
+export function roteiroUsaOServidor(script: string): boolean {
+  // Sinais de página, de requisição ao produto ou de HTTP na própria máquina — em qualquer lugar do roteiro.
+  // Outro esquema local (`postgres://localhost/agenda`) é argumento de um CLI, não servidor do produto.
+  if (/aplicacaoPropria|https?:\/\/(?:localhost|127\.0\.0\.1)\b|\bbaseURL\b|\bnewContext\b|\bnewPage\b|\bfetch\s*\(|\bgoto\s*\(|\b(?:chromium|firefox|webkit)\s*\.|\.\s*(?:page|browser|context|request)\b|\bpage\s*\./u.test(script)) return true;
+  // Toda fixture desestruturada — a do teste e a dos ganchos (`beforeEach`, `beforeAll`…).
+  for (const fixtures of script.matchAll(/\(\s*\{([^}]*)\}[^)]*\)\s*=>|function\s*[\w$]*\s*\(\s*\{([^}]*)\}/gu)) {
+    if (/\b(?:page|request|context|browser|baseURL)\b/u.test(fixtures[1] ?? fixtures[2] ?? "")) return true;
+  }
+  // E o teste com assinatura legível, sem fixture nenhuma; qualquer outra forma roda como sempre rodou.
+  const titulo = String.raw`(?:` + "`(?:[^`\\\\]|\\\\.)*`" + String.raw`|'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")`;
+  const semFixture = new RegExp(String.raw`(?<![\w$.])test\s*\(\s*` + titulo + String.raw`\s*,\s*(?:\{[^{}]*\}\s*,\s*)?async\s*(?:function\s*[\w$]*\s*)?\(\s*(?:\{\s*\})?\s*\)`, "u");
+  return !semFixture.test(script);
 }
 
 export interface FlowRun {
@@ -562,6 +638,8 @@ export interface FlowGateOptions {
    * navegador, antes de cobrar o entrypoint. O runner liga uma vez por fase (§133).
    */
   confirmarSemStart?: boolean;
+  /** Os fluxos que já avançaram passos no navegador numa passagem anterior desta fase (§134): para eles a marca não vale. */
+  jaAbertos?: readonly string[];
   /** O próximo ciclo substitui estes roteiros antes de executá-los outra vez. */
   rejectedScripts?: readonly string[];
   announce?: (message: string) => void;
@@ -680,8 +758,9 @@ export function passoQueFalhou(output: string, workflow: string): number | null 
 
 /** O que o roteirista ouve quando o projeto não tem `start` e o roteiro já existe (§133). */
 export const MOTIVO_SEM_START =
-  "o projeto ainda não declara um entrypoint `start`, e o gate 4 só percorre um fluxo com a aplicação servida por HTTP: " +
-  `se o contrato diz que o produto não se usa num navegador, responda com a linha ${FORA_DO_NAVEGADOR}; ` +
+  "o projeto ainda não declara um entrypoint `start`, e este roteiro abre a aplicação servida por HTTP: " +
+  "se o contrato diz que o produto se usa num terminal, devolva o roteiro percorrendo o fluxo só com `comandoDoProjeto`, sem página (§134); " +
+  `se ele não se usa nem num navegador nem num terminal, responda com a linha ${FORA_DO_NAVEGADOR} e a prova de cada passo; ` +
   "se ele se usa num navegador, devolva o roteiro como está (o executor declara o `start`)";
 
 /** O fluxo que o gate não percorreu porque o contrato põe o produto fora do navegador (§133). */
@@ -689,6 +768,113 @@ export interface NaoPercorrido {
   number: string;
   /** A passagem do contrato que o roteirista citou, conferida. */
   trecho: string;
+  /** Os testes da suíte que o roteirista citou como prova de cada passo (§134) — ainda não conferidos. */
+  provas?: ProvaCitada[];
+  /** Os passos que ele disse não ter teste que os exercite, e por quê (§134). */
+  semProva?: PassoSemProva[];
+}
+
+/** Código-fonte de teste. Documento, dado, fixture ou relatório não é teste que rode. */
+const FONTE_DE_TESTE = /\.(?:cs|fs|vb|py|go|rs|php|[cm]?[jt]sx?|rb|java|kts?|scala|swift|dart|exs?|cljs?|lua|c|cc|cpp|cxx|m|mm)$/iu;
+
+/** O que o relatório TRX do G2 cobre: os testes .NET (§134). */
+const FONTE_DOTNET = /\.(?:cs|fs|vb)$/iu;
+
+/**
+ * Onde não mora a suíte do projeto: o harness, dependências e ambientes virtuais
+ * em qualquer profundidade, a saída de build do .NET em qualquer projeto, e as
+ * pastas de build na raiz — um pacote Go chamado `build` continua sendo do projeto.
+ */
+const FORA_DA_SUITE = /(?:^|\/)(?:\.capivara|\.git|node_modules|vendor|\.?venv|site-packages|TestResults|obj)(?:\/|$)|(?:^|\/)bin\/(?:Debug|Release)(?:\/|$)|^(?:target|dist|build|bin)\//u;
+
+/**
+ * O teste citado como prova de um passo rodou e passou nesta execução da suíte? (§134)
+ *
+ * Devolve o motivo da recusa, ou `null`. O roteirista julga se o teste exercita o
+ * passo; o Core confere que ele é do projeto e que o RUNNER relatou que ele rodou e
+ * passou — `testes` é o que o relatório da suíte disse, teste a teste, sobre esta
+ * árvore (`lerResultadosDotnet`). Ler o código não basta: três revisões
+ * adversariais acharam, a cada rodada, um teste pulado que a leitura dava como
+ * ativo. Hoje o relatório por teste existe para o .NET (TRX); nas outras suítes o
+ * runner não o dá sem mudar o comando do projeto, e a citação é recusada — o
+ * passo fica pendente e nomeado, nunca aprovado.
+ *
+ * O caminho é resolvido de verdade (link simbólico incluído) e tem de ficar dentro
+ * do projeto, fora do harness, das dependências e da saída de build.
+ */
+export async function conferirCitacao(projectRoot: string, prova: ProvaCitada, testes?: ReadonlyMap<string, boolean> | null, suite?: string | null): Promise<string | null> {
+  const citado = `${prova.arquivo} :: ${prova.teste}`;
+  const arquivo = prova.arquivo.trim().replace(/^[`"']+|[`"']+$/g, "").replace(/\\/g, "/").replace(/^\.\//u, "");
+  const normal = posix.normalize(arquivo);
+  if (arquivo === "" || isAbsolute(arquivo) || /^[A-Za-z]:\//u.test(arquivo) || normal.startsWith("../") || normal === "..") return `a citação ${citado} aponta para fora do projeto`;
+  if (FORA_DA_SUITE.test(normal)) return `a citação ${citado} aponta para um arquivo do harness, de dependência ou de build, não da suíte do projeto`;
+  if (!FONTE_DE_TESTE.test(normal)) return `a citação ${citado} não é um arquivo de teste: a prova de um passo é um teste da suíte, não um documento ou um dado`;
+  if (!FONTE_DOTNET.test(normal)) {
+    return `a citação ${citado} é de uma suíte que não relata, teste a teste, o que rodou e passou: a prova pela suíte exige esse relatório do runner, e hoje ele existe para o .NET`;
+  }
+  const raiz = await realpath(projectRoot).catch(() => resolvePath(projectRoot));
+  const real = await realpath(join(projectRoot, normal)).catch(() => null);
+  if (real === null) return `o arquivo citado em ${citado} não existe no projeto`;
+  const relativoReal = posix.normalize(relative(raiz, real).replace(/\\/g, "/"));
+  if (relativoReal.startsWith("../") || isAbsolute(relativoReal) || FORA_DA_SUITE.test(relativoReal)) return `a citação ${citado} aponta para fora do projeto`;
+  const conteudo = await readFile(real, "utf8").catch(() => null);
+  if (conteudo === null) return `o arquivo citado em ${citado} não existe no projeto`;
+  if (testes === undefined || testes === null) {
+    return `a suíte não relatou quais testes rodaram nesta execução: ${citado} não tem prova de execução — o relatório TRX vem do \`dotnet test\` que o harness resolve, não de \`npm test\`, \`--test-cmd\` ou \`CAPIVARA_TEST_CMD\``;
+  }
+  // O arquivo tem de estar num projeto de teste que o comando rodou: o que fica fora não compila, nem roda.
+  const projetos = [...(suite ?? "").matchAll(/dotnet\s+test\s+(?:--project\s+)?(?:'([^']+)'|"([^"]+)"|(\S+\.(?:cs|fs|vb)proj))/gu)].map((casou) => posix.normalize(posix.dirname(casou[1] ?? casou[2] ?? casou[3] ?? "")));
+  if (projetos.length > 0 && !projetos.some((pasta) => pasta === "." || normal.startsWith(`${pasta}/`))) {
+    return `${citado}: o arquivo está fora dos projetos de teste que a suíte rodou`;
+  }
+  const recusa = testeDotnetAprovado(conteudo, posix.extname(normal).slice(1), prova.teste, testes);
+  return recusa === null ? null : `${citado}: ${recusa}`;
+}
+
+const SEM_SUITE = "nenhuma suíte do projeto rodou verde neste código, e só o teste que roda prova um passo";
+
+/**
+ * O que a suíte prova do fluxo que não se percorre (§134): cada passo com um teste
+ * citado e conferido, ou nomeado sem prova, com o porquê.
+ *
+ * `suite` é o comando que passou NESTE código, no G2; sem ele, nenhuma citação vale
+ * — teste que não rodou verde no código de agora não é prova de nada. Compilar,
+ * abrir ou a suíte verde sozinha não provam passo nenhum: cada um precisa do seu
+ * teste. O passo sem prova não vira defeito do produto nem pedido ao executor: é
+ * a pendência que a guarda final nomeia.
+ */
+export async function conferirProvas(
+  projectRoot: string,
+  workflow: SkeletonWorkflow,
+  citadas: { provas?: readonly ProvaCitada[]; semProva?: readonly PassoSemProva[] },
+  suite: string | null,
+  /** O que o relatório da suíte disse, teste a teste, sobre esta árvore; `null` sem relatório. */
+  testes: ReadonlyMap<string, boolean> | null = null,
+): Promise<{ provas: ProvaCitada[]; semProva: PassoSemProva[] }> {
+  const provas: ProvaCitada[] = [];
+  const semProva: PassoSemProva[] = [];
+  for (let passo = 1; passo <= workflow.steps.length; passo += 1) {
+    const dele = (citadas.provas ?? []).filter((prova) => prova.passo === passo);
+    const disse = (citadas.semProva ?? []).find((sem) => sem.passo === passo)?.motivo;
+    if (suite === null) {
+      // A mesma frase de uma resposta refeita não se aninha: a decisão que não mudou não é registrada de novo.
+      semProva.push({ passo, motivo: disse === undefined || disse.startsWith(SEM_SUITE) ? disse ?? SEM_SUITE : `${SEM_SUITE} (${disse})` });
+      continue;
+    }
+    const recusas: string[] = [];
+    let aceita: ProvaCitada | null = null;
+    for (const prova of dele) {
+      const recusa = await conferirCitacao(projectRoot, prova, testes, suite);
+      if (recusa === null) {
+        aceita = prova;
+        break;
+      }
+      recusas.push(recusa);
+    }
+    if (aceita !== null) provas.push(aceita);
+    else semProva.push({ passo, motivo: recusas.length > 0 ? recusas.join("; ") : disse ?? "nenhum teste da suíte foi citado para ele" });
+  }
+  return { provas, semProva };
 }
 
 export type FlowGateResult =
@@ -700,7 +886,7 @@ export type FlowGateResult =
    * três vezes seguidas, não havia no disco uma linha do que o Playwright tinha
    * dito — e sem isso o diagnóstico vira adivinhação.
    */
-  | { green: true; skipped: string; scripts: string[]; output?: string; naoPercorridos?: NaoPercorrido[]; perguntouSemStart?: boolean }
+  | { green: true; skipped: string; scripts: string[]; output?: string; naoPercorridos?: NaoPercorrido[]; perguntouSemStart?: boolean; abertos?: string[] }
   | {
       green: false;
       cause: string;
@@ -709,6 +895,8 @@ export type FlowGateResult =
       naoPercorridos?: NaoPercorrido[];
       /** A pergunta sem `start` chegou ao roteirista nesta passagem (§133): só então ela se gasta. */
       perguntouSemStart?: boolean;
+      /** Os fluxos que avançaram passos no navegador nesta chamada (§134). */
+      abertos?: string[];
       /** O veredito da triagem, quando ela correu e foi legível. */
       triagem?: Triagem;
       toolMissing?: boolean;
@@ -823,13 +1011,67 @@ export function ehEsquemaAusente(erros: readonly string[]): boolean {
  */
 export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   const naoPercorridos: NaoPercorrido[] = [];
-  const sinais = { perguntouSemStart: false };
+  const sinais: SinaisDaPassagem = { perguntouSemStart: false, abertos: new Set<string>() };
   const resultado = await percorrerFluxos(options, naoPercorridos, sinais);
+  const abertos = [...sinais.abertos].filter((numero) => !(options.jaAbertos ?? []).includes(numero));
   return {
     ...resultado,
     ...(naoPercorridos.length > 0 ? { naoPercorridos } : {}),
     ...(sinais.perguntouSemStart ? { perguntouSemStart: true } : {}),
+    ...(abertos.length > 0 ? { abertos } : {}),
   };
+}
+
+interface SinaisDaPassagem {
+  perguntouSemStart: boolean;
+  abertos: Set<string>;
+}
+
+/**
+ * A linha citada diz que o produto se usa num navegador, e nada de nativo,
+ * terminal ou biblioteca nela? (§134)
+ *
+ * Com a prova pela suíte, a marca deixou de ser só pendência: tirar do navegador
+ * um fluxo web e citar testes o concluía sem nunca abrir a aplicação. Na revisão
+ * adversarial, o roteirista citou a própria linha "usada no navegador" e o build
+ * fechou com código 0. A linha que declara o navegador não tira ninguém dele; a
+ * linha híbrida (desktop com WebView, exportação "sem interface web") continua
+ * valendo.
+ */
+export function linhaDeNavegador(trecho: string): boolean {
+  // A negação não declara navegador: "sem interface web", "não usa navegador". O "no" do português ("no navegador") não é negação.
+  const linha = trecho.replace(/\b(?:sem|n[ãa]o\s+usa|n[ãa]o\s+tem|without)\s+(?:\w+\s+){0,2}?(?:navegador|browser|web|internet)\b/giu, " ");
+  // 1. A web embutida num aplicativo (Electron, Tauri, WebView, Blazor Hybrid, MAUI) é desktop ou mobile.
+  if (/electron|tauri|webview|blazor\s+hybrid|\bmaui\b/iu.test(linha)) return false;
+  // 2. O toolkit nativo declarado: a linha é da janela ou do app, mesmo que fale da API web que consome.
+  if (/avalonia|\bwpf\b|winforms|\bqt\b|\bgtk\b|swing|javafx|flutter|swiftui|jetpack|\bcompose\b|godot|unity|react\s+native|(?:aplicativo|app|interface|janela|cliente|desktop|ios|android)\s+(?:\w+\s+)?nativ/iu.test(linha)) return false;
+  // 3. O navegador declarado: "aplicação ASP.NET acessada pelo navegador no desktop e no celular" é web.
+  if (/navegador|browser|web\s?app|aplica(?:[çc][ãa]o|tivo)\s+web|sistema\s+web|portal\s+web|https?:|localhost|asp\.net|razor|blazor|chrome|firefox|safari/iu.test(linha) || /\b(?:PWA|SPA)\b/u.test(linha)) return true;
+  // 4. A forma do aparelho, o terminal ou a biblioteca, sem navegador declarado.
+  if (/desktop|android|\bios\b|iphone|ipad|tablet|celular|smartphone|mobile|m[óo]vel|\bjogo\b|\bgame\b|raspberry|kindle|terminal|linha de comando|\bcli\b|biblioteca|library|\bsdk\b|dispositivo|device/iu.test(linha)) return false;
+  // 5. O resto que só a web tem: página, site, HTML, frontend e os frameworks dela.
+  return /\bweb\b|p[áa]gina|\bsite\b|\bhtml\b|front[\s-]?end|\breact\b|preact|\bvue\b|angular|svelte|solid(?:js)?\b|ember|backbone|jquery|next\.?js|nuxt|remix|astro|\bvite\b|django|flask|jinja|rails|hotwire|laravel|livewire|phoenix|liveview|spring\s+mvc|\bjsp\b|thymeleaf|handlebars|\bejs\b|streamlit|gradio|htmx/iu.test(linha);
+}
+
+/** A linha descreve uma interface gráfica — navegador, janela ou aplicativo de aparelho? */
+function linhaDeInterfaceGrafica(linha: string): boolean {
+  return linhaDeNavegador(linha) ||
+    /electron|tauri|webview|\bmaui\b|desktop|janela|avalonia|\bwpf\b|winforms|\bqt\b|\bgtk\b|swing|javafx|flutter|swiftui|jetpack|\bcompose\b|godot|unity|android|\bios\b|iphone|ipad|tablet|celular|smartphone|mobile|m[óo]vel|\bjogo\b|\bgame\b/iu.test(linha);
+}
+
+/**
+ * O produto é de terminal, e só de terminal? (§134) Só então o G4 roda um
+ * roteiro sem servidor. A Stack tem de declarar o uso no terminal (programa de
+ * linha de comando, interface de terminal) e nenhuma interface gráfica. No
+ * produto híbrido — desktop com um CLI de backup, web com migração pela linha de
+ * comando —, o roteiro que não abre a aplicação roda como sempre rodou, com o
+ * servidor: na revisão adversarial, uma linha de CLI qualquer na Stack deixava
+ * um fluxo de janela ser "percorrido" por comandos.
+ */
+export function stackDeTerminal(stack: string): boolean {
+  const linhas = stack.split(/\r?\n/u).filter((linha) => !linha.startsWith("#") && linha.trim() !== "");
+  return linhas.some((linha) => /terminal|linha de comando|command[\s-]line|\bcli\b|\btui\b/iu.test(linha) && !/\bcli\b\s+(?:do|da|de|of)\s+|angular\s+cli|\bvue\s+cli/iu.test(linha)) &&
+    !linhas.some((linha) => linhaDeInterfaceGrafica(linha));
 }
 
 /**
@@ -846,7 +1088,7 @@ export function citaOContrato(trecho: string, contrato: string): boolean {
   return citado.split(" ").length >= 3 && contrato.split(/\r?\n/).some((linha) => !linha.startsWith("#") && normal(linha).includes(citado));
 }
 
-async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPercorrido[], sinais: { perguntouSemStart: boolean }): Promise<FlowGateResult> {
+async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPercorrido[], sinais: SinaisDaPassagem): Promise<FlowGateResult> {
   const announce = options.announce ?? ((): void => {});
   const preferida = options.preferredPort ?? FLOW_PORT;
   // `let`: a colisão na porta do próprio gate troca a porta uma vez (§107).
@@ -897,7 +1139,11 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
    * Sem conferência, é rascunho defeituoso como qualquer outro, e o fluxo continua
    * cobrado.
    */
-  const jaPercorridos = new Set([...regressao.map((workflow) => workflow.number), ...(options.jaPercorridos ?? [])]);
+  // Quem diz é o runner, que sabe qual fluxo foi percorrido e qual foi provado pela suíte (§134); sem ele, a regressão.
+  const jaPercorridos = new Set(options.jaPercorridos ?? regressao.map((workflow) => workflow.number));
+  /** Os fluxos que já avançaram passos no navegador, com a aplicação servida, nesta fase (§134). */
+  const abertos = sinais.abertos;
+  for (const numero of options.jaAbertos ?? []) abertos.add(numero);
   const foraDaResposta = async (workflow: SkeletonWorkflow, resposta: string): Promise<{ trecho: string } | { problema: string } | null> => {
     const trecho = lerForaDoNavegador(resposta);
     if (trecho === null || /\btest(?:\.step)?\s*\(/.test(extractFlowScript(resposta))) return null;
@@ -907,8 +1153,19 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
     if (options.contratoCertificado === undefined || !citaOContrato(trecho, options.contratoCertificado)) {
       return { problema: `o trecho citado em ${FORA_DO_NAVEGADOR} não está no contrato (a Stack publicada) — copie palavra por palavra a linha que diz como o usuário chega ao produto, ou devolva o roteiro` };
     }
-    if (!naoPercorridos.some((fluxo) => fluxo.number === workflow.number)) {
-      naoPercorridos.push({ number: workflow.number, trecho });
+    if (linhaDeNavegador(trecho)) {
+      return { problema: `a linha citada em ${FORA_DO_NAVEGADOR} diz que o produto se usa num navegador: o fluxo é percorrido nele — devolva o roteiro` };
+    }
+    if (abertos.has(workflow.number)) {
+      return { problema: `o fluxo ${workflow.number} já avançou passos num percurso desta fase (no navegador ou no terminal): ele se percorre ali — devolva o roteiro corrigido` };
+    }
+    // A última resposta é a mais informada: substitui a anterior do mesmo fluxo, com as provas que trouxer (§134).
+    const { provas, semProva } = lerProvas(resposta);
+    const fluxo: NaoPercorrido = { number: workflow.number, trecho, ...(provas.length > 0 ? { provas } : {}), ...(semProva.length > 0 ? { semProva } : {}) };
+    const anterior = naoPercorridos.findIndex((outro) => outro.number === workflow.number);
+    if (anterior >= 0) naoPercorridos.splice(anterior, 1, fluxo);
+    else {
+      naoPercorridos.push(fluxo);
       announce(`fluxo ${workflow.number} (${workflow.name}) NÃO percorrido: o contrato descreve o produto fora do navegador — «${trecho}»`);
     }
     /*
@@ -1054,7 +1311,25 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
    * HTTP falso num aplicativo desktop.
    */
   const startCommand = options.startCommand;
-  if (startCommand === null) {
+  /*
+   * Só o roteiro que abre a aplicação precisa dela de pé (§134). O de um programa
+   * de terminal roda sem servidor e sem `start` — cobrá-lo de um CLI era pedir ao
+   * executor um entrypoint HTTP que o produto não tem.
+   */
+  const produtoDeTerminal = options.contratoCertificado !== undefined && stackDeTerminal(options.contratoCertificado);
+  const precisaDoServidor = async (): Promise<boolean> => {
+    if (!produtoDeTerminal) return true;
+    for (const nome of scripts) if (roteiroUsaOServidor(await readFile(join(pasta, nome), "utf8").catch(() => ""))) return true;
+    return false;
+  };
+  const semComoSubir = (): FlowGateResult => ({
+    green: false,
+    cause:
+      "o gate 4 não sabe como subir a aplicação: o projeto não declara um entrypoint (`start`) " +
+      "que o loop possa executar. Declare-o no manifesto para que os fluxos possam ser percorridos. " +
+      "O gate o executa com PORT e HOST no ambiente, e a aplicação precisa escutar nesse endereço.",
+  });
+  if (startCommand === null && (await precisaDoServidor())) {
     /*
      * Sem `start`, uma pergunta a mais, uma vez por fase (o runner decide quando):
      * o roteiro que já está no disco pode ter sido escrito como se o produto fosse
@@ -1062,8 +1337,11 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
      * o executor que não cria servidor para um desktop ficava sem saída (§133).
      */
     if (options.confirmarSemStart === true) {
+      // Só quem escreveu roteiro que abre a aplicação: o de comandos não precisa de `start` (§134).
+      const abrem = new Set<string>();
+      for (const nome of scripts) if (!produtoDeTerminal || roteiroUsaOServidor(await readFile(join(pasta, nome), "utf8").catch(() => ""))) abrem.add(nome);
       const daFase = options.workflows.filter((workflow) =>
-        !jaPercorridos.has(workflow.number) && scripts.includes(flowScriptName(workflow.number)));
+        !jaPercorridos.has(workflow.number) && abrem.has(flowScriptName(workflow.number)));
       // Só conta como feita quando chegou a alguém: a passagem que reprovou antes não a gasta.
       if (daFase.length > 0) sinais.perguntouSemStart = true;
       for (const workflow of daFase) {
@@ -1077,15 +1355,11 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
       scripts = await aPercorrer();
       if (scripts.length === 0) return semRoteiro();
     }
-    return {
-      green: false,
-      cause:
-        "o gate 4 não sabe como subir a aplicação: o projeto não declara um entrypoint (`start`) " +
-        "que o loop possa executar. Declare-o no manifesto para que os fluxos possam ser percorridos. " +
-        "O gate o executa com PORT e HOST no ambiente, e a aplicação precisa escutar nesse endereço.",
-    };
+    if (await precisaDoServidor()) return semComoSubir();
   }
-  await writeFile(join(pasta, FLOW_CONFIG), renderFlowConfig({ startCommand, port, scripts }), "utf8");
+  // `null`: nenhum roteiro desta passagem abre a aplicação, e nada sobe (§134).
+  let servidor = (await precisaDoServidor()) ? startCommand : null;
+  await writeFile(join(pasta, FLOW_CONFIG), renderFlowConfig({ startCommand: servidor, port, scripts }), "utf8");
   await writeFile(join(pasta, FLOW_HELPER), renderFlowHelper(), "utf8");
 
   const runner = options.runner ?? defaultFlowRunner;
@@ -1106,7 +1380,7 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
         }
       }
       // O comando de início vai junto: o ajudante sobe com ele a instância que o roteiro reinicia (§109).
-      return await runner(options.projectRoot, scripts, { ...ambiente.env, [VARIAVEL_DO_INICIO]: startCommand });
+      return await runner(options.projectRoot, scripts, { ...ambiente.env, [VARIAVEL_DO_INICIO]: startCommand ?? "" });
     } finally {
       await ambiente.limpar();
     }
@@ -1120,23 +1394,41 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
    * sem tocar no processo que ocupou a porta: ele não é nosso.
    */
   let portaTrocada = false;
-  const rodar = async (): Promise<FlowRun> => {
+  /*
+   * O fluxo que falhou depois do primeiro passo avançou no navegador, ou no
+   * terminal: ele se percorre ali, e a marca não vale mais para ele nesta fase (§134).
+   * Falhar no primeiro passo não diz nada — é o caso do roteiro inventado para um
+   * produto que não é web.
+   */
+  const anotarAbertos = (corrida: FlowRun): void => {
+    // Vale também para o percurso no terminal: o fluxo que falhou depois do passo 1 foi percorrido ali (§134).
+    if (corrida.exitCode === 0 || corrida.toolMissing === true || (servidor !== null && falhouAoSubir(corrida.output))) return;
+    for (const numero of fluxosQueFalharam(corrida.output, ordem)) {
+      if ((passoQueFalhou(corrida.output, numero) ?? 1) > 1) abertos.add(numero);
+    }
+  };
+  const rodar = async (): Promise<FlowRun & { semStart?: true }> => {
     // A reescrita pode ter tirado um fluxo do navegador: roda só o que sobrou (§133).
     const atuais = await aPercorrer();
-    if (atuais.join("\n") !== scripts.join("\n")) {
-      scripts = atuais;
-      if (scripts.length > 0) await writeFile(join(pasta, FLOW_CONFIG), renderFlowConfig({ startCommand, port, scripts }), "utf8");
-    }
+    if (atuais.join("\n") !== scripts.join("\n")) scripts = atuais;
+    // A reescrita pode ter mudado o que o roteiro abre: a configuração acompanha, e sem `start` o entrypoint volta a ser cobrado (§134).
+    const abre = await precisaDoServidor();
+    if (abre && startCommand === null) return { exitCode: 1, output: "", semStart: true };
+    servidor = abre ? startCommand : null;
+    if (scripts.length > 0) await writeFile(join(pasta, FLOW_CONFIG), renderFlowConfig({ startCommand: servidor, port, scripts }), "utf8");
     if (scripts.length === 0) return { exitCode: 0, output: "" };
     const corrida = await passagem();
+    anotarAbertos(corrida);
     if (portaTrocada || corrida.exitCode === 0 || !portasEmUso(corrida.output).includes(port)) return corrida;
     portaTrocada = true;
     const anterior = port;
     port = await portaLivre(0);
     baseUrl = `http://127.0.0.1:${port}`;
     announce(`a porta ${anterior} do gate foi ocupada antes de a aplicação subir; tentando de novo na ${port}, sem gastar ciclo`);
-    await writeFile(join(pasta, FLOW_CONFIG), renderFlowConfig({ startCommand, port, scripts }), "utf8");
-    return await passagem();
+    await writeFile(join(pasta, FLOW_CONFIG), renderFlowConfig({ startCommand: servidor, port, scripts }), "utf8");
+    const segunda = await passagem();
+    anotarAbertos(segunda);
+    return segunda;
   };
 
   announce(
@@ -1192,6 +1484,7 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
   };
 
   let run = await rodar();
+  if (run.semStart === true) return semComoSubir();
 
   /*
    * Falhou por culpa do roteiro? Reescreve e roda de novo, UMA vez.
@@ -1212,6 +1505,7 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
     };
 
     run = await rodar();
+    if (run.semStart === true) return semComoSubir();
     if (run.exitCode !== 0 && ehFalhaDoRoteiro(run.output)) {
       return {
         green: false,
@@ -1388,6 +1682,7 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
           `não repetir o mesmo teste nem reconstruir o produto.\n${causaDaTriagem(triada.triagem, tail(run.output))}`,
       };
       run = await rodar();
+      if (run.semStart === true) return semComoSubir();
       if (run.exitCode === 0) return scripts.length === 0 ? semRoteiro() : { green: true, skipped: "", scripts, output: run.output };
       triada = await triar(run);
     }

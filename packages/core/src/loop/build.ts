@@ -10,11 +10,11 @@
 
 import { appendFile, mkdir, readFile, rename } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { sha12 } from "../contract/stamps.js";
 import { cobreWorkflow, workflowsForPhase, type Adiamento, type Architecture, type Disponibilidade, type Skeleton, type SkeletonWorkflow } from "../contract/index.js";
 import { disponibilidadeNoBuild, vincularArquitetura } from "./arquitetura.js";
-import { LivroDeEvidencias } from "./evidencias.js";
+import { emptyScope, LivroDeEvidencias, referenciaDeArtefato } from "./evidencias.js";
 import { orcamentoEfetivo, type OrcamentoDaRecuperacao } from "./defeitos.js";
 import type { ContratoDaRetomada } from "../provider/cli/types.js";
 import {
@@ -57,8 +57,8 @@ import { checkPrerequisites, prerequisiteChoice, readPrerequisiteChoice, renderP
 import { prepareBuildEnvironment } from "./environment-prepare.js";
 import { readEnvironmentPlan } from "./environment-plan.js";
 import type { EscolhaNumerada } from "./escolha.js";
-import { resolveTestCommand } from "./testcmd.js";
-import { DEFAULT_MAX_CYCLES, MARCA_FORA_DO_NAVEGADOR, runPhase, type EngineCaller, type EngineResult, type PhaseOutcome } from "./runner.js";
+import { lerResultadosDotnet, limparResultadosDotnet, RESULTADOS_DOTNET, resolveTestCommand } from "./testcmd.js";
+import { DEFAULT_MAX_CYCLES, MARCA_FORA_DO_NAVEGADOR, MARCA_PROVA_PELA_SUITE, passosSemProva, runPhase, testesDaProva, type EngineCaller, type EngineResult, type ForaDoNavegador, type PhaseOutcome } from "./runner.js";
 import { runAcceptance, type AcceptanceResult, type CommandRunner } from "./acceptance.js";
 import { acceptancePrompt, installPrompt } from "../prompts/index.js";
 import type { BuildProgressListener } from "./progress.js";
@@ -71,7 +71,8 @@ import { garantiaDeAutoridade } from "./autoridade.js";
 import { conferirIsolamento } from "./isolamento.js";
 import { larguraDoPlano } from "./escalonador.js";
 import { executarEmParalelo, type AgenteDoPool, type ExecucaoDaFase } from "./paralelo.js";
-import { FLOW_PORT, citaOContrato } from "./flows.js";
+import { FLOW_MARK, FLOW_PORT, citaOContrato, conferirCitacao } from "./flows.js";
+import type { PassoSemProva, ProvaCitada } from "../prompts/index.js";
 import { stackDoSkeleton } from "../prompts/acceptance-policy.js";
 import { garantirBase } from "./worktree.js";
 import type { PhaseSession } from "./split.js";
@@ -695,6 +696,9 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
     // Sem gate de fluxos nesta execução, nada reabre por isso: o G4 nem poderia perguntar de novo.
     const trechoQueSaiu = (fechada: { foraDoNavegador?: { workflow: string; trecho: string }[] } | undefined) =>
       esqueleto === null ? undefined : fechada?.foraDoNavegador?.find((fluxo) => !citaOContrato(fluxo.trecho, stackAtual));
+    /** O fluxo que a fase deixou pendente fora do navegador, sem prova de todos os passos (§134): a fase volta a ser verificada. */
+    const pendenteForaDoNavegador = (fechada: { foraDoNavegador?: { workflow: string; provas?: ProvaCitada[] }[] } | undefined) =>
+      esqueleto === null ? undefined : fechada?.foraDoNavegador?.find((fluxo) => fluxo.provas === undefined);
     if (options.skipFlows !== true && esqueleto === null) {
       announce("aviso: sem esqueleto legível, o gate 4 não percorre fluxo nenhum nesta execução");
     }
@@ -707,6 +711,12 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
      * tela de cadastro que só a fase 3 constrói.
      */
     const fluxosCumpridos: SkeletonWorkflow[] = [];
+    /**
+     * Os cumpridos pela suíte do projeto, e não por percurso (§134), com as provas
+     * — a guarda final as reconfere no código entregue, e a fase que os cobre de
+     * novo ainda pode dizer que vivem fora do navegador.
+     */
+    const provadosPelaSuite = new Map<string, { fase: number; trecho: string; provas: ProvaCitada[] }>();
 
     /*
      * Quando cada fluxo pode ser cobrado (§127): a mesma derivação que o plano
@@ -754,6 +764,7 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
              * posição; os fluxos novos da fase vão para o fim, como antes.
              */
             regressao: [...fluxosCumpridos],
+            ...(provadosPelaSuite.size > 0 ? { provadosPelaSuite: [...provadosPelaSuite.keys()] } : {}),
             resolveStart: () => startCommandFor(options.projectRoot),
             ...(options.flowRunner !== undefined ? { runner: options.flowRunner } : {}),
           })
@@ -1004,13 +1015,30 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
      * navegador (§133), e o trecho do contrato. Não é cumprido nem regressão: a
      * guarda final o nomeia, e a aplicação não se declara concluída sem prova dele.
      */
-    const naoPercorridos = new Map<string, { fase: number; trecho: string }>();
-    const cumprir = (session: PhaseSession, fechadaEm: string | undefined, foraDoNavegador: readonly { workflow: string; trecho: string }[] = []): void => {
+    const naoPercorridos = new Map<string, { fase: number; trecho: string; semProva: PassoSemProva[] }>();
+    const cumprir = (session: PhaseSession, fechadaEm: string | undefined, foraDoNavegador: readonly ForaDoNavegador[] = []): void => {
       if (esqueleto === null) return;
-      for (const fluxo of foraDoNavegador) naoPercorridos.set(fluxo.workflow, { fase: session.number, trecho: fluxo.trecho });
+      // Pendente é o que a suíte não provou passo a passo; o provado é cumprido como o percorrido (§134).
+      const pendentes = foraDoNavegador.filter((fluxo) => fluxo.provas === undefined);
+      for (const fluxo of pendentes) {
+        naoPercorridos.set(fluxo.workflow, { fase: session.number, trecho: fluxo.trecho, semProva: fluxo.semProva ?? [] });
+        /*
+         * A fase mais nova que cobre o fluxo decide o estado dele (§134). Se ela o
+         * deixou pendente, o cumprimento de uma fase anterior não vale mais — e
+         * deixaria um PASS antigo, refeito numa revalidação, esconder a pendência.
+         */
+        const cumprido = fluxosCumpridos.findIndex((workflow) => workflow.number === fluxo.workflow);
+        if (cumprido >= 0) fluxosCumpridos.splice(cumprido, 1);
+        cumpridoEm.delete(fluxo.workflow);
+      }
+      for (const workflow of cobradosNaFase(session.number)) {
+        const pelaSuite = foraDoNavegador.find((fluxo) => fluxo.workflow === workflow.number && fluxo.provas !== undefined);
+        if (pelaSuite?.provas) provadosPelaSuite.set(workflow.number, { fase: session.number, trecho: pelaSuite.trecho, provas: pelaSuite.provas });
+        else provadosPelaSuite.delete(workflow.number);
+      }
       // Só o que a fase cobrou: o fluxo que ela deixou para depois não passou aqui, e não é regressão de ninguém ainda (§127).
       for (const workflow of cobradosNaFase(session.number)) {
-        if (foraDoNavegador.some((fluxo) => fluxo.workflow === workflow.number)) continue;
+        if (pendentes.some((fluxo) => fluxo.workflow === workflow.number)) continue;
         if (fluxosCumpridos.some((cumprido) => cumprido.number === workflow.number)) continue;
         const anterior = fluxosCumpridos.at(-1);
         fluxosCumpridos.push(workflow);
@@ -1046,7 +1074,8 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
         sliceSha12: fatia?.sha12 ?? "",
         ...(head ? { head } : {}),
         ...(semCommit ? { semCommit: true } : {}),
-        ...(foraDoNavegador.length > 0 ? { foraDoNavegador } : {}),
+        // Os passos pendentes vão para o livro e para a guarda, não para o registro: a fase pendente é reverificada (§134).
+        ...(foraDoNavegador.length > 0 ? { foraDoNavegador: foraDoNavegador.map(({ workflow, trecho, provas }) => ({ workflow, trecho, ...(provas ? { provas } : {}) })) } : {}),
       });
       cumprir(session, fechadaEm, foraDoNavegador);
     };
@@ -1068,6 +1097,7 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
       if (!registrada) return false;
       if (registrada.sliceSha12 !== undefined && registrada.sliceSha12 !== (arquitetura.fatia(session.number)?.sha12 ?? "")) return false;
       if (trechoQueSaiu(registrada)) return false;
+      if (pendenteForaDoNavegador(registrada)) return false;
       return registrada.semCommit !== true && historicoDaFechada.get(registrada.sha) !== false;
     };
     const pularSeFechada = (session: PhaseSession): boolean => {
@@ -1109,6 +1139,18 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
       if (fechadaAntes && noHistorico === false) {
         announce(`[${session.id}] fechada no run ${fechadaAntes.runId} com este mesmo texto, mas o commit em que ela fechou (${fechadaAntes.head!.slice(0, 12)}) não está no histórico do HEAD; volta a ser verificada, sem nova implementação`);
         revalidarFase.set(session.id, `o commit em que a fase fechou no run ${fechadaAntes.runId} não está no histórico do HEAD`);
+        return false;
+      }
+      /*
+       * A pendência fora do navegador é estado retomável (§134): a fase volta a ser
+       * verificada, sem implementação, e a prova é procurada de novo na suíte. Sobre
+       * o mesmo código, as provas que já existem respondem sem sessão nenhuma; com
+       * código novo — um teste que chegou —, o roteirista olha de novo.
+       */
+      const pendente = pendenteForaDoNavegador(fechadaAntes);
+      if (fechadaAntes && pendente) {
+        announce(`[${session.id}] fechada no run ${fechadaAntes.runId} com o fluxo ${pendente.workflow} fora do navegador e sem prova executada de todos os passos; volta a ser verificada, sem nova implementação`);
+        revalidarFase.set(session.id, `o fluxo ${pendente.workflow} ficou pendente: fora do navegador, sem prova executada de todos os passos`);
         return false;
       }
       /*
@@ -1326,6 +1368,112 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
     }
 
     /*
+     * A prova pela suíte é sobre o código de quando foi tirada (§134). O teste
+     * citado que uma fase seguinte (ou o reparo da aceitação) apagou, renomeou ou
+     * pulou não prova mais nada: a citação é reconferida no código entregue, contra
+     * o relatório da suíte rodada sobre ele. O percorrido num navegador não passa
+     * por aqui. A prova que cai vira pendência gravada: a fase que a tirou volta a
+     * ser verificada na execução seguinte, em vez de o build ficar parado nela.
+     */
+    const lerLista = <T>(texto: string | undefined): T[] => {
+      try {
+        const lido = JSON.parse(texto ?? "[]") as unknown;
+        return Array.isArray(lido) ? (lido as T[]) : [];
+      } catch {
+        return [];
+      }
+    };
+    const provasQueCairam = async (cumpridos: ReadonlySet<string>): Promise<Map<string, { fase: number; trecho: string; semProva: PassoSemProva[] }>> => {
+      const quedas = new Map<string, { fase: number; trecho: string; semProva: PassoSemProva[] }>();
+      if (esqueleto === null) return quedas;
+      const livroDaGuarda = await LivroDeEvidencias.abrir(paths.root, runId);
+      const historico = livroDaGuarda.historico();
+      type SuiteEntregue = { command: string; testes: Map<string, boolean> | null } | null;
+      let suiteEntregue: SuiteEntregue | undefined;
+      /*
+       * A suíte sobre a árvore entregue: a prova do G2 tirada sobre ela — não a
+       * última por ordem: no paralelo, a última pode ser do worktree de uma fase
+       * irmã. Sem nenhuma (a árvore integrada do paralelo, a retomada sobre código
+       * novo, o reparo da aceitação), a suíte roda uma vez, aqui, e fica no livro.
+       */
+      const suiteNoEntregue = async (): Promise<SuiteEntregue> => {
+        if (suiteEntregue !== undefined) return suiteEntregue;
+        const codigoEntregue = await estadoDoCodigo(options.projectRoot);
+        const daArvore = codigoEntregue.tree === null ? undefined : [...historico].reverse().find((evidencia) => evidencia.checkId === "suite" && evidencia.inputs.code?.tree === codigoEntregue.tree);
+        if (daArvore !== undefined) {
+          suiteEntregue = daArvore.outcome === "PASS" ? { command: daArvore.inputs.command ?? "", testes: await testesDaProva(paths.root, daArvore) } : null;
+          return suiteEntregue;
+        }
+        const teste = await resolveTestCommand(options.projectRoot, {
+          ...(options.explicitTestCommand !== undefined ? { explicit: options.explicitTestCommand } : {}),
+          ...(options.environment !== undefined ? { environment: options.environment } : {}),
+        });
+        if (teste === null) return (suiteEntregue = null);
+        announce(`a prova de fluxo pela suíte depende do código entregue, e nenhuma passagem do G2 o provou: rodando \`${teste.command}\` uma vez sobre ele`);
+        const comRelatorio = teste.command.includes(RESULTADOS_DOTNET);
+        if (comRelatorio) await limparResultadosDotnet(options.projectRoot);
+        let saida = "";
+        const rodada = await comBancosDeTeste(options.projectRoot, options.testRunner ?? defaultTestRunner, async (testar) => {
+          await prepararAmbiente(options.projectRoot, testar);
+          return gate2(options.projectRoot, teste.command, async (comando, cwd, env) => {
+            const resultado = await testar(comando, cwd, env);
+            saida = resultado.output;
+            return resultado;
+          }, options.systemInstall === true);
+        });
+        const testes = comRelatorio ? await lerResultadosDotnet(options.projectRoot, teste.command) : null;
+        const carimbo = now().getTime();
+        const log = join(paths.logs, `entrega.suite-${carimbo}.log`);
+        await writeAtomic(log, `$ ${teste.command}\n${saida}`);
+        const relatorio = testes === null ? null : join(paths.logs, `entrega.suite-${carimbo}.testes.tsv`);
+        if (relatorio !== null && testes !== null) await writeAtomic(relatorio, [...testes].map(([nome, passou]) => `${passou ? "Passed" : "NotPassed"}\t${nome}`).join("\n") + "\n");
+        const refs = (await Promise.all([log, ...(relatorio ? [relatorio] : [])].map((arquivo) => referenciaDeArtefato(paths.root, relative(paths.root, arquivo))))).filter((ref) => ref !== null);
+        const verde = rodada.green && rodada.skipped !== true;
+        await livroDaGuarda.registrar({
+          phaseId: "entrega", gate: "ENTREGA", checkId: "suite", now,
+          claim: `a suíte do projeto (${teste.command}) ${verde ? "passa" : "não passa"} no código entregue`,
+          outcome: verde ? "PASS" : "REPAIR_REQUIRED",
+          inputs: { documents: [], code: codigoEntregue, command: teste.command, ...(relatorio ? { extra: { relatorioDeTestes: relative(paths.root, relatorio) } } : {}) },
+          scope: emptyScope(), supports: [], artifactRefs: refs,
+        });
+        suiteEntregue = verde ? { command: teste.command, testes } : null;
+        return suiteEntregue;
+      };
+      for (const workflow of esqueleto.workflows) {
+        if (!cumpridos.has(workflow.number)) continue;
+        const ultima = [...historico].reverse().find((evidencia) => evidencia.checkId === `fluxo-${workflow.number}` && evidencia.outcome === "PASS");
+        const daSuite = ultima === undefined
+          ? provadosPelaSuite.get(workflow.number)
+          : ultima.inputs.extra?.["marca"] === MARCA_PROVA_PELA_SUITE
+            ? { fase: Number(ultima.phaseId.replace(/^P/, "")), trecho: ultima.inputs.extra?.["trecho"] ?? "", provas: lerLista<ProvaCitada>(ultima.inputs.extra?.["provas"]) }
+            : ultima.inputs.extra?.["marca"] === FLOW_MARK ? undefined : provadosPelaSuite.get(workflow.number);
+        if (!daSuite) continue;
+        const semProva: PassoSemProva[] = [];
+        const suiteAgora = await suiteNoEntregue();
+        if (suiteAgora === null) {
+          semProva.push(...daSuite.provas.map((prova) => ({ passo: prova.passo, motivo: "a prova pela suíte caiu no código entregue: a suíte do projeto não passou nele" })));
+        }
+        for (const prova of semProva.length > 0 ? [] : daSuite.provas) {
+          const recusa = await conferirCitacao(options.projectRoot, prova, suiteAgora?.testes ?? null, suiteAgora?.command ?? null);
+          if (recusa !== null) semProva.push({ passo: prova.passo, motivo: `a prova pela suíte caiu no código entregue: ${recusa}` });
+        }
+        if (semProva.length === 0) continue;
+        quedas.set(workflow.number, { fase: daSuite.fase, trecho: daSuite.trecho, semProva });
+        // A pendência é gravada no registro da fase que tirou a prova: a execução seguinte a reabre (§134).
+        const idDaFase = `P${String(daSuite.fase).padStart(2, "0")}`;
+        const fechada = (await lerFasesFechadas(options.projectRoot)).find((fase) => fase.id === idDaFase);
+        if (fechada) {
+          const entradas = fechada.foraDoNavegador ?? [];
+          const semAProva = entradas.some((fluxo) => fluxo.workflow === workflow.number)
+            ? entradas.map((fluxo) => (fluxo.workflow === workflow.number ? { workflow: fluxo.workflow, trecho: fluxo.trecho } : fluxo))
+            : [...entradas, { workflow: workflow.number, trecho: daSuite.trecho }];
+          await registrarFaseFechada(options.projectRoot, { ...fechada, foraDoNavegador: semAProva });
+        }
+      }
+      return quedas;
+    };
+
+    /*
      * Nenhum fluxo fica devendo (§127): o que uma fase deixou para outra tem de
      * ter passado na que o completa. Pela derivação, a fase de destino o cobre
      * e o percorre; se, por qualquer caminho, ele não passou, a aplicação não é
@@ -1344,17 +1492,26 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
         const numero = /^fora-do-navegador-(.+)$/.exec(evidencia.checkId)?.[1];
         const trecho = evidencia.inputs.extra?.["trecho"];
         if (numero === undefined || evidencia.inputs.extra?.["marca"] !== MARCA_FORA_DO_NAVEGADOR || typeof trecho !== "string") return;
-        if (historico.slice(indice + 1).some((outra) => outra.checkId === `fluxo-${numero}` && outra.outcome === "PASS")) return;
+        // Só o PASS de uma fase igual ou mais nova resolve a pendência: o de uma anterior, refeito depois, não (§134).
+        const faseDe = (registro: { phaseId: string }): number => Number(/^P(\d+)/u.exec(registro.phaseId)?.[1] ?? 0);
+        if (historico.slice(indice + 1).some((outra) => outra.checkId === `fluxo-${numero}` && outra.outcome === "PASS" && faseDe(outra) >= faseDe(evidencia))) return;
         cumpridos.delete(numero);
-        if (!naoPercorridos.has(numero)) naoPercorridos.set(numero, { fase: Number(evidencia.phaseId.replace(/^P/, "")), trecho });
+        if (!naoPercorridos.has(numero)) {
+          naoPercorridos.set(numero, { fase: Number(evidencia.phaseId.replace(/^P/, "")), trecho, semProva: lerLista<PassoSemProva>(evidencia.inputs.extra?.["semProva"]) });
+        }
       });
+      for (const [numero, queda] of await provasQueCairam(cumpridos)) {
+        cumpridos.delete(numero);
+        naoPercorridos.set(numero, queda);
+      }
       const adiados = disponibilidade?.todosAdiados() ?? [];
       const fase = (numero: number): string => `P${String(numero).padStart(2, "0")}`;
       const devidos = esqueleto.workflows.filter((workflow) => !cumpridos.has(workflow.number)).map((workflow) => {
         const adiado = adiados.find((cada) => cada.workflow === workflow.number);
         const foraDoNavegador = naoPercorridos.get(workflow.number);
         if (foraDoNavegador) {
-          return `o fluxo ${workflow.number} (${workflow.name}) não foi percorrido: o gate 4 abre a aplicação num navegador, e o contrato descreve o produto fora dele («${foraDoNavegador.trecho}», ${fase(foraDoNavegador.fase)}); as fases fecharam pelo código, sem prova do percurso`;
+          return `o fluxo ${workflow.number} (${workflow.name}) não foi percorrido: o gate 4 percorre o fluxo num navegador ou num terminal, e o contrato descreve o produto fora dos dois («${foraDoNavegador.trecho}», ${fase(foraDoNavegador.fase)}); as fases fecharam pelo código` +
+            (foraDoNavegador.semProva.length > 0 ? `; sem prova executada: ${passosSemProva(foraDoNavegador.semProva)}` : ", sem prova do percurso");
         }
         return adiado
           ? `o fluxo ${workflow.number} (${workflow.name}), que a ${fase(adiado.fase)} deixou para a ${fase(adiado.para)}, nunca passou no gate 4`
@@ -1364,7 +1521,10 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
       if (unicos.length > 0) {
         const foraDoNavegador = esqueleto.workflows.some((workflow) => !cumpridos.has(workflow.number) && naoPercorridos.has(workflow.number));
         const detalhe = `fluxo obrigatório pendente: ${unicos.join("; ")}` +
-          (foraDoNavegador ? " — se o produto se usa num navegador, a Stack do skeleton está errada: corrigida a Stack, o build seguinte reabre a fase e volta a cobrar o fluxo" : "");
+          (foraDoNavegador
+            ? " — o fluxo fora do navegador se conclui pela suíte do projeto, um teste por passo: na próxima execução a fase volta a ser verificada e a prova é procurada de novo; " +
+              "se o produto se usa num navegador, a Stack do skeleton está errada: corrigida a Stack, o build seguinte reabre a fase e volta a cobrar o fluxo"
+            : "");
         announce(`aplicação NÃO concluída — ${detalhe}`);
         await appendEvent(paths.events, { timestamp: now().toISOString(), stage: "implement", subject: "-", attempt: 1, status: "paused", detail: detalhe });
         await registrarEstado(phases, checked.sessions, null);
@@ -1491,6 +1651,21 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
       }
 
       announce(acceptance.skipped !== "" ? `aceitação operacional: ${acceptance.skipped}` : "aceitação operacional: o produto sobe a partir de uma cópia limpa");
+    }
+
+    /*
+     * O reparo da aceitação muda o código depois da guarda (§134): a prova de
+     * fluxo pela suíte é reconferida sobre o que ele deixou. Um reparo que pule ou
+     * apague o teste citado não entrega um fluxo sem prova.
+     */
+    if (esqueleto !== null && (tocadosNaEntrega.length > 0 || reparoSemLista)) {
+      const quedas = await provasQueCairam(new Set(esqueleto.workflows.map((workflow) => workflow.number)));
+      if (quedas.size > 0) {
+        const detalhe = `fluxo obrigatório pendente depois do reparo da aceitação: ${[...quedas].map(([numero, queda]) => `o fluxo ${numero} perdeu a prova pela suíte — ${passosSemProva(queda.semProva)}`).join("; ")}`;
+        announce(`aplicação NÃO concluída — ${detalhe}`);
+        await appendEvent(paths.events, { timestamp: now().toISOString(), stage: "validate", subject: "aceitação", attempt: 1, status: "paused", detail: detalhe });
+        return { runId, exitCode: 2, phases, warnings: checked.warnings, errors: [detalhe], acceptance };
+      }
     }
 
     /*

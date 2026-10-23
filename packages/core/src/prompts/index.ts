@@ -7,7 +7,7 @@ export { BUILDER_COMPLETE_MARKER, BUILDER_FLOW_WRONG_MARKER, MUDADOS_NA_PARTE, a
 export type { BuilderContext, ConflictContext, FixContext, InstallContext, ParteDoPrompt } from "./builder.js";
 export { VERIFY_HEADER, VERIFY_REPAIR_HEADER, parseVerification, verifierRepairPrompt, verifyPrompt } from "./verifier.js";
 export type { TaskVerdict, VerifierContext, VerifierRepairContext } from "./verifier.js";
-export { FLOW_HEADER, FORA_DO_NAVEGADOR, LEITURA_SEM_EFEITO, extractFlowScript, flowPrompt, lerForaDoNavegador, stepLabel } from "./flows.js";
+export { FLOW_HEADER, FORA_DO_NAVEGADOR, LEITURA_SEM_EFEITO, PROVA, SEM_PROVA, extractFlowScript, flowPrompt, lerForaDoNavegador, lerProvas, stepLabel, type PassoSemProva, type ProvaCitada } from "./flows.js";
 export { TRIAGE_HEADER, lerTriagem, triagePrompt } from "./triagem.js";
 export type { TipoDaTriagem, TriageContext, Triagem } from "./triagem.js";
 export type { FlowAuthorContext, FlowWorkflowContext } from "./flows.js";

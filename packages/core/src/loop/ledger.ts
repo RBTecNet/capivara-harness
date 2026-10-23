@@ -23,6 +23,7 @@ import { artifactPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
 import { sha12 } from "../contract/stamps.js";
 import { PLANNING_CONTRACT } from "../contract/environment.js";
+import type { ProvaCitada } from "../prompts/index.js";
 
 export interface FaseFechada {
   id: string;
@@ -60,9 +61,11 @@ export interface FaseFechada {
   /**
    * Os fluxos que a fase fechou sem percorrer porque o contrato põe o produto fora
    * do navegador (§133). Ausente é o registro anterior ao campo: a fase percorreu
-   * o que cobriu, como sempre.
+   * o que cobriu, como sempre. Com `provas`, a suíte do projeto o provou passo a
+   * passo e ele é cumprido (§134); sem, é pendência, e a fase volta a ser
+   * verificada na execução seguinte.
    */
-  foraDoNavegador?: { workflow: string; trecho: string }[];
+  foraDoNavegador?: { workflow: string; trecho: string; provas?: ProvaCitada[] }[];
 }
 
 function caminho(projectRoot: string): string {

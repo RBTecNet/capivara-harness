@@ -31,6 +31,12 @@ export interface FlowAuthorContext {
   rejected?: string[];
   previousScript?: string;
   /**
+   * O comando da suíte do projeto que o harness roda no G2 (§134): é ela que prova
+   * o fluxo que nenhum roteiro percorre. `null` é o projeto sem suíte que o harness
+   * rode; ausente, o prompt não diz nada sobre ela.
+   */
+  suite?: string | null;
+  /**
    * A passagem em que o roteiro vai rodar: quem roda antes, o que começa vazio,
    * e o ajudante para o que não é interface. Sem isto o roteirista escreve para
    * uma máquina que ele imagina — e no `assistencia2` imaginou um instalador que
@@ -73,6 +79,56 @@ export const LEITURA_SEM_EFEITO = [
  */
 export const FORA_DO_NAVEGADOR = "CAPIVARA_FORA_DO_NAVEGADOR";
 
+/**
+ * A prova de um passo do fluxo que não se percorre (§134): o teste da suíte do
+ * próprio projeto que o exercita, citado pelo roteirista — que é independente e
+ * leu a suíte —, rodado pelo harness no G2 e conferido pelo Core. No Luna a suíte
+ * xUnit existia, o G2 nunca a rodou, e o fluxo ficou pendente com o produto certo.
+ */
+export const PROVA = "CAPIVARA_PROVA";
+
+/** O passo que nenhum teste da suíte exercita, com o porquê: continua pendente e nomeado (§134). */
+export const SEM_PROVA = "CAPIVARA_SEM_PROVA";
+
+export interface ProvaCitada {
+  passo: number;
+  /** O arquivo de teste, relativo à raiz do projeto. */
+  arquivo: string;
+  teste: string;
+}
+
+export interface PassoSemProva {
+  passo: number;
+  motivo: string;
+}
+
+/** Sem crases, aspas e espaço em volta. */
+function limpar(texto: string): string {
+  return texto.trim().replace(/^[`"'«“]+|[`"'»”]+$/g, "").trim();
+}
+
+/**
+ * As linhas de prova da resposta, uma por linha, com ou sem crases em volta.
+ * Linha fora do formato não é prova: o passo dela fica sem prova, e isso é dito.
+ */
+export function lerProvas(resposta: string): { provas: ProvaCitada[]; semProva: PassoSemProva[] } {
+  const provas: ProvaCitada[] = [];
+  const semProva: PassoSemProva[] = [];
+  for (const bruta of resposta.split(/\r?\n/)) {
+    const linha = limpar(bruta);
+    const prova = new RegExp(`^${PROVA}:\\s*passo\\s+(\\d+)\\s*[—–:-]+\\s*(.+?)\\s*::\\s*(.+)$`, "u").exec(linha);
+    if (prova) {
+      const arquivo = limpar(prova[2] ?? "");
+      const teste = limpar(prova[3] ?? "");
+      if (arquivo !== "" && teste !== "") provas.push({ passo: Number(prova[1]), arquivo, teste });
+      continue;
+    }
+    const sem = new RegExp(`^${SEM_PROVA}:\\s*passo\\s+(\\d+)\\s*[—–:-]+\\s*(.+)$`, "u").exec(linha);
+    if (sem) semProva.push({ passo: Number(sem[1]), motivo: limpar(sem[2] ?? "") });
+  }
+  return { provas, semProva };
+}
+
 /** O trecho citado depois da marca, sem aspas, crases nem pontuação final em volta; `null` sem marca ou sem trecho. */
 export function lerForaDoNavegador(resposta: string): string | null {
   const linha = new RegExp(`${FORA_DO_NAVEGADOR}:[ \\t]*([^\\n]*)`).exec(resposta)?.[1] ?? "";
@@ -107,14 +163,28 @@ export function flowPrompt(context: FlowAuthorContext): string {
     "The runtime instructions below describe the returned script, never actions for your authoring session.",
     "",
     "## A product used outside the browser",
-    "This gate walks the flow in a browser, against the product served over HTTP. When the published contract in this",
-    "prompt says users do not reach the product through a browser at all — a native desktop window, a program used in",
-    "a terminal, a library with no interface of its own — no browser script can walk this flow: do not invent pages or",
-    "selectors. Answer with this single line instead of a script:",
+    "This gate walks the flow against the running product. When the published contract in this prompt says users",
+    "reach the product neither through a browser nor through a terminal — a native desktop window, a mobile device, a",
+    "library with no interface of its own — no script can walk this flow: do not invent pages or selectors. Answer",
+    "instead with this line, then one line per step:",
     `\`${FORA_DO_NAVEGADOR}: <the line of the contract's Stack that says how users reach the product, copied word for word>\``,
-    "The harness checks that line against the Stack and records the flow as NOT walked: a pending obligation",
-    "reported to the developer, never a pass. A step done in a terminal inside a product used through a browser is",
-    "not this case: walk it with `comandoDoProjeto`, below.",
+    `\`${PROVA}: passo <n> — <path of a test file of the project> :: <name of the test>\``,
+    `\`${SEM_PROVA}: passo <n> — <why no test of the project's suite does what this step says>\``,
+    ...suiteBlock(context.suite),
+    "A Stack line that says the product is used in a browser never takes a flow out of it, and neither does a flow that",
+    "already ran steps in a browser in this phase. Cite the test by its own name — the method or function the suite runs,",
+    "or the exact title of its `it`/`test` — never a class, an attribute or a helper; a skipped test proves nothing.",
+    "The harness checks the Stack line and every cited test. A flow whose every step has an accepted test is concluded",
+    "by the suite; any other stays NOT walked — a pending obligation reported to the developer with the steps you named,",
+    "never a pass. A step done in a terminal inside a product used through a browser is not this case: walk it with",
+    "`comandoDoProjeto`, below.",
+    "",
+    "## A product used in a terminal",
+    "When the contract says users reach the product through a terminal — a command-line program, a terminal interface",
+    "driven by its input — walk the flow with `comandoDoProjeto` alone: run the product's own commands with their input,",
+    "and assert the exit code, the output and what they wrote. Use no `page`, `request`, `context`, `browser`,",
+    "`aplicacaoPropria` or URL: the harness then runs the script without starting a server or opening a browser, and",
+    "the running application described below does not exist for it. Write the test as `async () => { ... }`.",
     flowScopeBlock(),
     transientStateBlock(true),
     "",
@@ -200,7 +270,7 @@ export function flowPrompt(context: FlowAuthorContext): string {
     "The one exception is the instance you start yourself: reach it through `app.url`.",
     "",
     "Return EXACTLY ONE fenced code block, TypeScript, and nothing else — no preamble, no",
-    `explanation after it (the \`${FORA_DO_NAVEGADOR}\` line above is the only other answer). The block is the whole file:`,
+    `explanation after it (the \`${FORA_DO_NAVEGADOR}\` answer above, with its step lines, is the only other answer). The block is the whole file:`,
     "",
     "```ts",
     "import { expect, test } from '@playwright/test';",
@@ -254,6 +324,29 @@ export function flowPrompt(context: FlowAuthorContext): string {
         ]
       : []),
   ].join("\n");
+}
+
+/**
+ * O que o roteirista precisa saber da suíte para provar o fluxo por ela (§134).
+ * Ausente, só a regra; `null`, que não há suíte e nenhum passo se prova por teste.
+ */
+function suiteBlock(suite: string | null | undefined): string[] {
+  if (suite === undefined) {
+    return ["Cite only tests of the project's own suite that you read in the source; a test that only builds, starts or opens the product proves no step."];
+  }
+  if (suite === null) {
+    return [
+      "This project has no suite the harness can run, so no step can be proven by a test here: answer the first line",
+      `and one \`${SEM_PROVA}\` line per step.`,
+    ];
+  }
+  return [
+    `The project's own suite, which the harness runs and must pass on this code, is \`${suite}\`.`,
+    "Read its tests and cite, for each step, a test that performs what the step says and asserts its result:",
+    "a test that only builds, starts or opens the product proves no step. Cite only tests you read in the source.",
+    "A cited test counts only when the suite's own report shows it ran and passed in this run — today, a .NET",
+    `suite's TRX report. For any other suite, answer a \`${SEM_PROVA}\` line per step naming the test that covers it.`,
+  ];
 }
 
 /**

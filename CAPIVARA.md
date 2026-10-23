@@ -72,8 +72,21 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-Na versão 0.7.6, `npm run check` passa: build, typecheck e **3130 testes**, incluindo o catálogo de
+Na versão 0.7.7, `npm run check` passa: build, typecheck e **3234 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
+
+A 0.7.7 traz duas correções.
+
+- **§132:** o ensaio do PLAN lê o veredito escrito logo depois do espelho do
+  colchete, sem mudar o que os outros providers já liam.
+- **§133:** o BUILD deixa de bloquear pelo que o próprio harness pedia e ninguém
+  podia entregar.
+  - O roteirista e a triagem do G4 leem o produto com comandos sem efeito.
+  - O produto usado fora do navegador tem os fluxos registrados como não
+    percorridos: obrigação pendente, nomeada na guarda final, nunca PASS, sem
+    servidor HTTP pedido ao executor.
+  - O G3 não reprova por observação impossível e sabe que `PORT`/`HOST` é
+    exigência do harness.
 
 A 0.7.6 faz o BUILD listar o catálogo da API direta como referência dos modelos
 (§131.12): pelo OpenCode, os que o executor roda são escolhidos normalmente; os

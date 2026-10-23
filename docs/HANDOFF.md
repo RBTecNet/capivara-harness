@@ -14,9 +14,9 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `fix/cooperacao-build-133` (§133, sem commit) sobre a `main`; na `main`, a cadeia §129–§132 entrou por fast-forward em 22/10/2026 (a §122–§128 em 21/10/2026), e as branches de ajuste foram apagadas, local e no `origin` |
-| versão | 0.7.6 na `main`; a §132 entrou depois do bump, sem versão própria (o binário diz 0.7.6 com ela); planos da 0.6.x e da 0.7.x valem na 0.7.6 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
-| suíte | 3234 testes em 170 arquivos com a §133 na árvore (sem commit), `npm run check` verde (rc=0; as duas instabilidades conhecidas, `coerencia-temporal-127` e `integridade-122`, caíram uma vez cada sob load 10–13 e passaram na rodada seguinte); 3203 em 168 na `main` com a §132, `npm run check` verde (rc=0); 3130 em 167 na 0.7.6 sem a §132 (3121 em 166 na 0.7.5), `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na 0.7.4 (§130); 3020 em 163 na 0.7.3 (§129); 2989 em 161 na 0.7.2 (2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
+| branch | `fix/cooperacao-build-133` (§133, 0.7.7, push feito, sem merge) sobre a `main`; na `main`, a cadeia §129–§132 entrou por fast-forward em 22/10/2026 (a §122–§128 em 21/10/2026), e as branches de ajuste foram apagadas, local e no `origin` |
+| versão | 0.7.7 na branch da §133 (com a §132, que entrou na `main` sem versão própria); 0.7.6 na `main`; planos da 0.6.x e da 0.7.x valem na 0.7.7 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
+| suíte | 3234 testes em 170 arquivos na 0.7.7 (§133), `npm run check` verde (rc=0; as duas instabilidades conhecidas, `coerencia-temporal-127` e `integridade-122`, caíram uma vez cada sob load 10–13 e passaram na rodada seguinte); 3203 em 168 na `main` com a §132, `npm run check` verde (rc=0); 3130 em 167 na 0.7.6 sem a §132 (3121 em 166 na 0.7.5), `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na 0.7.4 (§130); 3020 em 163 na 0.7.3 (§129); 2989 em 161 na 0.7.2 (2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 

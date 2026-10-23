@@ -14,12 +14,32 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `fix/minimax-integracao-131` (§131, 0.7.6, push feito, sem merge) sobre a `feat/execucao-progressiva-130` (§130, 0.7.4, push feito, sem merge), sobre a `fix/testes-so-no-build-129` (§129, 0.7.3, push feito, sem merge), que está sobre a `main`; na `main`, a cadeia §122–§128 entrou por fast-forward em 21/10/2026 e as outras branches foram apagadas |
-| versão | 0.7.6 na branch da §131 (0.7.5 sem o complemento 131.12), 0.7.4 na da §130, 0.7.3 na da §129, 0.7.2 na `main`; planos da 0.6.x e da 0.7.x valem na 0.7.6 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
-| suíte | 3130 testes em 167 arquivos na branch da §131 (0.7.6; 3121 em 166 na 0.7.5), `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na branch da §130, `npm run check` verde (rc=0); 3020 em 163 na branch da §129 (2989 em 161 na `main`; 2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
+| branch | `main`; a cadeia §129–§132 entrou por fast-forward em 22/10/2026 (a §122–§128 em 21/10/2026), e as branches de ajuste foram apagadas, local e no `origin` |
+| versão | 0.7.6 na `main`; a §132 entrou depois do bump, sem versão própria (o binário diz 0.7.6 com ela); planos da 0.6.x e da 0.7.x valem na 0.7.6 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
+| suíte | 3203 testes em 168 arquivos na `main` com a §132, `npm run check` verde (rc=0); 3130 em 167 na 0.7.6 sem a §132 (3121 em 166 na 0.7.5), `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na 0.7.4 (§130); 3020 em 163 na 0.7.3 (§129); 2989 em 161 na 0.7.2 (2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-22 — Ensaio do PLAN: o veredito logo depois do espelho do colchete (§132)
+
+O PLAN do `laravel/mmax` (MiniMax-M3.1-Flash, API direta) parou em NOT READY
+com quatro critérios "NÃO ENSAIADOS". O verificador tinha julgado os dezoito
+critérios da fase 4, no formato `CRITERION P4.T2.C1 [Phase 4: … · …] OBSERVABLE —
+…`. O parser exigia o primeiro dois-pontos da linha colado ao veredito, e
+nessa linha não há dois-pontos depois do colchete, e há um dentro dele. A
+segunda chance renumerou os endereços, e quatro critérios ficaram sem linha. O
+`teste_minimax` parou do mesmo jeito em 19/10.
+
+A correção é uma extensão restrita de `parseRehearsal()`. O espelho com o ` · `
+do prompt é seguido do veredito, com ou sem dois-pontos, e precisa haver um
+único lugar na linha em que isso acontece. A linha canônica tem precedência, e o
+que a chave antiga lia não muda. Em todo log real de ensaio no disco (156 logs,
+27 runs, todos os providers), 145 ficam idênticos, nenhum veredito anterior
+muda, e entram 161 vereditos novos. Eles batem com a segunda chance que os runs
+pagaram, menos um: um UNOBSERVABLE que a segunda chance tinha aprovado. Ficam
+para decisão a segunda chance renumerada aceita como escrita e as formas ainda
+não lidas (§132.7). Entrou na `main` sem versão própria: o binário continua 0.7.6.
 
 ## 2026-10-22 — MiniMax: a preparação que integra, o raciocínio que o modelo aceita, e o effort que o BUILD escolhe (§131)
 

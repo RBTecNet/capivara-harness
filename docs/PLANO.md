@@ -13497,3 +13497,147 @@ ordem, depois da chave.
   listagem compatível com OpenAI devolve `models/…`. Se devolver, os modelos da
   API aparecem como fora do OpenCode, e os do catálogo dele continuam listados e
   escolhíveis.
+
+## §132 — Ensaio do PLAN: o veredito logo depois do espelho do colchete
+
+### 132.1 A evidência
+
+O PLAN do `laravel/mmax` (0.7.6, MiniMax-M3.1-Flash por API direta, run
+`init-dc741f0d7b92`) parou em NOT READY: P4.T4.C4, P4.T5.C1, P4.T5.C2 e P4.T5.C3
+"NÃO ENSAIADOS". O verificador tinha julgado os dezoito critérios da fase 4:
+
+```
+CRITERION P4.T2.C1 [Phase 4: Módulo independente de anotações · Expor o contrato REST …] OBSERVABLE — Requisitar as duas rotas GET …
+```
+
+O prompt lista cada critério como `P4.T2.C1 [fase · task] texto`, e o MiniMax
+espelhou o colchete e pôs o veredito logo depois. A chave do ensaio
+(`CRITERION_LINE`) exige que o **primeiro** dois-pontos da linha venha colado ao
+veredito. Nessa linha não há dois-pontos depois do colchete, e há um dentro dele
+(o título da fase é "Phase 4: …", e a task cita `obterAnotacao(id: number)`).
+Zero de dezoito linhas foram lidas.
+
+A segunda chance pediu os dezoito de novo, e o modelo renumerou: juntou as tasks
+1 e 2 em `P4.T1.C1`–`C7`, deslocou as outras uma task para cima e não escreveu
+linha para os quatro últimos endereços. Esses quatro ficaram sem veredito.
+
+### 132.2 A causa, comprovada nos logs
+
+| lote | forma da linha | lida antes | segunda chance |
+|---|---|---|---|
+| P1 (20), P1 (16), P2 (20), P5 (7) | `[Phase N: … · …]: OBSERVABLE — …` (dois-pontos dentro do colchete) | 0 | paga e lida |
+| P4 (18) | `[Phase 4: … · …] OBSERVABLE — …` (sem dois-pontos depois) | 0 | paga, renumerada, 4 sem linha → NOT READY |
+| P2 (13) | `[…] texto do critério.: OBSERVABLE — …` | 0 | paga e lida |
+| P3 (16) | `P3.T6.C1 [… · …] OBSERVABLE — …` (sem a chave `CRITERION`) | 0 | paga e lida |
+
+No `teste_minimax` (19/10) aconteceu o mesmo. A primeira passada do lote P1,
+nessa forma, não foi lida. A segunda chance não escreveu linha para P1.T4.C1, e o
+run parou em "NÃO ENSAIADO". O defeito é de leitura, não de resposta. É o que o
+§40 diz: forma é responsabilidade de quem escreveu o parser.
+
+### 132.3 O que muda
+
+`parseRehearsal()` ganha uma extensão restrita. Não é outra chave:
+
+- vale só para a linha que `CRITERION_LINE` recusa;
+- o colchete começa logo depois do endereço e traz o ` · ` do prompt;
+- o veredito vem logo depois do `]`, com ou sem dois-pontos;
+- há exatamente um lugar na linha em que um veredito segue um `]` (dois é
+  ambíguo, e a linha é recusada);
+- o fim é o mesmo da chave: separador (`—`, `:` ou `-`) e justificativa, ou fim
+  de linha.
+
+A linha canônica tem precedência sobre o espelho do mesmo endereço. A saída
+anterior é prefixo exato da nova, e o espelho só acrescenta endereços que a
+chave não leu. A leitura é feita em partes, não num regex só: com `.*? · .*?`,
+uma linha de 150 KB levou 20 s para ser recusada, e em partes leva 2 ms. Não há
+condição por provider.
+
+### 132.4 O que NÃO muda
+
+Continuam iguais:
+
+- a política de RALPH READY;
+- o tratamento de UNOBSERVABLE, de UNSATISFIABLE e de critério não ensaiado
+  (`assessRehearsal`);
+- a regra fail-closed;
+- os prompts, os contratos, a segunda chance, os lotes e os orçamentos.
+
+Também continuam recusadas, de propósito, as formas em que o veredito não vem
+logo depois do colchete. São elas:
+
+- o texto do critério ecoado com dois-pontos dentro;
+- o eco seguido de `— OBSERVABLE —`;
+- a linha sem a chave `CRITERION`;
+- o veredito entre crases (Codex, `luna`).
+
+Lê-las exigiria saber onde termina o texto ecoado, ou abrir mão da chave do
+protocolo. Esses lotes seguem para a segunda chance, como antes.
+
+### 132.5 Antes × depois, nas mesmas entradas
+
+O parser anterior e o corrigido rodaram sobre todo log real de ensaio no disco:
+156 logs e 2371 ocorrências da chave, de 27 runs em projetos feitos com Claude,
+Codex, OpenCode (DeepSeek, OpenRouter, MiniMax), agy, cursor e API direta. O
+provider do PLAN não fica gravado no run, então o rótulo é o do projeto.
+
+- **145 logs idênticos.** Em nenhum dos 156 o que já era lido mudou (prefixo
+  exato).
+- **161 vereditos novos**, todos de linhas na forma do espelho:
+  - `mmax`: 81, todos OBSERVABLE;
+  - `teste_minimax`: 74, sendo 72 OBSERVABLE e 2 UNOBSERVABLE;
+  - `luna` (Codex `gpt-6-luna`): 6 OBSERVABLE. A forma é a mesma, colchete com
+    `http://` e `{"erro":…}` dentro.
+- **Conferidos contra a segunda chance que os runs pagaram, critério a
+  critério.**
+  - `mmax`: 77 iguais. Os 4 restantes são os que a segunda chance não leu.
+  - `luna`: 6 iguais.
+  - `teste_minimax`: todos iguais menos um. P1.T2.C2 saiu UNOBSERVABLE na
+    primeira passada (agora lida) e OBSERVABLE na segunda chance. O mesmo
+    verificador o julgou UNOBSERVABLE em 3 de 4 chamadas, e o run seguinte o
+    bloqueou. A correção deixa o ensaio mais estrito, não mais permissivo.
+- **No `mmax`, com o parser corrigido:**
+  - os quatro "NÃO ENSAIADOS" não acontecem, porque a P4 é lida na primeira
+    passada;
+  - as segundas chances caem de 7 para 2, a da P2 (texto ecoado) e a da P3 (sem
+    a chave).
+
+### 132.6 Testes: RED → GREEN
+
+`test/prompts/ensaio-espelho-132.spec.ts` (72 casos) usa
+`test/fixtures/ensaio-132/`, com 20 saídas reais sem edição:
+
+- **Caracterização.** 16 entradas aceitas e 20 recusadas, conferidas contra o
+  parser anterior congelado no próprio teste: canônica, separadores, CRLF,
+  prosa, chave grudada, duplicadas, conflito, ambíguas e incompletas. Passam
+  antes e depois.
+- **Comparação.** Em cada fixture, a saída anterior é prefixo exato da nova, e
+  todo veredito novo tem linha de origem na forma do espelho. As 9 saídas
+  canônicas de outros runs ficam idênticas.
+- **RED.** 8 casos falham contra o código anterior:
+  - mmax P4 (18/18) e P1 (20/20);
+  - eco seguido de veredito;
+  - teste_minimax, com UNOBSERVABLE bloqueando;
+  - as 6 linhas do Codex;
+  - a precedência entre espelhos;
+  - o critério sem linha.
+
+  Há ainda 1 caso ponta a ponta em `test/init/init.spec.ts`: o ensaio pelo
+  orquestrador, com resposta na forma do MiniMax, passa sem segunda chance.
+
+### 132.7 Achados que ficam para decisão
+
+1. **A segunda chance renumerada é aceita como foi escrita.** No `mmax`, 10
+   vereditos da P4 ficaram ligados a critérios que não eram os do texto. Todos
+   eram OBSERVABLE, e o run parou de qualquer forma. A resposta trazia
+   endereços que o plano não tem (P4.T1.C5–C7 e P4.T2.C4), o que é sinal de
+   numeração deslocada. Tratar isso mexe na recuperação e no não ensaiado, e
+   fica fora desta correção.
+2. **A segunda chance pode desfazer um veredito que o parser não leu.** No
+   `mmax`, a primeira passada da P2 julgou P2.T9.C3 UNOBSERVABLE na forma do
+   texto ecoado, que continua não lida. A segunda chance o aprovou. O caso do
+   `teste_minimax` é o mesmo, e esta correção o fecha porque aquela forma passou
+   a ser lida.
+3. **O título "Phase 4: Phase 4: …".** O esqueleto do MiniMax gravou o prefixo
+   no título da fase, e é dele que vem o dois-pontos dentro do colchete. A
+   leitura já não depende disso.

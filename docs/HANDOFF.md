@@ -14,12 +14,57 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `main`; a cadeia §129–§132 entrou por fast-forward em 22/10/2026 (a §122–§128 em 21/10/2026), e as branches de ajuste foram apagadas, local e no `origin` |
+| branch | `fix/cooperacao-build-133` (§133, sem commit) sobre a `main`; na `main`, a cadeia §129–§132 entrou por fast-forward em 22/10/2026 (a §122–§128 em 21/10/2026), e as branches de ajuste foram apagadas, local e no `origin` |
 | versão | 0.7.6 na `main`; a §132 entrou depois do bump, sem versão própria (o binário diz 0.7.6 com ela); planos da 0.6.x e da 0.7.x valem na 0.7.6 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
-| suíte | 3203 testes em 168 arquivos na `main` com a §132, `npm run check` verde (rc=0); 3130 em 167 na 0.7.6 sem a §132 (3121 em 166 na 0.7.5), `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na 0.7.4 (§130); 3020 em 163 na 0.7.3 (§129); 2989 em 161 na 0.7.2 (2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
+| suíte | 3234 testes em 170 arquivos com a §133 na árvore (sem commit), `npm run check` verde (rc=0; as duas instabilidades conhecidas, `coerencia-temporal-127` e `integridade-122`, caíram uma vez cada sob load 10–13 e passaram na rodada seguinte); 3203 em 168 na `main` com a §132, `npm run check` verde (rc=0); 3130 em 167 na 0.7.6 sem a §132 (3121 em 166 na 0.7.5), `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na 0.7.4 (§130); 3020 em 163 na 0.7.3 (§129); 2989 em 161 na 0.7.2 (2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-23 — Executor e verificador do mesmo lado: o que o harness pedia e ninguém podia entregar (§133)
+
+Dois runs do Codex pararam por exigências do próprio harness, e não por
+defeito do produto.
+
+- **Astra** (`gpt-6-astra`, web): o roteirista do G4 recusou sete vezes em oito.
+  O prompt dele proibia "rodar comandos", e no Codex ler um arquivo é rodar
+  comando. O G3 também reprovou o servidor por honrar o `PORT`/`HOST` que o
+  harness exige para o G4.
+- **Luna** (`gpt-6-luna`, desktop Avalonia): o G4 exigiu um `start` HTTP. O
+  executor criou `package.json` com `dotnet run` e depois um `HttpListener`
+  falso no produto, e o G3 pediu cinco vezes para "confirmar visualmente" uma
+  janela que nenhuma sessão abre. Foram 19 chamadas e 22 minutos até a parada.
+
+O que mudou:
+
+- roteirista e triagem podem rodar comandos que não mudam nada, como o G3;
+- o roteirista pode responder `CAPIVARA_FORA_DO_NAVEGADOR: <linha da Stack>`.
+  O trecho é conferido literalmente e só vale para fluxo da fase que nenhuma
+  fase percorreu. O fluxo fica NÃO percorrido, como obrigação pendente, e nunca
+  vira cumprido, regressão nem PASS. A guarda final o nomeia, e o build termina
+  com código 2, também na retomada e depois de revalidação (`fases.json` e o
+  livro). Se a Stack mudar, a fase reabre;
+- a cobrança do `start` acontece depois da redação e da contestação; sem
+  `start`, o roteirista é perguntado de novo uma vez por fase;
+- o executor não é mandado criar servidor para produto fora do navegador;
+- o G3 não bloqueia por observação impossível, julga critério de procedimento
+  pelo comportamento e sabe que PORT/HOST é exigência do harness.
+
+Nenhum gate, estado, limite ou condição por provider novo. 31 testes novos, 25
+deles RED contra a 0.7.6; os outros 6 são guardas da saída nova. Duas revisões
+adversariais acharam seis furos reproduzíveis na primeira rodada, entre eles um
+PASS falso depois de reescrever o histórico; todos foram corrigidos e viraram
+teste (§133.9).
+
+A matriz, o custo medido e as limitações estão na §133 do PLANO. Ficam para
+decisão:
+- o campo de forma de acesso no INIT;
+- o "num navegador" injetado no INIT/PLAN;
+- G2 para .NET;
+- o reparo do verificador que libera o executor sem árvore nova.
+
+A árvore do `teste_c#` ainda tem o `package.json`, o `HttpListener` e roteiros
+web do incidente; desfazê-los antes de retomar.
 
 ## 2026-10-22 — Ensaio do PLAN: o veredito logo depois do espelho do colchete (§132)
 

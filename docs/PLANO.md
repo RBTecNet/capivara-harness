@@ -13641,3 +13641,301 @@ provider do PLAN não fica gravado no run, então o rótulo é o do projeto.
 3. **O título "Phase 4: Phase 4: …".** O esqueleto do MiniMax gravou o prefixo
    no título da fase, e é dele que vem o dois-pontos dentro do colchete. A
    leitura já não depende disso.
+
+## §133 — Executor e verificador do mesmo lado: o que o harness exigia e nenhum dos dois podia entregar
+
+O pedido: que a verificação ajude a concluir, e não bloqueie pelo que não prova
+defeito do produto. A regra foi ajustar só o que contraria isso, sem recriar
+mecanismo, sem gate novo, sem aumentar limite e sem aprovar nada sem evidência.
+A investigação partiu dos runs reais e terminou em cinco causas comprovadas. As
+cinco moram na fronteira entre o que o harness pede e o que quem recebe o pedido
+consegue fazer.
+
+### 133.1 A evidência
+
+| run | produto | provider | o que aconteceu |
+|---|---|---|---|
+| `build-521a72e8dbb5` (`laravel/teste_c#`, "Luna") | desktop .NET 10 + Avalonia | codex `gpt-6-luna` | P02 parou com 3 ciclos esgotados: 19 das 25 chamadas do run, 22 min |
+| `build-082c825927b3` (zip enviado pelo Bruno, "Astra") | web React + API, o plano do Parallel Lab | codex `gpt-6-astra` | P06 parou por "esgotamento técnico" no roteiro do workflow 2 |
+| `build-2c510cd43091` (`laravel/claude`) | o mesmo plano do Astra | claude `opus` | 6 fases no 1º ciclo; 4 chamadas de roteirista, nenhuma recusa |
+
+O run de controle citado no pedido (`build-b6b412dad19e`) não está no disco nem
+no zip; só a worktree vazia dele em `~/.cache/capivara/worktrees/97d1fe88e7bd`.
+No lugar dele ficaram o `laravel/claude` acima, que é o mesmo plano construído
+até o fim, e a suíte da §130.
+
+### 133.2 A matriz
+
+Classes: ATENDIDO (preservado), PARCIAL, DEFEITO COMPROVADO (reproduzido e
+corrigido), NÃO COMPROVADO (investigado, sem prova; não mexido).
+
+| comportamento | implementação atual | evidência | divergência | ajuste | classe |
+|---|---|---|---|---|---|
+| verificador relata todos os achados de uma vez | `prompts/verifier.ts` ("Report ALL the gaps…"), `acceptance-policy.ts` ("Collect ALL…", "Do not … progressively expand") | prompts | — | — | ATENDIDO |
+| achado acionável: critério, observado, esperado, local, correção, checagem | campos B0/B1 no prompt; `handoff.ts` lê os rótulos | handoffs do Luna têm todos os campos | 89 de 99 INCOMPLETE do corpus não têm rótulo, mas quase todos são de runs anteriores à §125 e trazem a evidência em prosa | — | NÃO COMPROVADO como dano |
+| testar o resultado, não o método; teste extra não é bloqueio | `functionalAcceptanceBlock` (nomes de teste são sugestão, implementação equivalente vale) | prompts; nos runs de 21–23/10 nenhum INCOMPLETE por teste ausente | — | — | ATENDIDO |
+| não bloquear pelo que nenhuma sessão observa | "B0 … cannot be proven at all", sem limite | Luna: 5 vereditos "confirmar visualmente a janela", árvore idêntica em 5 ações | "não provado" virava defeito do executor | parágrafo no prompt do G3 (133.4) | DEFEITO COMPROVADO |
+| executor recebe o conjunto dos defeitos, sem mudar o PLAN | `defeitos.ts planejar`, `handoff.ts`, `builder.ts` | — | — | — | ATENDIDO |
+| revalidação por impacto, reaproveitar prova | `impacto.ts`, `evidencias.ts`, `runner.ts` (§125) | relatórios: "evidência preservada" | — | — | ATENDIDO |
+| reparo do verificador com validação independente | escada `executor → verificador`; quem repara não valida (§125) | Luna e Astra: a leitura seguinte é sessão nova | — | — | ATENDIDO |
+| não repetir tentativa sem informação nova | `proximaEstrategia`: o reparo do verificador conta como mudança mesmo com a árvore igual (pode ter mudado o ambiente) e libera o executor | Luna ações 5 e 7: executor liberado por reparo do verificador sem mudança na árvore, as duas sem progresso | desperdício de 2 chamadas, vindo da causa do G3 | nenhum: separar ambiente de código exige saber o que o reparo mudou fora da árvore (133.8) | PARCIAL |
+| falha da ferramenta ou do roteiro não é defeito do produto | naturezas `fluxo-roteiro`, `fluxo-revisao`, `fluxo-ferramenta`; triagem PRODUTO/ROTEIRO/CRITERIO | Astra: a recusa do roteirista virou `fluxo-roteiro`, "isto é do harness" | — | — | ATENDIDO |
+| triagem ilegível não vira defeito do produto | sem veredito legível, o rastro vai ao executor | 0 ocorrências no corpus | — | — | NÃO COMPROVADO |
+| roteirista e triagem conseguem ler o produto | "Do not run commands" | Astra: 7 recusas em 8 ("ler arquivos depende de executar comandos, que você proibiu"); Luna: 1 em 5; Claude no mesmo plano: 0 em 4 | no codex, ler é rodar comando | a frase do verificador ("commands that change nothing") nos dois prompts | DEFEITO COMPROVADO |
+| o G4 não presume navegador | aplicabilidade só conta fluxos; sem `start`, defeito `fluxo-subida` ao executor; o executor é mandado criar `start` com PORT/HOST | Luna: `package.json` com `dotnet run`, depois um `HttpListener` falso em `Program.cs`; dois roteiristas disseram "é desktop", os outros inventaram seletores | o harness exigia interface web de um aplicativo nativo | 133.4 | DEFEITO COMPROVADO |
+| o G3 conhece o que o harness exige do G4 | o executor recebe o contrato de subida (§107), o verificador não | Astra P06-D1: G3 reprovou "lê PORT e HOST", o reparo dele tirou os dois, e o produto passou a escutar onde o gate não o procura | metade da regra só do lado do executor | bloco no prompt do G3 quando a fase tem fluxos | DEFEITO COMPROVADO |
+| a falha de infraestrutura do G4 não contamina o G3 | o G3 recebe os defeitos conhecidos; a tag `[P02-D1]` funde o achado do G3 no defeito do G4 sem olhar a natureza | Luna verify-4: "o registro do gate G4 informa que a aplicação não subiu" reabriu a TASK 8, aprovada duas vezes | consequência da exigência web; sem ela, a TASK 8 ficou DONE em verify-2 e verify-3 | nenhum isolado (133.8) | NÃO COMPROVADO como causa independente |
+| G2 reconhece o ecossistema | `testcmd.ts`: Sail, composer, artisan, npm, pytest, go, cargo | Luna: "nenhum comando de teste resolvido" em P01 e P02 com `tests/Agenda.Tests` | .NET sem suíte no gate | nenhum (133.8) | PARCIAL |
+| pontos de parada | inventário em `runner.ts`/`build.ts` | — | cada parada vista nos dois runs vinha de uma das causas acima | — | ATENDIDO |
+
+### 133.3 As causas
+
+1. **Ler era proibido a quem só lê por comando.** O roteirista e a triagem
+   ouviam "You may read the real source" e, logo depois, "Do not run commands".
+   Na CLI do Codex não há ferramenta de leitura separada: `cat`, `sed` e `rg`
+   no sandbox somente leitura são a leitura. O Astra (`gpt-6-astra`) obedeceu e
+   pediu, seis vezes, que alguém colasse os arquivos. O Luna e o Sol, no mesmo
+   Codex, leram mesmo assim: o prompt era ambíguo, e cada modelo o leu de um
+   jeito. O verificador sempre teve a frase certa: "You may run commands that
+   change nothing — reading files…". É a correção pela metade.
+2. **O G4 tratava todo produto como web.** O §33 escreveu "para produto de
+   navegador" e a aplicabilidade nunca olhou isso: fase com fluxo é fase com
+   Playwright. Sem `start`, o gate devolvia ao executor "declare-o no
+   manifesto… com PORT e HOST", e o prompt do executor dizia "Create it in this
+   session". Num aplicativo Avalonia isso virou um `package.json` com
+   `dotnet run` e, no ciclo seguinte, um `HttpListener` que devolve HTML fixo.
+   O produto foi alterado para satisfazer a ferramenta.
+3. **"Não provado" valia para o que nenhuma sessão vê.** O B0 de "essential
+   behaviour cannot be proven at all" levou o G3 a pedir "confirmar visualmente
+   a abertura do calendário". Ele pediu isso cinco vezes, sobre uma integração
+   que ele mesmo descreveu como "implementada, mas não exercitada". Nenhum
+   reparo podia mudar o veredito.
+4. **O G3 não sabia do PORT/HOST.** O plano do Parallel Lab diz "iniciar na
+   porta 3000 e manter SQLITE_PATH como única variável lida". O harness manda o
+   executor honrar PORT e HOST para o G4. O G3, que não conhecia essa
+   exigência, reprovou, e o reparo do verificador tirou o que o gate precisava.
+5. **(do PLAN, registrada e não corrigida aqui)** O critério P2.T8.C4, "Os
+   fluxos desta fase são percorridos no aplicativo desktop Avalonia nativo",
+   nasceu de uma decisão levantada pelo auditor a partir do texto injetado pelo
+   próprio harness ("the build … walks, in a browser",
+   `contract/disponibilidade.ts`; "é assim que os fluxos são percorridos, num
+   navegador", `interview/banco.ts`). É procedimento de verificação dentro do
+   plano, o que a §129 proíbe. Fica como achado (133.8): esta § é do BUILD.
+
+### 133.4 O que muda
+
+- **`prompts/flows.ts` e `prompts/triagem.ts`:** quem lê o produto pode rodar
+  comandos que não mudam nada (ler, listar, buscar). Continuam proibidos teste,
+  servidor, build, sonda de navegador, instalação e qualquer escrita. A frase
+  é a mesma constante (`LEITURA_SEM_EFEITO`) nos dois.
+- **O produto fora do navegador (`prompts/flows.ts`, `loop/flows.ts`,
+  `loop/runner.ts`, `loop/build.ts`, `loop/ledger.ts`):**
+  - quem decide é o roteirista, a sessão independente que já lê o contrato. Em
+    vez de roteiro, ele responde `CAPIVARA_FORA_DO_NAVEGADOR: <trecho do
+    contrato>`;
+  - o gate só aceita o trecho se ele estiver, literalmente, na seção `## Stack`
+    do skeleton. A comparação ignora espaço, caixa, marcação, aspas e pontuação
+    final, e o trecho precisa ter três palavras ou mais. Task, critério e regra
+    não servem. Sem conferência, é rascunho defeituoso como qualquer outro
+    (`fluxo-roteiro`, do harness), e o fluxo continua cobrado. Se a resposta
+    traz roteiro de verdade, vale o roteiro;
+  - a marca só vale para fluxo desta fase que nenhuma fase percorreu num
+    navegador. Para regressão, e para fluxo que já passou no G4, é rascunho
+    defeituoso;
+  - o mesmo auxiliar decide a marca na redação, na reescrita e na contestação do
+    executor;
+  - a contestação passa a ser tratada antes da cobrança do `start`;
+  - a falta de `start` passa a ser cobrada depois da redação. É o roteirista
+    quem diz se há navegador; para produto web, o roteiro escrito fica no disco
+    e a próxima passagem não paga por ele de novo;
+  - sem `start` e com roteiro no disco, o roteirista é perguntado de novo, uma
+    vez por fase, com o motivo (`MOTIVO_SEM_START`). Sem isso, um roteiro web
+    inventado no primeiro rascunho deixava o desktop sem saída: o executor não
+    cria servidor, e o gate nunca mais oferecia a marca;
+  - o fluxo fora do navegador não roda, não abre defeito e não pede nada ao
+    executor. O registro é `fora-do-navegador-N`, NOT_APPLICABLE com marca
+    própria e a afirmação "obrigação pendente, não aprovação". É a mesma forma
+    do fluxo adiado da §127;
+  - a decisão vale para a fase inteira: outra passagem do G4 nela não paga
+    outra sessão. Quando a fase roda de novo sobre o mesmo código (revalidação,
+    retomada, histórico reescrito), a decisão volta do livro de evidências. Um
+    percurso posterior que passe a desfaz;
+  - o G4 NOT_APPLICABLE de uma fase com fluxo próprio só continua valendo se a
+    decisão de cada fluxo dela continua de pé; senão, o gate roda de novo;
+  - a prova de percurso (`fluxos` PASS, `fluxo-N` PASS) cobre só o que foi
+    percorrido. No produto híbrido, o fluxo fora do navegador não ganha PASS;
+  - o build não conta o fluxo como cumprido (nem regressão). O registro da fase
+    fechada (`fases.json`) guarda `foraDoNavegador`, e a retomada também não o
+    esquece. A guarda final ainda confere o livro do run, para o caso de uma
+    queda entre o fim da fase e o registro;
+  - a fase fechada cujo trecho citado não está mais na Stack volta a ser
+    verificada, sem nova implementação, e o G4 pergunta de novo. É assim que um
+    fluxo tirado do navegador por engano volta a ser cobrado;
+  - a guarda final da §127 o nomeia: "o fluxo N (…) não foi percorrido: o gate 4
+    abre a aplicação num navegador, e o contrato descreve o produto fora dele
+    («trecho», Pnn); as fases fecharam pelo código, sem prova do percurso". O
+    build termina com código 2, estado retomável, e a aplicação não é declarada
+    concluída. A mensagem diz como liberar o fluxo: se o produto se usa num
+    navegador, a Stack está errada; corrigida a Stack, o build seguinte reabre a
+    fase.
+- **`prompts/builder.ts`:** "crie o `start`" vale para produto usado num
+  navegador. Fora dele, o executor ouve que não deve criar manifesto, servidor
+  HTTP nem `start` só para o gate.
+- **`prompts/verifier.ts`:**
+  - "não provado" é do código e da evidência que o loop produz, não do que a
+    sessão consegue olhar. Nenhuma sessão abre janela nativa nem opera
+    dispositivo, então isso nunca é motivo de bloqueio. Pede-se só a prova que o
+    executor entrega com a infraestrutura aprovada, e "if the code does not
+    establish the behaviour, it is INCOMPLETE as before";
+  - o critério que prescreve COMO verificar é julgado pelo comportamento que ele
+    protege. Percorrer fluxos é do G4, que diz o que não percorreu;
+  - com fluxos na fase, para produto usado num navegador, honrar PORT e HOST,
+    com o endereço do plano como padrão, é exigência do harness: o G3 não pede
+    para tirar. Para produto fora do navegador, o G3 não pede para criar
+    servidor nem `start`. Um padrão que contradiz o plano continua sendo achado.
+    A frase "o gate de fluxos relata o que não percorreu" só aparece quando a
+    fase passa por ele.
+  - `runner.ts` passa `temFluxos` ao G3 com o mesmo critério do contexto do
+    executor.
+
+### 133.5 O que NÃO muda
+
+- A escada da §125, os orçamentos, os ciclos, a independência de quem repara, o
+  UPSTREAM e a revalidação por impacto.
+- Nenhum gate novo, nenhum estado novo de evidência (NOT_APPLICABLE com marca,
+  como o adiamento), nenhuma condição por provider, projeto ou stack.
+- O G4 de produto web: o roteiro é escrito e rodado como antes, o `start`
+  ausente continua cobrado do executor, e a triagem e a contestação continuam
+  iguais.
+- Nada passa a PASS. O fluxo fora do navegador nunca é prova: o build não se
+  declara concluído sem ele.
+- O preflight continua preparando o Chromium do harness quando o esqueleto tem
+  fluxos, mesmo num produto desktop. Custa tempo, não bloqueia.
+
+### 133.6 Testes: RED → GREEN
+
+`test/prompts/cooperacao-133.spec.ts` (12) e `test/loop/cooperacao-133.spec.ts`
+(19), 31 ao todo. Os casos do build inteiro usam Git real, provider falso e o
+runner de fluxos falso.
+
+- **Contra a `main` (0.7.6):** 25 dos 31 falham. Os 6 que passam são guardas
+  que a 0.7.6 já cumpria, porque nela não havia a saída nova. São estes: a marca
+  sem contrato não vale; a regressão e o fluxo já percorrido não saem pela
+  marca; o web sem `start` continua cobrado; o trecho tirado de um critério não
+  vale; e o bloco de PORT não aparece sem fluxos.
+- **Contra a primeira rodada da §133, antes da revisão:** 14 falham. Os do build
+  inteiro falham pelo motivo que a revisão apontou. O squash dava código 0 (o
+  PASS falso), a Stack corrigida não reabria a fase, o roteiro web inventado
+  travava o desktop e o híbrido gravava `fluxo-2` PASS.
+
+| item do pedido (§9) | onde |
+|---|---|
+| 1 defeito real continua detectado | web sem `start` continua reprovando; trecho fora do contrato continua cobrando o fluxo; suítes do G3/G4 existentes |
+| 2, 3 achado acionável e consolidado | prompt do G3 continua com "Report ALL" e os campos; suítes existentes de handoff |
+| 4 reparo do verificador com validação independente | suítes da §125 (sem mudança) |
+| 5 falha de roteiro não vira defeito do produto | trecho inválido vira `scriptFailed` (harness) |
+| 6 desktop sem obrigação artificial de servidor web | build desktop: fases no 1º ciclo, nenhum `package.json`, runner de fluxos nunca chamado, um roteirista só |
+| 7 web continua verificada | controle web: roteiro escrito e percorrido, build com código 0 |
+| 8 roteirista sem leitura não gera tentativas inúteis | prompt do roteirista e da triagem com leitura permitida |
+| 9, 10 evidência reaproveitada; sem prova repetida | decisão do G4 reaproveitada na fase; retomada sem roteirista |
+| 11, 12 execução progressiva, paralelismo, Git | suíte inteira (§130, `paralelo*.spec.ts`) |
+| 13 nada aprovado sem evidência | nenhum `fluxo-1` PASS; NOT_APPLICABLE "obrigação pendente"; guarda final com código 2, também na retomada e depois de reescrever o histórico; o híbrido sem PASS do fluxo de terminal |
+| 14 outros providers | prompts sem condição de provider; suíte de providers inteira |
+| 15 orçamentos | sem mudança; suítes existentes |
+
+`npm run check`: rc=0, 3234 testes em 170 arquivos (eram 3203 em 168). Duas
+rodadas antes dessa caíram uma vez cada, nas duas instabilidades conhecidas
+(`coerencia-temporal-127` "correm juntas" e `integridade-122` "15."), com load
+entre 10 e 13 em 4 CPUs. A primeira foi rodada contra a `main` na mesma carga,
+intercalada: falhou na mesma rodada nos dois códigos.
+
+### 133.7 Custo medido nos runs
+
+Medido no disco. O ganho com modelo real não está medido: os números do
+"depois" são do provider falso ou estimativa, e estão marcados assim.
+
+- **Luna:** o bloqueio da P02 custou 19 chamadas (5 executor, 7 G3, 5
+  roteirista, 2 reparos do verificador) e 22 min 21 s, 76% das chamadas do run.
+  Com o ajuste, o que sobra desse trecho é uma sessão de roteirista por fluxo
+  (estimativa: 2 chamadas) e nenhuma ação de reparo. No teste com provider falso
+  da mesma forma, a P02 caiu de 3 ciclos de executor e uma parada para um ciclo
+  e fase completa.
+- **Astra:** o roteiro custou 8 sessões de roteirista onde bastavam 2. A cadeia
+  do PORT/HOST custou 4 chamadas (uma correção do executor, duas releituras do
+  G3, um reparo do verificador) e deixou o produto sem escutar onde o G4 o
+  procura. O mesmo plano com Claude, que tem ferramenta de leitura, fechou as 6
+  fases no 1º ciclo com 4 sessões de roteirista.
+- **Caminho limpo:** nenhuma chamada nova. A única mudança de ordem é a redação
+  do roteiro antes da cobrança do `start`. Num produto web sem `start`, o
+  roteiro escrito fica no disco e é usado na passagem seguinte.
+
+### 133.8 Limitações e achados para decisão
+
+1. **Produto fora do navegador nunca fecha como "concluído".** É o que o pedido
+   manda: obrigação sem meio legítimo de prova fica pendente e nomeada. Um
+   percurso de CLI poderia ser feito pelo G4 com `comandoDoProjeto`, sem
+   `webServer`. Hoje o gate sempre sobe um servidor, e isso fica para outra §.
+2. **A marca depende da palavra do roteirista.** O trecho tem de estar na Stack
+   e o fluxo não pode ter sido percorrido antes. Ainda assim, um roteirista web
+   que cite uma linha verdadeira da Stack para fugir do roteiro tira o fluxo do
+   G4. Nenhum caminho o transforma em prova: a guarda final recusa o "concluído",
+   mostra o trecho citado e diz como liberar. Um campo estruturado de forma de
+   acesso no esqueleto (INIT) seria mais forte. É mudança de contrato do INIT, e
+   fica para decisão.
+3. **INIT e PLAN ainda dizem "num navegador"** (`interview/banco.ts`,
+   `contract/disponibilidade.ts`, `prompts/architecture.ts`,
+   `prompts/planning-scope.ts`). Foi daí que veio o critério de procedimento do
+   Luna, e é mudança de estágio, fora desta §.
+4. **G2 sem .NET** (`testcmd.ts`). A suíte xUnit do Luna nunca passou por um
+   gate. Achar o projeto de teste certo (sem `.sln` na raiz) é regra própria de
+   ecossistema, que não foi feita às cegas.
+5. **O reparo do verificador conta como mudança mesmo com a árvore igual**, e
+   libera o executor sem fato novo (Luna, ações 5 e 7). É deliberado na §125,
+   porque o reparo pode mudar o ambiente fora da árvore. No corpus vNext (6 runs,
+   14 defeitos) as tentativas de executor e verificador em ciclo ≥ 2 não
+   resolveram nada, mas a amostra é pequena e toda do Luna.
+6. **Assinatura de progresso por texto do CRITERION:** "percorrer" e
+   "demonstrar" contaram como falhas diferentes no Luna, e uma tentativa saiu
+   "com progresso". É a âncora da §127.
+7. **API direta como verificador não tem ferramenta de leitura nenhuma**
+   (`direct-api.ts`): G3, roteirista e triagem leem só o que vai no prompt. Sem
+   run de BUILD com API direta no disco.
+8. **No paralelo,** sem `start`, a primeira fase com fluxo ainda roda sozinha
+   (§110), e o aviso diz que ela vai criar o `start`. Num produto desktop isso
+   custa paralelismo e não bloqueia.
+9. **A árvore do `teste_c#` está alterada pelo incidente:** `package.json`, o
+   `HttpListener` em `src/Agenda/Program.cs` (sem commit) e roteiros web
+   inventados em `.capivara/flows/`. Antes de retomar esse run, apagar os
+   roteiros e o `package.json` e descartar a alteração do `Program.cs`. É
+   desfazer o que o incidente fez, não ajudar o harness.
+
+### 133.9 A revisão adversarial
+
+Duas revisões independentes sobre a primeira rodada: uma procurou falso PASS e
+requisito perdido, a outra procurou bloqueio novo e regressão em web e nos
+outros providers. As duas reproduziram o que acharam numa worktree fora do
+repositório. Tudo o que sobreviveu à conferência foi corrigido na segunda
+rodada (133.4) e virou teste (133.6):
+
+| achado | gravidade | reproduzido |
+|---|---|---|
+| revalidação sem G4 novo apagava a decisão; ledger reescrito sem ela; build com código 0 | alta | sim (squash; commit recusado e retomado) |
+| roteiro web inventado mais falta de `start`: o desktop ficava sem saída, e a contestação era tratada depois da cobrança | alta | sim |
+| híbrido gravava `fluxo-N` PASS para o fluxo não percorrido | alta/média | sim, nas duas revisões |
+| a marca valia para a regressão e aceitava trecho de task ou de critério | média | sim |
+| a marca só era lida na redação e sem cerca de código | média | sim |
+| pontuação final recusava a citação correta | baixa | sim |
+| o G3 de um desktop lia que o gate sobe `start` com PORT/HOST | baixa/média | raciocínio |
+| a frase do gate de fluxos aparecia com `--no-flows` | baixa | raciocínio |
+| G4 pintado de verde na fase pulada que não percorreu o fluxo | baixa | raciocínio |
+
+Os pontos confirmados como corretos incluem:
+- a permissão de leitura não dá a nenhum provider o que o G3 já não tinha:
+  codex `--sandbox read-only`, claude `-p`, opencode com `bash: deny`, cursor
+  `--mode ask`, agy `--sandbox`;
+- ninguém lia a frase antiga;
+- os campos novos (`fases.json`, `PhaseOutcome`, `fora-do-navegador-N`) são
+  opcionais e compatíveis com os registros anteriores;
+- o caminho limpo de um produto web não ganhou chamada.
+
+Uma terceira revisão, só da segunda rodada, foi pedida antes do commit.

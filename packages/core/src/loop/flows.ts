@@ -19,7 +19,7 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdir, readFile, readdir, writeFile, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile, stat } from "node:fs/promises";
 import { join, resolve as resolvePath } from "node:path";
 import type { SkeletonWorkflow } from "../contract/index.js";
 import { FORA_DO_NAVEGADOR, extractFlowScript, lerForaDoNavegador, lerTriagem, stepLabel, type Triagem } from "../prompts/index.js";
@@ -700,13 +700,15 @@ export type FlowGateResult =
    * três vezes seguidas, não havia no disco uma linha do que o Playwright tinha
    * dito — e sem isso o diagnóstico vira adivinhação.
    */
-  | { green: true; skipped: string; scripts: string[]; output?: string; naoPercorridos?: NaoPercorrido[] }
+  | { green: true; skipped: string; scripts: string[]; output?: string; naoPercorridos?: NaoPercorrido[]; perguntouSemStart?: boolean }
   | {
       green: false;
       cause: string;
       output?: string;
       /** Fora do navegador, mesmo quando outro fluxo reprovou: a pendência é registrada de qualquer forma. */
       naoPercorridos?: NaoPercorrido[];
+      /** A pergunta sem `start` chegou ao roteirista nesta passagem (§133): só então ela se gasta. */
+      perguntouSemStart?: boolean;
       /** O veredito da triagem, quando ela correu e foi legível. */
       triagem?: Triagem;
       toolMissing?: boolean;
@@ -821,8 +823,13 @@ export function ehEsquemaAusente(erros: readonly string[]): boolean {
  */
 export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   const naoPercorridos: NaoPercorrido[] = [];
-  const resultado = await percorrerFluxos(options, naoPercorridos);
-  return naoPercorridos.length > 0 ? { ...resultado, naoPercorridos } : resultado;
+  const sinais = { perguntouSemStart: false };
+  const resultado = await percorrerFluxos(options, naoPercorridos, sinais);
+  return {
+    ...resultado,
+    ...(naoPercorridos.length > 0 ? { naoPercorridos } : {}),
+    ...(sinais.perguntouSemStart ? { perguntouSemStart: true } : {}),
+  };
 }
 
 /**
@@ -835,10 +842,11 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
 export function citaOContrato(trecho: string, contrato: string): boolean {
   const normal = (texto: string): string => texto.replace(/[`*_]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
   const citado = normal(trecho);
-  return citado.split(" ").length >= 3 && normal(contrato).includes(citado);
+  // Dentro de uma linha: a citação que costura duas, ou pega o título, não é a frase de ninguém.
+  return citado.split(" ").length >= 3 && contrato.split(/\r?\n/).some((linha) => !linha.startsWith("#") && normal(linha).includes(citado));
 }
 
-async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPercorrido[]): Promise<FlowGateResult> {
+async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPercorrido[], sinais: { perguntouSemStart: boolean }): Promise<FlowGateResult> {
   const announce = options.announce ?? ((): void => {});
   const preferida = options.preferredPort ?? FLOW_PORT;
   // `let`: a colisão na porta do próprio gate troca a porta uma vez (§107).
@@ -890,7 +898,7 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
    * cobrado.
    */
   const jaPercorridos = new Set([...regressao.map((workflow) => workflow.number), ...(options.jaPercorridos ?? [])]);
-  const foraDaResposta = (workflow: SkeletonWorkflow, resposta: string): { trecho: string } | { problema: string } | null => {
+  const foraDaResposta = async (workflow: SkeletonWorkflow, resposta: string): Promise<{ trecho: string } | { problema: string } | null> => {
     const trecho = lerForaDoNavegador(resposta);
     if (trecho === null || /\btest(?:\.step)?\s*\(/.test(extractFlowScript(resposta))) return null;
     if (!options.workflows.some((atual) => atual.number === workflow.number) || jaPercorridos.has(workflow.number)) {
@@ -903,6 +911,12 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
       naoPercorridos.push({ number: workflow.number, trecho });
       announce(`fluxo ${workflow.number} (${workflow.name}) NÃO percorrido: o contrato descreve o produto fora do navegador — «${trecho}»`);
     }
+    /*
+     * O roteiro que existia para ele — web, inventado — sai do disco: é do harness,
+     * e deixá-lo faria a passagem seguinte da fase rodá-lo de novo, sem perguntar.
+     * Sem roteiro, o fluxo volta à redação, onde a decisão já tomada responde.
+     */
+    await rm(join(pasta, flowScriptName(workflow.number)), { force: true });
     return { trecho };
   };
 
@@ -932,7 +946,7 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
         `roteiro do workflow ${workflow.number} (${workflow.name})` + (tentativa > 1 ? ` — tentativa ${tentativa}` : ""),
       );
       const resposta = await options.author(workflow, rejeitado, baseUrl, passagemDe(workflow));
-      const fora = foraDaResposta(workflow, resposta);
+      const fora = await foraDaResposta(workflow, resposta);
       if (fora !== null && "trecho" in fora) {
         gravado = true;
         break;
@@ -1018,7 +1032,7 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
         baseUrl,
         passagemDe(workflow),
       );
-      const fora = foraDaResposta(workflow, resposta);
+      const fora = await foraDaResposta(workflow, resposta);
       if (fora !== null && "trecho" in fora) continue;
       const script = extractFlowScript(resposta);
       const defeitos = fora !== null ? [{ problem: fora.problema, hint: "" }] : checkFlowScript(script, workflow);
@@ -1050,10 +1064,12 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
     if (options.confirmarSemStart === true) {
       const daFase = options.workflows.filter((workflow) =>
         !jaPercorridos.has(workflow.number) && scripts.includes(flowScriptName(workflow.number)));
+      // Só conta como feita quando chegou a alguém: a passagem que reprovou antes não a gasta.
+      if (daFase.length > 0) sinais.perguntouSemStart = true;
       for (const workflow of daFase) {
         announce(`o projeto não declara \`start\`: o roteirista confirma se o fluxo ${workflow.number} se percorre num navegador`);
         const resposta = await options.author(workflow, [MOTIVO_SEM_START], baseUrl, passagemDe(workflow));
-        const fora = foraDaResposta(workflow, resposta);
+        const fora = await foraDaResposta(workflow, resposta);
         if (fora !== null) continue;
         const script = extractFlowScript(resposta);
         if (checkFlowScript(script, workflow).length === 0) await writeFile(join(pasta, flowScriptName(workflow.number)), comMarca(script), "utf8");
@@ -1150,7 +1166,7 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
       let problemas = ["nenhuma correção executável foi entregue"];
       for (let tentativa = 1; tentativa <= tentativas; tentativa += 1) {
         const resposta = await options.author(workflow, rejeitado, baseUrl, passagemDe(workflow));
-        const fora = foraDaResposta(workflow, resposta);
+        const fora = await foraDaResposta(workflow, resposta);
         if (fora !== null && "trecho" in fora) {
           problemas = [];
           break;
@@ -1363,7 +1379,9 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
           cause: `O roteirista não entregou uma correção executável. Isto é do harness; não executar de novo o roteiro antigo nem devolver o produto ao executor.\n${falhas.join("\n")}`,
         };
       }
-      if (await readFile(caminhoDoRoteiro, "utf8") === antesDaCorrecao) return {
+      const numeroDaTriagem = triada.workflow.number;
+      const saiuDoNavegador = naoPercorridos.some((fluxo) => fluxo.number === numeroDaTriagem);
+      if (!saiuDoNavegador && await readFile(caminhoDoRoteiro, "utf8").catch(() => null) === antesDaCorrecao) return {
         green: false, scriptFailed: true, output: run.output,
         falharam: fluxosQueFalharam(run.output, ordem), triagem: triada.triagem,
         cause: `O roteirista não alterou o roteiro que já falhou no ${passoEmFalha}. Isto é do harness; ` +

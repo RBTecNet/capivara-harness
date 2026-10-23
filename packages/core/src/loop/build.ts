@@ -692,8 +692,9 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
     const esqueleto = options.skipFlows === true ? null : (options.skeleton ?? null);
     /** A Stack de agora: a decisão "fora do navegador" de uma fase fechada só vale enquanto o trecho citado estiver nela (§133). */
     const stackAtual = stackDoSkeleton(await readFile(join(options.projectRoot, ".capivara/init/skeleton.md"), "utf8").catch(() => ""));
+    // Sem gate de fluxos nesta execução, nada reabre por isso: o G4 nem poderia perguntar de novo.
     const trechoQueSaiu = (fechada: { foraDoNavegador?: { workflow: string; trecho: string }[] } | undefined) =>
-      fechada?.foraDoNavegador?.find((fluxo) => !citaOContrato(fluxo.trecho, stackAtual));
+      esqueleto === null ? undefined : fechada?.foraDoNavegador?.find((fluxo) => !citaOContrato(fluxo.trecho, stackAtual));
     if (options.skipFlows !== true && esqueleto === null) {
       announce("aviso: sem esqueleto legível, o gate 4 não percorre fluxo nenhum nesta execução");
     }
@@ -1022,7 +1023,14 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
     /** O que toda fase verde deixa: o registro no ledger e os fluxos como regressão das seguintes. */
     const aposVerde = async (session: PhaseSession, outcome?: PhaseOutcome): Promise<void> => {
       const fechadaEm = now().toISOString();
-      const foraDoNavegador = outcome && (outcome.status === "complete" || outcome.status === "already-implemented") ? outcome.foraDoNavegador ?? [] : [];
+      /*
+       * Sem gate de fluxos (`--no-flows`), a fase não decidiu nada sobre eles: o
+       * registro anterior continua valendo, e reescrevê-lo sem o campo faria a
+       * execução seguinte contar o fluxo como cumprido (§133).
+       */
+      const foraDoNavegador = esqueleto === null
+        ? shaFechado.get(shaDaFase(session.markdown))?.foraDoNavegador ?? []
+        : outcome && (outcome.status === "complete" || outcome.status === "already-implemented") ? outcome.foraDoNavegador ?? [] : [];
       const fatia = arquitetura.fatia(session.number);
       // O commit que o git recusou: o código ficou na árvore, e nenhum HEAD o contém — sem HEAD no registro, e revalidada depois.
       const semCommit = checked.commitsEnabled && outcome?.status === "complete" && !outcome.committed;
@@ -1156,7 +1164,9 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
           options.onProgress?.({ kind: "gate", id: session.id, gate, state: "verde", cycle: 0 });
         }
         if (fluxosDaFase !== null) {
-          options.onProgress?.({ kind: "gate", id: session.id, gate: "G4", state: "verde", cycle: 0 });
+          // O fluxo que ficou fora do navegador não foi aberto: neutro, como no ramo da fase fechada antes (§133).
+          const naoAberto = (shaFechado.get(shaDaFase(session.markdown))?.foraDoNavegador?.length ?? 0) > 0;
+          options.onProgress?.({ kind: "gate", id: session.id, gate: "G4", state: naoAberto ? "neutro" : "verde", cycle: 0 });
         }
         options.onProgress?.({ kind: "phase", id: session.id, state: "concluído", cycle: 0, detail: "concluída antes" });
         /*

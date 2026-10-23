@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FLOWS_DIR, gate4, runBuild, type EngineCall, type EngineResult } from "../../src/loop/index.js";
-import { MOTIVO_SEM_START } from "../../src/loop/flows.js";
+import { FLOW_MARK, MOTIVO_SEM_START, citaOContrato } from "../../src/loop/flows.js";
 import type { BuildOptions } from "../../src/loop/index.js";
 import { LivroDeEvidencias } from "../../src/loop/evidencias.js";
 import { lerFasesFechadas } from "../../src/loop/ledger.js";
@@ -459,4 +459,122 @@ describe("§133 · revisão adversarial: o build inteiro", () => {
     expect(fluxos.passagens).toEqual([["workflow-1.spec.ts"]]);
     expect(anuncios.join("\n")).toContain("que a Stack atual não traz");
   }, 90_000);
+});
+
+describe("§133 · terceira revisão: a decisão e a pergunta sem `start` de ponta a ponta", () => {
+  const OUTRO: SkeletonWorkflow = { number: "2", name: "Consultar o dia", steps: ["Consultar o dia."] };
+  const corpo = (workflow: SkeletonWorkflow): string => roteiro(workflow).replace(/^```ts\n/, "").replace(/\n```$/, "");
+  const FALHOU2 = {
+    exitCode: 1,
+    output:
+      "  ✘  2 [workflow-2] › workflow-2.spec.ts:8:5 › workflow 2 (1.0m)\n" +
+      "  1) [workflow-2] › workflow-2.spec.ts:8:5 › passo 1: Rodar a exportação.\n" +
+      "    waiting for getByRole('button', { name: 'Exportar' })\n  1 failed",
+  };
+  const semRunner = async (): Promise<{ exitCode: number; output: string }> => {
+    throw new Error("nenhum navegador deveria abrir");
+  };
+
+  it("a pergunta sem `start` só se gasta quando foi feita: a redação que reprova antes não a consome", async () => {
+    const esqueleto = await publicar(DESKTOP, [FLUXO, OUTRO]);
+    let doSegundo = 0;
+    const engine = motor(false, (prompt) => {
+      if (prompt.includes(MOTIVO_SEM_START)) return `${FORA_DO_NAVEGADOR}: ${DESKTOP}`;
+      if (prompt.includes(`workflow 2: ${OUTRO.name}`)) return ++doSegundo <= 2 ? "não consigo escrever agora" : `${FORA_DO_NAVEGADOR}: ${DESKTOP}`;
+      return roteiro(FLUXO);
+    });
+    const fluxos = corredor();
+    const { outcome, anuncios } = await construir(esqueleto, engine, fluxos.runner);
+    expect(outcome.phases.map((fase) => [fase.id, fase.outcome.status]), anuncios.join("\n")).toEqual([["P01", "complete"], ["P02", "complete"]]);
+    // O executor nunca é mandado criar `start` num desktop.
+    expect(engine.chamadas.filter((chamada) => chamada.role === "builder" && chamada.phase.id === "P02").every((chamada) => chamada.attempt === 1)).toBe(true);
+    expect(fluxos.passagens).toEqual([]);
+    const erro = outcome.errors.join("\n");
+    expect(erro).toContain("o fluxo 1 (Cadastrar compromisso) não foi percorrido");
+    expect(erro).toContain("o fluxo 2 (Consultar o dia) não foi percorrido");
+  }, 90_000);
+
+  it("a reescrita pela triagem ROTEIRO que responde com a marca não vira 'o roteirista não alterou'", async () => {
+    await mkdir(join(projectRoot, FLOWS_DIR), { recursive: true });
+    await writeFile(join(projectRoot, FLOWS_DIR, "workflow-1.spec.ts"), `${FLOW_MARK}\n${corpo(FLUXO)}\n`, "utf8");
+    await writeFile(join(projectRoot, FLOWS_DIR, "workflow-2.spec.ts"), `${FLOW_MARK}\n${corpo(TERMINAL)}\n`, "utf8");
+    const passagens: string[][] = [];
+    const resultado = await gate4({
+      projectRoot, workflows: [FLUXO, TERMINAL], startCommand: "npm start", contratoCertificado: `## Stack\n- ${WEB}\n- ${EXPORTACAO}`,
+      author: async (workflow) => (workflow.number === "2" ? `${FORA_DO_NAVEGADOR}: ${EXPORTACAO}` : roteiro(workflow)),
+      triagem: async () => ["CAPIVARA_TRIAGEM: ROTEIRO", "CAPIVARA_EVIDENCIA: não há página de exportação", "CAPIVARA_ONDE: cli", "CAPIVARA_CRITERIO: task 1", "CAPIVARA_CORRECAO: o fluxo 2 é de terminal"].join("\n"),
+      runner: async (_raiz, scripts) => {
+        passagens.push([...scripts]);
+        return scripts.includes("workflow-2.spec.ts") ? FALHOU2 : { exitCode: 0, output: "1 passed" };
+      },
+    });
+    if (!resultado.green) throw new Error(resultado.cause);
+    expect(resultado.naoPercorridos).toEqual([{ number: "2", trecho: EXPORTACAO }]);
+    expect(passagens.at(-1)).toEqual(["workflow-1.spec.ts"]);
+  });
+
+  it("a decisão alcança a passagem seguinte da fase: o roteiro inventado não volta a rodar", async () => {
+    const contrato = `## Stack\n- ${DESKTOP}`;
+    await mkdir(join(projectRoot, FLOWS_DIR), { recursive: true });
+    await writeFile(join(projectRoot, FLOWS_DIR, "workflow-1.spec.ts"), `${FLOW_MARK}\n${corpo(FLUXO)}\n`, "utf8");
+    // O mesmo atalho do runner: a decisão tomada nesta fase responde sem nova sessão.
+    const decidido = new Map<string, string>();
+    let sessoes = 0;
+    const author = async (workflow: SkeletonWorkflow, rejeitado: readonly string[]): Promise<string> => {
+      const ja = decidido.get(workflow.number);
+      if (ja !== undefined && rejeitado.length === 0) return `${FORA_DO_NAVEGADOR}: ${ja}`;
+      sessoes += 1;
+      return rejeitado.includes(MOTIVO_SEM_START) ? `${FORA_DO_NAVEGADOR}: ${DESKTOP}` : roteiro(workflow);
+    };
+    const primeira = await gate4({ projectRoot, workflows: [FLUXO], startCommand: null, contratoCertificado: contrato, confirmarSemStart: true, author, runner: semRunner });
+    for (const fluxo of primeira.naoPercorridos ?? []) decidido.set(fluxo.number, fluxo.trecho);
+    const segunda = await gate4({ projectRoot, workflows: [FLUXO], startCommand: null, contratoCertificado: contrato, author, runner: semRunner });
+    if (!segunda.green) throw new Error(segunda.cause);
+    expect(segunda.naoPercorridos).toEqual([{ number: "1", trecho: DESKTOP }]);
+    expect(sessoes).toBe(1);
+  });
+
+  it("a citação vale dentro de uma linha da Stack, não costurando duas", () => {
+    const stack = `## Stack\n- ${DESKTOP}\n- Banco de dados: SQLite em arquivo local`;
+    expect(citaOContrato(DESKTOP, stack)).toBe(true);
+    expect(citaOContrato("compatível com Windows e Linux - Banco de dados", stack)).toBe(false);
+    expect(citaOContrato("Stack - Interface visual: Avalonia", stack)).toBe(false);
+  });
+
+  it("um build com `--no-flows` não apaga a pendência da fase, nem a reabre", async () => {
+    const esqueleto = await publicar(DESKTOP);
+    await construir(esqueleto, motor(false), corredor().runner);
+    const raiz = await git(["rev-list", "--max-parents=0", "HEAD"]);
+    await git(["reset", "--soft", raiz]);
+    await git(["commit", "-q", "-m", "feat: tudo junto"]);
+    await runBuild({
+      projectRoot, language: "português do Brasil", engine: "codex", call: motor(false).call, sleep: async () => undefined,
+      environment: { XDG_CACHE_HOME: cache }, skipAcceptance: true, explicitTestCommand: "true",
+      testRunner: async () => ({ exitCode: 0, output: "1 passed" }), skeleton: esqueleto, skipFlows: true, announce: () => undefined,
+    });
+    expect((await lerFasesFechadas(projectRoot)).find((fase) => fase.id === "P02")?.foraDoNavegador).toEqual([{ workflow: "1", trecho: DESKTOP }]);
+    // Outro run (o plano mudou fora das fases), com fluxos: a pendência continua nomeada.
+    const plano = await readFile(join(projectRoot, ".capivara", "init", "project-phases.md"), "utf8");
+    await writeFile(join(projectRoot, ".capivara", "init", "project-phases.md"), plano.replace("Persistência e calendário.", "Persistência e calendário, revisado."), "utf8");
+    await certifyCurrentPlan(projectRoot);
+    await git(["add", "-A"]);
+    await git(["commit", "-q", "-m", "docs: overview"]);
+    const { outcome } = await construir(esqueleto, motor(false), corredor().runner);
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.errors.join("\n")).toContain("o fluxo 1 (Cadastrar compromisso) não foi percorrido");
+  }, 180_000);
+
+  it("`--rebuild-all` pergunta de novo ao roteirista: quem refaz tudo não confia na decisão antiga", async () => {
+    const esqueleto = await publicar(DESKTOP);
+    await construir(esqueleto, motor(false), corredor().runner);
+    const segunda = motor(false);
+    const outcome = await runBuild({
+      projectRoot, language: "português do Brasil", engine: "codex", call: segunda.call, sleep: async () => undefined,
+      environment: { XDG_CACHE_HOME: cache }, skipAcceptance: true, explicitTestCommand: "true",
+      testRunner: async () => ({ exitCode: 0, output: "1 passed" }), skeleton: esqueleto, flowRunner: corredor().runner,
+      rebuildAll: true, announce: () => undefined,
+    });
+    expect(outcome.exitCode).toBe(2);
+    expect(roteiristas(segunda).length).toBeGreaterThan(0);
+  }, 120_000);
 });

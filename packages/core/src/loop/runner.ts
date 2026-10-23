@@ -572,7 +572,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
    * ela, e o fluxo virava cumprido sem ter sido percorrido. Vale enquanto o trecho
    * estiver na Stack de agora e nenhum percurso posterior o tiver provado.
    */
-  for (const workflow of options.flows?.workflows ?? []) {
+  // `--rebuild-all` não confia no que está lá (as provas da fase são invalidadas abaixo): o roteirista decide de novo.
+  for (const workflow of options.refazer === true ? [] : options.flows?.workflows ?? []) {
     const registro = livro.atual(session.id, `fora-do-navegador-${workflow.number}`)?.evidence;
     const trecho = registro?.inputs.extra?.["trecho"];
     if (registro?.inputs.extra?.["marca"] !== MARCA_FORA_DO_NAVEGADOR || typeof trecho !== "string" || !citaOContrato(trecho, stackCertificada)) continue;
@@ -1626,7 +1627,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       return "vermelho";
     }
     triagensNoCiclo = 0;
-    if (confirmouSemStart) perguntouSemStart = true;
+    if (g4.perguntouSemStart === true) perguntouSemStart = true;
     for (const { number, trecho } of g4.naoPercorridos ?? []) {
       if (foraDoNavegador.get(number) === trecho) continue;
       foraDoNavegador.set(number, trecho);
@@ -2595,7 +2596,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         if (await g2Valido()) gate("G2", "verde", ciclosAbertos);
         if (await g3Valido()) gate("G3", "verde", ciclosAbertos);
         const fluxosAgora = livro.atual(session.id, "fluxos");
-        if (options.flows && fluxosAgora && fluxosAgora.validity.state === "VALID" && fluxosAgora.evidence.outcome !== "REPAIR_REQUIRED" && fluxosAgora.evidence.inputs.code?.tree === codigo.atual.tree) gate("G4", "verde", ciclosAbertos);
+        // NOT_APPLICABLE (fora do navegador, regressão provada) é neutro, como na primeira passagem: verde diria que a aplicação foi aberta (§133).
+        if (options.flows && fluxosAgora && fluxosAgora.validity.state === "VALID" && fluxosAgora.evidence.outcome !== "REPAIR_REQUIRED" && fluxosAgora.evidence.inputs.code?.tree === codigo.atual.tree) gate("G4", fluxosAgora.evidence.outcome === "NOT_APPLICABLE" ? "neutro" : "verde", ciclosAbertos);
         await transicao({
           tipo: "ciclo",
           defeitos: estado.defects.filter((defeito) => defeito.status === "OPEN" || defeito.status === "ESCALATED").map((defeito) => defeito.defectId),

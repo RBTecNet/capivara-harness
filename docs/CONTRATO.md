@@ -1,6 +1,6 @@
 # O contrato da Capivara — INIT, PLAN e BUILD
 
-Versão **0.7.8** (com a execução progressiva das fases, §130, a preparação, o raciocínio e o catálogo de modelos do §131, o ensaio do §132 e o produto fora do navegador do §133). Este documento descreve, num lugar só, o que cada estágio da
+Versão **0.7.8** (com a execução progressiva das fases, §130, a preparação, o raciocínio e o catálogo de modelos do §131, o ensaio do §132 e o produto fora do navegador do §133; a conclusão pela suíte e o G4 de terminal da §134 estão na branch dela, ainda sem versão própria). Este documento descreve, num lugar só, o que cada estágio da
 Capivara recebe, decide, produz e não pode fazer, e como o trabalho passa de um
 para o outro. O porquê de cada regra está numerado em `docs/PLANO.md` (§NNN); o
 estado do trabalho, em `docs/HANDOFF.md`. Quando este documento e o código
@@ -280,18 +280,36 @@ flowchart TD
    |---|---|---|
    | G0 | o engine terminou, sem recusa nem erro | julgar o código |
    | G1 | a sessão escreveu código (sinal) | aprovar |
-   | G2 | a suíte do projeto, pelo loop, num banco descartável | ler critérios |
+   | G2 | a suíte do projeto, pelo loop, num banco descartável (inclusive `dotnet test` de cada projeto de teste .NET, §134) | ler critérios |
    | G3 | cada task contra os critérios, por um verificador read-only | rodar a suíte inteira |
-   | G4 | cada fluxo declarado, num navegador, com a aplicação de pé | duplicar teste unitário; exigir navegador de produto que não o tem |
+   | G4 | cada fluxo declarado, percorrido num navegador com a aplicação de pé, ou num terminal por comandos e resultados; fora dos dois, provado passo a passo pela suíte do projeto | duplicar teste unitário; exigir navegador ou servidor de produto que não o tem |
 
-   Produto usado fora do navegador (§133) — janela nativa, programa de terminal,
-   biblioteca —: o roteirista cita a linha da Stack que o diz
-   (`CAPIVARA_FORA_DO_NAVEGADOR`), o harness a confere, e o fluxo fica **não
-   percorrido**: obrigação pendente, nunca PASS, sem servidor pedido ao executor. As
-   fases fecham pelo código; a aplicação não é declarada concluída, e a guarda final
-   nomeia o fluxo e o trecho. Se a Stack mudar, a fase reabre e o G4 pergunta de novo.
-   O verificador não bloqueia por observação que nenhuma sessão faz (abrir janela,
-   "confirmar visualmente"), e sabe que honrar `PORT`/`HOST` é exigência do harness.
+   Programa de terminal (§134): no produto puramente de terminal pela Stack
+   (nenhuma interface gráfica), o roteirista percorre o fluxo só com
+   `comandoDoProjeto`, rodando o produto (nunca a suíte de testes dele), e o gate
+   roda o roteiro sem `webServer` e sem cobrar `start`. No produto híbrido, o
+   gate sobe o servidor como sempre.
+
+   Produto usado fora do navegador e do terminal (§133, §134) — janela nativa,
+   dispositivo, biblioteca —: o roteirista cita a linha da Stack que o diz
+   (`CAPIVARA_FORA_DO_NAVEGADOR`) e, na mesma resposta, o teste da suíte do
+   projeto que prova cada passo (`CAPIVARA_PROVA: passo <n> — <arquivo> :: <teste>`)
+   ou o porquê de não haver (`CAPIVARA_SEM_PROVA`). O harness confere:
+   - o trecho, na Stack, que não pode ser a linha que declara navegador;
+   - cada citação: arquivo do projeto, e o relatório do próprio runner mostrando
+     o teste aprovado nesta execução do G2 sobre este código. Hoje esse
+     relatório existe no .NET (TRX, gravado pelo G2 em `.capivara/tmp`); nas
+     outras suítes a citação é recusada e o passo fica pendente.
+
+   Com todo passo provado, o fluxo é cumprido (`fluxo-N` PASS, marca da prova
+   pela suíte). Senão, fica **não percorrido**: obrigação pendente, nunca PASS,
+   sem servidor nem teste pedido ao executor, com os passos nomeados na guarda
+   final. Compilar, abrir ou a suíte verde sozinha não provam passo nenhum. A
+   fase com pendência volta a ser verificada, sem implementação, na execução
+   seguinte; se a Stack mudar, a fase reabre e o G4 pergunta de novo. O
+   verificador não bloqueia por observação que nenhuma sessão faz (abrir janela,
+   "confirmar visualmente"), e sabe que honrar `PORT`/`HOST` é exigência do
+   harness.
 
 5. **Evidências e impacto**: cada prova vale para a árvore, o comando e o ambiente em
    que foi obtida; uma mudança refaz só a prova que atingiu (a suíte prova o produto

@@ -13963,3 +13963,380 @@ ecossistema que `startCommandFor` não reconhece, o `start` falta sempre e o G4
 web reprova de qualquer forma; isso já era assim antes da §133. Também já
 existia, e continua, a lacuna da fase fechada com `--no-flows`: os fluxos dela
 contam como cumpridos depois. Não é desta §.
+
+## §134 — A conclusão pela evidência que a plataforma permite
+
+A §133 parou de exigir navegador de um produto que não tem um. Mas o fluxo
+ficou sem saída: o fluxo fora do navegador era pendência para sempre, e o build
+terminava com código 2 com o produto funcionando. O pedido desta § é concluir a
+obrigação funcional com evidência compatível com a plataforma, sem dispensá-la
+e sem exigir ferramenta inadequada. As regras eram:
+- estender o que existe, sem G4 novo e sem framework de teste por plataforma;
+- não declarar PASS sem verificação, não transformar NOT_APPLICABLE em PASS;
+- não mudar nada no que os projetos web já fazem.
+
+### 134.1 A evidência
+
+| fonte | o que mostra |
+|---|---|
+| `build-521a72e8dbb5` (Luna), `evidence.jsonl` | `P01.suite.1`, `P02.suite.1..3`: G2 `NOT_APPLICABLE`, "nenhum comando de teste resolvido", nas quatro passagens |
+| `.capivara/init/architecture.md` e `environment.json` do Luna | o PLAN declara `Microsoft.NET.Test.Sdk`, `xunit` e `xunit.runner.visualstudio` como "o executor da stack .NET exigido para a construção" |
+| a árvore do Luna | `tests/Agenda.Tests/Agenda.Tests.csproj` (P01) com `PersistenciaTests.cs`, e `AgendaInterfaceTests.cs` (P02, não commitado) |
+| cópia da árvore, `dotnet test tests/Agenda.Tests/Agenda.Tests.csproj` | 13 aprovados, rc=0, 21 s; com um teste quebrado de propósito, a saída traz `[xUnit.net …] … [FAIL]` e `Com falha … [24 ms]` |
+| teste "13 — retomar" da §133 | a retomada não muda nada: o fluxo pendente fica pendente, e não há como a fase fechada provar o fluxo depois |
+| o prompt do roteirista na 0.7.8 | "a program used in a terminal" estava na lista da marca, e a configuração do G4 sempre tinha `webServer` |
+
+O run de controle `build-b6b412dad19e` continua fora do disco (133.1).
+
+### 134.2 A matriz
+
+| mecanismo existente | comportamento atual | divergência comprovada | correção mínima | evidência de regressão | resultado |
+|---|---|---|---|---|---|
+| G2, `testcmd.ts` | Sail, composer, artisan, npm, pytest, go, cargo; o resto é `null` | Luna: suíte contratada e presente, nunca executada; o G3 julgou o desktop só pela leitura | cada projeto de teste .NET (SDK de teste, `MSTest.Sdk` ou `<IsTestProject>true`) vira `dotnet test <projeto>` com o relatório TRX em `.capivara/tmp`, depois de todos os outros ecossistemas; a busca não desce em dependência, pasta oculta ou subprojeto de outro ecossistema | 5 testes; na árvore real do Luna resolve `dotnet test tests/Agenda.Tests/Agenda.Tests.csproj …` | GREEN |
+| identidade do defeito do G2, `testesQueFalharam` | sem padrão .NET | G2 vermelho de .NET sem nome de teste | a linha `[FAIL]` do xUnit e a `Failed`/`Com falha` do VSTest | 1 teste | GREEN |
+| configuração do G4, `renderFlowConfig` | sempre `webServer` | um CLI não se percorre: com `start` o gate espera uma porta que nunca abre; sem `start`, "não sabe como subir" | sem `webServer` quando nenhum roteiro da passagem abre a aplicação (`roteiroUsaOServidor`, conservador) | 3 testes de gate, 1 de build | GREEN |
+| cobrança do `start` no G4 | sempre que falta | o CLI recebia pedido de entrypoint HTTP | só quando algum roteiro abre a aplicação | os mesmos | GREEN |
+| prompt do roteirista | programa de terminal → marca | o ajudante `comandoDoProjeto` já percorre comandos e resultados | terminal → roteiro só com `comandoDoProjeto`; a marca fica para janela nativa, dispositivo e biblioteca | 2 testes de prompt | GREEN |
+| a marca fora do navegador (§133) | pendência para sempre | não havia como concluir o fluxo com evidência da plataforma | na mesma resposta, o roteirista cita o teste da suíte que prova cada passo; o Core confere a citação no relatório do runner (o teste rodou e passou nesta execução do G2); tudo provado vira `fluxo-N` PASS com marca própria; o resto continua pendente, passo a passo | testes de prova, de relatório e de build | GREEN |
+| livro de evidências | `fora-do-navegador-N` NOT_APPLICABLE | — | mesma API e mesmos estados: a marca `capivara-prova-pela-suite/v1` no PASS; `provas`, `semProva` e `arvoreDaResposta` no `extra` | testes 4 e 13 | GREEN |
+| revalidação seletiva (§125) | a decisão da fase responde sem sessão | — | a resposta refeita leva as provas; depois de um reparo, o Core reconfere sem sessão, e só o código novo que derruba a prova volta ao roteirista | teste 10 | GREEN |
+| retomada, `fases.json` | a fase fechada com pendência é pulada | beco: o teste que chegou depois nunca é lido | a fase com pendência volta a ser verificada, sem implementação, na execução seguinte; sem nada novo, sem sessão nenhuma | 2 testes | GREEN |
+| guarda final | nomeia o fluxo | não dizia qual passo faltava; e a prova pela suíte não era reconferida | nomeia os passos e o porquê; reconfere as citações no código entregue | 2 testes | GREEN |
+| `jaPercorridos` | toda a regressão | a fase que cobre de novo um fluxo provado pela suíte não podia usar a marca | só o que foi aberto num navegador | 1 teste | GREEN |
+| G3 | leitura do código, todos os achados de uma vez, observação impossível não bloqueia (§133) | — | — | suíte da §133 | ATENDIDO |
+| `NOT_APPLICABLE` | `fora-do-navegador-N` é a estratégia web que não se aplica | — | continua NOT_APPLICABLE e nunca vira PASS; o PASS é só o `fluxo-N` que a suíte prova | testes 5, 7, 9 | ATENDIDO |
+| aceitação operacional, `acceptance.ts` | não conhece .NET: pula, e pular é aceitar | não bloqueia, logo não é bloqueio artificial | nenhuma (134.8) | — | NÃO MEXIDO |
+| paralelismo, execução progressiva | — | — | — | teste 12, suítes da §97 e da §130 | ATENDIDO |
+
+### 134.3 As causas
+
+1. **O G2 não conhecia .NET.** O mecanismo que comprova funcionamento por
+   execução real existia: a suíte do projeto, rodada pelo loop, com código de
+   saída. Ele presumia Node, PHP, Python, Go ou Rust. No Luna a suíte que o PLAN
+   contratou nunca rodou, e a única evidência do desktop foi a leitura do G3.
+2. **A saída da §133 não tinha chegada.** O fluxo fora do navegador era
+   registrado como C (a estratégia não se aplica), mas A (comprovado) só existia
+   por percurso. Nenhuma evidência compatível com um desktop podia concluí-lo.
+3. **O programa de terminal foi mandado para a marca.** O ajudante
+   `comandoDoProjeto` já roda comandos e devolve código e saída, mas a
+   configuração do G4 sempre subia `webServer` e o prompt tratava terminal como
+   fora do navegador. É a correção pela metade.
+4. **A pendência não era retomável.** A fase fechada com pendência era pulada
+   em toda execução seguinte, mesmo depois de um teste novo.
+
+### 134.4 O que muda
+
+- **G2 .NET** (`testcmd.ts`): `dotnet test <projeto> --logger "trx;…"
+  --results-directory .capivara/tmp/testes-dotnet` por projeto de teste, na
+  ordem do caminho, depois dos ecossistemas que já existiam. O projeto de teste
+  é nomeado, não a solução: um projeto fora da solução não rodaria. O relatório
+  TRX de cada um diz, teste a teste, o que rodou e passou; ele fica fora da
+  árvore do produto e dos commits. O executor recebe o mesmo comando no bloco
+  de teste, como já acontece com os outros.
+- **G4 de terminal** (`flows.ts`): só quando a Stack certificada declara um
+  produto puramente de terminal: uma linha de terminal e nenhuma interface
+  gráfica (`stackDeTerminal`). Em qualquer outro produto, híbrido inclusive, o
+  gate sobe o servidor como sempre. Um roteiro que roda a suíte de testes do projeto
+  (`dotnet test`, `npm test`, `pytest`…) é recusado: percorrer é rodar o
+  produto. `roteiroUsaOServidor` diz se o roteiro abre a aplicação. Abre quando tem fixture `page`, `request`, `context`, `browser` ou
+  `baseURL` (no teste ou num gancho), quando usa `aplicacaoPropria`, URL ou
+  `page.`, ou quando a assinatura não se lê. Sem nenhum roteiro que abra, a
+  configuração sai sem `webServer`, e o `start` não é cobrado nem perguntado.
+- **A prova pela suíte** (`prompts/flows.ts`, `flows.ts`, `runner.ts`):
+  - a resposta com a marca traz uma linha por passo:
+    `CAPIVARA_PROVA: passo <n> — <arquivo de teste> :: <nome do teste>` ou
+    `CAPIVARA_SEM_PROVA: passo <n> — <motivo>`;
+  - o roteirista recebe o comando da suíte que passou neste código, ou o aviso
+    de que não há suíte;
+  - `conferirProvas` aceita a citação quando:
+    - a suíte passou no G2 sobre esta árvore;
+    - o arquivo real (com link simbólico resolvido) está dentro do projeto e
+      fora do harness, de dependências, de ambientes virtuais e de saída de
+      build;
+    - **o relatório do próprio runner mostra que o teste citado rodou e passou
+      nesta execução.** No .NET, o G2 que o harness resolve grava o relatório
+      TRX de cada projeto de teste em `.capivara/tmp/testes-dotnet`. O Core lê
+      `Namespace.Classe.Metodo → passou` (classe aninhada com `+`, módulo F#)
+      do relatório que o comando declara, e guarda a lista com a prova da
+      suíte. A citação vale quando:
+      - o arquivo citado está na pasta de um projeto de teste que o comando
+        rodou;
+      - o arquivo declara, como código, a classe e o método;
+      - o namespace do relatório é exatamente o do arquivo (sem namespace, o
+        global; no VB, pelo fim do nome);
+      - o teste passou em todas as execuções;
+    - nas outras suítes, o runner não relata teste a teste sem mudar o comando
+      do projeto: a citação é recusada, com esse motivo, e o passo fica
+      pendente;
+  - todo passo aceito resulta em `fluxo-N` PASS, que cita a evidência da suíte,
+    os arquivos de teste com sha e as provas;
+  - o resto continua `fora-do-navegador-N` NOT_APPLICABLE, com os passos
+    pendentes e o porquê; o passo sem prova não vira defeito nem pedido ao
+    executor.
+- **A decisão reaproveitada** (`runner.ts`):
+  - sobre o mesmo código, a mesma resposta;
+  - em código novo, a prova completa é reconferida pelo Core, sem sessão; só a
+    pendência, ou a prova que caiu, volta ao roteirista;
+  - o registro da 0.7.8, sem as provas, é reavaliado uma vez.
+- **Retomada** (`build.ts`): a fase fechada com pendência fora do navegador volta
+  como revalidação, sem implementação. O registro da fase fechada guarda
+  `provas` só do fluxo provado; o pendente continua `{workflow, trecho}`, como
+  na §133.
+- **Guarda final** (`build.ts`): nomeia os passos sem prova e o porquê, e
+  reconfere as citações da prova pela suíte na árvore entregue. O teste que uma
+  fase seguinte apagou derruba o fluxo para pendente.
+- **Regressão** (`runner.ts`): `jaPercorridos` passa a ser só o que foi aberto
+  num navegador. O que a suíte provou continua podendo ser tirado do navegador
+  pela fase que o cobre de novo. O fluxo provado pela suíte não entra na regressão
+  do G4: ele não tem roteiro, e o PASS de percurso é só do fluxo cujo roteiro rodou.
+- **A marca não vale para web** (`flows.ts`): não vale quando a linha citada diz
+  "navegador", "web", "página", "site", "HTML", "SPA" ou "frontend" sem nada de
+  nativo, terminal ou biblioteca. Também não vale para o fluxo que já avançou
+  passos no navegador com a aplicação servida, nesta fase.
+- **A fase mais nova decide** (`build.ts`): o fluxo que ela deixa pendente sai
+  dos cumpridos. Na guarda, só o PASS de uma fase igual ou mais nova resolve a
+  pendência.
+- **A suíte no código entregue** (`build.ts`): a prova pela suíte exige a suíte
+  verde, e o teste aprovado no relatório dela, sobre a árvore entregue. Vale a
+  prova do G2 tirada sobre essa árvore. Sem nenhuma (a árvore integrada do
+  paralelo, retomada sobre código novo), a suíte roda uma vez na guarda, só
+  quando algum fluxo depende dela. A rodada fica no livro (`ENTREGA`, `suite`)
+  com o log e o relatório, e a retomada sobre o mesmo código não a repete.
+
+### 134.5 O que NÃO muda
+
+- INIT, PLAN, critérios de aceite, providers, gates, orçamentos, limites, o G3 e
+  a escada de recuperação.
+- O produto web: o roteiro com página sobe o `webServer` com o mesmo comando,
+  porta, PORT/HOST e `stdout`. O `start` ausente continua cobrado, a triagem
+  continua igual, e a regressão roda os roteiros na mesma ordem. `fluxo-N` de
+  percurso continua com a marca `FLOW_MARK`.
+- `fora-do-navegador-N` continua NOT_APPLICABLE e nunca é PASS. A guarda continua
+  a terminar com código 2 enquanto houver passo sem prova.
+- Nenhuma chamada nova de modelo no caminho limpo:
+  - a prova vem na mesma resposta que já trazia a marca;
+  - a reconferência é do Core;
+  - a fase retomada sem nada novo não abre sessão.
+
+### 134.6 Testes: RED → GREEN
+
+`test/loop/conclusao-134.spec.ts` (75) e `test/prompts/conclusao-134.spec.ts` (6).
+- Dos 37 escritos antes da implementação, 31 estavam RED contra a 0.7.8. Os 6
+  que já passavam são os controles web, que precisavam continuar verdes.
+- Cada rodada de revisão adversarial (134.9) virou teste, e cada teste foi
+  confirmado RED contra o código que aquela rodada analisou: 13, 45 de 49,
+  3 de 4, 7 e 8.
+- Os testes da leitura estática multi-linguagem saíram junto com ela, na
+  terceira rodada.
+
+| item do pedido | teste |
+|---|---|
+| 1. web válida conclui | "1 — controle: o produto web continua sendo percorrido…" e o controle de gate |
+| 2. web com defeito real reprova | "2 — controle: o produto web com defeito real não conclui" e "controle web: o defeito real…" |
+| 3. desktop sem exigência HTTP | "4, 8" (nenhum `package.json`, nenhum ciclo) e "6, 3" (CLI) |
+| 4. desktop conclui com evidência suficiente | "4, 8 — com todos os passos provados…" |
+| 5. compilar/abrir não prova | "5, 7 — compilar, abrir e a suíte verde não provam o fluxo…" |
+| 6. CLI por comandos e resultados | "6, 3", "CLI sem `start`…", "CLI com `start`…", "CLI com defeito real…" |
+| 7. não verificado continua pendente | "5, 7" e "retomável…" |
+| 8. evidência válida sem Playwright | "4, 8" (o runner de fluxos lança se for chamado) |
+| 9. nenhum falso PASS | "nenhum falso PASS…", "sem a suíte verde…", "9, 15", "9 — a citação de teste que não existe…", "9 — o teste citado que some…" |
+| 10. revalidação proporcional | "10 — depois de um reparo…" (uma sessão do roteirista para o fluxo provado, duas provas em árvores diferentes) |
+| 11. execução progressiva | suíte da §130 sem mudança |
+| 12. paralelismo | "12 — no paralelo…" e a suíte da §97 |
+| 13. planos e runs existentes | "13 — o registro da 0.7.8…"; os 37 testes da §133 sem mudança de expectativa |
+| 14. retomada sem perda | "14 — retomar o build concluído…" e "retomável…" |
+| 15. sem bloqueio artificial | "9, 15" (sem suíte: fecha as fases, sem ciclo nem pedido ao executor) |
+
+### 134.7 Custo e ganho medidos
+
+Medição determinística, sem modelo:
+- na árvore real do Luna, sem alterá-la, o G2 resolve
+  `dotnet test tests/Agenda.Tests/Agenda.Tests.csproj`, e numa cópia a suíte
+  passa 13 testes em 21 s;
+- citações plausíveis dos testes que já existem passam na conferência do Core
+  para os fluxos 1 (3 passos) e 2 (4 passos);
+- a citação de `ServicoAgenda.cs :: CriarAsync` é recusada ("não é um arquivo
+  de teste");
+- sem a suíte (o estado da 0.7.8), nenhuma citação vale.
+
+Isso mostra que o mecanismo aceita a evidência que o Luna já tinha. Não mostra
+que um modelo real faria essas citações, e nada aqui afirma isso.
+
+No provider falso:
+- o desktop provado conclui com 1 sessão de roteirista e 0 ciclos de correção;
+- depois de um reparo, o fluxo provado não abre sessão (eram 2 respostas, agora 1);
+- a retomada sem nada novo abre 0 sessões;
+- o G2 de .NET custa o tempo da suíte em cada passagem, como o G2 de qualquer
+  outro ecossistema.
+
+### 134.8 Limitações
+
+- O Core confere a citação: arquivo do projeto e teste aprovado no relatório
+  do runner nesta execução. Que o teste exercite o passo é julgamento do
+  roteirista, como a força da asserção num roteiro do G4.
+- A prova pela suíte só existe, hoje, para .NET, o caso comprovado do Luna.
+  Python, Go, Rust, JS/TS, JVM, PHP e Ruby ficam pendentes, nomeados passo a
+  passo, até a suíte deles relatar teste a teste. O caminho está claro:
+  `--junitxml` no pytest, `go test -json`, a saída padrão do `cargo test`,
+  `--log-junit` no PHPUnit. Mas cada um muda o comando de teste de projetos que
+  já funcionam, e por isso fica para decisão.
+- Com `--test-cmd`, `CAPIVARA_TEST_CMD` ou `npm test` à frente do .NET, o
+  comando é do desenvolvedor, sem o relatório: a citação .NET é recusada, com a
+  causa dita, e o passo fica pendente. No modo Microsoft.Testing.Platform
+  (`global.json`), o G2 roda com `--project` e também sem relatório.
+- O teste herdado de uma classe base noutro arquivo é recusado: o relatório
+  nomeia a classe derivada, e o método está no arquivo da base. Fica pendente.
+- A regra da linha de navegador é por palavras, em português e inglês:
+  - navegador, web, página, site, HTML, SPA, frontend, `localhost` e nomes de
+    navegador;
+  - frameworks web, a não ser que a linha diga mobile, CLI ou biblioteca;
+  - nunca quando a linha declara desktop, nativo, terminal, Electron, Tauri,
+    Avalonia, WPF, Qt, GTK, Flutter ou similares.
+  Uma linha web com outras palavras ("Interface: Elm com componentes
+  próprios") passa por ela. Quem segura esse caso é o fluxo que já avançou no
+  navegador; a decisão continua sendo do roteirista independente que leu o
+  contrato.
+- A apresentação nativa (o que a janela desenha) não é observada por sessão
+  nenhuma. O passo prova o comportamento por trás da tela, pelo view model, pelo
+  serviço e pelos dados gravados. O vínculo da tela é lido pelo G3.
+- A aceitação operacional não conhece .NET: pula, e pular é aceitar. Não
+  bloqueia, e por isso ficou fora.
+- Fora .NET, ecossistemas que o G2 não resolve continuam sem suíte. Java, por
+  exemplo, só entra quando houver run real que o peça; mobile é a próxima frente.
+- O fluxo provado pela suíte, como regressão de fases seguintes, é coberto pelo
+  G2, que roda a suíte inteira a cada fase, e pela reconferência das citações
+  na guarda final. Ele não é reavaliado pelo roteirista a cada fase.
+- A árvore do Luna continua com o `package.json`, o `HttpListener` do
+  `Program.cs` e os roteiros inventados em `.capivara/flows/` (133.8). Apague-os
+  antes de retomar.
+
+### 134.9 A revisão adversarial
+
+Duas revisões independentes rodaram sobre o código da primeira rodada. Uma
+procurava aprovação falsa; a outra, regressão web e custo. Cada achado foi
+reproduzido num spec temporário, depois apagado. Contra aquele código, os 13
+testes que viraram regressão estavam RED.
+
+| achado | gravidade | correção |
+|---|---|---|
+| o nome conferido era qualquer palavra do arquivo de teste: classe, atributo `Fact`, comentário, string; o fluxo fechava com código 0 sem teste | alta | `declaraOTeste`: declarado como teste, ativo, sem comentário |
+| o produto web citava a própria linha "usada no navegador" e concluía o fluxo pela suíte, sem percurso; o mesmo depois de reprovar no navegador | alta | a linha de navegador não vale para a marca; o fluxo que avançou passos no navegador nesta fase também não |
+| híbrido: o fluxo provado pela suíte entrava na regressão do G4 e ganhava PASS de percurso sem roteiro; a guarda deixava de reconferir a citação, e o teste apagado numa fase seguinte passava | média | fora da regressão do G4; PASS de percurso só de roteiro que rodou |
+| squash e nova execução: o PASS da P02, refeito na revalidação, escondia a pendência mais nova da P03 e fechava com código 0 | média | a fase mais nova decide; a guarda só aceita o PASS de fase igual ou mais nova |
+| a guarda não exigia que a suíte rodasse no código entregue (P03 apagou o projeto de teste, o G2 virou NOT_APPLICABLE, código 0); `npm test` aceitava citação xUnit | média | última passagem do G2 verde; teste .NET exige o projeto no comando |
+| documento, dado, `node_modules` e `.capivara` aninhados e link simbólico para fora passavam como arquivo de teste | média | caminho real dentro do projeto; exclusões em qualquer profundidade; só código-fonte |
+| sem `start`, a reescrita que passava a abrir página rodava sem servidor e culpava o produto | baixa/média | `rodar()` devolve a cobrança do entrypoint |
+| a heurística do servidor perdia `baseURL`, `newContext` e `f.browser`, e acusava servidor em CLI com URL de entrada, apóstrofo no título, opções ou `function` | baixa | sinais e assinatura revistos |
+| a busca .NET achava o projeto de outro produto numa subpasta (a pasta que contém o Luna resolvia a suíte dele) | baixa | a busca não desce em pasta com manifesto de outro ecossistema ou `.git` |
+| o padrão `Failed` do VSTest atravessava linhas | baixa | `^[ \t]+` |
+
+Ficam registrados sem mudança:
+- O prompt do roteirista cresceu cerca de 10% (11 072 → 12 246 caracteres com
+  `npm test`). Não houve chamada nova no caminho limpo web, depois de reparo ou
+  na retomada.
+- `--no-flows` seguido de build normal conta como cumpridos os fluxos da fase
+  fechada sem gate de fluxos. A lacuna é anterior à §134 (133.9) e não é desta §.
+
+Uma segunda revisão, sobre as correções da primeira, quebrou duas delas e
+achou mais cinco furos. Contra o código revisado, 45 dos 49 testes novos
+estavam RED; os outros 4 são casos de aceite que já valiam.
+
+| achado | gravidade | correção |
+|---|---|---|
+| o script de edição gravou `\b` como byte 0x08 nas duas expressões da linha de navegador: "web", "site" e "HTML" nunca casavam (web com só "web" fechava com código 0), e WPF e Qt com "páginas" voltavam ao navegador | alta | `\b` de verdade, e um teste que falha com byte de controle em `src/` |
+| teste desligado pelo escopo de fora, pelo corpo ou pelo arquivo contava como ativo (`[Ignore]` na classe, `describe.skip`, `pytestmark`, `pytest.skip()`, `#if false`, docstring, string com cara de teste, função aninhada, classe que o pytest não coleta) | alta | `loop/teste-declarado.ts`: máscara de comentários e strings, escopos, corpo, arquivo e regras de coleta |
+| paralelo: a guarda pegava a última prova da suíte por ordem, que podia ser do worktree de uma fase irmã sem o projeto de teste; o build provado parava para sempre | média | a prova da suíte sobre a árvore entregue, ou a suíte rodada uma vez na guarda |
+| o fluxo de terminal que falhou no passo 2 saía pela marca e virava PASS pela suíte | média | o avanço no terminal também conta |
+| opções do `dotnet test` (`--no-build`, `-c`, pasta, `--filter`) enganavam a conferência do projeto | baixa/média | as opções são puladas; `--filter` não vale |
+| testes válidos recusados: `[AvaloniaFact]`, `[Trait(…), Fact]`, `[Theory]` com 14 `[InlineData]`, atributo em várias linhas, acento no nome, Rust inline, pacote Go `build`, `it.concurrent`, nome completo, crase do Kotlin, id do pytest | baixa/média | reconhecidos |
+| `localhost` num argumento de CLI pedia servidor | baixa | só HTTP local conta |
+
+Uma terceira revisão, sobre a segunda, reproduziu mais aprovações falsas na
+leitura estática de "teste ativo" em Python, JS, Ruby, Java e Go:
+- alias de skip;
+- `.only` em outro teste;
+- pulo no gancho ou no corpo do `describe`;
+- build tag do Go;
+- `@Test(enabled = false)`;
+- `cd X && dotnet test`;
+- e uma dúzia de outras formas.
+
+Três rodadas seguidas acharam formas novas. Reconhecer teste ativo lendo o
+fonte, em todas as linguagens, é uma corrida que não fecha. O desenho mudou: o
+reconhecimento deu lugar ao **relatório do runner**, que diz o que rodou. No
+.NET, o caso comprovado, o TRX resolve por construção:
+- pulo de qualquer forma;
+- `#if`;
+- filtro;
+- projeto fora da solução;
+- herança.
+
+Nas outras suítes, a citação é recusada até haver relatório (134.8). Contra o
+código que a terceira revisão analisou, 3 dos 4 testes do relatório estavam
+RED; o quarto (documento e dependência) já era recusado. A linha de navegador
+ganhou as formas que a revisão achou: `localhost`, nomes de navegador,
+`webapp`, `front end`, frameworks web; mobile e CLI não salvam mais uma linha
+que diz web.
+
+Medido na cópia do Luna, com `dotnet test` real:
+- o G2 resolve o comando com o TRX e roda em 4,6 s (build em cache);
+- o relatório traz 11 testes, 10 aprovados e 1 pulado de propósito;
+- os fluxos 1 e 2 ficam provados por citações dos testes que o executor já
+  tinha escrito;
+- o teste pulado e o método do produto são recusados.
+
+Uma quarta revisão, já sobre o relatório do runner, reproduziu três aprovações
+falsas e três bloqueios. Contra o código revisado, os 7 testes que viraram
+regressão estavam RED.
+
+| achado | gravidade | correção |
+|---|---|---|
+| num desktop, um roteiro "de terminal" rodava `dotnet test --filter …` via `comandoDoProjeto`, sem servidor, e virava PASS de percurso sem relatório | alta | roteiro sem servidor só num produto de terminal pela Stack; roteiro que roda a suíte é recusado |
+| Blazor e ASP.NET "pelo navegador no desktop e no celular" passavam como fora do navegador, e a suíte concluía o fluxo web | alta | o navegador declarado vence; só web embutida (Electron, Tauri, WebView, Blazor Hybrid) a vence; negação não conta |
+| classe homônima num namespace vizinho, e arquivo fora de qualquer projeto de teste, aproveitavam o resultado de outro teste | média/alta | namespace exato; o arquivo na pasta de um projeto que o comando rodou |
+| a prova que a guarda derrubava deixava o build parado para sempre, com a promessa de reverificar que não se cumpria | alta (bloqueio) | a queda é gravada no registro da fase, que volta a ser verificada |
+| projeto em Microsoft.Testing.Platform: o comando quebrava o G2 em toda passagem | média | `dotnet test --project`, sem relatório |
+| classe aninhada, módulo F#, namespace raiz do VB recusados | média | reconhecidos |
+| o reparo da aceitação podia pular o teste citado depois da guarda | média | a prova pela suíte é reconferida depois do reparo |
+| `npm test` à frente do .NET, ou `.trx` estranho na pasta | baixa | a recusa diz a causa; só o relatório declarado conta |
+| linhas nativas (iPhone, SwiftUI, Godot, Raspberry, tablet) tomadas por navegador | baixa | a lista do nativo cresceu; "página", "edge" e "spa" minúsculo não decidem sozinhos |
+
+A quinta revisão, sobre a quarta, reproduziu mais sete problemas. Os dois altos
+vinham das heurísticas de texto. Contra o código revisado, os 8 testes novos
+estavam RED.
+
+| achado | gravidade | correção |
+|---|---|---|
+| o "no" português ("acessada no navegador") era tirado como negação em inglês: a linha web virava "fora do navegador" e a suíte concluía o fluxo | alta | negação só com "sem", "não usa", "não tem", "without"; ordem explícita: web embutida, toolkit nativo, navegador declarado, aparelho/terminal, palavras fracas de web |
+| uma linha qualquer de CLI na Stack (desktop com CLI de backup, web com migração pela linha de comando) liberava roteiro sem servidor para todo fluxo; `bash -c 'dotnet test'` passava pela checagem | alta | sem servidor só no produto puramente de terminal; a suíte é recusada também por shell `-c`, `npm t`, `npm run test:*`, `make test`, `dotnet vstest`, `--project tests/…` |
+| `global.json` com comentário, BOM ou numa pasta acima não era lido, e o comando VSTest quebrava o G2 | média | leitura tolerante, subindo as pastas como o SDK |
+| um teste de um projeto seguinte na cadeia `&&` podia reescrever o TRX do anterior | média/baixa | fora do modelo de ameaça (código de teste do executor forjando o relatório do runner): registrado em 134.8 |
+| o subcomando `test` de um produto (`validador test config.yml`) era tomado por suíte | baixa | só o primeiro argumento da ferramenta de teste conta |
+| namespace aninhado em bloco não compunha o nome | baixa | composto pela profundidade das chaves |
+| `./` no caminho do projeto do comando | muito baixa | normalizado |
+
+Medido de novo na cópia do Luna, com o código final, o resultado se mantém:
+- o G2 roda em 4,8 s;
+- o relatório traz 11 testes, 10 aprovados;
+- os fluxos 1 e 2 ficam provados;
+- o teste pulado e o arquivo do produto são recusados (este, agora, por estar
+  fora do projeto de teste).
+
+`npm run check` deu rc=0, com 3321 testes em 172 arquivos. Na primeira rodada
+caiu o `coerencia-temporal-127` ("correm juntas") com a máquina em load 12.
+Intercalado com a HEAD, passou 3 de 3 nos dois lados com a carga menor, e na
+rodada seguinte da verificação completa passou também.
+
+Ficam registrados, para decisão:
+- **Revisões.** Cinco rodadas de revisão adversarial, e cada uma achou alguma
+  coisa. As três primeiras atacaram a leitura estática do "teste ativo", que
+  saiu. As duas últimas atacaram as heurísticas de texto que sobram: a linha de
+  navegador e o produto de terminal. Essas regras são por palavra e continuam
+  imperfeitas por natureza. O que as cerca:
+  - o roteirista independente, que lê o contrato;
+  - o avanço no navegador ou no terminal, que fecha a saída pela marca;
+  - a prova pela suíte só com relatório do runner;
+  - o híbrido no comportamento de antes.
+- **Forjamento do TRX.** Um teste do executor pode forjar o TRX de outro
+  projeto da mesma cadeia `&&`. Rodar cada projeto separado, guardando o
+  relatório antes do seguinte, fecha isso, mas muda o G2 do .NET de novo.

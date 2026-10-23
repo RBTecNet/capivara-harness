@@ -14,12 +14,76 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `fix/cooperacao-build-133` (§133, 0.7.8, push feito, sem merge) sobre a `main`; na `main`, a cadeia §129–§132 entrou por fast-forward em 22/10/2026 (a §122–§128 em 21/10/2026), e as branches de ajuste foram apagadas, local e no `origin` |
+| branch | `fix/conclusao-generalista-134` (§134, sobre a 0.7.8, sem commit e sem versão: aguardando autorização) a partir de `fix/cooperacao-build-133` (§133, 0.7.8, push feito, sem merge) sobre a `main`; na `main`, a cadeia §129–§132 entrou por fast-forward em 22/10/2026 (a §122–§128 em 21/10/2026), e as branches de ajuste foram apagadas, local e no `origin` |
 | versão | 0.7.8 na branch da §133 (0.7.7 sem as correções da §133.9; ambas com a §132, que entrou na `main` sem versão própria); 0.7.6 na `main`; planos da 0.6.x e da 0.7.x valem na 0.7.8 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
-| suíte | 3240 testes em 170 arquivos na 0.7.8 (§133.9), `npm run check` verde (rc=0); 3234 na 0.7.7 (§133), `npm run check` verde (rc=0; as duas instabilidades conhecidas, `coerencia-temporal-127` e `integridade-122`, caíram uma vez cada sob load 10–13 e passaram na rodada seguinte); 3203 em 168 na `main` com a §132, `npm run check` verde (rc=0); 3130 em 167 na 0.7.6 sem a §132 (3121 em 166 na 0.7.5), `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na 0.7.4 (§130); 3020 em 163 na 0.7.3 (§129); 2989 em 161 na 0.7.2 (2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
+| suíte | 3321 testes em 172 arquivos com a §134, `npm run check` verde (rc=0; o `coerencia-temporal-127` caiu uma vez sob load 12 e passou intercalado com a HEAD e na rodada seguinte); 3240 testes em 170 arquivos na 0.7.8 (§133.9), `npm run check` verde (rc=0); 3234 na 0.7.7 (§133), `npm run check` verde (rc=0; as duas instabilidades conhecidas, `coerencia-temporal-127` e `integridade-122`, caíram uma vez cada sob load 10–13 e passaram na rodada seguinte); 3203 em 168 na `main` com a §132, `npm run check` verde (rc=0); 3130 em 167 na 0.7.6 sem a §132 (3121 em 166 na 0.7.5), `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na 0.7.4 (§130); 3020 em 163 na 0.7.3 (§129); 2989 em 161 na 0.7.2 (2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-23 — A conclusão pela evidência que a plataforma permite (§134)
+
+A §133 parou de exigir navegador do desktop, mas deixou o fluxo sem saída. No
+Luna (`build-521a72e8dbb5`, Avalonia), o fluxo ficava pendente para sempre e o
+build terminava com código 2, com o produto funcionando. E a suíte xUnit que o
+PLAN contratou nunca rodou: o G2 não conhecia .NET e ficou NOT_APPLICABLE nas
+quatro passagens.
+
+O que mudou, sem gate novo, sem chamada nova de modelo no caminho limpo e sem
+mexer no web:
+- **G2 .NET:** `dotnet test <projeto de teste>` com o relatório TRX em
+  `.capivara/tmp`. No modo Microsoft.Testing.Platform, `--project` sem
+  relatório.
+- **G4 de terminal:** no produto puramente de terminal pela Stack, o roteiro só
+  com `comandoDoProjeto` roda sem servidor e sem cobrar `start`. Roteiro que
+  roda a suíte de testes é recusado.
+- **Prova pela suíte:** fora do navegador e do terminal, o roteirista cita, por
+  passo, o teste da suíte (`CAPIVARA_PROVA` / `CAPIVARA_SEM_PROVA`).
+  - O Core aceita a citação só quando o **relatório do runner** mostra o teste
+    aprovado nesta execução do G2, com classe, namespace e projeto batendo com
+    o arquivo citado.
+  - Tudo provado vira `fluxo-N` PASS com marca própria; o resto fica pendente,
+    passo a passo.
+  - Hoje o relatório existe para o .NET; nas outras suítes a citação é
+    recusada com o motivo.
+- **A marca não vale para web:** nem com a linha que declara navegador (regra
+  por palavras), nem para o fluxo que já avançou passos no navegador ou no
+  terminal.
+- **Retomável:** a fase com pendência volta a ser verificada na execução
+  seguinte, sem implementação e sem custo quando nada mudou. A prova que a
+  guarda derruba vira pendência gravada.
+- **Guarda final:** nomeia os passos sem prova e reconfere a prova pela suíte
+  no código entregue, rodando a suíte uma vez se nenhuma passagem a provou
+  ali. Faz o mesmo depois de um reparo da aceitação.
+
+Medido numa cópia do Luna, com `dotnet test` real:
+- o G2 resolve e roda em 4,8 s;
+- o relatório traz 11 testes, 10 aprovados;
+- os fluxos 1 e 2 ficam provados por citações dos testes que o executor já
+  tinha escrito;
+- o teste pulado e o arquivo do produto são recusados.
+
+Isso mostra o mecanismo, não que um modelo real faça essas citações.
+
+Cinco rodadas de revisão adversarial. A leitura estática de "teste ativo" foi
+substituída pelo relatório do runner depois de três rodadas achando formas
+novas de pulo. Todo achado virou teste, confirmado RED contra o código que
+aquela rodada analisou.
+
+A matriz, as rodadas e as limitações estão na §134 do PLANO. Ficam para
+decisão:
+- a prova pela suíte em Python, Go, Rust, JS/TS, JVM, PHP e Ruby exige
+  mudar o comando de teste desses projetos (`--junitxml`, `-json`…);
+- as heurísticas de texto (linha de navegador, produto de terminal) seguem
+  imperfeitas por natureza;
+- o TRX pode ser forjado por código de teste de outro projeto da mesma cadeia;
+- `--no-flows` seguido de build normal conta os fluxos como cumpridos (antes
+  da §134).
+
+Antes de retomar o Luna: apague o `package.json`, os roteiros inventados em
+`.capivara/flows/` e o `HttpListener` do `Program.cs` (133.8). Com o
+`package.json` de pé, um `scripts.test` à frente do `dotnet test` tiraria o
+relatório.
 
 ## 2026-10-23 — Executor e verificador do mesmo lado: o que o harness pedia e ninguém podia entregar (§133)
 

@@ -16,6 +16,7 @@
 
 import { languageBlock } from "./language.js";
 import { flowScopeBlock, functionalAcceptanceBlock, interfaceContractBlock, transientStateBlock } from "./acceptance-policy.js";
+import { LEITURA_SEM_EFEITO } from "./flows.js";
 
 export const TRIAGE_HEADER = "CAPIVARA_TRIAGE";
 
@@ -57,7 +58,7 @@ export function triagePrompt(context: TriageContext): string {
     "before anyone spends a cycle on it. You only read: never write, edit, create or delete a file.",
     "",
     "You may read the product's source to confirm what you see.",
-    "Do not run commands, tests, servers, browser probes or installations in this session.",
+    ...LEITURA_SEM_EFEITO,
     "Use the supplied failure, snapshot, script and source. Do not create auxiliary files or investigate the test environment.",
     flowScopeBlock(),
     "",

@@ -224,7 +224,8 @@ export function flowStartBlock(context: BuilderContext): string {
   return [
     "",
     "## How the application is started for the flow gate",
-    "After the tests, the gate runs the manifest's `start` entrypoint (`npm start` in a Node project)",
+    "The flow gate walks the flows in a browser. For a product used through a browser, after the tests the",
+    "gate runs the manifest's `start` entrypoint (`npm start` in a Node project)",
     "from the project root, with `PORT` and `HOST` set in the environment, and walks the flows at that",
     "address. The entrypoint must exist and listen on that `PORT` and `HOST`; a server that only",
     "listens on a fixed port fails the gate. The project may keep its own variable names, as long as",
@@ -232,8 +233,12 @@ export function flowStartBlock(context: BuilderContext): string {
     ...(context.entrypointAusente
       ? [
           "",
-          "This project does NOT declare that entrypoint yet: the manifest has no `start`. Create it in this",
-          "session — honouring `PORT` and `HOST` — or the flow gate fails before walking a single flow.",
+          "This project does NOT declare that entrypoint yet: the manifest has no `start`.",
+          "If the product is used through a browser, create it in this session — honouring `PORT` and `HOST` — or the",
+          "flow gate fails before walking a single flow. If the approved contract describes a product used outside the",
+          "browser — a native desktop window, a program used in a terminal, a library — then",
+          "do not create a manifest, an HTTP server or a `start` entry only for this gate:",
+          "the gate records those flows as not walked, and a server made for it would change the approved product.",
         ]
       : []),
   ].join("\n");

@@ -57,6 +57,12 @@ export interface FaseFechada {
    * volta a ser verificada, porque o código pode ter sido descartado.
    */
   semCommit?: boolean;
+  /**
+   * Os fluxos que a fase fechou sem percorrer porque o contrato põe o produto fora
+   * do navegador (§133). Ausente é o registro anterior ao campo: a fase percorreu
+   * o que cobriu, como sempre.
+   */
+  foraDoNavegador?: { workflow: string; trecho: string }[];
 }
 
 function caminho(projectRoot: string): string {

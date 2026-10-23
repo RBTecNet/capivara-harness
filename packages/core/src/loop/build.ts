@@ -58,7 +58,7 @@ import { prepareBuildEnvironment } from "./environment-prepare.js";
 import { readEnvironmentPlan } from "./environment-plan.js";
 import type { EscolhaNumerada } from "./escolha.js";
 import { resolveTestCommand } from "./testcmd.js";
-import { DEFAULT_MAX_CYCLES, runPhase, type EngineCaller, type EngineResult, type PhaseOutcome } from "./runner.js";
+import { DEFAULT_MAX_CYCLES, MARCA_FORA_DO_NAVEGADOR, runPhase, type EngineCaller, type EngineResult, type PhaseOutcome } from "./runner.js";
 import { runAcceptance, type AcceptanceResult, type CommandRunner } from "./acceptance.js";
 import { acceptancePrompt, installPrompt } from "../prompts/index.js";
 import type { BuildProgressListener } from "./progress.js";
@@ -71,7 +71,8 @@ import { garantiaDeAutoridade } from "./autoridade.js";
 import { conferirIsolamento } from "./isolamento.js";
 import { larguraDoPlano } from "./escalonador.js";
 import { executarEmParalelo, type AgenteDoPool, type ExecucaoDaFase } from "./paralelo.js";
-import { FLOW_PORT } from "./flows.js";
+import { FLOW_PORT, citaOContrato } from "./flows.js";
+import { stackDoSkeleton } from "../prompts/acceptance-policy.js";
 import { garantirBase } from "./worktree.js";
 import type { PhaseSession } from "./split.js";
 import type { WorkerProgressListener } from "./progress.js";
@@ -689,6 +690,10 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
      * ele passa a existir no meio do caminho.
      */
     const esqueleto = options.skipFlows === true ? null : (options.skeleton ?? null);
+    /** A Stack de agora: a decisão "fora do navegador" de uma fase fechada só vale enquanto o trecho citado estiver nela (§133). */
+    const stackAtual = stackDoSkeleton(await readFile(join(options.projectRoot, ".capivara/init/skeleton.md"), "utf8").catch(() => ""));
+    const trechoQueSaiu = (fechada: { foraDoNavegador?: { workflow: string; trecho: string }[] } | undefined) =>
+      fechada?.foraDoNavegador?.find((fluxo) => !citaOContrato(fluxo.trecho, stackAtual));
     if (options.skipFlows !== true && esqueleto === null) {
       announce("aviso: sem esqueleto legível, o gate 4 não percorre fluxo nenhum nesta execução");
     }
@@ -993,10 +998,18 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
      * quando cada fase fechou; sem a data, o fluxo fica junto do anterior.
      */
     const cumpridoEm = new Map<string, string>();
-    const cumprir = (session: PhaseSession, fechadaEm: string | undefined): void => {
+    /**
+     * O fluxo que uma fase fechou SEM percorrer, por estar o produto fora do
+     * navegador (§133), e o trecho do contrato. Não é cumprido nem regressão: a
+     * guarda final o nomeia, e a aplicação não se declara concluída sem prova dele.
+     */
+    const naoPercorridos = new Map<string, { fase: number; trecho: string }>();
+    const cumprir = (session: PhaseSession, fechadaEm: string | undefined, foraDoNavegador: readonly { workflow: string; trecho: string }[] = []): void => {
       if (esqueleto === null) return;
+      for (const fluxo of foraDoNavegador) naoPercorridos.set(fluxo.workflow, { fase: session.number, trecho: fluxo.trecho });
       // Só o que a fase cobrou: o fluxo que ela deixou para depois não passou aqui, e não é regressão de ninguém ainda (§127).
       for (const workflow of cobradosNaFase(session.number)) {
+        if (foraDoNavegador.some((fluxo) => fluxo.workflow === workflow.number)) continue;
         if (fluxosCumpridos.some((cumprido) => cumprido.number === workflow.number)) continue;
         const anterior = fluxosCumpridos.at(-1);
         fluxosCumpridos.push(workflow);
@@ -1009,6 +1022,7 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
     /** O que toda fase verde deixa: o registro no ledger e os fluxos como regressão das seguintes. */
     const aposVerde = async (session: PhaseSession, outcome?: PhaseOutcome): Promise<void> => {
       const fechadaEm = now().toISOString();
+      const foraDoNavegador = outcome && (outcome.status === "complete" || outcome.status === "already-implemented") ? outcome.foraDoNavegador ?? [] : [];
       const fatia = arquitetura.fatia(session.number);
       // O commit que o git recusou: o código ficou na árvore, e nenhum HEAD o contém — sem HEAD no registro, e revalidada depois.
       const semCommit = checked.commitsEnabled && outcome?.status === "complete" && !outcome.committed;
@@ -1024,8 +1038,9 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
         sliceSha12: fatia?.sha12 ?? "",
         ...(head ? { head } : {}),
         ...(semCommit ? { semCommit: true } : {}),
+        ...(foraDoNavegador.length > 0 ? { foraDoNavegador } : {}),
       });
-      cumprir(session, fechadaEm);
+      cumprir(session, fechadaEm, foraDoNavegador);
     };
 
     /*
@@ -1044,6 +1059,7 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
       const registrada = shaFechado.get(shaDaFase(session.markdown));
       if (!registrada) return false;
       if (registrada.sliceSha12 !== undefined && registrada.sliceSha12 !== (arquitetura.fatia(session.number)?.sha12 ?? "")) return false;
+      if (trechoQueSaiu(registrada)) return false;
       return registrada.semCommit !== true && historicoDaFechada.get(registrada.sha) !== false;
     };
     const pularSeFechada = (session: PhaseSession): boolean => {
@@ -1060,6 +1076,18 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
         // Vale também para a fase fechada neste mesmo run: o plano é o mesmo, a arquitetura não.
         announce(`[${session.id}] fechada no run ${registrada.runId} com o mesmo texto, mas a fatia da arquitetura mudou desde então; volta a ser verificada contra o contrato novo, sem nova implementação`);
         revalidarFase.set(session.id, `a fatia da arquitetura mudou desde que a fase fechou no run ${registrada.runId}`);
+        return false;
+      }
+      /*
+       * O fluxo que a fase deixou fora do navegador por um trecho que a Stack de
+       * agora não traz mais (§133): o produto foi redefinido, e a decisão também
+       * cai. A fase volta a ser verificada, sem implementação, e o G4 pergunta de
+       * novo — é assim que um fluxo tirado do navegador por engano volta a ser cobrado.
+       */
+      const saiuDaStack = trechoQueSaiu(registrada);
+      if (registrada && saiuDaStack) {
+        announce(`[${session.id}] fechada no run ${registrada.runId} com o fluxo ${saiuDaStack.workflow} fora do navegador por «${saiuDaStack.trecho}», que a Stack atual não traz; volta a ser verificada, sem nova implementação`);
+        revalidarFase.set(session.id, `o trecho que deixou o fluxo ${saiuDaStack.workflow} fora do navegador não está mais na Stack`);
         return false;
       }
       const fechadaAntes = registrada;
@@ -1104,10 +1132,11 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
         for (const gate of ["G0", "G1", "G2", "G3"] as const) {
           options.onProgress?.({ kind: "gate", id: session.id, gate, state: "verde", cycle: 0 });
         }
-        if (fluxosDaFase !== null) options.onProgress?.({ kind: "gate", id: session.id, gate: "G4", state: "verde", cycle: 0 });
+        // Verde diria que a aplicação foi aberta; o fluxo fora do navegador não foi (§133).
+        if (fluxosDaFase !== null) options.onProgress?.({ kind: "gate", id: session.id, gate: "G4", state: fechadaAntes.foraDoNavegador?.length ? "neutro" : "verde", cycle: 0 });
 
         // O fluxo de uma fase fechada continua sendo regressão das seguintes.
-        cumprir(session, shaFechado.get(shaDaFase(session.markdown))?.closedAt);
+        cumprir(session, shaFechado.get(shaDaFase(session.markdown))?.closedAt, shaFechado.get(shaDaFase(session.markdown))?.foraDoNavegador);
         return true;
       }
 
@@ -1136,7 +1165,7 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
          * retomado, a P04 rodou só os próprios fluxos, e o fluxo 2, escrito para
          * rodar depois do 1, rodou primeiro num banco sem tabela.
          */
-        cumprir(session, shaFechado.get(shaDaFase(session.markdown))?.closedAt);
+        cumprir(session, shaFechado.get(shaDaFase(session.markdown))?.closedAt, shaFechado.get(shaDaFase(session.markdown))?.foraDoNavegador);
         return true;
       }
       return false;
@@ -1294,17 +1323,38 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
      */
     if (esqueleto !== null) {
       const cumpridos = new Set(fluxosCumpridos.map((workflow) => workflow.number));
+      /*
+       * Defesa (§133): o livro deste run sabe o que ficou fora do navegador mesmo
+       * quando o registro da fase fechada não chegou a ser gravado com isso (queda
+       * entre o fim da fase e o registro). Fora do navegador sem percurso
+       * posterior não é cumprido.
+       */
+      const historico = (await LivroDeEvidencias.abrir(paths.root, runId)).historico();
+      historico.forEach((evidencia, indice) => {
+        const numero = /^fora-do-navegador-(.+)$/.exec(evidencia.checkId)?.[1];
+        const trecho = evidencia.inputs.extra?.["trecho"];
+        if (numero === undefined || evidencia.inputs.extra?.["marca"] !== MARCA_FORA_DO_NAVEGADOR || typeof trecho !== "string") return;
+        if (historico.slice(indice + 1).some((outra) => outra.checkId === `fluxo-${numero}` && outra.outcome === "PASS")) return;
+        cumpridos.delete(numero);
+        if (!naoPercorridos.has(numero)) naoPercorridos.set(numero, { fase: Number(evidencia.phaseId.replace(/^P/, "")), trecho });
+      });
       const adiados = disponibilidade?.todosAdiados() ?? [];
       const fase = (numero: number): string => `P${String(numero).padStart(2, "0")}`;
       const devidos = esqueleto.workflows.filter((workflow) => !cumpridos.has(workflow.number)).map((workflow) => {
         const adiado = adiados.find((cada) => cada.workflow === workflow.number);
+        const foraDoNavegador = naoPercorridos.get(workflow.number);
+        if (foraDoNavegador) {
+          return `o fluxo ${workflow.number} (${workflow.name}) não foi percorrido: o gate 4 abre a aplicação num navegador, e o contrato descreve o produto fora dele («${foraDoNavegador.trecho}», ${fase(foraDoNavegador.fase)}); as fases fecharam pelo código, sem prova do percurso`;
+        }
         return adiado
           ? `o fluxo ${workflow.number} (${workflow.name}), que a ${fase(adiado.fase)} deixou para a ${fase(adiado.para)}, nunca passou no gate 4`
           : `o fluxo ${workflow.number} (${workflow.name}) nunca foi percorrido: nenhuma fase o cobrou`;
       });
       const unicos = [...new Set(devidos)];
       if (unicos.length > 0) {
-        const detalhe = `fluxo obrigatório pendente: ${unicos.join("; ")}`;
+        const foraDoNavegador = esqueleto.workflows.some((workflow) => !cumpridos.has(workflow.number) && naoPercorridos.has(workflow.number));
+        const detalhe = `fluxo obrigatório pendente: ${unicos.join("; ")}` +
+          (foraDoNavegador ? " — se o produto se usa num navegador, a Stack do skeleton está errada: corrigida a Stack, o build seguinte reabre a fase e volta a cobrar o fluxo" : "");
         announce(`aplicação NÃO concluída — ${detalhe}`);
         await appendEvent(paths.events, { timestamp: now().toISOString(), stage: "implement", subject: "-", attempt: 1, status: "paused", detail: detalhe });
         await registrarEstado(phases, checked.sessions, null);

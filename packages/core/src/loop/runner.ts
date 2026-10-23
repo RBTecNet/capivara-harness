@@ -15,18 +15,18 @@ import { join, relative } from "node:path";
 import { appendEvent } from "../state/events.js";
 import { runPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
-import { conflictPrompt, declarouRoteiroErrado, extractFlowScript, fixPrompt, flowPrompt, implementPrompt, MUDADOS_NA_PARTE, triagePrompt, verifierRepairPrompt, verifyPrompt, type Triagem } from "../prompts/index.js";
+import { conflictPrompt, declarouRoteiroErrado, extractFlowScript, fixPrompt, flowPrompt, FORA_DO_NAVEGADOR, implementPrompt, MUDADOS_NA_PARTE, triagePrompt, verifierRepairPrompt, verifyPrompt, type Triagem } from "../prompts/index.js";
 import type { BuildProgressListener, LoopGate, LoopGateState } from "./progress.js";
 import { alteracoesParaCommit, type Bloqueio } from "./admissao.js";
 import { fotografarRefs, publicacaoProvavel, refsMovidas } from "./autoridade.js";
 import { arquivosDasFases, arquivosMudados, comMarcadorDeConflito, commitPhase, estadoDoCodigo, existiamNaArvore, hasPendingChanges, restaurarDoEstado } from "./git.js";
 import { declaredComplete, defaultTestRunner, gate0, gate2, gate3, type GateName, type GateResult, type TestRunner } from "./gates.js";
 import { detectCredentialRejection, detectRateLimit, planWait } from "./ratelimit.js";
-import { checkFlowScript, FLOW_MARK, FLOWS_DIR, flowScriptName, gate4, passoQueFalhou, type FlowRunner } from "./flows.js";
+import { checkFlowScript, citaOContrato, FLOW_MARK, FLOWS_DIR, flowScriptName, gate4, passoQueFalhou, type FlowRunner } from "./flows.js";
 import { shaDaTask, TasksAprovadas, tasksDaFase } from "./veredictos.js";
 import { prepararAmbiente } from "./ambiente.js";
 import { comBancosDeTeste } from "./test-databases.js";
-import { sharedContractFromSkeleton } from "../prompts/acceptance-policy.js";
+import { sharedContractFromSkeleton, stackDoSkeleton } from "../prompts/acceptance-policy.js";
 import { portaLivre } from "./ports.js";
 import { faltaOPacoteDoRunner } from "./dependencias.js";
 import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mcp/index.js";
@@ -271,8 +271,8 @@ export interface PhaseRunOptions {
 }
 
 export type PhaseOutcome =
-  | { status: "complete"; committed: boolean; message: string; cycles: number }
-  | { status: "already-implemented"; cycles: number }
+  | { status: "complete"; committed: boolean; message: string; cycles: number; foraDoNavegador?: ForaDoNavegador[] }
+  | { status: "already-implemented"; cycles: number; foraDoNavegador?: ForaDoNavegador[] }
   | {
       status: "failed";
       gate: GateName;
@@ -306,6 +306,19 @@ export type PhaseOutcome =
 /** A marca do registro de um fluxo adiado (§127): obrigação pendente, nunca prova. */
 export const MARCA_DO_ADIAMENTO = "capivara-adiado/v1";
 
+/** A marca do registro de um fluxo que o G4 não percorre porque o produto vive fora do navegador (§133): pendência, nunca prova. */
+export const MARCA_FORA_DO_NAVEGADOR = "capivara-fora-do-navegador/v1";
+
+/**
+ * O fluxo que a fase fechou sem percorrer, e o trecho do contrato que o tirou do
+ * navegador. Vai para o registro da fase fechada: o build não o conta como
+ * cumprido, nem neste run nem na retomada (§133).
+ */
+export interface ForaDoNavegador {
+  workflow: string;
+  trecho: string;
+}
+
 export const DEFAULT_MAX_CYCLES = 3;
 export const DEFAULT_MAX_LIMIT_WAITS = 20;
 
@@ -323,7 +336,10 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   const session = options.session;
   const evidencePrefix = options.integrationFailure ? `${session.id}.integration-${options.integrationFailure.attempt}` : session.id;
   const arvore = options.workRoot ?? options.projectRoot;
-  const sharedContract = sharedContractFromSkeleton(await readFile(join(arvore, ".capivara/init/skeleton.md"), "utf8").catch(() => ""));
+  const skeletonMd = await readFile(join(arvore, ".capivara/init/skeleton.md"), "utf8").catch(() => "");
+  const sharedContract = sharedContractFromSkeleton(skeletonMd);
+  /** Onde o produto diz como o usuário chega a ele: a única fonte da citação de quem o tira do navegador (§133). */
+  const stackCertificada = stackDoSkeleton(skeletonMd);
   const noWorktree = arvore !== options.projectRoot;
   /*
    * Só o Core registra no Git (§101). As referências são fotografadas antes e
@@ -529,6 +545,12 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
 
   const rascunhosDosFluxos = new Map<string, string>();
   const causasDosRoteiros = new Map<string, string>();
+  /** Os fluxos desta fase que o G4 registrou fora do navegador, com o trecho conferido (§133). */
+  const foraDoNavegador = new Map<string, string>();
+  /** A pergunta ao roteirista quando falta `start` é uma por fase: na seguinte, o roteiro escrito já respondeu (§133). */
+  let perguntouSemStart = false;
+  const foraDoNavegadorDaFase = (): { foraDoNavegador?: ForaDoNavegador[] } =>
+    foraDoNavegador.size > 0 ? { foraDoNavegador: [...foraDoNavegador].map(([workflow, trecho]) => ({ workflow, trecho })) } : {};
 
   /*
    * ------------------------------------------------------------------ vNext (§125)
@@ -543,6 +565,22 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
    * outro gate falhou; nada se aprova sem aplicabilidade demonstrada.
    */
   const livro = options.evidencias ?? (await LivroDeEvidencias.abrir(paths.root, options.runId));
+  /*
+   * A decisão "fora do navegador" vem do livro quando a fase roda de novo sobre o
+   * mesmo código (revalidação, retomada) e o G4 não volta a rodar (§133). Sem
+   * isto, o resultado saía sem ela, o registro da fase fechada era reescrito sem
+   * ela, e o fluxo virava cumprido sem ter sido percorrido. Vale enquanto o trecho
+   * estiver na Stack de agora e nenhum percurso posterior o tiver provado.
+   */
+  for (const workflow of options.flows?.workflows ?? []) {
+    const registro = livro.atual(session.id, `fora-do-navegador-${workflow.number}`)?.evidence;
+    const trecho = registro?.inputs.extra?.["trecho"];
+    if (registro?.inputs.extra?.["marca"] !== MARCA_FORA_DO_NAVEGADOR || typeof trecho !== "string" || !citaOContrato(trecho, stackCertificada)) continue;
+    const historico = livro.historico();
+    const percorridoDepois = historico.slice(historico.indexOf(registro) + 1)
+      .some((evidencia) => evidencia.phaseId === session.id && evidencia.checkId === `fluxo-${workflow.number}` && evidencia.outcome === "PASS");
+    if (!percorridoDepois) foraDoNavegador.set(workflow.number, trecho);
+  }
   const registro = await RegistroDeDefeitos.abrir(paths.root, options.runId, session.id, now, options.refazer === true);
   if (options.refazer === true) {
     // Quem pede para refazer tudo não confia no que está lá: as provas anteriores da fase deixam de valer, com o motivo.
@@ -1281,6 +1319,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       ...(plano.aprovadas.length > 0 ? { tasksJaAprovadas: plano.aprovadas } : {}),
       ...(plano.confirmar.length > 0 ? { tasksParaConfirmar: plano.confirmar } : {}),
       ...(estado.defects.length > 0 ? { defeitosConhecidos: defeitosConhecidos() } : {}),
+      // O mesmo critério do contexto do executor: quem julga conhece o contrato de subida que ele recebeu (§133).
+      ...((options.flows?.workflows.length ?? 0) + (options.flows?.regressao?.length ?? 0) > 0 ? { temFluxos: true } : {}),
     });
     const indicesAprovados = new Set([...plano.aprovadas, ...plano.confirmar].map((task) => task.index));
     let { resposta: verification, g0: g0Verifier, log } = await leituraDoVerificador(verificationPrompt, nome);
@@ -1478,7 +1518,14 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     const atual = livro.atual(session.id, "fluxos");
     if (atual === null || atual.validity.state !== "VALID" || atual.evidence.inputs.code?.tree !== codigo.atual.tree) return false;
     // NOT_APPLICABLE só vale aqui quando foi o PRÓPRIO G4 que decidiu (roteiro de regressão ausente), com a marca dele.
-    return atual.evidence.outcome === "PASS" || (atual.evidence.outcome === "NOT_APPLICABLE" && atual.evidence.inputs.extra?.["marca"] === FLOW_MARK);
+    if (atual.evidence.outcome === "PASS") return true;
+    if (atual.evidence.outcome !== "NOT_APPLICABLE" || atual.evidence.inputs.extra?.["marca"] !== FLOW_MARK) return false;
+    /*
+     * Com fluxo próprio, o NOT_APPLICABLE do gate é o "fora do navegador" (§133):
+     * vale só enquanto a decisão de cada fluxo continua de pé. Se a Stack mudou e a
+     * fase voltou, o gate roda de novo — a prova antiga, da mesma árvore, não serve.
+     */
+    return (options.flows?.workflows ?? []).every((workflow) => foraDoNavegador.has(workflow.number));
   };
 
   /** G4 — os fluxos na aplicação de pé: o que já existia, com a decisão e a evidência novas. */
@@ -1515,6 +1562,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     const passagem = execucoesG4NaPassagem === 1 ? passagemBase : `${passagemBase}.${execucoesG4NaPassagem}`;
     gate("G4", "corrente", ciclosAbertos);
     const startCommand = await fluxos.resolveStart();
+    const confirmouSemStart = startCommand === null && !perguntouSemStart;
     let g4: Awaited<ReturnType<typeof gate4>>;
     try {
       g4 = await gate4({
@@ -1524,7 +1572,13 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         ...(regressao.length > 0 ? { regressao } : {}),
         ...(pedido?.rejeitados ? { rejectedScripts: pedido.rejeitados } : {}),
         startCommand,
+        contratoCertificado: stackCertificada,
+        jaPercorridos: (fluxos.regressao ?? []).map((workflow) => workflow.number),
+        ...(confirmouSemStart ? { confirmarSemStart: true } : {}),
         author: async (workflow, rejected, baseUrl, contextoDaPassagem) => {
+          // Fora do navegador já conferido nesta fase: o contrato é o mesmo, e a resposta também (§133).
+          const decidido = foraDoNavegador.get(workflow.number);
+          if (decidido !== undefined && rejected.length === 0) return `${FORA_DO_NAVEGADOR}: ${decidido}`;
           const priorCause = causasDosRoteiros.get(workflow.number);
           const previousScript = rascunhosDosFluxos.get(workflow.number) ?? (rejected.length > 0 || priorCause
             ? await readFile(join(arvore, FLOWS_DIR, flowScriptName(workflow.number)), "utf8").catch(() => undefined)
@@ -1572,11 +1626,30 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       return "vermelho";
     }
     triagensNoCiclo = 0;
+    if (confirmouSemStart) perguntouSemStart = true;
+    for (const { number, trecho } of g4.naoPercorridos ?? []) {
+      if (foraDoNavegador.get(number) === trecho) continue;
+      foraDoNavegador.set(number, trecho);
+      const nome = fluxos.workflows.find((workflow) => workflow.number === number)?.name ?? "";
+      await livro.registrar({
+        phaseId: session.id, gate: "G4", checkId: `fora-do-navegador-${number}`, now,
+        claim: `o fluxo ${number} (${nome}) não é percorrido pelo G4: o contrato descreve o produto fora do navegador («${trecho}»); obrigação pendente, não aprovação`,
+        outcome: "NOT_APPLICABLE",
+        inputs: { documents: documentosDaFase(), code: codigo.atual, extra: { marca: MARCA_FORA_DO_NAVEGADOR, trecho } },
+        scope: emptyScope({ flows: [number] }), supports: [], artifactRefs: [],
+      });
+      await transicao({
+        tipo: "nao-aplicavel", gate: "G4",
+        motivo: `o fluxo ${number} (${nome}) não é percorrido: o gate 4 abre a aplicação num navegador, e o contrato descreve o produto fora dele («${trecho}»); obrigação pendente, não aprovação — nenhum servidor foi pedido ao executor`,
+      });
+    }
     if (g4.green === false && g4.triagem?.tipo === "CRITERIO") await registrarDecisaoDoBuild(options.projectRoot, session.id, ciclosAbertos, g4.triagem);
     const evidenciaDoG4 = g4.output || (!g4.green ? g4.cause : "");
     const logDoG4 = evidenciaDoG4 !== "" ? await gravarUnico(`${paths.logs}/${evidencePrefix}.flow-run-${passagem}.log`, evidenciaDoG4) : null;
     gate("G4", g4.green ? (g4.skipped !== "" ? "neutro" : "verde") : "vermelho", ciclosAbertos);
     const ordem = [...regressao, ...fluxos.workflows].filter((workflow, indice, todos) => todos.findIndex((outro) => outro.number === workflow.number) === indice);
+    // O que ficou fora do navegador não foi percorrido: não entra em prova de percurso nem em reprovação (§133).
+    const percorridos = ordem.filter((workflow) => !(g4.naoPercorridos ?? []).some((fluxo) => fluxo.number === workflow.number));
     const roteiros: { name: string; sha12: string }[] = [];
     for (const workflow of ordem) {
       const conteudo = await readFile(join(arvore, FLOWS_DIR, flowScriptName(workflow.number)), "utf8").catch(() => "");
@@ -1595,13 +1668,15 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       else announce(`[${session.id}] gate 4: ${g4.scripts.length} fluxo(s) percorrido(s) na aplicação de pé`);
       const geral = await livro.registrar({
         phaseId: session.id, gate: "G4", checkId: "fluxos", now,
-        claim: g4.skipped !== "" ? `G4 não se aplica: ${g4.skipped}` : `os fluxos ${ordem.map((workflow) => workflow.number).join(", ")} passam na aplicação de pé`,
+        claim: g4.skipped !== "" ? `G4 não se aplica: ${g4.skipped}` : `os fluxos ${percorridos.map((workflow) => workflow.number).join(", ")} passam na aplicação de pé`,
         outcome: g4.skipped !== "" ? "NOT_APPLICABLE" : "PASS",
-        inputs: entradasDoG4, scope: emptyScope({ flows: ordem.map((workflow) => workflow.number), components: options.architecture?.componentes ?? [] }),
+        inputs: entradasDoG4, scope: emptyScope({ flows: percorridos.map((workflow) => workflow.number), components: options.architecture?.componentes ?? [] }),
         supports: [], artifactRefs: refs,
       });
       if (g4.skipped === "") {
-        for (const workflow of ordem) {
+        for (const workflow of percorridos) {
+          // Percorrido de verdade: a decisão anterior de "fora do navegador" deixa de valer (§133).
+          foraDoNavegador.delete(workflow.number);
           await livro.registrar({
             phaseId: session.id, gate: "G4", checkId: `fluxo-${workflow.number}`, now,
             claim: `o fluxo ${workflow.number} (${workflow.name}) passa na aplicação de pé`, outcome: "PASS",
@@ -1619,7 +1694,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     else if (g4.startupFailed === true) announce(`[${session.id}] gate 4: a aplicação não subiu; nenhum fluxo foi percorrido`);
     else if (g4.scriptFailed === true) announce(`[${session.id}] gate 4: o roteiro falhou por si mesmo, não o produto — defeito do harness`);
     if (falhaDoRoteiro) {
-      const reprovados = fluxosQueFalharamPorUltimo.length > 0 ? fluxosQueFalharamPorUltimo : [...new Set(ordem.map((workflow) => workflow.number))];
+      const reprovados = fluxosQueFalharamPorUltimo.length > 0 ? fluxosQueFalharamPorUltimo : [...new Set(percorridos.map((workflow) => workflow.number))];
       for (const number of reprovados) causasDosRoteiros.set(number, g4.cause);
     }
     const evidencia = await livro.registrar({
@@ -2160,7 +2235,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       await concluir("já implementada em HEAD", ciclosAbertos);
       relatar({ kind: "phase", id: session.id, state: "concluído", cycle: ciclosAbertos, detail: "já implementada" });
       announce(`[${session.id}] JÁ IMPLEMENTADA — gates verdes, nada a commitar`);
-      return { status: "already-implemented", cycles: ciclosAbertos };
+      return { status: "already-implemented", cycles: ciclosAbertos, ...foraDoNavegadorDaFase() };
     }
     if (options.commitsEnabled && !commit.committed && noWorktree) {
       /*
@@ -2175,7 +2250,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     await concluir(commit.message, ciclosAbertos);
     relatar({ kind: "phase", id: session.id, state: "concluído", cycle: ciclosAbertos, detail: commit.committed ? "commitada" : "completa" });
     announce(`[${session.id}] COMPLETA${commit.committed ? ` — ${commit.message}` : ""}`);
-    return { status: "complete", committed: commit.committed, message: commit.message, cycles: ciclosAbertos };
+    return { status: "complete", committed: commit.committed, message: commit.message, cycles: ciclosAbertos, ...foraDoNavegadorDaFase() };
   };
 
   /**

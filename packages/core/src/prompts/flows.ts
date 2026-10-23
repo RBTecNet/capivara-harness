@@ -46,6 +46,40 @@ export interface FlowAuthorContext {
 
 export const FLOW_HEADER = "CAPIVARA_FLOW";
 
+/**
+ * Ler o produto sem mudar nada (§133).
+ *
+ * Aqui estava "Do not run commands" — e no codex ler arquivo É rodar comando,
+ * não há outra ferramenta. No Astra (`build-082c825927b3`) o roteirista recusou
+ * sete vezes em oito, pedindo que alguém colasse os arquivos, e a fase parou com
+ * o produto aprovado no G2 e no G3. O verificador sempre teve a frase certa; o
+ * roteirista e a triagem, que também leem o produto, ficaram com a metade.
+ */
+export const LEITURA_SEM_EFEITO = [
+  "You may run commands that change nothing — reading files, listing directories, searching the source.",
+  "Do not run tests, servers, builds, browser probes or installations, and do not write anything, in this session.",
+] as const;
+
+/**
+ * O produto que não se usa num navegador (§133).
+ *
+ * O G4 abre a aplicação por HTTP e a percorre com Playwright; o esqueleto declara
+ * fluxos de qualquer produto. No Luna (`build-521a72e8dbb5`, desktop Avalonia) o
+ * gate pediu um `start` no manifesto, o executor pôs um `package.json` com
+ * `dotnet run` e depois um `HttpListener` falso dentro do produto, e o roteirista
+ * — que tinha lido o contrato e dito que era desktop — inventou seletores web.
+ * Quem decide é o roteirista, que é independente e lê o contrato; o trecho que ele
+ * cita é conferido contra o contrato, e o fluxo fica NÃO percorrido, nunca aprovado.
+ */
+export const FORA_DO_NAVEGADOR = "CAPIVARA_FORA_DO_NAVEGADOR";
+
+/** O trecho citado depois da marca, sem aspas, crases nem pontuação final em volta; `null` sem marca ou sem trecho. */
+export function lerForaDoNavegador(resposta: string): string | null {
+  const linha = new RegExp(`${FORA_DO_NAVEGADOR}:[ \\t]*([^\\n]*)`).exec(resposta)?.[1] ?? "";
+  const trecho = linha.replace(/^[\s"'«“`]+|[\s"'»”`.;:,!?]+$/g, "");
+  return trecho === "" ? null : trecho;
+}
+
 /** O rótulo de cada passo. É estrutural: o gate conta por ele. */
 export function stepLabel(index: number, step: string): string {
   return `passo ${index + 1}: ${step}`;
@@ -68,9 +102,19 @@ export function flowPrompt(context: FlowAuthorContext): string {
     "",
     "You may read the real source — pages, templates, components, routes — to find the actual",
     "selectors. Read the product, never guess the markup.",
-    "Do not run commands, tests, servers, browser probes or installations in this session.",
+    ...LEITURA_SEM_EFEITO,
     "Do not create temporary scripts or delegate work. The harness executes the returned script once it is ready.",
     "The runtime instructions below describe the returned script, never actions for your authoring session.",
+    "",
+    "## A product used outside the browser",
+    "This gate walks the flow in a browser, against the product served over HTTP. When the published contract in this",
+    "prompt says users do not reach the product through a browser at all — a native desktop window, a program used in",
+    "a terminal, a library with no interface of its own — no browser script can walk this flow: do not invent pages or",
+    "selectors. Answer with this single line instead of a script:",
+    `\`${FORA_DO_NAVEGADOR}: <the line of the contract's Stack that says how users reach the product, copied word for word>\``,
+    "The harness checks that line against the Stack and records the flow as NOT walked: a pending obligation",
+    "reported to the developer, never a pass. A step done in a terminal inside a product used through a browser is",
+    "not this case: walk it with `comandoDoProjeto`, below.",
     flowScopeBlock(),
     transientStateBlock(true),
     "",
@@ -156,7 +200,7 @@ export function flowPrompt(context: FlowAuthorContext): string {
     "The one exception is the instance you start yourself: reach it through `app.url`.",
     "",
     "Return EXACTLY ONE fenced code block, TypeScript, and nothing else — no preamble, no",
-    "explanation after it. The block is the whole file:",
+    `explanation after it (the \`${FORA_DO_NAVEGADOR}\` line above is the only other answer). The block is the whole file:`,
     "",
     "```ts",
     "import { expect, test } from '@playwright/test';",

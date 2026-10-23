@@ -42,6 +42,56 @@ export interface VerifierContext {
    * para o verificador dizer quando um achado é o mesmo: `[P03-D1]` na linha.
    */
   defeitosConhecidos?: readonly { id: string; status: string; gate: string; summary: string }[];
+  /** A fase passa pelo gate 4: o executor recebeu o contrato de subida dele (§107), e o verificador precisa conhecê-lo (§133). */
+  temFluxos?: boolean;
+}
+
+/**
+ * "Não provado" é do código, não da sessão (§133).
+ *
+ * No Luna (desktop Avalonia) o verificador escreveu, sobre a integração que ele
+ * mesmo leu pronta, "confirmar visualmente a abertura do calendário" — cinco
+ * vezes, com a árvore idêntica, e dois reparos dele mesmo, que não tinham janela
+ * para olhar. O B0 de "não pode ser provado" valia para o que nenhuma sessão do
+ * loop consegue ver, e virou reprovação sem saída. O critério que manda percorrer
+ * os fluxos "no aplicativo nativo" é procedimento de verificação, que pertence ao
+ * gate de fluxos — o plano não planeja teste (§129).
+ */
+function observacaoPossivelBlock(temFluxos: boolean | undefined): string[] {
+  return [
+    "'Cannot be proven' is about the code and the evidence this loop can produce, not about what your session can watch.",
+    "No session of this loop can open a native window, look at a screen or operate a device, and no repair changes that:",
+    "never block on such an observation ('open the application and confirm visually'). Judge the requirement from the",
+    "code, the gates' results and a check you can run, and ask only for a proof the builder can deliver with the approved",
+    "infrastructure. If the code does not establish the behaviour, it is INCOMPLETE as before.",
+    "A criterion that prescribes HOW the product is verified — walk the flows in some environment, run a given test — is",
+    "the gates' procedure, not a code requirement: verify the product behaviour it refers to.",
+    // Com `--no-flows`, ou numa fase sem fluxo, não há gate que relate o percurso: a frase seria falsa (§133).
+    ...(temFluxos ? ["Walking the flows belongs to the flow gate, which reports what it could not walk."] : []),
+  ];
+}
+
+/**
+ * O que o harness exige da subida para o gate 4, do lado de quem julga (§133).
+ *
+ * O executor recebe o contrato do §107 — `start` com `PORT` e `HOST` — e o
+ * verificador não. No Astra a P06 dizia "iniciar na porta 3000 e manter
+ * SQLITE_PATH como única variável lida"; o G3 reprovou o servidor por ler `PORT`
+ * e `HOST`, o reparo dele os tirou, e a aplicação passou a escutar onde o gate não
+ * a procura. A metade que faltava era esta.
+ */
+function subidaDoGate4Block(temFluxos: boolean | undefined): string[] {
+  if (!temFluxos) return [];
+  return [
+    "",
+    "## How the harness starts the product for the flow gate",
+    "For a product used through a browser, the harness itself tells the builder that the flow gate runs the manifest's",
+    "`start` entrypoint with `PORT` and `HOST` in the environment, and that the entrypoint must listen there. Honouring",
+    "`PORT` and `HOST` — with the plan's own address as the default when they are absent — is that harness requirement,",
+    "not a deviation from the plan: never ask to remove it. A default that contradicts the plan is still a finding.",
+    "A product used outside the browser — a native desktop window, a program used in a terminal, a library — has no",
+    "such entrypoint: never ask to create a manifest, an HTTP server or a `start` entry only for the flow gate.",
+  ];
 }
 
 /**
@@ -182,6 +232,7 @@ export function verifyPrompt(context: VerifierContext): string {
     "`B1: CRITERION: <unmet requirement>; OBSERVED: <file, symbol or test and its actual behaviour>; EXPECTED: <required behaviour>;",
     "LOCATION: <where>; HYPOTHESIS: <likely cause>; FIX: <smallest change>; CHECK: <regression scenario and command>`.",
     "Start with B0 instead of B1 when required functionality is absent or essential behaviour cannot be proven at all.",
+    ...observacaoPossivelBlock(context.temFluxos),
     "Only when the code CANNOT satisfy the requirement because the approved documentation itself is wrong — an",
     "acceptance criterion contradicts the architecture, a contract cannot be honoured as written, two documents",
     "contradict each other, the phase demonstrably needs a dependency the approved infrastructure does not",
@@ -213,6 +264,7 @@ export function verifyPrompt(context: VerifierContext): string {
     ...aprovadasBlock(context.tasksJaAprovadas ?? []),
     ...confirmarBlock(context.tasksParaConfirmar ?? []),
     ...defeitosBlock(context.defeitosConhecidos ?? []),
+    ...subidaDoGate4Block(context.temFluxos),
     "",
     "## The phase to verify",
     context.phaseMarkdown,

@@ -22,7 +22,7 @@ import { execFile } from "node:child_process";
 import { mkdir, readFile, readdir, writeFile, stat } from "node:fs/promises";
 import { join, resolve as resolvePath } from "node:path";
 import type { SkeletonWorkflow } from "../contract/index.js";
-import { extractFlowScript, lerTriagem, stepLabel, type Triagem } from "../prompts/index.js";
+import { FORA_DO_NAVEGADOR, extractFlowScript, lerForaDoNavegador, lerTriagem, stepLabel, type Triagem } from "../prompts/index.js";
 import { comandoDeMigracao } from "./ambiente.js";
 import { FLOW_HELPER, VARIAVEL_DO_INICIO, bancosDeclarados, criarAmbienteDaPassagem, renderFlowHelper } from "./passagem.js";
 import { runtimeEnvironment } from "../provider/runtime-env.js";
@@ -544,6 +544,24 @@ export interface FlowGateOptions {
   preferredPort?: number;
   /** Tentativas de redação por fluxo, contando a primeira. */
   maxDrafts?: number;
+  /**
+   * O contrato que o roteirista leu — o compartilhado e o da fase (§133).
+   *
+   * É contra ele que se confere o trecho de quem diz que o produto não se usa num
+   * navegador. Sem ele, a marca não é aceita: nenhum fluxo sai da cobrança por
+   * uma frase que ninguém pôde conferir.
+   */
+  contratoCertificado?: string;
+  /**
+   * Os fluxos que alguma fase já percorreu num navegador — todos, não só a
+   * regressão que esta passagem roda (§133). Para eles a marca não vale.
+   */
+  jaPercorridos?: readonly string[];
+  /**
+   * Sem `start`, perguntar de novo ao roteirista se o fluxo se percorre num
+   * navegador, antes de cobrar o entrypoint. O runner liga uma vez por fase (§133).
+   */
+  confirmarSemStart?: boolean;
   /** O próximo ciclo substitui estes roteiros antes de executá-los outra vez. */
   rejectedScripts?: readonly string[];
   announce?: (message: string) => void;
@@ -660,6 +678,19 @@ export function passoQueFalhou(output: string, workflow: string): number | null 
   return null;
 }
 
+/** O que o roteirista ouve quando o projeto não tem `start` e o roteiro já existe (§133). */
+export const MOTIVO_SEM_START =
+  "o projeto ainda não declara um entrypoint `start`, e o gate 4 só percorre um fluxo com a aplicação servida por HTTP: " +
+  `se o contrato diz que o produto não se usa num navegador, responda com a linha ${FORA_DO_NAVEGADOR}; ` +
+  "se ele se usa num navegador, devolva o roteiro como está (o executor declara o `start`)";
+
+/** O fluxo que o gate não percorreu porque o contrato põe o produto fora do navegador (§133). */
+export interface NaoPercorrido {
+  number: string;
+  /** A passagem do contrato que o roteirista citou, conferida. */
+  trecho: string;
+}
+
 export type FlowGateResult =
   /**
    * `output` é a saída crua do runner, quando ele chegou a correr.
@@ -669,11 +700,13 @@ export type FlowGateResult =
    * três vezes seguidas, não havia no disco uma linha do que o Playwright tinha
    * dito — e sem isso o diagnóstico vira adivinhação.
    */
-  | { green: true; skipped: string; scripts: string[]; output?: string }
+  | { green: true; skipped: string; scripts: string[]; output?: string; naoPercorridos?: NaoPercorrido[] }
   | {
       green: false;
       cause: string;
       output?: string;
+      /** Fora do navegador, mesmo quando outro fluxo reprovou: a pendência é registrada de qualquer forma. */
+      naoPercorridos?: NaoPercorrido[];
       /** O veredito da triagem, quando ela correu e foi legível. */
       triagem?: Triagem;
       toolMissing?: boolean;
@@ -787,6 +820,25 @@ export function ehEsquemaAusente(erros: readonly string[]): boolean {
  * lendo código — e o roteiro para exercitá-lo já está escrito e pago.
  */
 export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
+  const naoPercorridos: NaoPercorrido[] = [];
+  const resultado = await percorrerFluxos(options, naoPercorridos);
+  return naoPercorridos.length > 0 ? { ...resultado, naoPercorridos } : resultado;
+}
+
+/**
+ * O trecho que o roteirista citou está no contrato que ele leu (§133)?
+ *
+ * Literal, a menos de espaço, caixa e marcação de Markdown; e com corpo — uma
+ * palavra solta ("desktop") estaria em qualquer contrato. É o mesmo princípio da
+ * citação do PLAN: a citação que não confere não tira nada da cobrança.
+ */
+export function citaOContrato(trecho: string, contrato: string): boolean {
+  const normal = (texto: string): string => texto.replace(/[`*_]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+  const citado = normal(trecho);
+  return citado.split(" ").length >= 3 && normal(contrato).includes(citado);
+}
+
+async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPercorrido[]): Promise<FlowGateResult> {
   const announce = options.announce ?? ((): void => {});
   const preferida = options.preferredPort ?? FLOW_PORT;
   // `let`: a colisão na porta do próprio gate troca a porta uma vez (§107).
@@ -798,16 +850,6 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
   const regressao = options.regressao ?? [];
   if (options.workflows.length === 0 && regressao.length === 0) {
     return { green: true, skipped: "a fase não declara fluxos e nenhuma anterior deixou fluxo a revalidar", scripts: [] };
-  }
-
-  if (options.startCommand === null) {
-    return {
-      green: false,
-      cause:
-        "o gate 4 não sabe como subir a aplicação: o projeto não declara um entrypoint (`start`) " +
-        "que o loop possa executar. Declare-o no manifesto para que os fluxos possam ser percorridos. " +
-        "O gate o executa com PORT e HOST no ambiente, e a aplicação precisa escutar nesse endereço.",
-    };
   }
 
   await mkdir(pasta, { recursive: true });
@@ -839,6 +881,31 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
    * regressão cujo roteiro foi escrito para o ambiente antigo. Um roteiro de
    * regressão AUSENTE continua não sendo escrito aqui — ver o filtro `noDisco`.
    */
+  /*
+   * A marca do produto fora do navegador, nos três lugares onde o roteirista
+   * responde: a redação, a reescrita e a contestação (§133). Vale só para um fluxo
+   * desta fase que nenhuma fase percorreu num navegador, e só com o trecho
+   * conferido na Stack que ele leu; roteiro de verdade na mesma resposta vence.
+   * Sem conferência, é rascunho defeituoso como qualquer outro, e o fluxo continua
+   * cobrado.
+   */
+  const jaPercorridos = new Set([...regressao.map((workflow) => workflow.number), ...(options.jaPercorridos ?? [])]);
+  const foraDaResposta = (workflow: SkeletonWorkflow, resposta: string): { trecho: string } | { problema: string } | null => {
+    const trecho = lerForaDoNavegador(resposta);
+    if (trecho === null || /\btest(?:\.step)?\s*\(/.test(extractFlowScript(resposta))) return null;
+    if (!options.workflows.some((atual) => atual.number === workflow.number) || jaPercorridos.has(workflow.number)) {
+      return { problema: `o fluxo ${workflow.number} já foi percorrido num navegador por uma fase anterior: a marca ${FORA_DO_NAVEGADOR} não vale para ele — devolva o roteiro` };
+    }
+    if (options.contratoCertificado === undefined || !citaOContrato(trecho, options.contratoCertificado)) {
+      return { problema: `o trecho citado em ${FORA_DO_NAVEGADOR} não está no contrato (a Stack publicada) — copie palavra por palavra a linha que diz como o usuário chega ao produto, ou devolva o roteiro` };
+    }
+    if (!naoPercorridos.some((fluxo) => fluxo.number === workflow.number)) {
+      naoPercorridos.push({ number: workflow.number, trecho });
+      announce(`fluxo ${workflow.number} (${workflow.name}) NÃO percorrido: o contrato descreve o produto fora do navegador — «${trecho}»`);
+    }
+    return { trecho };
+  };
+
   const aEscrever: SkeletonWorkflow[] = [];
   for (const workflow of ordem) {
     const daFase = options.workflows.some((atual) => atual.number === workflow.number);
@@ -864,7 +931,17 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
       announce(
         `roteiro do workflow ${workflow.number} (${workflow.name})` + (tentativa > 1 ? ` — tentativa ${tentativa}` : ""),
       );
-      const script = extractFlowScript(await options.author(workflow, rejeitado, baseUrl, passagemDe(workflow)));
+      const resposta = await options.author(workflow, rejeitado, baseUrl, passagemDe(workflow));
+      const fora = foraDaResposta(workflow, resposta);
+      if (fora !== null && "trecho" in fora) {
+        gravado = true;
+        break;
+      }
+      if (fora !== null) {
+        rejeitado = [fora.problema];
+        continue;
+      }
+      const script = extractFlowScript(resposta);
       const defeitos = checkFlowScript(script, workflow);
       if (anterior !== null && comMarca(script) === anterior) defeitos.push({ problem: "o roteirista devolveu o mesmo roteiro que já falhou", hint: "aplique o diagnóstico recebido antes de devolver o arquivo; não repetir o mesmo teste" });
       if (defeitos.length === 0) {
@@ -893,14 +970,105 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
    * pasta e não pertencer a nenhum deles é resto de outro plano — rodá-lo
    * cobraria da fase um comportamento que ninguém prometeu nela.
    */
-  const noDisco = new Set(await existingFlowScripts(options.projectRoot));
-  const scripts = [...regressao, ...options.workflows]
-    .map((workflow) => flowScriptName(workflow.number))
-    .filter((nome, indice, todos) => todos.indexOf(nome) === indice && noDisco.has(nome));
+  const aPercorrer = async (): Promise<string[]> => {
+    const noDisco = new Set(await existingFlowScripts(options.projectRoot));
+    const foraDoNavegador = new Set(naoPercorridos.map((fluxo) => flowScriptName(fluxo.number)));
+    return [...regressao, ...options.workflows]
+      .map((workflow) => flowScriptName(workflow.number))
+      .filter((nome, indice, todos) => todos.indexOf(nome) === indice && noDisco.has(nome) && !foraDoNavegador.has(nome));
+  };
+  // `let`: a contestação, a pergunta sem `start` e a reescrita podem tirar um fluxo do navegador (§133).
+  let scripts = await aPercorrer();
+  const semRoteiro = (): FlowGateResult => ({
+    green: true,
+    skipped: naoPercorridos.length > 0
+      ? `fluxo(s) ${naoPercorridos.map((fluxo) => fluxo.number).join(", ")} não percorrido(s): o produto é usado fora do navegador — obrigação pendente, não aprovação`
+      : "nenhum fluxo a percorrer",
+    scripts: [],
+  });
 
-  if (scripts.length === 0) return { green: true, skipped: "nenhum fluxo a percorrer", scripts: [] };
+  if (scripts.length === 0) return semRoteiro();
 
+  /*
+   * Quem reescrever: o roteiro que falhou — seja da fase, seja da regressão —, e
+   * só na falta dessa informação os da fase, como antes.
+   */
+  const alvos = (numeros: readonly string[] | undefined): SkeletonWorkflow[] => {
+    const escolhidos = ordem.filter((workflow) => (numeros ?? []).includes(workflow.number));
+    return escolhidos.length > 0 ? escolhidos : options.workflows;
+  };
+
+  /*
+   * O executor contestou o roteiro: reescreve antes de rodar — e antes de cobrar o
+   * `start` (§133). No desktop, o executor que não cria servidor contesta o roteiro
+   * web; tratada depois da cobrança, a contestação nunca chegava ao roteirista.
+   *
+   * Ele acabou de ler o produto e o erro do seletor, e é a única parte do ciclo
+   * que viu os dois. Quem reescreve é outra sessão, que lê o produto de novo —
+   * então a contestação não vira licença para ignorar o fluxo, só troca quem é
+   * corrigido primeiro.
+   */
+  if (options.roteiroContestado) {
+    announce(`o executor contestou o roteiro: ${options.roteiroContestado}`);
+    for (const workflow of alvos(options.roteirosQueFalharam)) {
+      const arquivo = join(pasta, flowScriptName(workflow.number));
+      const resposta = await options.author(
+        workflow,
+        [`o executor diz que este roteiro está errado, e não o produto: ${options.roteiroContestado}`],
+        baseUrl,
+        passagemDe(workflow),
+      );
+      const fora = foraDaResposta(workflow, resposta);
+      if (fora !== null && "trecho" in fora) continue;
+      const script = extractFlowScript(resposta);
+      const defeitos = fora !== null ? [{ problem: fora.problema, hint: "" }] : checkFlowScript(script, workflow);
+      if (defeitos.length === 0) {
+        await writeFile(arquivo, comMarca(script), "utf8");
+        announce(`  roteiro do fluxo ${workflow.number} reescrito`);
+      } else {
+        announce(`  o roteiro reescrito do fluxo ${workflow.number} veio com defeito; mantive o anterior`);
+      }
+    }
+    scripts = await aPercorrer();
+    if (scripts.length === 0) return semRoteiro();
+  }
+
+  /*
+   * A falta de `start` é cobrada aqui, depois da redação, e não antes (§133): é o
+   * roteirista quem diz, lendo o contrato, se o produto se usa num navegador. No
+   * Luna, cobrada antes, ela fez o executor criar `package.json` e um servidor
+   * HTTP falso num aplicativo desktop.
+   */
   const startCommand = options.startCommand;
+  if (startCommand === null) {
+    /*
+     * Sem `start`, uma pergunta a mais, uma vez por fase (o runner decide quando):
+     * o roteiro que já está no disco pode ter sido escrito como se o produto fosse
+     * web. No Luna, três de cinco roteiristas inventaram seletores; sem esta volta,
+     * o executor que não cria servidor para um desktop ficava sem saída (§133).
+     */
+    if (options.confirmarSemStart === true) {
+      const daFase = options.workflows.filter((workflow) =>
+        !jaPercorridos.has(workflow.number) && scripts.includes(flowScriptName(workflow.number)));
+      for (const workflow of daFase) {
+        announce(`o projeto não declara \`start\`: o roteirista confirma se o fluxo ${workflow.number} se percorre num navegador`);
+        const resposta = await options.author(workflow, [MOTIVO_SEM_START], baseUrl, passagemDe(workflow));
+        const fora = foraDaResposta(workflow, resposta);
+        if (fora !== null) continue;
+        const script = extractFlowScript(resposta);
+        if (checkFlowScript(script, workflow).length === 0) await writeFile(join(pasta, flowScriptName(workflow.number)), comMarca(script), "utf8");
+      }
+      scripts = await aPercorrer();
+      if (scripts.length === 0) return semRoteiro();
+    }
+    return {
+      green: false,
+      cause:
+        "o gate 4 não sabe como subir a aplicação: o projeto não declara um entrypoint (`start`) " +
+        "que o loop possa executar. Declare-o no manifesto para que os fluxos possam ser percorridos. " +
+        "O gate o executa com PORT e HOST no ambiente, e a aplicação precisa escutar nesse endereço.",
+    };
+  }
   await writeFile(join(pasta, FLOW_CONFIG), renderFlowConfig({ startCommand, port, scripts }), "utf8");
   await writeFile(join(pasta, FLOW_HELPER), renderFlowHelper(), "utf8");
 
@@ -937,6 +1105,13 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
    */
   let portaTrocada = false;
   const rodar = async (): Promise<FlowRun> => {
+    // A reescrita pode ter tirado um fluxo do navegador: roda só o que sobrou (§133).
+    const atuais = await aPercorrer();
+    if (atuais.join("\n") !== scripts.join("\n")) {
+      scripts = atuais;
+      if (scripts.length > 0) await writeFile(join(pasta, FLOW_CONFIG), renderFlowConfig({ startCommand, port, scripts }), "utf8");
+    }
+    if (scripts.length === 0) return { exitCode: 0, output: "" };
     const corrida = await passagem();
     if (portaTrocada || corrida.exitCode === 0 || !portasEmUso(corrida.output).includes(port)) return corrida;
     portaTrocada = true;
@@ -954,22 +1129,6 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
       (scripts.length > 1 ? `; ${scripts.length} roteiros em sequência` : ""),
   );
 
-  /*
-   * O executor contestou o roteiro: reescreve antes de rodar.
-   *
-   * Ele acabou de ler o produto e o erro do seletor, e é a única parte do ciclo
-   * que viu os dois. Quem reescreve é outra sessão, que lê o produto de novo —
-   * então a contestação não vira licença para ignorar o fluxo, só troca quem é
-   * corrigido primeiro.
-   */
-  /*
-   * Quem reescrever: o roteiro que falhou — seja da fase, seja da regressão —, e
-   * só na falta dessa informação os da fase, como antes.
-   */
-  const alvos = (numeros: readonly string[] | undefined): SkeletonWorkflow[] => {
-    const escolhidos = ordem.filter((workflow) => (numeros ?? []).includes(workflow.number));
-    return escolhidos.length > 0 ? escolhidos : options.workflows;
-  };
 
   /*
    * Reescreve os roteiros indicados, com as mesmas tentativas da primeira
@@ -990,8 +1149,14 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
       let rejeitado = [...motivo];
       let problemas = ["nenhuma correção executável foi entregue"];
       for (let tentativa = 1; tentativa <= tentativas; tentativa += 1) {
-        const script = extractFlowScript(await options.author(workflow, rejeitado, baseUrl, passagemDe(workflow)));
-        const defeitos = checkFlowScript(script, workflow, naoDefinidos);
+        const resposta = await options.author(workflow, rejeitado, baseUrl, passagemDe(workflow));
+        const fora = foraDaResposta(workflow, resposta);
+        if (fora !== null && "trecho" in fora) {
+          problemas = [];
+          break;
+        }
+        const script = extractFlowScript(resposta);
+        const defeitos = fora !== null ? [{ problem: fora.problema, hint: "" }] : checkFlowScript(script, workflow, naoDefinidos);
         if (defeitos.length === 0) {
           if (comMarca(script) === existente) {
             problemas = ["o roteirista não alterou o roteiro que acabou de falhar; não repetir o mesmo teste"];
@@ -1009,28 +1174,6 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
     }
     return falhas;
   };
-
-  if (options.roteiroContestado) {
-    announce(`o executor contestou o roteiro: ${options.roteiroContestado}`);
-    for (const workflow of alvos(options.roteirosQueFalharam)) {
-      const arquivo = join(pasta, flowScriptName(workflow.number));
-      const script = extractFlowScript(
-        await options.author(
-          workflow,
-          [`o executor diz que este roteiro está errado, e não o produto: ${options.roteiroContestado}`],
-          baseUrl,
-          passagemDe(workflow),
-        ),
-      );
-      const defeitos = checkFlowScript(script, workflow);
-      if (defeitos.length === 0) {
-        await writeFile(arquivo, comMarca(script), "utf8");
-        announce(`  roteiro do fluxo ${workflow.number} reescrito`);
-      } else {
-        announce(`  o roteiro reescrito do fluxo ${workflow.number} veio com defeito; mantive o anterior`);
-      }
-    }
-  }
 
   let run = await rodar();
 
@@ -1227,7 +1370,7 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
           `não repetir o mesmo teste nem reconstruir o produto.\n${causaDaTriagem(triada.triagem, tail(run.output))}`,
       };
       run = await rodar();
-      if (run.exitCode === 0) return { green: true, skipped: "", scripts, output: run.output };
+      if (run.exitCode === 0) return scripts.length === 0 ? semRoteiro() : { green: true, skipped: "", scripts, output: run.output };
       triada = await triar(run);
     }
 
@@ -1274,7 +1417,8 @@ export async function gate4(options: FlowGateOptions): Promise<FlowGateResult> {
     };
   }
 
-  return { green: true, skipped: "", scripts, output: run.output };
+  // Nada percorrido não é prova de percurso: sem roteiro restante, vale o registro de quem ficou fora (§133).
+  return scripts.length === 0 ? semRoteiro() : { green: true, skipped: "", scripts, output: run.output };
 }
 
 /** As últimas linhas, que é onde o playwright escreve o que falhou. */

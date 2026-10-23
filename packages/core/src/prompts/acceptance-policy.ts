@@ -57,6 +57,21 @@ export function sharedContractFromSkeleton(markdown: string): string {
   return lines.join("\n").trim();
 }
 
+/**
+ * Só a seção `## Stack` do skeleton (§133): é ali que o produto diz como o usuário
+ * chega a ele. O roteirista que tira um fluxo do navegador cita uma linha daqui —
+ * não uma task, não um critério, não uma regra.
+ */
+export function stackDoSkeleton(markdown: string): string {
+  const lines: string[] = [];
+  let include = false;
+  for (const line of markdown.split(/\r?\n/)) {
+    if (line.startsWith("## ")) include = /^## Stack\b/.test(line);
+    if (include) lines.push(line);
+  }
+  return lines.join("\n").trim();
+}
+
 export function interfaceContractBlock(sharedContract: string | undefined, phaseMarkdown?: string): string {
   return [
     "## Published interface contract — concrete input, not a naming convention",

@@ -24,7 +24,8 @@ describe("o prompt do roteiro", () => {
     const previousScript = "// roteiro publicado\nawait navegarPelasTarefas();";
     const repair = flowPrompt({ language: "pt-BR", workflow, baseUrl: "http://127.0.0.1:47533", previousScript, rejected: ["o link está na sidebar"] });
     expect(repair).toContain(previousScript);
-    expect(repair).toContain("Do not run commands, tests, servers, browser probes or installations in this session");
+    // Ler o produto é permitido; rodar teste, servidor, sonda ou instalação continua proibido (§133).
+    expect(repair).toContain("Do not run tests, servers, builds, browser probes or installations, and do not write anything, in this session");
     expect(repair).toContain("Preserve the working steps and assertions");
     expect(repair).toContain("Do not add scenarios, edge cases or assertions beyond the declared steps and acceptance criteria");
     expect(repair).toContain("Navigation belongs to its actual navigation region");

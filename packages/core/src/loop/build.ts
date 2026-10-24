@@ -55,7 +55,7 @@ import { materializeSessions } from "./split.js";
 import { preflight, type PreflightWarning } from "./preflight.js";
 import { checkPrerequisites, prerequisiteChoice, readPrerequisiteChoice, renderPrerequisiteChoice, resolvePrerequisites, type PrerequisiteStatus } from "./prerequisites.js";
 import { prepareBuildEnvironment } from "./environment-prepare.js";
-import { readEnvironmentPlan } from "./environment-plan.js";
+import { autoridadePublicada, readEnvironmentPlan, type AutoridadeDaAdocao } from "./environment-plan.js";
 import type { EscolhaNumerada } from "./escolha.js";
 import { lerResultadosDotnet, limparResultadosDotnet, RESULTADOS_DOTNET, resolveTestCommand } from "./testcmd.js";
 import { DEFAULT_MAX_CYCLES, MARCA_FORA_DO_NAVEGADOR, MARCA_PROVA_PELA_SUITE, passosSemProva, runPhase, testesDaProva, type EngineCaller, type EngineResult, type ForaDoNavegador, type PhaseOutcome } from "./runner.js";
@@ -67,7 +67,7 @@ import { TasksAprovadas, tasksDaFase } from "./veredictos.js";
 import { defaultTestRunner, gate0, gate2, type TestRunner } from "./gates.js";
 import { adoptPreparedDependencies, conteudoDe, criadosPelaPreparacao, explicarPreparacaoNaoAdotada, pendentesDaPreparacao } from "./prepared-dependencies.js";
 import { admitirArvore, alteracoesParaCommit, artefatosLocaisIgnorados, lerStatus } from "./admissao.js";
-import { garantiaDeAutoridade } from "./autoridade.js";
+import { fotografarRefs, garantiaDeAutoridade, refsMovidas } from "./autoridade.js";
 import { conferirIsolamento } from "./isolamento.js";
 import { larguraDoPlano } from "./escalonador.js";
 import { executarEmParalelo, type AgenteDoPool, type ExecucaoDaFase } from "./paralelo.js";
@@ -257,7 +257,12 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   return preparation.sessions > 0 ? { ...outcome, preparation } : outcome;
 }
 
-async function performBuild(options: BuildOptions, preparation: NonNullable<BuildOutcome["preparation"]>): Promise<BuildOutcome> {
+async function performBuild(
+  options: BuildOptions,
+  preparation: NonNullable<BuildOutcome["preparation"]>,
+  /** O que autoriza dependência na adoção, lido na primeira passada, antes de qualquer sessão de preparação (§135). */
+  autoridadeDaPrimeiraPassada?: AutoridadeDaAdocao,
+): Promise<BuildOutcome> {
   const announce = options.announce ?? (() => undefined);
   const now = options.now ?? (() => new Date());
 
@@ -390,8 +395,17 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
     }
   }
 
+  /*
+   * O que autoriza dependência num manifesto da preparação (§135): as sondas e
+   * o contrato publicado, lidos uma vez, antes de qualquer sessão desta
+   * execução. A segunda passada, depois da sessão, usa os mesmos — a sessão não
+   * reescreve o que a autoriza.
+   */
+  const autoridade = autoridadeDaPrimeiraPassada ?? (repository
+    ? await autoridadePublicada(options.projectRoot, declaredRequirements)
+    : { requisitos: [], dependencias: [], publicadas: null });
   if (repository) {
-    if (await adoptPreparedDependencies(options.projectRoot, declaredRequirements, await criadosPelaPreparacao(join(runPaths(options.projectRoot, runId).root, "preparation")))) announce("dependências já preparadas registradas pelo Core; instalação preservada para iniciar as fases");
+    if (await adoptPreparedDependencies(options.projectRoot, autoridade.requisitos, await criadosPelaPreparacao(join(runPaths(options.projectRoot, runId).root, "preparation")), autoridade.dependencias)) announce("dependências já preparadas registradas pelo Core; instalação preservada para iniciar as fases");
     const locais = await artefatosLocaisIgnorados(options.projectRoot, (await lerStatus(options.projectRoot)).map(entrada => entrada.caminho));
     if (locais.size > 0) announce(`${locais.size} arquivo(s) de artefatos locais ignorados já versionados diferem do HEAD; mantidos no disco, fora das alterações do produto`);
   }
@@ -486,11 +500,22 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
           await appendEvent(paths.events, { timestamp: now().toISOString(), stage: "preflight", subject: "environment",
             attempt: preparation.sessions, status: "started", detail: `sessão de instalação: ${logPath}` });
           let response: EngineResult | void;
+          // Só o Core registra no Git (§101): a sessão de preparação é uma chamada de agente como as das fases.
+          const refsAntes = repository ? await fotografarRefs(options.projectRoot) : null;
           try {
             response = await options.installPrerequisites?.(prompt);
           } catch (error) {
             await writeAtomic(logPath, JSON.stringify({ ...metadata, ...(await proveniencia()), status: "failed", error: error instanceof Error ? error.message : String(error) }, null, 2));
             throw error;
+          }
+          const movidas = refsAntes ? refsMovidas(refsAntes, await fotografarRefs(options.projectRoot)) : [];
+          if (movidas.length > 0) {
+            const violacao = `referências do Git mudaram durante a sessão de preparação (${movidas.join(", ")}): só o Core registra no Git (§101), e nada da sessão foi adotado. ` +
+              "O Core não sabe quem as moveu, e não desfez nada: confira o histórico; se não foi a sessão (um fetch automático, por exemplo), rode de novo";
+            await writeAtomic(logPath, JSON.stringify({ ...metadata, ...(await proveniencia()), status: "failed", error: violacao, response: response ?? null }, null, 2));
+            await appendEvent(paths.events, { timestamp: now().toISOString(), stage: "preflight", subject: "environment",
+              attempt: preparation.sessions, status: "blocked", detail: violacao });
+            throw new Error(violacao);
           }
           const gate = response ? gate0(response, options.engine) : { green: true as const };
           const canVerify = response && !gate.green && !response.timedOut && !response.engineError && !response.providerFailure && response.resultRead !== false;
@@ -522,7 +547,7 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
 
     announce(`pré-requisitos satisfeitos: ${resolucao.installed.join(", ") || "nada faltava"}`);
     const preparacoes = join(runPaths(options.projectRoot, runId).root, "preparation");
-    if (repository && await adoptPreparedDependencies(options.projectRoot, declaredRequirements, await criadosPelaPreparacao(preparacoes))) announce("preparação das dependências registrada pelo Core antes dos worktrees");
+    if (repository && await adoptPreparedDependencies(options.projectRoot, autoridade.requisitos, await criadosPelaPreparacao(preparacoes), autoridade.dependencias)) announce("preparação das dependências registrada pelo Core antes dos worktrees");
     /*
      * A preparação que não pôde ser adotada para o build aqui (§131), antes da
      * primeira fase. Seguir com ela pendente levava o manifesto (e, sem
@@ -534,7 +559,7 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
       const pendentes = await pendentesDaPreparacao(options.projectRoot).catch(() => []);
       const reason = [
         `depois da preparação do ambiente, a árvore principal tem alterações que o Core não pôde adotar (${pendentes.slice(0, 8).join(", ")}${pendentes.length > 8 ? ", …" : ""}); nenhuma fase foi iniciada.`,
-        await explicarPreparacaoNaoAdotada(options.projectRoot, preparacoes) ?? "Se são suas, commite-as; se vieram da preparação, apague-as — ela os refaz na próxima execução.",
+        await explicarPreparacaoNaoAdotada(options.projectRoot, preparacoes, autoridade) ?? "Se são suas, commite-as; se vieram da preparação, apague-as — ela os refaz na próxima execução.",
       ].join("\n");
       announce(`erro: ${reason}`);
       return { runId, exitCode: 1, phases: [], warnings: checked.warnings, errors: [reason], acceptance: null };
@@ -547,14 +572,14 @@ async function performBuild(options: BuildOptions, preparation: NonNullable<Buil
     // que voltasse a perguntar entraria em laço.
     if (!checked.ok) {
       const { askPrerequisite: _resolvido, ...semPergunta } = options;
-      return performBuild(semPergunta, preparation);
+      return performBuild(semPergunta, preparation, autoridade);
     }
   }
 
   if (!checked.ok) {
     // Árvore suja com preparação registrada neste run: dizer por que ela não foi adotada (§131).
     const preparacaoNaoAdotada = repository && checked.errors.some(error => error.includes("alterações não commitadas"))
-      ? await explicarPreparacaoNaoAdotada(options.projectRoot, join(runPaths(options.projectRoot, runId).root, "preparation"))
+      ? await explicarPreparacaoNaoAdotada(options.projectRoot, join(runPaths(options.projectRoot, runId).root, "preparation"), autoridade)
       : null;
     if (preparacaoNaoAdotada) checked.errors.push(preparacaoNaoAdotada);
     for (const error of checked.errors) announce(`erro: ${error}`);

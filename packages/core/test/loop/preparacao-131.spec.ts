@@ -355,7 +355,8 @@ describe("o build com a preparação do cenário real", () => {
     expect(registros[0]).toMatchObject({ pendentesAntes: ["package.json"], criados: [{ caminho: "package-lock.json", sha256: await conteudoDe(join(root, "package-lock.json")) }] });
     // Nem o node_modules que a sessão instalou entra na lista, nem o manifesto que já era do desenvolvedor.
     expect(JSON.stringify(registros[0])).not.toContain("node_modules");
-    expect(outcome.errors.join("\n")).toContain("nenhum deles prova");
+    // O motivo é o exato (§135): o manifesto não foi criado pela sessão.
+    expect(outcome.errors.join("\n")).toMatch(/package\.json — [^\n]*nenhuma sessão de preparação deste run o registrou/u);
   });
 
   it("preparação que a adoção recusa para o build antes da primeira fase, sem commitar nem apagar", async () => {
@@ -400,7 +401,8 @@ describe("o build com a preparação do cenário real", () => {
     expect(outcome.exitCode).toBe(1);
     expect(engine.chamadas).toHaveLength(0);
     expect(outcome.errors.join("\n")).toContain("alterações não commitadas");
-    expect(outcome.errors.join("\n")).toContain("nenhum deles prova");
+    // O que o registro mostra (§135), e não uma lista de hipóteses.
+    expect(outcome.errors.join("\n")).toContain("environment-install-interrompida.json (a sessão não terminou");
     expect(await git(["rev-parse", "HEAD"])).toBe(head);
   });
 

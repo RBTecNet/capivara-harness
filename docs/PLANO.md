@@ -14340,3 +14340,290 @@ Ficam registrados, para decisão:
 - **Forjamento do TRX.** Um teste do executor pode forjar o TRX de outro
   projeto da mesma cadeia `&&`. Rodar cada projeto separado, guardando o
   relatório antes do seguinte, fecha isso, mas muda o G2 do .NET de novo.
+
+## §135 — A preparação que a Capivara pediu não pode parar o build
+
+No `laravel/codex2` (`build-e3a468a74631`, Astra pelo Codex CLI), faltavam o
+Vite e o Chromium do Playwright. A sessão de preparação terminou normalmente e
+o registro diz isto:
+- `status: complete`, código 0, `pendentesAntes: []`;
+- `package.json` e `package-lock.json` criados, com o sha256;
+- as sondas passaram depois.
+
+O Core recusou a adoção dos dois arquivos, e nenhuma fase começou. A mensagem
+listava quatro causas possíveis sem dizer qual, entre elas uma sessão
+interrompida, que o registro desmentia.
+
+### 135.1 A evidência
+
+| fonte | o que mostra |
+|---|---|
+| `preparation/environment-install-e9297220….json` | `status: complete`, `exitCode: 0`, `pendentesAntes: []`, `criados`: `package-lock.json` 264e7a82…, `package.json` 768096c4… |
+| `sha256sum` na árvore do codex2 | os dois arquivos têm hoje exatamente esses sha256: nada mudou depois da sessão |
+| `package.json` do codex2 | só `devDependencies`: `@playwright/test`, `@vitejs/plugin-react`, `vite` |
+| `package-lock.json`, entrada `""` | as mesmas três, com as mesmas versões: lock consistente |
+| `environment.json` → `infrastructure.dependencies` | 16 dependências contratadas pelo PLAN, entre elas as três do manifesto |
+| `environment.json` → sondas | a do Vite é `npm exec --no -- vite --version`, que não nomeia pacote; a do Chromium é `node -e "require('@playwright/test')…"` |
+| `git status` do codex2 | só os dois arquivos pendentes, fora do `.capivara` (o `.capivara.zip` é posterior ao incidente) |
+| `usage` da sessão | 277 030 tokens de entrada, 263 552 em cache (95,1%), 1 032 de saída; o prompt do Core tem 4 399 bytes |
+
+### 135.2 A causa, reproduzida
+
+A hipótese do pedido se confirmou por reprodução, não por suposição. Numa cópia
+do codex2 (`.git`, `.capivara` e os dois arquivos, com os mesmos bytes),
+`adoptPreparedDependencies` com as sondas do `environment.json` devolveu
+`false`. As sondas autorizavam um pacote só: `@playwright/test`. Na mesma cópia,
+com os mesmos arquivos, os mesmos hashes e o mesmo registro, uma sonda a mais
+que nomeasse `vite` e `@vitejs/plugin-react` fazia a adoção passar.
+
+A condição que recusava é esta, em `prepared-dependencies.ts`:
+
+    Object.keys(declared).some(name => !packages.includes(name))
+
+`packages` vinha só das sondas: do `require` de uma sonda `node -e` e do pacote
+por trás de um link `./node_modules/.bin/X`. Uma sonda `npm exec --no -- vite`
+não diz pacote nenhum. As sondas comprovam prontidão, e a adoção as usava como a
+lista do que é permitido. O contrato do PLAN, que é quem autoriza dependência
+(§129), não era consultado.
+
+As outras condições de recusa foram conferidas uma a uma no incidente e
+nenhuma pesou:
+
+| condição | no incidente |
+|---|---|
+| arquivo pendente antes da sessão | `pendentesAntes: []` |
+| hash diferente do registrado | iguais |
+| campo além do manifesto mínimo | só `devDependencies` |
+| lock inconsistente | igual ao manifesto |
+| caminho inesperado | os dois na raiz |
+| alteração Git alheia | só os dois pendentes |
+| registro incompleto | `criados` presente, sessão `complete` |
+| dependência não contratada | nenhuma: as três estão em `infrastructure.dependencies` |
+
+O teste de build serial da §135, montado com essas sondas e esse manifesto,
+reproduz a mensagem do incidente palavra por palavra antes da correção.
+
+### 135.3 O que muda
+
+- **O contrato autoriza** (`environment-plan.ts`). A adoção aceita a
+  dependência que o contrato lista ou que uma sonda nomeia. Plano sem
+  `infrastructure` segue só com as sondas, como antes. O que autoriza é
+  `autoridadePublicada`, lida uma vez, antes de qualquer sessão, e usada
+  também pela segunda passada do build. Ela traz:
+  - os nomes de `infrastructure.dependencies` da árvore que também estão no
+    `environment.json` do commit da HEAD;
+  - as sondas da árvore, como na 0.7.9.
+
+  O nome que a sessão acrescentasse ao contrato da árvore não está no commit.
+  O `change` reescreve o arquivo sem commitar, mas preserva a infraestrutura,
+  e o contrato continua inteiro. As sondas não passam por essa comparação: o
+  `change` as refaz a partir do esqueleto, e a sonda nova que ele escreveu
+  seria recusada (135.9, terceira rodada). O que a sessão acrescenta às sondas
+  não vale na execução em que ela roda, porque a autoridade foi lida antes. A
+  especificação nunca versionada (`--no-commit`) não tem com que comparar:
+  vale a árvore, lida antes de qualquer sessão.
+  - O nome do manifesto é comparado exato, como o npm compara. O do contrato
+    vale como o PLAN o escreveu e na forma minúscula (`React` autoriza
+    `react`), e nenhum nome ganha maiúscula.
+  - Um projeto cujos gerenciadores declarados não incluem o npm (NuGet,
+    Composer) não autoriza nada num `package.json`.
+- **A sessão de preparação é uma chamada de agente** (§101). As referências do
+  Git são fotografadas antes e depois dela, com o mesmo `fotografarRefs` das
+  fases. A sessão que commita ou move uma ref para o build antes da primeira
+  fase, sem adotar nada e sem desfazer o que ela fez. Antes, um commit dela
+  passava por fora da adoção inteira.
+- **Só versão do registro.** A versão declarada tem de ser um intervalo semver
+  ou uma etiqueta (`latest`). A regra é positiva: o que não tem essa forma é
+  recusado. Alias, `file:`, Git, URL, `usuario/repo`, pasta (`..`,
+  `.capivara`) e tarball instalam outra coisa sob o nome contratado, inclusive
+  o tarball com cara de pré-lançamento (`1.0.0-a.tgz`). O nome
+  repetido em duas chaves de dependências também é recusado, porque o npm
+  escolhe entre elas por uma precedência que a conferência não vê.
+- **O lock do registro.** Além de bater com o manifesto na raiz, o lock não
+  pode mandar instalar de um `link`, de uma pasta, de um arquivo ou de um Git.
+  É a mesma regra do manifesto, aplicada ao irmão dele.
+- **O motivo exato** (`explicarPreparacaoNaoAdotada`). A explicação sai da
+  mesma avaliação que a adoção faz, e não de uma regra paralela. Para cada
+  arquivo pendente ela diz:
+  - a situação no Git;
+  - a proveniência, ou seja, se uma sessão deste run o registrou;
+  - a comparação do sha256 com o registrado;
+  - a condição que falhou, com a dependência, o campo ou a entrada do lock
+    responsável.
+
+  Ela diz também o estado de cada sessão registrada (`terminou (complete,
+  código 0)`, `a sessão não terminou: o registro parou em started`), o nome
+  que só a árvore lista, e a ação que cada condição pede. A lista de hipóteses
+  saiu. Quando nada pendente é da preparação, ela não explica nada: a
+  preparação já adotada não responde pela árvore que alguém sujou depois.
+- **A retomada se resolve sozinha.** No estado em que o codex2 parou, a
+  próxima execução do mesmo run adota a preparação já registrada, no começo
+  do build, sem sessão nova e sem o desenvolvedor apagar nada.
+
+### 135.4 O que NÃO muda
+
+- A proveniência: registro deste run, arquivo não versionado, sha256 igual ao
+  registrado, nada pendente de antes da sessão.
+- O manifesto mínimo, o lock consistente e a recusa de qualquer alteração
+  alheia junto.
+- O commit pela admissão (`commitAdmitido`), o `node_modules` fora do
+  histórico pela exclusão local, e a parada antes da primeira fase quando a
+  adoção é recusada.
+- INIT, PLAN, G2, G3, G4, a recuperação das §133–§134, os orçamentos e os
+  providers. Nenhuma chamada nova de modelo.
+
+### 135.5 Testes: RED → GREEN
+
+`test/loop/preparacao-135.spec.ts` tem 69 testes. O RED foi provado em cada
+etapa:
+- **Correção original.** Contra o código da 0.7.9 (só com o helper do contrato
+  no lugar, para o import), 24 dos 28 testes de então estavam RED. Os outros 4
+  cobrem coisas que já valiam: o contrato lido, o plano sem contrato só pelas
+  sondas, o registro de outro run e a fonte sem nome de provider.
+- **Achados da revisão.** Os testes de cada rodada ficaram RED contra o código
+  anterior a ela, ou com só aquela correção desligada:
+  - 15 da primeira rodada;
+  - 9 da segunda;
+  - 6 da terceira;
+  - 3 da quarta (135.9).
+
+| item do pedido | teste |
+|---|---|
+| 1, 2 | o manifesto e o lock do incidente são adotados (dependências contratadas que as sondas não nomeiam) |
+| 3 | dependência não contratada continua impedindo, e o motivo a nomeia; o mesmo para campo extra e versão fora do registro |
+| 4 | hash alterado depois da sessão: o motivo traz os dois sha |
+| 5 | manifesto do desenvolvedor pendente antes da sessão |
+| 6 | lock que não corresponde, com a divergência |
+| 7 | registro ausente, e sessão que parou em `started` |
+| 8 | duas sessões do mesmo run, a segunda reescrevendo o manifesto |
+| 9 | registro de outro run com o mesmo conteúdo não autoriza |
+| 10, 13 | o build do incidente adota, a P01 começa e a árvore fica íntegra, em serial e em paralelo |
+| 11 | a recusa diz arquivo, Git, proveniência, hash, condição, sessão e ação, sem "interrompida" quando o registro diz `complete` |
+| 12 | o manifesto adotado e depois mudado pela fase nunca é adotado como preparação |
+| 14 | plano sem `infrastructure` segue as sondas; a sonda que o `change` escreveu sem commitar continua autorizando; as versões que o npm grava continuam aceitas; as suítes da §131 continuam verdes |
+| 15 | o mesmo resultado com `codex`, `opencode` e `claude`; a fonte da adoção não cita provider |
+
+Duas asserções da §131 mudaram de texto, não de comportamento: esperavam a
+frase genérica ("nenhum deles prova"). Agora esperam a condição exata: o
+manifesto que nenhuma sessão registrou, e a sessão que parou em `started`.
+
+### 135.6 P01 depois da preparação, no estado real
+
+Numa cópia do codex2 com o `node_modules`, o `runBuild` rodou com as sondas
+reais e o Node do incidente (25.9.0). O motor das fases era falso, sem chamada
+paga, e parava na primeira chamada. A sequência foi esta:
+1. "dependências já preparadas registradas pelo Core";
+2. commit `chore(capivara): prepara dependências do ambiente` sobre o
+   `docs(capivara): especificação RALPH READY`;
+3. árvore do produto limpa;
+4. "ambiente aprovado; iniciando desenvolvimento";
+5. `[P01] Fundação persistente e contratos compartilhados`, em 2 partes (§130);
+6. a primeira e única chamada de modelo foi `P01:builder`, sem sessão nova de
+   preparação.
+
+O codex2 original não foi tocado: continua no `76313bd`, com os dois arquivos
+pendentes.
+
+### 135.7 Economia de chamadas
+
+A sessão de preparação recebeu do Core um prompt de 4 399 bytes, cerca de
+1,1 mil tokens:
+- as duas faltas, com o comando e a evidência da sonda;
+- o bloco de idioma;
+- as regras.
+
+Nenhum documento do plano vai junto. Os 277 030 tokens de entrada são do laço
+da própria CLI do provider: o contexto dela e as saídas de `npm install` e
+`playwright install`, reenviados a cada turno. Desses, 95,1% foram lidos do
+cache. Até a parte fora do cache (13 478) é cerca de 12 vezes o prompt do Core.
+
+O que daria para cortar seria o bloco de idioma, que traz chaves de protocolo
+que a preparação não usa, e as linhas de pilha do Node na evidência. São cerca
+de 1,4 KB por turno, em contexto que já é cache. O ganho é imaterial, e não
+mexi.
+
+A economia real deste incidente é outra. A mensagem antiga mandava apagar os
+arquivos e repetir. Isso pagaria uma sessão nova de preparação sem mudar a
+causa da recusa, que é determinística no conteúdo do manifesto. Agora não há
+sessão nova: a retomada adota o que já foi pago.
+
+### 135.8 Limitações
+
+- **A sonda `npm exec --no -- X` aceita binário de fora do projeto.** No
+  incidente, a do TypeScript passou pelo `tsc` global do Node 25. A do Vitest
+  passou por um Vitest 4.x antigo no cache do npx (`~/.npm/_npx`), que o npm
+  11.12 aceita e o 11.19 recusa. O PLAN pedia as duas "como dependência local".
+  É prontidão falsamente positiva, um defeito diferente do bloqueio, na forma
+  da sonda que o PLAN escreve. Fica para decisão.
+- **O que a sessão de preparação controla, ela pode forjar.** Ela escreve no
+  `.capivara/runs` e no `node_modules`. Daí três canais, todos anteriores à
+  §135:
+  - Uma sonda acrescentada ao `environment.json` vale a partir da execução
+    seguinte. Ancorá-la na HEAD barrava a sonda legítima do `change` (135.9).
+    As saídas possíveis são o `change` commitar o metadado ou o Core conferir
+    que o arquivo é o que ele mesmo gera. Fica para decisão.
+  - O link de `node_modules/.bin` diz o pacote que ela instalou.
+  - Um registro em `preparation/` pode ser escrito por ela.
+
+  O que ela não consegue mais é ampliar o contrato, que vem do commit, nem
+  autorizar alguma coisa na execução em que roda, nem commitar sem que o
+  build pare.
+- **A especificação nunca versionada não tem âncora.** Com `--no-commit`, vale
+  o contrato da árvore, lido antes de qualquer sessão de cada execução.
+- **O host do registro não é conferido.** O lock é recusado com `link`, pasta,
+  arquivo ou Git. Uma URL `https` de outro host passa, e o registro privado
+  legítimo também é uma URL de outro host.
+- **A versão contratada não é conferida.** O `version` do item do contrato,
+  hoje vazio quando nenhuma fonte o fixou, não é comparado com o manifesto.
+  Antes da §135 também não era.
+- **O manifesto só é procurado onde a busca das sondas olha.** São até três
+  níveis, sem pastas ocultas nem geradas. Fora disso, a recusa diz isso.
+- **A foto das refs não sabe quem as moveu.** Um fetch automático durante a
+  sessão (o de uma IDE, por exemplo) muda `refs/remotes` e para o build, como
+  já parava as fases (§101). A mensagem diz que o Core não sabe quem as moveu.
+
+### 135.9 A revisão adversarial
+
+Quatro rodadas de revisão independente, com cada achado reproduzido num spec
+temporário e apagado depois. A quarta não achou falsa aprovação nem falso
+bloqueio, só os dois textos da tabela.
+
+| rodada | achado | gravidade | correção |
+|---|---|---|---|
+| 1 | a sessão reescrevia o `infrastructure.dependencies` da árvore e se autorizava, na execução seguinte e, pela pergunta, na mesma (a segunda passada relia o arquivo) | alta | contrato da árvore ∩ commit da HEAD, lido uma vez antes de qualquer sessão |
+| 1 | `"vite": ".."`, `".capivara"`, `"x.tgz"` passavam pela recusa por `:` e `/` | alta | versão aceita só na forma do registro (intervalo ou etiqueta) |
+| 1 | o mesmo nome em `devDependencies` e `optionalDependencies`: a conferência via uma versão, o npm instalava outra | alta | nome repetido em duas chaves é recusado |
+| 1 | o lock com `resolved` de outro lugar ou com `link` passava (já era assim antes) | média | o lock não pode mandar instalar de link, pasta, arquivo ou Git |
+| 1 | as minúsculas autorizavam `VITE` por `vite` e recusavam o legado `JSONStream` da sonda | média | comparação exata; o contrato vale também na forma minúscula |
+| 1 | nomes NuGet de um projeto sem npm autorizavam um `package.json` | baixa | o contrato só vale quando os gerenciadores incluem o npm |
+| 1 | a explicação errava fatos: dizia "não foi adotada" depois da adoção; "versionado" para o arquivo só no índice; mandava apagar o manifesto versionado de outro; chamava de "pasta não percorrida" a versão que não é texto | média | os fatos certos em cada caso; sem explicação quando nada pendente é da preparação |
+| 2 | o canal das sondas: a sessão acrescentava uma sonda com `require('left-pad')` e se autorizava | alta | autoridade (sondas e contrato) congelada na primeira passada |
+| 2 | `1.0.0-a.tgz` tem a forma de pré-lançamento, e o npm o instala como arquivo | média | sufixo de tarball recusado |
+| 2 | a sessão que commita passava por fora da adoção: a foto das refs da §101 não cobria a chamada de preparação | média | a mesma foto, antes e depois da sessão |
+| 2 | "Node Package Manager" zerava o contrato; "React" no contrato recusava `react` | baixa | os dois aceitos |
+| 2 | na especificação nunca versionada, a explicação falava de um commit da HEAD que não existe | baixa | o porquê exato: fora do commit, ou depois da leitura |
+| 3 | ancorar as sondas na HEAD recusava a sonda nova que o `change` escreve sem commitar: um falso bloqueio criado pela segunda rodada | média | sondas da árvore, congeladas; o canal entre execuções fica em 135.8 |
+| 3 | a foto acusava "a sessão moveu" quando um fetch automático muda `refs/remotes` | baixa | a mensagem diz que as refs mudaram durante a sessão e que o Core não sabe quem as moveu |
+| 3 | com o contrato fora do commit, a ação mandava apagar e preparar de novo, o que daria na mesma recusa | baixa | a ação manda decidir sobre o contrato e commitar a especificação |
+| 4 | a ação de commitar a especificação aparecia também quando a recusa era de hash ou de outra dependência | baixa | cada ação só aparece quando um nome que ela cobre está numa recusa |
+| 4 | a sonda acrescentada durante a execução era dita "não vale", sem dizer que na próxima vale nem mandar desfazer | baixa | "não vale nesta execução, e na próxima passa a valer", com a ação de desfazer |
+
+Nas quatro rodadas, ficaram de pé:
+- o plano só com sondas;
+- as sondas por `.bin`;
+- o manifesto já versionado;
+- o modo paralelo e a retomada;
+- o registro de outro run;
+- o arquivo mudado depois da sessão;
+- o pendente de antes da sessão;
+- o registro `started`, ilegível ou sem `criados`;
+- os arquivos sensíveis, pela admissão;
+- o projeto numa subpasta do repositório;
+- as 16 formas de versão que o npm grava;
+- o lock real do npm 10/11;
+- nenhuma dependência de provider.
+
+`npm run check` deu rc=0, com 3390 testes em 173 arquivos, rodado sozinho no
+fim (load 9,5). Numa rodada anterior, com o revisor rodando testes ao lado,
+caiu o `coerencia-temporal-127` ("correm juntas"): é a instabilidade conhecida
+de sobreposição temporal sob carga, e ela não foi afrouxada.

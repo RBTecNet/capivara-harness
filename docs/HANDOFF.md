@@ -14,12 +14,54 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `fix/conclusao-generalista-134` (§134, 0.7.9, push feito, sem merge) a partir de `fix/cooperacao-build-133` (§133, 0.7.8, push feito, sem merge) sobre a `main`; na `main`, a cadeia §129–§132 entrou por fast-forward em 22/10/2026 (a §122–§128 em 21/10/2026), e as branches de ajuste foram apagadas, local e no `origin` |
+| branch | `fix/preparacao-135` (§135, sobre a 0.7.9, sem versão própria) a partir de `fix/conclusao-generalista-134` (§134, 0.7.9, push feito, sem merge) a partir de `fix/cooperacao-build-133` (§133, 0.7.8, push feito, sem merge) sobre a `main`; na `main`, a cadeia §129–§132 entrou por fast-forward em 22/10/2026 (a §122–§128 em 21/10/2026), e as branches de ajuste foram apagadas, local e no `origin` |
 | versão | 0.7.9 na branch da §134; 0.7.8 na branch da §133 (0.7.7 sem as correções da §133.9; ambas com a §132, que entrou na `main` sem versão própria); 0.7.6 na `main`; planos da 0.6.x e da 0.7.x valem na 0.7.9 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
-| suíte | 3321 testes em 172 arquivos na 0.7.9 (§134), `npm run check` verde (rc=0; o `coerencia-temporal-127` caiu uma vez sob load 12 e passou intercalado com a HEAD e na rodada seguinte); 3240 testes em 170 arquivos na 0.7.8 (§133.9), `npm run check` verde (rc=0); 3234 na 0.7.7 (§133), `npm run check` verde (rc=0; as duas instabilidades conhecidas, `coerencia-temporal-127` e `integridade-122`, caíram uma vez cada sob load 10–13 e passaram na rodada seguinte); 3203 em 168 na `main` com a §132, `npm run check` verde (rc=0); 3130 em 167 na 0.7.6 sem a §132 (3121 em 166 na 0.7.5), `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na 0.7.4 (§130); 3020 em 163 na 0.7.3 (§129); 2989 em 161 na 0.7.2 (2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
+| suíte | 3390 testes em 173 arquivos com a §135, `npm run check` verde (rc=0, rodado sozinho; com o revisor rodando ao lado, o `coerencia-temporal-127` caiu uma vez); 3321 testes em 172 arquivos na 0.7.9 (§134), `npm run check` verde (rc=0; o `coerencia-temporal-127` caiu uma vez sob load 12 e passou intercalado com a HEAD e na rodada seguinte); 3240 testes em 170 arquivos na 0.7.8 (§133.9), `npm run check` verde (rc=0); 3234 na 0.7.7 (§133), `npm run check` verde (rc=0; as duas instabilidades conhecidas, `coerencia-temporal-127` e `integridade-122`, caíram uma vez cada sob load 10–13 e passaram na rodada seguinte); 3203 em 168 na `main` com a §132, `npm run check` verde (rc=0); 3130 em 167 na 0.7.6 sem a §132 (3121 em 166 na 0.7.5), `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na 0.7.4 (§130); 3020 em 163 na 0.7.3 (§129); 2989 em 161 na 0.7.2 (2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-23 — A preparação que a Capivara pediu não pode parar o build (§135)
+
+No `laravel/codex2` (`build-e3a468a74631`, Astra pelo Codex CLI), a sessão de
+preparação instalou Vite e Chromium e terminou `complete`. Os dois arquivos que
+ela criou, `package.json` e `package-lock.json`, foram registrados com o
+sha256. O Core recusou a adoção, e nenhuma fase começou.
+
+- **A causa foi reproduzida.** A adoção usava as sondas como a lista do que é
+  permitido:
+  - a sonda do Vite (`npm exec --no -- vite --version`) não nomeia pacote;
+  - a do Chromium nomeia só `@playwright/test`;
+  - o manifesto declara também `vite` e `@vitejs/plugin-react`, que o
+    contrato do PLAN lista.
+
+  Na mesma cópia, uma sonda a mais que os nomeasse fazia a adoção passar.
+- **O contrato autoriza.** Valem os nomes de `infrastructure.dependencies` da
+  árvore que também estão no commit da HEAD, lidos antes de qualquer sessão,
+  junto com as sondas, como antes. A sessão não amplia o que a autoriza na
+  execução em que roda, nem o contrato depois. O `change`, que não commita mas
+  preserva a infraestrutura, continua autorizando.
+- **Só o registro.** Versão de alias, pasta, arquivo, Git ou URL é recusada,
+  no manifesto e no lock. O nome repetido em duas chaves também.
+- **A sessão de preparação está sob a foto das refs (§101).** Se uma ref muda
+  durante ela, o build para.
+- **O motivo é o exato.** A recusa diz, arquivo por arquivo:
+  - a situação no Git;
+  - a proveniência e o sha256;
+  - a condição e a dependência;
+  - o estado de cada sessão registrada;
+  - a ação.
+
+  A lista de hipóteses saiu.
+- **A retomada se resolve sozinha.** Numa cópia do codex2, com as sondas reais
+  e o Node 25 do incidente, a execução seguinte adota a preparação registrada
+  e a P01 começa, sem sessão nova. O codex2 não foi tocado.
+
+Ficam para decisão (PLANO 135.8):
+- a sonda `npm exec --no` aceita binário global ou do cache do npx: o
+  TypeScript e o Vitest do incidente passaram assim;
+- a sonda acrescentada pela sessão vale a partir da execução seguinte;
+- o host do registro no lock não é conferido.
 
 ## 2026-10-23 — A conclusão pela evidência que a plataforma permite (§134)
 

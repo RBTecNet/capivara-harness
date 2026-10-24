@@ -1,6 +1,6 @@
 # O contrato da Capivara — INIT, PLAN e BUILD
 
-Versão **0.7.9** (com a execução progressiva das fases, §130, a preparação, o raciocínio e o catálogo de modelos do §131, o ensaio do §132, o produto fora do navegador do §133 e a conclusão pela suíte e o G4 de terminal da §134). Este documento descreve, num lugar só, o que cada estágio da
+Versão **0.7.9** (com a execução progressiva das fases, §130, a preparação, o raciocínio e o catálogo de modelos do §131, o ensaio do §132, o produto fora do navegador do §133 e a conclusão pela suíte e o G4 de terminal da §134; a adoção da preparação pelo contrato do PLAN da §135 está na branch dela, ainda sem versão própria). Este documento descreve, num lugar só, o que cada estágio da
 Capivara recebe, decide, produz e não pode fazer, e como o trabalho passa de um
 para o outro. O porquê de cada regra está numerado em `docs/PLANO.md` (§NNN); o
 estado do trabalho, em `docs/HANDOFF.md`. Quando este documento e o código
@@ -252,9 +252,20 @@ flowchart TD
    recusa que o `--engine-strict` das instalações do build faria depois (§131).
    O manifesto mínimo que a sessão de preparação deixou vira commit antes dos
    worktrees, e só com o conteúdo que ela foi vista deixando. O que já estava
-   pendente é do desenvolvedor e não é adotado. Se a preparação deixou alteração
-   que não se adota, o build para antes da primeira fase, sem commitar nem
-   apagar (§131).
+   pendente é do desenvolvedor e não é adotado. O manifesto só pode declarar o
+   que o contrato do PLAN (`infrastructure.dependencies`) lista ou o que uma
+   sonda nomeia, e sempre com uma versão do registro: alias, pasta, arquivo, Git
+   ou URL são recusados, no manifesto e no lock. As sondas comprovam prontidão;
+   não são a lista do que é permitido. O contrato que autoriza é o do
+   `environment.json` da árvore que também está no commit da HEAD, e ele e as
+   sondas são lidos antes de qualquer sessão: a sessão não amplia o que a
+   autoriza na execução em que roda, nem o contrato depois. A sessão de
+   preparação é uma chamada de agente como as das fases: se ela move uma ref do
+   Git, o build para (§101, §135). Se a preparação deixou alteração que não se adota, o build
+   para antes da primeira fase, sem commitar nem apagar, e diz, arquivo por
+   arquivo, a situação no Git, a proveniência, a comparação do sha256, a
+   condição que falhou e a ação. Na execução seguinte do mesmo run, a preparação
+   já registrada é adotada sem sessão nova (§131, §135).
 2. **Fases**: na ordem das dependências, ou em paralelo, em worktrees próprias, com
    integração na árvore principal.
 3. **Implementação em partes** (§130): a fase que passa do orçamento de uma sessão

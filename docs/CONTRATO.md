@@ -1,6 +1,6 @@
 # O contrato da Capivara — INIT, PLAN e BUILD
 
-Versão **0.7.9** (com a execução progressiva das fases, §130, a preparação, o raciocínio e o catálogo de modelos do §131, o ensaio do §132, o produto fora do navegador do §133 e a conclusão pela suíte e o G4 de terminal da §134; a adoção da preparação pelo contrato do PLAN da §135 está na branch dela, ainda sem versão própria). Este documento descreve, num lugar só, o que cada estágio da
+Versão **0.7.10** (com a execução progressiva das fases, §130, a preparação, o raciocínio e o catálogo de modelos do §131, o ensaio do §132, o produto fora do navegador do §133, a conclusão pela suíte e o G4 de terminal da §134 e a adoção da preparação pelo contrato do PLAN da §135). Este documento descreve, num lugar só, o que cada estágio da
 Capivara recebe, decide, produz e não pode fazer, e como o trabalho passa de um
 para o outro. O porquê de cada regra está numerado em `docs/PLANO.md` (§NNN); o
 estado do trabalho, em `docs/HANDOFF.md`. Quando este documento e o código

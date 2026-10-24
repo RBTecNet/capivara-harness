@@ -2,7 +2,7 @@
 
 Do prompt à aplicação final, em três comandos.
 
-Versão **0.7.9**: o `build` recupera por defeito e revalida só a prova que a
+Versão **0.7.10**: o `build` recupera por defeito e revalida só a prova que a
 correção atingiu (§125), cobra cada fluxo quando o plano diz que ele existe
 (§127), entrega a fase grande ao executor em partes, julgando-a inteira (§130),
 e só aprova o ambiente que a instalação estrita aceita, com o MiniMax nos efforts
@@ -11,7 +11,9 @@ dos modelos no BUILD (§131); não exige navegador de produto que não o tem e
 deixa o fluxo dele pendente e nomeado, nunca aprovado, e o verificador não
 bloqueia pelo que nenhuma sessão consegue observar (§133); conclui esse fluxo
 pela suíte do projeto só com o teste aprovado no relatório do runner (.NET), e
-percorre por comandos o produto de terminal (§134);
+percorre por comandos o produto de terminal (§134); adota a preparação do
+ambiente que o contrato do PLAN autoriza e, quando recusa, diz a condição exata
+(§135);
 o `plan` mantém a correção que o achado alcança e a fase que a
 reorganização não tocou (§128), não planeja teste, escolhe todas as dependências
 do projeto — as de teste incluídas — e não devolve por teste (§129). Planos e

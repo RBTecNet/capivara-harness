@@ -72,8 +72,21 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-Na versão 0.7.9, `npm run check` passa: build, typecheck e **3321 testes**, incluindo o catálogo de
+Na versão 0.7.10, `npm run check` passa: build, typecheck e **3390 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
+
+A 0.7.10 traz a §135: a preparação do ambiente deixa de parar o build com o
+que ela mesma instalou a pedido da Capivara.
+- O manifesto que a sessão de preparação criou é adotado quando declara o que
+  o contrato do PLAN (`infrastructure.dependencies`) lista ou uma sonda nomeia.
+  As sondas comprovam prontidão; não são a lista do que é permitido.
+- O contrato que autoriza é o da árvore que também está no commit da HEAD, lido
+  antes de qualquer sessão, e só versões do registro passam, no manifesto e no
+  lock.
+- A sessão de preparação fica sob a mesma foto das refs do Git que as fases.
+- A recusa diz, arquivo por arquivo, a condição exata e a ação.
+
+Foram quatro rodadas de revisão adversarial.
 
 A 0.7.9 traz a §134, que conclui o fluxo do produto usado fora do navegador
 com evidência que a plataforma permite, sem dispensá-lo.

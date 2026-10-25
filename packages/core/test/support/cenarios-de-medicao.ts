@@ -23,7 +23,7 @@ import type { AgentCall, InitOutcome } from "../../src/init/index.js";
 import { runBuild } from "../../src/loop/index.js";
 import type { BuildOutcome, EngineCall } from "../../src/loop/index.js";
 import { runIdFor } from "../../src/state/index.js";
-import { NO_QUESTIONS, approve, fakeAgent, materialityKeeps, rehearsalApproves } from "./fake-agent.js";
+import { NO_QUESTIONS, approve, fakeAgent } from "./fake-agent.js";
 import type { ScriptStep } from "./fake-agent.js";
 import { allDone, fakeEngine } from "./fake-engine.js";
 import type { EngineStep } from "./fake-engine.js";
@@ -123,7 +123,7 @@ function documentos(produto: Produto): { skeleton: string; architecture: string;
   return { skeleton, architecture, fases };
 }
 
-/** O roteiro do `plan` que aprova tudo: entrevista sem pergunta, documentos válidos, auditoria e ensaio aprovando. */
+/** O roteiro do `plan` que aprova tudo: entrevista sem pergunta, documentos válidos, auditorias aprovando. */
 function roteiroDoPlano(produto: Produto, extra: ScriptStep[] = []): ScriptStep[] {
   const docs = documentos(produto);
   return [
@@ -137,8 +137,6 @@ function roteiroDoPlano(produto: Produto, extra: ScriptStep[] = []): ScriptStep[
       repeat: true,
     })),
     { match: { role: "auditor", stage: "audit" }, respond: { stdout: approve() }, repeat: true },
-    materialityKeeps(),
-    rehearsalApproves(),
   ];
 }
 
@@ -244,8 +242,6 @@ async function cadeia(
   const comum = {
     projectRoot, request, language: LINGUA, call: agente.call,
     ask: async () => "use as recomendações",
-    // Ninguém decide o impasse: num cenário medido, o desenvolvedor não está olhando.
-    decideStandoff: async () => "não sei",
     sleep: async () => undefined,
   };
 
@@ -645,7 +641,7 @@ export async function garantiaG3(): Promise<Garantia> {
         call.prompt.includes(CITACAO_DA_FASE)
           ? [
               "CAPIVARA_AUDIT_STATUS: REJECTED",
-              `CAPIVARA_FINDING: Phase 2 | o critério «${CITACAO_DA_FASE}» contradiz a regra do esqueleto «${CITACAO_DA_DECISAO}» | troque a exclusão permanente pela desativação do cliente`,
+              `CAPIVARA_FINDING: CONTRADICTION | Phase 2 | o critério «${CITACAO_DA_FASE}» contradiz a regra do esqueleto «${CITACAO_DA_DECISAO}» | troque a exclusão permanente pela desativação do cliente`,
               "CAPIVARA_REASON: a fase contradiz uma decisão do produto",
             ].join("\n")
           : approve(),
@@ -665,7 +661,7 @@ export async function garantiaG3(): Promise<Garantia> {
     detalhe: pronto
       ? "o plan publicou RALPH READY com a fase que exclui permanentemente"
       : citaAsDuas
-        ? `o plan parou (${cenario.bloqueio !== null ? "impasse" : "NOT READY"}) e a parada cita a fase e a decisão`
+        ? `o plan parou (${cenario.bloqueio !== null ? "bloqueio" : "NOT READY"}) e a parada cita a fase e a decisão`
         : `o plan parou, mas a parada não cita as duas passagens: ${texto.slice(0, 300)}`,
     cenario,
   };

@@ -29,10 +29,10 @@ import { sha12 } from "../contract/index.js";
 
 /**
  * `v3` (§116): além das fases e das aprovações por auditoria, a memória guarda
- * o esqueleto, a arquitetura, as tasks aprovadas uma a uma e a base da
- * coerência. É o que faz uma retomada depois de o provider cair custar zero
- * chamadas pelo que já estava julgado — antes, as aprovações por task e a
- * coerência viviam só em memória e morriam com o processo.
+ * o esqueleto e a arquitetura. É o que faz uma retomada depois de o provider
+ * cair custar zero chamadas pelo que já estava julgado. As aprovações por task
+ * e a base da coerência saíram com a auditoria por fase (etapa 2 da redução);
+ * um arquivo da 0.7.10 que as traga continua sendo lido, e elas são ignoradas.
  */
 export const PLAN_CACHE_CONTRACT = "capivara-plan-cache/v3" as const;
 
@@ -47,10 +47,6 @@ export interface PlanCache {
   escritas: Record<string, string>;
   /** sha do prompt de auditoria que aprovou. Valor é o instante, para quem for ler. */
   aprovadas: Record<string, string>;
-  /** As chaves `sha-da-task:autoridade` já aprovadas pelo auditor. */
-  tasksAprovadas: string[];
-  /** A base da auditoria de coerência: a autoridade e a assinatura de cada critério aprovado. */
-  coerencia: { authority: string; approved: Record<string, string> } | null;
   updatedAt: string;
 }
 
@@ -59,7 +55,7 @@ export function planCachePath(projectRoot: string, runId: string): string {
 }
 
 function vazio(runId: string): PlanCache {
-  return { contract: PLAN_CACHE_CONTRACT, runId, esqueletos: {}, arquiteturas: {}, escritas: {}, aprovadas: {}, tasksAprovadas: [], coerencia: null, updatedAt: new Date(0).toISOString() };
+  return { contract: PLAN_CACHE_CONTRACT, runId, esqueletos: {}, arquiteturas: {}, escritas: {}, aprovadas: {}, updatedAt: new Date(0).toISOString() };
 }
 
 export async function readPlanCache(projectRoot: string, runId: string): Promise<PlanCache> {
@@ -73,8 +69,6 @@ export async function readPlanCache(projectRoot: string, runId: string): Promise
       arquiteturas: parsed.arquiteturas ?? {},
       escritas: parsed.escritas ?? {},
       aprovadas: parsed.aprovadas ?? {},
-      tasksAprovadas: Array.isArray(parsed.tasksAprovadas) ? parsed.tasksAprovadas.filter((chave) => typeof chave === "string") : [],
-      coerencia: parsed.coerencia && typeof parsed.coerencia.authority === "string" && parsed.coerencia.approved ? parsed.coerencia : null,
       updatedAt: parsed.updatedAt ?? new Date(0).toISOString(),
     };
   } catch {
@@ -134,29 +128,6 @@ export class MemoriaDoPlano {
     this.gravar();
   }
 
-  /** As chaves de task já aprovadas numa execução anterior. */
-  tasksAprovadas(): readonly string[] {
-    return this.ativa ? [...this.cache.tasksAprovadas] : [];
-  }
-
-  guardarTasksAprovadas(chaves: readonly string[]): void {
-    const conhecidas = new Set(this.cache.tasksAprovadas);
-    const novas = chaves.filter((chave) => !conhecidas.has(chave));
-    if (novas.length === 0) return;
-    this.cache.tasksAprovadas.push(...novas);
-    this.gravar();
-  }
-
-  /** A base da coerência aprovada numa execução anterior, ou `null`. */
-  coerenciaGuardada(): { authority: string; approved: Record<string, string> } | null {
-    return this.ativa ? this.cache.coerencia : null;
-  }
-
-  guardarCoerencia(estado: { authority: string; approved: Record<string, string> } | null): void {
-    this.cache.coerencia = estado;
-    this.gravar();
-  }
-
   /** A fase que este prompt já produziu, ou `null`. */
   faseEscrita(prompt: string): string | null {
     if (!this.ativa) return null;
@@ -187,8 +158,6 @@ export class MemoriaDoPlano {
       arquiteturas: { ...this.cache.arquiteturas },
       escritas: { ...this.cache.escritas },
       aprovadas: { ...this.cache.aprovadas },
-      tasksAprovadas: [...this.cache.tasksAprovadas],
-      coerencia: this.cache.coerencia ? { authority: this.cache.coerencia.authority, approved: { ...this.cache.coerencia.approved } } : null,
     };
     this.fila = this.fila.then(async () => {
       await writePlanCache(this.projectRoot, instantaneo).catch(() => undefined);

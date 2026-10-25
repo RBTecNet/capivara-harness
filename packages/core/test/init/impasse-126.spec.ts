@@ -37,7 +37,7 @@ import { runInit, runPlan } from "../../src/init/index.js";
 import type { AgentCall } from "../../src/init/index.js";
 import { ID_DO_BANCO, regrasDeBanco } from "../../src/interview/index.js";
 import type { Question } from "../../src/interview/index.js";
-import { NO_QUESTIONS, approve, fakeAgent, materialityKeeps, rehearsalApproves, reject } from "../support/fake-agent.js";
+import { NO_QUESTIONS, approve, fakeAgent, reject } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
 
 let projectRoot = "";
@@ -332,12 +332,11 @@ function roteiro(papeis: Papeis = {}): ScriptStep[] {
     { match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: FASE_1 }, repeat: true },
     { match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: FASE_2 }, repeat: true },
     { match: { role: "writer", stage: "authoring", subject: "phase-p03" }, respond: { stdout: FASE_3 }, repeat: true },
-    ...(papeis.p2 ? [{ match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2" }, respond: { stdout: papeis.p2 }, repeat: true }] : []),
-    ...(papeis.p3 ? [{ match: { role: "auditor", stage: "audit", subject: "project-phases.md#P3" }, respond: { stdout: papeis.p3 }, repeat: true }] : []),
-    ...(papeis.coerencia ? [{ match: { role: "auditor", stage: "audit", subject: COERENCIA }, respond: { stdout: papeis.coerencia }, repeat: true }] : []),
+    // O plano é auditado inteiro, numa chamada (etapa 2 da redução): a leitura que o caso dá a uma fase é a do plano.
+    ...(papeis.p2 ?? papeis.p3 ?? papeis.coerencia
+      ? [{ match: { role: "auditor", stage: "audit", subject: "project-phases.md" }, respond: { stdout: (papeis.p2 ?? papeis.p3 ?? papeis.coerencia)! }, repeat: true }]
+      : []),
     { match: { role: "auditor", stage: "audit" }, respond: { stdout: approve() }, repeat: true },
-    materialityKeeps(),
-    rehearsalApproves(),
   ];
 }
 
@@ -350,16 +349,14 @@ async function init(pedido = request, papeis: Papeis = {}) {
 async function plan(papeis: Papeis, extras: Partial<Parameters<typeof runPlan>[0]> = {}, pedido = request) {
   const dito: string[] = [];
   const perguntadas: Question[] = [];
-  const impasses: string[] = [];
   const agent = fakeAgent(roteiro(papeis));
   const run = runPlan({
     projectRoot, request: pedido, language, call: agent.call,
     ask: async (question) => { perguntadas.push(question); return "1"; },
     announce: (frase) => void dito.push(frase), sleep: async () => undefined,
-    decideStandoff: async (rendered) => { impasses.push(rendered); return "publicar"; },
     ...extras,
   });
-  return { run, agent, perguntadas, impasses, anunciado: () => dito.join("\n") };
+  return { run, agent, perguntadas, anunciado: () => dito.join("\n") };
 }
 
 const por = (agent: { calls: AgentCall[] }, filtro: Partial<AgentCall>) =>
@@ -570,29 +567,22 @@ describe("INIT: o esqueleto publicado", () => {
 describe("PLAN: a arquitetura e as auditorias com a mesma autoridade", () => {
   it("3, 12. a decisão técnica legítima do plano — DATABASE_PATH do lado da aplicação — passa e é publicada; o caminho limpo não ganha chamada", async () => {
     await init();
-    const { run, agent, perguntadas, impasses } = await plan({});
+    const { run, agent, perguntadas } = await plan({});
     const outcome = await run;
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
     const arquiteturaPublicada = await publicado("architecture.md");
     expect(arquiteturaPublicada).toContain(CONTRATO_DA_APLICACAO);
     expect(arquiteturaPublicada).toContain("Usar DATABASE_PATH como única variável de ambiente");
     expect(perguntadas).toEqual([]);
-    expect(impasses).toEqual([]);
-    // As chamadas da 0.7.0, nem uma a mais: arquiteto, leitura, três fases, três leituras, coerência, triagem
-    // nenhuma, o ensaio em três lotes. As fases são escritas e lidas em paralelo: conta o conjunto, não a ordem.
+    // Arquiteto, leitura da arquitetura, três fases e UMA auditoria do plano inteiro (etapa 2 da redução):
+    // eram três leituras de fase, a coerência e três lotes de ensaio. As fases são escritas em paralelo: conta o conjunto.
     expect(agent.calls.map((call) => `${call.role}:${call.stage}:${call.subject}`).sort()).toEqual([
       "writer:authoring:architecture",
       "auditor:audit:architecture",
       "writer:authoring:phase-p01",
       "writer:authoring:phase-p02",
       "writer:authoring:phase-p03",
-      "auditor:audit:project-phases.md#P1",
-      "auditor:audit:project-phases.md#P2",
-      "auditor:audit:project-phases.md#P3",
-      "auditor:audit:project-phases.md#coerência",
-      "verifier:verify:project-phases.md",
-      "verifier:verify:project-phases.md",
-      "verifier:verify:project-phases.md",
+      "auditor:audit:project-phases.md",
     ].sort());
   });
 
@@ -650,121 +640,6 @@ describe("PLAN: a arquitetura e as auditorias com a mesma autoridade", () => {
   });
 });
 
-describe("PLAN: o achado sobre o envelope vai à origem", () => {
-  it("7, 8, 9, 10. o Goal real vai à arquitetura, sem pergunta; a fase 1 aprovada fica, a fase 2 é reescrita e reauditada", async () => {
-    await init();
-    const { run, agent, perguntadas, impasses, anunciado } = await plan({
-      arquiteto: (call) => (call.prompt.includes("what to do: Remova") ? arquitetura("limpa") : arquitetura("prosa")),
-      p2: (call) => (call.prompt.includes("banco descartável próprio") ? linha(GOAL_P2[0]!) : approve()),
-    });
-    const outcome = await run;
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    // 8: ninguém perguntou ao desenvolvedor qual leitura vale; não houve impasse.
-    expect(deAuditoria(perguntadas)).toEqual([]);
-    expect(impasses).toEqual([]);
-    // 7: a origem é dita, e a arquitetura recebeu o achado com o endereço do envelope.
-    expect(anunciado()).toContain("architecture.md");
-    expect(anunciado()).toMatch(/envelope/iu);
-    const chamadas = arquitetos(agent);
-    expect(chamadas).toHaveLength(2);
-    expect(chamadas[1]?.prompt).toContain("Phase 2");
-    expect(chamadas[1]?.prompt).toContain(GOAL_P2[0]!.problem);
-    // A primeira leitura é defeito da fase (§70): uma emenda do escritor. A volta vai à arquitetura,
-    // sem reparo pelo auditor, sem verifier e sem arbitragem sobre o que nenhuma emenda alcança.
-    const emendasDaFase2 = agent.calls.filter((call) => call.stage === "authoring" && call.subject === "phase-p02" && call.prompt.includes("amending a phase"));
-    expect(emendasDaFase2).toHaveLength(1);
-    expect(emendasDaFase2[0]?.role).toBe("writer");
-    expect(por(agent, { role: "auditor", stage: "authoring", subject: "phase-p02" })).toEqual([]);
-    expect(por(agent, { role: "verifier", stage: "audit", subject: "project-phases.md#P2" })).toEqual([]);
-    // 9: a fase 1 aprovada não foi reescrita nem reauditada.
-    expect(por(agent, { stage: "authoring", subject: "phase-p01" })).toHaveLength(1);
-    expect(por(agent, { stage: "audit", subject: "project-phases.md#P1" })).toHaveLength(1);
-    // 10: a fase 2 mudou de envelope: escrita de novo e auditada de novo, sem reaproveitar aprovação.
-    expect(por(agent, { stage: "authoring", subject: "phase-p02" })).toHaveLength(3);
-    expect(por(agent, { stage: "audit", subject: "project-phases.md#P2" })).toHaveLength(3);
-    expect(await goalsPublicados()).not.toContain("banco descartável próprio");
-  });
-
-  it("revisão 1: o Goal cuja correção cita a frase — trocada pela regra I-16 — continua indo à arquitetura, sem pergunta", async () => {
-    await init();
-    const citando = { ...GOAL_P2[0]!, fix: "Remova do Goal a frase \"a execução automatizada dos testes e dos fluxos cria e destrói o banco descartável\" e mantenha só o isolamento." };
-    const { run, agent, perguntadas, impasses } = await plan({
-      arquiteto: (call) => (call.prompt.includes("what to do:") && call.prompt.includes("envelope da fase") ? arquitetura("limpa") : arquitetura("prosa")),
-      p2: (call) => (call.prompt.includes("banco descartável próprio") ? linha(citando) : approve()),
-    });
-    const outcome = await run;
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(deAuditoria(perguntadas)).toEqual([]);
-    expect(impasses).toEqual([]);
-    expect(arquitetos(agent)).toHaveLength(2);
-  });
-
-  it("revisão 3: depois da reorganização, um achado sobre o goal NOVO é primeira aparição — a emenda tem a chance dela", async () => {
-    await init();
-    let leiturasDoGoalNovo = 0;
-    const { run, agent, perguntadas } = await plan({
-      arquiteto: (call) => (call.prompt.includes("what to do: Remova") ? arquitetura("limpa") : arquitetura("prosa")),
-      p2: (call) => {
-        if (call.prompt.includes("banco descartável próprio")) return linha(GOAL_P2[0]!);
-        // O goal novo é lido duas vezes: na primeira o auditor aponta outra coisa nele; na segunda aprova.
-        return (leiturasDoGoalNovo += 1) === 1
-          ? linha({ where: "Goal", problem: "O objetivo não menciona a listagem das tarefas cadastradas.", fix: "Mencione a listagem no objetivo." })
-          : approve();
-      },
-    });
-    const outcome = await run;
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(deAuditoria(perguntadas)).toEqual([]);
-    // Uma reorganização só: o achado sobre o goal novo foi à emenda, não a uma segunda reorganização.
-    expect(arquitetos(agent)).toHaveLength(2);
-    expect(agent.calls.filter((call) => call.stage === "authoring" && call.subject === "phase-p02" && call.prompt.includes("amending a phase"))).toHaveLength(2);
-  });
-
-  it("6. o mesmo defeito reescrito em vários endereços é uma reorganização, não rodadas de arbitragem", async () => {
-    await init();
-    let leiturasP2 = 0;
-    let leiturasP3 = 0;
-    let leiturasDaCoerencia = 0;
-    const comFrase = (call: AgentCall) => call.prompt.includes("banco descartável próprio");
-    const { run, agent, perguntadas, impasses } = await plan({
-      arquiteto: (call) => (call.prompt.includes("what to do: Remova") ? arquitetura("limpa") : arquitetura("prosa")),
-      p2: (call) => (comFrase(call) ? linha(GOAL_P2[leiturasP2++ % GOAL_P2.length]!) : approve()),
-      p3: (call) => (comFrase(call) ? linha([GOAL_P3, GOAL_P4][leiturasP3++ % 2]!) : approve()),
-      coerencia: (call) => (comFrase(call) ? linha([COERENCIA_DESCRICOES, COERENCIA_DESSAS][leiturasDaCoerencia++ % 2]!) : approve()),
-    });
-    const outcome = await run;
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(deAuditoria(perguntadas)).toEqual([]);
-    expect(impasses).toEqual([]);
-    // Uma reorganização para os três endereços. Três leituras de cada fase: o defeito, a volta (com outras
-    // palavras, reconhecida pelo lugar — P2·goal, P3·goal) e a aprovação. Nenhuma rodada a mais.
-    expect(arquitetos(agent)).toHaveLength(2);
-    expect(por(agent, { stage: "audit", subject: "project-phases.md#P2" })).toHaveLength(3);
-    expect(por(agent, { stage: "audit", subject: "project-phases.md#P3" })).toHaveLength(3);
-    expect(por(agent, { stage: "audit", subject: COERENCIA })).toHaveLength(3);
-  });
-
-  it("7, 8. a arquitetura que não muda o goal esgota as reorganizações e para com diagnóstico que nomeia a origem; nada vai ao desenvolvedor", async () => {
-    await init();
-    const { run, agent, perguntadas, impasses } = await plan({
-      arquiteto: () => arquitetura("prosa"),
-      p2: (call) => (call.prompt.includes("banco descartável próprio") ? linha(GOAL_P2[0]!) : approve()),
-    });
-    const erro = await run.then(() => null, (e: Error) => e.message);
-    expect(erro).not.toBeNull();
-    expect(erro).toContain("architecture.md");
-    expect(erro).toContain("Phase 2");
-    expect(erro).toMatch(/goal/iu);
-    expect(erro).toContain("nada aqui é seu para decidir");
-    expect(erro).toContain("Estratégias tentadas, nesta ordem:");
-    expect(deAuditoria(perguntadas)).toEqual([]);
-    expect(impasses).toEqual([]);
-    // O teto continua existindo e é o que já havia: o defeito, a volta e uma leitura depois de cada uma das
-    // duas reorganizações (maxArchitectureReturns) — nenhuma volta a mais.
-    expect(por(agent, { stage: "audit", subject: "project-phases.md#P2" })).toHaveLength(4);
-    await expect(publicado("project-phases.md")).rejects.toThrow();
-  });
-});
 
 describe("retomada: a arquitetura guardada passa pelo contrato de hoje", () => {
   it("revisão 7, 10. a arquitetura aprovada antes, com o procedimento no goal, não é reaproveitada: é desenhada de novo", async () => {

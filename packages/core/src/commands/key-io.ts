@@ -25,7 +25,7 @@
  * interrupção receber o mesmo que receberia sem este módulo.
  */
 
-import { InputEndedError } from "./line-io.js";
+import { InputEndedError, PerguntaRetiradaError } from "./line-io.js";
 import type { LineIO } from "./line-io.js";
 import { createLiveRegion } from "../tui/live.js";
 import { BRACKETED_PASTE_OFF, BRACKETED_PASTE_ON, KeyDecoder } from "../tui/keys.js";
@@ -88,6 +88,8 @@ export interface KeySession {
    * continua sendo da sessão.
    */
   capture: (listener: (chunk: string) => void) => () => void;
+  /** Retira a pergunta aberta, se houver: a leitura pendente rejeita com `PerguntaRetiradaError`. */
+  retirar: () => void;
   close: () => void;
   readonly closed: boolean;
 }
@@ -204,9 +206,17 @@ export function createKeySession(options: KeySessionOptions): KeySession {
           render(state);
         };
       }),
+    retirar: () => {
+      if (!pending) return;
+      const current = pending;
+      pending = null;
+      current.reject(new PerguntaRetiradaError());
+    },
     line: {
       write: (text) => write(text),
-      ask: (prompt) => {
+      ask: (prompt, signal) => {
+        if (signal?.aborted) return Promise.reject(new PerguntaRetiradaError());
+        signal?.addEventListener("abort", () => session.retirar(), { once: true });
         const descartadas = session.takeEarly();
         if (descartadas > 0) {
           write(`  (ignorei ${descartadas} tecla(s) batida(s) antes desta pergunta aparecer — responda agora, olhando para ela)\n`);

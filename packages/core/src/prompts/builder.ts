@@ -10,6 +10,7 @@
 import { languageBlock } from "./language.js";
 import { functionalAcceptanceBlock, proportionateChecksBlock } from "./acceptance-policy.js";
 import { testPolicyBlock } from "./test-policy.js";
+import { lerProtocolo } from "../contract/protocolo.js";
 
 export interface BuilderContext {
   language: string;
@@ -152,7 +153,7 @@ export const BUILDER_FLOW_WRONG_MARKER = "CAPIVARA_ROTEIRO_ERRADO";
 export function declarouRoteiroErrado(output: string): string | null {
   // O negrito do Markdown cerca a chave de qualquer lado — `**CHAVE:**` e
   // `**CHAVE**:` — e nenhum dos dois muda o que ele quis dizer (§40).
-  const linha = new RegExp(`^[\\s*>-]*${BUILDER_FLOW_WRONG_MARKER}[\\s*]*:?(.*)$`, "im").exec(output);
+  const linha = new RegExp(`^${BUILDER_FLOW_WRONG_MARKER}:?(.*)$`, "m").exec(lerProtocolo(output, BUILDER_FLOW_WRONG_MARKER));
   if (!linha) return null;
   return (linha[1] ?? "").replace(/^[\s*]+/, "").trim() || "o executor não explicou o motivo";
 }

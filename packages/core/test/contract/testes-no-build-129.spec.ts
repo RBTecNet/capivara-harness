@@ -37,7 +37,7 @@ import {
 import type { Skeleton } from "../../src/contract/index.js";
 import { sharedContractFromSkeleton } from "../../src/prompts/acceptance-policy.js";
 import { testPolicyBlock } from "../../src/prompts/test-policy.js";
-import { architectPrompt, architectureAuditPrompt, phaseAuditPrompt, planningScopeBlock, skeletonPrompt } from "../../src/prompts/index.js";
+import { architectPrompt, architectureAuditPrompt, planAuditPrompt, planningScopeBlock, skeletonPrompt } from "../../src/prompts/index.js";
 
 const fixture = (nome: string): string => readFileSync(join(import.meta.dirname, "..", "fixtures", nome), "utf8");
 
@@ -269,11 +269,9 @@ describe("§129 · os prompts dizem a mesma regra a todos os papéis", () => {
     const auditorDaArquitetura = architectureAuditPrompt({ language: contexto.language, request: PEDIDO, decisions: [], skeleton: "# esqueleto", architecture: "# arquitetura", maxTasksPerPhase: 15 });
     expect(auditorDaArquitetura).toContain("its absence from the architecture is correct");
     expect(auditorDaArquitetura).not.toContain("its absence is a fidelity defect");
-    const auditorDaFase = phaseAuditPrompt({
-      language: contexto.language, document: "project-phases.md#P1", executable: true, request: PEDIDO, decisions: [], dispositions: [],
-      upstream: [], upstreamRemarks: [], content: "## Phase 1", phaseMarkdown: "## Phase 1", phaseNumber: 1, totalPhases: 1,
-    });
-    expect(auditorDaFase).toContain("the one finding allowed is to remove it");
+    // A auditoria do plano leva a regra do planejamento: teste nunca devolve o plano.
+    const auditorDoPlano = planAuditPrompt({ language: contexto.language, request: PEDIDO, decisions: [], upstream: [], content: "## Phase 1", totalPhases: 1 });
+    expect(auditorDoPlano).toContain("Tests are never a reason to reject, return or question a plan");
   });
 });
 

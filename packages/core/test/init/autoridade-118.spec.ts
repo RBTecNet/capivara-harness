@@ -202,7 +202,7 @@ describe("o gate RALPH READY confere a prescrição de teste", () => {
   it("um plano que prescreve teste é NOT READY pela verificação própria", () => {
     const readiness = evaluateReadiness({
       plan: PLANO_CONTAMINADO, architecture: "# arq", stampInputs: [], coverage: { storyIds: [], entities: [], workflows: [] },
-      approved: true, unresolvedQuestions: [], designRoot: "/nenhum", designExists: () => true, rehearsal: { blocked: [] },
+      approved: true, unresolvedQuestions: [], designRoot: "/nenhum", designExists: () => true,
     });
     const testes = readiness.checks.find((check) => check.id === "testes");
     expect(testes?.passed).toBe(false);
@@ -264,31 +264,6 @@ describe("no orquestrador, com o provider falso", () => {
     ];
   };
 
-  it("1–2. a resposta real do Luna não vira pergunta: a regra é aplicada como correção e o plano fecha", async () => {
-    await init(skeletonPath());
-    // A fixture tem duas fases; o endereço da decisão é a única adaptação do texto real.
-    const resposta = LUNA_P5.replace("Phase 5, última tarefa", "Phase 2, última tarefa");
-    let auditou = 0;
-    const perguntadas: Question[] = [];
-    const passos: ScriptStep[] = [
-      { match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2" }, respond: { stdout: () => ((auditou += 1) === 1 ? resposta : approve()) }, repeat: true },
-      ...faseDoisEmDuasVersoes(PHASE_2, PHASE_2_CORRIGIDA),
-    ];
-    const { outcome, agent, anunciado } = await plan(passos, { ask: async (question) => { perguntadas.push(question); return "1"; } });
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-
-    // Ninguém foi perguntado se a regra do planejamento vale.
-    expect(perguntadas.filter((pergunta) => pergunta.topic.startsWith("auditoria ·"))).toEqual([]);
-    expect(anunciado).toContain("levantou como decisão uma regra do planejamento");
-    // A correção chegou ao escritor da fase 2, como achado mecânico: tirar a prescrição (a ferramenta), nada no lugar.
-    const escritas = por(agent, { role: "writer", stage: "authoring", subject: "phase-p02" });
-    expect(escritas).toHaveLength(2);
-    expect(escritas[1]?.prompt).toContain("I-16");
-    expect(escritas[1]?.prompt).toContain("executado pelo build");
-    // Nada do auditor virou decisão confirmada do desenvolvedor.
-    const handoff = await readHandoff(projectRoot, outcome.runId, "project-phases.md");
-    expect((handoff?.answers ?? []).filter((answer) => answer.decision.includes("Vitest"))).toEqual([]);
-  });
 
   it("3–5. a contaminação é corrigida nos três documentos sem perder a exigência do pedido", async () => {
     const { anunciado: doInit } = await init([
@@ -329,24 +304,6 @@ describe("no orquestrador, com o provider falso", () => {
     expect(esqueleto?.phases.map((fase) => fase.title)).toEqual(["Fundação de dados", "Criar reserva"]);
   });
 
-  it("6. uma decisão genuína de produto continua chegando ao desenvolvedor, sem leitura recomendada", async () => {
-    await init(skeletonPath());
-    let auditou = 0;
-    const decisao = `${approve()}\nCAPIVARA_DECISION: P2.T1.C1 | A reserva nova nasce pendente ou já confirmada? | Pendente, até o pagamento | Confirmada no ato`;
-    const perguntadas: Question[] = [];
-    const passos: ScriptStep[] = [
-      { match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2" }, respond: { stdout: () => ((auditou += 1) === 1 ? decisao : approve()) }, repeat: true },
-      ...faseDoisEmDuasVersoes(PHASE_2, PHASE_2_CORRIGIDA),
-    ];
-    const { outcome } = await plan(passos, { ask: async (question) => { perguntadas.push(question); return "1"; } });
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    const daAuditoria = perguntadas.filter((pergunta) => pergunta.topic.startsWith("auditoria ·"));
-    expect(daAuditoria).toHaveLength(1);
-    expect(daAuditoria[0]?.decision).toContain("pendente ou já confirmada");
-    expect(daAuditoria[0]?.recommended).toBe("");
-    const handoff = await readHandoff(projectRoot, outcome.runId, "project-phases.md");
-    expect(handoff?.answers.some((answer) => answer.decision === "Pendente, até o pagamento" && answer.raw === "1")).toBe(true);
-  });
 
   it("o pedido que nomeia a ferramenta é autoridade: a task que a cita passa sem emenda", async () => {
     const comFerramenta = pedido("uma pousada com reservas; os testes usam Vitest e Playwright em src/quality/reservas/api.test.ts");

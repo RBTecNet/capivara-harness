@@ -1,8 +1,8 @@
 export { PROTOCOL_KEYS, languageBlock } from "./language.js";
 export { gapPrompt, interviewPrompt } from "./writer.js";
 export type { AskedQuestion, WriterContext } from "./writer.js";
-export { DOCUMENTO_DO_TEMPO, auditRetryPrompt, auditorPrompt, coherencePrompt, phaseAuditPrompt, rewriteInstruction } from "./auditor.js";
-export type { AuditorContext, CoherenceContext, PhaseAuditContext } from "./auditor.js";
+export { DOCUMENTO_DO_TEMPO, auditRetryPrompt, planAuditPrompt } from "./auditor.js";
+export type { PlanAuditContext } from "./auditor.js";
 export { BUILDER_COMPLETE_MARKER, BUILDER_FLOW_WRONG_MARKER, MUDADOS_NA_PARTE, acceptancePrompt, conflictPrompt, declarouRoteiroErrado, fixPrompt, implementPrompt, installPrompt } from "./builder.js";
 export type { BuilderContext, ConflictContext, FixContext, InstallContext, ParteDoPrompt } from "./builder.js";
 export { VERIFY_HEADER, VERIFY_REPAIR_HEADER, parseVerification, verifierRepairPrompt, verifyPrompt } from "./verifier.js";
@@ -11,8 +11,6 @@ export { FLOW_HEADER, FORA_DO_NAVEGADOR, LEITURA_SEM_EFEITO, PROVA, SEM_PROVA, e
 export { TRIAGE_HEADER, lerTriagem, triagePrompt } from "./triagem.js";
 export type { TipoDaTriagem, TriageContext, Triagem } from "./triagem.js";
 export type { FlowAuthorContext, FlowWorkflowContext } from "./flows.js";
-export { REHEARSAL_HEADER, assessRehearsal, enumerateCriteria, parseRehearsal, rehearsalPrompt } from "./rehearsal.js";
-export type { CriterionRef, CriterionRuling, CriterionVerdict, RehearsalContext, RehearsalResult } from "./rehearsal.js";
 export { amendPhasePrompt } from "./amend.js";
 export type { AmendContext } from "./amend.js";
 export { phaseFromSlicePrompt, skeletonPrompt } from "./skeleton.js";

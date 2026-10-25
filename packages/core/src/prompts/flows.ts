@@ -13,6 +13,7 @@
 
 import { languageBlock } from "./language.js";
 import { flowScopeBlock, interfaceContractBlock, transientStateBlock } from "./acceptance-policy.js";
+import { lerProtocolo, semRaciocinio } from "../contract/protocolo.js";
 
 export interface FlowWorkflowContext {
   number: string;
@@ -114,7 +115,7 @@ function limpar(texto: string): string {
 export function lerProvas(resposta: string): { provas: ProvaCitada[]; semProva: PassoSemProva[] } {
   const provas: ProvaCitada[] = [];
   const semProva: PassoSemProva[] = [];
-  for (const bruta of resposta.split(/\r?\n/)) {
+  for (const bruta of lerProtocolo(resposta, `${PROVA}|${SEM_PROVA}`).split(/\r?\n/)) {
     const linha = limpar(bruta);
     const prova = new RegExp(`^${PROVA}:\\s*passo\\s+(\\d+)\\s*[—–:-]+\\s*(.+?)\\s*::\\s*(.+)$`, "u").exec(linha);
     if (prova) {
@@ -131,7 +132,7 @@ export function lerProvas(resposta: string): { provas: ProvaCitada[]; semProva: 
 
 /** O trecho citado depois da marca, sem aspas, crases nem pontuação final em volta; `null` sem marca ou sem trecho. */
 export function lerForaDoNavegador(resposta: string): string | null {
-  const linha = new RegExp(`${FORA_DO_NAVEGADOR}:[ \\t]*([^\\n]*)`).exec(resposta)?.[1] ?? "";
+  const linha = new RegExp(`${FORA_DO_NAVEGADOR}:[ \\t]*([^\\n]*)`).exec(lerProtocolo(resposta, FORA_DO_NAVEGADOR))?.[1] ?? "";
   const trecho = linha.replace(/^[\s"'«“`]+|[\s"'»”`.;:,!?]+$/g, "");
   return trecho === "" ? null : trecho;
 }
@@ -356,7 +357,8 @@ function suiteBlock(suite: string | null | undefined): string[] {
  * antes dele é o caso comum, e recusar isso gastaria um ciclo inteiro para ganhar
  * nada. Sem nenhum bloco, devolve vazio e quem chamou decide.
  */
-export function extractFlowScript(output: string): string {
+export function extractFlowScript(resposta: string): string {
+  const output = semRaciocinio(resposta);
   const blocos = [...output.matchAll(/```(?:ts|typescript|js|javascript)?\s*\n([\s\S]*?)```/g)];
   if (blocos.length === 0) return "";
   // O último: um modelo que mostra o antes e o depois põe o resultado por último.

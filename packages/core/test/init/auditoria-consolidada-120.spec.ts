@@ -122,7 +122,6 @@ describe("no orquestrador, com o provider falso", () => {
     await runInit({ projectRoot, request, language: "português do Brasil", stage: "init", call: fakeAgent(skeletonPath()).call, ask: responde, announce: () => undefined });
     const dito: string[] = [];
     const perguntadas: Question[] = [];
-    let impasses = 0;
     const agent = fakeAgent([
       { match: { role: "auditor", stage: "audit", subject: "architecture" }, respond: { stdout: auditorDaArquitetura }, repeat: true },
       { match: { role: "writer", stage: "authoring", subject: "architecture" }, respond: { stdout: arquiteto }, repeat: true },
@@ -132,15 +131,14 @@ describe("no orquestrador, com o provider falso", () => {
       projectRoot, request, language: "português do Brasil", call: agent.call,
       ask: async (question) => { perguntadas.push(question); return "1"; },
       announce: (linha) => void dito.push(linha), sleep: async () => undefined,
-      decideStandoff: async () => { impasses += 1; return "publicar"; },
       ...extras,
     });
-    return { run, agent, perguntadas, anunciado: () => dito.join("\n"), impasses: () => impasses };
+    return { run, agent, perguntadas, anunciado: () => dito.join("\n") };
   }
 
   it("2–4, 10, 12. os sete achados chegam juntos ao arquiteto, são corrigidos numa rodada, e o plano fecha com duas auditorias", async () => {
     let auditorias = 0;
-    const { run, agent, perguntadas, impasses, anunciado } = await plan(() => ((auditorias += 1) === 1 ? consolidada(ACHADOS_REAIS) : approve()));
+    const { run, agent, perguntadas, anunciado } = await plan(() => ((auditorias += 1) === 1 ? consolidada(ACHADOS_REAIS) : approve()));
     const outcome = await run;
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
 
@@ -159,7 +157,6 @@ describe("no orquestrador, com o provider falso", () => {
     expect(reauditoria).toContain("## Your previous reading of this architecture found");
     expect(reauditoria).toContain("O contrato de PUT cita título e descrição");
     expect(anunciado()).toContain("refazendo a arquitetura com os 7 achado(s) juntos");
-    expect(impasses()).toBe(0);
     expect(perguntadas.filter((pergunta) => pergunta.topic.startsWith("auditoria ·"))).toEqual([]);
   });
 
@@ -167,7 +164,7 @@ describe("no orquestrador, com o provider falso", () => {
     // Leituras do run real: 3 achados, depois 1, 1, 1, 1; a sexta aprova. O teto é 3 sem progresso.
     const leituras = [ACHADOS_REAIS.slice(0, 3), [ACHADOS_REAIS[3]!], [ACHADOS_REAIS[4]!], [ACHADOS_REAIS[5]!], [ACHADOS_REAIS[6]!]];
     let auditorias = 0;
-    const { run, agent, impasses, perguntadas, anunciado } = await plan(() => {
+    const { run, agent, perguntadas, anunciado } = await plan(() => {
       const leitura = leituras[auditorias];
       auditorias += 1;
       return leitura ? consolidada(leitura) : approve();
@@ -176,7 +173,6 @@ describe("no orquestrador, com o provider falso", () => {
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
     expect(auditorias).toBe(6);
     expect(por(agent, { role: "writer", stage: "authoring", subject: "architecture" })).toHaveLength(6);
-    expect(impasses()).toBe(0);
     expect(perguntadas.filter((pergunta) => pergunta.topic.startsWith("auditoria ·"))).toEqual([]);
     expect(anunciado()).toContain("rodada: fechou 3, 1 apareceu(ram) novo(s)");
     // O que já fechou viaja com a emenda seguinte, para não voltar.
@@ -186,7 +182,7 @@ describe("no orquestrador, com o provider falso", () => {
   });
 
   it("7, 10. o achado que persiste gasta o teto; esgotado, a estratégia muda uma vez e o run para sem publicar", async () => {
-    const { run, agent, impasses } = await plan(() => consolidada([ACHADOS_REAIS[0]!]));
+    const { run, agent } = await plan(() => consolidada([ACHADOS_REAIS[0]!]));
     await expect(run).rejects.toThrow(/não convergiu depois de 6 devolução\(ões\)/);
     // Devoluções 1 e 2 dentro do teto, a 3 esgota, a 4 é a estratégia trocada, a 5 e a 6 são os dois
     // reparos pelo auditor validados pelo verifier (§121): seis desenhos, seis leituras, e para.
@@ -194,43 +190,42 @@ describe("no orquestrador, com o provider falso", () => {
     expect(por(agent, { role: "verifier", stage: "audit", subject: "architecture" })).toHaveLength(2);
     expect(por(agent, { role: "writer", stage: "authoring", subject: "architecture" })).toHaveLength(4);
     expect(por(agent, { role: "auditor", stage: "authoring", subject: "architecture" })).toHaveLength(2);
-    expect(impasses()).toBe(0);
     await expect(readFile(join(projectRoot, ".capivara/init/architecture.md"), "utf8")).rejects.toThrow();
   });
 
   it("7. o auditor que sempre acha um ponto novo bate no teto duro: finito, e dito no diagnóstico", async () => {
     let auditorias = 0;
-    const { run, agent, impasses } = await plan(() => consolidada([ACHADOS_REAIS[(auditorias += 1) % ACHADOS_REAIS.length]!]));
+    const { run, agent } = await plan(() => consolidada([ACHADOS_REAIS[(auditorias += 1) % ACHADOS_REAIS.length]!]));
     await expect(run).rejects.toThrow(/não convergiu depois de 9 devolução\(ões\)/);
     // Sete leituras do auditor até o teto duro e a estratégia; depois dois reparos validados pelo verifier.
     expect(por(agent, { role: "auditor", stage: "audit", subject: "architecture" })).toHaveLength(7);
     expect(por(agent, { role: "verifier", stage: "audit", subject: "architecture" })).toHaveLength(2);
-    expect(impasses()).toBe(0);
   });
 
   it("8. a decisão genuína de produto continua chegando ao desenvolvedor, separada dos achados", async () => {
     let auditorias = 0;
     const comDecisao = `${consolidada(ACHADOS_REAIS.slice(0, 2))}\nCAPIVARA_DECISION: components · api | A reserva nova nasce pendente ou confirmada? | Pendente, até o pagamento | Confirmada no ato`;
-    const { run, perguntadas, impasses } = await plan(() => ((auditorias += 1) === 1 ? comDecisao : approve()));
+    const { run, perguntadas } = await plan(() => ((auditorias += 1) === 1 ? comDecisao : approve()));
     const outcome = await run;
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
     const daAuditoria = perguntadas.filter((pergunta) => pergunta.topic.startsWith("auditoria ·"));
     expect(daAuditoria).toHaveLength(1);
     expect(daAuditoria[0]?.decision).toContain("pendente ou confirmada");
-    expect(impasses()).toBe(0);
   });
 
   it("3, 12. no plano, dois achados de uma fase chegam juntos à emenda e são corrigidos numa passagem", async () => {
     await runInit({ projectRoot, request, language: "português do Brasil", stage: "init", call: fakeAgent(skeletonPath()).call, ask: responde, announce: () => undefined });
     let auditorias = 0;
     let escritas = 0;
+    // Classe e duas passagens que existem no plano e no esqueleto: o que o Core exige para um achado devolver o plano.
+    const citadas = "«Uma reserva nova nasce com status pendente» contra «duas reservas do mesmo quarto não se sobrepõem»";
     const dois = ["CAPIVARA_AUDIT_STATUS: REJECTED",
-      "CAPIVARA_FINDING: Tarefa «Implementar a criação de reserva com recusa de datas sobrepostas» | o critério de datas não diz o que acontece com a reserva recusada | diga que nada é persistido e que a resposta é 409",
-      "CAPIVARA_FINDING: Tarefa «Implementar a criação de reserva com recusa de datas sobrepostas» | o status inicial não é observável | diga que a resposta traz status pendente",
+      `CAPIVARA_FINDING: CONTRADICTION | Phase 2 · Tarefa «Implementar a criação de reserva com recusa de datas sobrepostas» | o critério de datas não diz o que acontece com a reserva recusada: ${citadas} | diga que nada é persistido e que a resposta é 409`,
+      `CAPIVARA_FINDING: CONTRADICTION | Phase 2 · Tarefa «Implementar a criação de reserva com recusa de datas sobrepostas» | o status inicial não é observável: ${citadas} | diga que a resposta traz status pendente`,
       "CAPIVARA_REASON: dois pontos"].join("\n");
     const corrigida = PHASE_2.replace("Uma reserva nova nasce com status pendente", "A resposta 201 traz status pendente").replace("devolvem erro e não persistem nada", "respondem 409 e nada é persistido");
     const agent = fakeAgent([
-      { match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2" }, respond: { stdout: () => ((auditorias += 1) === 1 ? dois : approve()) }, repeat: true },
+      { match: { role: "auditor", stage: "audit", subject: "project-phases.md" }, respond: { stdout: () => ((auditorias += 1) === 1 ? dois : approve()) }, repeat: true },
       { match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: () => ((escritas += 1) === 1 ? PHASE_2 : corrigida) }, repeat: true },
       ...skeletonPath().filter((passo) => passo.match.subject !== "phase-p02"),
     ]);
@@ -241,6 +236,6 @@ describe("no orquestrador, com o provider falso", () => {
     expect(emendas[1]?.prompt).toContain("o critério de datas não diz o que acontece");
     expect(emendas[1]?.prompt).toContain("o status inicial não é observável");
     expect(emendas[1]?.prompt).toContain("apply ALL of it in this one answer");
-    expect(por(agent, { role: "auditor", stage: "audit", subject: "project-phases.md#P2" })).toHaveLength(2);
+    expect(por(agent, { role: "auditor", stage: "audit", subject: "project-phases.md" })).toHaveLength(2);
   });
 });

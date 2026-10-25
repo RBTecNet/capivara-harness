@@ -3,9 +3,9 @@
  *
  * `init`: entrevista → esqueleto → PLAN READY. Uma chamada olha o produto
  * inteiro, e é a única que olha.
- * `plan`: uma fase por chamada, cada uma vendo só a sua fatia → lacunas →
- * auditoria → ensaio → RALPH READY. O plano é montado em código, nunca escrito
- * de uma vez.
+ * `plan`: a arquitetura, uma fase por chamada, cada uma vendo só a sua fatia →
+ * lacunas → conferência mecânica → uma auditoria do plano inteiro (e uma emenda,
+ * no máximo) → RALPH READY. O plano é montado em código, nunca escrito de uma vez.
  *
  * Toda dependência externa entra por parâmetro — a chamada ao modelo e a
  * pergunta ao desenvolvedor. Isso é o que permite exercitar o init inteiro, do
@@ -17,19 +17,18 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, fasesIntactas, blocoDaDisponibilidade, disponibilidadeDaArquitetura, tabelaDaDisponibilidade, buildStamp, checkCoverage, checkDesignRefs, checkTestPrescription, checkWriteOwnership, testPrescriptionHint, testPrescriptions, testToolPrescriptions, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parseArchitecture, parsePhaseFragment, parseSkeleton, phaseHeading, phasesFromArchitecture, renderArchitecture, renderSkeleton, requirementsFromArchitecture, skeletonForPlanning, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12 } from "../contract/index.js";
-import { CoherenceMemory } from "../audit/coherence.js";
-import { achadoNaOrigem, alvoNoEnvelope, chavesDoEnvelope, veioDoEnvelope } from "../audit/envelope.js";
+import { achadoNaOrigem, alvoNoEnvelope, veioDoEnvelope } from "../audit/envelope.js";
 import { tirarPedidoDeTeste } from "../audit/sem-teste.js";
-import { applyMaterialityReview, materialityInput, materialityPrompt } from "../audit/materiality.js";
+import { admitir, type Lugar } from "../audit/admissibilidade.js";
 import type { Architecture, ContractError, CoverageSources, PhasesDocument, Skeleton, StampInput } from "../contract/index.js";
-import { DEFAULT_MAX_RETURNS, enderecoDaDecisao, balancoDaRodada, descreverBalanco, fingerprint, nextAuditAction, parseAudit, persistentFindings, renderStandoff, writerDid } from "../audit/index.js";
-import type { AuditAttempt, AuditVerdict, Finding, Remark, Standoff } from "../audit/index.js";
+import { DEFAULT_MAX_RETURNS, enderecoDaDecisao, balancoDaRodada, descreverBalanco, fingerprint, nextAuditAction, parseAudit, persistentFindings, writerDid } from "../audit/index.js";
+import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
 import { tasksBlock } from "../contract/templates.js";
 import { MAX_CRITERIA_PER_PHASE, MAX_CRITERIA_PER_TASK, MAX_TASKS_PER_PHASE, isRepairable, publish, repairDeterministically, stripAllMarkers, stripDeadDesignRefs, stripResolvedMarkers, substanceDefects } from "../authoring/index.js";
-import { buildAnswer, buildCheckpoint, classifyLocally, decisaoDeBanco, isNonAnswer, leituraInsistente, naoObjetivos, perguntaDeLacuna, perguntaDoBanco, perguntaInsistente, regrasDeBanco, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, suposicaoDelegada, unresolved, writeHandoff } from "../interview/index.js";
+import { buildAnswer, buildCheckpoint, classifyLocally, DELEGAR, decisaoDeBanco, leituraInsistente, naoObjetivos, perguntaDeLacuna, perguntaDoBanco, perguntaInsistente, regrasDeBanco, needsDecisionMarkers, parseClassification, parseQuestionBatch, planRound, readHandoff, suposicaoDelegada, unresolved, writeHandoff } from "../interview/index.js";
 import type { Answer, Assumption, Question } from "../interview/index.js";
-import { DOCUMENTO_DO_TEMPO, planningScopeBlock, repairBlock, amendPhasePrompt, architectPrompt, architectureAuditPrompt, assessRehearsal, auditRetryPrompt, auditorPrompt, coherencePrompt, languageBlock, enumerateCriteria, phaseAuditPrompt, phaseFromSlicePrompt, skeletonPrompt, gapPrompt, interviewPrompt, parseRehearsal, rehearsalPrompt } from "../prompts/index.js";
-import type { AskedQuestion, CriterionRef, RehearsalResult, WriterContext } from "../prompts/index.js";
+import { DOCUMENTO_DO_TEMPO, repairBlock, amendPhasePrompt, architectPrompt, architectureAuditPrompt, auditRetryPrompt, languageBlock, phaseFromSlicePrompt, planAuditPrompt, skeletonPrompt, gapPrompt, interviewPrompt } from "../prompts/index.js";
+import type { AskedQuestion, WriterContext } from "../prompts/index.js";
 import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEvents, runIdFor, runPaths, writeAtomic, writeRunState } from "../state/index.js";
 import type { RunStage } from "../state/index.js";
 import { detectRateLimit, planWait } from "../loop/ratelimit.js";
@@ -37,10 +36,8 @@ import { renderEnvironmentPlan } from "../loop/environment-plan.js";
 import { inspectProject, summarizeInventory } from "./inventory.js";
 import { decisoesComoMemorias, renderLibraryBlock, type McpDocument, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { INIT_ARTIFACTS, evaluateReadiness } from "./readiness.js";
-import type { LeituraEscolhida } from "../interview/index.js";
-import { comAutoridade, decisaoDoAuditorComoFinding, decisaoDoEnsaio, decisaoGravada, lerEscolha, lerEscolhaDoEnsaio, perguntaDeLevantamento, perguntaDoAuditor, perguntaDoEnsaio } from "../interview/index.js";
-import { NOTA_DE_ENGENHARIA, TasksJulgadas, autoridadeDaDecisao, autoridadeDoAchado, comNotaDeEngenharia, decisaoDeEngenhariaComoFinding, ehRepetido, marcaDoProblema, mesmoPonto, shaDaAutoridade, sinaisDeEngenharia } from "../audit/index.js";
-import type { TaskBlock } from "../contract/index.js";
+import { decisaoDoAuditorComoFinding, perguntaDoAuditor } from "../interview/index.js";
+import { NOTA_DE_ENGENHARIA, autoridadeDaDecisao, decisaoDeEngenhariaComoFinding, shaDaAutoridade, sinaisDeEngenharia } from "../audit/index.js";
 import { MemoriaDoPlano } from "./plan-cache.js";
 import type { PlanProgressListener } from "./progress.js";
 import { evaluatePlanReadiness, renderPlanReadiness } from "./plan-readiness.js";
@@ -82,8 +79,8 @@ export type AgentCaller = (call: AgentCall) => Promise<{
   /** O limite do harness que encerrou a chamada, quando foi isso. */
   timedOut?: string | null;
 }>;
-export type AskDeveloper = (question: Question, index: number, total: number) => Promise<string>;
-export type DecideStandoff = (rendered: string, context?: Standoff) => Promise<string>;
+/** `signal` aborta quando a pergunta venceu o prazo e deve sair da tela. */
+export type AskDeveloper = (question: Question, index: number, total: number, opcoes?: { signal?: AbortSignal }) => Promise<string>;
 
 export interface InitOptions {
   projectRoot: string;
@@ -103,7 +100,11 @@ export interface InitOptions {
   /** Quem rodou: provider, modelo e effort de cada papel, para o `run.json`. */
   roles?: Record<string, { provider: string; model: string; effort: string }>;
   ask: AskDeveloper;
-  decideStandoff?: DecideStandoff;
+  /**
+   * O prazo de uma pergunta do `plan`, em milissegundos (10 minutos por padrão).
+   * Vencido, o run segue com a leitura recomendada e a registra como suposição.
+   */
+  planQuestionTimeoutMs?: number;
   /**
    * A tela de fases do `plan`.
    *
@@ -128,8 +129,6 @@ export interface InitOptions {
    * quantas perguntas aparecem juntas na mesma tela.
    */
   maxGapQuestions?: number;
-  /** Reescritas do plano motivadas pelo ensaio do verificador. */
-  maxRehearsalRounds?: number;
   /** Ignora o que este run já publicou e recomeça do zero. */
   fresh?: boolean;
   /** Fases escritas ao mesmo tempo. Elas são independentes; o teto é de cortesia. */
@@ -151,8 +150,6 @@ export interface InitOptions {
    * é como os testes exercitam o ciclo de ponta a ponta.
    */
   stage?: "init" | "plan" | "both";
-  /** Critérios por chamada do ensaio. Lote grande volta sem julgamento. */
-  maxCriteriaPerRehearsalBatch?: number;
   /** Provider de cada papel, só para reconhecer o formato do limite de uso. */
   providers?: Partial<Record<AgentCall["role"], string>>;
   /** Injetada para o teste não dormir de verdade. */
@@ -207,40 +204,12 @@ const INDISPONIBILIDADE = /ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND
 /** As esperas entre repetições por indisponibilidade, em segundos. Curtas e finitas. */
 const ESPERAS_POR_INDISPONIBILIDADE = [5, 20] as const;
 
-/** A ressalva do esqueleto que é o pedido de testes tolerado fora do lugar (§129): do relatório, não dos auditores. */
-function ehRessalvaDoPedidoDeTeste(remark: Remark): boolean {
-  return remark.observation.includes("carrega o pedido de testes para o plano");
-}
-
 /** Quantas tasks há neste markdown. Zero é resposta inválida do escritor. */
 /** Há decisão pendente no texto? O marcador é o contrato entre escritor e entrevista. */
 function temDecisaoPendente(markdown: string): boolean {
   return /\[NEEDS DECISION\]/.test(markdown);
 }
 
-/**
- * O que o escritor entregou na fase que o achado nomeia.
- *
- * Os títulos das tasks, e só eles: é a resposta compacta para "o que a fase faz
- * hoje", que é o que está em disputa num levantamento de auditoria. O texto
- * inteiro da fase não caberia na tela, e a lista de títulos costuma mostrar a
- * ausência que o auditor apontou — no `assitencia`, "cadastro, alteração,
- * consulta e anexação" com exclusão faltando.
- */
-function oQueOEscritorFez(documento: string, finding: Finding): string {
-  const lido = parsePhases(documento);
-  if (!lido.ok) return "";
-
-  const total = lido.document.phases.length;
-  const numeros = affectedPhases([finding], total);
-  // Sem referência utilizável, `affectedPhases` devolve TODAS: mostrar o plano
-  // inteiro não ajuda ninguém a escolher.
-  if (numeros.length !== 1) return "";
-
-  const fase = lido.document.phases.find((entry) => entry.number === numeros[0]);
-  if (!fase || fase.tasks.length === 0) return "";
-  return fase.tasks.map((task) => `- ${task.title}`).join("\n");
-}
 
 function contaTasks(markdown: string): number {
   return [...markdown.matchAll(/^\s*-\s*\[[ xX]\]\s*\*\*Task:\*\*/gm)].length;
@@ -376,9 +345,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const maxAuditReturns = options.maxAuditReturns ?? DEFAULT_MAX_RETURNS;
   const maxInterviewRounds = options.maxInterviewRounds ?? 3;
   const maxGapQuestions = options.maxGapQuestions ?? 5;
-  const maxRehearsalRounds = options.maxRehearsalRounds ?? 1;
   const maxParallelParts = Math.max(1, options.maxParallelParts ?? 3);
-  const maxCriteriosPorLote = Math.max(1, options.maxCriteriaPerRehearsalBatch ?? 20);
   const maxMechanicalRounds = Math.max(1, options.maxMechanicalRounds ?? 3);
   const maxArchitectureReturns = Math.max(0, options.maxArchitectureReturns ?? 2);
   const esperar = options.sleep ?? ((seconds: number) => new Promise<void>((resolve) => setTimeout(resolve, seconds * 1000)));
@@ -599,41 +566,22 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   /** O plano executável publicado por este run. */
   let plano = "";
   let planoAprovado = false;
-  /**
-   * As fases já aprovadas neste run, pelo sha do texto delas.
-   *
-   * O auditor é independente e sem memória — é o que o torna auditor. Mas
-   * perguntar de novo sobre um texto que não mudou não é independência: é pagar
-   * por um sorteio. No `MCP_teste2` a rodada 1 aprovou P1, P3, P5 e P8 e
-   * reprovou P4; a rodada 2 reauditou tudo e trouxe dez findings nas QUATRO que
-   * ela mesma tinha aprovado, sem que uma linha delas tivesse mudado. O teto de
-   * devoluções estourou e o plano não saiu.
-   *
-   * A pergunta global continua sendo feita toda rodada: a auditoria de coerência
-   * lê o índice de critérios inteiro, e é ela que pega a contradição que nasce
-   * quando uma fase muda. O que não se repete é o julgamento do que não mudou.
-   */
-  const fasesAprovadas = new Set<string>();
 
   /*
    * As lacunas já perguntadas, para o run inteiro.
    *
    * Aqui em cima e não ao lado de `closeGaps` porque as declarações abaixo do
    * `return await buildFromSkeleton()` nunca chegam a ser executadas: a função é
-   * içada, o `const` não, e o uso estoura em TDZ. Já foi assim com
-   * `fasesAprovadas`, e a armadilha é a mesma.
+   * içada, o `const` não, e o uso estoura em TDZ.
    */
   const lacunasPerguntadas = new Set<string>();
-
-  /** Os achados já arbitrados pelo desenvolvedor. Um levantamento por ponto. */
-  const arbitrados = new Set<string>();
 
   /**
    * As decisões que já foram insistidas, e as que o auditor levantou.
    *
    * Aqui em cima pela mesma razão de todas as outras: declaração abaixo do
    * `return await buildFromSkeleton()` nunca é executada, e o uso estoura em TDZ.
-   * A armadilha já foi paga duas vezes — `fasesAprovadas` e `lacunasPerguntadas`.
+   * A armadilha já foi paga com `lacunasPerguntadas`.
    */
   const insistidas = new Set<string>();
   const decisoesDoAuditor = new Set<string>();
@@ -652,26 +600,14 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const marcadoresDevolvidos = new Set<string>();
   const marcadorDaPergunta = new Map<string, string>();
 
-  /**
-   * O que já foi julgado, por TASK.
-   *
-   * O `fasesAprovadas` acima é a mesma ideia na granularidade da fase, e continua
-   * valendo: fase inteira intacta não volta à fila. Isto é o degrau abaixo — uma
-   * task que mudou não arrasta as outras catorze de volta ao julgamento.
-   */
   /*
    * O que este run já escreveu e já teve aprovado, guardado em disco.
    *
-   * O `fasesAprovadas` acima continua existindo e é o mesmo fato dito de outro
-   * jeito — ele evita reauditar DENTRO de uma execução; a memória evita
-   * reescrever e reauditar ENTRE execuções. Desde o §116 ela também guarda o
-   * esqueleto, a arquitetura, as tasks aprovadas uma a uma e a base da
-   * coerência: uma retomada depois de o provider cair recomeça de onde parou.
+   * A memória evita reescrever e reauditar ENTRE execuções: ela guarda o
+   * esqueleto, a arquitetura, as fases escritas e as auditorias aprovadas, e uma
+   * retomada depois de o provider cair recomeça de onde parou.
    */
   const memoria = await MemoriaDoPlano.abrir(options.projectRoot, runId, options.fresh === true);
-  const tasksJulgadas = new TasksJulgadas(memoria.tasksAprovadas());
-  const coerencia = new CoherenceMemory();
-  coerencia.importar(memoria.coerenciaGuardada());
   const relatarFase: PlanProgressListener = options.onPhaseProgress ?? ((): void => undefined);
 
   const allAnswers: Answer[] = [];
@@ -685,8 +621,52 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * harness que gravou o esqueleto viraria achado que nenhuma fase corrige.
    */
   const avisosDoRelatorio: { document: string; remark: Remark }[] = [];
-  /** Ausente até o ensaio rodar; o gate trata ausência como reprovação. */
-  let rehearsal: { blocked: string[] } | undefined;
+
+  /*
+   * A pergunta do `plan` tem prazo (etapa 2 da redução).
+   *
+   * O `plan` pergunta só sobre o que construir, e toda pergunta dele traz a
+   * leitura recomendada. Sem resposta no prazo, o run segue com ela e a registra
+   * como suposição: um plano parado à espera de quem saiu da frente do terminal
+   * não entrega nada. A pergunta vencida sai da tela pelo `signal`, para a
+   * resposta da seguinte não cair nela. O `init` continua sem prazo: ali a
+   * entrevista é a razão de existir do estágio.
+   */
+  const prazoDaPergunta = options.planQuestionTimeoutMs ?? 10 * 60_000;
+  let perguntasComPrazo = false;
+  const perguntar = async (pergunta: Question, indice: number, total: number): Promise<string> => {
+    if (!perguntasComPrazo) return await options.ask(pergunta, indice, total);
+    const prazo = new AbortController();
+    let relogio: ReturnType<typeof setTimeout> | undefined;
+    const vencida = new Promise<null>((resolve) => {
+      relogio = setTimeout(() => {
+        prazo.abort();
+        resolve(null);
+      }, prazoDaPergunta);
+    });
+    const pedido = options.ask(pergunta, indice, total, { signal: prazo.signal });
+    // A pergunta retirada pode rejeitar depois de o prazo vencer; essa rejeição não é de ninguém.
+    pedido.catch(() => undefined);
+    try {
+      const resposta = await Promise.race([pedido, vencida]);
+      if (resposta !== null) return resposta;
+    } finally {
+      clearTimeout(relogio);
+    }
+    const recomendada = pergunta.recommended.trim();
+    const exata = pergunta.options.findIndex((opcao) => opcao.label.trim() === recomendada);
+    const posicao = exata >= 0 || recomendada === "" ? exata : pergunta.options.findIndex((opcao) => opcao.label.includes(recomendada));
+    const escolhida = posicao >= 0 ? posicao : pergunta.options.findIndex((opcao) => opcao.label === DELEGAR);
+    const leitura = recomendada !== "" ? recomendada : (pergunta.options[escolhida]?.label ?? "");
+    const minutos = Math.max(1, Math.round(prazoDaPergunta / 60_000));
+    if (leitura === "") {
+      announce(`  ${pergunta.topic}: sem resposta em ${minutos} min e sem leitura recomendada; a decisão segue em aberto`);
+      return "";
+    }
+    allAssumptions.push({ topic: pergunta.topic, statement: leitura, basis: `sem resposta em ${minutos} min: o plan seguiu com a leitura recomendada` });
+    announce(`  ${pergunta.topic}: sem resposta em ${minutos} min; sigo com a leitura recomendada (${leitura}) e a registro como suposição`);
+    return escolhida >= 0 ? String(escolhida + 1) : leitura;
+  };
   /** Presente apenas no caminho por esqueleto; é dele que sai a cobertura. */
   let skeletonAtual: Skeleton | null = null;
   /** O esqueleto como o `init` o publicou: é dele que a arquitetura é derivada. */
@@ -871,7 +851,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       let index = 0;
       for (const question of plan.ask) {
         index += 1;
-        const raw = await options.ask(question, index, plan.ask.length);
+        const raw = await perguntar(question, index, plan.ask.length);
         answers.push(await settle(document, question, raw, round, index, plan.ask.length));
       }
 
@@ -936,7 +916,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     if (classification.disposition !== "ACCEPTED") {
       announce(`  Sua resposta não fechou a decisão: ${classification.open}`);
       announce("  Responda de novo fechando esse ponto — ou deixe vazio para mantê-la em aberto.");
-      const segunda = await options.ask(question, index, total);
+      const segunda = await perguntar(question, index, total);
       if (segunda.trim() !== "") {
         const localDaSegunda = classifyLocally(question, segunda);
         texto = segunda;
@@ -1003,298 +983,6 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * não é falta de informação: é uma decisão que ninguém quer tomar agora, e o
    * gate de prontidão é o lugar certo para isso aparecer.
    */
-  /** O contexto comum das duas perguntas da auditoria do plano. */
-  function auditBase(writer: WriterContext, upstream: { name: string; content: string }[]) {
-    return {
-      language: options.language,
-      document: "project-phases.md",
-      executable: true,
-      request: options.request.text,
-      decisions: writer.decisions,
-      dispositions: allAnswers.map((answer) => `${answer.questionId} ${answer.disposition}`),
-      upstream,
-      // A ressalva do pedido de testes (§129) fica no relatório: aos auditores do plano ela seria um pedido de teste.
-      upstreamRemarks: remarks.filter((entry) => !ehRessalvaDoPedidoDeTeste(entry.remark)).map((entry) => ({
-        document: entry.document,
-        where: entry.remark.where,
-        observation: entry.remark.observation,
-      })),
-      content: "",
-    };
-  }
-
-  /**
-   * Auditoria do plano: uma chamada por fase, em paralelo, mais uma de coerência.
-   *
-   * As chamadas por fase são independentes — cada uma julga uma fase contra as
-   * decisões — então correm juntas. A de coerência lê o índice de critérios em
-   * vez do texto corrido: o mesmo conteúdo, organizado para que a contradição
-   * fique lado a lado em vez de a trinta páginas de distância.
-   */
-  async function auditPlanInParts(
-    content: string,
-    writer: WriterContext,
-    upstream: { name: string; content: string }[],
-    attempt: number,
-    papel: "auditor" | "verifier" = "auditor",
-  ): Promise<AuditVerdict> {
-    const parsed = parsePhases(content);
-    if (!parsed.ok) throw new InitBlockedError("o plano não passa no parser na hora de auditar", runId);
-
-    const fases = parsed.document.phases;
-    const base = auditBase(writer, upstream);
-
-    const criteria = enumerateCriteria(parsed.document);
-    const digest = criteria
-      .map((criterion) => `${criterion.address} [${criterion.taskTitle}] ${criterion.text}`)
-      .join("\n");
-
-    /*
-     * A coerência entra na MESMA fila das fases, não depois delas. Ela não
-     * depende de nenhuma e serializá-la custou 318s numa medição — cinco minutos
-     * de relógio em troca de nada.
-     */
-    /*
-     * Cada auditoria recebe exatamente o que a sua pergunta exige.
-     *
-     * A de uma fase recebe a MESMA fatia que escreveu a fase: fidelidade só é
-     * julgável contra o que foi pedido, e pedir a fase sem o pedido é pedir ao
-     * auditor que adivinhe. A de coerência recebe o esqueleto inteiro, porque a
-     * pergunta dela é global por natureza — e ela é uma chamada, não N.
-     */
-    const fatia = (numero: number): { name: string; content: string }[] =>
-      skeletonAtual
-        ? [
-            { name: "fatia do esqueleto", content: sliceForPhase(skeletonAtual, numero) },
-            ...(arquiteturaAtual ? [{ name: "fatia da arquitetura", content: architectureSliceForPhase(arquiteturaAtual, numero) }] : []),
-            // O tempo dos fluxos (§127): o auditor cobra o mesmo contrato que o escritor recebeu.
-            ...(arquiteturaAtual && tempoDaFase(arquiteturaAtual, skeletonAtual, numero) !== ""
-              ? [{ name: DOCUMENTO_DO_TEMPO, content: tempoDaFase(arquiteturaAtual, skeletonAtual, numero) }]
-              : []),
-          ]
-        : upstream;
-
-    /*
-     * Uma aprovação vale para o texto E para a fatia contra a qual ele foi
-     * julgado (§128). Enquanto toda reorganização reescrevia todas as fases, o
-     * sha do texto bastava: texto igual era fatia igual. Desde que a fase
-     * intocada mantém o texto, a fatia muda por baixo dele — e a aprovação
-     * dada contra a arquitetura anterior não pode pular a releitura.
-     */
-    const chaveDaFase = (fase: { number: number; markdown: string }): string =>
-      sha12(`${fase.markdown.trim()}\n${JSON.stringify(fatia(fase.number))}`);
-    const aReauditar = fases.filter((fase) => !fasesAprovadas.has(chaveDaFase(fase)));
-    for (const fase of fases.filter((fase) => fasesAprovadas.has(chaveDaFase(fase)))) {
-      relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
-    }
-    const puladas = fases.length - aReauditar.length;
-    if (puladas > 0) {
-      announce(`  ${puladas} fase(s) já aprovada(s) neste run, com o mesmo texto; não vou reauditá-las`);
-    }
-
-    /*
-     * O mesmo julgamento não se paga duas vezes, nem dentro nem entre execuções.
-     *
-     * O prompt de auditoria contém a fase, a fatia do esqueleto, as decisões e o
-     * que o auditor foi instruído a julgar. Se o sha dele é o mesmo de uma
-     * aprovação anterior, nada do que decide o veredito mudou — e quando NÓS
-     * mexemos no eixo do auditor, como no §49, o sha muda e toda aprovação velha
-     * cai sozinha.
-     */
-    const autoridade = shaDaAutoridade(base.decisions);
-    /** A autoridade de uma task aprovada leva a fatia da fase, pela mesma razão da chave da fase (§128). */
-    const autoridadeDaFase = (numero: number): string => sha12(`${autoridade}\n${JSON.stringify(fatia(numero))}`);
-    /** E a da coerência leva a arquitetura: um par aprovado contra a anterior é relido. */
-    const autoridadeDaCoerencia = sha12(`${autoridade}\n${arquiteturaMd}`);
-
-    /** As tasks desta fase que já passaram, com este texto e estas decisões. */
-    const jaAprovadas = (fase: { number: number; markdown: string }): TaskBlock[] => {
-      const lido = parsePhaseFragment(fase.markdown);
-      return lido === null ? [] : tasksJulgadas.jaAprovadas(lido.tasks, autoridadeDaFase(fase.number));
-    };
-
-    const promptDaFase = (fase: { number: number; markdown: string }): string => {
-      const aprovadas = jaAprovadas(fase);
-      return phaseAuditPrompt({
-        ...base,
-        upstream: fatia(fase.number),
-        phaseMarkdown: fase.markdown,
-        phaseNumber: fase.number,
-        totalPhases: fases.length,
-        ...(aprovadas.length > 0 ? { tasksJaAprovadas: aprovadas.map((task) => task.title) } : {}),
-      });
-    };
-
-    /*
-     * A chave da aprovação é o prompt SEM a lista de tasks já aprovadas.
-     *
-     * Essa lista muda conforme a memória cresce — vazia na primeira auditoria,
-     * cheia na retomada — e com ela mudaria o sha, e a aprovação paga ontem não
-     * seria encontrada hoje. O que decide o veredito é a fase, a fatia e as
-     * decisões; é isso que entra na chave.
-     */
-    const chaveDeAprovacao = (fase: { number: number; markdown: string }): string =>
-      phaseAuditPrompt({ ...base, upstream: fatia(fase.number), phaseMarkdown: fase.markdown, phaseNumber: fase.number, totalPhases: fases.length });
-
-    const reaproveitadas = aReauditar.filter((fase) => memoria.jaAprovada(chaveDeAprovacao(fase)));
-    for (const fase of reaproveitadas) {
-      fasesAprovadas.add(chaveDaFase(fase));
-      relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
-    }
-    if (reaproveitadas.length > 0) {
-      announce(`  ${reaproveitadas.length} fase(s) aprovada(s) numa execução anterior, com a mesma auditoria; não vou repagar`);
-    }
-
-    const tarefas: (() => Promise<AuditVerdict>)[] = [
-      ...aReauditar
-        .filter((fase) => !fasesAprovadas.has(chaveDaFase(fase)))
-        .map((fase) => () => {
-          relatarFase({ kind: "audit", number: fase.number, state: "corrente" });
-          return auditCall(`project-phases.md#P${fase.number}`, attempt, () => promptDaFase(fase), papel).then((bruto) => {
-            /*
-             * Quem chamou sabe a fase; o auditor não precisa dizê-la.
-             *
-             * Sem isto, o achado desta chamada chegava à emenda sem endereço
-             * utilizável e a reescrita ia para a fase errada — ou para nenhuma.
-             */
-            const veredicto: AuditVerdict = {
-              ...bruto,
-              findings: bruto.findings.map((finding) => ({ ...finding, phase: fase.number })),
-              /*
-               * E a decisão também (§127). No Luna a pergunta do status inicial
-               * da tarefa, levantada pelo auditor da fase 3, saiu sem fase; a
-               * resposta virou achado sem endereço, foi às fases 1, 4 e 6, e a
-               * emenda da fase 1 — que estava aprovada — devolveu três tasks a
-               * menos. As lacunas viraram reorganização da arquitetura: ~26
-               * chamadas.
-               */
-              ...(bruto.decisions ? { decisions: bruto.decisions.map((decisao) => ({ ...decisao, phase: fase.number })) } : {}),
-            };
-            // Aprovada é fato do run: o texto exato que passou não volta à fila.
-            if (veredicto.findings.length === 0) {
-              fasesAprovadas.add(chaveDaFase(fase));
-              memoria.guardarAprovacao(chaveDeAprovacao(fase));
-              // Fase aprovada é TASK aprovada, uma a uma: é o que sobrevive à
-              // próxima emenda, que vai mudar só uma delas — e à próxima execução.
-              const lido = parsePhaseFragment(fase.markdown);
-              if (lido !== null) {
-                tasksJulgadas.aprovar(lido.tasks, autoridadeDaFase(fase.number));
-                memoria.guardarTasksAprovadas(tasksJulgadas.chaves());
-              }
-              relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
-            } else {
-              relatarFase({ kind: "audit", number: fase.number, state: "devolvida", findings: veredicto.findings.length });
-            }
-            return veredicto;
-          });
-        }),
-      async () => {
-        const changed = coerencia.changed(criteria, autoridadeDaCoerencia);
-        /*
-         * Índice idêntico ao aprovado, sob as mesmas decisões: a resposta já é
-         * conhecida. Reperguntar não acrescenta rigor, acrescenta variância — e
-         * numa retomada acrescentaria uma chamada paga por nada.
-         */
-        if (changed !== undefined && changed.length === 0) {
-          announce("  coerência aprovada numa execução anterior sobre o mesmo índice e as mesmas decisões; não vou repagar");
-          return { status: "APPROVED" as const, findings: [], remarks: [], decisions: [], reason: "índice idêntico ao já aprovado" };
-        }
-        const verdict = await auditCall("project-phases.md#coerência", attempt, () =>
-          coherencePrompt({
-            ...base,
-            upstream: skeletonAtual
-              ? [
-                  { name: "skeleton.md", content: renderSkeleton(skeletonForPlanning(skeletonAtual)) },
-                  ...(arquiteturaMd !== "" ? [{ name: "architecture.md", content: arquiteturaMd }] : []),
-                  ...(arquiteturaAtual && tempoDosFluxos(arquiteturaAtual, skeletonAtual).length > 0
-                    ? [{ name: DOCUMENTO_DO_TEMPO, content: tempoDosFluxos(arquiteturaAtual, skeletonAtual).join("\n") }]
-                    : []),
-                ]
-              : upstream,
-            digest,
-            totalPhases: fases.length,
-            ...(changed ? { changedSinceApproval: changed } : {}),
-          }),
-          papel,
-        );
-        const reconciliado = coerencia.reconcile(verdict, criteria, autoridadeDaCoerencia);
-        memoria.guardarCoerencia(coerencia.exportar());
-        return reconciliado;
-      },
-    ];
-
-    const veredictos: AuditVerdict[] = [];
-    const fila = [...tarefas];
-    await Promise.all(
-      Array.from({ length: Math.min(maxParallelParts + 1, fila.length) }, async () => {
-        for (;;) {
-          const tarefa = fila.shift();
-          if (!tarefa) return;
-          veredictos.push(await tarefa());
-        }
-      }),
-    );
-
-    const findings = veredictos.flatMap((veredicto) => veredicto.findings);
-    const remarksDoPlano = veredictos.flatMap((veredicto) => veredicto.remarks);
-    /*
-     * As decisões também se juntam.
-     *
-     * Esquecê-las aqui foi a correção pela metade da primeira versão deste canal:
-     * o parser as lia, o prompt as pedia, e a auditoria do plano — que é a que
-     * roda de verdade, uma chamada por fase — montava o veredito à mão sem elas.
-     * Nenhuma decisão do auditor chegava ao desenvolvedor, e nada no caminho
-     * reclamava.
-     */
-    const decisoesDoPlano = veredictos.flatMap((veredicto) => veredicto.decisions ?? []);
-
-    announce(`  auditoria em ${aReauditar.length - reaproveitadas.length} fase(s) + coerência: ${findings.length} finding(s)`);
-
-    const original: AuditVerdict = findings.length > 0
-      ? { status: "REJECTED", findings, remarks: remarksDoPlano, decisions: decisoesDoPlano, reason: veredictos.find((v) => v.reason)?.reason ?? "há defeito no plano" }
-      : { status: "APPROVED", findings: [], remarks: remarksDoPlano, decisions: decisoesDoPlano, reason: "" };
-    if (findings.length === 0 && decisoesDoPlano.length === 0) return original;
-
-    const input = materialityInput(original, {
-      request: options.request.text, decisions: writer.decisions, phases: fases,
-      ...(skeletonAtual ? { skeleton: renderSkeleton(skeletonForPlanning(skeletonAtual)) } : {}),
-      ...(arquiteturaMd !== "" ? { architecture: arquiteturaMd } : {}),
-      harness: planningScopeBlock(),
-    });
-    relatarFase({ kind: "documento", etapa: "triagem dos bloqueios" });
-    announce(`  conferindo a materialidade de ${input.items.length} bloqueio(s)/decisão(ões) antes de gastar outra escrita`);
-    await event("audit", "project-phases.md#materialidade", "started", `${input.items.length} item(s)`, attempt);
-    const output = await track({ role: "verifier", stage: "audit", subject: "project-phases.md#materialidade", attempt, prompt: materialityPrompt(input) });
-    const review = applyMaterialityReview(original, input, output, autoridadeDeTeste());
-    if (review.defects.length > 0) {
-      announce("  parecer sem prova válida na triagem: o bloqueio correspondente continua valendo");
-    }
-    announce(`  triagem: ${review.advisory} ponto(s) não bloqueante(s); ${review.verdict.findings.length} defeito(s) e ${review.verdict.decisions?.length ?? 0} decisão(ões) mantidos`);
-    await event("audit", "project-phases.md#materialidade", "complete",
-      `${review.advisory} observação(ões); ${review.verdict.findings.length} defeito(s) mantido(s)`
-      + (review.defects.length ? `; pareceres não aplicados: ${review.defects.join("; ")}` : ""), attempt);
-    // A base global pode ser confirmada pela triagem, mesmo com defeito local
-    // ainda aberto. Os vereditos originais permanecem nas transcrições.
-    if (original.findings.some(finding => finding.phase === undefined)
-      && !review.verdict.findings.some(finding => finding.phase === undefined)
-      && (review.verdict.decisions?.length ?? 0) === 0) {
-      coerencia.reconcile({ ...review.verdict, status: "APPROVED", findings: [] }, criteria, autoridadeDaCoerencia);
-      memoria.guardarCoerencia(coerencia.exportar());
-    }
-    for (const fase of fases) {
-      if (!original.findings.some(finding => finding.phase === fase.number) || review.verdict.findings.some(finding => finding.phase === fase.number)) continue;
-      fasesAprovadas.add(chaveDaFase(fase));
-      memoria.guardarAprovacao(chaveDeAprovacao(fase));
-      const lido = parsePhaseFragment(fase.markdown);
-      if (lido !== null) {
-        tasksJulgadas.aprovar(lido.tasks, autoridadeDaFase(fase.number));
-        memoria.guardarTasksAprovadas(tasksJulgadas.chaves());
-      }
-      relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
-    }
-    return review.verdict;
-  }
-
   /**
    * Uma chamada de auditoria, com a repetição por saída inválida que já existia.
    *
@@ -1696,6 +1384,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * o que precisava ser acordado entre elas já foi, antes de qualquer task.
    */
   async function detalharFases(esqueletoDoInit: Skeleton): Promise<InitOutcome> {
+    perguntasComPrazo = true;
     /*
      * O que o `init` deixou aberto é perguntado antes da primeira fase.
      *
@@ -1771,14 +1460,10 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     plano = semGaps.content;
 
     relatarFase({ kind: "documento", etapa: "auditoria" });
-    const verdict = await auditLoop("project-phases.md", semGaps, writerDoPlano, []);
-    plano = verdict.content;
-    planoAprovado = true;
-    remarks.push(...verdict.remarks.map((remark) => ({ document: "project-phases.md", remark })));
-
-    relatarFase({ kind: "documento", etapa: "ensaio do verificador" });
-    const final = await rehearse(verdict.authored, writerDoPlano, []);
+    const final = await auditarPlano(semGaps, writerDoPlano);
     plano = final.content;
+    planoAprovado = true;
+    remarks.push(...final.remarks.map((remark) => ({ document: "project-phases.md", remark })));
 
     await publish(options.projectRoot, [{ name: "project-phases.md", content: final.content }]);
     await event("publish", "project-phases.md", "complete");
@@ -2686,53 +2371,6 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   }
 
   /**
-   * A decisão que fecha um impasse é uma decisão, não um recado.
-   *
-   * O piloto 3 pagou por isso duas vezes. Na primeira madrugada, a regra precisa
-   * sobre espaços em `cartoes.titulo` foi escrita pelo desenvolvedor, aplicada ao
-   * plano daquele momento e publicada. No run seguinte o plano foi reescrito, a
-   * decisão não existia em lugar nenhum além de uma linha de log, e o auditor
-   * levantou exatamente a mesma ambiguidade — três devoluções e um segundo
-   * impasse sobre a mesma coisa.
-   *
-   * Ela passa a valer como resposta ACEITA: entra nas decisões que alimentam
-   * todo escritor daqui para frente e é gravada no handoff, que é o que a
-   * retomada lê.
-   */
-  async function recordDeveloperDecision(document: string, findings: readonly Finding[], decision: string): Promise<void> {
-    const anteriores = allAnswers.filter((answer) => answer.questionId.includes("#standoff#")).length;
-    const id = `SD-${String(anteriores + 1).padStart(2, "0")}`;
-    const pergunta: Question = {
-      id,
-      topic: "impasse de auditoria",
-      evidence: findings.map((finding) => `${finding.where}: ${finding.problem}`).join(" · "),
-      decision: `O auditor e o escritor não convergiram em ${document}. O que vale?`,
-      why: "a decisão do desenvolvedor é autoridade acima do auditor e vale para os documentos seguintes",
-      options: [],
-      recommended: "",
-      recommendationBasis: "",
-    };
-
-    allQuestions.push({ ...pergunta, id: scoped(document, id, "standoff") });
-    allAnswers.push({
-      questionId: scoped(document, id, "standoff"),
-      raw: decision,
-      disposition: "ACCEPTED",
-      decision,
-      open: "",
-      round: 1,
-      answeredAt: now().toISOString(),
-    });
-
-    // No handoff os ids são locais ao documento: é assim que a retomada os lê.
-    await persistAnswers(document, [pergunta], [
-      { questionId: id, raw: decision, disposition: "ACCEPTED", decision, open: "", round: 1, answeredAt: now().toISOString() },
-    ]);
-
-    announce("  decisão registrada: vale para este documento e para os seguintes");
-  }
-
-  /**
    * Junta perguntas e respostas ao handoff do documento, sem perder o que já havia.
    *
    * Os ids ficam locais ao documento, que é como a retomada os lê; o escopo por
@@ -2840,7 +2478,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       if (!original) continue;
 
       const pergunta = perguntaInsistente(original, item.statement);
-      const raw = await options.ask(pergunta, indice + 1, abertas.length);
+      const raw = await perguntar(pergunta, indice + 1, abertas.length);
       let resposta = await settle(document, pergunta, raw, attempt, indice + 1, abertas.length);
 
       /*
@@ -2852,7 +2490,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
        */
       if (resposta.disposition !== "ACCEPTED") {
         announce("  esta decisão não pode ficar aberta: escolha um número — as duas últimas opções fecham a pergunta sem você precisar da resposta.");
-        resposta = await settle(document, pergunta, await options.ask(pergunta, indice + 1, abertas.length), attempt, indice + 1, abertas.length);
+        resposta = await settle(document, pergunta, await perguntar(pergunta, indice + 1, abertas.length), attempt, indice + 1, abertas.length);
       }
 
       resposta = aplicarInsistencia(pergunta, resposta);
@@ -2878,153 +2516,6 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   }
 
   /**
-   * O levantamento de auditoria.
-   *
-   * Devolve os achados que devem seguir para o escritor — já com a decisão do
-   * desenvolvedor embutida —, e tira da lista os que ele encerrou dando razão ao
-   * escritor. A decisão fica gravada em `allAnswers`, e é por ali que ela chega
-   * ao auditor da rodada seguinte: sem isso ele levanta o mesmo ponto de novo,
-   * com toda a razão do mundo.
-   */
-  async function levantamentoDeAuditoria(
-    document: string,
-    conteudo: string,
-    findings: readonly Finding[],
-    history: readonly AuditAttempt[],
-    attempt: number,
-    writer: WriterContext,
-    doSelfCheck: boolean,
-    /** No impasse, todo achado insistido vai a arbitragem, repetido ou não. */
-    todos = false,
-  ): Promise<Finding[]> {
-    /*
-     * Achado mecânico não vai a arbitragem.
-     *
-     * "A task declara 5 critérios de aceite" é contagem: 5 é maior que 4, não há
-     * duas leituras possíveis, e perguntar qual vale é pedir ao desenvolvedor
-     * que arbitre uma conta. Repetir, aqui, significa que o escritor não cumpriu
-     * — não que alguém discorde dele.
-     *
-     * O levantamento existe para o outro caso: quando o escritor leu as fontes
-     * de um jeito e o auditor de outro, e nenhum dos dois pode decidir.
-     */
-    if (doSelfCheck) return [...findings];
-
-    /*
-     * No impasse, insistir É a repetição.
-     *
-     * A regra normal é arbitrar o achado que volta pela SEGUNDA vez: uma vez é
-     * descuido, duas é leitura divergente. Mas um achado que sobreviveu ao
-     * orçamento inteiro de devoluções é, por definição, insistência — mesmo que o
-     * endereço seja novo. Exigir repetição ali era o que fazia o impasse virar
-     * prosa: no `assistencia2` as quatro tentativas apontaram fases sempre
-     * diferentes, nada repetiu, e o levantamento nunca abriu.
-     */
-    /*
-     * Achado de engenharia não vai a arbitragem (§122).
-     *
-     * "O `rotas.ts` de Categorias não declara `export const prefixo` que
-     * `registrarRotasApi` exige" voltou pela segunda vez no `minimax`, foi à
-     * frente do desenvolvedor como "desacordo de leitura", e ele respondeu
-     * "fica como está": a contradição foi publicada como decidida. Um
-     * conflito entre contratos do próprio plano é o plano que fecha — o
-     * escritor, e depois o reparador — e a escolha do desenvolvedor não o
-     * torna coerente. O achado segue na recuperação, com a nota de quem decide.
-     */
-    const deEngenharia = findings.filter((finding) => autoridadeDoAchado(finding) === "engenharia");
-    if (deEngenharia.length > 0 && (todos || deEngenharia.some((finding) => ehRepetido(finding, history)))) {
-      announce(`  ${deEngenharia.length} ponto(s) são de engenharia (${deEngenharia.map((finding) => sinaisDeEngenharia(`${finding.where}\n${finding.problem}`)[0] ?? finding.where).join(", ")}): o plano decide, não você — seguem na correção`);
-    }
-    const anotado = (finding: Finding): Finding => (deEngenharia.includes(finding) ? comNotaDeEngenharia(finding) : finding);
-    /*
-     * Nem o achado sobre o envelope da fase (§126): as duas "leituras" que a
-     * pergunta oferece — a do auditor e a do escritor — são igualmente
-     * inalcançáveis para quem emenda a fase, e a resposta vira uma decisão
-     * aceita que ninguém aplica. Ele vai à arquitetura, que escreve o envelope.
-     */
-    const repetidos = findings.filter(
-      (finding) =>
-        finding.mechanical !== true &&
-        !deEngenharia.includes(finding) &&
-        !alvoNoEnvelope(finding) &&
-        !veioDoEnvelope(finding) &&
-        (todos || ehRepetido(finding, history)) &&
-        !arbitrados.has(marcaDoProblema(finding)),
-    );
-    if (repetidos.length === 0) return findings.map(anotado);
-
-    announce(
-      todos
-        ? `  ${repetidos.length} ponto(s) sobreviveram a todas as devoluções: quem decide é você, e é agora`
-        : `  ${repetidos.length} ponto(s) voltaram pela segunda vez: isso é desacordo de leitura, não descuido — perguntando a você`,
-    );
-    const resultado: Finding[] = [];
-    /*
-     * O mesmo ponto em três lugares é UMA pergunta.
-     *
-     * A auditoria do plano são N chamadas — uma por fase, mais a coerência — e o
-     * mesmo defeito aparece em várias delas com endereços diferentes. O filtro
-     * acima é calculado uma vez, antes do laço, então os irmãos passavam todos por
-     * ele e o desenvolvedor respondia três vezes a mesma coisa. O teste adversário
-     * pegou isso na primeira execução: três arbitragens para um ponto só.
-     *
-     * A decisão é do PONTO, não do endereço: tomada uma vez, ela vale para todos
-     * os achados que dizem o mesmo.
-     */
-    const decididoAgora = new Map<string, LeituraEscolhida>();
-
-    for (const finding of findings) {
-      if (!repetidos.includes(finding)) {
-        resultado.push(anotado(finding));
-        continue;
-      }
-
-      const marca = marcaDoProblema(finding);
-      const jaDecidido = decididoAgora.get(marca);
-      if (jaDecidido) {
-        if (jaDecidido.tipo === "escritor") {
-          announce(`    ${finding.where}: encerrado pela mesma decisão`);
-          continue;
-        }
-        resultado.push(comAutoridade(finding, jaDecidido));
-        continue;
-      }
-
-      arbitrados.add(marca);
-      const pergunta = perguntaDeLevantamento(finding, arbitrados.size, oQueOEscritorFez(conteudo, finding));
-      const raw = await options.ask(pergunta, resultado.length + 1, repetidos.length);
-      const resposta = await settle(document, pergunta, raw, attempt, 1, repetidos.length);
-
-      const escolha = lerEscolha(resposta.decision, raw);
-      decididoAgora.set(marca, escolha);
-
-      /*
-       * O que se grava é a DECISÃO, não o botão.
-       *
-       * "Vale a leitura do auditor" é rótulo: ele vai para o contexto do
-       * escritor, para a lista que o auditor recebe na rodada seguinte e para o
-       * relatório — e não diz nada em nenhum dos três. No `assitencia` o
-       * desenvolvedor arbitrou onze pontos e o auditor devolveu os mesmos, com
-       * razão: para ele, nada tinha sido decidido.
-       */
-      const gravada: Answer =
-        resposta.disposition === "ACCEPTED" ? { ...resposta, decision: decisaoGravada(finding, escolha) } : resposta;
-
-      allQuestions.push(pergunta);
-      allAnswers.push(gravada);
-      await persistAnswers(document, [pergunta], [gravada]);
-      if (escolha.tipo === "escritor") {
-        announce(`    ${finding.where}: você deu razão ao escritor; o ponto está encerrado`);
-        continue;
-      }
-      resultado.push(comAutoridade(finding, escolha));
-    }
-
-    writer.decisions = allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision);
-    return resultado;
-  }
-
-  /**
    * Uma pergunta respondida, gravada e contabilizada.
    *
    * Os três caminhos que perguntam ao desenvolvedor — lacuna, insistência e
@@ -3041,7 +2532,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     escopo: string,
     writer?: WriterContext,
   ): Promise<Answer> {
-    const raw = await options.ask(pergunta, indice, total);
+    const raw = await perguntar(pergunta, indice, total);
     const resposta = await settle(document, pergunta, raw, attempt, indice, total);
 
     const id = escopo === "" ? pergunta.id : scoped(document, pergunta.id, escopo);
@@ -3476,7 +2967,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       let index = 0;
       for (const question of perguntas) {
         index += 1;
-        const raw = await options.ask(question, index, perguntas.length);
+        const raw = await perguntar(question, index, perguntas.length);
         const resposta = await settle(document, question, raw, round, index, perguntas.length);
         answered.push(aplicarInsistencia(question, resposta));
       }
@@ -3566,1095 +3057,376 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   }
 
   /**
-   * O ensaio do verificador.
+   * A conferência mecânica do plano, antes de qualquer modelo.
    *
-   * O auditor pergunta se o documento está bem escrito; o ensaio pergunta se o
-   * critério pode ser provado por alguém. São perguntas diferentes, feitas por
-   * papéis com regras da dúvida opostas, e foi entre elas que o piloto 2 escapou:
-   * plano aprovado, critério impossível, três ciclos de correção queimados sobre
-   * código que estava certo.
-   *
-   * Reprovou, volta ao escritor como finding, igual a qualquer devolução de
-   * auditoria. Sobreviveu à última rodada, bloqueia o RALPH READY com o endereço
-   * na tela — porque o preço de barrar um plano bom é o desenvolvedor reler uma
-   * linha, e o de liberar um plano impossível é o build inteiro.
+   * Contável é conferido em código: referência de design morta, cobertura,
+   * prescrição de teste (I-16), escrita concorrente (I-18), tetos de tamanho e o
+   * contrato. Cada defeito volta à fase em que está; nenhum gasta auditor.
    */
-  async function rehearse(
-    initial: Authored,
-    writer: WriterContext,
-    upstream: { name: string; content: string }[],
-  ): Promise<{ content: string }> {
-    let authored = initial;
-    let limite = maxRehearsalRounds + 1;
+  function autoconferencia(content: string): AuditVerdict | null {
+    const parsed = parsePhases(content);
 
-    for (let round = 1; round <= limite; round += 1) {
-      const parsed = parsePhases(authored.content);
-      if (!parsed.ok) {
-        // Plano que não passa no parser já é reprovado pelo gate do contrato, e
-        // ensaiar critério que ninguém conseguiu ler não acrescenta nada.
-        rehearsal = { blocked: [] };
-        return { content: authored.content };
+    /*
+     * Referência de design morta tem o mesmo destino da cobertura: conferida
+     * só no gate, custa o run; conferida aqui, custa uma devolução.
+     */
+    if (parsed.ok) {
+      const mortas = checkDesignRefs(parsed.document, artifactPaths(options.projectRoot).design, (caminho) =>
+        existsSync(caminho),
+      );
+      if (mortas.length > 0) {
+        return {
+          status: "REJECTED",
+          findings: mortas.map((erro) => ({ where: "Design ref", problem: erro.message, fix: erro.hint })),
+          remarks: [],
+          reason: "há referência de design que não existe em disco",
+          mechanical: true,
+        };
       }
+    }
 
-      const criteria = enumerateCriteria(parsed.document);
-      if (criteria.length === 0) {
-        rehearsal = { blocked: [] };
-        return { content: authored.content };
+    /*
+     * Cobertura é mecânica e era conferida SÓ no gate final. O piloto 3 gastou
+     * três horas para terminar em NOT READY porque nenhuma task citava
+     * `workflow <n>` — o modelo traduziu o rótulo junto com a prosa. Conferida
+     * aqui, a mesma falha vira uma devolução dentro do ciclo que já existe.
+     */
+    if (parsed.ok) {
+      const semCobertura = checkCoverage(parsed.document, coberturaAtual());
+      if (semCobertura.length > 0) {
+        return {
+          status: "REJECTED",
+          findings: achadosDeCobertura(parsed.document),
+          remarks: [],
+          reason: "há item do esqueleto que nenhuma task rastreia",
+          mechanical: true,
+        };
       }
+    }
 
-      await event("verify", "project-phases.md", "started", `${criteria.length} critério(s)`, round);
+    /*
+     * Prescrição de teste é contável (I-16) e era descoberta pelo auditor —
+     * que, no `teste_openrouter3`, a transformou numa pergunta ao
+     * desenvolvedor sobre se a regra valia. Conferida aqui, vira uma emenda
+     * mecânica na task certa, sem gastar auditor nem pedir licença para
+     * cumprir a regra. O que o pedido e a entrevista autorizam não conta.
+     */
+    if (parsed.ok) {
+      const prescritos = checkTestPrescription(parsed.document, autoridadeDeTeste());
+      if (prescritos.length > 0) {
+        const total = skeletonAtual?.phases.length ?? 0;
+        return {
+          status: "REJECTED",
+          findings: prescritos.map((erro) => achadoMecanico(parsed.document, content, erro, total)),
+          remarks: [],
+          reason: "há task que prescreve teste, e como provar o produto é decisão do build",
+          mechanical: true,
+        };
+      }
+    }
+
+    /*
+     * Propriedade de escrita (I-18, §124): fases sem dependência entre si
+     * com obrigação de escrita no mesmo arquivo. É a metade irmã, no nível
+     * das fases, da serialização por componente que a arquitetura faz
+     * (§119). No `haiku` o auditor de coerência apontou três rodadas
+     * seguidas que as fases 3 a 6 mandavam acrescentar em `modulos.ts` e
+     * `navegacao.ts` as entradas que a fundação já entregava, e a triagem
+     * descartou três vezes porque "existe uma implementação que evita o
+     * conflito". Contável, conferido aqui: vira emenda mecânica na fase que
+     * escreve, com o dono do arquivo nomeado, sem auditor, sem triagem e sem
+     * pergunta ao desenvolvedor — e sem inventar dependência, que é da
+     * arquitetura.
+     */
+    if (parsed.ok) {
+      const conflitos = checkWriteOwnership(parsed.document, { components: arquiteturaAtual?.components ?? [] });
+      if (conflitos.length > 0) {
+        const total = skeletonAtual?.phases.length ?? 0;
+        return {
+          status: "REJECTED",
+          findings: conflitos.map((erro) => achadoMecanico(parsed.document, content, erro, total)),
+          remarks: [],
+          reason: "há fases sem ordem entre si com obrigação de escrita no mesmo arquivo, e o build as executa ao mesmo tempo",
+          mechanical: true,
+        };
+      }
+    }
+
+    /*
+     * Task inchada é o defeito de origem: o piloto 3 saiu com 4,3 critérios por
+     * task contra 2,1 a 2,5 dos três planos que construíram. Cortado aqui, o
+     * teto por fase vira consequência — 15 tasks de até 4 critérios fecham em 60.
+     */
+    if (parsed.ok) {
+      const inchadas = parsed.document.phases.flatMap((phase) =>
+        phase.tasks
+          .filter((task) => task.acceptanceCriteria.length > MAX_CRITERIA_PER_TASK)
+          .map((task) => ({ phase: phase.number, task, tasksNaFase: phase.tasks.length })),
+      );
+      if (inchadas.length > 0) {
+        return {
+          status: "REJECTED",
+          findings: inchadas.map(({ phase, task, tasksNaFase }) => ({
+            where: `Phase ${phase} · ${task.title}`,
+            mechanical: true,
+            problem: `a task declara ${task.acceptanceCriteria.length} critérios de aceite`,
+            /*
+             * Os dois tetos, sempre juntos.
+             *
+             * Este texto mandava só dividir, e o do tamanho da fase mandava só
+             * consolidar. No `assitencia` isso virou um pêndulo com nome e
+             * horário: 00:01 "a task declara 5 critérios" → divide → 00:26 "a
+             * fase declara 16 tasks" → consolida → 00:23 "a task declara 5
+             * critérios". Cada correção obedecia a um teto e quebrava o outro,
+             * porque cada uma só sabia do seu.
+             */
+            fix:
+              `uma task com mais de ${MAX_CRITERIA_PER_TASK} critérios está fazendo mais de uma coisa: divida-a em tasks` +
+              ` que façam uma coisa cada, com dois ou três critérios. Nenhuma condição verificável pode desaparecer no corte.` +
+              ` E a fase inteira não pode passar de ${MAX_TASKS_PER_PHASE} tasks — ela tem ${tasksNaFase} agora: se a divisão` +
+              ` estourar esse teto, consolide outras tasks desta fase NA MESMA REESCRITA, até a fase caber nos dois limites` +
+              ` ao mesmo tempo. Uma correção que respeita um teto e quebra o outro volta para cá`,
+          })),
+          remarks: [],
+          reason: "há task fazendo mais de uma coisa",
+          mechanical: true,
+        };
+      }
+    }
+
+    // Dimensionamento é contável, então é contado aqui e não descoberto pelo
+    // auditor três devoluções depois: uma fase é uma sessão de agente.
+    if (parsed.ok) {
+      const criterios = (phase: (typeof parsed.document.phases)[number]): number =>
+        phase.tasks.reduce((total, task) => total + task.acceptanceCriteria.length, 0);
+
+      const grandes = parsed.document.phases.filter(
+        (phase) => phase.tasks.length > MAX_TASKS_PER_PHASE || criterios(phase) > MAX_CRITERIA_PER_PHASE,
+      );
+      if (grandes.length > 0) {
+        return {
+          status: "REJECTED",
+          findings: grandes.map((phase) => ({
+            where: `Phase ${phase.number}`,
+            mechanical: true,
+            problem:
+              phase.tasks.length > MAX_TASKS_PER_PHASE
+                ? `a fase declara ${phase.tasks.length} tasks e uma fase é uma sessão de agente`
+                : `a fase declara ${criterios(phase)} critérios de aceite em ${phase.tasks.length} tasks, e uma fase é uma sessão de agente`,
+            fix:
+              phase.tasks.length > MAX_TASKS_PER_PHASE
+                ? /*
+                   * Consolidar, nunca dividir.
+                   *
+                   * Este texto dizia "divida em mais fases de topo" — e quem o
+                   * recebe escreve UMA fase, cujo número, título e cobertura
+                   * vêm do esqueleto e são montados em código. Criar fase não
+                   * é uma jogada que ele tenha. No `assitencia` a fase 18
+                   * voltou cinco vezes fechando tudo o que era possível
+                   * fechar, e o run parou num impasse sobre a única correção
+                   * que ninguém ali podia fazer.
+                   *
+                   * A instrução certa já existia na linha de baixo, para os
+                   * critérios, escrita depois de a mesma lição ser aprendida.
+                   * Ficou ali sozinha.
+                   */
+                  `consolide as tasks desta fase até ela caber em ${MAX_TASKS_PER_PHASE}: duas tasks que entregam a mesma` +
+                  ` capacidade viram uma. Nada verificável pode desaparecer — se depois de consolidar ainda não couber, diga` +
+                  ` isso em vez de apagar trabalho. Reescreva apenas esta fase: criar fases novas é decisão do esqueleto, não` +
+                  ` desta reescrita. E nenhuma task pode ficar com mais de ${MAX_CRITERIA_PER_TASK} critérios: a consolidação` +
+                  ` que empurra critério para cima do teto volta para cá pelo outro lado`
+                : `consolide critérios redundantes desta fase até ela caber em ${MAX_CRITERIA_PER_PHASE}: dois critérios que` +
+                  ` verificam a mesma condição com palavras diferentes viram um só. Nenhuma condição verificável pode desaparecer —` +
+                  ` se depois de consolidar ainda não couber, diga isso em vez de apagar critério. Reescreva apenas esta fase:` +
+                  ` criar fases novas é decisão do plano, não desta reescrita`,
+          })),
+          remarks: [],
+          reason: "há fase acima do que cabe numa sessão",
+          mechanical: true,
+        };
+      }
+    }
+
+    if (!parsed.ok && !isRepairable(parsed.errors)) {
       /*
-       * Cada lote do ensaio vê a FASE de onde os critérios vieram.
+       * Decisão pendente não é achado do escritor.
        *
-       * O ensaio era chamado com contexto vazio e julgava cada critério sozinho,
-       * sem a fase em volta. Um critério que diz "as 23 tabelas enumeradas nesta
-       * fase" era, para ele, referência a algo que não existe — e no
-       * `assistencia2` voltou UNOBSERVABLE, sobreviveu à reescrita (o escritor não
-       * tinha o que consertar: as 23 estão no `Covers` da fase) e foi parar numa
-       * arbitragem na frente do desenvolvedor.
+       * `I-13` diz que sobrou um `[NEEDS DECISION]`, e a correção que ele pede
+       * é "resolva a decisão na entrevista" — coisa que quem reescreve a fase
+       * não pode fazer: quem decide é o desenvolvedor, na rodada de lacunas.
+       * Mandá-lo assim mesmo é o §49 de novo, e no `assitencia` foram quatorze
+       * marcadores consumindo as três devoluções inteiras.
        *
-       * É a mesma assimetria do §77, noutro par: quem julga precisa ver o que
-       * quem vai julgar DE VERDADE vai ver. O verificador do build recebe a fase
-       * inteira e lê o esqueleto no repositório; o ensaio agora recebe as duas
-       * coisas. Os lotes nunca misturam fases (`agruparCriterios`), então cada um
-       * leva só a sua.
+       * O marcador continua bloqueando: a prontidão tem um gate só para ele, e
+       * ele diz ao DESENVOLVEDOR o que ficou em aberto, que é quem pode fechar.
        */
-      const contextoDaFase = (numero: number): { name: string; content: string }[] => {
-        const fase = parsed.document.phases.find((entrada) => entrada.number === numero);
-        return [
-          ...upstream,
-          ...(fase ? [{ name: "a fase de onde estes critérios vêm", content: fase.markdown }] : []),
-          ...(skeletonAtual ? [{ name: "fatia do esqueleto desta fase", content: sliceForPhase(skeletonAtual, numero) }] : []),
-          ...(arquiteturaAtual ? [{ name: "fatia da arquitetura desta fase", content: architectureSliceForPhase(arquiteturaAtual, numero) }] : []),
-        ];
-      };
-      const assessment = await judgeAll(criteria, writer, contextoDaFase, round);
-
-      const blocked = [
-        ...assessment.blocking.map(
-          ({ criterion, ruling, reason }) =>
-            `${criterion.address} · ${criterion.taskTitle} — ${ruling}: ${reason || criterion.text}`,
-        ),
-        /*
-         * Silêncio não aprova — mas também não acusa o critério. Quando um lote
-         * volta sem julgamento, o defeito está no ensaio, não no plano, e a
-         * mensagem precisa dizer isso para ninguém sair reescrevendo texto bom.
-         */
-        ...assessment.unrehearsed.map(
-          (criterion) =>
-            `${criterion.address} · ${criterion.taskTitle} — NÃO ENSAIADO: o ensaio não conseguiu julgar este critério` +
-            ` (falha do ensaio, não do plano; rode de novo para ensaiar só o que faltou)`,
-        ),
-      ];
-
-      if (blocked.length === 0) {
-        announce(`  ensaio do verificador: ${criteria.length} critério(s), todos observáveis`);
-        await event("verify", "project-phases.md", "complete", `${criteria.length} critério(s) observáveis`, round);
-        rehearsal = { blocked: [] };
-        return { content: authored.content };
+      const doEscritor = substanceDefects(parsed.errors).filter((error) => error.code !== "I-13");
+      const pendentes = parsed.errors.filter((error) => error.code === "I-13").length;
+      if (pendentes > 0) {
+        announce(`  ${pendentes} decisão(ões) seguem marcadas como pendentes; elas param a prontidão, não o escritor`);
       }
 
-      // Sem finding não há o que reescrever: critério não julgado é falha do
-      // ensaio, não do plano, e mandar o escritor mexer no que ninguém acusou só
-      // troca um documento bom por outro.
-      if (round > maxRehearsalRounds || assessment.blocking.length === 0) {
+      if (doEscritor.length > 0) {
         /*
-         * Antes de bloquear, PERGUNTA.
+         * Cada defeito de contrato vai à FASE em que está.
          *
-         * Aqui o run terminava em NOT READY com o plano publicado e uma lista de
-         * endereços na tela. É o mesmo desacordo de leitura do levantamento de
-         * auditoria, com outro par — o escritor diz que o critério é observável, o
-         * verificador diz que não — e a mesma pessoa capaz de encerrá-lo estava
-         * sentada no terminal, sem ser consultada.
+         * Com `where: linha N` e sem fase, `affectedPhases` mandava a emenda para
+         * todas — e reescrever todas derruba as aprovações já pagas (HANDOFF). O
+         * harness sabe a resposta: a última fase cujo heading precede a linha.
          */
-        const arbitragem = await levantamentoDoEnsaio(assessment.blocking, writer, round);
-        if (arbitragem.paraOEscritor.length > 0) {
-          limite += 1;
-          announce(`  ${arbitragem.paraOEscritor.length} critério(s) voltam ao escritor com a sua decisão como autoridade`);
-          await event("verify", "project-phases.md", "retry", "critérios arbitrados pelo desenvolvedor", round);
-          authored = await authored.rewrite(arbitragem.paraOEscritor, maxAuditReturns + round + 2);
-          continue;
-        }
-
-        const restantes = blocked.filter((linha) => !arbitragem.encerrados.some((endereco) => linha.startsWith(endereco)));
-        if (restantes.length === 0) {
-          announce(`  ensaio do verificador: ${arbitragem.encerrados.length} critério(s) mantidos por sua decisão`);
-          await event("verify", "project-phases.md", "complete", "critérios mantidos por decisão do desenvolvedor", round);
-          rehearsal = { blocked: [] };
-          return { content: authored.content };
-        }
-
-        announce(`  ensaio do verificador reprovou ${restantes.length} critério(s); o plano segue publicado e o gate bloqueia`);
-        await event("verify", "project-phases.md", "blocked", restantes.join(" | "), round);
-        rehearsal = { blocked: restantes };
-        return { content: authored.content };
+        const total = skeletonAtual?.phases.length ?? 0;
+        return {
+          status: "REJECTED",
+          findings: doEscritor.map((error) => {
+            const fase = faseDaLinha(content, error.line, total);
+            return {
+              where: fase === undefined ? `linha ${error.line}` : `Phase ${fase} · linha ${error.line}`,
+              mechanical: true,
+              problem: `${error.code}: ${error.message}`,
+              fix: error.hint,
+              ...(fase === undefined ? {} : { phase: fase }),
+            };
+          }),
+          remarks: [],
+          reason: "o plano não passa no contrato",
+          mechanical: true,
+        };
       }
+    }
+    return null;
+  }
 
-      announce(`  ensaio do verificador reprovou ${assessment.blocking.length} critério(s); reescrevendo o plano`);
-      await event("verify", "project-phases.md", "retry", blocked.join(" | "), round);
-
-      authored = await authored.rewrite(
-        assessment.blocking.map(({ criterion, ruling, reason }) => ({
-          where: `Phase ${criterion.phase}`,
-          problem:
-            ruling === "UNSATISFIABLE"
-              ? `o critério ${criterion.address}, na task "${criterion.taskTitle}", afirma a presença do que as decisões confirmadas negam: ${reason}. Nenhuma implementação correta consegue prová-lo, e o verificador vai reprovar a fase por ela estar certa`
-              : `o critério ${criterion.address}, na task "${criterion.taskTitle}", não nomeia nada que alguém possa observar no código: ${reason}. Dois verificadores honestos leriam o mesmo código e discordariam`,
-          fix:
-            ruling === "UNSATISFIABLE"
-              ? `reescreva esse critério para afirmar o que é verdade segundo as decisões — inclusive a ausência, quando for o caso. Mexa só nele; o resto da fase está aprovado. O critério atual é: "${criterion.text}"`
-              : `troque esse critério por uma condição observável: um arquivo, um comando e sua saída, uma rota e sua resposta, um campo presente. Mexa só nele; o resto da fase está aprovado. O critério atual é: "${criterion.text}"`,
-        })),
-        maxAuditReturns + round + 1,
+  /**
+   * A auditoria do plano inteiro, numa chamada (etapa 2 da redução).
+   *
+   * Era uma chamada por fase, mais a coerência, mais a triagem de materialidade
+   * — N+2 chamadas por rodada, três rodadas, impasse, arbitragem. Agora o auditor
+   * lê o plano inteiro uma vez contra as fontes, e o Core decide o que bloqueia
+   * (`admitir`): só a contradição com as duas passagens citadas e existentes, a
+   * interface citada dos dois lados e o pacote fora de
+   * `infrastructure.dependencies`. O resto é observação do relatório.
+   *
+   * Sem segunda chance de formato: o que a leitura tolerante não entende é
+   * auditoria que não aconteceu, e o plano não é publicado por ela.
+   */
+  async function auditarPlanoInteiro(content: string, writer: WriterContext, attempt: number): Promise<{ bloqueios: Finding[]; observacoes: Remark[] }> {
+    const lido = parsePhases(stripAllMarkers(content).content);
+    const fases = lido.ok ? lido.document.phases : [];
+    const upstream = [
+      ...(skeletonAtual ? [{ name: "skeleton.md", content: renderSkeleton(skeletonForPlanning(skeletonAtual)) }] : []),
+      ...(arquiteturaMd !== "" ? [{ name: "architecture.md", content: arquiteturaMd }] : []),
+      ...(arquiteturaAtual && skeletonAtual && tempoDosFluxos(arquiteturaAtual, skeletonAtual).length > 0
+        ? [{ name: DOCUMENTO_DO_TEMPO, content: tempoDosFluxos(arquiteturaAtual, skeletonAtual).join("\n") }]
+        : []),
+    ];
+    const prompt = planAuditPrompt({ language: options.language, request: options.request.text, decisions: writer.decisions, upstream, content, totalPhases: fases.length });
+    if (memoria.jaAprovada(prompt)) {
+      announce("  plano aprovado numa execução anterior, com a mesma auditoria; não vou repagar");
+      for (const fase of fases) relatarFase({ kind: "audit", number: fase.number, state: "aprovada" });
+      return { bloqueios: [], observacoes: [] };
+    }
+    for (const fase of fases) relatarFase({ kind: "audit", number: fase.number, state: "corrente" });
+    await event("audit", "project-phases.md", "started", "", attempt);
+    const saida = await track({ role: "auditor", stage: "audit", subject: "project-phases.md", attempt, prompt });
+    const resposta = parseAudit(saida);
+    if (!resposta.ok) {
+      await event("audit", "project-phases.md", "blocked", `auditoria ilegível: ${resposta.defects.join("; ")}`, attempt);
+      throw new InitBlockedError(
+        diagnostico("project-phases.md", [
+          `a auditoria do plano veio ilegível: ${resposta.defects.join("; ")}`,
+          "",
+          "O que veio, do começo:",
+          `  ${saida.trim().slice(0, 300).replace(/\n/g, "\n  ") || "(nada)"}`,
+        ], "Uma resposta ilegível não aprova o plano. Nada do que já foi escrito se perdeu; `capivara plan` retoma daqui e audita de novo."),
+        runId,
       );
     }
-
-    return { content: authored.content };
-  }
-
-  /**
-   * O levantamento do ensaio: as duas leituras de um critério, na sua frente.
-   *
-   * Devolve o que volta ao escritor — já com a decisão embutida como autoridade —
-   * e os endereços que o desenvolvedor encerrou a favor do texto atual. Um
-   * critério por pergunta, uma vez por run: `arbitrados` é o mesmo conjunto do
-   * levantamento de auditoria, e o endereço é a marca.
-   */
-  async function levantamentoDoEnsaio(
-    blocking: RehearsalResult["blocking"],
-    writer: WriterContext,
-    round: number,
-  ): Promise<{ paraOEscritor: Finding[]; encerrados: string[] }> {
-    const novos = blocking.filter(({ criterion }) => !arbitrados.has(`ensaio::${criterion.address}`));
-    if (novos.length === 0) return { paraOEscritor: [], encerrados: [] };
-
-    announce(`  ${novos.length} critério(s) seguem reprovados pelo ensaio depois da reescrita: quem decide é você`);
-    const paraOEscritor: Finding[] = [];
-    const encerrados: string[] = [];
-
-    for (const [indice, { criterion, ruling, reason }] of novos.entries()) {
-      arbitrados.add(`ensaio::${criterion.address}`);
-      const pergunta = perguntaDoEnsaio(criterion, ruling, reason || criterion.text, arbitrados.size);
-      const raw = await options.ask(pergunta, indice + 1, novos.length);
-      const resposta = await settle("project-phases.md", pergunta, raw, round, indice + 1, novos.length);
-      const escolha = lerEscolhaDoEnsaio(resposta.decision, raw);
-
-      const gravada: Answer =
-        resposta.disposition === "ACCEPTED"
-          ? { ...resposta, decision: decisaoDoEnsaio(criterion, escolha) }
-          : resposta;
-      allQuestions.push(pergunta);
-      allAnswers.push(gravada);
-      await persistAnswers("project-phases.md", [pergunta], [gravada]);
-
-      if (escolha.tipo === "criterio") {
-        announce(`    ${criterion.address}: mantido como está, por sua decisão`);
-        encerrados.push(criterion.address);
-        continue;
-      }
-
-      paraOEscritor.push({
-        where: `Phase ${criterion.phase}`,
-        problem:
-          `o critério ${criterion.address}, na task "${criterion.taskTitle}", não sobreviveu ao ensaio do ` +
-          `verificador (${ruling}): ${reason || criterion.text}`,
-        fix:
-          escolha.tipo === "outra"
-            ? `o desenvolvedor decidiu o que o critério deve afirmar, e isto é autoridade: ${escolha.texto}. ` +
-              `Reescreva SÓ esse critério; o resto da fase está aprovado. O atual é: "${criterion.text}"`
-            : ruling === "UNSATISFIABLE"
-              ? `o desenvolvedor confirmou a leitura do verificador: reescreva esse critério para afirmar o que é ` +
-                `verdade segundo as decisões — inclusive a ausência, quando for o caso. Mexa só nele; o resto da ` +
-                `fase está aprovado. O critério atual é: "${criterion.text}"`
-              : `o desenvolvedor confirmou a leitura do verificador: troque esse critério por uma condição ` +
-                `observável — um arquivo, um comando e sua saída, uma rota e sua resposta, um campo presente. Mexa só ` +
-                `nele; o resto da fase está aprovado. O critério atual é: "${criterion.text}"`,
-      });
-    }
-
-    writer.decisions = allAnswers.filter((answer) => answer.disposition === "ACCEPTED").map((answer) => answer.decision);
-    return { paraOEscritor, encerrados };
-  }
-
-  /**
-   * O ensaio vai em lotes pequenos.
-   *
-   * Primeiro tentei um lote por fase, e o piloto 3 mostrou que ainda era grande:
-   * a fase 1 tinha 51 critérios e voltou inteira sem julgamento, duas vezes, num
-   * run em que as outras seis passaram. Pedir cinquenta linhas exatas é pedir
-   * para o modelo derivar no meio — e derivar, aqui, conta como bloqueio.
-   *
-   * O corte é por TAMANHO, respeitando a fronteira da fase quando ela cabe. Uma
-   * fase grande vira dois ou três lotes; nenhuma resposta precisa carregar mais
-   * do que cabe com folga.
-   */
-  async function judgeAll(
-    criteria: CriterionRef[],
-    writer: WriterContext,
-    /** O contexto de cada lote, pela fase dele: um lote nunca mistura fases. */
-    contextoDaFase: (fase: number) => { name: string; content: string }[],
-    round: number,
-  ): Promise<{ blocking: RehearsalResult["blocking"]; unrehearsed: CriterionRef[] }> {
-    const lotes = agruparCriterios(criteria);
-    announce(`  ensaiando ${criteria.length} critério(s) em ${lotes.length} lote(s), até ${maxParallelParts} por vez`);
-
-    const resultados: { blocking: RehearsalResult["blocking"]; unrehearsed: CriterionRef[] }[] = [];
-    const fila = [...lotes];
-    const trabalhadores = Array.from({ length: Math.min(maxParallelParts, fila.length) }, async () => {
-      for (;;) {
-        const proximo = fila.shift();
-        if (!proximo) return;
-        resultados.push(await judge(proximo, writer, contextoDaFase(proximo[0]?.phase ?? 0), round));
-      }
-    });
-    await Promise.all(trabalhadores);
-
-    return {
-      blocking: resultados.flatMap((resultado) => resultado.blocking),
-      unrehearsed: resultados.flatMap((resultado) => resultado.unrehearsed),
-    };
-  }
-
-  /** Lotes de no máximo `maxCriteriosPorLote`, sem misturar fases. */
-  function agruparCriterios(criteria: CriterionRef[]): CriterionRef[][] {
-    const porFase = new Map<number, CriterionRef[]>();
-    for (const criterion of criteria) {
-      const lote = porFase.get(criterion.phase) ?? [];
-      lote.push(criterion);
-      porFase.set(criterion.phase, lote);
-    }
-
-    const lotes: CriterionRef[][] = [];
-    for (const [, daFase] of [...porFase.entries()].sort(([esquerda], [direita]) => esquerda - direita)) {
-      for (let inicio = 0; inicio < daFase.length; inicio += maxCriteriosPorLote) {
-        lotes.push(daFase.slice(inicio, inicio + maxCriteriosPorLote));
-      }
-    }
-    return lotes;
-  }
-
-  /**
-   * Uma passada do ensaio, com uma segunda chance para o que ficou sem linha.
-   *
-   * Omissão é erro de formatação, não veredito: vale relembrar os endereços
-   * antes de tratar silêncio como reprovação.
-   */
-  async function judge(
-    criteria: CriterionRef[],
-    writer: WriterContext,
-    upstream: { name: string; content: string }[],
-    round: number,
-  ) {
-    const prompt = rehearsalPrompt({
-      language: options.language,
-      request: options.request.text,
-      decisions: writer.decisions,
-      upstream,
-      criteria,
-    });
-
-    /*
-     * Lote já ensaiado com tudo observável, sob este mesmo prompt — mesma fase,
-     * mesma fatia, mesmas decisões —, não é pago de novo: é a mesma regra das
-     * aprovações de auditoria, no papel que faltava.
-     */
-    if (memoria.jaAprovada(prompt)) {
-      announce(`  ensaio de ${criteria.length} critério(s) reaproveitado de uma execução anterior`);
-      return { blocking: [], unrehearsed: [] };
-    }
-    const verdicts = parseRehearsal(
-      await track({ role: "verifier", stage: "verify", subject: "project-phases.md", attempt: round, prompt }),
-    );
-    let assessment = assessRehearsal(criteria, verdicts);
-    if (assessment.unrehearsed.length === 0) {
-      if (assessment.blocking.length === 0) memoria.guardarAprovacao(prompt);
-      return assessment;
-    }
-
-    const corrective = [
-      prompt,
-      "",
-      "## The previous answer left criteria unjudged",
-      "Emit one line for EACH address below, in this order, and nothing else.",
-      ...assessment.unrehearsed.map((criterion) => `${criterion.address} ${criterion.text}`),
-    ].join("\n");
-
-    const completed = parseRehearsal(
-      await track({ role: "verifier", stage: "verify", subject: "project-phases.md", attempt: round, prompt: corrective }),
-    );
-    assessment = assessRehearsal(criteria, [...verdicts, ...completed]);
-    if (assessment.unrehearsed.length === 0 && assessment.blocking.length === 0) memoria.guardarAprovacao(prompt);
-    return assessment;
-  }
-
-  async function auditLoop(
-    document: string,
-    initial: Authored,
-    writer: WriterContext,
-    upstream: { name: string; content: string }[],
-  ): Promise<{ content: string; remarks: Remark[]; authored: Authored }> {
-    let authored = initial;
-    const history: AuditAttempt[] = [];
-    // Uma vez que o desenvolvedor decidiu, ele decidiu. Voltar a perguntar a cada
-    // nova devolução do auditor transforma a autoridade dele em sugestão, e foi
-    // o que o piloto 1 fez: o mesmo documento pediu decisão três vezes.
-    let developerRuled = false;
-
-    /*
-     * O laço precisa caber os DOIS orçamentos.
-     *
-     * Quando o defeito mecânico ganhou contagem própria, o teto do laço continuou
-     * sendo o do auditor: três devoluções mecânicas mais uma do auditor já
-     * estouravam a volta e o run morria com "o ciclo não convergiu" — sem impasse,
-     * sem pergunta, sem documento. Foi assim que a medição de 95 minutos terminou.
-     */
-    /**
-     * Quantas RODADAS de arbitragem, e não quantos pontos.
-     *
-     * Era um teto de 60 pontos, e o teste adversário mostrou o que isso significa
-     * na prática: sessenta perguntas ao desenvolvedor num run em que o auditor
-     * inventa um ponto novo a cada leitura. Cada rodada de arbitragem custa uma
-     * auditoria inteira depois dela, então o que precisa ser limitado é o número de
-     * voltas — o mesmo orçamento que já governa as devoluções.
-     *
-     * Dentro de uma rodada, todos os pontos insistidos são arbitrados: eles são
-     * distintos, e calar um deles seria jogar informação fora.
-     */
-    let rodadasDeArbitragem = 0;
-    const cycleBudget = maxAuditReturns + maxMechanicalRounds + 1;
-    let attemptLimit = cycleBudget;
-    /** Rodadas gastas com decisão do auditor — não são devolução de escrita. */
-    let rodadasDeDecisao = 0;
-    /*
-     * Modo de reparo (§121): quando o escritor demonstrou que não fecha os
-     * pontos — texto idêntico, teto sem progresso, estrutura fora dos limites
-     * —, toda emenda passa ao auditor, com o histórico compacto, e toda
-     * leitura passa ao verifier, em sessão própria: quem reparou não julga.
-     * Dois reparos; depois disso o caminho é o de sempre, arbitragem e impasse.
-     */
-    let modoReparo = false;
-    let reparos = 0;
-    const maxReparos = 2;
-    const papelDaEmenda = (): "writer" | "auditor" => (modoReparo ? "auditor" : "writer");
-    /*
-     * O que o desenvolvedor decidiu no impasse, ponto a ponto (§122).
-     *
-     * A decisão dele vale para os pontos que ele leu e decidiu; não para o
-     * que o auditor apontar depois. Com uma única bandeira, a primeira
-     * decisão transformava QUALQUER reprovação seguinte em publicação com
-     * ressalvas — o `minimax` publicou contradições de contrato assim.
-     */
-    const decididosNoImpasse: Finding[] = [];
-    /** Não-respostas no impasse: a primeira recomeça a correção; a segunda para com diagnóstico. */
-    let naoRespostas = 0;
-    /*
-     * Os lugares do envelope de fase já apontados neste ciclo (§126), por
-     * endereço — `P2·goal` —, e não pelo texto: a mesma reclamação sobre o
-     * mesmo goal volta com outras palavras a cada leitura. Não zera com a
-     * história, porque nenhuma emenda, reparo ou arbitragem muda o envelope;
-     * só a arquitetura muda.
-     */
-    const envelopesApontados = new Set<string>();
-    const totalDeFases = (): number => skeletonAtual?.phases.length ?? 0;
-    /*
-     * A chave leva o envelope que está na mesa: depois de uma reorganização o
-     * goal é outro, e um achado sobre ele é primeira aparição de novo — a
-     * emenda tem a chance dela. Renumerar fases também muda a assinatura.
-     */
-    const assinaturaDoEnvelope = (numero: number): string => sha12(JSON.stringify(skeletonAtual?.phases.find((fase) => fase.number === numero) ?? null));
-    const naOrigem = (findings: readonly Finding[], herdados: readonly Finding[]): Finding[] => [
-      ...findings.filter((finding) => !herdados.includes(finding)),
-      ...herdados.map((finding) => achadoNaOrigem(finding, totalDeFases())),
+    const veredicto = await semPedidoDeTeste("project-phases.md", resposta.verdict, attempt);
+    const lugares: Lugar[] = [
+      ...fases.map((fase) => ({ nome: `Phase ${fase.number}`, texto: fase.markdown })),
+      ...upstream.map((documento) => ({ nome: documento.name, texto: documento.content })),
+      { nome: "pedido", texto: options.request.text },
+      { nome: "decisões", texto: writer.decisions.join("\n") },
     ];
-    const anunciarHeranca = (herdados: readonly Finding[]): void => {
-      const lugares = [...new Set(herdados.flatMap((finding) => chavesDoEnvelope(finding, totalDeFases())))].join(", ");
-      announce(`  ${herdados.length} achado(s) apontam o envelope de fase (${lugares}), que é escrito por architecture.md: nenhuma emenda de fase o alcança, e a correção vai à arquitetura — não a você`);
-      registrarEstrategia(document, `envelope de fase (${lugares}) devolvido à arquitetura, que o escreve`);
-    };
-    for (let attempt = 1; attempt <= attemptLimit; attempt += 1) {
-      const content = authored.content;
-      if (modoReparo) announce(`  validação independente de ${document} reparado, pelo verifier`);
-      const verdict = await auditOnce(document, content, writer, upstream, attempt, modoReparo ? "verifier" : "auditor");
+    const dependencias = arquiteturaAtual?.infrastructure.dependencies.map((dependencia) => dependencia.name) ?? [];
+    const bloqueios: Finding[] = [];
+    const observacoes: Remark[] = [...veredicto.remarks];
+    for (const finding of veredicto.findings) {
+      const admissao = admitir(finding, lugares, dependencias);
+      if (admissao.bloqueia) bloqueios.push(finding);
+      else observacoes.push({ where: finding.where, observation: `${finding.problem} — não bloqueia: ${admissao.motivo}` });
+    }
+    // O auditor não cria decisão de produto: o que ele levantar como decisão vai ao relatório.
+    for (const decisao of veredicto.decisions ?? []) observacoes.push({ where: decisao.where, observation: `ponto que o auditor levantou como decisão: ${decisao.decision}` });
+    const devolvidas = new Set(bloqueios.length > 0 ? affectedPhases(bloqueios, fases.length) : []);
+    for (const fase of fases) relatarFase(devolvidas.has(fase.number) ? { kind: "audit", number: fase.number, state: "devolvida", findings: bloqueios.length } : { kind: "audit", number: fase.number, state: "aprovada" });
+    if (bloqueios.length === 0) memoria.guardarAprovacao(prompt);
+    await event("audit", "project-phases.md", "complete", bloqueios.length === 0 ? "aprovado" : `${bloqueios.length} bloqueio(s)`, attempt);
+    announce(`  auditoria do plano: ${bloqueios.length} bloqueio(s); ${observacoes.length} observação(ões) para o relatório`);
+    return { bloqueios, observacoes };
+  }
 
-      /*
-       * A decisão que o auditor levantou vem ANTES de o veredito entrar na
-       * história.
-       *
-       * Ela não é devolução de escrita: o escritor não errou, faltava uma decisão.
-       * Contá-la contra o teto de devoluções seria cobrar dele o silêncio do
-       * pedido — e foi assim que pontos indecidíveis consumiram as três
-       * devoluções inteiras, três runs seguidos.
-       *
-       * A rodada é paga com um aumento do orçamento, e o número delas é limitado
-       * pelo mesmo teto do auditor: um auditor que descobre uma decisão nova a
-       * cada passada não pode adiar o run para sempre.
-       */
-      const doAuditor = await perguntarDecisoesDoAuditor(document, verdict, attempt, writer);
-      if (doAuditor.length > 0 && rodadasDeDecisao < maxAuditReturns) {
-        rodadasDeDecisao += 1;
-        attemptLimit += 1;
-        await event("audit", document, "retry", `${doAuditor.length} decisão(ões) do desenvolvedor aplicadas`, attempt);
-        announce(`  ${doAuditor.length} decisão(ões) fechada(s); reescrevendo com elas como autoridade`);
-        authored = await authored.rewrite([...doAuditor, ...verdict.findings], attempt + 1);
-        continue;
-      }
-
-      history.push({ attempt, verdict, contentSha: sha12(content) });
-
-      // O envelope que VOLTA ao mesmo lugar é herança; na primeira vez, é defeito como qualquer outro (§70).
-      const doEnvelope = document === "project-phases.md" ? verdict.findings.filter(alvoNoEnvelope) : [];
-      const reincidentes = doEnvelope.filter((finding) => chavesDoEnvelope(finding, totalDeFases(), assinaturaDoEnvelope).some((chave) => envelopesApontados.has(chave)));
-      for (const finding of doEnvelope) for (const chave of chavesDoEnvelope(finding, totalDeFases(), assinaturaDoEnvelope)) envelopesApontados.add(chave);
-
-      /*
-       * Emenda que não mudou o texto não vai ser emendada de novo.
-       *
-       * Duas auditorias seguidas sobre os MESMOS bytes, as duas reprovando, dizem
-       * que o escritor não sabe o que fazer com o achado — ou que a emenda foi
-       * recusada por destruir a fase. Pagar a terceira devolução é reencenar a
-       * mesma conversa; a estratégia muda: os pontos vão ao desenvolvedor agora,
-       * com o orçamento de arbitragem de sempre.
-       */
-      const anterior = history.at(-2);
-      const semAvanco =
-        anterior !== undefined &&
-        anterior.contentSha === sha12(content) &&
-        anterior.verdict.status === "REJECTED" &&
-        verdict.status === "REJECTED" &&
-        verdict.mechanical !== true;
-      if (semAvanco) announce("  a emenda não mudou o texto e o auditor reprovou de novo; insistir não resolve — trocando de estratégia");
-
-      const action = nextAuditAction({
-        document,
-        history,
-        maxReturns: semAvanco || (modoReparo && reparos >= maxReparos) ? 0 : maxAuditReturns,
-        maxMechanical: modoReparo && reparos >= maxReparos ? 0 : maxMechanicalRounds,
-      });
-      if (action.action === "publish") return { content, remarks: verdict.remarks, authored };
-
-      /*
-       * O envelope no fim da escada vai à arquitetura, não à escada (§126).
-       *
-       * Reparo pelo auditor, arbitragem e impasse emendam ou decidem a FASE —
-       * e o envelope não é dela. No Parallel Lab com Luna o Goal das fases 2 a
-       * 5 passou pelos dois reparos, por três arbitragens e pelo impasse, e a
-       * segunda reorganização, a única que alcançava o texto, nunca foi usada.
-       * Cada passagem por aqui gasta uma reorganização ou para o run com o
-       * diagnóstico da origem: o laço é finito.
-       */
-      if (action.action === "ask-developer" && document === "project-phases.md") {
-        const herdados = action.standoff.auditorInsists.filter(alvoNoEnvelope);
-        if (herdados.length > 0) {
-          anunciarHeranca(herdados);
-          history.length = 0;
-          attemptLimit = attempt + cycleBudget;
-          authored = await authored.rewrite(naOrigem(action.standoff.auditorInsists, herdados), attempt + 1, { papel: papelDaEmenda() });
-          continue;
-        }
-      }
-
-      if (action.action === "ask-developer" && developerRuled) {
-        /*
-         * Só o que o desenvolvedor DECIDIU vira ressalva (§122).
-         *
-         * O auditor que insiste contra a decisão dele perde: o ponto decidido
-         * fica visível no relatório, sem travar o run. O que o auditor apontou
-         * DEPOIS, sobre outra coisa, não foi decidido por ninguém — e um achado
-         * técnico não é promovido a ressalva por ter aparecido no momento
-         * errado: ele segue na recuperação como qualquer outro.
-         */
-        const decididos = verdict.findings.filter((finding) => decididosNoImpasse.some((decidido) => mesmoPonto(finding, decidido) === "sim"));
-        const restantes = verdict.findings.filter((finding) => !decididos.includes(finding));
-        if (restantes.length === 0) {
-          announce(`  publicando ${document} sob a decisão do desenvolvedor; ${decididos.length} finding(s) decidido(s) por ele viram ressalva`);
-          await event("audit", document, "complete", "publicado sob decisão do desenvolvedor", attempt);
-          return {
-            content,
-            authored,
-            remarks: [
-              ...verdict.remarks,
-              ...decididos.map((finding) => ({
-                where: finding.where,
-                observation: `${finding.problem} (mantido por decisão do desenvolvedor)`,
-              })),
-            ],
-          };
-        }
-        announce(`  ${restantes.length} achado(s) não foram decididos por você (${decididos.length} foram); eles seguem na correção, não viram ressalva`);
-      }
-
-      if (action.action === "ask-developer" && reparos < maxReparos) {
-        reparos += 1;
-        modoReparo = true;
-        const motivo = semAvanco
-          ? "a emenda não mudou o texto"
-          : action.standoff.mechanical
-            ? "o escritor não adequou a estrutura aos limites"
-            : `o escritor não fechou os pontos em ${action.standoff.returns} devolução(ões)`;
-        announce(`  ${motivo}; o auditor assume o reparo (${reparos}/${maxReparos}) e o verifier valida, em sessão própria`);
-        if (reparos === 1) anunciarIndependencia("verifier", "auditor");
-        registrarEstrategia(document, `reparo ${reparos} pelo auditor: ${motivo}; validação independente pelo verifier`);
-        await event("authoring", document, "retry", `reparo pelo auditor (${reparos}/${maxReparos}): ${motivo}`, attempt);
-        const historico = writerDid(history);
-        history.length = 0;
-        attemptLimit = attempt + cycleBudget;
-        authored = await authored.rewrite(action.standoff.auditorInsists, attempt + 1, { papel: "auditor", historico });
-        if (temDecisaoPendente(authored.content)) {
-          announce("  o reparo deixou decisão pendente; levando ao desenvolvedor antes de validar");
-          authored = await closeGaps(document, authored, writer);
-        }
-        continue;
-      }
-
-      if (action.action === "ask-developer") {
-        /*
-         * Antes da prosa, a pergunta com opções.
-         *
-         * O impasse era a PRIMEIRA parada quando os achados não repetiam, e é
-         * justamente a pergunta que a gente combinou de não fazer mais: texto
-         * livre, três comandos, no pior momento possível. No `assistencia2` ele
-         * apareceu com dois achados concretos e específicos — "o campo não tem as
-         * quatro linhas e a rolagem exigidas no pedido" — que cabiam numa escolha
-         * numerada e viraram um prompt em branco.
-         *
-         * Agora cada ponto insistido é arbitrado como qualquer desacordo de
-         * leitura: a leitura do auditor, o que o escritor escreveu, ou o que o
-         * desenvolvedor determinar. A decisão é gravada, vira autoridade e chega
-         * ao auditor da rodada seguinte. A prosa continua existindo para o que não
-         * se arbitra — defeito mecânico, ou ponto já arbitrado antes.
-         */
-        if (verdict.mechanical !== true && rodadasDeArbitragem < maxAuditReturns) {
-          /*
-           * O que decide se houve arbitragem é o CONJUNTO ter crescido.
-           *
-           * `levantamentoDeAuditoria` devolve os achados intactos quando não há
-           * nada novo a arbitrar — e, medido pelo tamanho da lista devolvida,
-           * "nada a arbitrar" parecia "tudo arbitrado": o laço reescrevia,
-           * reauditava e voltava aqui, para sempre. Os testes pegaram na primeira
-           * execução, com timeout.
-           */
-          const antes = arbitrados.size;
-          const decididos = await levantamentoDeAuditoria(
-            document,
-            content,
-            action.standoff.auditorInsists,
-            history,
-            attempt,
-            writer,
-            false,
-            true,
-          );
-          if (arbitrados.size > antes) {
-            rodadasDeArbitragem += 1;
-            attemptLimit = attempt + cycleBudget;
-            history.length = 0;
-            await event("audit", document, "retry", `${action.standoff.auditorInsists.length} ponto(s) arbitrados por você`, attempt);
-            if (decididos.length === 0) {
-              announce("  você deu razão ao escritor em todos os pontos; o documento segue como está e o auditor reconfere");
-            } else {
-              announce(`  ${decididos.length} ponto(s) voltam ao escritor com a sua decisão como autoridade`);
-            }
-            authored = decididos.length > 0 ? await authored.rewrite(decididos, attempt + 1, { papel: papelDaEmenda() }) : authored;
-            continue;
-          }
-        }
-
-        const rendered = renderStandoff(action.standoff);
-        await event("audit", document, "blocked", "teto de devoluções esgotado", attempt);
-        if (!options.decideStandoff) throw new InitBlockedError(diagnostico(document, [rendered], "O último estado válido está em disco; `capivara plan` retoma daqui, num terminal, para a sua decisão."), runId);
-
-        const decision = (await options.decideStandoff(rendered, action.standoff)).trim();
-        const normalized = decision.toLowerCase();
-
-        if (normalized.startsWith("publicar")) {
-          // Publicar é decisão dele; o que ficou aberto não some: vai ao relatório como ressalva (§122).
-          announce(`  publicando ${document} por decisão explícita sua, com ${verdict.findings.length} achado(s) em aberto no relatório`);
-          await event("audit", document, "complete", `publicado por decisão do desenvolvedor com ${verdict.findings.length} achado(s) em aberto`, attempt);
-          return {
-            content,
-            authored,
-            remarks: [
-              ...verdict.remarks,
-              ...verdict.findings.map((finding) => ({ where: finding.where, observation: `${finding.problem} (publicado por decisão explícita do desenvolvedor, com o achado em aberto)` })),
-            ],
-          };
-        }
-        if (normalized.startsWith("abortar")) {
-          throw new InitBlockedError(`${rendered}\n\nDecisão do desenvolvedor: abortar`, runId);
-        }
-
-        if (normalized === "reiniciar") {
-          // Controle de execução, não decisão de produto. O cron5 gravou esta
-          // palavra como ACCEPTED e liberou a rejeição seguinte como ressalva.
-          // Só o orçamento do ciclo recomeça: as tentativas nos logs seguem
-          // crescentes, e uma nova rejeição ainda precisa passar pela auditoria.
-          developerRuled = false;
-          history.length = 0;
-          attemptLimit = attempt + cycleBudget;
-          await event("audit", document, "retry", "reinício da auditoria solicitado pelo desenvolvedor", attempt);
-          announce(`  reiniciando correção e auditoria de ${document}; aprovação continua obrigatória`);
-          authored = await authored.rewrite(action.standoff.auditorInsists, attempt + 1, { papel: papelDaEmenda() });
-          continue;
-        }
-
-        if (action.standoff.mechanical) {
-          throw new InitBlockedError(`${rendered}\n\nUma decisão escrita não dispensa os limites mecânicos. Use reiniciar, publicar ou abortar.`, runId);
-        }
-
-        /*
-         * Não-resposta não é decisão.
-         *
-         * O que vem daqui é gravado como autoridade ACIMA do auditor, então
-         * "não sei", "tanto faz" e "use as recomendações" não podem entrar por
-         * esse caminho: num impasse não há recomendação — há o que o auditor
-         * exige e o que o escritor escreveu, que não convergiram.
-         *
-         * O piloto 5 mostrou o estrago: "use as recomendações" virou "decisão do
-         * desenvolvedor" e silenciou um finding que dizia, com razão, que a fase
-         * tinha inventado escopo que ninguém pediu. O run publica do mesmo jeito
-         * — parar aqui custaria o run inteiro por uma pergunta sem dono — mas a
-         * ressalva sai dizendo que NINGUÉM decidiu, que é a verdade.
-         */
-        /*
-         * E não-resposta também não é aprovação (§122).
-         *
-         * Publicar "com ressalva em aberto" era aprovar por exaustão: o achado
-         * material ia ao relatório e o plano a RALPH READY. Agora a primeira
-         * não-resposta recomeça a correção — Recovery First: o orçamento do
-         * ciclo volta e o escritor tenta de novo com os achados consolidados —
-         * e a segunda para o run com o diagnóstico e o estado em disco, que é
-         * o fim da escada, não um atalho para o READY.
-         */
-        if (isNonAnswer(decision)) {
-          naoRespostas += 1;
-          if (naoRespostas === 1) {
-            announce(`  ninguém decidiu o impasse; isso não aprova ${verdict.findings.length} achado(s) material(is) — recomeçando a correção e a auditoria`);
-            registrarEstrategia(document, "impasse sem decisão do desenvolvedor: correção e auditoria recomeçadas com os achados consolidados");
-            await event("audit", document, "retry", "impasse sem decisão; correção recomeçada", attempt);
-            history.length = 0;
-            attemptLimit = attempt + cycleBudget;
-            modoReparo = false;
-            authored = await authored.rewrite(action.standoff.auditorInsists, attempt + 1);
-            continue;
-          }
-          await event("audit", document, "blocked", "impasse sem decisão pela segunda vez", attempt);
+  /**
+   * Da conferência mecânica à publicação: uma auditoria e, se ela bloquear,
+   * uma emenda e mais uma auditoria — no máximo. O que continuar bloqueando
+   * depois disso para o `plan`, com as citações à vista.
+   */
+  async function auditarPlano(initial: Authored, writer: WriterContext): Promise<{ content: string; remarks: Remark[] }> {
+    let authored = initial;
+    const observacoes = new Map<string, Remark>();
+    let auditorias = 0;
+    let mecanicas = 0;
+    for (let attempt = 1; ; attempt += 1) {
+      const mecanico = autoconferencia(authored.content);
+      if (mecanico !== null) {
+        if (mecanicas >= maxMechanicalRounds) {
+          await event("audit", "project-phases.md", "blocked", "a conferência mecânica não fechou", attempt);
           throw new InitBlockedError(
-            diagnostico(document, [rendered, "", `Ninguém decidiu o impasse duas vezes, e ${verdict.findings.length} achado(s) material(is) seguem abertos: o documento não é publicado assim.`],
-              "O último estado válido está em disco; `capivara plan` retoma daqui — decida os pontos acima, ou responda reiniciar, publicar ou abortar."),
+            diagnostico("project-phases.md", [
+              `a conferência mecânica do plano não fechou em ${maxMechanicalRounds} emenda(s): ${mecanico.reason}`,
+              ...mecanico.findings.flatMap((finding) => [`  · ${finding.where}: ${finding.problem}`, `    correção pedida: ${finding.fix}`]),
+            ], "O esqueleto, a arquitetura e as fases estão em disco; `capivara plan` retoma daqui."),
             runId,
           );
         }
-
-        // A resposta do desenvolvedor É a decisão: ela volta ao escritor como
-        // autoridade, acima do auditor. Perguntar "o que vale?" e descartar a
-        // resposta é pior do que não ter perguntado.
-        developerRuled = true;
-        decididosNoImpasse.push(...action.standoff.auditorInsists);
-        await recordDeveloperDecision(document, action.standoff.auditorInsists, decision);
-        await event("audit", document, "retry", `decisão do desenvolvedor: ${decision}`, attempt);
-        announce(`  decisão aplicada; reescrevendo ${document}`);
-        /*
-         * A decisão muda a autoridade; o documento reescrito sobre ela continua
-         * sujeito à validação de sempre (§122): o ciclo recomeça com orçamento
-         * próprio, e o escritor volta a ser quem emenda. Os reparos já gastos
-         * não voltam — o que recomeça é a correção, não a escada inteira.
-         */
-        history.length = 0;
-        attemptLimit = attempt + cycleBudget;
-        modoReparo = false;
-        authored = await authored.rewrite(
-          [
-            {
-              where: document,
-              problem: `o auditor e o escritor não convergiram em ${action.standoff.returns} devoluções`,
-              fix: `o desenvolvedor decidiu e esta decisão é a autoridade, acima do auditor: ${decision}`,
-            },
-            ...action.standoff.auditorInsists,
-          ],
-          attempt + 1,
-        );
+        mecanicas += 1;
+        announce(`  conferência mecânica: ${mecanico.findings.length} defeito(s) — ${mecanico.reason}; emendando`);
+        await event("audit", "project-phases.md", "retry", mecanico.reason, attempt);
+        authored = await authored.rewrite(mecanico.findings, attempt + 1);
+        if (temDecisaoPendente(authored.content)) authored = await closeGaps("project-phases.md", authored, writer);
         continue;
       }
 
-      await event("audit", document, "retry", action.findings.map((finding) => finding.problem).join("; "), attempt);
-      announce(`  auditor devolveu ${document} (${action.findings.length} finding)`);
+      auditorias += 1;
+      const { bloqueios, observacoes: destaLeitura } = await auditarPlanoInteiro(authored.content, writer, attempt);
+      for (const observacao of destaLeitura) observacoes.set(`${observacao.where}\n${observacao.observation}`, observacao);
+      if (bloqueios.length === 0) return { content: authored.content, remarks: [...observacoes.values()] };
 
-      /*
-       * Decisão em aberto volta a QUEM DECIDE, antes de o escritor tentar de novo.
-       *
-       * O auditor devolve dizendo "a matriz de permissões permanece pendente,
-       * obter a decisão aceita" — e o escritor não tem como obter decisão
-       * nenhuma. Sem este caminho, as três devoluções são gastas numa coisa
-       * impossível e o run aborta com o trabalho todo pronto e uma pergunta de
-       * dez segundos sem resposta.
-       *
-       * O que reabre é só o que a entrevista deixou em aberto de verdade — o que
-       * ficou PARTIAL, AMBIGUOUS ou adiado —, e uma vez por decisão no run.
-       */
-      const decisoes = await insistirNasDecisoes(document, attempt, "o auditor esbarrou nelas", writer);
-      /*
-       * Achado que volta pela segunda vez não é defeito de escrita: é desacordo
-       * de leitura, e quem decide não está na mesa. O levantamento de auditoria
-       * põe as duas versões na frente do desenvolvedor antes de gastar mais uma
-       * reescrita nelas.
-       */
-      /*
-       * A história SEM esta tentativa.
-       *
-       * `history.push` acontece antes de `nextAuditAction`, então a história já
-       * contém o veredito que está sendo tratado — e `ehRepetido`, que procura o
-       * achado nela, encontrava o achado nele mesmo. Resultado: TODO achado parecia
-       * repetido na primeira aparição, e o levantamento arbitrava tudo, sempre. O
-       * §70 diz o contrário com todas as letras: "um achado que aparece uma vez é
-       * defeito — o escritor conserta e segue; um achado que sobrevive a uma
-       * reescrita é desacordo". O escritor nunca ganhou a primeira chance.
-       *
-       * No `assistencia2` isso apareceu como sete arbitragens numa auditoria de
-       * nove achados: o desenvolvedor decidindo o que o escritor teria fechado.
-       */
-      const anteriores = history.slice(0, -1);
-      const arbitradosDaVolta = await levantamentoDeAuditoria(document, content, action.findings.filter((finding) => !reincidentes.includes(finding)), anteriores, attempt, writer, verdict.mechanical === true);
-      if (reincidentes.length > 0) anunciarHeranca(reincidentes);
-      // Com herança, a reescrita é a reorganização da arquitetura, e os achados de fase esperam a divisão nova: não há reparo a contar.
-      if (modoReparo && reincidentes.length === 0) {
-        reparos += 1;
-        announce(`  o verifier devolveu ${document}; o auditor repara de novo (${reparos}/${maxReparos})`);
-        registrarEstrategia(document, `reparo ${reparos} pelo auditor sobre os achados do verifier`);
-      }
-      authored = await authored.rewrite(
-        [...decisoes, ...arbitradosDaVolta, ...reincidentes.map((finding) => achadoNaOrigem(finding, totalDeFases()))],
-        action.attempt,
-        modoReparo ? { papel: "auditor", historico: writerDid(history) } : {},
-      );
-      if (reincidentes.length > 0) {
-        // A divisão é nova: o ciclo recomeça sobre ela, como no ramo do impasse.
-        history.length = 0;
-        attemptLimit = attempt + cycleBudget;
-      }
-
-      /*
-       * Decisão que aparece NA REESCRITA também vai ao desenvolvedor.
-       *
-       * A rodada de lacunas rodava uma vez, antes da auditoria. Só que a emenda
-       * tem a mesma saída legal do escritor — marcar `[NEEDS DECISION]` em vez de
-       * inventar (§56) — e o que ela marca nascia depois da única rodada que
-       * existia. Ninguém era perguntado, e o auditor devolvia a fase dizendo,
-       * com razão, "obter a decisão aceita".
-       *
-       * No `assitencia` isso se leu assim: tentativa 1 com 2 achados, fechou 2 e
-       * apareceram 2; fechou 2 e apareceram 4. O escritor fechava tudo e a
-       * pilha crescia, porque cada volta criava perguntas que não tinham a quem
-       * ser feitas.
-       */
-      if (temDecisaoPendente(authored.content)) {
-        announce(`  a reescrita deixou decisão pendente; levando ao desenvolvedor antes de auditar de novo`);
-        authored = await closeGaps(document, authored, writer);
-      }
-    }
-
-    throw new InitBlockedError(
-      diagnostico(document, [`o ciclo de auditoria de ${document} não convergiu: o teto de rodadas acabou com defeito material aberto.`],
-        "O último estado válido está em disco; `capivara plan` retoma daqui."),
-      runId,
-    );
-  }
-
-  async function auditOnce(
-    document: string,
-    content: string,
-    writer: WriterContext,
-    upstream: { name: string; content: string }[],
-    attempt: number,
-    papel: "auditor" | "verifier" = "auditor",
-  ): Promise<AuditVerdict> {
-    // Self-check mecânico antes do auditor: erro de forma não custa modelo.
-    if (document === "project-phases.md") {
-      const parsed = parsePhases(content);
-
-      /*
-       * Referência de design morta tem o mesmo destino da cobertura: conferida
-       * só no gate, custa o run; conferida aqui, custa uma devolução.
-       */
-      if (parsed.ok) {
-        const mortas = checkDesignRefs(parsed.document, artifactPaths(options.projectRoot).design, (caminho) =>
-          existsSync(caminho),
+      if (auditorias >= 2) {
+        await event("audit", "project-phases.md", "blocked", `${bloqueios.length} bloqueio(s) depois da emenda`, attempt);
+        throw new InitBlockedError(
+          diagnostico("project-phases.md", [
+            `A auditoria do plano bloqueou de novo depois da emenda: ${bloqueios.length} defeito(s), conferido(s) pelo Core nos documentos.`,
+            "",
+            ...bloqueios.flatMap((finding) => [`  · [${finding.classe ?? "?"}] ${finding.where}: ${finding.problem}`, `    correção pedida: ${finding.fix}`]),
+          ], "O esqueleto, a arquitetura e as fases estão em disco; `capivara plan` retoma daqui. Corrija a fonte do conflito — a decisão ou a fase — ou troque o modelo do escritor e rode de novo."),
+          runId,
         );
-        if (mortas.length > 0) {
-          return {
-            status: "REJECTED",
-            findings: mortas.map((erro) => ({ where: "Design ref", problem: erro.message, fix: erro.hint })),
-            remarks: [],
-            reason: "há referência de design que não existe em disco",
-            mechanical: true,
-          };
-        }
       }
-
       /*
-       * Cobertura é mecânica e era conferida SÓ no gate final. O piloto 3 gastou
-       * três horas para terminar em NOT READY porque nenhuma task citava
-       * `workflow <n>` — o modelo traduziu o rótulo junto com a prosa. Conferida
-       * aqui, a mesma falha vira uma devolução dentro do ciclo que já existe.
+       * O envelope da fase — goal, covers, dependsOn — é escrito pela
+       * arquitetura, e nenhuma emenda de fase o alcança (§126). Com uma emenda
+       * só, o achado sobre ele vai à origem já na primeira vez.
        */
-      if (parsed.ok) {
-        const semCobertura = checkCoverage(parsed.document, coberturaAtual());
-        if (semCobertura.length > 0) {
-          return {
-            status: "REJECTED",
-            findings: achadosDeCobertura(parsed.document),
-            remarks: [],
-            reason: "há item do esqueleto que nenhuma task rastreia",
-            mechanical: true,
-          };
-        }
-      }
-
-      /*
-       * Prescrição de teste é contável (I-16) e era descoberta pelo auditor —
-       * que, no `teste_openrouter3`, a transformou numa pergunta ao
-       * desenvolvedor sobre se a regra valia. Conferida aqui, vira uma emenda
-       * mecânica na task certa, sem gastar auditor nem pedir licença para
-       * cumprir a regra. O que o pedido e a entrevista autorizam não conta.
-       */
-      if (parsed.ok) {
-        const prescritos = checkTestPrescription(parsed.document, autoridadeDeTeste());
-        if (prescritos.length > 0) {
-          const total = skeletonAtual?.phases.length ?? 0;
-          return {
-            status: "REJECTED",
-            findings: prescritos.map((erro) => achadoMecanico(parsed.document, content, erro, total)),
-            remarks: [],
-            reason: "há task que prescreve teste, e como provar o produto é decisão do build",
-            mechanical: true,
-          };
-        }
-      }
-
-      /*
-       * Propriedade de escrita (I-18, §124): fases sem dependência entre si
-       * com obrigação de escrita no mesmo arquivo. É a metade irmã, no nível
-       * das fases, da serialização por componente que a arquitetura faz
-       * (§119). No `haiku` o auditor de coerência apontou três rodadas
-       * seguidas que as fases 3 a 6 mandavam acrescentar em `modulos.ts` e
-       * `navegacao.ts` as entradas que a fundação já entregava, e a triagem
-       * descartou três vezes porque "existe uma implementação que evita o
-       * conflito". Contável, conferido aqui: vira emenda mecânica na fase que
-       * escreve, com o dono do arquivo nomeado, sem auditor, sem triagem e sem
-       * pergunta ao desenvolvedor — e sem inventar dependência, que é da
-       * arquitetura.
-       */
-      if (parsed.ok) {
-        const conflitos = checkWriteOwnership(parsed.document, { components: arquiteturaAtual?.components ?? [] });
-        if (conflitos.length > 0) {
-          const total = skeletonAtual?.phases.length ?? 0;
-          return {
-            status: "REJECTED",
-            findings: conflitos.map((erro) => achadoMecanico(parsed.document, content, erro, total)),
-            remarks: [],
-            reason: "há fases sem ordem entre si com obrigação de escrita no mesmo arquivo, e o build as executa ao mesmo tempo",
-            mechanical: true,
-          };
-        }
-      }
-
-      /*
-       * Task inchada é o defeito de origem: o piloto 3 saiu com 4,3 critérios por
-       * task contra 2,1 a 2,5 dos três planos que construíram. Cortado aqui, o
-       * teto por fase vira consequência — 15 tasks de até 4 critérios fecham em 60.
-       */
-      if (parsed.ok) {
-        const inchadas = parsed.document.phases.flatMap((phase) =>
-          phase.tasks
-            .filter((task) => task.acceptanceCriteria.length > MAX_CRITERIA_PER_TASK)
-            .map((task) => ({ phase: phase.number, task, tasksNaFase: phase.tasks.length })),
-        );
-        if (inchadas.length > 0) {
-          return {
-            status: "REJECTED",
-            findings: inchadas.map(({ phase, task, tasksNaFase }) => ({
-              where: `Phase ${phase} · ${task.title}`,
-              mechanical: true,
-              problem: `a task declara ${task.acceptanceCriteria.length} critérios de aceite`,
-              /*
-               * Os dois tetos, sempre juntos.
-               *
-               * Este texto mandava só dividir, e o do tamanho da fase mandava só
-               * consolidar. No `assitencia` isso virou um pêndulo com nome e
-               * horário: 00:01 "a task declara 5 critérios" → divide → 00:26 "a
-               * fase declara 16 tasks" → consolida → 00:23 "a task declara 5
-               * critérios". Cada correção obedecia a um teto e quebrava o outro,
-               * porque cada uma só sabia do seu.
-               */
-              fix:
-                `uma task com mais de ${MAX_CRITERIA_PER_TASK} critérios está fazendo mais de uma coisa: divida-a em tasks` +
-                ` que façam uma coisa cada, com dois ou três critérios. Nenhuma condição verificável pode desaparecer no corte.` +
-                ` E a fase inteira não pode passar de ${MAX_TASKS_PER_PHASE} tasks — ela tem ${tasksNaFase} agora: se a divisão` +
-                ` estourar esse teto, consolide outras tasks desta fase NA MESMA REESCRITA, até a fase caber nos dois limites` +
-                ` ao mesmo tempo. Uma correção que respeita um teto e quebra o outro volta para cá`,
-            })),
-            remarks: [],
-            reason: "há task fazendo mais de uma coisa",
-            mechanical: true,
-          };
-        }
-      }
-
-      // Dimensionamento é contável, então é contado aqui e não descoberto pelo
-      // auditor três devoluções depois: uma fase é uma sessão de agente.
-      if (parsed.ok) {
-        const criterios = (phase: (typeof parsed.document.phases)[number]): number =>
-          phase.tasks.reduce((total, task) => total + task.acceptanceCriteria.length, 0);
-
-        const grandes = parsed.document.phases.filter(
-          (phase) => phase.tasks.length > MAX_TASKS_PER_PHASE || criterios(phase) > MAX_CRITERIA_PER_PHASE,
-        );
-        if (grandes.length > 0) {
-          return {
-            status: "REJECTED",
-            findings: grandes.map((phase) => ({
-              where: `Phase ${phase.number}`,
-              mechanical: true,
-              problem:
-                phase.tasks.length > MAX_TASKS_PER_PHASE
-                  ? `a fase declara ${phase.tasks.length} tasks e uma fase é uma sessão de agente`
-                  : `a fase declara ${criterios(phase)} critérios de aceite em ${phase.tasks.length} tasks, e uma fase é uma sessão de agente`,
-              fix:
-                phase.tasks.length > MAX_TASKS_PER_PHASE
-                  ? /*
-                     * Consolidar, nunca dividir.
-                     *
-                     * Este texto dizia "divida em mais fases de topo" — e quem o
-                     * recebe escreve UMA fase, cujo número, título e cobertura
-                     * vêm do esqueleto e são montados em código. Criar fase não
-                     * é uma jogada que ele tenha. No `assitencia` a fase 18
-                     * voltou cinco vezes fechando tudo o que era possível
-                     * fechar, e o run parou num impasse sobre a única correção
-                     * que ninguém ali podia fazer.
-                     *
-                     * A instrução certa já existia na linha de baixo, para os
-                     * critérios, escrita depois de a mesma lição ser aprendida.
-                     * Ficou ali sozinha.
-                     */
-                    `consolide as tasks desta fase até ela caber em ${MAX_TASKS_PER_PHASE}: duas tasks que entregam a mesma` +
-                    ` capacidade viram uma. Nada verificável pode desaparecer — se depois de consolidar ainda não couber, diga` +
-                    ` isso em vez de apagar trabalho. Reescreva apenas esta fase: criar fases novas é decisão do esqueleto, não` +
-                    ` desta reescrita. E nenhuma task pode ficar com mais de ${MAX_CRITERIA_PER_TASK} critérios: a consolidação` +
-                    ` que empurra critério para cima do teto volta para cá pelo outro lado`
-                  : `consolide critérios redundantes desta fase até ela caber em ${MAX_CRITERIA_PER_PHASE}: dois critérios que` +
-                    ` verificam a mesma condição com palavras diferentes viram um só. Nenhuma condição verificável pode desaparecer —` +
-                    ` se depois de consolidar ainda não couber, diga isso em vez de apagar critério. Reescreva apenas esta fase:` +
-                    ` criar fases novas é decisão do plano, não desta reescrita`,
-            })),
-            remarks: [],
-            reason: "há fase acima do que cabe numa sessão",
-            mechanical: true,
-          };
-        }
-      }
-
-      if (!parsed.ok && !isRepairable(parsed.errors)) {
-        /*
-         * Decisão pendente não é achado do escritor.
-         *
-         * `I-13` diz que sobrou um `[NEEDS DECISION]`, e a correção que ele pede
-         * é "resolva a decisão na entrevista" — coisa que quem reescreve a fase
-         * não pode fazer: quem decide é o desenvolvedor, na rodada de lacunas.
-         * Mandá-lo assim mesmo é o §49 de novo, e no `assitencia` foram quatorze
-         * marcadores consumindo as três devoluções inteiras.
-         *
-         * O marcador continua bloqueando: a prontidão tem um gate só para ele, e
-         * ele diz ao DESENVOLVEDOR o que ficou em aberto, que é quem pode fechar.
-         */
-        const doEscritor = substanceDefects(parsed.errors).filter((error) => error.code !== "I-13");
-        const pendentes = parsed.errors.filter((error) => error.code === "I-13").length;
-        if (pendentes > 0) {
-          announce(`  ${pendentes} decisão(ões) seguem marcadas como pendentes; elas param a prontidão, não o escritor`);
-        }
-
-        if (doEscritor.length > 0) {
-          /*
-           * Cada defeito de contrato vai à FASE em que está.
-           *
-           * Com `where: linha N` e sem fase, `affectedPhases` mandava a emenda para
-           * todas — e reescrever todas derruba as aprovações já pagas (HANDOFF). O
-           * harness sabe a resposta: a última fase cujo heading precede a linha.
-           */
-          const total = skeletonAtual?.phases.length ?? 0;
-          return {
-            status: "REJECTED",
-            findings: doEscritor.map((error) => {
-              const fase = faseDaLinha(content, error.line, total);
-              return {
-                where: fase === undefined ? `linha ${error.line}` : `Phase ${fase} · linha ${error.line}`,
-                mechanical: true,
-                problem: `${error.code}: ${error.message}`,
-                fix: error.hint,
-                ...(fase === undefined ? {} : { phase: fase }),
-              };
-            }),
-            remarks: [],
-            reason: "o plano não passa no contrato",
-            mechanical: true,
-          };
-        }
-      }
+      const total = skeletonAtual?.phases.length ?? 0;
+      const destino = bloqueios.map((finding) => (alvoNoEnvelope(finding) ? achadoNaOrigem(finding, total) : finding));
+      const doEnvelope = destino.filter((finding, indice) => finding !== bloqueios[indice]).length;
+      if (doEnvelope > 0) announce(`  ${doEnvelope} bloqueio(s) apontam o envelope de fase, que é escrito por architecture.md: a correção vai à arquitetura`);
+      announce(`  emendando o plano com ${bloqueios.length} bloqueio(s); depois, a última auditoria`);
+      await event("audit", "project-phases.md", "retry", bloqueios.map((finding) => finding.problem).join("; "), attempt);
+      authored = await authored.rewrite(destino, attempt + 1);
+      if (temDecisaoPendente(authored.content)) authored = await closeGaps("project-phases.md", authored, writer);
     }
-
-    /*
-     * O plano é auditado em duas perguntas, não numa só.
-     *
-     * Medido no piloto 3: auditoria e reescritas foram 41 dos 65 minutos, e a
-     * primeira leitura do plano de 68 KB levou seis minutos sozinha. A pergunta
-     * local — esta fase está fiel, seus critérios são observáveis — só precisa da
-     * fase, então vira N chamadas paralelas e uma devolução custa uma fase
-     * relida. A pergunta global continua vendo tudo, porque contradição entre
-     * fases é o defeito que ninguém mais pega.
-     */
-    if (document === "project-phases.md") {
-      if (parsePhases(content).ok) return await auditPlanInParts(content, writer, upstream, attempt, papel);
-
-      /*
-       * Marcador pendente não decide como o plano é auditado.
-       *
-       * `I-13` faz o parser recusar o documento, e a recusa desligava a auditoria
-       * por fase em silêncio: uma chamada sobre o documento inteiro em vez de
-       * treze paralelas, sem aprovação por fase e sem memória por task. No
-       * `assistencia2` foram onze marcadores e quatro tentativas apontando fases
-       * sempre diferentes — 1, 3, 4, 9, 10, depois 5, 12, 10, depois 4, 5, 8, 9.
-       *
-       * Então a estrutura é lida sem os marcadores. Eles continuam no documento e
-       * continuam bloqueando a prontidão, que é o gate que fala com o
-       * desenvolvedor; o que eles deixam de fazer é rebaixar a auditoria e gastar
-       * devolução pedindo ao escritor uma decisão que não é dele (§49).
-       */
-      const semMarcas = stripAllMarkers(content);
-      if (semMarcas.applied.length > 0 && parsePhases(semMarcas.content).ok) {
-        announce(`  ${semMarcas.applied[0]}`);
-        return await auditPlanInParts(semMarcas.content, writer, upstream, attempt, papel);
-      }
-    }
-
-    return await auditCall(document, attempt, () =>
-      auditorPrompt({
-        language: options.language,
-        document,
-        executable: document === "project-phases.md",
-        request: options.request.text,
-        decisions: writer.decisions,
-        dispositions: allAnswers.map((answer) => `${answer.questionId} ${answer.disposition}`),
-        upstream,
-        // Ressalva que atravessa a cadeia sem ser resolvida vira defeito que o
-        // loop paga: no piloto 2, "a ausência de dependências não é
-        // explicitada" custou três ciclos e parou o run três fases depois.
-        upstreamRemarks: remarks.filter((entry) => !ehRessalvaDoPedidoDeTeste(entry.remark)).map((entry) => ({
-          document: entry.document,
-          where: entry.remark.where,
-          observation: entry.remark.observation,
-        })),
-        content,
-      }),
-      papel,
-    );
   }
 
   return await concluir();
@@ -4703,7 +3475,6 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       // Perguntar ao disco, não responder "sim" por padrão: o gate existe para
       // conferir, e um verificador que sempre aprova não está conferindo nada.
       designExists: (caminho) => existsSync(caminho),
-      rehearsal,
     });
 
     const tasks = parsedPhases.ok ? parsedPhases.document.phases.reduce((total, phase) => total + phase.tasks.length, 0) : 0;

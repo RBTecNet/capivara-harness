@@ -461,7 +461,6 @@ describe("o laço do esqueleto: corrigir sem interromper", () => {
       ask: async () => "1",
       announce: () => undefined,
       sleep: async () => undefined,
-      decideStandoff: async () => "publicar",
     });
     expect(outcome.readiness.ready).toBe(true);
     const arquiteto = agent.calls.find((call) => call.stage === "authoring" && call.subject === "architecture");

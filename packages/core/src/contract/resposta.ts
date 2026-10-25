@@ -14,8 +14,11 @@
  * JSON que antes era recusado não aceita um conteúdo que antes era recusado.
  */
 
+import { semRaciocinio } from "./protocolo.js";
+
 export function jsonDaResposta(source: string): unknown {
-  const texto = source.trim();
+  // O raciocínio antes da resposta pode trazer chaves e cercas que não são o objeto.
+  const texto = semRaciocinio(source).trim();
 
   const tentativas: string[] = [texto];
 

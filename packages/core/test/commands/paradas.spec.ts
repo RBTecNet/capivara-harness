@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { opcoesDoImpasse, paradaDeProntidao, paradaDoEstagio } from "../../src/commands/paradas.js";
+import { paradaDeProntidao, paradaDoEstagio } from "../../src/commands/paradas.js";
 
 describe("parada dos estágios documentais", () => {
   it("teto de geração orienta orçamento sem culpar a credencial", () => {
@@ -57,22 +57,6 @@ describe("parada dos estágios documentais", () => {
   it("guarda o run como evidência quando há um", () => {
     expect(paradaDoEstagio(new Error("x"), "init", "init-9").evidencia).toEqual([".capivara/runs/init-9"]);
     expect(paradaDoEstagio(new Error("x"), "init").evidencia).toBeUndefined();
-  });
-});
-
-describe("controles do impasse", () => {
-  it("contagem oferece controle de execução, sem pedir decisão de produto", () => {
-    const choices = opcoesDoImpasse(true);
-    expect(choices.map(choice => choice.resposta)).toEqual(["reiniciar", "publicar", "abortar"]);
-    expect(choices[0]?.choice.label).toContain("corrigir");
-    expect(choices[1]?.choice.hint).toContain("limites");
-    expect(choices.some(choice => choice.resposta === null)).toBe(false);
-  });
-
-  it("desacordo semântico continua aceitando uma decisão escrita", () => {
-    const choices = opcoesDoImpasse(false);
-    expect(choices[0]?.resposta).toBeNull();
-    expect(choices[0]?.choice.label).toContain("decisão");
   });
 });
 

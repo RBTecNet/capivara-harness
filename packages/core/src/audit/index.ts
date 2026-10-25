@@ -4,5 +4,5 @@ export { DEFAULT_MAX_RETURNS, balancoDaRodada, descreverBalanco, ehRepetido, fin
 export type { AuditAction, AuditAttempt, AuditCycleState, Balanco, Identidade, Standoff } from "./cycle.js";
 export { NOTA_DE_ENGENHARIA, autoridadeDaDecisao, autoridadeDoAchado, comNotaDeEngenharia, decisaoDeEngenhariaComoFinding, sinaisDeEngenharia } from "./authority.js";
 export type { Autoridade } from "./authority.js";
-export { TasksJulgadas, chaveDaTask, shaDaAutoridade, textoDaTask } from "./tasks.js";
+export { shaDaAutoridade, textoDaTask } from "./tasks.js";
 export { CORRECAO_SEM_TESTE, NADA_DE_TESTE_NO_LUGAR, falaDeTeste, semPedidoNaCorrecao, tirarPedidoDeTeste } from "./sem-teste.js";

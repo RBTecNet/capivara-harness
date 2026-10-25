@@ -29,7 +29,7 @@ import { ID_DO_BANCO } from "../../src/interview/index.js";
 import { dependenciasEfetivas } from "../../src/loop/escalonador.js";
 import type { AgentCall } from "../../src/init/index.js";
 import type { Question } from "../../src/interview/index.js";
-import { ARCHITECTURE, PHASE_1, PHASE_2, SKELETON, approve, fakeAgent, skeletonPath } from "../support/fake-agent.js";
+import { ARCHITECTURE, PHASE_1, PHASE_2, SKELETON, approve, fakeAgent, reject, skeletonPath } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
 
 /** O achado real do auditor, como veio no impasse. */
@@ -161,29 +161,26 @@ describe("no orquestrador, com o provider falso", () => {
     await runInit({ projectRoot, request, language: "português do Brasil", stage: "init", call: agentInit.call, ask: responde, announce: () => undefined });
     const dito: string[] = [];
     const perguntadas: Question[] = [];
-    let impasses = 0;
     const agent = fakeAgent(steps);
     const run = runPlan({
       projectRoot, request, language: "português do Brasil", call: agent.call,
       ask: async (question) => { perguntadas.push(question); return "1"; },
       announce: (linha) => void dito.push(linha), sleep: async () => undefined,
-      decideStandoff: async () => { impasses += 1; return "publicar"; },
       ...extras,
     });
-    return { run, agent, perguntadas, anunciado: () => dito.join("\n"), impasses: () => impasses };
+    return { run, agent, perguntadas, anunciado: () => dito.join("\n") };
   }
 
   it("5, 8, 11. o achado real é resolvido pelo arquiteto por serialização, sem pergunta, sem chamada a mais, até RALPH READY", async () => {
     let desenhos = 0;
     let auditorias = 0;
-    const { run, agent, perguntadas, anunciado, impasses } = await plan(roteiro(
+    const { run, agent, perguntadas, anunciado } = await plan(roteiro(
       () => ((desenhos += 1) === 1 ? ARQ_PONTO_DE_EXTENSAO : ARQ_COMPARTILHADO_DECLARADO),
       () => ((auditorias += 1) === 1 ? ACHADO_REAL : approve()),
     ));
     const outcome = await run;
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
 
-    expect(impasses()).toBe(0);
     expect(perguntadas.filter((pergunta) => pergunta.topic.startsWith("auditoria ·") || pergunta.topic.startsWith("impasse"))).toEqual([]);
     // Uma devolução, uma correção: nada repetido.
     expect(por(agent, { role: "writer", stage: "authoring", subject: "architecture" })).toHaveLength(2);
@@ -204,35 +201,35 @@ describe("no orquestrador, com o provider falso", () => {
     let coerencias = 0;
     let auditorias = 0;
     // Dois achados DIFERENTES: o mesmo achado repetido é o levantamento do plano, outro assunto.
-    const devolucaoDoPlano = (ponto: string) => ["CAPIVARA_AUDIT_STATUS: REJECTED", `CAPIVARA_FINDING: Architecture | ${ponto} | mova a integração para depois dos módulos`, "CAPIVARA_REASON: divisão"].join("\n");
+    // Classe e duas passagens existentes: a devolução que o Core deixa passar (etapa 2).
+    const devolucaoDoPlano = (ponto: string) => reject("Architecture", ponto, "mova a integração para depois dos módulos");
     // Cada desenho é diferente do anterior: a emenda que não muda o texto é outro caso, abaixo.
     // (Um desenho já aprovado voltaria do cache sem auditoria: o terceiro é inédito de propósito.)
     const desenhos = [ARQ_PONTO_DE_EXTENSAO, ARQ_INTEGRACAO, ARQ_INTEGRACAO.replace("só ela toca o compartilhado", "integração ao final"), ARQ_COMPARTILHADO_DECLARADO];
     let desenho = 0;
     const passos: ScriptStep[] = [
-      { match: { role: "auditor", stage: "audit", subject: "project-phases.md#coerência" }, respond: { stdout: () => { coerencias += 1; return coerencias === 1 ? devolucaoDoPlano("a fase 4 lista relatório sem que o núcleo exponha a rota") : coerencias === 2 ? devolucaoDoPlano("a fase 3 registra a página antes de o shell existir") : approve(); } }, repeat: true },
-      // A terceira arquitetura (segunda reorganização) é devolvida uma vez pelo seu auditor, e depois aprovada.
-      ...roteiro(() => desenhos[Math.min(desenho++, desenhos.length - 1)]!, () => ((auditorias += 1) === 3 ? ACHADO_REAL : approve())),
+      // O plano pede UMA reorganização — é a emenda que o orçamento tem (etapa 2).
+      { match: { role: "auditor", stage: "audit", subject: "project-phases.md" }, respond: { stdout: () => ((coerencias += 1) === 1 ? devolucaoDoPlano("a fase 4 lista relatório sem que o núcleo exponha a rota") : approve()) }, repeat: true },
+      // A segunda arquitetura (a reorganização) é devolvida uma vez pelo seu auditor, e depois aprovada: o orçamento dela está intacto.
+      ...roteiro(() => desenhos[Math.min(desenho++, desenhos.length - 1)]!, () => ((auditorias += 1) === 2 ? ACHADO_REAL : approve())),
     ];
-    const { run, impasses, perguntadas, anunciado } = await plan(passos);
+    const { run, perguntadas, anunciado } = await plan(passos);
     const outcome = await run;
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(impasses()).toBe(0);
     expect(perguntadas.filter((pergunta) => pergunta.topic.startsWith("auditoria ·"))).toEqual([]);
-    expect(auditorias, anunciado()).toBe(4);
+    expect(auditorias, anunciado()).toBe(3);
   });
 
   it("7b. o arquiteto que devolve a mesma arquitetura recebe a mudança de estratégia antes de qualquer arbitragem", async () => {
     let coerencias = 0;
-    const devolucao = ["CAPIVARA_AUDIT_STATUS: REJECTED", "CAPIVARA_FINDING: Architecture | as fases 3 e 4 editam server/index.ts sem ordem entre si | ordene-as ou integre depois", "CAPIVARA_REASON: edição concorrente"].join("\n");
+    const devolucao = reject("Architecture", "as fases 3 e 4 editam server/index.ts sem ordem entre si", "ordene-as ou integre depois");
     const passos: ScriptStep[] = [
-      { match: { role: "auditor", stage: "audit", subject: "project-phases.md#coerência" }, respond: { stdout: () => ((coerencias += 1) === 1 ? devolucao : approve()) }, repeat: true },
+      { match: { role: "auditor", stage: "audit", subject: "project-phases.md" }, respond: { stdout: () => ((coerencias += 1) === 1 ? devolucao : approve()) }, repeat: true },
       ...roteiro((call) => (call.prompt.includes("## Change of strategy") ? ARQ_COMPARTILHADO_DECLARADO : ARQ_PONTO_DE_EXTENSAO), () => approve()),
     ];
-    const { run, agent, impasses, perguntadas, anunciado } = await plan(passos);
+    const { run, agent, perguntadas, anunciado } = await plan(passos);
     const outcome = await run;
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(impasses()).toBe(0);
     expect(perguntadas.filter((pergunta) => pergunta.topic.startsWith("auditoria ·"))).toEqual([]);
     expect(anunciado()).toContain("o arquiteto devolveu a mesma arquitetura; trocando a estratégia");
     expect(por(agent, { role: "writer", stage: "authoring", subject: "architecture" })).toHaveLength(3);
@@ -242,19 +239,17 @@ describe("no orquestrador, com o provider falso", () => {
   it("6. uma decisão genuína de produto levantada na auditoria da arquitetura chega ao desenvolvedor", async () => {
     let auditorias = 0;
     const decisao = `${approve()}\nCAPIVARA_DECISION: components · modulo-reservas | A reserva nova nasce pendente ou confirmada? | Pendente, até o pagamento | Confirmada no ato`;
-    const { run, perguntadas, impasses } = await plan(roteiro(() => ARQ_PONTO_DE_EXTENSAO, () => ((auditorias += 1) === 1 ? decisao : approve())));
+    const { run, perguntadas } = await plan(roteiro(() => ARQ_PONTO_DE_EXTENSAO, () => ((auditorias += 1) === 1 ? decisao : approve())));
     const outcome = await run;
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
     const daAuditoria = perguntadas.filter((pergunta) => pergunta.topic.startsWith("auditoria ·"));
     expect(daAuditoria).toHaveLength(1);
     expect(daAuditoria[0]?.decision).toContain("pendente ou confirmada");
-    expect(impasses()).toBe(0);
   });
 
   it("10. o conflito que o auditor não dá por resolvido para o run com diagnóstico: sem pergunta, sem publicar", async () => {
-    const { run, agent, impasses, perguntadas } = await plan(roteiro(() => ARQ_PONTO_DE_EXTENSAO, () => ACHADO_REAL), { maxAuditReturns: 1 });
+    const { run, agent, perguntadas } = await plan(roteiro(() => ARQ_PONTO_DE_EXTENSAO, () => ACHADO_REAL), { maxAuditReturns: 1 });
     await expect(run).rejects.toThrow(/A auditoria de architecture.md não convergiu depois de 4 devolução\(ões\)/);
-    expect(impasses()).toBe(0);
     expect(perguntadas.filter((pergunta) => pergunta.topic.startsWith("auditoria ·"))).toEqual([]);
     // Teto 1 sem progresso: a primeira devolução já o esgota; uma mudança de estratégia; dois reparos pelo
     // auditor validados pelo verifier (§121); e para, com o diagnóstico das estratégias tentadas.

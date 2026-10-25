@@ -420,6 +420,7 @@ function mecanismo(registroComUuid) {
   if (/\.triagem-/.test(registro)) return `triagem do G4 (${registro})`;
   if (/^audit\.project-phases\.md-P(\d+)\./.test(registro)) return `auditoria da fase P${/-P(\d+)\./.exec(registro)[1]} (${registro})`;
   if (/^audit\.project-phases\.md-coer/.test(registro)) return `auditoria de coerência (${registro})`;
+  if (/^audit\.project-phases\.md\.auditor\./.test(registro)) return `auditoria do plano inteiro (${registro})`;
   if (registro === "") return "(nenhum registro com o achado)";
   return registro;
 }

@@ -9,7 +9,7 @@
  * vez de uma instrução para quem estava no terminal.
  */
 
-import type { Choice, NaturezaDaParada, Parada } from "../tui/index.js";
+import type { NaturezaDaParada, Parada } from "../tui/index.js";
 import type { Readiness } from "../init/index.js";
 
 export type Estagio = "init" | "plan" | "survey" | "change";
@@ -54,16 +54,6 @@ const DE_QUEM_EXTRA: Partial<Record<NaturezaDaParada, string>> = {
   ambiente: "do provider ou da rede, ou da CLI que os chama: a chamada não produziu uma resposta do modelo",
   modelo: "da sessão do modelo: o texto que ele devolveu não serve",
 };
-
-/** Contagem não oferece uma decisão de produto como se pudesse mudar o teto. */
-export function opcoesDoImpasse(mechanical: boolean): { choice: Choice; resposta: string | null }[] {
-  return [
-    ...(!mechanical ? [{ choice: { label: "escrever minha decisão", hint: "vira autoridade acima do auditor nos pontos do impasse" }, resposta: null }] : []),
-    { choice: { label: mechanical ? "tentar corrigir novamente" : "reiniciar", hint: mechanical ? "o escritor tenta adequar a estrutura aos limites" : "o escritor tenta corrigir de novo e o auditor reconfere" }, resposta: "reiniciar" },
-    { choice: { label: mechanical ? "publicar rascunho" : "publicar como está", ...(mechanical ? { hint: "os limites continuam obrigatórios no RALPH READY" } : {}) }, resposta: "publicar" },
-    { choice: { label: "abortar" }, resposta: "abortar" },
-  ];
-}
 
 export function paradaDoEstagio(erro: Error, estagio: Estagio, runId?: string): Parada {
   const linhas = erro.message.split("\n");

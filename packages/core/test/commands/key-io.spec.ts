@@ -14,7 +14,7 @@ import { describe, expect, it, vi } from "vitest";
 import { chooseInBox, createKeyPrompter, createKeySession } from "../../src/commands/key-io.js";
 import { escolhaSemRepositorio, lerEscolhaDeRepositorio } from "../../src/loop/git.js";
 import { runWizard, runWizardDePapeis } from "../../src/commands/wizard.js";
-import { InputEndedError } from "../../src/commands/line-io.js";
+import { InputEndedError, PerguntaRetiradaError, createLineIO } from "../../src/commands/line-io.js";
 import { ensureApiCredential } from "../../src/commands/api-login.js";
 import { readCredentials, saveCredential } from "../../src/provider/credentials.js";
 import { rolesFromFlags } from "../../src/commands/options.js";
@@ -447,5 +447,34 @@ describe("escolha embaixo do painel", () => {
     await teclar("\r");
     expect(await indice).toBe(0);
     session.close();
+  });
+});
+
+/*
+ * A pergunta do plan tem prazo (etapa 2 da redução): vencida, ela sai da tela e
+ * a próxima resposta é da pergunta seguinte — nunca engolida pela que venceu.
+ */
+describe("a pergunta retirada pelo prazo", () => {
+  it("a linha pendente sai da fila: a próxima linha é da pergunta seguinte", async () => {
+    const fonte = new EventEmitter();
+    const linhas = createLineIO(fonte as never, () => undefined);
+    const prazo = new AbortController();
+    const primeira = linhas.ask("primeira? ", prazo.signal);
+    prazo.abort();
+    await expect(primeira).rejects.toBeInstanceOf(PerguntaRetiradaError);
+    const segunda = linhas.ask("segunda? ");
+    fonte.emit("line", "resposta da segunda");
+    await expect(segunda).resolves.toBe("resposta da segunda");
+  });
+
+  it("a sessão de teclas retira a leitura aberta, e a sessão segue de pé", async () => {
+    const input = new EventEmitter();
+    const sessao = createKeySession({ input: input as never, write: () => undefined });
+    const prazo = new AbortController();
+    const pendente = sessao.line.ask("> ", prazo.signal);
+    prazo.abort();
+    await expect(pendente).rejects.toBeInstanceOf(PerguntaRetiradaError);
+    expect(sessao.closed).toBe(false);
+    sessao.close();
   });
 });

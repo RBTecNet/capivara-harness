@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runInit, runPlan } from "../../src/init/index.js";
 import type { AgentCall } from "../../src/init/index.js";
 import type { Question } from "../../src/interview/index.js";
-import { NO_QUESTIONS, approve, fakeAgent, materialityKeeps, rehearsalApproves, reject } from "../support/fake-agent.js";
+import { NO_QUESTIONS, approve, fakeAgent } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
 import { arquiteturaSemTestes, faseSemTestes } from "../support/sem-testes.js";
 
@@ -35,13 +35,6 @@ const faseR1 = (numero: number): string => (numero === 3 ? P3_SEM_TESTE : FASES.
 const ehEmenda = (prompt: string): boolean => prompt.includes("## The phase to amend");
 const ehReorganizacao = (prompt: string): boolean => prompt.includes("## The audit of your previous architecture found");
 
-/** Um achado de coerência endereçado à arquitetura: pede reorganização. */
-const ACHADO_DE_ARQUITETURA = reject(
-  "Architecture (P1 vs P2)",
-  "A fase 2 promete a inicialização integrada da interface com a API, que a fase 1 já entrega.",
-  "Reorganize o goal da Phase 2 para não prometer a inicialização que a Phase 1 entrega.",
-);
-
 let projectRoot = "";
 beforeEach(async () => { projectRoot = await mkdtemp(join(tmpdir(), "capivara-rev128-")); });
 afterEach(async () => { await rm(projectRoot, { recursive: true, force: true }); });
@@ -53,7 +46,7 @@ interface Papeis {
   arquitetoReorganizado: string;
   fase: (numero: number, call: AgentCall) => string;
   emenda?: (numero: number, call: AgentCall) => string;
-  auditorDaFase: (numero: number, call: AgentCall) => string;
+  /** A auditoria do plano inteiro. */
   coerencia: (call: AgentCall) => string;
 }
 
@@ -73,19 +66,9 @@ function roteiro(papeis: Papeis): ScriptStep[] {
       },
       repeat: true,
     })),
-    { match: { role: "auditor", stage: "audit", subject: "project-phases.md#coerência" }, respond: { stdout: papeis.coerencia }, repeat: true },
-    {
-      match: { role: "auditor", stage: "audit" },
-      respond: {
-        stdout: (call) => {
-          const numero = Number(/#P(\d+)$/.exec(call.subject)?.[1] ?? "0");
-          return numero > 0 ? papeis.auditorDaFase(numero, call) : approve();
-        },
-      },
-      repeat: true,
-    },
-    materialityKeeps(),
-    rehearsalApproves(),
+    // O plano é auditado inteiro, numa chamada (etapa 2 da redução).
+    { match: { role: "auditor", stage: "audit", subject: "project-phases.md" }, respond: { stdout: papeis.coerencia }, repeat: true },
+    { match: { role: "auditor", stage: "audit" }, respond: { stdout: approve() }, repeat: true },
   ];
 }
 
@@ -100,7 +83,6 @@ async function planejar(papeis: Papeis) {
     ask: async (question) => { perguntadas.push(question); return "1"; },
     announce: (linha) => { avisos.push(linha); },
     sleep: async () => undefined,
-    decideStandoff: async () => "publicar",
   });
   const publicado = await readFile(join(projectRoot, ".capivara", "init", "project-phases.md"), "utf8").catch(() => "");
   return { outcome, agent, perguntadas, avisos, publicado };
@@ -119,65 +101,19 @@ const v5ComGoalDaFase2 = (): string => {
   return JSON.stringify(arquitetura);
 };
 
-describe("§128 · revisão — a decisão do desenvolvedor na mesma rodada de uma reorganização", () => {
-  it("a decisão levantada pelo auditor da fase 4 chega ao texto publicado da fase 4", async () => {
-    let p4 = 0;
-    let coerencias = 0;
-    const decisao = `${approve()}\nCAPIVARA_DECISION: Task 2 | Uma categoria pode ser excluída enquanto tarefas antigas ainda citam o nome dela? | Sim, a exclusão é livre | Não, a exclusão é recusada`;
-    const { outcome, agent, perguntadas, publicado } = await planejar({
-      arquitetoReorganizado: v5ComGoalDaFase2(),
-      // O escritor aplica a decisão quando ela está no prompt (escrita do zero ou emenda).
-      fase: (numero, call) => (call.prompt.includes("a exclusão é livre") ? faseR1(numero).replace("- **Traces:**", "- DECISAO-APLICADA: a exclusão é livre.\n  - **Traces:**") : faseR1(numero)),
-      emenda: (numero, call) => {
-        const atual = call.prompt.slice(call.prompt.indexOf("## The phase to amend") + "## The phase to amend".length).trim();
-        return call.prompt.includes("a exclusão é livre") && !atual.includes("DECISAO-APLICADA") ? atual.replace("- **Traces:**", "- DECISAO-APLICADA: a exclusão é livre.\n  - **Traces:**") : atual;
-      },
-      auditorDaFase: (numero) => (numero === 4 && (p4 += 1) === 1 ? decisao : approve()),
-      coerencia: () => ((coerencias += 1) === 1 ? ACHADO_DE_ARQUITETURA : approve()),
-    });
-    // A fase 4 tinha achado aberto (a decisão) quando a reorganização veio: ela é escrita de novo, com a decisão no prompt.
-    expect(agent.calls.filter((call) => call.subject === "phase-p04" && !ehEmenda(call.prompt))).toHaveLength(2);
-    expect(perguntadas.filter((pergunta) => pergunta.topic.startsWith("auditoria ·"))).toHaveLength(1);
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    // Seguro: a decisão que o desenvolvedor tomou está na fase que a levantou.
-    expect(secaoDaFase(publicado, 4), "decisão do desenvolvedor ausente da fase 4 publicada").toContain("DECISAO-APLICADA");
-  });
-});
 
-describe("§128 · revisão — a decisão de dados muda na reorganização", () => {
-  it("o status trocado na decisão de dados chega à fase 3 publicada: ela não é mantida", async () => {
-    // Reorganização que, além do goal da fase 2, troca os valores de status (decisão de dados, fora da comparação).
-    const arquitetura = JSON.parse(v5ComGoalDaFase2()) as { dataDecisions: { subject: string; statement: string }[] };
-    arquitetura.dataDecisions = arquitetura.dataDecisions.map((entrada) => entrada.subject === "tarefas.status"
-      ? { ...entrada, statement: "Armazenar status como texto e aceitar somente aberta, fazendo ou feita ao criar ou atualizar." }
-      : entrada);
-    let coerencias = 0;
-    const { outcome, publicado } = await planejar({
-      arquitetoReorganizado: JSON.stringify(arquitetura),
-      // O escritor segue a fatia que recebe.
-      fase: (numero, call) => (call.prompt.includes("aberta, fazendo ou feita") ? faseR1(numero).replaceAll("pendente", "aberta").replaceAll("em andamento", "fazendo").replaceAll("concluída", "feita") : faseR1(numero)),
-      auditorDaFase: () => approve(),
-      coerencia: () => ((coerencias += 1) === 1 ? ACHADO_DE_ARQUITETURA : approve()),
-    });
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    const arquiteturaPublicada = await readFile(join(projectRoot, ".capivara", "init", "architecture.md"), "utf8").catch(() => "");
-    expect(arquiteturaPublicada).toContain("aberta, fazendo ou feita");
-    const fase3 = secaoDaFase(publicado, 3);
-    expect(fase3, "fase 3 publicada contradiz a decisão de dados publicada").not.toContain("pendente");
-  });
-});
 
 describe("§128 · revisão — a emenda que tira uma task e acrescenta outra", () => {
   it("a fase 1 publicada mantém a task das migrações e não duplica tasks", async () => {
     let coerencias = 0;
-    const ACHADO = reject(
-      "P1.T1.C3 vs P2.T1.C1",
-      "A fundação exige que `index.html` monte `src/web/main.tsx`; a interface exige `src/main.tsx`, e o script `dev` precisa iniciar `src/server/index.ts`.",
-      "Em P1, use `src/main.tsx` como ponto de entrada.",
-    );
+    // As duas passagens citadas existem nas fases 1 e 2 do run: o Core as confere antes de devolver o plano.
+    const ACHADO = [
+      "CAPIVARA_AUDIT_STATUS: REJECTED",
+      "CAPIVARA_FINDING: CONTRADICTION | P1.T1.C3 vs P2.T1.C1 | A fundação diz «`index.html` monta a aplicação React a partir de `src/web/main.tsx`»; a interface diz «Em `src/main.tsx` e `src/styles`, montar» | Em P1, use `src/main.tsx` como ponto de entrada.",
+      "CAPIVARA_REASON: pontos de entrada incompatíveis",
+    ].join("\n");
     const nova = "- [ ] **Task:** Em `src/server/health.ts`, expor `GET /api/saude` para o painel.\n  - **Acceptance criteria:**\n    - `GET /api/saude` responde 200 com `{\"ok\":true}`.\n  - **Traces:** workflow 4";
-    const promptsP1: string[] = [];
-    const { outcome, publicado } = await planejar({
+    const { outcome, publicado, agent } = await planejar({
       arquitetoReorganizado: V5,
       fase: (numero) => faseR1(numero),
       emenda: (numero, call) => {
@@ -187,12 +123,12 @@ describe("§128 · revisão — a emenda que tira uma task e acrescenta outra", 
         // O escritor corrige a Task 1, tira a Task 3 (migrações) e acrescenta uma no fim: mesma contagem.
         return [tasks[0]!.replace("a partir de `src/web/main.tsx`", "a partir de `src/main.tsx`"), tasks[1]!, ...tasks.slice(3).map((t) => t.trimEnd() + "\n"), nova].join("\n");
       },
-      auditorDaFase: (numero, call) => { if (numero === 1) promptsP1.push(call.prompt); return approve(); },
       coerencia: () => ((coerencias += 1) === 1 ? ACHADO : approve()),
     });
     const fase1 = secaoDaFase(publicado, 1);
     const titulos = [...fase1.matchAll(/^- \[[ x]\] \*\*Task:\*\* (.{0,50})/gm)].map((m) => m[1]);
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+    expect(agent.calls.some((call) => call.subject === "phase-p01" && call.prompt.includes("## The phase to amend")), "a contradição citada não chegou à emenda").toBe(true);
     expect(fase1, "a task das migrações sumiu do plano publicado").toContain("Em `src/migrations`, crie migrações versionadas");
     expect(new Set(titulos).size, "tasks duplicadas no plano publicado").toBe(titulos.length);
   });

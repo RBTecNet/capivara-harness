@@ -6,7 +6,7 @@ import { InitBlockedError, evaluateReadiness, inspectProject, resolveRequest, ru
 import { readEvents, runIdFor, runPaths } from "../../src/state/index.js";
 import { DELEGAR, FORA_DO_ESCOPO, ID_DO_BANCO } from "../../src/interview/index.js";
 import { assemblePhasesDocument } from "../../src/contract/index.js";
-import { SKELETON, PHASE_1, PHASE_2, approve, fakeAgent, happyPath, oneQuestion, reject, rehearsedAddresses } from "../support/fake-agent.js";
+import { SKELETON, PHASE_1, PHASE_2, approve, fakeAgent, happyPath, oneQuestion, reject } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
 
 let projectRoot = "";
@@ -435,7 +435,7 @@ describe("dimensionamento de fase", () => {
 
   it("fase densa demais volta ao escritor mesmo cabendo em tasks", async () => {
     const { agent, anunciado } = await run(comFaseDensa());
-    expect(anunciado).toContain("auditor devolveu project-phases.md");
+    expect(anunciado).toContain("conferência mecânica");
     const reescrita = agent.calls.find((call) => call.subject === "phase-p01" && call.attempt > 1);
     expect(reescrita?.prompt).toContain("critérios de aceite");
   });
@@ -457,7 +457,7 @@ describe("dimensionamento de fase", () => {
 });
 
 describe("o laço de auditoria cabe os dois orçamentos", () => {
-  it("duas devoluções mecânicas mais duas do auditor não estouram a volta", async () => {
+  it("duas devoluções mecânicas mais uma do auditor não estouram a volta", async () => {
     /*
      * A medição de 95 minutos morreu aqui: "o ciclo de auditoria não convergiu",
      * sem impasse, sem pergunta e sem documento. O teto do laço continuou sendo o
@@ -491,13 +491,13 @@ describe("o laço de auditoria cabe os dois orçamentos", () => {
     });
     steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 }, repeat: true });
 
-    // Passadas as mecânicas, o auditor do plano ainda devolve duas vezes.
+    // Passadas as mecânicas, o auditor do plano ainda devolve uma vez — a emenda que o orçamento tem.
     steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#coerência" },
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md" },
       respond: {
         stdout: () => {
           auditorias += 1;
-          return auditorias <= 2 ? reject("Phase 2", "o critério não nomeia o alvo", "nomeie o alvo") : approve();
+          return auditorias <= 1 ? reject("Phase 2", "o critério não nomeia o alvo", "nomeie o alvo") : approve();
         },
       },
       repeat: true,
@@ -577,65 +577,6 @@ describe("o canal de suposição", () => {
   });
 });
 
-describe("decisão de impasse", () => {
-  /** Leva o plano ao impasse: o auditor reprova sempre, o escritor insiste. */
-  function semConvergencia(): ScriptStep[] {
-    const steps = happyPath();
-    steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#coerência" },
-      respond: { stdout: reject("Phase 1", "a regra não diz sobre o que a operação incide", "nomeie o alvo") },
-      repeat: true,
-    });
-    return steps;
-  }
-
-  async function comImpasse(decisao: string) {
-    const agent = fakeAgent(semConvergencia());
-    const dito: string[] = [];
-    const outcome = await runInit({
-      projectRoot,
-      request,
-      language: "português do Brasil",
-      announce: (message) => void dito.push(message),
-      call: agent.call,
-      ask: async () => "use as recomendações",
-      decideStandoff: async () => decisao,
-    });
-    return { outcome, agent, anunciado: dito.join("\n") };
-  }
-
-  it("a decisão do desenvolvedor vira decisão confirmada, não recado", async () => {
-    const regra = "o valor é aparado na gravação e a comparação ignora caixa";
-    const { outcome, anunciado } = await comImpasse(regra);
-
-    expect(anunciado).toContain("decisão registrada");
-    expect(
-      outcome.report.checkpoint.decisions.some((entry) => entry.decision.includes("aparado na gravação")),
-    ).toBe(true);
-  });
-
-  it("ela sobrevive ao run: fica gravada onde a retomada lê", async () => {
-    const regra = "o valor é aparado na gravação e a comparação ignora caixa";
-    await comImpasse(regra);
-
-    const handoff = JSON.parse(
-      await readFile(join(projectRoot, ".capivara", "handoffs", `${runIdFor("init", request.sha12)}.project-phases.md.json`), "utf8"),
-    ) as { answers: { questionId: string; disposition: string; decision: string }[] };
-
-    const registrada = handoff.answers.find((answer) => answer.questionId.startsWith("SD-"));
-    expect(registrada?.disposition).toBe("ACCEPTED");
-    expect(registrada?.decision).toContain("aparado na gravação");
-  });
-
-  it("e volta ao escritor como autoridade, na emenda da fase", async () => {
-    const regra = "o valor é aparado na gravação e a comparação ignora caixa";
-    const { agent } = await comImpasse(regra);
-
-    const emendas = agent.calls.filter((call) => call.subject.startsWith("phase-") && call.prompt.includes("amending"));
-    expect(emendas.length).toBeGreaterThan(0);
-    expect(emendas.some((call) => call.prompt.includes("aparado na gravação"))).toBe(true);
-  });
-});
 
 describe("limite de uso", () => {
   it("espera e repete sem gastar a tentativa, em vez de matar a entrevista", async () => {
@@ -780,8 +721,8 @@ describe("gate de prontidão", () => {
     expect(readiness.checks.find((check) => check.id === "decisoes")?.passed).toBe(false);
   });
 
-  it("inclui dimensionamento, arquitetura, prescrição de teste e propriedade de escrita entre as treze verificações", () => {
-    expect(evaluateReadiness(base).checks).toHaveLength(13);
+  it("inclui dimensionamento, arquitetura, prescrição de teste e propriedade de escrita entre as doze verificações", () => {
+    expect(evaluateReadiness(base).checks).toHaveLength(12);
   });
 
   it("plano sem arquitetura publicada é NOT READY, dizendo o que rodar", () => {
@@ -807,149 +748,9 @@ describe("gate de prontidão", () => {
     expect(check?.detail).toContain(detail);
   });
 
-  it("ensaio que não rodou não aprova por omissão", () => {
-    const readiness = evaluateReadiness(base);
-    expect(readiness.checks.find((check) => check.id === "ensaio")?.passed).toBe(false);
-  });
 
-  it("critério reprovado no ensaio aparece com endereço", () => {
-    const readiness = evaluateReadiness({
-      ...base,
-      rehearsal: { blocked: ["P5.T9.C1 · Verificar metadados — UNSATISFIABLE: o projeto não tem dependências"] },
-    });
-    const check = readiness.checks.find((item) => item.id === "ensaio");
-    expect(check?.passed).toBe(false);
-    expect(check?.detail).toContain("P5.T9.C1");
-  });
 });
 
-describe("ensaio do verificador", () => {
-  /** Reprova o primeiro critério de cada task 1 e aprova todo o resto. */
-  function rehearsalRejects(rounds: number): ScriptStep {
-    let round = 0;
-    return {
-      match: { role: "verifier", stage: "verify" },
-      respond: {
-        stdout: (call) => {
-          round += 1;
-          const alvo = round <= rounds;
-          return rehearsedAddresses(call.prompt)
-            .map((address, position) =>
-              alvo && position === 0
-                ? `CRITERION ${address}: UNSATISFIABLE — exige dependência fixada num projeto decidido sem dependências`
-                : `CRITERION ${address}: OBSERVABLE — dá para abrir o arquivo e olhar`,
-            )
-            .join("\n");
-        },
-      },
-      repeat: true,
-    };
-  }
-
-  /** O escritor devolve a mesma fase quando o ensaio manda reescrever. */
-  const reescreve: ScriptStep[] = [
-    { match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: PHASE_1 }, repeat: true },
-    { match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 }, repeat: true },
-  ];
-
-  it("critério impossível volta ao escritor antes de o build existir", async () => {
-    const steps = [...happyPath().filter((step) => step.match.role !== "verifier"), ...reescreve];
-    steps.push(rehearsalRejects(1));
-
-    const { outcome, agent } = await run(steps);
-    const reescrita = agent.calls.find((call) => call.stage === "authoring" && call.subject.startsWith("phase-") && call.attempt > 1);
-    expect(reescrita?.prompt).toContain("as decisões confirmadas negam");
-    expect(outcome.readiness.checks.find((check) => check.id === "ensaio")?.passed).toBe(true);
-  });
-
-  it("critério que sobrevive à reescrita bloqueia o RALPH READY com o endereço", async () => {
-    const steps = [...happyPath().filter((step) => step.match.role !== "verifier"), ...reescreve];
-    steps.push(rehearsalRejects(9));
-
-    const { outcome } = await run(steps);
-    expect(outcome.readiness.ready).toBe(false);
-    const check = outcome.readiness.checks.find((item) => item.id === "ensaio");
-    expect(check?.passed).toBe(false);
-    expect(check?.detail).toMatch(/P\d+\.T\d+\.C\d+/);
-    expect(check?.detail).toContain("UNSATISFIABLE");
-  });
-
-  it("lote grande é quebrado: fase com muitos critérios vira várias chamadas", async () => {
-    // O piloto 3 perdeu a fase 1 inteira com 51 critérios num lote só: o modelo
-    // derivou e voltou sem julgamento nenhum, duas vezes.
-    const densa = [
-      "## Phase 1: Fundação",
-      "",
-      "**Goal:** base · **Depends on:** none · **Covers:** statuses",
-      "",
-      ...Array.from({ length: 5 }, (_unused, indice) => [
-        `- [ ] **Task:** Tarefa ${indice + 1}`,
-        "  - **Acceptance criteria:**",
-        ...Array.from({ length: 4 }, (_ignora, posicao) => `    - condição observável ${posicao + 1}`),
-        "  - **Traces:** statuses",
-        "",
-      ].join("\n")),
-    ].join("\n");
-
-    const steps = happyPath();
-    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: densa }, repeat: true });
-
-    const agent = fakeAgent(steps);
-    await runInit({
-      projectRoot,
-      request,
-      language: "português do Brasil",
-      maxCriteriaPerRehearsalBatch: 6,
-      call: agent.call,
-      ask: async () => "use as recomendações",
-    });
-
-    const ensaios = agent.calls.filter((call) => call.role === "verifier" && call.stage === "verify");
-    expect(ensaios.length).toBeGreaterThan(1);
-    for (const chamada of ensaios) {
-      const enderecos = chamada.prompt.match(/^P\d+\.T\d+\.C\d+ /gm) ?? [];
-      expect(enderecos.length).toBeLessThanOrEqual(6);
-    }
-  });
-
-  it("lote sem julgamento acusa o ensaio, não o plano", async () => {
-    const steps = happyPath().filter((step) => step.match.role !== "verifier");
-    steps.push({ match: { role: "verifier", stage: "verify" }, respond: { stdout: "achei tudo ótimo" }, repeat: true });
-
-    const { outcome } = await run(steps);
-    const detalhe = outcome.readiness.checks.find((check) => check.id === "ensaio")?.detail ?? "";
-    expect(detalhe).toContain("falha do ensaio, não do plano");
-  });
-
-  it("critério sem veredito não passa por omissão", async () => {
-    const steps = happyPath().filter((step) => step.match.role !== "verifier");
-    steps.push({ match: { role: "verifier", stage: "verify" }, respond: { stdout: "achei tudo ótimo" }, repeat: true });
-
-    const { outcome } = await run(steps);
-    expect(outcome.readiness.checks.find((check) => check.id === "ensaio")?.detail).toContain("NÃO ENSAIADO");
-  });
-
-  it("veredito logo depois do espelho do colchete é lido na primeira passada (§132)", async () => {
-    // A forma do MiniMax no mmax: `CRITERION P4.T2.C1 [fase · task] OBSERVABLE — …`, sem dois-pontos.
-    const steps = happyPath().filter((step) => step.match.role !== "verifier");
-    steps.push({
-      match: { role: "verifier", stage: "verify" },
-      respond: {
-        stdout: (call) =>
-          [...call.prompt.matchAll(/^(P\d+\.T\d+\.C\d+) (\[[^\]\n]* · [^\]\n]*\]) /gm)]
-            .map(([, address, espelho]) => `CRITERION ${address} ${espelho} OBSERVABLE — dá para abrir o arquivo e olhar`)
-            .join("\n"),
-      },
-      repeat: true,
-    });
-
-    const { outcome, agent } = await run(steps);
-    expect(outcome.readiness.checks.find((check) => check.id === "ensaio")?.passed).toBe(true);
-    const ensaios = agent.calls.filter((call) => call.role === "verifier" && call.stage === "verify");
-    expect(ensaios.length).toBeGreaterThan(0);
-    expect(ensaios.some((call) => call.prompt.includes("The previous answer left criteria unjudged"))).toBe(false);
-  });
-});
 
 describe("quando o provider falha, o que ele disse chega a quem chamou", () => {
   it("a mensagem carrega a resposta da CLI, não só o código de saída", async () => {

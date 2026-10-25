@@ -1,7 +1,7 @@
 /**
  * O gate RALPH READY.
  *
- * Treze itens, todos verdadeiros ou o run termina em NOT READY — retomável e
+ * Doze itens, todos verdadeiros ou o run termina em NOT READY — retomável e
  * dizendo exatamente o que falta. Nunca "quase pronto": um pacote quase pronto
  * entregue ao loop vira uma aplicação quase feita, descoberta fase a fase, ao
  * preço de uma chamada de modelo por descoberta.
@@ -30,11 +30,6 @@ export interface ReadinessInput {
   unresolvedQuestions: string[];
   designRoot: string;
   designExists: (path: string) => boolean;
-  /**
-   * O que o ensaio do verificador reprovou no plano, já formatado. Ausente
-   * significa que o ensaio não rodou — e não rodar não aprova nada.
-   */
-  rehearsal?: { blocked: string[] } | undefined;
 }
 
 export interface ReadinessCheck {
@@ -172,24 +167,6 @@ export function evaluateReadiness(input: ReadinessInput): Readiness {
     title: "O plano foi aprovado pelo auditor",
     passed: input.approved,
     detail: input.approved ? "" : "o auditor não aprovou o plano",
-  });
-
-  /*
-   * O ensaio do verificador. O piloto 2 chegou aqui com oito itens verdes e um
-   * critério que exigia dependências fixadas de um projeto decidido sem
-   * dependência nenhuma: o plano estava aprovado, e era impossível. Quem descobriu
-   * foi o loop, três ciclos de correção depois, com o código certo em disco.
-   */
-  checks.push({
-    id: "ensaio",
-    title: "Todo critério de aceite sobrevive ao ensaio do verificador",
-    passed: input.rehearsal !== undefined && input.rehearsal.blocked.length === 0,
-    detail:
-      input.rehearsal === undefined
-        ? document === null
-          ? "não há plano executável para ensaiar"
-          : "o ensaio do verificador não rodou sobre o plano; sem ele, critério impossível só aparece no build, ao preço de um ciclo de correção por descoberta"
-        : input.rehearsal.blocked.join("\n"),
   });
 
   checks.push({

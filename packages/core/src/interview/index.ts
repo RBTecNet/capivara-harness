@@ -27,21 +27,7 @@ export type { RoundPlan, RoundState, UnresolvedItem } from "./rounds.js";
 export { HANDOFF_CONTRACT, handoffPath, readHandoff, writeHandoff } from "./handoff.js";
 export { ID_DO_BANCO, PERGUNTA_DO_BANCO, bancoNoPedido, decisaoDeBanco, perguntaDoBanco, regrasDeBanco } from "./banco.js";
 export type { DecisaoDeBanco } from "./banco.js";
-export {
-  PREFIXO_DA_DECISAO_DO_AUDITOR,
-  PREFIXO_DO_LEVANTAMENTO,
-  comAutoridade,
-  decisaoDoAuditorComoFinding,
-  decisaoGravada,
-  lerEscolha,
-  perguntaDeLevantamento,
-  perguntaDoAuditor,
-  PREFIXO_DO_ENSAIO,
-  decisaoDoEnsaio,
-  lerEscolhaDoEnsaio,
-  perguntaDoEnsaio,
-} from "./levantamento.js";
-export type { LeituraDoEnsaio, LeituraEscolhida } from "./levantamento.js";
+export { PREFIXO_DA_DECISAO_DO_AUDITOR, decisaoDoAuditorComoFinding, perguntaDoAuditor } from "./levantamento.js";
 export {
   DELEGAR,
   FORA_DO_ESCOPO,

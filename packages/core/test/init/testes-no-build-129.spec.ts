@@ -77,7 +77,7 @@ const por = (agent: { calls: AgentCall[] }, filtro: Partial<AgentCall>) =>
 function custo(cenario: string, agent: { calls: AgentCall[] }): void {
   if (process.env.CAPIVARA_MEDIR !== "1") return;
   const contar = (filtro: Partial<AgentCall>) => por(agent, filtro).length;
-  console.log(`MEDIDA ${cenario}: total=${agent.calls.length} escritaP2=${contar({ stage: "authoring", subject: "phase-p02" })} auditoriaP2=${contar({ stage: "audit", subject: "project-phases.md#P2" })} triagem=${contar({ subject: "project-phases.md#materialidade" })}`);
+  console.log(`MEDIDA ${cenario}: total=${agent.calls.length} escritaP2=${contar({ stage: "authoring", subject: "phase-p02" })} auditoriaP2=${contar({ stage: "audit", subject: "project-phases.md" })}`);
 }
 
 async function init(steps: ScriptStep[]) {
@@ -100,20 +100,19 @@ async function plan(steps: ScriptStep[]) {
 const publicado = (nome: string) => readFile(join(projectRoot, ".capivara/init", nome), "utf8");
 
 describe("§129 · teste não é motivo de devolução", () => {
-  it("a fase reprovada por NÃO ter o critério de testes sai aprovada: sem emenda, sem triagem, sem pergunta", async () => {
+  it("a fase reprovada por NÃO ter o critério de testes sai aprovada: sem emenda e sem pergunta", async () => {
     await init(skeletonPath());
     const f2 = reject("Phase 2 (Goal, task 2.1)", F2.problem, F2.fix);
     const { outcome, agent, perguntadas, anunciado } = await plan([
       // O auditor do run insistiu duas rodadas; aqui ele insiste sempre.
-      { match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2" }, respond: { stdout: f2 }, repeat: true },
+      { match: { role: "auditor", stage: "audit", subject: "project-phases.md" }, respond: { stdout: f2 }, repeat: true },
       ...skeletonPath(),
     ]);
     custo("F2", agent);
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
     expect(anunciado).toContain("pediam ou julgavam teste");
     expect(por(agent, { stage: "authoring", subject: "phase-p02" })).toHaveLength(1);
-    expect(por(agent, { stage: "audit", subject: "project-phases.md#P2" })).toHaveLength(1);
-    expect(por(agent, { subject: "project-phases.md#materialidade" })).toHaveLength(0);
+    expect(por(agent, { stage: "audit", subject: "project-phases.md" })).toHaveLength(1);
     expect(perguntadas.filter((pergunta) => pergunta.topic.startsWith("auditoria ·"))).toEqual([]);
     expect(await publicado("project-phases.md")).not.toMatch(/testes automatizados/u);
   });
@@ -123,7 +122,7 @@ describe("§129 · teste não é motivo de devolução", () => {
     let leituras = 0;
     const f1 = reject("Phase 2.2 (task \"O módulo Reservas tem os seus próprios testes automatizados\")", F1.problem, F1.fix.replaceAll("4.3", "2.2"));
     const { outcome, agent } = await plan([
-      { match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2" }, respond: { stdout: () => ((leituras += 1) === 1 ? f1 : approve()) }, repeat: true },
+      { match: { role: "auditor", stage: "audit", subject: "project-phases.md" }, respond: { stdout: () => ((leituras += 1) === 1 ? f1 : approve()) }, repeat: true },
       ...skeletonPath(),
     ]);
     custo("F1", agent);
@@ -150,7 +149,7 @@ describe("§129 · a task de teste não chega a nenhum auditor", () => {
     expect(escritasP2).toHaveLength(2);
     expect(escritasP2[1]?.prompt).toContain("I-16");
     expect(escritasP2[1]?.prompt).toContain("executado pelo build");
-    for (const auditoria of por(agent, { stage: "audit", subject: "project-phases.md#P2" })) {
+    for (const auditoria of por(agent, { stage: "audit", subject: "project-phases.md" })) {
       expect(auditoria.prompt).not.toContain("tem os seus próprios testes automatizados");
     }
     expect(await publicado("project-phases.md")).not.toContain("testes automatizados");

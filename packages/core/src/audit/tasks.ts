@@ -46,11 +46,6 @@ export function textoDaTask(task: TaskBlock): string {
     .join("\n");
 }
 
-/** A chave de uma aprovação: o que foi julgado, e sob qual autoridade. */
-export function chaveDaTask(task: TaskBlock, autoridade: string): string {
-  return `${sha12(textoDaTask(task))}:${autoridade}`;
-}
-
 /**
  * O sha das decisões que valem agora.
  *
@@ -60,31 +55,4 @@ export function chaveDaTask(task: TaskBlock, autoridade: string): string {
  */
 export function shaDaAutoridade(decisoes: readonly string[]): string {
   return sha12(`${PLANNING_CONTRACT}\n${[...decisoes].sort().join("\n")}`);
-}
-
-export class TasksJulgadas {
-  private readonly aprovadas: Set<string>;
-
-  /** Semeada com as chaves de uma execução anterior: aprovação paga não se repaga. */
-  constructor(chaves: readonly string[] = []) {
-    this.aprovadas = new Set(chaves);
-  }
-
-  /** As chaves que valem agora, para quem as guarda em disco. */
-  chaves(): string[] {
-    return [...this.aprovadas];
-  }
-
-  /** As tasks desta fase que já passaram, sob a autoridade de agora. */
-  jaAprovadas(tasks: readonly TaskBlock[], autoridade: string): TaskBlock[] {
-    return tasks.filter((task) => this.aprovadas.has(chaveDaTask(task, autoridade)));
-  }
-
-  aprovar(tasks: readonly TaskBlock[], autoridade: string): void {
-    for (const task of tasks) this.aprovadas.add(chaveDaTask(task, autoridade));
-  }
-
-  get tamanho(): number {
-    return this.aprovadas.size;
-  }
 }

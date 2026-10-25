@@ -18,7 +18,7 @@ import { readPlanCache, writePlanCache } from "../../src/init/plan-cache.js";
 import type { Question } from "../../src/interview/index.js";
 import { parseSkeleton } from "../../src/contract/index.js";
 import type { Skeleton } from "../../src/contract/index.js";
-import { PHASE_1, SKELETON, fakeAgent, oneQuestion, rehearsedAddresses, skeletonPath } from "../support/fake-agent.js";
+import { PHASE_1, SKELETON, fakeAgent, oneQuestion, reject, skeletonPath } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
 
 let projectRoot = "";
@@ -73,57 +73,6 @@ const esqueletoLido = (): Skeleton => {
   return lido.skeleton;
 };
 
-describe("recuperação do protocolo do auditor — teste_openrouter", () => {
-  const invalid = "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_FINDING: nada | sem defeito material | sem correção necessária\nCAPIVARA_REASON: ok";
-
-  it.each(["project-phases.md#P1", "project-phases.md#coerência"])("devolve o diagnóstico e a resposta recusada a %s", async subject => {
-    await init(skeletonPath());
-    const steps = skeletonPath();
-    steps.unshift({ match: { role: "auditor", stage: "audit", subject }, repeat: true,
-      respond: { stdout: call => call.prompt.includes("## Repair the previous audit response")
-        && call.prompt.includes(JSON.stringify(invalid)) && call.prompt.includes("APPROVED com CAPIVARA_FINDING")
-        ? "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: sem defeito material"
-        : invalid },
-    });
-    const { agent, outcome } = await plan(steps);
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    const audits = agent.calls.filter(call => call.stage === "audit" && call.subject === subject);
-    expect(audits).toHaveLength(2);
-    expect(audits[1]!.prompt.startsWith(`${audits[0]!.prompt}\n\n`)).toBe(true);
-    expect(audits[1]!.prompt).toContain("Do not emit placeholder findings");
-    expect(agent.calls.filter(call => call.stage === "authoring" && call.subject.startsWith("phase-"))).toHaveLength(2);
-  });
-
-  it("mantém o bloqueio após duas respostas contraditórias, sem publicar o plano", async () => {
-    await init(skeletonPath());
-    const steps = skeletonPath();
-    steps.unshift({ match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" }, repeat: true, respond: { stdout: invalid } });
-    const agent = fakeAgent(steps);
-    await expect(runPlan({ projectRoot, request, ...comum, call: agent.call })).rejects.toThrow(/saída inválida três vezes \(auditor, auditor, verifier\): APPROVED com CAPIVARA_FINDING/);
-    // Duas do auditor e a terceira do verifier (§121), que no roteiro responde o mesmo texto inválido.
-    expect(agent.calls.filter(call => call.subject === "project-phases.md#P1").map(call => call.role)).toEqual(["auditor", "auditor", "verifier"]);
-    await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).rejects.toThrow();
-  });
-
-  it("explica separadores inválidos e aceita uma rejeição corrigida antes da emenda", async () => {
-    await init(skeletonPath());
-    const malformed = "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_FINDING: Phase 1 / falta prazo de garantia / declare prazo de 37 dias\nCAPIVARA_REASON: falta prazo";
-    const steps = skeletonPath();
-    let calls = 0;
-    steps.unshift({ match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" }, repeat: true, respond: { stdout: call => {
-      calls++;
-      if (calls === 1 || (calls === 2 && !call.prompt.includes("três campos separados"))) return malformed;
-      return calls === 2
-        ? "CAPIVARA_AUDIT_STATUS: REJECTED\nCAPIVARA_FINDING: Phase 1 | falta prazo de garantia | declare prazo de 37 dias\nCAPIVARA_REASON: falta prazo"
-        : "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: prazo declarado";
-    } } });
-    steps.unshift({ match: { role: "writer", stage: "authoring", subject: "phase-p01", attempt: 2 }, respond: { stdout: PHASE_1.replace("A tabela statuses existe", "A garantia dura 37 dias e a tabela statuses existe") } });
-    const { agent, outcome } = await plan(steps);
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(agent.calls.filter(call => call.subject === "phase-p01" && call.stage === "authoring")).toHaveLength(2);
-    expect(await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).toContain("garantia dura 37 dias");
-  });
-});
 
 describe("estágio 1 — init", () => {
   it("plan publica pré-requisitos vinculados ao esqueleto sem uma sessão extra de modelo", async () => {
@@ -189,10 +138,8 @@ describe("regressões de teste_minimax", () => {
     await init(skeletonPath());
     const steps = skeletonPath();
     let audits = 0;
-    steps.unshift({ match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" }, repeat: true,
-      respond: { stdout: () => ++audits === 1
-        ? "CAPIVARA_AUDIT_STATUS: REJECTED\nCAPIVARA_FINDING: Phase 1 | falta prazo no seed | declare prazo de 37 dias\nCAPIVARA_REASON: falta prazo"
-        : "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: ok" },
+    steps.unshift({ match: { role: "auditor", stage: "audit", subject: "project-phases.md" }, repeat: true,
+      respond: { stdout: () => ++audits === 1 ? reject("Phase 1", "falta prazo no seed", "declare prazo de 37 dias") : "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: ok" },
     });
     const corrected = PHASE_1.replace("A tabela statuses existe", "O seed preserva a garantia de 37 dias e a tabela statuses existe").replace("**Acceptance criteria:**", "**Acceptance criteria:");
     steps.unshift({ match: { role: "writer", stage: "authoring", subject: "phase-p01", attempt: 2 }, respond: { stdout: corrected } });
@@ -204,53 +151,17 @@ describe("regressões de teste_minimax", () => {
     expect(agent.calls.filter(call => call.stage === "authoring" && call.subject === "phase-p01")).toHaveLength(2);
   });
 
-  it("a emenda recebe autoridade atual e só os achados da fase corrigida", async () => {
-    await init(skeletonPath());
-    const steps = skeletonPath();
-    for (const phase of [1, 2]) {
-      let audits = 0;
-      steps.unshift({ match: { role: "auditor", stage: "audit", subject: `project-phases.md#P${phase}` }, repeat: true,
-        respond: { stdout: () => ++audits === 1
-          ? ["CAPIVARA_AUDIT_STATUS: REJECTED", `CAPIVARA_FINDING: Tarefa ${phase} | defeito-exclusivo-fase-${phase} | corrija conforme a decisão aceita`,
-            ...(phase === 1 ? ["CAPIVARA_DECISION: Phase 1 | Qual prazo de garantia vale? | Garantia de 37 dias | Garantia de 82 dias"] : []),
-            "CAPIVARA_REASON: ajuste localizado"].join("\n")
-          : "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: ok" },
-      });
-    }
-    const { agent, outcome } = await planComAnuncioEResposta(steps, async () => "1");
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    const amendments = agent.calls.filter(call => call.stage === "authoring" && call.prompt.includes("You are amending"));
-    expect(amendments).toHaveLength(2);
-    for (const phase of [1, 2]) {
-      const prompt = amendments.find(call => call.subject === `phase-p0${phase}`)!.prompt;
-      const authority = prompt.split("## Confirmed decisions")[1]?.split("## ")[0];
-      expect(authority).toContain("37 dias");
-      expect(prompt).toContain(`## This phase's slice`);
-      expect(prompt).toContain(`defeito-exclusivo-fase-${phase}`);
-      expect(prompt).not.toContain(`defeito-exclusivo-fase-${3 - phase}`);
-      expect(prompt).toContain("## Task grammar and limits");
-      expect(prompt).toContain("**Acceptance criteria:**");
-    }
-  });
 
-  it("preserva a evidência de cada lote, repetição e retomada", async () => {
+  it("preserva a evidência de cada chamada e da retomada", async () => {
     const initialized = await init(skeletonPath());
     const initialCount = initialized.agent.calls.length;
-    const steps = skeletonPath();
-    let omitted = false;
-    steps.unshift({ match: { role: "verifier", stage: "verify" }, repeat: true, respond: { stdout: call => {
-      if (!omitted) { omitted = true; return ""; }
-      return rehearsedAddresses(call.prompt).map(address => `CRITERION ${address}: OBSERVABLE — inspeção do arquivo`).join("\n");
-    } } });
-    const first = fakeAgent(steps);
-    const outcome = await runPlan({ projectRoot, request, ...comum, call: first.call, maxCriteriaPerRehearsalBatch: 1 });
+    const first = fakeAgent(skeletonPath());
+    const outcome = await runPlan({ projectRoot, request, ...comum, call: first.call });
     const root = join(projectRoot, ".capivara/runs", outcome.runId);
     const before = new Map(await Promise.all((await readdir(join(root, "prompts"))).map(async name => [name, await readFile(join(root, "prompts", name), "utf8")] as const)));
-    expect(first.calls.filter(call => call.stage === "verify").length).toBeGreaterThan(1);
-    expect(first.calls.some(call => call.prompt.includes("The previous answer left criteria unjudged"))).toBe(true);
     expect(before.size).toBe(initialCount + first.calls.length);
     const second = fakeAgent(skeletonPath());
-    await runPlan({ projectRoot, request, ...comum, call: second.call, maxCriteriaPerRehearsalBatch: 1, fresh: true });
+    await runPlan({ projectRoot, request, ...comum, call: second.call, fresh: true });
     const prompts = await readdir(join(root, "prompts"));
     const logs = await readdir(join(root, "logs"));
     expect(prompts.length).toBe(before.size + second.calls.length);
@@ -269,37 +180,13 @@ describe("reprovação mecânica não é decisão de produto", () => {
     return steps;
   };
 
-  it("texto livre não altera os limites nem vira decisão aceita", async () => {
-    const initialized = await init(skeletonPath());
-    const agent = fakeAgent(stepsWithDensePhase());
-    const decision = "dispensar o limite para este projeto";
-    let rendered = "";
-    await expect(runPlan({ projectRoot, request, ...comum, call: agent.call, maxMechanicalRounds: 1,
-      decideStandoff: async (text, context) => {
-        rendered = text;
-        expect(context?.mechanical).toBe(true);
-        expect(context?.mechanicalChecks).toBe(1);
-        return decision;
-      },
-    })).rejects.toThrow("Uma decisão escrita não dispensa os limites mecânicos");
-    expect(paradaDoEstagio(new Error(rendered), "plan").natureza).toBe("modelo");
-    expect(rendered).not.toContain("após 0 devoluções");
-    // O auditor do PLANO não é chamado a JULGAR: o impasse mecânico vem antes dele. Ele é chamado a
-    // REPARAR (§121), duas vezes, antes de o impasse chegar ao desenvolvedor. A auditoria da
-    // arquitetura é outra etapa, e acontece antes de haver fases.
-    expect(agent.calls.filter(call => call.role === "auditor" && call.stage === "audit" && call.subject !== "architecture")).toHaveLength(0);
-    expect(agent.calls.filter(call => call.role === "auditor" && call.stage === "authoring")).toHaveLength(2);
-    const handoff = await readHandoff(projectRoot, initialized.outcome.runId, "project-phases.md");
-    expect(handoff?.answers.some(answer => answer.decision.includes(decision)) ?? false).toBe(false);
-    await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"))).rejects.toThrow();
-  });
-
-  it("publicar rascunho mantém o gate mecânico reprovado", async () => {
+  it("a conferência mecânica que não fecha para o plan, sem pergunta e sem publicar", async () => {
     await init(skeletonPath());
     const agent = fakeAgent(stepsWithDensePhase());
-    const outcome = await runPlan({ projectRoot, request, ...comum, call: agent.call, maxMechanicalRounds: 1, decideStandoff: async () => "publicar" });
-    expect(outcome.readiness.ready).toBe(false);
-    expect(outcome.readiness.checks.find(check => check.id === "dimensionamento")?.passed).toBe(false);
+    await expect(runPlan({ projectRoot, request, ...comum, call: agent.call, maxMechanicalRounds: 1 })).rejects.toThrow(/a conferência mecânica do plano não fechou/);
+    // A conferência é do Core: nenhum auditor é chamado a julgar o plano que ela recusa.
+    expect(agent.calls.filter(call => call.role === "auditor" && call.subject === "project-phases.md")).toHaveLength(0);
+    await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"))).rejects.toThrow();
   });
 });
 
@@ -467,23 +354,17 @@ describe("o esqueleto guardado e a entrevista do esqueleto não brigam pelo mesm
   });
 });
 
-describe("cada auditoria recebe só o que a sua pergunta exige", () => {
-  it("a auditoria de uma fase recebe a fatia que escreveu aquela fase, não o produto inteiro", async () => {
+describe("a auditoria do plano lê o plano inteiro contra as fontes", () => {
+  it("uma chamada, com o esqueleto, a arquitetura e todas as fases", async () => {
     await init(skeletonPath());
     const { agent } = await plan(skeletonPath());
 
-    const fase2 = agent.calls.find((call) => call.role === "auditor" && call.subject === "project-phases.md#P2");
-    expect(fase2?.prompt).toContain("US-1.1");
-    expect(fase2?.prompt).not.toContain("pertence a statuses");
-  });
-
-  it("a auditoria de coerência recebe o esqueleto inteiro: a pergunta dela é global", async () => {
-    await init(skeletonPath());
-    const { agent } = await plan(skeletonPath());
-
-    const coerencia = agent.calls.find((call) => call.role === "auditor" && call.subject === "project-phases.md#coerência");
-    expect(coerencia?.prompt).toContain("pertence a statuses");
-    expect(coerencia?.prompt).toContain("## Fases");
+    const auditorias = agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-phases.md");
+    expect(auditorias).toHaveLength(1);
+    expect(auditorias[0]?.prompt).toContain("pertence a statuses");
+    expect(auditorias[0]?.prompt).toContain("## Upstream document: architecture.md");
+    expect(auditorias[0]?.prompt).toContain("## Phase 1: Fundação de dados");
+    expect(auditorias[0]?.prompt).toContain("## Phase 2: Criar reserva");
   });
 });
 
@@ -675,12 +556,12 @@ describe("emenda que destrói a fase não entra no documento", () => {
     // A auditoria devolve uma vez; a emenda responde com a carta.
     let auditou = 0;
     steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md" },
       respond: {
         stdout: () => {
           auditou += 1;
           return auditou === 1
-            ? "CAPIVARA_AUDIT_STATUS: REJECTED\nCAPIVARA_FINDING: Phase 1 | falta dizer o que acontece | decida e escreva\nCAPIVARA_REASON: falta decisão"
+            ? reject("Phase 1", "falta dizer o que acontece", "decida e escreva")
             : "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: ok";
         },
       },
@@ -715,12 +596,12 @@ describe("decisão que nasce na reescrita também chega ao desenvolvedor", () =>
     let auditou = 0;
     const steps = skeletonPath();
     steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md" },
       respond: {
         stdout: () => {
           auditou += 1;
           return auditou === 1
-            ? "CAPIVARA_AUDIT_STATUS: REJECTED\nCAPIVARA_FINDING: Phase 1 | falta dizer o prazo | decida\nCAPIVARA_REASON: falta decisão"
+            ? reject("Phase 1", "falta dizer o prazo", "decida")
             : "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: ok";
         },
       },
@@ -737,7 +618,6 @@ describe("decisão que nasce na reescrita também chega ao desenvolvedor", () =>
 
     const { outcome, agent, anunciado } = await planComAnuncioEResposta(steps, async () => "1");
 
-    expect(anunciado).toContain("a reescrita deixou decisão pendente");
     const perguntas = agent.calls.filter((call) => call.subject === "project-phases.md:gaps");
     expect(perguntas.length).toBeGreaterThan(0);
     expect(perguntas.at(-1)?.prompt).toContain("qual é o prazo de garantia padrão");
@@ -770,51 +650,14 @@ describe("decisão em aberto volta a quem decide, não ao escritor", () => {
     expect(escrita?.prompt).toContain("Decisions taken after the skeleton was written");
   });
 
-  it("reabre a pergunta quando o auditor devolve e há decisão pendente", async () => {
-    await init(skeletonPath(), async () => "");   // a entrevista fica sem resposta
-
-    let auditou = 0;
-    const steps = skeletonPath();
-    steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
-      respond: {
-        stdout: () => {
-          auditou += 1;
-          return auditou === 1
-            ? "CAPIVARA_AUDIT_STATUS: REJECTED\nCAPIVARA_FINDING: Phase 1 | a matriz permanece pendente | obter a decisão aceita\nCAPIVARA_REASON: falta decisão"
-            : "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: ok";
-        },
-      },
-      repeat: true,
-    });
-
-    /*
-     * A insistência do começo do `plan` é respondida em aberto — "" mantém a
-     * decisão pendente —, então ela continua em aberto quando o auditor esbarra
-     * nela. É o caso que importa: a decisão fica sem dono até alguém decidir, e
-     * quem decide é perguntado no ponto em que a decisão volta a fazer diferença.
-     */
-    let vez = 0;
-    const { agent, anunciado } = await planComAnuncioEResposta(steps, async () => {
-      vez += 1;
-      return vez <= 3 ? "" : "1";
-    });
-
-    expect(anunciado).toContain("não vou fechar o run sem perguntar de novo");
-    expect(anunciado).toContain("passam a valer como autoridade");
-
-    // A decisão do desenvolvedor chega à emenda como autoridade.
-    const emenda = agent.calls.filter((call) => call.stage === "authoring" && call.subject === "phase-p01").at(-1);
-    expect(emenda?.prompt).toContain("esta decisão é a autoridade");
-  });
 
   it("não repergunta a mesma decisão a cada devolução — isso seria trocar um laço por outro", async () => {
     await init(skeletonPath(), async () => "");
 
     const steps = skeletonPath();
     steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
-      respond: { stdout: "CAPIVARA_AUDIT_STATUS: REJECTED\nCAPIVARA_FINDING: Phase 1 | pendente | decida\nCAPIVARA_REASON: falta" },
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md" },
+      respond: { stdout: reject("Phase 1", "pendente", "decida") },
       repeat: true,
     });
 
@@ -880,92 +723,6 @@ describe("achado mecânico não vai a arbitragem", () => {
   });
 });
 
-/*
- * O auditor tinha dois canais e nenhum chegava a tempo a quem decide: o finding
- * vai ao escritor, e a ressalva só é lida no relatório, depois de o run terminar.
- * Quando o que falta é uma DECISÃO, mandar ao escritor é pedir que ele invente.
- *
- * O caminho até o desenvolvedor existia e era caro: o levantamento abre quando o
- * MESMO achado volta pela segunda vez, e o impasse quando o teto estoura. Entre a
- * primeira leitura e a primeira pergunta havia sempre um ciclo inteiro.
- */
-describe("o auditor pergunta ao desenvolvedor, na primeira leitura", () => {
-  const comDecisao = [
-    "CAPIVARA_AUDIT_STATUS: REJECTED",
-    "CAPIVARA_FINDING: Phase 1 | o critério não diz o que acontece na recusa | descreva o efeito observável",
-    "CAPIVARA_DECISION: Phase 1 · statuses | A tabela de statuses é fixa ou o operador cria status novo? | Fixa: as três linhas vêm do seed e ninguém acrescenta | Aberta: o operador cadastra status novos",
-    "CAPIVARA_REASON: falta uma decisão que nenhuma fonte contém",
-  ].join("\n");
-
-  it("a decisão vai à tela com as leituras dele, e volta ao escritor como autoridade", async () => {
-    await init(skeletonPath());
-
-    let auditou = 0;
-    const steps = skeletonPath();
-    steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
-      respond: {
-        stdout: () => {
-          auditou += 1;
-          return auditou === 1 ? comDecisao : "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: ok";
-        },
-      },
-      repeat: true,
-    });
-
-    const perguntadas: string[] = [];
-    const agent = fakeAgent(steps);
-    const dito: string[] = [];
-    await runPlan({
-      projectRoot,
-      request,
-      ...comum,
-      call: agent.call,
-      announce: (linha) => void dito.push(linha),
-      ask: async (question) => {
-        perguntadas.push(`${question.topic} :: ${question.options.map((opcao) => opcao.label).join(" | ")}`);
-        return "1";
-      },
-    });
-
-    expect(dito.join("\n")).toContain("ninguém na mesa pode tomar");
-    // As duas leituras do auditor chegam como opções: pergunta sem opção entra em laço.
-    expect(perguntadas.join("\n")).toContain("Fixa: as três linhas vêm do seed");
-    expect(perguntadas.join("\n")).toContain("Aberta: o operador cadastra status novos");
-
-    // E a escolha volta ao escritor junto do achado, como autoridade.
-    const emenda = agent.calls.filter((call) => call.stage === "authoring" && call.subject === "phase-p01").at(-1);
-    expect(emenda?.prompt).toContain("esta decisão é a autoridade acima do auditor");
-    expect(emenda?.prompt).toContain("Fixa: as três linhas vêm do seed");
-  });
-
-  it("uma vez por decisão: o auditor é sem memória e a levantaria de novo", async () => {
-    await init(skeletonPath());
-
-    const steps = skeletonPath();
-    steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
-      respond: { stdout: comDecisao },
-      repeat: true,
-    });
-
-    let perguntas = 0;
-    const agent = fakeAgent(steps);
-    await runPlan({
-      projectRoot,
-      request,
-      ...comum,
-      call: agent.call,
-      ask: async (question) => {
-        if (question.topic.includes("statuses")) perguntas += 1;
-        return "1";
-      },
-      decideStandoff: async () => "publicar",
-    }).catch(() => undefined);
-
-    expect(perguntas).toBe(1);
-  });
-});
 
 /*
  * O teto de lacunas era seis rodadas de cinco perguntas: trinta decisões por run.
@@ -1101,55 +858,6 @@ describe("a rodada de lacunas não tem teto", () => {
   });
 });
 
-/*
- * O ensaio do verificador reprovava, o escritor tinha uma rodada, e se o veredito
- * se mantivesse o run terminava em NOT READY com o plano publicado e uma lista de
- * endereços na tela. É o mesmo desacordo de leitura do levantamento de auditoria,
- * com outro par — e a mesma pessoa capaz de encerrá-lo estava no terminal.
- */
-describe("o ensaio também pergunta antes de bloquear", () => {
-  const reprovaUm = (): ScriptStep => ({
-    match: { role: "verifier", stage: "verify" },
-    respond: {
-      stdout: (call) =>
-        rehearsedAddresses(call.prompt)
-          .map((address, indice) =>
-            indice === 0
-              ? `CRITERION ${address}: UNOBSERVABLE — dois verificadores honestos discordariam`
-              : `CRITERION ${address}: OBSERVABLE — dá para abrir o arquivo e olhar`,
-          )
-          .join("\n"),
-    },
-    repeat: true,
-  });
-
-  it("mantido por decisão do desenvolvedor, o critério deixa de bloquear o gate", async () => {
-    await init(skeletonPath());
-
-    const steps = skeletonPath().filter((step) => step.match.role !== "verifier");
-    steps.push(reprovaUm());
-
-    const perguntadas: string[] = [];
-    const dito: string[] = [];
-    const agent = fakeAgent(steps);
-    const outcome = await runPlan({
-      projectRoot,
-      request,
-      ...comum,
-      call: agent.call,
-      announce: (linha) => void dito.push(linha),
-      ask: async (question) => {
-        perguntadas.push(question.topic);
-        // Opção 2: vale o critério como está.
-        return question.topic.startsWith("ensaio") ? "2" : "use as recomendações";
-      },
-    });
-
-    expect(perguntadas.some((topico) => topico.startsWith("ensaio ·"))).toBe(true);
-    expect(dito.join("\n")).toContain("mantidos por sua decisão");
-    expect(outcome.readiness.checks.find((check) => check.id === "ensaio")?.passed).toBe(true);
-  });
-});
 
 /*
  * O `assistencia2` mostrou uma degradação silenciosa: onze marcadores
@@ -1170,31 +878,6 @@ describe("marcador pendente não rebaixa a auditoria", () => {
   - **Traces:** statuses, reservations
 `;
 
-  it("audita fase por fase mesmo com o marcador no texto", async () => {
-    await init(skeletonPath());
-
-    const steps = skeletonPath();
-    steps.unshift({
-      match: { role: "writer", stage: "authoring", subject: "phase-p01" },
-      respond: { stdout: comMarcador },
-      repeat: true,
-    });
-    // O escritor não consegue virar o marcador em pergunta, e o desenvolvedor não
-    // fecha: o marcador atravessa, que é o caso que derrubava a auditoria.
-    steps.unshift({
-      match: { role: "writer", stage: "interview", subject: "project-phases.md:gaps" },
-      respond: { stdout: JSON.stringify({ contract: "capivara-questions/v1", questions: [] }) },
-      repeat: true,
-    });
-
-    const { agent, anunciado } = await planComAnuncioEResposta(steps, async () => "não sei");
-
-    const auditorias = agent.calls.filter((call) => call.stage === "audit").map((call) => call.subject);
-    expect(auditorias).toContain("project-phases.md#P1");
-    expect(auditorias).toContain("project-phases.md#coerência");
-    expect(auditorias).not.toContain("project-phases.md");
-    expect(anunciado).toContain("marcador(es) de decisão pendente para auditar a estrutura");
-  });
 
   it("o marcador continua bloqueando a prontidão: é ao desenvolvedor que ele fala", async () => {
     await init(skeletonPath());
@@ -1275,65 +958,6 @@ describe("a rodada de lacunas não devolve plano marcado", () => {
   });
 });
 
-/*
- * O impasse era a PRIMEIRA parada quando os achados não repetiam — e é exatamente
- * a pergunta discursiva que a gente combinou de não fazer mais: texto livre, três
- * comandos, no pior momento. No `assistencia2` ele apareceu com dois achados
- * concretos que cabiam numa escolha numerada.
- */
-describe("o impasse arbitra com opções antes de virar prosa", () => {
-  it("cada ponto insistido vai à tela com as duas leituras, e a prosa não aparece", async () => {
-    await init(skeletonPath());
-
-    // O auditor devolve um achado DIFERENTE a cada volta: nada repete, então o
-    // levantamento normal nunca abriria.
-    let volta = 0;
-    const steps = skeletonPath();
-    steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
-      respond: {
-        stdout: () => {
-          volta += 1;
-          return volta > 4
-            ? "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: ok"
-            : [
-                "CAPIVARA_AUDIT_STATUS: REJECTED",
-                `CAPIVARA_FINDING: Phase 1, ponto ${volta} | o campo ${volta} não tem as quatro linhas exigidas no pedido | exija uma área de texto de quatro linhas com rolagem`,
-                "CAPIVARA_REASON: falta o que o pedido pede",
-              ].join("\n");
-        },
-      },
-      repeat: true,
-    });
-
-    const perguntadas: { topic: string; opcoes: string[] }[] = [];
-    let impasseEmProsa = 0;
-    const agent = fakeAgent(steps);
-    const dito: string[] = [];
-    await runPlan({
-      projectRoot,
-      request,
-      ...comum,
-      call: agent.call,
-      announce: (linha) => void dito.push(linha),
-      ask: async (question) => {
-        perguntadas.push({ topic: question.topic, opcoes: question.options.map((opcao) => opcao.label) });
-        return "1";
-      },
-      decideStandoff: async () => {
-        impasseEmProsa += 1;
-        return "publicar";
-      },
-    });
-
-    const arbitragens = perguntadas.filter((pergunta) => pergunta.topic.startsWith("auditoria ·"));
-    expect(arbitragens.length).toBeGreaterThan(0);
-    // Duas leituras numeradas, nunca um prompt em branco.
-    expect(arbitragens[0]?.opcoes.length).toBeGreaterThanOrEqual(2);
-    expect(dito.join("\n")).toContain("sobreviveram a todas as devoluções");
-    expect(impasseEmProsa).toBe(0);
-  });
-});
 
 /*
  * `persistAnswers` dizia, em comentário, que grava "para o run seguinte não

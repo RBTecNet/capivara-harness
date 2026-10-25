@@ -50,7 +50,8 @@ export interface LineSource {
 }
 
 export interface LineIO {
-  ask: (prompt: string) => Promise<string>;
+  /** `signal` retira a pergunta: a leitura pendente rejeita com `PerguntaRetiradaError`. */
+  ask: (prompt: string, signal?: AbortSignal) => Promise<string>;
   write: (text: string) => void;
 }
 
@@ -58,6 +59,14 @@ export class InputEndedError extends Error {
   constructor() {
     super("a entrada terminou");
     this.name = "InputEndedError";
+  }
+}
+
+/** A pergunta saiu da tela antes da resposta: o prazo dela venceu. */
+export class PerguntaRetiradaError extends Error {
+  constructor() {
+    super("a pergunta foi retirada: o prazo venceu");
+    this.name = "PerguntaRetiradaError";
   }
 }
 
@@ -89,7 +98,8 @@ export function createLineIO(source: LineSource, write: (text: string) => void, 
 
   return {
     write,
-    ask: (prompt) => {
+    ask: (prompt, signal) => {
+      if (signal?.aborted) return Promise.reject(new PerguntaRetiradaError());
       if (options.interactive === true && buffered.length > 0) {
         const descartadas = buffered.length;
         buffered.length = 0;
@@ -102,7 +112,17 @@ export function createLineIO(source: LineSource, write: (text: string) => void, 
       const pronto = buffered.shift();
       if (pronto !== undefined) return Promise.resolve(pronto);
       if (closed) return Promise.reject(new InputEndedError());
-      return new Promise<string>((resolve, reject) => waiting.push({ resolve, reject }));
+      return new Promise<string>((resolve, reject) => {
+        const espera = { resolve, reject };
+        waiting.push(espera);
+        // Retirada, a pergunta sai da fila: a próxima linha digitada é da pergunta seguinte.
+        signal?.addEventListener("abort", () => {
+          const posicao = waiting.indexOf(espera);
+          if (posicao >= 0) waiting.splice(posicao, 1);
+          write("\n");
+          reject(new PerguntaRetiradaError());
+        }, { once: true });
+      });
     },
   };
 }

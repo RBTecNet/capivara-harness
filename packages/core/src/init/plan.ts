@@ -4,7 +4,7 @@
  * `init` entrega as fases; `plan` detalha cada uma até o plano que o loop
  * executa. São o mesmo orquestrador com estágios diferentes — não duas
  * implementações — porque tudo o que protege a execução é comum aos dois:
- * dimensionamento, cobertura, auditoria, ensaio.
+ * dimensionamento, cobertura, auditoria.
  *
  * O que muda é o que cada estágio enxerga. O `init` olha o produto inteiro uma
  * vez; o `plan` olha uma fase de cada vez, com a fatia dela.

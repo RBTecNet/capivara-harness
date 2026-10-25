@@ -26,7 +26,6 @@ import {
 } from "../../src/contract/index.js";
 import type { Architecture } from "../../src/contract/index.js";
 import { arquiteturaSemTestes, faseSemTestes } from "../support/sem-testes.js";
-import { applyMaterialityReview, materialityInput, materialityPrompt } from "../../src/audit/materiality.js";
 import type { AuditVerdict } from "../../src/audit/index.js";
 import { planningScopeBlock } from "../../src/prompts/index.js";
 
@@ -240,63 +239,3 @@ describe("§128 · A6 — a reorganização sabe quais fases ela não tocou", ()
   });
 });
 
-describe("§128 · A5 — a triagem recebe a regra do harness e não a anula", () => {
-  const p3 = parsePhases(["# Parallel Lab — Project Phases", "", "<!-- inputs: a.md@sha256:000000000000 -->", "", fase(1, FASES.r1["3"]!).replace("## Phase 1:", "## Phase 1:"), "", fase(2, FASES.r1["2"]!)].join("\n"));
-  if (!p3.ok) throw new Error("fases do run não lidas");
-  const arquitetura = "## Decisões de dados\n- tarefas.status: Armazenar status como texto e aceitar somente pendente, em andamento ou concluída ao criar ou atualizar.";
-  /** Os achados reais: o da Task 10 (fase 3 do run, aqui a fase 1 do documento), o da responsividade (fase 2) e o da migração (rodada 3). */
-  const original: AuditVerdict = {
-    status: "REJECTED",
-    findings: [
-      { where: "Task 10", problem: "A tarefa inclui “concluir a cobertura automatizada própria do módulo”, prescrevendo a entrega de uma suíte de testes, o que contraria a responsabilidade do planejamento.", fix: "Restrinja a tarefa à exclusão com confirmação.", phase: 1 },
-      { where: "Task em `src/App.tsx`", problem: "Os critérios não tornam verificável a exigência de interface responsiva declarada no objetivo e na arquitetura.", fix: "Acrescente um critério observável.", phase: 2 },
-      { where: "Critérios das migrações", problem: "O critério coloca em “As migrações” a exigência de que `tarefas.status` aceite somente os três valores.", fix: "Limite o critério da migração.", phase: 1 },
-    ],
-    remarks: [], decisions: [], reason: "há defeito",
-  };
-  const input = materialityInput(original, { request: PEDIDO, decisions: [], phases: p3.document.phases, skeleton: "# Parallel Lab — Skeleton", architecture: arquitetura, harness: planningScopeBlock() });
-
-  it("a arquitetura e a regra do planejamento chegam como fontes próprias, e o prompt diz que a regra não se suspende", () => {
-    expect(input.sources.map((source) => source.id)).toEqual(["request", "decisions", "harness", "skeleton", "architecture", "P1", "P2"]);
-    const prompt = materialityPrompt(input);
-    expect(prompt).toContain("The `harness` source is the harness's own planning rule, and no other source suspends it");
-    expect(prompt).not.toContain("test organization)");
-  });
-
-  it("o parecer do run que descartou a Task 10 citando a própria Task 10 não remove o bloqueio", () => {
-    const parecer = JSON.stringify({ reviews: [
-      { id: "F1", disposition: "ADVISORY", reason: "A fonte não proíbe atribuir testes à fase; a própria tarefa inclui essa entrega.", evidence: [{ source: "P1", quote: "implementar a exclusão com confirmação e concluir a cobertura automatizada própria do módulo" }] },
-      { id: "F2", disposition: "ADVISORY", reason: "A responsividade já está declarada como entrega da fase.", evidence: [{ source: "P2", quote: "Em `src/App.tsx`" }] },
-      { id: "F3", disposition: "KEEP" },
-    ] });
-    const resultado = applyMaterialityReview(original, input, parecer, [PEDIDO]);
-    expect(resultado.verdict.findings.map((finding) => finding.where)).toEqual(["Task 10", "Critérios das migrações"]);
-    expect(resultado.defects.join("\n")).toContain("F1: a citação da triagem mostra o plano prescrevendo teste (I-16: concluir a cobertura automatizada");
-    // O parecer legítimo (fase 2) continua valendo: a guarda é do I-16, não da triagem inteira.
-    expect(resultado.advisory).toBe(1);
-  });
-
-  it("a citação da arquitetura sob o rótulo errado (o F5 da rodada 3) continua recusada; sob o rótulo certo, vale", () => {
-    const comRotulo = (source: string) => JSON.stringify({ reviews: [
-      { id: "F1", disposition: "KEEP" },
-      { id: "F2", disposition: "KEEP" },
-      { id: "F3", disposition: "ADVISORY", reason: "As fontes não proíbem a restrição no esquema.", evidence: [{ source, quote: "tarefas.status: Armazenar status como texto e aceitar somente pendente, em andamento ou concluída ao criar ou atualizar." }] },
-    ] });
-    const errado = applyMaterialityReview(original, input, comRotulo("request"), [PEDIDO]);
-    expect(errado.verdict.findings).toHaveLength(3);
-    expect(errado.defects).toEqual(["F3: a citação da triagem não existe na fonte indicada"]);
-    const certo = applyMaterialityReview(original, input, comRotulo("architecture"), [PEDIDO]);
-    expect(certo.verdict.findings.map((finding) => finding.where)).toEqual(["Task 10", "Task em `src/App.tsx`"]);
-  });
-
-  it("uma citação inventada nunca remove bloqueio", () => {
-    const parecer = JSON.stringify({ reviews: [
-      { id: "F1", disposition: "ADVISORY", reason: "a task só descreve a exclusão", evidence: [{ source: "P1", quote: "implementar apenas a exclusão com confirmação, sem testes" }] },
-      { id: "F2", disposition: "KEEP" },
-      { id: "F3", disposition: "KEEP" },
-    ] });
-    const resultado = applyMaterialityReview(original, input, parecer, [PEDIDO]);
-    expect(resultado.verdict).toBe(original);
-    expect(resultado.advisory).toBe(0);
-  });
-});

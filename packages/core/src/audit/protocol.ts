@@ -10,7 +10,7 @@
  */
 
 import { phaseReferences } from "../contract/phase-references.js";
-import { desgrudarChaves } from "../contract/protocolo.js";
+import { lerProtocolo } from "../contract/protocolo.js";
 
 export type AuditStatus = "APPROVED" | "REJECTED";
 
@@ -46,7 +46,17 @@ export interface Finding {
    * fases aprovadas voltavam à fila.
    */
   phase?: number;
+  /**
+   * A classe que o auditor do plano declarou (etapa 2 da redução). Só as de
+   * `CLASSES_QUE_BLOQUEIAM` podem devolver o plano, e só depois de o Core
+   * conferir o que cada uma exige (`audit/admissibilidade.ts`). Ausente nos
+   * achados de outras auditorias, que não usam classe.
+   */
+  classe?: string;
 }
+
+/** As classes de achado que o protocolo reconhece no primeiro campo. */
+const CLASSES = /^(?:CONTRADICTION|INTERFACE|DEPENDENCY|OTHER)$/iu;
 
 export interface Remark {
   where: string;
@@ -143,42 +153,8 @@ const REMARK = /^CAPIVARA_REMARK:\s*(.*)$/;
 const DECISION = /^CAPIVARA_DECISION:\s*(.*)$/;
 const REASON = /^CAPIVARA_REASON:\s*(.*)$/;
 
-/** As cinco chaves do protocolo, para achá-las onde quer que tenham parado. */
+/** As cinco chaves do protocolo, para a leitura tolerante achá-las onde quer que tenham parado. */
 const CHAVES = "CAPIVARA_(?:AUDIT_STATUS|FINDING|REMARK|DECISION|REASON)";
-
-/**
- * Tolerar a embalagem, nunca o conteúdo.
- *
- * O plano do `MCP_teste2` morreu por uma quebra de linha. O auditor escreveu
- * "Vou conferir o calendário das datas…CAPIVARA_AUDIT_STATUS: APPROVED" — a
- * frase de abertura e a chave grudadas, sem `\n` no meio. O veredito era bom:
- * aprovado, com uma ressalva e um motivo. O parser não achou a chave na coluna
- * 1, o auditor repetiu o mesmo hábito na segunda tentativa, e o run inteiro
- * parou com oito fases prontas e duas emendas pendentes.
- *
- * Isso é defeito de forma, e defeito de forma não pode custar um run — é a mesma
- * regra do §34.8. O verificador do build já lê as linhas TASK "ignorando prosa
- * em volta e indentação acidental"; aqui a régua era outra, e a diferença só
- * aparecia com um modelo de hábitos diferentes.
- *
- * O que é tolerado: a chave colada no fim de uma frase, indentação, um marcador
- * de lista na frente e o negrito do Markdown em volta. O que NÃO é tolerado
- * continua igual: três campos num finding, um status, um motivo.
- */
-export function desembrulhar(output: string): string {
-  return desgrudarChaves(output, `${CHAVES}:`)
-    .split("\n")
-    .map((linha) =>
-      linha
-        .trim()
-        // Marcador de lista ou citação antes da chave.
-        .replace(new RegExp(`^[-*>\\s]+(?=\\*{0,2}${CHAVES})`), "")
-        // O negrito que sobrou depois da chave: **CAPIVARA_FINDING:** …
-        // O de antes já saiu com o marcador, porque `*` está na classe acima.
-        .replace(new RegExp(`^(${CHAVES}:)\\*\\*`), "$1"),
-    )
-    .join("\n");
-}
 
 /**
  * O travessão no lugar do primeiro "|": o caso do `teste_openrouter3`.
@@ -237,7 +213,7 @@ function recuperarTravessao(fields: readonly string[]): { fields: string[]; nota
 }
 
 export function parseAudit(rawOutput: string): AuditParse {
-  const output = desembrulhar(rawOutput);
+  const output = lerProtocolo(rawOutput, CHAVES);
   const defects: string[] = [];
   const applied: string[] = [];
   const statuses: string[] = [];
@@ -251,13 +227,16 @@ export function parseAudit(rawOutput: string): AuditParse {
 
     const status = STATUS.exec(line);
     if (status) {
-      statuses.push((status[1] ?? "").trim());
+      // A caixa é embalagem: "approved" é APPROVED.
+      statuses.push((status[1] ?? "").trim().toUpperCase());
       continue;
     }
 
     const finding = FINDING.exec(line);
     if (finding) {
       let fields = (finding[1] ?? "").split("|").map((field) => field.trim());
+      const classe = fields.length >= 4 && CLASSES.test(fields[0] ?? "") ? (fields[0] ?? "").toUpperCase() : undefined;
+      if (classe !== undefined) fields = fields.slice(1);
       const recuperado = recuperarTravessao(fields);
       if (recuperado) {
         fields = recuperado.fields;
@@ -275,7 +254,7 @@ export function parseAudit(rawOutput: string): AuditParse {
         defects.push(`o terceiro campo do finding em "${where}" apenas repete o problema; ele deve dizer o que fazer`);
         continue;
       }
-      findings.push({ where: where!, problem: problem!, fix });
+      findings.push({ where: where!, problem: problem!, fix, ...(classe !== undefined ? { classe } : {}) });
       continue;
     }
 
@@ -346,7 +325,7 @@ export function parseAudit(rawOutput: string): AuditParse {
 export function formatVerdict(verdict: AuditVerdict): string {
   const lines = [`CAPIVARA_AUDIT_STATUS: ${verdict.status}`];
   for (const finding of verdict.findings) {
-    lines.push(`CAPIVARA_FINDING: ${finding.where} | ${finding.problem} | ${finding.fix}`);
+    lines.push(`CAPIVARA_FINDING: ${finding.classe !== undefined ? `${finding.classe} | ` : ""}${finding.where} | ${finding.problem} | ${finding.fix}`);
   }
   for (const remark of verdict.remarks) {
     lines.push(`CAPIVARA_REMARK: ${remark.where} | ${remark.observation}`);

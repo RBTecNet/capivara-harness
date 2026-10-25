@@ -9,7 +9,7 @@ import {
   writerDid,
 } from "../../src/audit/index.js";
 import type { AuditAttempt, AuditVerdict } from "../../src/audit/index.js";
-import { auditorPrompt } from "../../src/prompts/index.js";
+import { planAuditPrompt, planningScopeBlock } from "../../src/prompts/index.js";
 
 const approved = ["CAPIVARA_AUDIT_STATUS: APPROVED", "CAPIVARA_REASON: fiel ao prompt e às decisões aceitas"].join("\n");
 const rejected = [
@@ -208,96 +208,6 @@ describe("ciclo de devolução", () => {
   });
 });
 
-describe("prompt do auditor", () => {
-  const context = {
-    language: "português do Brasil",
-    document: "user-stories.md",
-    executable: false,
-    request: "um sistema de reservas",
-    decisions: ["Stack: Node"],
-    dispositions: ["Q-01 ACCEPTED"],
-    upstream: [],
-    upstreamRemarks: [],
-    content: "# X — User Stories",
-  };
-
-  it("o eixo de executabilidade só aparece no plano executável", () => {
-    expect(auditorPrompt(context)).not.toContain("EXECUTABILITY");
-    expect(auditorPrompt({ ...context, document: "project-phases.md", executable: true })).toContain("EXECUTABILITY");
-  });
-
-  it("o eixo de executabilidade reprova fase que não cabe numa sessão", () => {
-    const prompt = auditorPrompt({ ...context, document: "project-phases.md", executable: true });
-    expect(prompt).toContain("exceed one session");
-    expect(prompt).toContain("15 tasks");
-  });
-
-  it("declara a regra da dúvida: aprova e ressalva", () => {
-    expect(auditorPrompt(context)).toContain("When in doubt, approve and remark");
-  });
-
-  it("proíbe rejeitar por preferência de escrita", () => {
-    expect(auditorPrompt(context)).toContain("would have written differently");
-  });
-
-  it("proíbe o auditor de editar o documento", () => {
-    expect(auditorPrompt(context)).toContain("cannot edit it");
-  });
-
-  it("manda não reauditar o que o parser já provou", () => {
-    expect(auditorPrompt(context)).toContain("Do not re-audit the shape the parser owns");
-  });
-
-  it("proíbe revisar SQL no documento de dados", () => {
-    const prompt = auditorPrompt({ ...context, document: "database-schema.md" });
-    expect(prompt).toContain("NO DDL, NO SQL and NO triggers");
-    expect(prompt).toContain("Never review SQL here");
-    expect(prompt).toContain("a finding the writer cannot close");
-  });
-
-  it("declara a fronteira entre declarar e implementar", () => {
-    const prompt = auditorPrompt(context);
-    expect(prompt).toContain("DECLARES what must be true");
-    expect(prompt).toContain("belongs to the execution plan");
-    expect(prompt).toContain("Never reject a document for not implementing what it correctly declares");
-  });
-
-  it("nomeia o que é trabalho e não pertence ao documento", () => {
-    const prompt = auditorPrompt(context);
-    for (const trabalho of ["Seed migrations", "triggers", "runtime validation", "immutability enforcement"]) {
-      expect(prompt).toContain(trabalho);
-    }
-  });
-
-  it("avisa que um finding impossível de fechar para o run", () => {
-    expect(auditorPrompt(context)).toContain("a finding the writer cannot close");
-  });
-
-  it("as ressalvas de montante chegam à auditoria seguinte", () => {
-    const prompt = auditorPrompt({
-      ...context,
-      document: "project-phases.md",
-      executable: true,
-      upstreamRemarks: [
-        { document: "user-stories.md", where: "US-3.1", observation: "a ausência de dependências não é explicitada" },
-      ],
-    });
-    expect(prompt).toContain("Remarks from earlier audits");
-    expect(prompt).toContain("a ausência de dependências não é explicitada");
-    expect(prompt).toContain("becomes a defect the loop pays for");
-  });
-
-  it("o eixo de executabilidade recusa critério insatisfazível", () => {
-    const prompt = auditorPrompt({ ...context, document: "project-phases.md", executable: true });
-    expect(prompt).toContain("UNSATISFIABLE");
-    expect(prompt).toContain("reject");
-    expect(prompt).toContain("must name the absence instead");
-  });
-
-  it("carrega o bloco de idioma resolvido", () => {
-    expect(auditorPrompt(context)).toContain("português do Brasil");
-  });
-});
 
 describe("o impasse fala da versão atual", () => {
   const rejeita = (where: string, problem: string) => ({
@@ -513,5 +423,43 @@ describe("CAPIVARA_DECISION — a pergunta que vai ao desenvolvedor", () => {
     const lido = parseAudit(comDecisao);
     if (!lido.ok) throw new Error("deveria ler");
     expect(formatVerdict(lido.verdict)).toContain("CAPIVARA_DECISION: Phase 1 · statuses |");
+  });
+});
+
+/*
+ * A auditoria do plano inteiro (etapa 2 da redução): três classes bloqueiam, o
+ * resto é observação, e nenhuma decisão de produto nasce do auditor.
+ */
+describe("prompt da auditoria do plano", () => {
+  const prompt = planAuditPrompt({
+    language: "português do Brasil",
+    request: "um sistema de reservas",
+    decisions: ["clientes são desativados, nunca excluídos"],
+    upstream: [{ name: "architecture.md", content: "# arquitetura" }],
+    content: "## Phase 1: X",
+    totalPhases: 1,
+  });
+
+  it("só as três classes bloqueiam, e cada uma diz o que o Core confere", () => {
+    for (const classe of ["CONTRADICTION", "INTERFACE", "DEPENDENCY"]) expect(prompt).toContain(classe);
+    expect(prompt).toContain("Quote BOTH passages between « and »");
+    expect(prompt).toContain("is a CAPIVARA_REMARK");
+  });
+
+  it("o auditor não cria decisão de produto nem caça precisão", () => {
+    expect(prompt).not.toContain("CAPIVARA_DECISION");
+    expect(prompt).not.toContain("PRECISION");
+    expect(prompt).toContain("You never create a product decision");
+  });
+
+  it("a divisão de fases vai à arquitetura pelo endereço `Architecture`", () => {
+    expect(prompt).toContain("start the\nlocation field with `Architecture`");
+  });
+
+  it("leva a regra do planejamento, as decisões, as fontes e o plano inteiro", () => {
+    expect(prompt).toContain(planningScopeBlock());
+    expect(prompt).toContain("- clientes são desativados, nunca excluídos");
+    expect(prompt).toContain("## Upstream document: architecture.md");
+    expect(prompt).toContain("## The plan under audit — 1 phase(s)\n## Phase 1: X");
   });
 });

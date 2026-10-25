@@ -479,7 +479,7 @@ describe("B-08 a B-12 · auditoria", () => {
   it("B-08 auditor devolve e o escritor corrige", async () => {
     const steps = happyPath();
     steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1", attempt: 1 },
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md", attempt: 1 },
       respond: { stdout: reject("Phase 1", "critério não verificável", "use um limite numérico observável") },
     });
 
@@ -489,87 +489,47 @@ describe("B-08 a B-12 · auditoria", () => {
     expect(reescrita?.prompt).toContain("use um limite numérico observável");
   });
 
-  it("B-09 finding sem orientação é saída inválida e repete só o auditor", async () => {
-    const steps = happyPath();
-    steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
-      respond: { stdout: "CAPIVARA_AUDIT_STATUS: REJECTED\nCAPIVARA_FINDING: Phase 1 | está ruim\nCAPIVARA_REASON: ruim" },
-    });
-    const { outcome, agent } = await init(steps);
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    const auditorias = agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-phases.md#P1");
-    // Duas auditorias, ambas na tentativa 1: o escritor não pagou pelo erro de formato.
-    expect(auditorias).toHaveLength(2);
-    expect(auditorias.every((call) => call.attempt === 1)).toBe(true);
-  });
-
-  /**
-   * O que travou o plano do MCP_teste2.
-   *
-   * A rodada 1 aprovou quatro fases e reprovou uma. A rodada 2 reauditou tudo e
-   * trouxe dez findings nas QUATRO que ela mesma tinha aprovado, sem que uma
-   * linha delas tivesse mudado — e o teto de devoluções estourou com o plano
-   * pronto. O auditor é independente e sem memória, que é o que o torna
-   * auditor; perguntar de novo sobre texto que não mudou não é independência,
-   * é pagar por um sorteio.
+  /*
+   * Ilegível nunca vira aprovação, e não ganha segunda chance de formato
+   * (etapa 2 da redução): a auditoria que a leitura tolerante não entende é
+   * auditoria que não aconteceu, e o plano não é publicado por ela.
    */
-  it("fase aprovada não volta ao auditor enquanto o texto dela não mudar", async () => {
+  it("B-09 finding sem orientação é saída ilegível: o plan para sem publicar e sem repetir o auditor", async () => {
     const steps = happyPath();
-    // Só a fase 2 é devolvida, e só na primeira rodada.
-    steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2", attempt: 1 },
-      respond: { stdout: reject("Phase 2", "critério não verificável", "use um limite numérico observável") },
-    });
-    // E a emenda MUDA o texto da fase 2: é o que faz o índice de critérios mudar.
-    steps.unshift({
-      match: { role: "writer", stage: "authoring", subject: "phase-p02", attempt: 2 },
-      respond: { stdout: PHASE_2.replace("Uma reserva nova nasce com status pendente", "Uma reserva nova nasce com status pendente e data de criação") },
-    });
-
-    const { outcome, agent } = await init(steps);
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-
-    const daPrimeira = agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-phases.md#P1");
-    // Uma auditoria só para a fase 1: ela passou na rodada 1 e não mudou depois.
-    expect(daPrimeira).toHaveLength(1);
-
-    // A fase reescrita volta, porque o texto dela mudou.
-    expect(agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-phases.md#P2").length).toBeGreaterThan(1);
-
-    /*
-     * E a pergunta global é feita de novo quando o índice MUDA: é a coerência
-     * que pega a contradição que nasce quando uma fase muda. Índice idêntico ao
-     * já aprovado, sob as mesmas decisões, não é reperguntado (§116).
-     */
-    expect(agent.calls.filter((call) => call.subject === "project-phases.md#coerência").length).toBeGreaterThan(1);
+    const agent = fakeAgent([
+      { match: { role: "auditor", stage: "audit", subject: "project-phases.md" }, respond: { stdout: "CAPIVARA_AUDIT_STATUS: REJECTED\nCAPIVARA_FINDING: Phase 1 | está ruim\nCAPIVARA_REASON: ruim" }, repeat: true },
+      ...steps,
+    ]);
+    await expect(runInit({ projectRoot, request, language: "português do Brasil", call: agent.call, ask: async () => "1" })).rejects.toThrow(/a auditoria do plano veio ilegível/);
+    expect(agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-phases.md")).toHaveLength(1);
+    await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).rejects.toThrow();
   });
 
-  it("índice idêntico ao já aprovado, sob as mesmas decisões, não volta à coerência", async () => {
-    const steps = happyPath();
-    // A fase 2 é devolvida uma vez e a emenda devolve o MESMO texto: nada muda no índice.
-    steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2", attempt: 1 },
-      respond: { stdout: reject("Phase 2", "critério não verificável", "use um limite numérico observável") },
-    });
-    const { outcome, agent } = await init(steps);
+
+  it("plano aprovado numa execução anterior, com a mesma auditoria, não volta ao auditor", async () => {
+    await init(happyPath());
+    const { outcome, agent } = await init(happyPath());
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(agent.calls.filter((call) => call.subject === "project-phases.md#coerência")).toHaveLength(1);
+    expect(agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-phases.md")).toHaveLength(0);
   });
 
-  it("B-10 teto de devoluções esgotado para e pergunta ao desenvolvedor", async () => {
+  it("B-10 o bloqueio que sobrevive à emenda para o plan, sem nova rodada e sem pergunta", async () => {
     const steps = happyPath();
     steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md" },
       respond: { stdout: reject("Phase 1", "continua errado", "declare o código HTTP devolvido") },
       repeat: true,
     });
-    await expect(init(steps, [], { maxAuditReturns: 2 })).rejects.toThrow(InitBlockedError);
+    const agent = fakeAgent(steps);
+    await expect(runInit({ projectRoot, request, language: "português do Brasil", call: agent.call, ask: async () => "1" })).rejects.toThrow(/bloqueou de novo depois da emenda/);
+    // Uma auditoria e mais uma depois da emenda, no máximo.
+    expect(agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-phases.md")).toHaveLength(2);
   });
 
   it("B-11 aprovação com ressalva não bloqueia e aparece no relatório", async () => {
     const steps = happyPath();
     steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md" },
       respond: {
         stdout: "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REMARK: Phase 1 | faltou índice em status_id\nCAPIVARA_REASON: fiel e conforme",
       },
@@ -595,7 +555,7 @@ describe("B-32 · reescrita do plano após devolução", () => {
   ])("encaminha endereços do auditor: $where / $fix", async ({ where, problem, fix, expected }) => {
     const steps = happyPath();
     steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#coerência", attempt: 1 },
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md", attempt: 1 },
       respond: { stdout: reject(where, problem, fix) },
     });
     const { outcome, agent } = await init(steps);
@@ -608,7 +568,7 @@ describe("B-32 · reescrita do plano após devolução", () => {
   it("reescreve APENAS a fase que o finding nomeia e remonta o documento inteiro", async () => {
     const steps = happyPath();
     steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2", attempt: 1 },
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md", attempt: 1 },
       respond: { stdout: reject("Phase 2", "o critério de sobreposição não é observável", "declare o código HTTP devolvido") },
     });
     steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02", attempt: 2 }, respond: { stdout: PHASE_2 } });
@@ -625,7 +585,7 @@ describe("B-32 · reescrita do plano após devolução", () => {
   it("o documento remontado mantém título, stamp e TODAS as fases", async () => {
     const steps = happyPath();
     steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P2", attempt: 1 },
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md", attempt: 1 },
       respond: { stdout: reject("Phase 2", "critério vago", "declare o código HTTP") },
     });
     steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p02", attempt: 2 }, respond: { stdout: PHASE_2 } });
@@ -646,7 +606,7 @@ describe("B-32 · reescrita do plano após devolução", () => {
   it("finding sem fase identificada reescreve todas, pelo conservador", async () => {
     const steps = happyPath();
     steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#coerência", attempt: 1 },
+      match: { role: "auditor", stage: "audit", subject: "project-phases.md", attempt: 1 },
       respond: { stdout: reject("Overview", "a ordem das fases não é fundação-primeiro", "reordene as fases") },
     });
     steps.push({ match: { role: "writer", stage: "authoring", subject: "phase-p01", attempt: 2 }, respond: { stdout: PHASE_1 } });
@@ -659,165 +619,6 @@ describe("B-32 · reescrita do plano após devolução", () => {
   });
 });
 
-describe("B-35 · impasse do auditor", () => {
-  function impasse(steps: ScriptStep[]): ScriptStep[] {
-    steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
-      respond: { stdout: reject("Phase 1", "a regra não é estrutural", "modele a restrição no esquema") },
-      repeat: true,
-    });
-    return steps;
-  }
-
-  it("a decisão do desenvolvedor volta ao escritor como autoridade, acima do auditor", async () => {
-    const steps = impasse(happyPath());
-    const agent = fakeAgent(steps);
-    let perguntado = "";
-
-    await runInit({
-      projectRoot,
-      request,
-      language: "português do Brasil",
-      maxAuditReturns: 2,
-      call: agent.call,
-      ask: async () => "use as recomendações",
-      decideStandoff: async (rendered) => {
-        perguntado = rendered;
-        return "PostgreSQL 16; as restrições que o DBML não expressa vão num bloco DDL abaixo";
-      },
-    }).catch(() => undefined);
-
-    expect(perguntado).toContain("O auditor insiste em:");
-    const reescrita = agent.calls.find(
-      (call) => call.stage === "authoring" && call.subject === "phase-p01" && call.prompt.includes("acima do auditor"),
-    );
-    expect(reescrita?.prompt).toContain("PostgreSQL 16");
-  });
-
-  it("publicar aceita como está e o run segue", async () => {
-    const steps = impasse(happyPath());
-    const agent = fakeAgent(steps);
-    const outcome = await runInit({
-      projectRoot,
-      request,
-      language: "português do Brasil",
-      maxAuditReturns: 2,
-      call: agent.call,
-      ask: async () => "use as recomendações",
-      decideStandoff: async () => "publicar",
-    });
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-  });
-
-  it("decidido uma vez, o auditor não volta a perguntar: findings viram ressalva", async () => {
-    const steps = impasse(happyPath());
-    const agent = fakeAgent(steps);
-    let vezesPerguntado = 0;
-
-    const outcome = await runInit({
-      projectRoot,
-      request,
-      language: "português do Brasil",
-      maxAuditReturns: 2,
-      call: agent.call,
-      ask: async () => "use as recomendações",
-      decideStandoff: async () => {
-        vezesPerguntado += 1;
-        return "as restrições ficam declaradas; implementá-las é tarefa do plano";
-      },
-    });
-
-    expect(vezesPerguntado).toBe(1);
-    expect(outcome.report.remarks.some((entry) => entry.remark.observation.includes("decisão do desenvolvedor"))).toBe(true);
-  });
-
-  it("abortar encerra o run com o impasse no diagnóstico", async () => {
-    const steps = impasse(happyPath());
-    await expect(
-      runInit({
-        projectRoot,
-        request,
-        language: "português do Brasil",
-        maxAuditReturns: 2,
-        call: fakeAgent(steps).call,
-        ask: async () => "use as recomendações",
-        decideStandoff: async () => "abortar",
-      }),
-    ).rejects.toThrow(/Decisão do desenvolvedor: abortar/);
-  });
-
-  /*
-   * A prosa do impasse deixou de ser a primeira parada (§76.3): o esgotamento do
-   * orçamento arbitra cada ponto insistido com as duas leituras numeradas, e só
-   * quando não há mais nada a arbitrar é que o texto livre aparece. Este cenário
-   * atravessa as duas etapas — uma arbitragem, depois a prosa — porque a lição que
-   * ele protege é da prosa: "REINICIAR" é comando, não decisão de produto.
-   */
-  it("reiniciar renova o ciclo, exige aprovação e não vira decisão confirmada", async () => {
-    const steps = happyPath();
-    steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
-      // Duas devoluções ao escritor, dois reparos do auditor validados pelo verifier (§121), uma
-      // arbitragem; só então a prosa do impasse — e o "reiniciar" que este cenário prova.
-      respond: { stdout: (call) => call.attempt < 5 ? reject("Phase 1", "falta a restrição", "declare a restrição") : approve() },
-      repeat: true,
-    });
-    const agent = fakeAgent(steps);
-    let asked = 0;
-    const outcome = await runInit({
-      projectRoot, request, language: "português do Brasil", maxAuditReturns: 1,
-      call: agent.call, ask: async () => "use as recomendações",
-      decideStandoff: async () => ++asked === 1 ? "  REINICIAR  " : "abortar",
-    });
-    expect(outcome.readiness.ready).toBe(true);
-    expect(asked).toBe(1);
-    const tentativas = agent.calls.filter((call) => call.subject === "project-phases.md#P1").map((call) => call.attempt);
-    // Crescentes e sem repetição: é o que a lição pede, e o número de voltas agora
-    // depende de quantas arbitragens couberam antes da prosa.
-    expect(tentativas).toEqual([...tentativas].sort((a, b) => a - b));
-    expect(new Set(tentativas).size).toBe(tentativas.length);
-    expect(doRoteiro(outcome.report.checkpoint.decisions)).toHaveLength(0);
-    expect(outcome.report.remarks.some((entry) => entry.remark.observation.includes("decisão do desenvolvedor"))).toBe(false);
-    expect(agent.calls.some((call) => call.prompt.includes("acima do auditor: REINICIAR"))).toBe(false);
-    const { readHandoff } = await import("../../src/interview/index.js");
-    /*
-     * O handoff guarda o levantamento de auditoria — o achado voltou pela segunda
-     * vez e o desenvolvedor arbitrou —, e não pode guardar a palavra "REINICIAR"
-     * como decisão. É a distinção que este cenário existe para proteger.
-     */
-    const handoff = await readHandoff(projectRoot, outcome.runId, "project-phases.md");
-    const respostas = handoff?.answers ?? [];
-    expect(respostas.every((resposta) => /^Q-9\d/.test(resposta.questionId))).toBe(true);
-    expect(respostas.some((resposta) => resposta.decision.toLowerCase().includes("reiniciar"))).toBe(false);
-    const events = await readEvents(runPaths(projectRoot, outcome.runId).events);
-    expect(events.some((event) => event.detail.includes("reinício da auditoria"))).toBe(true);
-    expect(events.some((event) => event.detail.includes("sob decisão do desenvolvedor"))).toBe(false);
-  });
-
-  it("cada reinício precisa ser pedido, volta a respeitar o teto e mantém tentativas crescentes", async () => {
-    const agent = fakeAgent(impasse(happyPath()));
-    let asked = 0;
-    await expect(runInit({
-      projectRoot, request, language: "português do Brasil", maxAuditReturns: 2, maxMechanicalRounds: 1,
-      call: agent.call, ask: async () => "use as recomendações",
-      decideStandoff: async () => ++asked <= 2 ? "reiniciar" : "abortar",
-    })).rejects.toThrow(/Decisão do desenvolvedor: abortar/);
-    expect(asked).toBe(3);
-    /*
-     * Crescentes e sem repetição. Os números exatos deixaram de ser afirmáveis
-     * quando a arbitragem passou a vir antes da prosa: cada arbitragem renova o
-     * orçamento, como o reinício. A lição é que uma tentativa nunca se repete —
-     * o log tem de contar a história de volta.
-     */
-    const doAuditor = agent.calls.filter((call) => call.subject === "project-phases.md#P1").map((call) => call.attempt);
-    expect(doAuditor).toEqual([...doAuditor].sort((a, b) => a - b));
-    expect(new Set(doAuditor).size).toBe(doAuditor.length);
-    expect(doAuditor.length).toBeGreaterThanOrEqual(6);
-    expect(agent.calls.some((call) => call.role === "verifier" && call.stage === "verify")).toBe(false);
-    expect(agent.calls.some((call) => call.subject === "project-phases.md#materialidade")).toBe(true);
-    await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).rejects.toThrow();
-  });
-});
 
 describe("B-38 · a fase que cria a própria suíte", () => {
   it("o gate 2 roda a suíte que a fase acabou de criar", async () => {
@@ -1259,73 +1060,6 @@ describe("cadeia completa init → build", () => {
   });
 });
 
-describe("B-40 · não-resposta não vira autoridade", () => {
-  function impasseNoPlano(steps: ScriptStep[]): ScriptStep[] {
-    steps.unshift({
-      match: { role: "auditor", stage: "audit", subject: "project-phases.md#P1" },
-      respond: { stdout: reject("Phase 1", "a fase inventou escopo que ninguém pediu", "remova o que o pedido não pede") },
-      repeat: true,
-    });
-    return steps;
-  }
-
-  async function comDecisao(decisao: string) {
-    const agent = fakeAgent(impasseNoPlano(happyPath()));
-    const outcome = await runInit({
-      projectRoot,
-      request,
-      language: "português do Brasil",
-      maxAuditReturns: 2,
-      call: agent.call,
-      ask: async () => "use as recomendações",
-      decideStandoff: async () => decisao,
-    });
-    return { outcome, agent };
-  }
-
-  /*
-   * §122: a não-resposta deixou de publicar. Ela não é decisão de ninguém —
-   * isso continua — e também não é aprovação: a primeira recomeça a correção
-   * (Recovery First) e, com o auditor insistindo e ninguém decidindo pela
-   * segunda vez, o run para com o diagnóstico e o estado em disco. Nada
-   * chega ao relatório como "decisão do desenvolvedor".
-   */
-  for (const naoResposta of ["use as recomendações", "não sei", "tanto faz", "   "]) {
-    it(`"${naoResposta.trim() || "(vazio)"}" não vira decisão de ninguém: recomeça a correção uma vez, e depois para com diagnóstico`, async () => {
-      const impasses: string[] = [];
-      const agent = fakeAgent(impasseNoPlano(happyPath()));
-      const erro = await runInit({
-        projectRoot, request, language: "português do Brasil", maxAuditReturns: 2, call: agent.call,
-        ask: async () => "use as recomendações",
-        decideStandoff: async (rendered) => { impasses.push(rendered); return naoResposta; },
-      }).then(() => null, (e: Error) => e.message);
-      expect(erro).toContain("Ninguém decidiu o impasse duas vezes");
-      expect(erro).toContain("impasse sem decisão do desenvolvedor: correção e auditoria recomeçadas");
-      // Nada foi gravado como decisão dele: o handoff não tem resposta de impasse.
-      const handoffs = await readdir(join(projectRoot, ".capivara/handoffs"));
-      const gravado = (await Promise.all(handoffs.map((nome) => readFile(join(projectRoot, ".capivara/handoffs", nome), "utf8")))).join("\n");
-      expect(gravado).not.toContain("impasse de auditoria");
-      expect(impasses).toHaveLength(2);
-      // A correção recomeçou de verdade: o escritor foi chamado de novo depois do primeiro impasse.
-      expect(agent.calls.filter((call) => call.stage === "authoring" && call.subject === "phase-p01").length).toBeGreaterThanOrEqual(3);
-    });
-  }
-
-  it("uma decisão de verdade continua valendo como autoridade acima do auditor", async () => {
-    const { outcome, agent } = await comDecisao("o escopo extra fica; eu quero editar categoria");
-    expect(outcome.readiness.ready).toBe(true);
-
-    const reescrita = agent.calls.find(
-      (call) => call.stage === "authoring" && call.prompt.includes("acima do auditor"),
-    );
-    expect(reescrita?.prompt).toContain("eu quero editar categoria");
-    expect(outcome.report.remarks.some((entry) => entry.remark.observation.includes("decisão do desenvolvedor"))).toBe(true);
-  });
-
-  it("abortar continua derrubando o run, e não se confunde com não responder", async () => {
-    await expect(comDecisao("abortar")).rejects.toThrow(/Decisão do desenvolvedor: abortar/);
-  });
-});
 
 /*
  * O §28 em forma de cenário.

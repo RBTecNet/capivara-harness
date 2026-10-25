@@ -25,7 +25,6 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { applyMaterialityReview, materialityInput } from "../../src/audit/materiality.js";
 import type { AuditVerdict } from "../../src/audit/protocol.js";
 import { checkWriteOwnership, parsePhaseFragment, parsePhases } from "../../src/contract/index.js";
 import { InitBlockedError, runInit, runPlan } from "../../src/init/index.js";
@@ -34,7 +33,7 @@ import { evaluateReadiness } from "../../src/init/readiness.js";
 import { ID_DO_BANCO } from "../../src/interview/index.js";
 import { REPAIR_MARKER } from "../../src/prompts/index.js";
 import type { Question } from "../../src/interview/index.js";
-import { NO_QUESTIONS, approve, fakeAgent, materialityKeeps, rehearsalApproves, reject } from "../support/fake-agent.js";
+import { NO_QUESTIONS, approve, fakeAgent } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
 
 let projectRoot = "";
@@ -173,26 +172,6 @@ const P3_CORRIGIDA = P3_CONTAMINADA.replace(
   "Criar `src/servidor/modulos/categorias/rotas.ts` com `criarRotas(banco): Router`, o stub registrado em `src/servidor/modulos.ts` pela fundação sob `/categorias`",
 );
 
-/* ---------- o caso raiz → root (defeito C): sequência explícita ou só imaginada ---------- */
-
-const P1_RAIZ = P1_FUNDACAO.replace(
-  "    - Os stubs `src/servidor/modulos/tarefas/rotas.ts` e `src/servidor/modulos/categorias/rotas.ts` exportam `criarRotas(banco)` e devolvem um Router sem rota nenhuma",
-  "    - Os stubs `src/servidor/modulos/tarefas/rotas.ts` e `src/servidor/modulos/categorias/rotas.ts` exportam `criarRotas(banco)` e devolvem um Router sem rota nenhuma\n    - `src/web/main.tsx` monta um componente React vazio no elemento de id `raiz`",
-);
-const P1_ROOT = P1_RAIZ.replace("no elemento de id `raiz`", "no elemento de id `root`");
-/** A fase 2 afirma `#root` num critério, mas nenhuma task dela reescreve o `main.tsx` da fase 1. */
-const P2_ROOT_IMPLICITO = P2_CORRIGIDA.replace(
-  "    - `src/servidor/modulos.ts` contém exatamente um item com `caminho: '/tarefas'`",
-  "    - `src/servidor/modulos.ts` contém exatamente um item com `caminho: '/tarefas'`\n    - `src/web/main.tsx` renderiza em `#root` a árvore `App`",
-);
-/** A fase 2 ORDENA a substituição: depende da 1 e reescreve o arquivo provisório. */
-const P2_ROOT_EXPLICITO = P2_ROOT_IMPLICITO.replace(
-  "o stub registrado em `src/servidor/modulos.ts` pela fundação sob `/tarefas`",
-  "o stub registrado em `src/servidor/modulos.ts` pela fundação sob `/tarefas`; e reescrever `src/web/main.tsx`, provisório na fase 1, para renderizar em `#root` a árvore `App`",
-);
-
-const ACHADO_RAIZ = reject("P1.T1.C3 vs P2.T1.C3", "o elemento de montagem é `raiz` na fase 1 e `root` na fase 2; um único main.tsx não satisfaz os dois", "usar `root` em P1.T1.C3, que é o que a fase 2 fixa");
-
 /* ---------- roteiros ---------- */
 
 function caminho(fases: { p1?: (call: AgentCall) => string; p2: (call: AgentCall) => string; p3: (call: AgentCall) => string }, extras: ScriptStep[] = []): ScriptStep[] {
@@ -205,8 +184,6 @@ function caminho(fases: { p1?: (call: AgentCall) => string; p2: (call: AgentCall
     { match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: fases.p2 }, repeat: true },
     { match: { role: "writer", stage: "authoring", subject: "phase-p03" }, respond: { stdout: fases.p3 }, repeat: true },
     { match: { role: "auditor", stage: "audit" }, respond: { stdout: approve() }, repeat: true },
-    materialityKeeps(),
-    rehearsalApproves(),
   ];
 }
 
@@ -220,7 +197,6 @@ async function plan(steps: ScriptStep[], extras: Partial<Parameters<typeof runPl
   const run = runPlan({
     projectRoot, request, language, call: agent.call, ask: responde,
     announce: (linha) => void dito.push(linha), sleep: async () => undefined,
-    decideStandoff: async () => { throw new Error("não há decisão de produto a tomar neste cenário"); },
     ...extras,
   });
   return { run, agent, anunciado: () => dito.join("\n") };
@@ -261,11 +237,9 @@ describe("§124 — a obrigação de escrita concorrente é conferida em código
     expect(prompt).toContain("Se ela ainda não entrega, escreva a necessidade como critério");
     expect(prompt).toContain("não invente dependência aqui");
     // Antes de qualquer auditor: o self-check devolveu, e o auditor só leu o texto já corrigido.
-    expect(anunciado()).toContain("auditor devolveu project-phases.md");
+    expect(anunciado()).toContain("conferência mecânica");
     const auditorias = por(agent, { stage: "audit" });
     expect(auditorias.every((call) => !call.prompt.includes("acrescentando à lista de `criarModulosApi(banco)`"))).toBe(true);
-    // Nenhuma triagem: não houve achado de modelo a triar.
-    expect(por(agent, { subject: "project-phases.md#materialidade" })).toHaveLength(0);
 
     const plano = await planoPublicado();
     expect(plano).not.toContain("registrar o módulo em `src/servidor/modulos.ts`");
@@ -279,47 +253,16 @@ describe("§124 — a obrigação de escrita concorrente é conferida em código
     expect(parsed.ok && parsed.document.phases.map((phase) => phase.dependsOn)).toEqual(["none", "Phase 1", "Phase 1"]);
   });
 
-  it("12. o escritor não fecha; o auditor repara; quem valida o reparo é o verifier, nunca o auditor", async () => {
-    const roteiro = caminho(
-      {
-        p2: () => P2_CONTAMINADA, // o escritor insiste
-        p3: () => P3_CONTAMINADA,
-      },
-      [
-        { match: { role: "auditor", stage: "authoring", subject: "phase-p02" }, respond: { stdout: P2_CORRIGIDA }, repeat: true },
-        { match: { role: "auditor", stage: "authoring", subject: "phase-p03" }, respond: { stdout: P3_CORRIGIDA }, repeat: true },
-      ],
-    );
-    await init(roteiro);
-    const { run, agent, anunciado } = await plan(roteiro);
-    const outcome = await run;
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(anunciado()).toContain("o auditor assume o reparo (1/2) e o verifier valida, em sessão própria");
-    const reparos = por(agent, { role: "auditor", stage: "authoring" });
-    expect(reparos.map((call) => call.subject).sort()).toEqual(["phase-p02", "phase-p03"]);
-    expect(reparos[0]?.prompt).toContain(REPAIR_MARKER);
-    expect(reparos[0]?.prompt).toContain("I-18:");
-    // Depois do reparo, toda leitura do plano é do verifier; o auditor não lê o que reparou.
-    const ultimoReparo = Math.max(...reparos.map((call) => agent.calls.indexOf(call)));
-    const leiturasDepois = agent.calls.slice(ultimoReparo + 1).filter((call) => call.stage === "audit");
-    expect(leiturasDepois.length).toBeGreaterThan(0);
-    expect(leiturasDepois.every((call) => call.role === "verifier")).toBe(true);
-    expect((await planoPublicado())).not.toContain("acrescentando à lista de `criarModulosApi(banco)`");
-  });
 
-  it("13. a publicação não apresenta RALPH READY enquanto as tasks ordenarem a edição concorrente, nem por decisão de publicar", async () => {
+  it("13. as tasks que insistem na edição concorrente param o plan, sem publicar e sem auditor", async () => {
     const roteiro = caminho({ p2: () => P2_CONTAMINADA, p3: () => P3_CONTAMINADA });
     await init(roteiro);
-    let impasses = 0;
-    const { run, agent } = await plan(roteiro, { decideStandoff: async () => { impasses += 1; return "publicar"; } });
-    const outcome = await run;
-    // O escritor, o reparador (que cai no roteiro do escritor) e o desenvolvedor mandando publicar: ainda assim, NOT READY.
-    expect(impasses).toBe(1);
-    expect(outcome.readiness.ready).toBe(false);
-    const propriedade = outcome.readiness.checks.find((check) => check.id === "propriedade");
-    expect(propriedade?.passed).toBe(false);
-    expect(propriedade?.detail).toContain("ordena escrever em `src/servidor/modulos.ts`");
-    // Nenhum auditor de modelo leu o plano contaminado: o self-check devolveu antes.
+    const { run, agent } = await plan(roteiro);
+    const erro = await run.then(() => null, (e: Error) => e.message);
+    expect(erro).toContain("a conferência mecânica do plano não fechou");
+    expect(erro).toContain("ordena escrever em `src/servidor/modulos.ts`");
+    await expect(planoPublicado()).rejects.toThrow();
+    // Nenhum auditor de modelo leu o plano contaminado: a conferência devolveu antes.
     expect(por(agent, { stage: "audit" }).filter((call) => call.subject.startsWith("project-phases.md"))).toHaveLength(0);
     // Bounded: a escada inteira cabe em poucas chamadas, sem ciclo.
     expect(agent.calls.length).toBeLessThan(30);
@@ -337,7 +280,7 @@ describe("§124 — a obrigação de escrita concorrente é conferida em código
     ].join("\n");
     const readiness = evaluateReadiness({
       plan: plano, architecture: "", stampInputs: [], coverage: { storyIds: ["US-1.1", "US-2.1", "US-3.1"], entities: ["tarefas", "categorias"], workflows: [{ number: "1", name: "Cadastrar tarefa" }] },
-      approved: true, unresolvedQuestions: [], designRoot: "/nada", designExists: () => true, rehearsal: { blocked: [] },
+      approved: true, unresolvedQuestions: [], designRoot: "/nada", designExists: () => true,
     });
     expect(readiness.ready).toBe(false);
     const propriedade = readiness.checks.find((check) => check.id === "propriedade");
@@ -348,143 +291,12 @@ describe("§124 — a obrigação de escrita concorrente é conferida em código
     const corrigido = evaluateReadiness({
       plan: plano.replace(P2_CONTAMINADA, P2_CORRIGIDA).replace(P3_CONTAMINADA, P3_CORRIGIDA), architecture: "", stampInputs: [],
       coverage: { storyIds: ["US-1.1", "US-2.1", "US-3.1"], entities: ["tarefas", "categorias"], workflows: [{ number: "1", name: "Cadastrar tarefa" }] },
-      approved: true, unresolvedQuestions: [], designRoot: "/nada", designExists: () => true, rehearsal: { blocked: [] },
+      approved: true, unresolvedQuestions: [], designRoot: "/nada", designExists: () => true,
     });
     expect(corrigido.checks.find((check) => check.id === "propriedade")?.passed).toBe(true);
   });
 });
 
-describe("§124 — a triagem distingue falso positivo de solução hipotética", () => {
-  /** O achado real do auditor de coerência do Haiku (rodada 4) e o parecer real da triagem que o descartou. */
-  const ACHADO_DO_HAIKU: AuditVerdict = {
-    status: "REJECTED",
-    findings: [{
-      where: "P1.T6.C1 vs P3.T4.C1, P4.T5.C1, P5.T4.C1 e P6.T2.C1",
-      problem: "P1.T6.C1 exige que criarModulosApi devolva exatamente quatro entradas (/tarefas, /categorias, /anotacoes, /painel) já na fase 1. As outras quatro mandam acrescentar cada entrada em modulos.ts. A lista ganha duplicatas e P4.T5.C2 e P6.T2.C3 (exatamente um item) tornam-se impossíveis. Além disso, as fases 3 a 6 rodam em paralelo e editariam o mesmo arquivo compartilhado, o que o pedido do desenvolvedor proíbe",
-      fix: "P1.T6.C1 está certo: a arquitetura põe a lista única de montagem na fundação para que as fases de módulo toquem só os próprios arquivos. Remover de P3.T4.C1, P4.T5.C1, P5.T4.C1 e P6.T2.C1 o registro em modulos.ts e manter apenas o trabalho em rotas.ts de cada módulo, que implementa o stub criado em P1.T6.C1.",
-    }],
-    remarks: [], decisions: [], reason: "P3 a P6 acrescentam itens a modulos.ts já completos pela fundação",
-  };
-  const fase = (numero: number, titulo: string, task: string) => parsePhaseFragment(`## Phase ${numero}: ${titulo}\n\n**Goal:** entrega · **Depends on:** ${numero === 1 ? "none" : "Phase 1"} · **Covers:** US-${numero}.1\n\n- [ ] **Task:** ${task}\n  - **Acceptance criteria:**\n    - \`src/servidor/modulos.ts\` contém exatamente um item do módulo\n  - **Traces:** US-${numero}.1\n`)!;
-  const fases = [
-    fase(1, "Fundação", "Criar `src/servidor/modulos.ts` com `criarModulosApi(banco)`, que devolve, nesta ordem, as entradas com `caminho` `/tarefas`, `/categorias`, `/anotacoes` e `/painel`, cada uma com o router de `criarRotas` do seu módulo"),
-    fase(2, "Casca", "Criar `src/web/navegacao.ts` com os quatro itens"),
-    fase(3, "Tarefas", "Criar `src/servidor/modulos/tarefas/rotas.ts` e registrar o módulo em `src/servidor/modulos.ts`, acrescentando a entrada `/tarefas`"),
-    fase(4, "Categorias", "Registrar o router em `src/servidor/modulos.ts` como item `/categorias`"),
-    fase(5, "Anotações", "Registrar o módulo em `src/servidor/modulos.ts` com o item `/anotacoes`"),
-    fase(6, "Painel", "Criar as rotas do painel e registrar o módulo em `src/servidor/modulos.ts`, adicionando `/painel`"),
-  ];
-  const input = materialityInput(ACHADO_DO_HAIKU, {
-    request: "Os módulos independentes não devem modificar arquivos compartilhados simultaneamente.", decisions: [], phases: fases,
-    skeleton: "## Visão geral\nOs módulos entram aqui apenas como rotas vazias registradas em modulos.ts, para que as fases de módulo toquem somente os próprios arquivos e possam rodar em paralelo.",
-  });
-
-  it("7. o parecer real do Haiku — uma solução possível, citando a fundação e a arquitetura — não remove o bloqueio", () => {
-    const parecerReal = JSON.stringify({ reviews: [{
-      id: "F1", disposition: "ADVISORY",
-      reason: "A fase 1 já entrega as quatro entradas de criarModulosApi com os routers de criarRotas. As fases de módulo podem cumprir os critérios só substituindo o stub de rotas.ts, sem inserir novas entradas em modulos.ts. A lista final fica com exatamente um item por caminho, sem duplicata.",
-      evidence: [
-        { source: "P1", quote: "cada uma com o router de `criarRotas` do seu módulo" },
-        { source: "skeleton", quote: "Os módulos entram aqui apenas como rotas vazias registradas em modulos.ts" },
-      ],
-    }] });
-    const result = applyMaterialityReview(ACHADO_DO_HAIKU, input, parecerReal);
-    expect(result.defects).toEqual(["F1: a triagem descartou um conflito entre as fases 1, 3, 4, 5, 6 sem citar o texto da(s) fase(s) 3, 4, 5, 6"]);
-    expect(result.advisory).toBe(0);
-    expect(result.verdict.status).toBe("REJECTED");
-    expect(result.verdict.findings).toEqual(ACHADO_DO_HAIKU.findings);
-  });
-
-  it("8. um falso positivo comprovado — o texto das fases acusadas NÃO ordena o que o achado afirma, e cada uma é citada — continua descartável", () => {
-    const corrigidas = [
-      fases[0]!, fases[1]!,
-      fase(3, "Tarefas", "Criar `src/servidor/modulos/tarefas/rotas.ts` com `criarRotas(banco)`, o stub registrado em `src/servidor/modulos.ts` pela fundação sob `/tarefas`"),
-      fase(4, "Categorias", "Criar `src/servidor/modulos/categorias/rotas.ts`, o stub registrado em `src/servidor/modulos.ts` pela fundação sob `/categorias`"),
-      fase(5, "Anotações", "Criar `src/servidor/modulos/anotacoes/rotas.ts`, o stub registrado em `src/servidor/modulos.ts` pela fundação sob `/anotacoes`"),
-      fase(6, "Painel", "Criar `src/servidor/modulos/painel/rotas.ts`, o stub registrado em `src/servidor/modulos.ts` pela fundação sob `/painel`"),
-    ];
-    const entradaLimpa = materialityInput(ACHADO_DO_HAIKU, { request: "Os módulos independentes não devem modificar arquivos compartilhados simultaneamente.", decisions: [], phases: corrigidas });
-    const parecer = JSON.stringify({ reviews: [{
-      id: "F1", disposition: "ADVISORY",
-      reason: "As fases de módulo só criam os próprios arquivos e consomem o stub que a fundação registrou; nenhuma ordena escrever em modulos.ts.",
-      evidence: [
-        { source: "P1", quote: "cada uma com o router de `criarRotas` do seu módulo" },
-        { source: "P3", quote: "o stub registrado em `src/servidor/modulos.ts` pela fundação sob `/tarefas`" },
-        { source: "P4", quote: "o stub registrado em `src/servidor/modulos.ts` pela fundação sob `/categorias`" },
-        { source: "P5", quote: "o stub registrado em `src/servidor/modulos.ts` pela fundação sob `/anotacoes`" },
-        { source: "P6", quote: "o stub registrado em `src/servidor/modulos.ts` pela fundação sob `/painel`" },
-      ],
-    }] });
-    const result = applyMaterialityReview(ACHADO_DO_HAIKU, entradaLimpa, parecer);
-    expect(result.defects).toEqual([]);
-    expect(result.advisory).toBe(1);
-    expect(result.verdict.status).toBe("APPROVED");
-    expect(result.verdict.remarks[0]?.observation).toContain("triagem de materialidade");
-    // E o mesmo plano, lido em código, concorda: nenhuma obrigação de escrita concorrente.
-    expect(checkWriteOwnership({ contract: "capivara-phases/v2", projectName: "Parallel Lab", stamp: null, phases: corrigidas })).toEqual([]);
-  });
-
-  it("18. raiz → root por interpretação não documentada: o parecer que cita só a fase 1 é recusado, e a fase 1 é corrigida", async () => {
-    let coerencias = 0;
-    const roteiro = caminho(
-      {
-        p1: (call) => (emenda(call) ? P1_ROOT : P1_RAIZ),
-        p2: () => P2_ROOT_IMPLICITO,
-        p3: () => P3_CORRIGIDA,
-      },
-      [
-        { match: { role: "auditor", stage: "audit", subject: "project-phases.md#coerência" }, repeat: true, respond: { stdout: (call) => {
-          coerencias += 1;
-          return call.prompt.includes("no elemento de id `root`") ? approve() : ACHADO_RAIZ;
-        } } },
-        { match: { role: "verifier", stage: "audit", subject: "project-phases.md#materialidade" }, repeat: true, respond: { stdout: JSON.stringify({ reviews: [{
-          id: "F1", disposition: "ADVISORY",
-          reason: "O nome do id do elemento de montagem é uma escolha de implementação; a sequência é coerente se a fase 2 usar root para o elemento de montagem.",
-          evidence: [{ source: "P1", quote: "monta um componente React vazio no elemento de id `raiz`" }],
-        }] }) } },
-      ],
-    );
-    await init(roteiro);
-    const { run, agent, anunciado } = await plan(roteiro);
-    const outcome = await run;
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(anunciado()).toContain("parecer sem prova válida na triagem: o bloqueio correspondente continua valendo");
-    expect(coerencias).toBe(2);
-    expect(emendas(agent, "phase-p01")).toHaveLength(1);
-    const plano = await planoPublicado();
-    expect(plano).toContain("no elemento de id `root`");
-    expect(plano).not.toContain("no elemento de id `raiz`");
-    // O achado não virou ressalva: foi corrigido no documento.
-    expect(outcome.report.remarks.some((remark) => remark.remark.observation.includes("triagem de materialidade"))).toBe(false);
-  });
-
-  it("17. raiz → root explicitamente ordenado pela fase seguinte: aceito pelo parecer com os dois lados, sem reescrita", async () => {
-    const roteiro = caminho(
-      { p1: () => P1_RAIZ, p2: () => P2_ROOT_EXPLICITO, p3: () => P3_CORRIGIDA },
-      [
-        { match: { role: "auditor", stage: "audit", subject: "project-phases.md#coerência" }, repeat: true, respond: { stdout: ACHADO_RAIZ } },
-        { match: { role: "verifier", stage: "audit", subject: "project-phases.md#materialidade" }, repeat: true, respond: { stdout: JSON.stringify({ reviews: [{
-          id: "F1", disposition: "ADVISORY",
-          reason: "A fase 2 depende da 1 e ORDENA reescrever o main.tsx provisório para #root: substituição sequencial explícita, não obrigação simultânea.",
-          evidence: [
-            { source: "P1", quote: "monta um componente React vazio no elemento de id `raiz`" },
-            { source: "P2", quote: "reescrever `src/web/main.tsx`, provisório na fase 1, para renderizar em `#root`" },
-          ],
-        }] }) } },
-      ],
-    );
-    await init(roteiro);
-    const { run, agent } = await plan(roteiro);
-    const outcome = await run;
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(emendas(agent)).toHaveLength(0);
-    expect(por(agent, { subject: "project-phases.md#materialidade" })).toHaveLength(1);
-    expect(outcome.report.remarks.some((remark) => remark.remark.observation.includes("triagem de materialidade"))).toBe(true);
-    const plano = await planoPublicado();
-    expect(plano).toContain("no elemento de id `raiz`");
-    expect(plano).toContain("reescrever `src/web/main.tsx`, provisório na fase 1");
-  });
-});
 
 describe("§124 — o que não muda", () => {
   it("19. o caminho sem defeito não ganha chamada nenhuma: uma escrita por fase, uma leitura por fase mais a coerência, o ensaio — e nada mais", async () => {
@@ -495,31 +307,39 @@ describe("§124 — o que não muda", () => {
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
     const assuntos = agent.calls.map((call) => `${call.role}/${call.stage}/${call.subject}`);
     expect(assuntos.filter((assunto) => assunto.startsWith("writer/authoring/")).sort()).toEqual(["writer/authoring/architecture", "writer/authoring/phase-p01", "writer/authoring/phase-p02", "writer/authoring/phase-p03"]);
-    expect(assuntos.filter((assunto) => assunto.startsWith("auditor/audit/")).sort()).toEqual(["auditor/audit/architecture", "auditor/audit/project-phases.md#P1", "auditor/audit/project-phases.md#P2", "auditor/audit/project-phases.md#P3", "auditor/audit/project-phases.md#coerência"]);
-    expect(assuntos.filter((assunto) => assunto.includes("materialidade") || assunto.includes("auditor/authoring"))).toEqual([]);
+    expect(assuntos.filter((assunto) => assunto.startsWith("auditor/audit/")).sort()).toEqual(["auditor/audit/architecture", "auditor/audit/project-phases.md"]);
+    expect(assuntos.filter((assunto) => assunto.includes("auditor/authoring") || assunto.startsWith("verifier/"))).toEqual([]);
     expect(emendas(agent)).toHaveLength(0);
-    expect(anunciado()).not.toContain("auditor devolveu project-phases.md");
+    expect(anunciado()).not.toContain("conferência mecânica");
   });
 
-  it("20. o auditor que reinsiste num achado equivalente depois de resolvido não produz ciclo: a escada termina, bounded", async () => {
+  /*
+   * O auditor que insiste no ponto já resolvido cita passagens que a correção
+   * apagou: o Core não as acha nos documentos, e o achado vira observação do
+   * relatório (etapa 2 da redução). Antes, a mesma insistência subia a escada
+   * inteira — texto idêntico, troca de estratégia, dois reparos — em 27 chamadas.
+   */
+  it("20. o auditor que reinsiste num achado já resolvido não devolve o plano: a correção fica, o achado vai ao relatório", async () => {
     const roteiro = caminho(
       { p2: (call) => (emenda(call) ? P2_CORRIGIDA : P2_CONTAMINADA), p3: (call) => (emenda(call) ? P3_CORRIGIDA : P3_CONTAMINADA) },
-      [{ match: { role: "auditor", stage: "audit", subject: "project-phases.md#coerência" }, repeat: true, respond: {
-        stdout: reject("P1.T1.C1 vs P2.T1.C1, P3.T1.C1", "as fases de módulo acrescentam em modulos.ts as entradas que a fundação já registra", "remover de P2.T1 e P3.T1 o registro em modulos.ts"),
+      [{ match: { role: "auditor", stage: "audit", subject: "project-phases.md" }, repeat: true, respond: {
+        stdout: [
+          "CAPIVARA_AUDIT_STATUS: REJECTED",
+          "CAPIVARA_FINDING: CONTRADICTION | P1.T1.C1 vs P2.T1.C1, P3.T1.C1 | as fases de módulo acrescentam em modulos.ts as entradas que a fundação já registra: «acrescentando à lista de `criarModulosApi(banco)`» contra «Registrar o router `criarRotas(banco)` em `src/servidor/modulos.ts`» | remover de P2.T1 e P3.T1 o registro em modulos.ts",
+          "CAPIVARA_REASON: escrita concorrente",
+        ].join("\n"),
       } }],
     );
     await init(roteiro);
-    const { run, agent, anunciado } = await plan(roteiro, { decideStandoff: async () => "abortar" });
-    await expect(run).rejects.toBeInstanceOf(InitBlockedError);
-    // O I-18 devolveu UMA vez, e nunca mais: o texto corrigido não volta a disparar o self-check.
-    expect(anunciado().split("auditor devolveu project-phases.md").length - 1).toBeGreaterThanOrEqual(1);
+    const { run, agent } = await plan(roteiro);
+    const outcome = await run;
+    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+    // O I-18 devolveu uma vez, às duas fases que escrevem, e nunca mais.
     expect(emendas(agent).filter((call) => call.prompt.includes("I-18:"))).toHaveLength(2);
-    expect((await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8").catch(() => "")).includes("acrescentando à lista de `criarModulosApi(banco)`")).toBe(false);
-    // O auditor que insiste no ponto já resolvido sobe a escada de sempre — texto idêntico, troca de estratégia, dois reparos — e para; a escada é finita e esta é a sua altura.
-    expect(anunciado()).toContain("a emenda não mudou o texto e o auditor reprovou de novo; insistir não resolve — trocando de estratégia");
-    expect(anunciado()).toContain("o auditor assume o reparo (1/2)");
-    expect(por(agent, { subject: "project-phases.md#coerência" })).toHaveLength(4);
-    expect(por(agent, { subject: "project-phases.md#materialidade" })).toHaveLength(4);
-    expect(agent.calls).toHaveLength(27);
+    expect(await planoPublicado()).not.toContain("acrescentando à lista de `criarModulosApi(banco)`");
+    // Uma auditoria do plano, nenhuma emenda por ela: as passagens citadas não existem mais.
+    expect(por(agent, { stage: "audit", subject: "project-phases.md" })).toHaveLength(1);
+    expect(emendas(agent)).toHaveLength(2);
+    expect(outcome.report.remarks.some((entrada) => entrada.remark.observation.includes("não bloqueia"))).toBe(true);
   });
 });

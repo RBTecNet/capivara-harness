@@ -98,8 +98,20 @@ export function oneQuestion(id = "Q-01"): string {
 export const approve = (reason = "fiel ao pedido e às decisões aceitas") =>
   `CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON: ${reason}`;
 
+/**
+ * Uma devolução que bloqueia o plano.
+ *
+ * Desde a etapa 2 da redução só bloqueia o achado de classe conferível, e a
+ * contradição precisa citar duas passagens que existam nos documentos: estas
+ * duas estão no PHASE_1 e nas regras do SKELETON do caminho feliz. A outra
+ * auditoria que usa este protocolo, a da arquitetura, ignora a classe.
+ */
 export const reject = (where: string, problem: string, fix: string) =>
-  [`CAPIVARA_AUDIT_STATUS: REJECTED`, `CAPIVARA_FINDING: ${where} | ${problem} | ${fix}`, `CAPIVARA_REASON: ${problem}`].join("\n");
+  [
+    `CAPIVARA_AUDIT_STATUS: REJECTED`,
+    `CAPIVARA_FINDING: CONTRADICTION | ${where} | ${problem} — «A tabela statuses existe e contém exatamente pendente, confirmada e cancelada» contra «duas reservas do mesmo quarto não se sobrepõem» | ${fix}`,
+    `CAPIVARA_REASON: ${problem}`,
+  ].join("\n");
 
 export const PHASE_1 = `## Phase 1: Fundação de dados
 
@@ -126,25 +138,6 @@ export const PHASE_2 = `## Phase 2: Criar reserva
     - Datas sobrepostas no mesmo quarto devolvem erro e não persistem nada
   - **Traces:** US-1.1, reservations, workflow 1
 `;
-
-/** Endereços que o prompt do ensaio listou, na ordem em que apareceram. */
-export function rehearsedAddresses(prompt: string): string[] {
-  return [...prompt.matchAll(/^(P\d+\.T\d+\.C\d+) /gm)].map((match) => match[1] ?? "");
-}
-
-/** Ensaio que aprova tudo, respondendo a cada endereço que recebeu. */
-export function rehearsalApproves(): ScriptStep {
-  return {
-    match: { role: "verifier", stage: "verify" },
-    respond: {
-      stdout: (call) =>
-        rehearsedAddresses(call.prompt)
-          .map((address) => `CRITERION ${address}: OBSERVABLE — dá para abrir o arquivo e olhar`)
-          .join("\n"),
-    },
-    repeat: true,
-  };
-}
 
 /** Uma fase acrescentada depois, como o `change` faz num plano que já rodou. */
 export const PHASE_3 = `## Phase 3: Editar a reserva
@@ -229,26 +222,11 @@ export function skeletonPath(): ScriptStep[] {
     { match: { role: "writer", stage: "authoring", subject: "phase-p01" }, respond: { stdout: PHASE_1 }, repeat: true },
     { match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: PHASE_2 }, repeat: true },
     { match: { role: "auditor", stage: "audit" }, respond: { stdout: approve() }, repeat: true },
-    materialityKeeps(),
-    rehearsalApproves(),
   ];
 }
 
-/** Os roteiros antigos conservam todos os bloqueios; cada caso novo pode revisar explicitamente. */
-export function materialityKeeps(): ScriptStep {
-  return {
-    match: { role: "verifier", stage: "audit", subject: "project-phases.md#materialidade" },
-    respond: { stdout: call => {
-      const marker = "## Review input (JSON)\n";
-      const input = JSON.parse(call.prompt.slice(call.prompt.indexOf(marker) + marker.length)) as { items: { id: string }[] };
-      return JSON.stringify({ reviews: input.items.map(item => ({ id: item.id, disposition: "KEEP" })) });
-    } },
-    repeat: true,
-  };
-}
-
 /**
- * O caminho feliz do ciclo único: entrevista, esqueleto, fases, auditoria, ensaio.
+ * O caminho feliz do ciclo único: entrevista, esqueleto, arquitetura, fases e a auditoria do plano.
  *
  * A cadeia de quatro documentos em prosa foi removida do produto, e com ela o
  * roteiro que a exercitava.

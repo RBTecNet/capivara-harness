@@ -18,13 +18,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runInit, runPlan } from "../../src/init/index.js";
 import { decisaoDeEngenhariaComoFinding } from "../../src/audit/authority.js";
-import { materialityInput } from "../../src/audit/materiality.js";
 import { affectedPhases, parsePhases } from "../../src/contract/index.js";
 import { decisaoDoAuditorComoFinding } from "../../src/interview/index.js";
 import type { AgentCall } from "../../src/init/index.js";
 import { ID_DO_BANCO } from "../../src/interview/index.js";
 import type { Question } from "../../src/interview/index.js";
-import { NO_QUESTIONS, approve, fakeAgent, materialityKeeps, rehearsalApproves, reject } from "../support/fake-agent.js";
+import { NO_QUESTIONS, approve, fakeAgent } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
 
 let projectRoot = "";
@@ -140,10 +139,9 @@ function roteiro(papeis: Papeis = {}): ScriptStep[] {
     { match: { role: "writer", stage: "authoring", subject: "skeleton" }, respond: { stdout: ESQUELETO }, repeat: true },
     { match: { role: "writer", stage: "authoring", subject: "architecture" }, respond: { stdout: papeis.arquiteto ?? (() => arquitetura("adiada")) }, repeat: true },
     ...Object.entries(FASES).map(([subject, texto]) => ({ match: { role: "writer" as const, stage: "authoring" as const, subject }, respond: { stdout: texto }, repeat: true })),
-    ...(papeis.p3 ? [{ match: { role: "auditor" as const, stage: "audit" as const, subject: "project-phases.md#P3" }, respond: { stdout: papeis.p3 }, repeat: true }] : []),
+    // O plano é auditado inteiro, numa chamada (etapa 2 da redução).
+    ...(papeis.p3 ? [{ match: { role: "auditor" as const, stage: "audit" as const, subject: "project-phases.md" }, respond: { stdout: papeis.p3 }, repeat: true }] : []),
     { match: { role: "auditor", stage: "audit" }, respond: { stdout: approve() }, repeat: true },
-    materialityKeeps(),
-    rehearsalApproves(),
   ];
 }
 
@@ -156,7 +154,6 @@ async function planejar(papeis: Papeis = {}) {
     projectRoot, request, language, call: agent.call,
     ask: async (question) => { perguntadas.push(question); return "1"; },
     announce: () => undefined, sleep: async () => undefined,
-    decideStandoff: async () => "publicar",
   });
   return { outcome, agent, perguntadas };
 }
@@ -196,11 +193,9 @@ describe("§127 · o escritor recebe antes o contrato que vai ser cobrado", () =
     expect(escritor("phase-p03")).toContain("it never wires them into the");
     expect(escritor("phase-p02")).toContain("Walked at the end of THIS phase: workflow 2 (Gestão de tarefas)");
     expect(escritor("phase-p04")).toContain("Walked at the end of THIS phase: workflow 3 (Gestão de categorias)");
-    const auditorDaTres = por(agent, { role: "auditor", stage: "audit", subject: "project-phases.md#P3" })[0]!.prompt;
-    expect(auditorDaTres).toContain("## The timing of this phase's workflows");
-    expect(auditorDaTres).toContain("walked only at the end of Phase 4");
-    const coerencia = por(agent, { role: "auditor", stage: "audit", subject: "project-phases.md#coerência" })[0]!.prompt;
-    expect(coerencia).toContain("Phase 3: covers workflow 3 (Gestão de categorias) but leaves it to Phase 4");
+    const doPlano = por(agent, { role: "auditor", stage: "audit", subject: "project-phases.md" })[0]!.prompt;
+    expect(doPlano).toContain("## Upstream document: quando o build percorre os fluxos");
+    expect(doPlano).toContain("Phase 3: covers workflow 3 (Gestão de categorias) but leaves it to Phase 4");
     const daArquitetura = por(agent, { role: "auditor", stage: "audit", subject: "architecture" })[0]!.prompt;
     expect(daArquitetura).toContain("7. TIMING OF WORKFLOWS");
     expect(daArquitetura).toContain("Phase 3: covers workflow 3 (Gestão de categorias) but leaves it to Phase 4");
@@ -215,18 +210,6 @@ describe("§127 · o escritor recebe antes o contrato que vai ser cobrado", () =
   });
 });
 
-describe("§127 · a decisão que o auditor de uma fase levanta volta só a ela", () => {
-  it("8 — a resposta do desenvolvedor emenda a fase 3; as fases 1, 2 e 4, aprovadas, ficam como estavam", async () => {
-    let auditou = 0;
-    const decisao = `${approve()}\nCAPIVARA_DECISION: Task 1 | Qual é a cor inicial de uma categoria criada sem cor? | Cinza neutro | A primeira cor da paleta`;
-    const { outcome, agent, perguntadas } = await planejar({ p3: () => ((auditou += 1) === 1 ? decisao : approve()) });
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(deAuditoria(perguntadas)).toHaveLength(1);
-    const escritas = (subject: string) => por(agent, { role: "writer", stage: "authoring", subject }).length;
-    expect(escritas("phase-p03")).toBe(2);
-    expect([escritas("phase-p01"), escritas("phase-p02"), escritas("phase-p04")]).toEqual([1, 1, 1]);
-  });
-});
 
 describe("§127 · 16 — o plano correto não ganha chamada", () => {
   it("o caminho limpo da arquitetura com integração posterior: as mesmas chamadas de sempre, nenhuma a mais", async () => {
@@ -236,16 +219,8 @@ describe("§127 · 16 — o plano correto não ganha chamada", () => {
     const chamadas = agent.calls.map((call) => `${call.role}:${call.stage}:${call.subject}`).sort();
     expect(chamadas).toEqual([
       "auditor:audit:architecture",
-      "auditor:audit:project-phases.md#P1",
-      "auditor:audit:project-phases.md#P2",
-      "auditor:audit:project-phases.md#P3",
-      "auditor:audit:project-phases.md#P4",
-      "auditor:audit:project-phases.md#coerência",
-      // O ensaio do verificador, em lotes: o de sempre.
-      "verifier:verify:project-phases.md",
-      "verifier:verify:project-phases.md",
-      "verifier:verify:project-phases.md",
-      "verifier:verify:project-phases.md",
+      // Uma auditoria do plano inteiro (etapa 2 da redução): eram quatro de fase, a coerência e quatro lotes de ensaio.
+      "auditor:audit:project-phases.md",
       "writer:authoring:architecture",
       "writer:authoring:phase-p01",
       "writer:authoring:phase-p02",
@@ -254,13 +229,14 @@ describe("§127 · 16 — o plano correto não ganha chamada", () => {
     ]);
   });
 
-  it("a contradição que o auditor da fase endereça à arquitetura vai ao arquiteto, nunca ao desenvolvedor", async () => {
+  it("a contradição que o auditor do plano endereça à arquitetura vai ao arquiteto, nunca ao desenvolvedor", async () => {
     let auditou = 0;
-    const achado = reject(
-      "Architecture",
-      "A fase 3 cobre o workflow 3, que o build percorre ao fim dela, mas a integração da página e do roteador é da fase 4.",
-      "Faça a fase 3 integrar o módulo, ou deixe o workflow 3 só na fase que o integra.",
-    );
+    // Classe e duas passagens que existem nas fases 3 e 4: o que o Core exige para devolver o plano (etapa 2).
+    const achado = [
+      "CAPIVARA_AUDIT_STATUS: REJECTED",
+      "CAPIVARA_FINDING: CONTRADICTION | Architecture | A fase 3 cobre o workflow 3, que o build percorre ao fim dela, mas a integração da página e do roteador é da fase 4: «`categoriasRouter` responde `GET /` com `200` e uma lista» contra «Em `server/api/index.ts`, montar `categoriasRouter` sob `/api/categorias`» | Faça a fase 3 integrar o módulo, ou deixe o workflow 3 só na fase que o integra.",
+      "CAPIVARA_REASON: integração no tempo errado",
+    ].join("\n");
     const { outcome, agent, perguntadas } = await planejar({ p3: () => ((auditou += 1) === 1 ? achado : approve()) });
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
     expect(deAuditoria(perguntadas)).toEqual([]);
@@ -279,17 +255,4 @@ describe("§127 · revisão adversarial — C6: a fase da decisão soma, não su
     expect(affectedPhases([desenvolvedor], 4)).toEqual([3]);
   });
 
-  it("a triagem de materialidade põe na mesa a fase que levantou a decisão", () => {
-    const plano = ["# Lab — Project Phases", "", "<!-- inputs: skeleton.md@sha256:aaaaaaaaaaaa -->", "", "## Overview", "", "Três fases.", "",
-      ...["phase-p01", "phase-p02", "phase-p03"].map((chave, indice) => FASES[chave]!.replace("## Phase", `## Phase`).replace(/\n- \[ \]/u, `\n**Goal:** g · **Depends on:** ${indice === 0 ? "none" : "Phase 1"} · **Covers:** US-1.1\n\n- [ ]`)),
-      "## Open Questions", "", "Nenhuma.", ""].join("\n");
-    const lido = parsePhases(plano);
-    expect(lido.ok, lido.ok ? "" : JSON.stringify(lido.errors)).toBe(true);
-    const entrada = materialityInput(
-      { status: "APPROVED", findings: [], remarks: [], reason: "", decisions: [{ where: "P1.T1", decision: "Qual?", options: ["a", "b"], phase: 3 }] },
-      { request: "", decisions: [], phases: lido.ok ? lido.document.phases : [] },
-    );
-    expect(entrada.sources.map((fonte) => fonte.id)).toEqual(["request", "decisions", "P1", "P3"]);
-    expect(entrada.items[0]).toMatchObject({ kind: "decision", phase: 3 });
-  });
 });

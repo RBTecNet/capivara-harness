@@ -12,6 +12,7 @@
  */
 
 import { isStampLine } from "../contract/stamps.js";
+import { semRaciocinio } from "../contract/protocolo.js";
 import type { ContractError, InvariantCode } from "../contract/index.js";
 
 export type DefectClass = "representation" | "substance";
@@ -45,7 +46,9 @@ export interface DeterministicRepair {
  */
 export function repairDeterministically(source: string, expectedStamp?: string): DeterministicRepair {
   const applied: string[] = [];
-  let content = source;
+  // O raciocínio que o modelo escreveu antes do documento não é documento.
+  let content = semRaciocinio(source);
+  if (content !== source) applied.push("removeu o raciocínio escrito antes do documento");
 
   // Uma `Design ref` marcada como pendente não é decisão: o diretório de design
   // é opcional e sua ausência nunca é erro (D-18). O piloto 1 provou que pedir

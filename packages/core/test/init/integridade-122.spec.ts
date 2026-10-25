@@ -137,34 +137,21 @@ async function init(pedido = request) {
 async function plan(steps: ScriptStep[], extras: Partial<Parameters<typeof runPlan>[0]> = {}, resposta: (question: Question) => string = () => "1") {
   const dito: string[] = [];
   const perguntadas: Question[] = [];
-  const impasses: string[] = [];
   const agent = fakeAgent(steps);
   const run = runPlan({
     projectRoot, request, language: "português do Brasil", call: agent.call,
     ask: async (question) => { perguntadas.push(question); return resposta(question); },
     announce: (linha) => void dito.push(linha), sleep: async () => undefined,
-    decideStandoff: async (rendered) => { impasses.push(rendered); return "publicar"; },
     ...extras,
   });
-  return { run, agent, perguntadas, anunciado: () => dito.join("\n"), impasses };
+  return { run, agent, perguntadas, anunciado: () => dito.join("\n") };
 }
 
-/** Um roteiro com passos próprios para a fase 2 e a coerência; o resto é o caminho por esqueleto. */
-function roteiro(papeis: {
-  auditor?: (call: AgentCall) => string;
-  coerencia?: (call: AgentCall) => string;
-  writer: (call: AgentCall) => string;
-  reparador?: (call: AgentCall) => string;
-  verifier?: (call: AgentCall) => string;
-  leitorEscritor?: (call: AgentCall) => string;
-}): ScriptStep[] {
+/** Um roteiro com a escrita da fase 2 e a auditoria do plano inteiro próprias; o resto é o caminho por esqueleto. */
+function roteiro(papeis: { auditor?: (call: AgentCall) => string; writer: (call: AgentCall) => string }): ScriptStep[] {
   return [
-    ...(papeis.auditor ? [{ match: { role: "auditor" as const, stage: "audit", subject: P2 }, respond: { stdout: papeis.auditor }, repeat: true }] : []),
-    ...(papeis.coerencia ? [{ match: { role: "auditor" as const, stage: "audit", subject: COERENCIA }, respond: { stdout: papeis.coerencia }, repeat: true }] : []),
+    ...(papeis.auditor ? [{ match: { role: "auditor" as const, stage: "audit", subject: "project-phases.md" }, respond: { stdout: papeis.auditor }, repeat: true }] : []),
     { match: { role: "writer", stage: "authoring", subject: "phase-p02" }, respond: { stdout: papeis.writer }, repeat: true },
-    ...(papeis.reparador ? [{ match: { role: "auditor" as const, stage: "authoring", subject: "phase-p02" }, respond: { stdout: papeis.reparador }, repeat: true }] : []),
-    ...(papeis.verifier ? [{ match: { role: "verifier" as const, stage: "audit", subject: P2 }, respond: { stdout: papeis.verifier }, repeat: true }] : []),
-    ...(papeis.leitorEscritor ? [{ match: { role: "writer" as const, stage: "audit", subject: P2 }, respond: { stdout: papeis.leitorEscritor }, repeat: true }] : []),
     ...skeletonPath().filter((passo) => passo.match.subject !== "phase-p02"),
   ];
 }
@@ -204,60 +191,8 @@ describe("a autoridade: quem decide o quê, classificado pela forma do ponto", (
 });
 
 describe("no orquestrador: a escolha de engenharia não chega ao desenvolvedor", () => {
-  it("1, 13, 14. o auditor levanta as duas decisões de código do DeepSeek: nenhuma pergunta; o escritor escolhe; o plano fecha sem chamada a mais", async () => {
-    await init();
-    let auditorias = 0;
-    const { run, agent, perguntadas, impasses, anunciado } = await plan(roteiro({
-      auditor: () => ((auditorias += 1) === 1 ? `${approve()}\nCAPIVARA_DECISION: ${DECISAO_DB}\nCAPIVARA_DECISION: ${DECISAO_ROTAS}` : approve()),
-      writer: (call) => (call.prompt.includes("escolha de engenharia") ? COM_PREFIXO : PHASE_2),
-    }));
-    const outcome = await run;
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(deAuditoria(perguntadas)).toEqual([]);
-    expect(impasses).toEqual([]);
-    expect(anunciado()).toContain("o plano decide, não você");
-    // O escritor recebeu as leituras do auditor e a nota de quem decide — uma emenda, uma reauditoria.
-    const emendas = por(agent, { role: "writer", stage: "authoring", subject: "phase-p02" });
-    expect(emendas).toHaveLength(2);
-    expect(emendas[1]?.prompt).toContain("é o plano que decide");
-    expect(emendas[1]?.prompt).toContain("obterBanco()");
-    expect(emendas[1]?.prompt).toContain("cabe ao plano, não ao desenvolvedor");
-    expect(por(agent, { stage: "audit", subject: P2 })).toHaveLength(2);
-    expect(await plano()).toContain("export const prefixo");
-  });
 
-  it("2. a decisão genuína de produto do DeepSeek continua chegando ao desenvolvedor, sem leitura recomendada", async () => {
-    await init();
-    let auditorias = 0;
-    const { run, perguntadas } = await plan(roteiro({
-      auditor: () => ((auditorias += 1) === 1 ? `${approve()}\nCAPIVARA_DECISION: ${DECISAO_STATUS}` : approve()),
-      writer: () => PHASE_2,
-    }));
-    const outcome = await run;
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    const perguntas = deAuditoria(perguntadas);
-    expect(perguntas).toHaveLength(1);
-    expect(perguntas[0]?.decision).toContain("O formulário de criação de tarefa deve permitir escolher o status inicial");
-    expect(perguntas[0]?.recommended).toBe("");
-  });
 
-  it("3, 12. a contradição de contrato (prefixo) que voltou pela segunda vez não é arbitrada: o escritor a fecha e o plano é coerente", async () => {
-    await init();
-    let escritas = 0;
-    const { run, agent, perguntadas, impasses, anunciado } = await plan(roteiro({
-      coerencia: (call) => (call.prompt.includes("export const prefixo") ? approve() : PREFIXO),
-      writer: () => { escritas += 1; return escritas === 1 ? PHASE_2 : escritas === 2 ? revisao(PHASE_2, 2) : COM_PREFIXO; },
-    }), {}, (pergunta) => (pergunta.topic.startsWith("auditoria ·") ? "2" : "1")); // "fica como está", como no run real
-    const outcome = await run;
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(deAuditoria(perguntadas)).toEqual([]);
-    expect(impasses).toEqual([]);
-    expect(anunciado()).toContain("são de engenharia");
-    expect(await plano()).toContain("export const prefixo = '/reservas'");
-    expect(outcome.rendered).not.toContain("fica como está");
-    // A emenda levou a nota: o escritor sabe que não há decisão a esperar.
-    expect(por(agent, { role: "writer", stage: "authoring", subject: "phase-p02" })[2]?.prompt).toContain("cabe ao plano, não ao desenvolvedor");
-  });
 
   it("o marcador [NEEDS DECISION] de engenharia volta ao escritor, uma vez; não vira pergunta", async () => {
     await init();
@@ -274,127 +209,7 @@ describe("no orquestrador: a escolha de engenharia não chega ao desenvolvedor",
   });
 });
 
-describe("no orquestrador: a decisão do desenvolvedor vale para o que ele decidiu, e a não-resposta não aprova", () => {
-  /** Um auditor que insiste num ponto de engenharia até o impasse; o escritor só muda a revisão. */
-  const insistente = () => (call: AgentCall) => (call.prompt.includes("export const prefixo") ? approve() : PREFIXO);
 
-  it("4. a ausência de resposta no impasse não publica: a correção recomeça, o escritor fecha, e o plano sai coerente", async () => {
-    await init();
-    let escritas = 0;
-    const { run, perguntadas, impasses, anunciado } = await plan(roteiro({
-      auditor: insistente(),
-      writer: () => { escritas += 1; return escritas >= 4 ? COM_PREFIXO : revisao(PHASE_2, escritas); },
-    }), { maxAuditReturns: 1, decideStandoff: async (rendered) => { impasses.push(rendered); return "não sei"; } });
-    const outcome = await run;
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(impasses).toHaveLength(1);
-    expect(deAuditoria(perguntadas)).toEqual([]);
-    expect(anunciado()).toContain("recomeçando a correção e a auditoria");
-    expect(anunciado()).not.toContain("ninguém decidiu o impasse; publicando");
-    expect(outcome.rendered).not.toContain("segue em aberto");
-    expect(await plano()).toContain("export const prefixo");
-  });
-
-  it("4b. duas não-respostas com o achado material aberto param o run com o diagnóstico; nada é publicado", async () => {
-    await init();
-    let escritas = 0;
-    const { run, impasses } = await plan(roteiro({
-      auditor: insistente(),
-      writer: () => revisao(PHASE_2, (escritas += 1)),
-    }), { maxAuditReturns: 1, decideStandoff: async (rendered) => { impasses.push(rendered); return "tanto faz"; } });
-    const erro = await run.then(() => null, (e: Error) => e.message);
-    expect(erro).toContain("Ninguém decidiu o impasse duas vezes");
-    expect(erro).toContain("Estratégias tentadas, nesta ordem:");
-    expect(erro).toContain("impasse sem decisão do desenvolvedor: correção e auditoria recomeçadas");
-    expect(impasses).toHaveLength(2);
-    await expect(plano()).rejects.toThrow();
-  });
-
-  it("5. a decisão dele no impasse não promove a ressalva um achado posterior sobre outra coisa: o novo achado é corrigido", async () => {
-    await init();
-    const { run, perguntadas, impasses } = await plan(roteiro({
-      auditor: (call) => (!call.prompt.includes("export const prefixo")
-        ? PREFIXO
-        : !call.prompt.includes("respondem 409") ? reject("P2.T1.C2", "o critério de datas não diz a resposta HTTP", "diga que a resposta é 409 e nada é persistido") : approve()),
-      writer: (call) => (call.prompt.includes("o desenvolvedor decidiu") || call.prompt.includes("respondem 409") || call.prompt.includes("resposta é 409")
-        ? (call.prompt.includes("409") ? COM_PREFIXO_E_409 : COM_PREFIXO)
-        : revisao(PHASE_2, Math.random())),
-    }), { maxAuditReturns: 1, decideStandoff: async (rendered) => { impasses.push(rendered); return "declare o prefixo em src/api/reservas.ts como a fundação exige"; } });
-    const outcome = await run;
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(impasses).toHaveLength(1);
-    expect(deAuditoria(perguntadas)).toEqual([]);
-    const publicado = await plano();
-    expect(publicado).toContain("export const prefixo");
-    expect(publicado).toContain("respondem 409");
-    expect(outcome.rendered).not.toContain("mantido por decisão do desenvolvedor");
-  });
-
-  it("5b. o auditor que insiste contra a decisão dele perde: o ponto decidido vira ressalva, e só ele", async () => {
-    await init();
-    let escritas = 0;
-    const { run, impasses } = await plan(roteiro({
-      auditor: () => PREFIXO, // insiste mesmo depois da decisão
-      writer: () => revisao(PHASE_2, (escritas += 1)),
-    }), { maxAuditReturns: 1, decideStandoff: async (rendered) => { impasses.push(rendered); return "o prefixo é derivado do diretório pela fundação; o módulo não o exporta"; } });
-    const outcome = await run;
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(impasses).toHaveLength(1);
-    expect(outcome.rendered).toContain("mantido por decisão do desenvolvedor");
-  });
-
-  it("publicar é decisão explícita, e o que ficou aberto vai ao relatório em vez de sumir", async () => {
-    await init();
-    let escritas = 0;
-    const { run, impasses } = await plan(roteiro({
-      auditor: () => PREFIXO,
-      writer: () => revisao(PHASE_2, (escritas += 1)),
-    }), { maxAuditReturns: 1 });
-    const outcome = await run;
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(impasses).toHaveLength(1);
-    expect(outcome.rendered).toContain("publicado por decisão explícita do desenvolvedor, com o achado em aberto");
-  });
-});
-
-describe("a independência do reparo: quem reparou não lê, nem quando o verifier falha no protocolo", () => {
-  const F1 = reject("Tarefa «Implementar a criação de reserva com recusa de datas sobrepostas»", "o status inicial não é observável na resposta", "diga que a resposta 201 traz status pendente");
-
-  it("6, 7. o verifier devolve saída inválida duas vezes depois do reparo: a terceira leitura é do escritor, nunca do auditor que reparou", async () => {
-    await init();
-    const { run, agent, impasses, anunciado } = await plan(roteiro({
-      auditor: () => F1,
-      writer: () => PHASE_2,
-      reparador: () => COM_STATUS,
-      verifier: () => "não entendi o protocolo",
-      leitorEscritor: () => approve(),
-    }), { roles: { auditor: { provider: "deepseek", model: "flash", effort: "" }, verifier: { provider: "deepseek", model: "flash", effort: "" }, writer: { provider: "deepseek", model: "flash", effort: "" } } });
-    const outcome = await run;
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
-    expect(impasses).toEqual([]);
-    const leituras = por(agent, { stage: "audit", subject: P2 }).map((call) => call.role);
-    expect(leituras).toEqual(["auditor", "auditor", "verifier", "verifier", "writer"]);
-    expect(anunciado()).toContain("o auditor reparou este documento e não lê o próprio reparo");
-    // A independência disponível é só de sessão, e isso é dito.
-    expect(anunciado()).toContain("a independência entre verifier e auditor é só de sessão: os dois rodam em deepseek/flash");
-    expect(await plano()).toContain("A resposta 201 traz status pendente");
-  });
-
-  it("7b. sem leitor elegível, o run para com o diagnóstico e o estado em disco; nada é aprovado", async () => {
-    await init();
-    const { run } = await plan(roteiro({
-      auditor: () => F1,
-      writer: () => PHASE_2,
-      reparador: () => COM_STATUS,
-      verifier: () => "não entendi o protocolo",
-      leitorEscritor: () => "também não",
-    }));
-    const erro = await run.then(() => null, (e: Error) => e.message);
-    expect(erro).toContain("(verifier, verifier, writer)");
-    expect(erro).toContain("Estratégias tentadas, nesta ordem:");
-    await expect(plano()).rejects.toThrow();
-  });
-});
 
 describe("I-16 sem ferramenta: o plano não aloca trabalho de teste", () => {
   it("8. as cinco formas observadas no DeepSeek são prescrição; as quatro exigências legítimas não são", () => {
@@ -546,21 +361,18 @@ describe("o caminho normal não fica mais caro", () => {
     const outcome = await run;
     expect(outcome.readiness.ready, outcome.rendered).toBe(true);
     expect(por(agent, { role: "auditor", stage: "authoring" })).toHaveLength(0);
-    expect(por(agent, { role: "verifier", stage: "audit", subject: P2 })).toHaveLength(0);
+    expect(por(agent, { role: "verifier" })).toHaveLength(0);
     expect(por(agent, { role: "writer", stage: "audit" })).toHaveLength(0);
     expect(perguntadas.filter((pergunta) => pergunta.id !== ID_DO_BANCO)).toEqual([]);
     expect(anunciado()).not.toContain("engenharia");
-    // O mesmo número de chamadas da 0.6.2: entrevista, esqueleto não (é do init), arquitetura, duas fases, duas auditorias de fase, coerência, triagem não (sem bloqueio), ensaio.
-    expect(agent.calls.map((call) => `${call.role}:${call.stage}:${call.subject}`)).toEqual([
+    // Arquitetura, sua leitura, duas fases e UMA auditoria do plano inteiro (etapa 2 da redução): eram duas
+    // auditorias de fase, a coerência e dois lotes de ensaio. As fases são escritas em paralelo: conta o conjunto.
+    expect(agent.calls.map((call) => `${call.role}:${call.stage}:${call.subject}`).sort()).toEqual([
       "writer:authoring:architecture",
       "auditor:audit:architecture",
       "writer:authoring:phase-p01",
       "writer:authoring:phase-p02",
-      "auditor:audit:project-phases.md#P1",
-      "auditor:audit:project-phases.md#P2",
-      "auditor:audit:project-phases.md#coerência",
-      "verifier:verify:project-phases.md",
-      "verifier:verify:project-phases.md",
-    ]);
+      "auditor:audit:project-phases.md",
+    ].sort());
   });
 });

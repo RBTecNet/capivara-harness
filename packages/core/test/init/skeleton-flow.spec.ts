@@ -152,9 +152,4 @@ describe("caminho por esqueleto", () => {
     expect(segunda?.prompt).toContain("previous attempt was rejected");
   });
 
-  it("o ensaio do verificador continua rodando: é ele que prova que o critério é provável", async () => {
-    const { agent, outcome } = await run(skeletonPath());
-    expect(agent.calls.some((call) => call.role === "verifier" && call.stage === "verify")).toBe(true);
-    expect(outcome.readiness.checks.find((check) => check.id === "ensaio")?.passed).toBe(true);
-  });
 });

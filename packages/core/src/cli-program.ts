@@ -55,9 +55,9 @@ import {
   supportsTrueColor,
 } from "./tui/index.js";
 import type { Choice, EntradaDeTeclado, InterviewInput, Janela, Parada, SaidaDeTela } from "./tui/index.js";
-import { opcoesDoImpasse, paradaDeProntidao, paradaDoEstagio, type Estagio } from "./commands/paradas.js";
+import { paradaDeProntidao, paradaDoEstagio, type Estagio } from "./commands/paradas.js";
 import { runWizard, runWizardDePapeis, runWizardDoPedido } from "./commands/wizard.js";
-import { InputEndedError, createLineIO } from "./commands/line-io.js";
+import { InputEndedError, PerguntaRetiradaError, createLineIO } from "./commands/line-io.js";
 import { chooseInBox, createKeyPrompter, createKeySession } from "./commands/key-io.js";
 import type { KeySession } from "./commands/key-io.js";
 import { escolhaDaMudanca, escolhaDeColisao, respostaDaMudanca } from "./commands/escolhas-sem-painel.js";
@@ -400,9 +400,9 @@ function estagioInterativo(options: {
    * no fim dela, e a pergunta seguinte estoura em ERR_USE_AFTER_CLOSE.
    */
   const linhas = options.entrada ?? teclas?.line ?? createLineIO(terminal!, (text) => void stdout.write(text), { interactive: stdin.isTTY === true });
-  const perguntar = async (prompt: string, decision: string): Promise<string> => {
+  const perguntar = async (prompt: string, decision: string, signal?: AbortSignal): Promise<string> => {
     try {
-      return await linhas.ask(prompt);
+      return await linhas.ask(prompt, signal);
     } catch (error) {
       if (!(error instanceof InputEndedError)) throw error;
       if (engenharia) {
@@ -567,7 +567,27 @@ function estagioInterativo(options: {
     };
   };
 
-  const ask: InitOptions["ask"] = async (question, index, total) => {
+  /*
+   * A pergunta com prazo (o `plan`) pode ser retirada antes da resposta: o
+   * `signal` aborta, a leitura pendente rejeita e a pergunta sai da tela — a
+   * próxima tecla ou linha é da pergunta seguinte.
+   */
+  const ask: InitOptions["ask"] = async (question, index, total, opcoes) => {
+    const sinal = opcoes?.signal;
+    const retirar = (): void => teclas?.retirar();
+    sinal?.addEventListener("abort", retirar, { once: true });
+    try {
+      return await perguntarAoDesenvolvedor(question, index, total, sinal);
+    } catch (error) {
+      if (!(error instanceof PerguntaRetiradaError)) throw error;
+      progress.note("(sem resposta no prazo: o plan seguiu com a leitura recomendada)");
+      return "";
+    } finally {
+      sinal?.removeEventListener("abort", retirar);
+    }
+  };
+
+  const perguntarAoDesenvolvedor = async (question: Parameters<InitOptions["ask"]>[0], index: number, total: number, sinal?: AbortSignal): Promise<string> => {
     /*
      * Sem terminal não há a quem perguntar. Oferecer a pergunta a uma entrada
      * que não existe termina em ERR_USE_AFTER_CLOSE do readline — stack trace no
@@ -633,7 +653,7 @@ function estagioInterativo(options: {
         // Ctrl-D: a entrada acabou. Com a sessão fechada, `perguntar` cai no
         // mesmo bloqueio retomável que a leitura de linha já explica.
         teclas.close();
-        return await perguntar("", question.decision);
+        return await perguntar("", question.decision, sinal);
       } finally {
         progress.asking(null);
       }
@@ -654,7 +674,7 @@ function estagioInterativo(options: {
           return perguntar(paint(
             engenharia ? "  ▸ sua resposta (número ou texto; Enter deixa em aberto): " : "  ▸ sua resposta: ",
             "cyan", style(),
-          ), question.decision);
+          ), question.decision, sinal);
         });
         return answer.trim().toLowerCase() === BACK ? "" : answer;
       } finally {
@@ -663,74 +683,21 @@ function estagioInterativo(options: {
     }
 
     stdout.write(renderQuestion({ question, index, total, document: options.documento, style: style() }));
-    const answer = await perguntar(engenharia ? "Sua resposta (número ou texto; Enter deixa em aberto): " : "> ", question.decision);
+    const answer = await perguntar(engenharia ? "Sua resposta (número ou texto; Enter deixa em aberto): " : "> ", question.decision, sinal);
     return answer.trim().toLowerCase() === BACK ? "" : answer;
-  };
-
-  /*
-   * Sem terminal não há a quem perguntar, e o orquestrador já sabe parar com o
-   * impasse na tela quando ninguém decide.
-   */
-  const decideStandoff: InitOptions["decideStandoff"] = async (rendered, context) => {
-    progress.waitingForDeveloper();
-    const mechanical = context?.mechanical === true;
-    const title = mechanical ? "MODELO · estrutura fora dos limites" : "IMPASSE · precisa da sua decisão";
-    const label = mechanical ? "a estrutura que o modelo não adequou" : "o impasse do auditor";
-    const inputPrompt = mechanical ? '> ("reiniciar", "publicar" rascunho ou "abortar") ' : '> (responda, ou "publicar" para aceitar como está) ';
-    /*
-     * Por tecla, as quatro saídas do impasse viram lista (§94), e cada uma
-     * devolve a palavra que o orquestrador já reconhece. A decisão escrita
-     * continua sendo texto: é ela que vira autoridade acima do auditor.
-     */
-    if (live.enabled && teclas) {
-      const texto = rendered.split("\n").filter((line) => !line.startsWith("Comandos:"));
-      const saidas = opcoesDoImpasse(mechanical);
-      return live.suspend(async () => {
-        try {
-          for (;;) {
-            const indice = await chooseInBox(teclas, {
-              title,
-              text: texto,
-              choices: saidas.map((saida) => saida.choice),
-              write: (text) => void stdout.write(text),
-              dimensions: () => ({ columns: stdout.columns ?? 100, rows: stdout.rows ?? 40 }),
-              style: style(),
-            });
-            const resposta = saidas[indice]?.resposta;
-            if (resposta) return resposta;
-            const decisao = await teclas.line.ask(paint("  ▸ sua decisão (Enter vazio volta às opções): ", "cyan", style()));
-            if (decisao.trim() !== "") return decisao;
-          }
-        } catch (error) {
-          if (!(error instanceof InputEndedError)) throw error;
-          teclas.close();
-          return await perguntar(inputPrompt, label);
-        }
-      });
-    }
-    if (live.enabled) {
-      progress.asking({ title, body: rendered.split("\n") });
-      repaint();
-      live.release();
-      progress.asking(null);
-      return perguntar(paint(inputPrompt, "cyan", style()), label);
-    }
-    stdout.write(`\n${rendered}\n`);
-    return perguntar(inputPrompt, label);
   };
 
   return {
     progress,
     live,
     repaint,
-    /** O que se passa ao orquestrador; `decideStandoff` só existe com terminal. */
+    /** O que se passa ao orquestrador. */
     hooks: {
       announce,
       onProgress,
       onPhaseProgress,
       call,
       ask,
-      ...(stdin.isTTY === true ? { decideStandoff } : {}),
     },
     close: () => { live.release(); terminal?.close(); teclas?.close(); },
   };
@@ -1550,11 +1517,18 @@ export function createProgram(): Command {
       .description("Detalha as fases que o init produziu, até RALPH READY")
       .option("--file <caminho>", "lê o pedido de um arquivo; por padrão, o mesmo que o init usou")
       .option("--max-audit-returns <n>", "devoluções do auditor", "3")
+      .option("--prazo-da-pergunta <min>", "minutos que uma pergunta espera resposta antes de o plan seguir com a leitura recomendada", "10")
       .option("--fresh", "reescreve todas as fases; ignora o que execuções anteriores já produziram")
       .option("--no-dashboard", "não desenha o painel; só as linhas de progresso")
       .option("--no-commit", "não versiona a especificação ao chegar em RALPH READY"),
     ["writer", "auditor", "verifier"],
-  ).action(async (flags: CommonFlags & { file?: string; maxAuditReturns: string; fresh?: boolean; dashboard?: boolean; commit?: boolean }) => {
+  ).action(async (flags: CommonFlags & { file?: string; maxAuditReturns: string; prazoDaPergunta: string; fresh?: boolean; dashboard?: boolean; commit?: boolean }) => {
+    const prazoEmMinutos = Number(flags.prazoDaPergunta);
+    if (!Number.isFinite(prazoEmMinutos) || prazoEmMinutos <= 0) {
+      stdout.write("erro: --prazo-da-pergunta deve ser um número de minutos maior que zero.\n");
+      process.exitCode = 1;
+      return;
+    }
     const projectRoot = flags.project ?? ".";
     let escolhas = flags;
     let roles = rolesFromFlags(escolhas);
@@ -1677,6 +1651,7 @@ export function createProgram(): Command {
         request,
         language,
         maxAuditReturns: Number(flags.maxAuditReturns),
+        planQuestionTimeoutMs: prazoEmMinutos * 60_000,
         ...(flags.fresh === true ? { fresh: true } : {}),
         providers: { writer: roles.writer.provider, auditor: roles.auditor.provider, verifier: roles.verifier.provider },
         ...ui.hooks,

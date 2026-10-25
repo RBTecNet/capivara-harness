@@ -17,6 +17,7 @@
 import { languageBlock } from "./language.js";
 import { flowScopeBlock, functionalAcceptanceBlock, interfaceContractBlock, transientStateBlock } from "./acceptance-policy.js";
 import { LEITURA_SEM_EFEITO } from "./flows.js";
+import { lerProtocolo } from "../contract/protocolo.js";
 
 export const TRIAGE_HEADER = "CAPIVARA_TRIAGE";
 
@@ -138,9 +139,10 @@ export function triagePrompt(context: TriageContext): string {
  * Nada quando o formato não veio: a triagem nunca bloqueia o gate, e sem
  * veredito legível o gate faz o que fazia antes dela.
  */
-export function lerTriagem(output: string): Triagem | null {
+export function lerTriagem(resposta: string): Triagem | null {
+  const output = lerProtocolo(resposta, "CAPIVARA_(?:TRIAGEM|EVIDENCIA|ONDE|CRITERIO|CORRECAO|PATCH)");
   const campo = (nome: string): string =>
-    new RegExp(`^[\\s*>-]*CAPIVARA_${nome}[\\s*]*:\\s*(.*)$`, "im").exec(output)?.[1]?.trim() ?? "";
+    new RegExp(`^CAPIVARA_${nome}:\\s*(.*)$`, "m").exec(output)?.[1]?.trim() ?? "";
 
   const tipo = campo("TRIAGEM").toUpperCase().replace(/[^A-Z]/g, "");
   if (tipo !== "PRODUTO" && tipo !== "ROTEIRO" && tipo !== "CRITERIO") return null;

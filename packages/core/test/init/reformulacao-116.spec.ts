@@ -281,9 +281,7 @@ describe("6. um documento inválido não recebe aprovação indevida", () => {
     const passos = skeletonPath().filter((passo) => passo.match.role !== "auditor");
     passos.push({ match: { role: "auditor", stage: "audit", subject: "architecture" }, respond: { stdout: reject("phases · Phase 2", "grande demais", "divida") }, repeat: true });
     passos.push({ match: { role: "auditor", stage: "audit" }, respond: { stdout: approve() }, repeat: true });
-    let impasses = 0;
-    await expect(plan(passos, { maxAuditReturns: 1, decideStandoff: async () => { impasses += 1; return "publicar"; } })).rejects.toThrow(/não convergiu/);
-    expect(impasses).toBe(0);
+    await expect(plan(passos, { maxAuditReturns: 1 })).rejects.toThrow(/não convergiu/);
     await expect(readFile(join(projectRoot, ".capivara/init/architecture.md"), "utf8")).rejects.toThrow();
   });
 
@@ -302,9 +300,9 @@ describe("6. um documento inválido não recebe aprovação indevida", () => {
     await init(skeletonPath());
     const passos = skeletonPath().filter((passo) => passo.match.role !== "auditor");
     passos.push({ match: { role: "auditor", stage: "audit", subject: "architecture" }, respond: { stdout: approve() }, repeat: true });
-    passos.push({ match: { role: "auditor", stage: "audit", subject: "project-phases.md#coerência" }, respond: { stdout: approve() }, repeat: true });
     passos.push({ match: { role: "auditor", stage: "audit" }, respond: { stdout: reject("Tarefa «Criar a migration de statuses»", "o seed não diz a ordem das linhas", "diga a ordem") }, repeat: true });
-    await expect(plan(passos, { maxAuditReturns: 1 })).rejects.toThrow(/Impasse em project-phases.md/);
+    await expect(plan(passos)).rejects.toThrow(/A auditoria do plano bloqueou de novo depois da emenda/);
+    await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).rejects.toThrow();
   });
 });
 

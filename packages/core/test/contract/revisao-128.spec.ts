@@ -17,7 +17,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { assemblePhase, assemblePhasesDocument, buildStamp, parsePhases, parseSkeleton, preserveUnaddressedTasks, testPrescriptions } from "../../src/contract/index.js";
-import { applyMaterialityReview, materialityInput } from "../../src/audit/materiality.js";
 import type { AuditVerdict } from "../../src/audit/index.js";
 import { planningScopeBlock } from "../../src/prompts/index.js";
 
@@ -137,28 +136,6 @@ describe("§128 · revisão — a posição não casa tasks que mudaram de lugar
 const cincoFases = [1, 2, 3, 4, 5].map((numero) => assemblePhase({ number: numero, title: `Fase ${numero}`, goal: "objetivo", dependsOn: numero === 1 ? "none" : `Phase ${numero - 1}`, covers: ["tarefas"], areas: ["frontend"] }, FASES.r1[String(numero)]!).trim());
 const documento = parsePhases(assemblePhasesDocument({ projectName: "PL", stamp: buildStamp([{ name: "skeleton.md", content: "" }]), overview: "x", phases: cincoFases, openQuestions: [] }));
 
-describe("§128 · revisão — a regra do harness é contexto, nunca prova", () => {
-  it("o achado 'a fase 4 perdeu o requisito de testes do módulo' não pode sair citando só o harness", () => {
-    expect(documento.ok).toBe(true);
-    if (!documento.ok) return;
-    const original: AuditVerdict = {
-      status: "REJECTED",
-      reason: "requisito perdido",
-      remarks: [],
-      findings: [{
-        where: "Task 9",
-        phase: 4,
-        problem: "O pedido exige que cada módulo tenha seus próprios testes e que os testes usem banco isolado; nenhuma task da fase 4 carrega esse requisito como critério.",
-        fix: "Acrescente a uma task de produto da fase 4 o critério: o módulo possui testes automatizados próprios, executados com banco SQLite isolado.",
-      }],
-    };
-    const input = materialityInput(original, { request: PEDIDO, decisions: [], phases: documento.document.phases, harness: planningScopeBlock() });
-    const parecer = JSON.stringify({ reviews: [{ id: "F1", disposition: "ADVISORY", reason: "A regra do planejamento manda não reprovar plano por não especificar testes.", evidence: [{ source: "harness", quote: "Do not reject a plan for not specifying tests." }] }] });
-    const resultado = applyMaterialityReview(original, input, parecer, [PEDIDO]);
-    // Seguro: o bloqueio continua.
-    expect(resultado.verdict.findings, "requisito do desenvolvedor descartado com citação do harness").toHaveLength(1);
-  });
-});
 
 interface Caso { frase: string; autoridade: string[] }
 

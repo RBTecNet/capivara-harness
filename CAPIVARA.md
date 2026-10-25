@@ -7,7 +7,7 @@ detalha até `RALPH READY`, e `capivara build` constrói a aplicação a partir 
 ## Especificação
 
 **`docs/PLANO.md` é a autoridade deste repositório.** Leia antes de escrever qualquer código.
-Ele define o contrato, os motores de entrevista e auditoria, os cinco gates do loop, os
+Ele define o contrato, os motores de entrevista e auditoria, os gates do loop, os
 prompts literais de cada papel (Apêndice A) e o provider falso (Apêndice B).
 
 **§26 é o ciclo que roda hoje.** As seções 6 a 9 descrevem a cadeia de quatro documentos em
@@ -84,8 +84,32 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-Na versão 0.7.10, `npm run check` passa: build, typecheck e **3390 testes**, incluindo o catálogo de
+Na versão 0.8.0, `npm run check` passa: build, typecheck e **3000 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
+
+A 0.8.0 traz a §138: o Core exige menos trabalho dos modelos, em cinco etapas,
+cada uma com a medida de antes e de depois (`medir-verificacao.mjs`).
+- Uma política de teste só, para o executor e o verificador: nenhum critério
+  exige teste próprio.
+- O `plan` numa passada: uma auditoria do plano inteiro, mais uma depois da
+  emenda no máximo; o Core decide o que devolve pela classe do achado, com as
+  citações conferidas; a pergunta tem prazo. Saíram o ensaio do verificador, a
+  triagem de materialidade, a auditoria por fase e a de coerência.
+- Até 2 critérios por task, na mesma gramática.
+- O `build` revisa cada fase uma vez, numa chamada, e o verificador repara
+  primeiro o que diagnosticou. Os fluxos são percorridos uma vez, na aceitação
+  final, numa cópia limpa. Saíram o G4 por fase, a triagem, a contestação do
+  roteiro, a correção de formato, a oscilação G3×G4 e a prova pela suíte da
+  0.7.9.
+- O build termina em `aceito`, `entregue com pendências`, `verificação
+  inconclusiva` ou `falhou` (código 0, 3, 3 ou 2); o orçamento esgotado entrega
+  a fase com as pendências ditas.
+- `test/architecture/orcamento-de-prova.spec.ts` falha quando o motor pede mais
+  chamadas do que a redução mediu, e as garantias G-1 a G-4 do catálogo
+  continuam.
+
+No cenário pequeno da medição, a cadeia caiu de 27 para 19 chamadas. A prova com
+modelo real ainda não foi feita.
 
 A 0.7.10 traz a §135: a preparação do ambiente deixa de parar o build com o
 que ela mesma instalou a pedido da Capivara.

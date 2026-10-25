@@ -14,12 +14,48 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `main`: a cadeia §133–§135 (`fix/cooperacao-build-133` → `fix/conclusao-generalista-134` → `fix/preparacao-135`) entrou por fast-forward em 24/10/2026, e as três branches continuam no `origin`; a §129–§132 entrou em 22/10/2026 (a §122–§128 em 21/10/2026), e as branches de ajuste delas foram apagadas, local e no `origin` |
-| versão | 0.7.10 na `main` (§135; 0.7.9 sem a §135, 0.7.8 sem a §134, 0.7.7 sem as correções da §133.9; a §132 entrou na `main` sem versão própria, sobre a 0.7.6); planos da 0.6.x e da 0.7.x valem na 0.7.10 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
-| suíte | 3390 testes em 173 arquivos na 0.7.10 (§135), `npm run check` verde (rc=0, rodado sozinho; com o revisor rodando ao lado, o `coerencia-temporal-127` caiu uma vez; na rodada da versão, duas execuções logo depois de load 19 caíram, com testes diferentes em cada uma: três da §135 cuja sonda real do Vite, `npm exec`, passou do prazo de 5 s das sondas, o conflito binário do `paralelo` e o `prompt-engineer/terminal`, morto por prazo; todos passaram sozinhos e na rodada seguinte, com load abaixo de 3); 3321 testes em 172 arquivos na 0.7.9 (§134), `npm run check` verde (rc=0; o `coerencia-temporal-127` caiu uma vez sob load 12 e passou intercalado com a HEAD e na rodada seguinte); 3240 testes em 170 arquivos na 0.7.8 (§133.9), `npm run check` verde (rc=0); 3234 na 0.7.7 (§133), `npm run check` verde (rc=0; as duas instabilidades conhecidas, `coerencia-temporal-127` e `integridade-122`, caíram uma vez cada sob load 10–13 e passaram na rodada seguinte); 3203 em 168 na `main` com a §132, `npm run check` verde (rc=0); 3130 em 167 na 0.7.6 sem a §132 (3121 em 166 na 0.7.5), `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na 0.7.4 (§130); 3020 em 163 na 0.7.3 (§129); 2989 em 161 na 0.7.2 (2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
+| branch | `refactor/core-exige-menos` (§138, 0.8.0, push feito em 25/10/2026, sem merge) sobre a `main` (0.7.10); a §136 e a §137 estão em `fix/ensaio-eco-136`, fora desta base; na `main`, a cadeia §133–§135 (`fix/cooperacao-build-133` → `fix/conclusao-generalista-134` → `fix/preparacao-135`) entrou por fast-forward em 24/10/2026, e as três branches foram apagadas, local e no `origin`; a §129–§132 entrou em 22/10/2026 (a §122–§128 em 21/10/2026), e as branches de ajuste delas foram apagadas, local e no `origin` |
+| versão | 0.8.0 na `refactor/core-exige-menos` (§138); 0.7.10 na `main` (§135; 0.7.9 sem a §135, 0.7.8 sem a §134, 0.7.7 sem as correções da §133.9; a §132 entrou na `main` sem versão própria, sobre a 0.7.6); planos da 0.6.x e da 0.7.x valem na 0.8.0 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
+| suíte | 3000 testes em 171 arquivos na 0.8.0 (§138), `npm run check` verde (rc=0; a redução apagou os testes do que saiu, listados no relatório de cada etapa, e o `coerencia-temporal-127`, instável, saiu com a oscilação); 3390 testes em 173 arquivos na 0.7.10 (§135), `npm run check` verde (rc=0, rodado sozinho; com o revisor rodando ao lado, o `coerencia-temporal-127` caiu uma vez; na rodada da versão, duas execuções logo depois de load 19 caíram, com testes diferentes em cada uma: três da §135 cuja sonda real do Vite, `npm exec`, passou do prazo de 5 s das sondas, o conflito binário do `paralelo` e o `prompt-engineer/terminal`, morto por prazo; todos passaram sozinhos e na rodada seguinte, com load abaixo de 3); 3321 testes em 172 arquivos na 0.7.9 (§134), `npm run check` verde (rc=0; o `coerencia-temporal-127` caiu uma vez sob load 12 e passou intercalado com a HEAD e na rodada seguinte); 3240 testes em 170 arquivos na 0.7.8 (§133.9), `npm run check` verde (rc=0); 3234 na 0.7.7 (§133), `npm run check` verde (rc=0; as duas instabilidades conhecidas, `coerencia-temporal-127` e `integridade-122`, caíram uma vez cada sob load 10–13 e passaram na rodada seguinte); 3203 em 168 na `main` com a §132, `npm run check` verde (rc=0); 3130 em 167 na 0.7.6 sem a §132 (3121 em 166 na 0.7.5), `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na 0.7.4 (§130); 3020 em 163 na 0.7.3 (§129); 2989 em 161 na 0.7.2 (2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-25 — O Core exige menos trabalho: a verificação reduzida, com prova medida (§138)
+
+A especificação "Correção da Capivara" pediu a redução em cinco etapas, cada uma
+com o seu commit e a medida de antes e de depois
+(`node packages/core/scripts/medir-verificacao.mjs`, cenários com provider falso
+em `test/support/cenarios-de-medicao.ts`). O registro completo está na §138.
+
+- **Os commits.** 14b6e4e, a medida e as garantias G-1 a G-4; cfa143b, uma
+  política de teste só; 455b5a5, o `plan` de uma passada; 4f13ecc, até 2
+  critérios por task; 24b462e, uma revisão por fase, os fluxos só na aceitação
+  final e os estados da entrega; 93cec43, o princípio no `CAPIVARA.md` e o
+  orçamento de prova.
+- **A medida.** No cenário pequeno, a cadeia caiu de 27 para 19 chamadas. As
+  garantias ficaram mais baratas: G-3 de 34 para 9 chamadas e G-4 de 22 para 9.
+  O orçamento esgotado voltou a 29 chamadas na etapa 4 (eram 29 antes da
+  redução e 21 depois da etapa 2), porque agora termina "entregue com
+  pendências", e a fase seguinte roda. As quatro garantias são
+  pegas em todos os commits.
+- **O orçamento de prova.** `test/architecture/orcamento-de-prova.spec.ts` falha
+  quando o motor dispara, em algum papel, mais chamadas do que o fim da etapa 4
+  mediu. Os tetos não têm folga.
+- **Ainda não houve run com modelo real.** A prova final é o `mmax` de ponta a
+  ponta, comparando os `events.tsv`. O `capivara aptidao` que ela pede está em
+  `fix/ensaio-eco-136`.
+
+Ficam para decisão (PLANO §138):
+- o reparo de um achado da revisão não tem segunda revisão, então toda fase com
+  achado sai "entregue com pendências", mesmo corrigida (o G-1 termina com
+  código 3);
+- com o orçamento esgotado, a fase seguinte herda a suíte vermelha;
+- "fluxos essenciais" virou todos os fluxos do esqueleto, porque o contrato não
+  marca quais são;
+- o produto desktop dá "verificação inconclusiva", porque a prova pela suíte
+  (§134) saiu;
+- a fase entregue com pendências não reabre no próximo `capivara build`.
 
 ## 2026-10-23 — A preparação que a Capivara pediu não pode parar o build (§135)
 

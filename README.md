@@ -2,22 +2,20 @@
 
 Do prompt à aplicação final, em três comandos.
 
-Versão **0.7.10**: o `build` recupera por defeito e revalida só a prova que a
-correção atingiu (§125), cobra cada fluxo quando o plano diz que ele existe
-(§127), entrega a fase grande ao executor em partes, julgando-a inteira (§130),
-e só aprova o ambiente que a instalação estrita aceita, com o MiniMax nos efforts
-que o modelo aceita da API direta ao OpenCode e o catálogo da API como referência
-dos modelos no BUILD (§131); não exige navegador de produto que não o tem e
-deixa o fluxo dele pendente e nomeado, nunca aprovado, e o verificador não
-bloqueia pelo que nenhuma sessão consegue observar (§133); conclui esse fluxo
-pela suíte do projeto só com o teste aprovado no relatório do runner (.NET), e
-percorre por comandos o produto de terminal (§134); adota a preparação do
-ambiente que o contrato do PLAN autoriza e, quando recusa, diz a condição exata
-(§135);
-o `plan` mantém a correção que o achado alcança e a fase que a
-reorganização não tocou (§128), não planeja teste, escolhe todas as dependências
-do projeto — as de teste incluídas — e não devolve por teste (§129). Planos e
-runs da 0.6.x e da 0.7.x continuam valendo. O contrato dos três estágios está em
+Versão **0.8.0**: o Core exige menos trabalho dos modelos, e cada redução tem a
+medida de antes e de depois (§138). O `plan` escreve as dependências e as fases
+numa passada, com uma auditoria do plano inteiro; o Core decide o que devolve
+(contradição, interface ou dependência, com as citações conferidas), e a
+pergunta ao desenvolvedor tem prazo. O `build` revisa cada fase uma vez, numa
+chamada; o verificador repara primeiro o que diagnosticou; os fluxos do
+esqueleto são percorridos uma vez, na aceitação final, numa cópia limpa; e o
+build termina em `aceito`, `entregue com pendências`, `verificação inconclusiva`
+ou `falhou` — só o último o para antes do fim. Continuam: a recuperação por
+defeito, revalidando só a prova que a correção atingiu (§125), a fase grande em
+partes (§130), o ambiente que a instalação estrita aceita (§131), a preparação
+que o contrato do PLAN autoriza (§135), e o `plan` que não planeja teste e
+escolhe todas as dependências do projeto (§129). Planos e runs da 0.6.x e da
+0.7.x continuam valendo. O contrato dos três estágios está em
 [`docs/CONTRATO.md`](docs/CONTRATO.md).
 Planejamentos da 0.5.0 e anteriores são incompatíveis: o plano deixou de prescrever testes (`capivara-phases/v2`) e passou a vir com a
 arquitetura e a infraestrutura decididas pelo `plan` (`capivara-planning/v3`).
@@ -165,7 +163,7 @@ três, e nenhum deles bloqueia — cada um vale para o projeto que o usa:
 |---|---|---|---|
 | `sqlite3` | a suíte de um projeto que guarda dados em SQLite | `brew install sqlite` | `sudo apt install sqlite3` |
 | compilador C e `make` | drivers de banco e outros módulos nativos | `xcode-select --install` | `sudo apt install build-essential` |
-| navegadores do Playwright | o gate 4, que percorre os fluxos na aplicação de pé | `npx playwright install` | `npx playwright install` |
+| navegadores do Playwright | a aceitação final, que percorre os fluxos na aplicação de pé | `npx playwright install` | `npx playwright install` |
 
 Confira o ambiente antes de gastar a primeira chamada:
 
@@ -263,18 +261,21 @@ teste nem procedimentos de validação — quem decide como provar o produto é 
 avaliador do build, lendo o código entregue.
 
 O que só a escrita da fase descobre volta como uma segunda rodada de entrevista.
-Depois vêm o self-check mecânico (custo zero), o **auditor independente** — uma
-chamada por fase, mais uma de coerência sobre o plano inteiro, julgando
-fidelidade ao produto, coerência arquitetural, completude, dependências,
-dimensionamento e viabilidade para um executor econômico — e o **ensaio do
-verificador**, que julga cada critério de aceite antes de existir código: um
-critério impossível de observar para aqui, e não três ciclos de correção adiante.
-Um achado que pede reorganização de fases volta à arquitetura, e as fases cujo
-envelope não mudou voltam do cache.
+Depois vêm o self-check mecânico (custo zero) e **uma auditoria independente do
+plano inteiro**, mais uma depois da emenda, no máximo. Quem decide o que devolve
+é o Core, conferindo em código: a contradição, só com as duas passagens citadas
+existindo no documento; a interface, com o nome dos dois lados; a dependência,
+com o pacote fora da infraestrutura aprovada. Precisão, completude e estilo viram
+observações do relatório, sem rodada nem pergunta, e o auditor não cria decisão
+de produto. O bloqueio que sobrevive à emenda para o `plan`, com as duas
+citações à vista. Um achado sobre o envelope de uma fase volta à arquitetura, e
+as fases cujo envelope não mudou voltam do cache. A pergunta ao desenvolvedor
+tem prazo (`--prazo-da-pergunta`, 10 minutos): sem resposta, o `plan` segue com
+a leitura recomendada e a registra como suposição.
 
 A recuperação é orientada à conclusão: o que se conserta contando é consertado
-em código; uma emenda toca só a fase citada; esqueleto, arquitetura, fases,
-aprovações por task e coerência sobrevivem em disco, e uma retomada depois de o
+em código; uma emenda toca só a fase citada; esqueleto, arquitetura, fases e
+aprovações sobrevivem em disco, e uma retomada depois de o
 provider cair recomeça de onde parou. Uma emenda que não muda o texto leva os
 pontos a você em vez de pagar outra devolução. Nada disso declara aprovado um
 documento que não foi.
@@ -299,15 +300,14 @@ muda os limites das CLIs.
 
 ### `capivara build`
 
-Cada fase usa sessões separadas de construção e validação. Por fase, cinco gates:
+Cada fase usa sessões separadas de construção e validação. Por fase, quatro gates:
 
 | Gate | O que verifica |
 |---|---|
 | G0 | o engine terminou de verdade |
 | G1 | a sessão escreveu código — **sinal, não veredito** |
 | G2 | a suíte do projeto, rodada **pelo loop**, fora da sessão do agente |
-| G3 | um verificador independente, read-only, task a task |
-| G4 | os fluxos do esqueleto, percorridos **na aplicação de pé** |
+| G3 | um verificador independente, read-only, task a task, **uma vez por fase** |
 
 Enquanto G0 aguarda o executor concluir, o painel mostra a atividade reportada
 pelo Codex ou OpenCode: arquivos, comandos e resultados de testes, com o tempo
@@ -321,18 +321,35 @@ inclui o servidor privado e filhos identificados por uma marca da chamada,
 mesmo em grupos separados. Na retomada, alterações sem commit do worktree são
 guardadas como parcial antes da limpeza; a fase volta aos gates normalmente.
 
-Os quatro primeiros leem; o G4 abre o produto e clica. Cada fluxo declarado no
-esqueleto vira um roteiro Playwright, escrito por uma sessão que não implementou
-a fase, guardado em `.capivara/flows/` e executado pelo loop — e como ele fica no
-projeto, o fluxo da fase 2 continua sendo percorrido na fase 7. `--no-flows`
-desliga o gate.
-
 Todos verdes com a árvore suja → um commit por fase. Todos verdes com a árvore
-limpa → a fase já estava implementada. Defeito funcional vermelho recebe a
-**causa real** para correção; erro do roteiro do harness é corrigido no próprio G4.
+limpa → a fase já estava implementada. O que a implementação não fechou — a
+suíte vermelha, o achado da revisão — vai primeiro ao reparo do verificador que
+o diagnosticou, e o executor vem depois. O reparo é provado pela suíte; sem
+segunda revisão, o achado reparado fica como pendência nomeada. Esgotados os
+ciclos, a fase é entregue com as pendências ditas, e o build segue.
 
-Esgotados os ciclos, o loop para e é retomável: `capivara build` de novo continua
-de onde parou, sem refazer o que já ficou verde.
+Os fluxos do esqueleto são percorridos **uma vez, na aceitação final**, numa
+cópia limpa do projeto: cada fluxo vira um roteiro, escrito por uma sessão que
+não implementou o produto, guardado em `.capivara/flows/` e executado pelo loop,
+num navegador com a aplicação de pé ou num terminal, pelos meios da plataforma.
+O fluxo que reprova volta ao executor como defeito do produto; a falha da
+ferramenta do harness (runner ausente, roteiro que falha por si) deixa a
+verificação inconclusiva, sem reparo. `--no-flows` pula o percurso, e o
+desfecho fica inconclusivo.
+
+O build termina num de quatro estados:
+
+| estado | quando | código |
+|---|---|---|
+| `aceito` | todas as fases aceitas e a aceitação limpa | 0 |
+| `entregue com pendências` | alguma fase ou a aceitação deixou um defeito sem prova de correção | 3 |
+| `verificação inconclusiva` | uma verificação não pôde ser feita ou lida, inclusive fluxos declarados e não percorridos | 3 |
+| `falhou` | o build parou antes do fim: sessão sem resultado utilizável, credencial, limite de uso, Git movido por um agente, commit recusado | 2 |
+
+`entrega.md` lista as pendências. A fase entregue com pendências não reabre
+sozinha: `capivara build --rebuild-all` ou `capivara change` refazem. O build
+que falhou é retomável: `capivara build` de novo continua de onde parou, sem
+refazer o que já ficou verde.
 
 O verificador informa, para cada pendência, a evidência, como corrigir e qual
 teste ou comando confirma a correção. Ele deve cobrir todos os critérios da
@@ -345,36 +362,35 @@ G2 continua rodando a suíte completa independentemente. Uma nova construção r
 o motivo completo da devolução. Defeitos reais de funcionalidade, dados e segurança
 continuam exigindo correção.
 
-Roteiros do G4 são gerados, executados e corrigidos pelo harness, com até duas
-correções distintas de roteiro por passagem. Erro persistente de roteiro não pede
-ao executor que altere produto aprovado. Um carregamento que terminou antes de o
-teste começar a observá-lo exige ajustar o teste, sem atrasar artificialmente o produto.
-O roteirista e a triagem recebem as regras compartilhadas do esqueleto e os critérios
-da fase: endpoints, métodos e base do cliente já publicados não precisam ser adivinhados
-a partir do nome da tela.
+Os roteiros dos fluxos são gerados, executados e corrigidos pelo harness, com até
+duas correções distintas de roteiro por passagem. Erro persistente de roteiro não
+pede ao executor que altere produto aprovado. Um carregamento que terminou antes
+de o teste começar a observá-lo exige ajustar o teste, sem atrasar artificialmente
+o produto. O roteirista recebe as regras compartilhadas do esqueleto: endpoints,
+métodos e base do cliente já publicados não precisam ser adivinhados a partir do
+nome da tela.
 
 O `plan` publica `environment.json` com os pré-requisitos e sondas de prontidão
 decididos pela arquitetura, mais a infraestrutura declarada. O `build` verifica e prepara o ambiente antes de iniciar
-as fases, incluindo dependências existentes e Chromium quando G4 está habilitado.
+as fases, incluindo dependências existentes e Chromium quando os fluxos são percorridos.
 A aprovação vale para a execução: as fases não repetem essas sondas. Dependência
 ou migração criada pelo código continua sendo instalada/aplicada quando necessário.
 O build exige o metadado atual vinculado ao plano e ao esqueleto; não há fallback
 para planos antigos nem conversão automática pelo catálogo da stack.
 
-Se a resposta de verificação vier com formato ou cobertura inválidos, o Core
-pede uma correção somente leitura no mesmo ciclo, preservando a resposta original.
-Isso não consome um reparo nem envia o executor para alterar código por erro de
-protocolo. Após um reparo, uma revisão completa renova os vereditos; as tasks
-aprovadas voltam a ser lembradas nas rodadas seguintes, mantendo a possibilidade
-de reabrir uma regressão real.
+A resposta de verificação é lida com tolerância à embalagem (`contract/protocolo.ts`);
+a que continua ilegível, ou a sessão do verificador que não termina de verdade,
+deixa a fase em verificação inconclusiva, sem pedido de correção de formato e sem
+segunda sessão; credencial recusada e limite de uso param o build. Erro de
+protocolo nunca manda o executor alterar código.
 
 Com um verificador via CLI, o build também permite uma sessão de reparo por
 fase, por padrão. Nessa sessão separada, o verificador pode corrigir código,
 fortalecer testes e instalar as dependências declaradas do projeto que o
 construtor não conseguiu preparar — nunca uma que a infraestrutura aprovada não
-declare (§129). Depois, o Core executa novamente a suíte, uma nova
-verificação somente leitura e os fluxos. O reparador não aprova sua própria
-alteração nem faz commits. `--max-verifier-repairs 0` desliga os reparos;
+declare (§129). Depois, o Core executa novamente a suíte; o reparo
+de um achado da revisão, sem segunda revisão, fica como pendência nomeada. O
+reparador não aprova sua própria alteração nem faz commits. `--max-verifier-repairs 0` desliga os reparos;
 valores de 1 a 10 definem o orçamento por fase. Com API direta, o verificador
 fornece orientação, e o construtor continua responsável pelas alterações.
 `--no-system-install` também se aplica aos reparos do verificador.

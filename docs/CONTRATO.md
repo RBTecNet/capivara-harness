@@ -1,6 +1,6 @@
 # O contrato da Capivara — INIT, PLAN e BUILD
 
-Versão **0.7.10** (com a execução progressiva das fases, §130, a preparação, o raciocínio e o catálogo de modelos do §131, o ensaio do §132, o produto fora do navegador do §133, a conclusão pela suíte e o G4 de terminal da §134 e a adoção da preparação pelo contrato do PLAN da §135). Este documento descreve, num lugar só, o que cada estágio da
+Versão **0.8.0** (com a execução progressiva das fases, §130, a preparação, o raciocínio e o catálogo de modelos do §131, o produto fora do navegador do §133, o percurso de terminal da §134, a adoção da preparação pelo contrato do PLAN da §135 e a redução da verificação da §138: o plan de uma passada, uma revisão por fase, os fluxos só na aceitação final e os estados da entrega). Este documento descreve, num lugar só, o que cada estágio da
 Capivara recebe, decide, produz e não pode fazer, e como o trabalho passa de um
 para o outro. O porquê de cada regra está numerado em `docs/PLANO.md` (§NNN); o
 estado do trabalho, em `docs/HANDOFF.md`. Quando este documento e o código
@@ -21,9 +21,11 @@ Três regras atravessam os três estágios:
    decide por ele uma questão de produto.
 2. **O objetivo é concluir.** Cada estágio procura o caminho para terminar dentro
    dos limites que já existem; parar é o último recurso, sempre retomável e com
-   diagnóstico. Nunca se aprova o que não foi verificado (fail-closed).
+   diagnóstico. Nunca se aprova o que não foi verificado: o que não se provou é
+   entregue como pendência nomeada, nunca como aceito.
 3. **Quem escreve não aprova o que escreveu.** Escritor, auditor e verificador são
-   sessões e papéis separados; o reparo é validado por outra leitura.
+   sessões e papéis separados; o reparo é provado pela suíte, e o achado reparado
+   que nenhuma leitura reviu fica como pendência.
 
 ## Fluxograma geral
 
@@ -50,18 +52,18 @@ flowchart TD
         F1 --> F2{"verificações mecânicas e auditorias"}
         F2 -- "defeito na fase" --> F3["Emenda só da fase citada"] --> F2
         F2 -- "defeito de divisão" --> A1
-        F2 -- aprovado --> F4["Ensaio do verificador"]
-        F4 --> F5["RALPH READY + environment.json"]
+        F2 -- aprovado --> F5["RALPH READY + environment.json"]
     end
 
     F5 --> B1
 
     subgraph BUILD["BUILD — como"]
         B1["Preflight: ambiente contratado, preparado e sondado uma vez"] --> B2["Fases em ordem ou em paralelo, pelas dependências"]
-        B2 --> B3["Por fase: implementação, numa sessão ou em partes, e gates G0–G4"]
+        B2 --> B3["Por fase: implementação, numa sessão ou em partes, e gates G0–G3"]
         B3 -- "todos verdes" --> B4["Commit ou integração da fase"]
-        B3 -- "sem estratégia possível" --> B5["Pacote de reparo UPSTREAM para o PLAN"]
-        B4 --> B6["Aceitação final do produto"]
+        B3 -- "orçamento esgotado ou sem estratégia" --> B5["Pendências nomeadas; pacote de reparo UPSTREAM quando o documento é a causa"]
+        B5 --> B4
+        B4 --> B6["Aceitação final numa cópia limpa, com os fluxos percorridos uma vez"]
     end
 
     B5 -. "revisão do documento pelo desenvolvedor" .-> A1
@@ -80,7 +82,7 @@ flowchart TD
 | todas as dependências do projeto, as de teste incluídas | — | **decide** (infraestrutura) | instala as declaradas; nunca acrescenta, troca nem atualiza |
 | o que o pedido diz sobre testes | **registra** em regras de assunto `testes.` | não carrega nem repete | **executa** |
 | como testar, que testes, que ferramenta de teste usar dentre as contratadas | — | nunca | **decide** |
-| ferramentas internas do harness (Playwright privado do G4) | — | — | a Capivara as prepara em `.capivara/` |
+| ferramentas internas do harness (Playwright privado dos fluxos) | — | — | a Capivara as prepara em `.capivara/` |
 
 ## Os artefatos
 
@@ -92,7 +94,7 @@ flowchart TD
 | `.capivara/init/architecture.md` | PLAN | BUILD (a fatia de cada fase) | componentes, contratos, dados, fluxos, infraestrutura, fases |
 | `.capivara/init/project-phases.md` | PLAN | BUILD (o único documento que o loop consome) | as fases, as tasks e os critérios de aceite |
 | `.capivara/init/environment.json` | PLAN | BUILD (preflight) | sondas de prontidão e infraestrutura, presas por hash ao esqueleto e ao plano |
-| `.capivara/flows/` | BUILD (o roteirista do G4) | BUILD (G4) | os roteiros dos fluxos, ferramenta do harness |
+| `.capivara/flows/` | BUILD (o roteirista da aceitação) | BUILD (aceitação final) | os roteiros dos fluxos, ferramenta do harness |
 | `.capivara/runs/<run-id>/` | os três | o harness | plano de controle: eventos, prompts, logs, evidências; nunca entra num commit |
 | `.capivara/repairs/` | BUILD | o desenvolvedor, o PLAN | pacotes de reparo documental (`UPSTREAM_REPAIR_REQUIRED`) |
 
@@ -152,17 +154,16 @@ flowchart TD
     AA -- aprovada --> FS["Escritor de cada fase, com a fatia do esqueleto e da arquitetura"]
     FS --> MC{"verificações mecânicas: I-16, I-18, cobertura, design refs, stamp"}
     MC -- "defeito contável" --> EM["Emenda mecânica da fase citada"] --> MC
-    MC -- ok --> AU["Auditor de cada fase + auditor de coerência"]
-    AU --> FT["Filtro: achado, ressalva e decisão que pedem teste saem"]
-    FT --> TR{"triagem de materialidade, com citação das fontes"}
-    TR -- "ADVISORY provado" --> OK
-    TR -- KEEP --> RT{"onde está o defeito?"}
-    RT -- "na fase" --> EF["Emenda da fase, só do que o achado alcança"] --> MC
+    MC -- ok --> AU["Uma auditoria do plano inteiro"]
+    AU --> AD{"admissibilidade, conferida pelo Core"}
+    AD -- "precisão, completude, estilo, citação que não existe, decisão de produto levantada pelo auditor" --> OB["Observação do relatório"]
+    AD -- "CONTRADICTION, INTERFACE ou DEPENDENCY, com as citações conferidas" --> RT{"onde está o defeito?"}
+    RT -- "na fase" --> EF["Emenda da fase, só do que o achado alcança"] --> AU2{"auditoria depois da emenda, no máximo uma"}
     RT -- "no envelope ou na divisão" --> RO["Reorganização pela arquitetura; fases intactas mantidas"] --> AR
-    RT -- "decisão de produto" --> DEV["Pergunta ao desenvolvedor"] --> EF
-    AU -- "tudo aprovado" --> OK["Ensaio do verificador sobre cada critério"]
-    OK -- "critério inobservável" --> EF
-    OK -- ok --> RR["RALPH READY: project-phases.md, architecture.md, environment.json"]
+    AU2 -- "o bloqueio sobrevive" --> NR["NOT READY, com as duas citações à vista"]
+    AU2 -- ok --> RR
+    OB --> RR
+    AD -- "nada bloqueia" --> RR["RALPH READY: project-phases.md, architecture.md, environment.json"]
 ```
 
 **Faz:**
@@ -177,27 +178,30 @@ flowchart TD
    da escolha — e a divisão de fases que vale. Toda fase cobre algo; o goal de uma
    fase promete só o que os componentes dela entregam.
 2. **Fases**, uma chamada por fase, em paralelo, cada uma vendo só a sua fatia. Até
-   15 tasks por fase, até 4 critérios por task e 60 por fase, dimensionadas pela
+   15 tasks por fase, até 2 critérios por task e 30 por fase, dimensionadas pela
    complexidade efetiva para um executor econômico de contexto pequeno. As tasks
    nomeiam arquivo, rota e função; os critérios descrevem comportamento observável.
 3. **Verificações mecânicas**, antes de qualquer modelo: I-16 (nenhum teste no
    plano: task, critério, condição ou procedimento de teste; a ferramenta só se o
    pedido, uma decisão ou a infraestrutura aprovada a nomeiam), I-18 (escrita
    concorrente no mesmo arquivo), cobertura, referências de design, stamps.
-4. **Auditorias independentes**: uma por fase e uma de coerência sobre o plano
-   inteiro. Julgam fidelidade, coerência, completude, dependências e viabilidade.
-   Teste nunca é motivo de devolução: o achado que pede teste ou reprova pela falta
-   dele sai na saída de cada auditoria; o que manda tirar teste do texto fica, sem
-   nada no lugar.
-5. **Triagem de materialidade**: um bloqueio só cai como ADVISORY com citação exata
-   da fonte que o desmente; a regra do harness é contexto, nunca prova.
-6. **Recuperação orientada à conclusão**: a emenda toca só a fase citada e só o que o
-   achado alcança (o resto volta byte a byte); o defeito de envelope ou de divisão
+4. **Uma auditoria independente do plano inteiro**, mais uma depois da emenda no
+   máximo (§138). O Core decide o que devolve, pela classe e conferindo em código:
+   `CONTRADICTION` com as duas passagens citadas existindo, `INTERFACE` com o nome
+   dos dois lados, `DEPENDENCY` com o pacote fora de `infrastructure.dependencies`.
+   O resto — precisão, completude, estilo, a decisão de produto que o auditor
+   levanta — é observação do relatório, sem rodada e sem pergunta. Teste nunca é
+   motivo de devolução. A auditoria ilegível não aprova e não ganha segunda chance.
+   A leitura do protocolo é tolerante num lugar só (`contract/protocolo.ts`): a
+   embalagem sai, o conteúdo fica, e o ilegível nunca é aprovação.
+5. **Recuperação orientada à conclusão**: a emenda toca só a fase citada e só o que o
+   achado alcança (o resto volta byte a byte); o bloqueio que sobrevive à emenda
+   para o `plan`, com as duas citações à vista; o defeito de envelope ou de divisão
    volta à arquitetura, e as fases que a reorganização não tocou mantêm o texto e são
    relidas contra a fatia nova; aprovações valem para o mesmo texto e a mesma fatia;
    só decisão genuína de produto vai ao desenvolvedor.
-7. **Ensaio do verificador**: cada critério precisa ser observável antes de existir
-   código.
+6. **A pergunta tem prazo** (`--prazo-da-pergunta`, 10 minutos): sem resposta, o
+   `plan` segue com a leitura recomendada, registrada como suposição.
 
 **Sai:** `architecture.md`, `project-phases.md`, `environment.json` e **RALPH
 READY**, ou **NOT READY** dizendo o que falta. Limites: 3 devoluções por documento,
@@ -210,7 +214,7 @@ ao esqueleto atuais.
 
 ```mermaid
 flowchart TD
-    PF["Preflight: sondas do environment.json, uma vez por execução"] --> PE["Preparação: dependências declaradas, Chromium e runner do G4 do harness"]
+    PF["Preflight: sondas do environment.json, uma vez por execução"] --> PE["Preparação: dependências declaradas, Chromium e runner dos fluxos do harness"]
     PE --> FA{"Fase N cabe numa sessão? até 15 critérios e o prompt no orçamento"}
     FA -- sim --> UM["Uma sessão de implementação com a fase inteira e a fatia da arquitetura"]
     FA -- não --> PT["Partes: grupos contíguos das tasks, na ordem do plano; uma sessão nova por parte, com o texto exato das suas tasks"]
@@ -220,24 +224,24 @@ flowchart TD
     UM --> G0{"G0: o engine terminou de verdade"}
     G0 --> G1["G1: a sessão escreveu código — sinal, não veredito"]
     G1 --> G2{"G2: a suíte do projeto, rodada pelo loop"}
-    G2 -- verde --> G3{"G3: verificador independente, task a task"}
-    G3 -- "todas DONE" --> G4{"G4: fluxos percorridos na aplicação de pé"}
-    G4 -- verde --> CM["Commit ou integração da fase"]
+    G2 -- verde --> G3{"G3: verificador independente, task a task, uma vez por fase"}
+    G3 -- "todas DONE" --> CM["Commit ou integração da fase"]
+    G3 -- "ilegível ou sem terminar" --> IN["Fase em verificação inconclusiva"] --> CM
     G2 -- vermelho --> DF["Defeito no livro: causa, evidência, critério"]
     G3 -- INCOMPLETE --> DF
-    G4 -- falha --> TG["Triagem do G4: produto, roteiro ou critério"] --> DF
     DF --> ES{"escada de estratégias do defeito"}
+    ES -- verificador --> RV["Reparo pelo verificador que diagnosticou, em sessão própria"]
     ES -- executor --> RX["Correção pelo executor, com todas as pendências"]
-    ES -- verificador --> RV["Reparo pelo verificador, em sessão própria"]
-    ES -- roteiro --> RG["Roteiro do G4 reescrito pelo harness"]
     RX --> IM["Revalidação por impacto: refaz só a prova que a mudança atingiu"]
     RV --> IM
-    RG --> G4
     IM --> G2
-    ES -- "nenhuma estratégia possível" --> UP["UPSTREAM_REPAIR_REQUIRED: pacote com evidência, documento intacto"]
+    ES -- "orçamento esgotado ou nenhuma estratégia" --> PD["Pendências nomeadas; UPSTREAM_REPAIR_REQUIRED quando o documento é a causa"] --> CM
     CM --> NX{"mais fases?"}
     NX -- sim --> FA
-    NX -- não --> AC["Aceitação final numa cópia limpa"]
+    NX -- não --> AC["Aceitação final numa cópia limpa: instala, migra, sobe e percorre os fluxos do esqueleto uma vez"]
+    AC -- "defeito do produto" --> RX2["Correção pelo executor"] --> AC
+    AC -- "falha da ferramenta do harness" --> AI["verificação inconclusiva"]
+    AC --> EE{"aceito, entregue com pendências ou verificação inconclusiva"}
 ```
 
 **Faz:**
@@ -245,7 +249,7 @@ flowchart TD
 1. **Preflight e preparação**, antes de qualquer fase: sondas do `environment.json`
    (com o laço de instalação de pré-requisitos de sistema, assistido pelo agente,
    quando há terminal), instalação das dependências declaradas nos manifestos,
-   Chromium e o runner privado do G4. As fases recebem o ambiente aprovado e não
+   Chromium e o runner privado dos fluxos. As fases recebem o ambiente aprovado e não
    repetem as sondas. Uma sonda só está pronta quando o pacote que ela comprova
    (o do link em `node_modules/.bin`, ou o do `require`) aceita no `engines.node`
    o Node do harness, e quando a árvore do lockfile também o aceita. É a mesma
@@ -291,71 +295,73 @@ flowchart TD
    |---|---|---|
    | G0 | o engine terminou, sem recusa nem erro | julgar o código |
    | G1 | a sessão escreveu código (sinal) | aprovar |
-   | G2 | a suíte do projeto, pelo loop, num banco descartável (inclusive `dotnet test` de cada projeto de teste .NET, §134) | ler critérios |
-   | G3 | cada task contra os critérios, por um verificador read-only | rodar a suíte inteira |
-   | G4 | cada fluxo declarado, percorrido num navegador com a aplicação de pé, ou num terminal por comandos e resultados; fora dos dois, provado passo a passo pela suíte do projeto | duplicar teste unitário; exigir navegador ou servidor de produto que não o tem |
+   | G2 | a suíte do projeto, pelo loop, num banco descartável, no máximo uma vez por estado do código e do ambiente | ler critérios |
+   | G3 | cada task contra os critérios, por um verificador read-only, uma vez por fase e numa chamada | rodar a suíte inteira; pedir correção de formato |
 
-   Programa de terminal (§134): no produto puramente de terminal pela Stack
-   (nenhuma interface gráfica), o roteirista percorre o fluxo só com
-   `comandoDoProjeto`, rodando o produto (nunca a suíte de testes dele), e o gate
-   roda o roteiro sem `webServer` e sem cobrar `start`. No produto híbrido, o
-   gate sobe o servidor como sempre.
-
-   Produto usado fora do navegador e do terminal (§133, §134) — janela nativa,
-   dispositivo, biblioteca —: o roteirista cita a linha da Stack que o diz
-   (`CAPIVARA_FORA_DO_NAVEGADOR`) e, na mesma resposta, o teste da suíte do
-   projeto que prova cada passo (`CAPIVARA_PROVA: passo <n> — <arquivo> :: <teste>`)
-   ou o porquê de não haver (`CAPIVARA_SEM_PROVA`). O harness confere:
-   - o trecho, na Stack, que não pode ser a linha que declara navegador;
-   - cada citação: arquivo do projeto, e o relatório do próprio runner mostrando
-     o teste aprovado nesta execução do G2 sobre este código. Hoje esse
-     relatório existe no .NET (TRX, gravado pelo G2 em `.capivara/tmp`); nas
-     outras suítes a citação é recusada e o passo fica pendente.
-
-   Com todo passo provado, o fluxo é cumprido (`fluxo-N` PASS, marca da prova
-   pela suíte). Senão, fica **não percorrido**: obrigação pendente, nunca PASS,
-   sem servidor nem teste pedido ao executor, com os passos nomeados na guarda
-   final. Compilar, abrir ou a suíte verde sozinha não provam passo nenhum. A
-   fase com pendência volta a ser verificada, sem implementação, na execução
-   seguinte; se a Stack mudar, a fase reabre e o G4 pergunta de novo. O
-   verificador não bloqueia por observação que nenhuma sessão faz (abrir janela,
-   "confirmar visualmente"), e sabe que honrar `PORT`/`HOST` é exigência do
-   harness.
+   Não há G4 por fase (§138). O verificador não bloqueia por observação que
+   nenhuma sessão faz (abrir janela, "confirmar visualmente"), e sabe que honrar
+   `PORT`/`HOST` é exigência do harness.
 
 5. **Evidências e impacto**: cada prova vale para a árvore, o comando e o ambiente em
    que foi obtida; uma mudança refaz só a prova que atingiu (a suíte prova o produto
    inteiro, então código mudado refaz o G2).
 6. **Recuperação por defeito**: cada defeito tem identidade, causa e evidência, e uma
-   escada de estratégias, que depende do tipo do defeito — o executor recebe todas
-   as pendências de uma vez; o verificador repara em sessão própria (antes do
-   executor, na suíte e na ferramenta ausente; depois dele, quando o executor não
-   progride) e não valida o próprio reparo; o roteiro do G4 é corrigido pelo harness. Orçamentos: 3
-   ciclos por fase, 6 reparos por ciclo, 2 por gate, 3 por defeito, reparos do
-   verificador configuráveis (1 por padrão com verificador por CLI).
-7. **Dependências**: o executor, o reparo, o G2 e o G4 instalam só o que a
+   escada de estratégias, que depende do tipo do defeito. O validador é coautor:
+   a suíte vermelha, a ferramenta ausente e o achado da revisão vão primeiro ao
+   reparo do verificador que diagnosticou, em sessão própria, e o executor vem
+   depois, recebendo todas as pendências de uma vez; o engine que não terminou vai
+   ao executor; o conflito do paralelo, à conciliação. O verificador não valida o
+   próprio reparo: ele é provado pela suíte, e o achado reparado, sem segunda
+   revisão, fica como pendência. Orçamentos: 3 ciclos por fase, 6 reparos por
+   ciclo, 2 por gate, 3 por defeito, reparos do verificador configuráveis (1 por
+   padrão com verificador por CLI). Esgotado o orçamento, ou sem estratégia, a
+   fase é entregue com as pendências ditas, e o build segue.
+7. **Dependências**: o executor, o reparo, o G2 e a aceitação instalam só o que a
    infraestrutura aprovada e os manifestos declaram. Nunca acrescentam, trocam nem
    atualizam uma dependência; a necessidade comprovada de uma não prevista é dita
    pelo verificador como `UPSTREAM: PLAN — architecture.md, infraestrutura: …`.
 8. **Testes**: o executor escreve e roda os testes que a fase precisa — os que o
    pedido exige estão nas regras `testes.` do contrato compartilhado —, com as
-   ferramentas contratadas; o G2 roda a suíte; o G3 lê; o G4 percorre os fluxos.
-9. **Reparo documental**: quando nenhuma estratégia resta e o verificador apontou que
+   ferramentas contratadas; o G2 roda a suíte; o G3 lê; a aceitação percorre os fluxos.
+9. **Aceitação final** (§138), numa cópia limpa do projeto: instala, migra e sobe o
+   produto e percorre os fluxos do esqueleto uma vez, todos, pelos meios da
+   plataforma — num navegador com a aplicação de pé, ou num terminal por comandos
+   e resultados no produto puramente de terminal (§134). O roteiro é escrito por
+   uma sessão que não implementou o produto e volta a `.capivara/flows/`. O
+   defeito do produto (não instala, não sobe, um fluxo reprova) volta ao
+   executor; a falha da ferramenta do harness (runner ausente, roteiro que falha
+   por si, porta do gate) deixa a verificação inconclusiva, sem reparo. O produto
+   usado fora do navegador e do terminal (§133) — janela nativa, dispositivo,
+   biblioteca — tem o fluxo nomeado como não percorrido
+   (`CAPIVARA_FORA_DO_NAVEGADOR`): verificação inconclusiva, nunca aprovação.
+10. **Reparo documental**: quando nenhuma estratégia resta e o verificador apontou que
    o documento aprovado é a causa, o build publica um pacote de reparo
    (`.capivara/repairs/`) com o defeito, o observado, o esperado, os contornos
    tentados e o trecho a rever. Nenhum documento certificado é editado pelo build;
    impacto além do defeito pede autorização ao desenvolvedor. O encaminhamento ao
    INIT ainda não está habilitado.
 
-**Sai:** um commit por fase verde, ou a fase parada e retomável (código 2);
+**Sai:** um commit por fase e um de quatro estados:
+
+| estado | quando |
+|---|---|
+| `aceito` | todas as fases aceitas e a aceitação limpa |
+| `entregue com pendências` | alguma fase ou a aceitação deixou um defeito sem prova de correção |
+| `verificação inconclusiva` | uma verificação não pôde ser feita ou lida, inclusive fluxos declarados e não percorridos (`--no-acceptance`, `--no-flows`) |
+| `falhou` | o build parou antes do fim |
+
+`entrega.md` lista as pendências. A fase entregue com pendências não reabre
+sozinha (`--rebuild-all` ou `capivara change`); o build que falhou é retomável, e
 `capivara build` de novo continua de onde parou, sem refazer o que ficou verde.
 
 ## Paradas e retomada
 
 | código | significado |
 |---:|---|
-| 0 | concluído |
+| 0 | aceito |
 | 1 | erro de contrato, configuração ou preflight |
-| 2 | pausado e retomável |
+| 2 | falhou: pausado e retomável |
+| 3 | entregue sem ser aceito: com pendências ou com a verificação inconclusiva |
 
 Toda parada diz o que estava em aberto, o que foi tentado e como retomar. Nada do que
 foi publicado ou aprovado se perde numa parada.

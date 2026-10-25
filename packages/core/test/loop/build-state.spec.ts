@@ -24,8 +24,10 @@ async function execute(approve: boolean, now: Date) {
     explicitTestCommand: "node --version",
     roles: { builder: { provider: "codex", model: "luna", effort: "high" } },
     testRunner: async () => ({ exitCode: 0, output: "ok" }),
+    // Sem aprovação, o provider recusa a sessão da revisão no meio da resposta: a parada de verdade (etapa 4 da redução).
     call: async (call) => ({
-      exitCode: 0, stderr: "", timedOut: null,
+      exitCode: call.role === "verifier" && !approve ? 1 : 0, stderr: "", timedOut: null,
+      ...(call.role === "verifier" && !approve ? { engineError: true, providerFailure: "quota" as const } : {}),
       stdout: call.role === "verifier"
         ? Array.from({ length: call.phase.taskCount }, (_, index) => `TASK ${index + 1}: ${approve ? "DONE" : "INCOMPLETE — falta validar os dados; corrigir a validação e executar o teste"}`).join("\n")
         : "feito",

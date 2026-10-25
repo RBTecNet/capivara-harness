@@ -88,13 +88,15 @@ async function construir(extra: Partial<BuildOptions> & { reprova?: string[]; re
 }
 
 describe("§10 · concluída só com todas as fases fechadas", () => {
-  it("com --keep-going, a fase que falhou impede a conclusão e a aceitação não roda", async () => {
-    const { outcome, passos, anuncios } = await construir({ keepGoing: true, reprova: ["P01"], maxCycles: 1, maxVerifierRepairs: 0 });
-    expect(outcome.exitCode).toBe(2);
-    expect(outcome.errors.join("\n")).toContain("não fecharam: P01");
-    expect(anuncios.some((linha) => linha.startsWith("aplicação NÃO concluída"))).toBe(true);
-    expect(anuncios).not.toContain("aplicação concluída: todas as fases verdes");
-    expect(passos).toEqual([]);
+  // Etapa 4 da redução: só `falhou` para o build; a fase entregue com pendência segue, e o desfecho nunca é `aceito`.
+  it("a fase entregue com pendências não para o build, mas impede o aceito: a aceitação roda e o desfecho diz o que falta", async () => {
+    const { outcome, passos, anuncios } = await construir({ reprova: ["P01"], maxCycles: 1, maxVerifierRepairs: 0 });
+    expect(outcome.exitCode).toBe(3);
+    expect(outcome.estado).toBe("entregue com pendências");
+    expect((outcome.pendencias ?? []).join("\n")).toContain("falta o arquivo");
+    expect(anuncios.some((linha) => linha.startsWith("aplicação ENTREGUE COM PENDÊNCIAS"))).toBe(true);
+    expect(anuncios).not.toContain("aplicação aceita: todas as fases verdes e a aceitação limpa");
+    expect(passos.length).toBeGreaterThan(0);
   });
 });
 
@@ -183,7 +185,7 @@ describe("da revisão adversarial do G: o reparo da aceitação e o commit que f
         if (reparos === 1) await writeFile(join(root, "server.js"), "quebra a suíte\n");
       },
     });
-    expect(outcome.exitCode).toBe(2);
+    expect(outcome).toMatchObject({ exitCode: 3, estado: "entregue com pendências" });
     expect(await git(["log", "--format=%s"])).not.toContain("fix(entrega)");
   });
 

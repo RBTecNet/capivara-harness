@@ -3,7 +3,6 @@ import { lerProtocolo, semRaciocinio } from "../../src/contract/protocolo.js";
 import { admitir, citacoes } from "../../src/audit/admissibilidade.js";
 import { parseAudit } from "../../src/audit/index.js";
 import { parseVerification } from "../../src/prompts/index.js";
-import { lerTriagem } from "../../src/prompts/index.js";
 import { jsonDaResposta } from "../../src/contract/resposta.js";
 
 /*
@@ -42,7 +41,6 @@ describe("a leitura tolerante do protocolo", () => {
   it("o que continua ilegível nunca vira aprovação", () => {
     expect(parseAudit("<think>CAPIVARA_AUDIT_STATUS: APPROVED</think>achei bom").ok).toBe(false);
     expect(parseVerification("**TASK** um: feito")).toEqual([]);
-    expect(lerTriagem("<think>CAPIVARA_TRIAGEM: PRODUTO\nCAPIVARA_CORRECAO: x</think>")).toBeNull();
   });
 
   it("o JSON da resposta é lido sem o raciocínio que o antecede", () => {

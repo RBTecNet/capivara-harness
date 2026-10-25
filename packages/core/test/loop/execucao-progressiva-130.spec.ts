@@ -393,7 +393,7 @@ describe("§130.9 · os gates não mudam e não se repetem por parte", () => {
 });
 
 describe("§130.10 · a revalidação por impacto continua valendo sobre a fase feita em partes", () => {
-  it("o reparo de src/t12.ts reabre a task 12 e a suíte; as outras onze vão à confirmação com o que mudou, não ao zero", async () => {
+  it("o reparo de src/t12.ts reabre a suíte; sem segunda revisão, a task 12 sai como pendência e as outras onze não são reperguntadas", async () => {
     const plano = envelope([faseGrande()]);
     let leituras = 0;
     const { outcome, calls, suites } = await fase(plano, async (chamada) => {
@@ -405,12 +405,12 @@ describe("§130.10 · a revalidação por impacto continua valendo sobre a fase 
       leituras += 1;
       return ok(leituras === 1 ? `${todasDone(11)}\nTASK 12: INCOMPLETE — CRITERION: a regra 1; OBSERVED: src/t12.ts; EXPECTED: a regra; FIX: corrigir src/t12.ts` : todasDone(12));
     });
-    expect(outcome.status).toBe("complete");
+    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
     expect(suites()).toBe(2);
-    const segunda = calls.filter((chamada) => chamada.role === "verifier")[1]!;
-    const confirmar = segunda.prompt.split("## Previously approved — confirm against what changed")[1]!.split("Emit their TASK lines")[0]!;
-    for (const indice of Array.from({ length: 11 }, (_, posicao) => posicao + 1)) expect(confirmar).toContain(`- task ${indice}: Implementar o módulo ${indice} em \`src/t${indice}.ts\` — changed since: src/t12.ts`);
-    expect(confirmar).not.toContain("- task 12:");
+    expect(calls.filter((chamada) => chamada.role === "verifier" && !chamada.repair)).toHaveLength(1);
+    const pendencias = outcome.status === "complete" ? (outcome.pendencias ?? []).join("\n") : "";
+    expect(pendencias).toContain("TASK 12");
+    expect(pendencias).not.toContain("TASK 1 ");
   });
 });
 
@@ -502,7 +502,7 @@ describe("§130.12 · o contrato arquitetural vai inteiro a cada parte, e nada c
     await writeFile(join(root, ".capivara", "init", "project-phases.md"), plano);
     const fatia: FatiaDaArquitetura = {
       texto: "### Componentes\n- modulos: src/ — expõe `registrar(modulo)`; consome `base` de src/base.ts",
-      sha12: sha12("fatia v1"), componentes: ["modulos"], arquivos: ["src/"], contratos: ["modulos: registrar(modulo)"], contratosProprios: ["registrar(modulo)"], consumidoras: [],
+      sha12: sha12("fatia v1"), componentes: ["modulos"], arquivos: ["src/"], contratosProprios: ["registrar(modulo)"], consumidoras: [],
     };
     const { construcao } = await fase(plano, tudoCerto(), { architecture: fatia });
     expect(construcao).toHaveLength(5);
@@ -542,7 +542,7 @@ describe("§130.13 · a mudança de contrato e o parcial descartado invalidam o 
 
   it("a fatia da arquitetura mudou: idem", async () => {
     const plano = envelope([faseGrande()]);
-    const fatia = (versao: string): FatiaDaArquitetura => ({ texto: `fatia ${versao}`, sha12: sha12(versao), componentes: [], arquivos: [], contratos: [], contratosProprios: [], consumidoras: [] });
+    const fatia = (versao: string): FatiaDaArquitetura => ({ texto: `fatia ${versao}`, sha12: sha12(versao), componentes: [], arquivos: [], contratosProprios: [], consumidoras: [] });
     await interromperNaParte2(plano, { architecture: fatia("v1") });
     const segunda = await fase(plano, tudoCerto(), { architecture: fatia("v2") });
     expect(parteDo(segunda.construcao[0]!.prompt)).toBe("1/5");
@@ -601,7 +601,7 @@ describe("§130.14 · sem capacidade conhecida do modelo: a política fixa, a me
 });
 
 describe("§130.15 · a fase só fecha inteira", () => {
-  it("depois da última parte, a task 2 incompleta segura a fase até o reparo; só então ela fecha", async () => {
+  it("depois da última parte, a task 2 incompleta vai ao reparo, e a fase fecha com ela dita como pendência", async () => {
     const plano = envelope([faseGrande()]);
     let leituras = 0;
     const { outcome, construcao } = await fase(plano, async (chamada) => {
@@ -612,9 +612,9 @@ describe("§130.15 · a fase só fecha inteira", () => {
       leituras += 1;
       return ok(leituras === 1 ? todasDone(12).replace("TASK 2: DONE", "TASK 2: INCOMPLETE — CRITERION: a regra 3; OBSERVED: falta; EXPECTED: a regra; FIX: src/t2.ts") : todasDone(12));
     });
-    expect(outcome.status).toBe("complete");
+    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
     expect(construcao).toHaveLength(6);
-    expect(leituras).toBe(2);
+    expect(leituras).toBe(1);
     expect((await defeitos()).implementation).toBe("done");
   });
 });

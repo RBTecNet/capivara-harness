@@ -17,13 +17,10 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runPhase, splitPhases } from "../../src/loop/index.js";
 import type { EngineCall, EngineResult, PhaseRunOptions, PhaseSession } from "../../src/loop/index.js";
-import * as flowGates from "../../src/loop/flows.js";
-import { LivroDeEvidencias, emptyScope, evidenciasDoRun } from "../../src/loop/evidencias.js";
-import { estadoDoCodigo } from "../../src/loop/git.js";
+import { LivroDeEvidencias, evidenciasDoRun } from "../../src/loop/evidencias.js";
 import { defeitosDoRun, type EstadoDaRecuperacao } from "../../src/loop/defeitos.js";
 import { lerTransicoes } from "../../src/loop/narrador.js";
 import { readEvents, runPaths } from "../../src/state/index.js";
-import { sha12 } from "../../src/contract/index.js";
 
 const run = promisify(execFile);
 const RUN = "build-vnext00000000";
@@ -119,7 +116,7 @@ async function defeitos(): Promise<EstadoDaRecuperacao> {
 }
 
 describe("§13.1 · a mudança localizada invalida só a evidência associada", () => {
-  it("o reparo de b.ts invalida a suíte e deixa a prova da task de a.ts de pé, dita ao verificador", async () => {
+  it("o reparo de b.ts invalida a suíte e deixa a prova da task de a.ts sem validade demonstrada; sem segunda revisão, é pendência", async () => {
     let verificacoes = 0;
     const { outcome, calls } = await fase(async (chamada) => {
       if (chamada.role === "builder") {
@@ -134,7 +131,7 @@ describe("§13.1 · a mudança localizada invalida só a evidência associada", 
       verificacoes += 1;
       return ok(verificacoes === 1 ? "TASK 1: DONE\nTASK 2: INCOMPLETE — CRITERION: a listagem; OBSERVED: src/b.ts devolve 'faltando'; EXPECTED: as reservas; FIX: corrigir src/b.ts" : DONE);
     });
-    expect(outcome).toMatchObject({ status: "complete", cycles: 1 });
+    expect(outcome).toMatchObject({ status: "complete", cycles: 1, estado: "entregue com pendências" });
     const livro = await evidencias();
     const historico = livro.historico();
     const primeiraDaTask1 = historico.find((evidencia) => evidencia.checkId === "task-1")!;
@@ -142,12 +139,9 @@ describe("§13.1 · a mudança localizada invalida só a evidência associada", 
     expect(livro.validadeDe(primeiraDaTask1.evidenceId)?.state).not.toBe("VALID");
     const primeiraDaSuite = historico.find((evidencia) => evidencia.checkId === "suite")!;
     expect(livro.validadeDe(primeiraDaSuite.evidenceId)).toMatchObject({ state: "INVALIDATED" });
-    // A segunda leitura do verificador recebe a task 1 como aprovada, com o arquivo que mudou desde então.
-    const segunda = calls.filter((chamada) => chamada.role === "verifier")[1]!;
-    // Desconhecido nunca é aprovado em silêncio: a task 1 vai à consulta limitada, com o que mudou.
-    expect(segunda.prompt).toContain("Previously approved — confirm against what changed");
-    expect(segunda.prompt).toContain("changed since: src/b.ts");
-    expect(segunda.prompt).not.toContain("Already DONE — not under verification now");
+    // A revisão é uma só: o reparo da task 2 é provado pela suíte, e dito como pendência.
+    expect(calls.filter((chamada) => chamada.role === "verifier" && !chamada.repair)).toHaveLength(1);
+    if (outcome.status === "complete") expect(outcome.pendencias?.join("\n")).toContain("sem segunda revisão");
   });
 
   it("o mesmo conteúdo reaproveita a prova: a correção que não muda nada não roda a suíte de novo", async () => {
@@ -167,131 +161,8 @@ describe("§13.1 · a mudança localizada invalida só a evidência associada", 
   });
 });
 
-describe("§13.2 · mudança só no roteiro do G4 não refaz o G2", () => {
-  it("numa nova execução, só o G4 roda: suíte e verificação continuam provadas para o mesmo conteúdo", async () => {
-    let passou = false;
-    const g4 = vi.spyOn(flowGates, "gate4").mockImplementation(async () =>
-      passou
-        ? { green: true, skipped: "", scripts: ["workflow-1.spec.ts"] }
-        : { green: false, cause: "o roteiro procura um seletor que não existe", scriptFailed: true, falharam: ["1"] });
-    const fluxos = { workflows: [{ number: "1", name: "Criar", steps: ["cria"] }], resolveStart: async () => "npm start" };
-    const roteiro = join(root, ".capivara", "flows", "workflow-1.spec.ts");
-    await mkdir(join(root, ".capivara", "flows"), { recursive: true });
-    await writeFile(roteiro, "// roteiro v1\n");
-    const primeira = await fase(async (chamada) => {
-      if (chamada.role === "builder") await escrever("src/a.ts", "export const a = 1;\n");
-      return ok(chamada.role === "verifier" ? DONE : "feito");
-    }, { flows: fluxos, maxCycles: 1 });
-    expect(primeira.outcome.status).toBe("failed");
-    expect(primeira.suites()).toBe(1);
 
-    // O roteiro foi corrigido fora do código do produto (.capivara/flows): o conteúdo do produto é o mesmo.
-    await writeFile(roteiro, "// roteiro v2, corrigido\n");
-    passou = true;
-    const segunda = await fase(async (chamada) => ok(chamada.role === "verifier" ? DONE : "feito"), { flows: fluxos });
-    expect(segunda.outcome.status).toBe("complete");
-    expect(segunda.suites()).toBe(0);
-    expect(segunda.calls).toHaveLength(0);
-    expect(g4.mock.calls.length).toBeGreaterThanOrEqual(3);
-    // A prova nova do G4 é do roteiro novo; a do G2 continua a de antes.
-    const livro = await evidencias();
-    expect(livro.atual("P01", "fluxos")?.evidence.inputs.documents).toContainEqual({ name: "roteiro-1", sha12: sha12("// roteiro v2, corrigido\n") });
-    expect(livro.historico().filter((evidencia) => evidencia.checkId === "suite")).toHaveLength(1);
-  });
-});
 
-describe("§13.3 · depois do G3, impacto só em G0 não reprisa G1–G3", () => {
-  it("a revisão do G4 que cai ganha uma sessão nova e o G4 continua, sem nova suíte nem nova verificação", async () => {
-    let autores = 0;
-    vi.spyOn(flowGates, "gate4").mockImplementation(async (opcoes) => {
-      const workflow = opcoes.workflows[0]!;
-      await opcoes.author(workflow, [], "http://127.0.0.1:1", { anteriores: [], bancoNovo: [], migracao: null, ajudante: "x" });
-      return { green: true, skipped: "", scripts: ["workflow-1.spec.ts"] };
-    });
-    const { outcome, calls, suites } = await fase(async (chamada) => {
-      if (chamada.purpose === "flow-author") {
-        autores += 1;
-        return autores === 1 ? ok("", { exitCode: 124, timedOut: "wall" }) : ok("```ts\n// roteiro\n```");
-      }
-      if (chamada.role === "builder") await escrever("src/a.ts", "export const a = 1;\n");
-      return ok(chamada.role === "verifier" ? DONE : "feito");
-    }, { flows: { workflows: [{ number: "1", name: "Criar", steps: ["cria"] }], resolveStart: async () => "npm start" } });
-    expect(outcome).toMatchObject({ status: "complete", cycles: 1 });
-    expect(autores).toBe(2);
-    expect(suites()).toBe(1);
-    expect(calls.filter((chamada) => chamada.role === "verifier" && !chamada.purpose)).toHaveLength(1);
-    expect(calls.filter((chamada) => chamada.role === "builder")).toHaveLength(1);
-  });
-});
-
-describe("§13.4 · G4 NOT_APPLICABLE não sobe nada", () => {
-  it("sem fluxos e sem regressão: nem porta, nem servidor, nem navegador, nem roteirista", async () => {
-    const gate4 = vi.spyOn(flowGates, "gate4");
-    const resolveStart = vi.fn(async () => "npm start");
-    const runner = vi.fn(async () => ({ exitCode: 0, output: "" }));
-    const { outcome, calls } = await fase(async (chamada) => {
-      if (chamada.role === "builder") await escrever("src/a.ts", "export const a = 1;\n");
-      return ok(chamada.role === "verifier" ? DONE : "feito");
-    }, { flows: { workflows: [], regressao: [], resolveStart, runner } });
-    expect(outcome.status).toBe("complete");
-    expect(gate4).not.toHaveBeenCalled();
-    expect(runner).not.toHaveBeenCalled();
-    expect(calls.some((chamada) => chamada.purpose !== undefined)).toBe(false);
-    const g4 = (await evidencias()).atual("P01", "fluxos");
-    expect(g4?.evidence.outcome).toBe("NOT_APPLICABLE");
-  });
-
-  it("a regressão provada e fora do território da mudança não roda: a prova anterior sustenta a decisão", async () => {
-    // A fase anterior percorreu o fluxo 1 contra este conteúdo.
-    const livro = await evidencias();
-    const antes = await estadoDoCodigo(root);
-    const prova = await livro.registrar({
-      phaseId: "P00", gate: "G4", checkId: "fluxo-1", claim: "o fluxo 1 passa", outcome: "PASS",
-      inputs: { documents: [{ name: "roteiro-1", sha12: "e3b0c44298fc" }], code: antes }, scope: emptyScope({ flows: ["1"] }), supports: [], artifactRefs: [],
-    });
-    const gate4 = vi.spyOn(flowGates, "gate4");
-    const runner = vi.fn(async () => ({ exitCode: 0, output: "" }));
-    const { outcome } = await fase(async (chamada) => {
-      if (chamada.role === "builder") {
-        await mkdir(join(root, "src", "relatorios"), { recursive: true });
-        await escrever("src/relatorios/mensal.ts", "export const mensal = 1;\n");
-      }
-      return ok(chamada.role === "verifier" ? DONE : "feito");
-    }, {
-      evidencias: livro,
-      flows: { workflows: [], regressao: [{ number: "1", name: "Criar", steps: ["cria"] }], resolveStart: async () => "npm start", runner },
-      territorioDoFluxo: () => ({
-        componentes: ["cadastro"], arquivos: ["src/a.ts"], commitados: [],
-        classificar: (arquivo) => (arquivo.startsWith("src/relatorios/") ? "fora" : "dentro"),
-      }),
-    });
-    expect(outcome.status).toBe("complete");
-    expect(gate4).not.toHaveBeenCalled();
-    expect(runner).not.toHaveBeenCalled();
-    const decisao = (await evidencias()).atual("P01", "fluxos")!;
-    expect(decisao.evidence.outcome).toBe("NOT_APPLICABLE");
-    expect(decisao.evidence.supports).toEqual([prova.evidenceId]);
-  });
-
-  it("a mudança que toca o território do fluxo roda a regressão", async () => {
-    const livro = await evidencias();
-    await livro.registrar({
-      phaseId: "P00", gate: "G4", checkId: "fluxo-1", claim: "o fluxo 1 passa", outcome: "PASS",
-      inputs: { documents: [], code: await estadoDoCodigo(root) }, scope: emptyScope({ flows: ["1"] }), supports: [], artifactRefs: [],
-    });
-    const gate4 = vi.spyOn(flowGates, "gate4").mockResolvedValue({ green: true, skipped: "", scripts: ["workflow-1.spec.ts"] });
-    const { outcome } = await fase(async (chamada) => {
-      if (chamada.role === "builder") await escrever("src/a.ts", "export const a = 9;\n");
-      return ok(chamada.role === "verifier" ? DONE : "feito");
-    }, {
-      evidencias: livro,
-      flows: { workflows: [], regressao: [{ number: "1", name: "Criar", steps: ["cria"] }], resolveStart: async () => "npm start" },
-      territorioDoFluxo: () => ({ componentes: ["cadastro"], arquivos: ["src/a.ts"], commitados: [], classificar: () => "dentro" }),
-    });
-    expect(outcome.status).toBe("complete");
-    expect(gate4).toHaveBeenCalledOnce();
-  });
-});
 
 describe("§13.5 · G2 e G3 têm orçamentos independentes", () => {
   it("o G2 gasta o reparo do verificador dele, e o G3 ainda tem o seu no mesmo ciclo", async () => {
@@ -323,66 +194,7 @@ describe("§13.5 · G2 e G3 têm orçamentos independentes", () => {
   });
 });
 
-describe("§13.6 · o mesmo defeito em G2 e G4 mantém identidade e histórico", () => {
-  it("a falha citada pela suíte e depois pela triagem do G4 é um defeito só, reaberto, com as tentativas", async () => {
-    let suites = 0;
-    vi.spyOn(flowGates, "gate4").mockResolvedValueOnce({
-      green: false,
-      cause: "o fluxo não mostrou 'Reserva criada com sucesso' depois de salvar",
-      triagem: { tipo: "PRODUTO", evidencia: "a tela não mostra 'Reserva criada com sucesso'", onde: "src/a.ts", criterio: "A criação devolve 201", correcao: "mostrar a confirmação" },
-      falharam: ["1"],
-    }).mockResolvedValue({ green: true, skipped: "", scripts: ["workflow-1.spec.ts"] });
-    const { outcome } = await fase(async (chamada) => {
-      if (chamada.role === "builder") {
-        await escrever("src/a.ts", `export const a = ${chamada.attempt};\n`);
-        return ok();
-      }
-      return ok(DONE);
-    }, {
-      flows: { workflows: [{ number: "1", name: "Criar", steps: ["cria"] }], resolveStart: async () => "npm start" },
-      testRunner: async () => (++suites === 1
-        ? { exitCode: 1, output: "FAIL reservas.spec.ts > cria\n  expected 'Reserva criada com sucesso' to be visible" }
-        : { exitCode: 0, output: "2 passed" }),
-    });
-    expect(outcome.status).toBe("complete");
-    const estado = await defeitos();
-    const comACitacao = estado.defects.filter((defeito) => defeito.anchors.quotes?.includes("reserva criada com sucesso"));
-    expect(comACitacao).toHaveLength(1);
-    expect(comACitacao[0]!.gates).toEqual(["G2", "G4"]);
-    expect(comACitacao[0]!.attempts.length).toBeGreaterThanOrEqual(2);
-    expect(comACitacao[0]!.status).toBe("RESOLVED");
-  });
-});
 
-describe("§13.7 · defeitos compatíveis numa chamada, validados um a um", () => {
-  it("duas tasks incompletas vão juntas ao executor; uma resolve, a outra continua aberta com a própria história", async () => {
-    let verificacoes = 0;
-    const { outcome, calls } = await fase(async (chamada) => {
-      if (chamada.role === "builder") {
-        if (chamada.attempt === 2) await escrever("src/a.ts", "export const a = 'criação';\n");
-        else await escrever("src/b.ts", `export const b = ${chamada.attempt};\n`);
-        return ok();
-      }
-      verificacoes += 1;
-      if (verificacoes === 1) return ok("TASK 1: INCOMPLETE — CRITERION: a criação; OBSERVED: src/a.ts vazio\nTASK 2: INCOMPLETE — CRITERION: a listagem; OBSERVED: src/b.ts vazio");
-      const a = await readFile(join(root, "src", "a.ts"), "utf8");
-      const b = await readFile(join(root, "src", "b.ts"), "utf8");
-      return ok(`TASK 1: ${a.includes("criação") ? "DONE" : "INCOMPLETE — CRITERION: a criação"}\nTASK 2: ${b.includes("3") ? "DONE" : "INCOMPLETE — CRITERION: a listagem; OBSERVED: src/b.ts ainda vazio"}`);
-    });
-    expect(outcome.status).toBe("complete");
-    const correcoes = calls.filter((chamada) => chamada.role === "builder").slice(1);
-    // A primeira correção leva os dois defeitos de uma vez.
-    expect(correcoes[0]!.prompt).toContain("P01-D1");
-    expect(correcoes[0]!.prompt).toContain("P01-D2");
-    const estado = await defeitos();
-    const [d1, d2] = estado.defects;
-    expect(d1!.status).toBe("RESOLVED");
-    expect(d1!.attempts.map((tentativa) => tentativa.result)).toEqual(["resolved"]);
-    expect(d2!.status).toBe("RESOLVED");
-    expect(d2!.attempts.length).toBeGreaterThanOrEqual(2);
-    expect(d2!.attempts[0]!.action).toBe(d1!.attempts[0]!.action);
-  });
-});
 
 describe("§13.8 · esgotar o orçamento do ciclo abre o seguinte sem perder nada", () => {
   it("o ciclo 2 nasce com contadores novos, o código e as evidências do ciclo 1, e sem nova implementação", async () => {
@@ -415,21 +227,18 @@ describe("§13.8 · esgotar o orçamento do ciclo abre o seguinte sem perder nad
 describe("§13.9 e §13.10 · handoff antes de qualquer reparo, retomada e quem valida", () => {
   const incompleto = "TASK 1: DONE\nTASK 2: INCOMPLETE — CRITERION: a listagem; OBSERVED: src/b.ts vazio; EXPECTED: as reservas; FIX: preencher src/b.ts; CHECK: npm test";
 
-  it("o handoff existe ANTES da primeira correção, e o reparador nunca é quem valida", async () => {
+  it("o handoff existe ANTES do primeiro reparo, e quem repara não se valida: não há segunda revisão", async () => {
     let handoffsNaCorrecao: string[] | null = null;
     const sessoes: string[] = [];
     let n = 0;
     const { outcome, calls } = await fase(async (chamada) => {
       n += 1;
-      if (chamada.role === "builder" && chamada.attempt === 2) {
-        handoffsNaCorrecao = await readdir(join(defeitosDoRun(runPaths(root, RUN).root), "P01", "P01-D1")).catch(() => []);
-        // E o que está nele é o diagnóstico ORIGINAL, já no disco quando a primeira correção começa.
-        const gravado = JSON.parse(await readFile(join(defeitosDoRun(runPaths(root, RUN).root), "P01", "P01-D1", "handoff-G3-c1.json"), "utf8")) as { raw: string };
-        expect(gravado.raw).toContain("FIX: preencher src/b.ts");
-        return ok();
-      }
       if (chamada.role === "builder") return ok();
       if (chamada.repair) {
+        handoffsNaCorrecao = await readdir(join(defeitosDoRun(runPaths(root, RUN).root), "P01", "P01-D1")).catch(() => []);
+        // E o que está nele é o diagnóstico ORIGINAL, já no disco quando o primeiro reparo começa.
+        const gravado = JSON.parse(await readFile(join(defeitosDoRun(runPaths(root, RUN).root), "P01", "P01-D1", "handoff-G3-c1.json"), "utf8")) as { raw: string };
+        expect(gravado.raw).toContain("FIX: preencher src/b.ts");
         await escrever("src/b.ts", "export const b = 'reservas';\n");
         return ok("reparado", { sessionId: `sessao-${n}` });
       }
@@ -442,11 +251,10 @@ describe("§13.9 e §13.10 · handoff antes de qualquer reparo, retomada e quem 
     const handoff = JSON.parse(await readFile(join(defeitosDoRun(runPaths(root, RUN).root), "P01", "P01-D1", "handoff-G3-c1.json"), "utf8")) as Record<string, unknown>;
     expect(handoff).toMatchObject({ identity: { runId: RUN, phaseId: "P01", gate: "G3", cycle: 1, defectId: "P01-D1" }, minimalRepair: "preencher src/b.ts", requiredProof: "npm test" });
     const reparo = calls.find((chamada) => chamada.repair)!;
-    const depois = calls.slice(calls.indexOf(reparo) + 1).filter((chamada) => chamada.role === "verifier" && !chamada.repair);
-    expect(depois.length).toBeGreaterThan(0);
-    expect(depois.every((chamada) => chamada.resumeSession === undefined)).toBe(true);
-    // Quem valida depois do reparo é sempre uma sessão nova: nenhuma leitura pede retomada, e a ponte recusaria (provider/retomada.spec).
-    expect(sessoes.length).toBeGreaterThanOrEqual(2);
+    // O reparo é do verificador que diagnosticou (o coautor), e nenhuma leitura o valida depois: a revisão é uma só.
+    expect(calls.slice(calls.indexOf(reparo) + 1).filter((chamada) => chamada.role === "verifier" && !chamada.repair)).toHaveLength(0);
+    expect(sessoes).toHaveLength(1);
+    expect(outcome.status === "complete" ? outcome.estado : "").toBe("entregue com pendências");
   });
 
   const garantida = { maxVerifierRepairs: 1, verifierResume: { estado: "garantido" as const, elevacao: "por-invocacao" as const, motivo: "teste" } };

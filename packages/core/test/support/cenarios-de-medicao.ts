@@ -267,20 +267,6 @@ async function cadeia(
       repeat: true,
     },
     {
-      match: { role: "verifier", purpose: "flow-triage" },
-      respond: {
-        stdout: async () =>
-          [
-            "CAPIVARA_TRIAGEM: PRODUTO",
-            "CAPIVARA_EVIDENCIA: o passo reprovou com a aplicação de pé; a tela não mudou depois da ação",
-            "CAPIVARA_ONDE: public/app.js",
-            "CAPIVARA_CRITERIO: o passo do fluxo que reprovou",
-            "CAPIVARA_CORRECAO: ligue a ação da tela à operação do serviço",
-          ].join("\n"),
-      },
-      repeat: true,
-    },
-    {
       match: { role: "verifier", repair: true },
       writes: async (call) => (comportamento.reparo ? await comportamento.reparo(call) : []),
       respond: { stdout: "reparo concluído" },
@@ -502,7 +488,9 @@ const ACHADO_G1 = "um usuário comum consegue excluir: excluir() não confere o 
 /**
  * G-1 · suíte verde não prova requisito ausente. O executor implementa a
  * exclusão e testa só o caso do administrador; a suíte passa. A revisão da fase
- * tem de apontar a restrição ausente, e o achado tem de chegar ao executor.
+ * tem de apontar a restrição ausente, o achado tem de chegar a quem repara —
+ * executor ou verificador, quem o harness escolher —, e a fase nunca é aceita
+ * com a exclusão aberta a qualquer usuário.
  */
 export async function garantiaG1(): Promise<Garantia> {
   const semRestricao = "export const excluir = (quem, id) => { remover(id); return 200; };\n";
@@ -513,6 +501,7 @@ export async function garantiaG1(): Promise<Garantia> {
       { path: "src/usuarios.js", content: call.prompt.includes(ACHADO_G1) ? comRestricao : semRestricao },
       { path: "test/usuarios.test.js", content: "test('o administrador exclui', () => assert.equal(excluir({ papel: 'admin' }, 1), 200));\n" },
     ],
+    reparo: async (call) => (call.prompt.includes(ACHADO_G1) ? [{ path: "src/usuarios.js", content: comRestricao }] : []),
     revisao: async (call, arvore) =>
       (await lerArquivo(arvore, "src/usuarios.js")).includes("papel !== 'admin'")
         ? allDone(call.phase.taskCount)
@@ -521,13 +510,15 @@ export async function garantiaG1(): Promise<Garantia> {
   const runId = cenario.build?.runId ?? "";
   const registro = await primeiroLogCom(cenario.projectRoot, runId, ACHADO_G1);
   const final = await lerArquivo(cenario.projectRoot, "src/usuarios.js");
-  const fechouSemRestricao = cenario.build?.phases.some((fase) => fase.outcome.status === "complete") === true && !final.includes("papel !== 'admin'");
+  // Fechar sem a restrição é a fase aceita sem ela: entregue com a pendência dita, ela não foi escondida.
+  const aceita = cenario.build?.phases.some((fase) => fase.outcome.status === "complete" && (fase.outcome.estado ?? "aceito") === "aceito") === true;
+  const fechouSemRestricao = aceita && !final.includes("papel !== 'admin'");
   return {
     id: "G-1",
     pega: registro !== "" && !fechouSemRestricao,
     registro,
     detalhe: fechouSemRestricao
-      ? "a fase fechou com a exclusão aberta a qualquer usuário"
+      ? "a fase foi aceita com a exclusão aberta a qualquer usuário"
       : `achado registrado em ${registro || "(nenhum log)"}; build terminou com código ${cenario.build?.exitCode ?? "-"}`,
     cenario,
   };
@@ -560,7 +551,8 @@ const FALHA_G2 = "o cliente não apareceu na lista depois de Salvar";
 /**
  * G-2 · serviço funcionando não prova fluxo funcionando. O serviço de cadastro
  * funciona, mas o botão Salvar não chama a operação. O fluxo percorrido na
- * aplicação de pé tem de reprovar, e a falha tem de chegar ao executor.
+ * aplicação de pé — na aceitação final, na cópia limpa — tem de reprovar, e a
+ * falha tem de chegar ao executor.
  */
 export async function garantiaG2(): Promise<Garantia> {
   const botaoMudo = "document.querySelector('#salvar').addEventListener('click', () => {});\n";
@@ -708,8 +700,12 @@ export async function garantiaG4(): Promise<Garantia> {
         ? allDone(call.phase.taskCount)
         : `TASK 1: DONE\nTASK 2: DONE\nTASK 3: INCOMPLETE — ${ACHADO_G4}; não existe src/recuperacao.js nem rota de redefinição; implemente recuperar(email) enviando o link; teste o envio do link`,
   }, { sha12: "9a7a00000004" });
-  const aceito = cenario.build?.exitCode === 0;
-  const parada = [...(cenario.build?.errors ?? []), ...(cenario.build?.phases.map((fase) => ("cause" in fase.outcome ? fase.outcome.cause : "")) ?? [])].join("\n");
+  const aceito = cenario.build?.exitCode === 0 || cenario.build?.estado === "aceito";
+  const parada = [
+    ...(cenario.build?.errors ?? []),
+    ...(cenario.build?.pendencias ?? []),
+    ...(cenario.build?.phases.map((fase) => ("cause" in fase.outcome ? fase.outcome.cause : "")) ?? []),
+  ].join("\n");
   const nomeada = /recupera[çc][ãa]o de senha/i.test(parada);
   return {
     id: "G-4",
@@ -718,7 +714,7 @@ export async function garantiaG4(): Promise<Garantia> {
     detalhe: aceito
       ? "o build terminou concluído sem a recuperação de senha"
       : nomeada
-        ? `o build não aceitou (código ${cenario.build?.exitCode ?? "-"}; ${cenario.build?.phases.map((fase) => `${fase.id}: ${fase.outcome.status}`).join(", ")}); a pendência é nomeada na parada`
+        ? `o build não aceitou (código ${cenario.build?.exitCode ?? "-"}, ${cenario.build?.estado ?? "falhou"}; ${cenario.build?.phases.map((fase) => `${fase.id}: ${fase.outcome.status}`).join(", ")}); a pendência é nomeada`
         : "o build não aceitou, mas não diz qual obrigação ficou pendente",
     cenario,
   };

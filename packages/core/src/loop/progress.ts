@@ -12,8 +12,8 @@
 
 import type { Transicao } from "./narrador.js";
 
-/** Os cinco gates, na ordem em que a fase passa por eles. */
-export type LoopGate = "G0" | "G1" | "G2" | "G3" | "G4";
+/** Os quatro gates da fase, na ordem em que ela passa por eles; os fluxos são da aceitação final. */
+export type LoopGate = "G0" | "G1" | "G2" | "G3";
 
 /**
  * `neutro` é o gate avaliado que não tem nada a dizer.

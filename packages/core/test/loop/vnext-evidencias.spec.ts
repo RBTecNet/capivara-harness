@@ -16,8 +16,8 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { tasksDaFase } from "../../src/loop/index.js";
 import { LivroDeEvidencias, emptyScope, evidenciasDoRun, localizarArtefato, referenciaDeArtefato } from "../../src/loop/evidencias.js";
-import { arquivosDasFases, arquivosMudados, estadoDoCodigo } from "../../src/loop/git.js";
-import { escopoDaTask, impactoNaSuite, impactoNaTask, impactoNoFluxo } from "../../src/loop/impacto.js";
+import { arquivosMudados, estadoDoCodigo } from "../../src/loop/git.js";
+import { escopoDaTask, impactoNaSuite, impactoNaTask } from "../../src/loop/impacto.js";
 import { MARCA_DO_HARNESS } from "../../src/loop/ambiente.js";
 
 const run = promisify(execFile);
@@ -134,20 +134,6 @@ describe("o estado do código é conteúdo", () => {
     expect(await arquivosMudados(root, antes.tree, depois.tree)).toBeNull();
   });
 
-  it("os commits de fase dizem de quem é cada arquivo", async () => {
-    await repo();
-    await writeFile(join(root, "src", "cadastro.ts"), "x\n");
-    await run("git", ["add", "-A"], { cwd: root });
-    await run("git", ["commit", "-q", "-m", "feat(phase-2): Cadastro"], { cwd: root });
-    await writeFile(join(root, "src", "relatorio.ts"), "y\n");
-    await writeFile(join(root, "src", "cadastro.ts"), "x2\n");
-    await run("git", ["add", "-A"], { cwd: root });
-    await run("git", ["commit", "-q", "-m", "feat(phase-3): Relatório"], { cwd: root });
-    const donos = await arquivosDasFases(root);
-    expect([...(donos.get(2) ?? [])]).toEqual(["src/cadastro.ts"]);
-    expect([...(donos.get(3) ?? [])].sort()).toEqual(["src/cadastro.ts", "src/relatorio.ts"]);
-    expect(donos.has(1)).toBe(false);
-  });
 });
 
 describe("o impacto de uma mudança", () => {
@@ -182,27 +168,4 @@ describe("o impacto de uma mudança", () => {
     expect(impactoNaTask([], escopoDaTask(segunda!)).impacto).toBe("NONE");
   });
 
-  it("o fluxo fica de pé só com dono demonstrado fora dele; raiz, manifesto, pasta vizinha e dono desconhecido não", () => {
-    const donos: Record<string, "dentro" | "fora" | "desconhecido"> = {
-      "src/relatorios/mensal.ts": "fora",
-      "src/cadastro/tela.tsx": "dentro",
-      "src/cadastro/novo-modulo.ts": "fora",
-      "src/misterio/sem-dono.ts": "desconhecido",
-      "src/relatorios/migrations/002.sql": "fora",
-    };
-    const territorio = {
-      componentes: ["cadastro", "dados"],
-      arquivos: ["src/cadastro/rotas.ts"],
-      commitados: ["src/cadastro/tela.tsx"],
-      classificar: (arquivo: string) => donos[arquivo] ?? "desconhecido",
-    };
-    expect(impactoNoFluxo(["src/relatorios/mensal.ts"], territorio).impacto).toBe("NONE");
-    expect(impactoNoFluxo(["src/cadastro/tela.tsx"], territorio).impacto).toBe("AFFECTED");
-    expect(impactoNoFluxo(["src/cadastro/novo-modulo.ts"], territorio).impacto).toBe("UNKNOWN");
-    expect(impactoNoFluxo(["src/misterio/sem-dono.ts"], territorio).impacto).toBe("UNKNOWN");
-    expect(impactoNoFluxo(["package.json"], territorio).impacto).toBe("UNKNOWN");
-    expect(impactoNoFluxo(["src/relatorios/migrations/002.sql"], territorio).impacto).toBe("UNKNOWN");
-    expect(impactoNoFluxo(["src/relatorios/mensal.ts", "src/misterio/sem-dono.ts"], territorio).impacto).toBe("UNKNOWN");
-    expect(impactoNoFluxo(["src/relatorios/mensal.ts"], null).impacto).toBe("UNKNOWN");
-  });
 });

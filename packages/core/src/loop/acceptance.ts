@@ -35,9 +35,28 @@ export interface StepResult {
   output: string;
 }
 
+/**
+ * De quem é a falha da aceitação (etapa 4 da redução): do produto — não instala,
+ * não sobe, um fluxo reprova —, que o executor corrige; ou da ferramenta do
+ * harness — o runner de fluxos ausente, o roteiro que falha por si, a porta do
+ * gate tomada —, que nenhum reparo do produto resolve: é verificação inconclusiva.
+ */
+export type NaturezaDaFalha = "produto" | "ferramenta";
+
 export type AcceptanceResult =
-  | { accepted: true; steps: StepResult[]; skipped: string }
-  | { accepted: false; steps: StepResult[]; failure: { id: string; cause: string } };
+  | {
+      accepted: true;
+      steps: StepResult[];
+      skipped: string;
+      /** O que a aceitação não pôde percorrer pelos meios da plataforma: pendência, nunca prova. */
+      pendencias?: string[];
+    }
+  | { accepted: false; steps: StepResult[]; failure: { id: string; cause: string; natureza: NaturezaDaFalha } };
+
+/** O smoke dos fluxos essenciais, na sala limpa em que os passos acabaram de passar. */
+export type ResultadoDoSmoke =
+  | { ok: true; pendencias: string[] }
+  | { ok: false; id: string; cause: string; natureza: NaturezaDaFalha };
 
 /**
  * O que não atravessa para a cópia limpa.
@@ -245,6 +264,12 @@ export interface AcceptanceOptions {
   service?: CommandRunner;
   /** Desligar a cópia só existe para teste; um run de verdade sempre copia. */
   cleanRoom?: boolean;
+  /**
+   * Os fluxos essenciais percorridos na sala limpa, depois dos passos, pelos
+   * meios da plataforma (etapa 4 da redução). Ausente: o projeto não tem fluxos,
+   * ou o build roda sem eles.
+   */
+  smoke?: (room: string) => Promise<ResultadoDoSmoke>;
 }
 
 async function lerManifesto(projectRoot: string, nome: string): Promise<string | null> {
@@ -252,7 +277,7 @@ async function lerManifesto(projectRoot: string, nome: string): Promise<string |
 }
 
 /**
- * Como a aplicação sobe, para quem precisa dela de pé — hoje, o gate 4.
+ * Como a aplicação sobe, para quem precisa dela de pé — o smoke dos fluxos.
  *
  * Reusa a derivação da aceitação em vez de adivinhar de novo: o passo `service`
  * é, por definição, o que fica de pé. O build vem junto quando existe, porque um
@@ -283,7 +308,7 @@ export async function runAcceptance(options: AcceptanceOptions): Promise<Accepta
     indexHtml: await lerManifesto(options.projectRoot, "index.html"),
   });
 
-  if (steps.length === 0) {
+  if (steps.length === 0 && !options.smoke) {
     return { accepted: true, steps: [], skipped: "o projeto não declara um ecossistema com build, instalação ou entrypoint: nada a aceitar operacionalmente" };
   }
 
@@ -330,12 +355,16 @@ export async function runAcceptance(options: AcceptanceOptions): Promise<Accepta
             cause:
               `A aceitação operacional falhou no passo "${step.id}" (${step.command}), numa cópia limpa do projeto` +
               ` — código ${exitCode}. Saída:\n${output.split("\n").slice(-60).join("\n").trim()}`,
+            natureza: "produto",
           },
         };
       }
     }
 
-    return { accepted: true, steps: results, skipped: "" };
+    if (!options.smoke) return { accepted: true, steps: results, skipped: "" };
+    const smoke = await options.smoke(room);
+    if (!smoke.ok) return { accepted: false, steps: results, failure: { id: smoke.id, cause: smoke.cause, natureza: smoke.natureza } };
+    return { accepted: true, steps: results, skipped: "", ...(smoke.pendencias.length > 0 ? { pendencias: smoke.pendencias } : {}) };
   } finally {
     if (room !== options.projectRoot) await rm(room, { recursive: true, force: true });
   }

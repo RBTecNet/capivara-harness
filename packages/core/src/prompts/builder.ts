@@ -10,7 +10,6 @@
 import { languageBlock } from "./language.js";
 import { functionalAcceptanceBlock, proportionateChecksBlock } from "./acceptance-policy.js";
 import { testPolicyBlock } from "./test-policy.js";
-import { lerProtocolo } from "../contract/protocolo.js";
 
 export interface BuilderContext {
   language: string;
@@ -126,38 +125,6 @@ function memoriaBlock(context: { memoriasDir?: string }): string[] {
 
 export const BUILDER_COMPLETE_MARKER = "CAPIVARA_BUILDER_STATUS: COMPLETE";
 
-/**
- * A saída do executor quando quem está errado é o roteiro, não o produto.
- *
- * O gate 4 devolve "a aplicação não cumpriu um fluxo declarado", e o executor só
- * tinha uma forma de responder: mexer no produto. Quando o roteiro é que exige o
- * que ninguém pediu, isso piora a aplicação para satisfazer um teste — e foi o
- * que aconteceu na fase 4 do MCP_teste2:
- *
- *   O título "Novo cadastro" está na seção, fora do `form`. O fluxo procura esse
- *   heading dentro do formulário — vou colocá-lo lá.
- *
- * O título estava no lugar certo. O roteiro é que se ancorava no `form` e
- * procurava dentro dele um heading que é irmão, não filho. O produto foi
- * remodelado para caber num seletor.
- *
- * Com este marcador o executor ganha a outra saída: dizer que o roteiro está
- * errado, e por quê. O harness reescreve o ROTEIRO — por uma sessão
- * independente, que lê o produto de novo — em vez de reescrever o produto. E o
- * escape se corrige sozinho: se o produto estiver mesmo errado, o roteiro novo
- * reprova de novo e a fase continua devendo o que devia.
- */
-export const BUILDER_FLOW_WRONG_MARKER = "CAPIVARA_ROTEIRO_ERRADO";
-
-/** O executor declarou que o defeito é do roteiro? Devolve o motivo que ele deu. */
-export function declarouRoteiroErrado(output: string): string | null {
-  // O negrito do Markdown cerca a chave de qualquer lado — `**CHAVE:**` e
-  // `**CHAVE**:` — e nenhum dos dois muda o que ele quis dizer (§40).
-  const linha = new RegExp(`^${BUILDER_FLOW_WRONG_MARKER}:?(.*)$`, "m").exec(lerProtocolo(output, BUILDER_FLOW_WRONG_MARKER));
-  if (!linha) return null;
-  return (linha[1] ?? "").replace(/^[\s*]+/, "").trim() || "o executor não explicou o motivo";
-}
-
 export function discoveryPreamble(): string {
   return [
     /*
@@ -220,14 +187,14 @@ export function architectureSliceBlock(slice: string | undefined): string[] {
   ];
 }
 
-/** Como o gate 4 sobe a aplicação — só para quem será percorrido nele (§107). */
+/** Como a aceitação final sobe a aplicação para percorrer os fluxos — da fase que entrega um fluxo em diante (§107). */
 export function flowStartBlock(context: BuilderContext): string {
   if (!context.temFluxos) return "";
   return [
     "",
     "## How the application is started for the flow gate",
-    "The flow gate walks the flows in a browser. For a product used through a browser, after the tests the",
-    "gate runs the manifest's `start` entrypoint (`npm start` in a Node project)",
+    "At the end of the build, the flow gate walks the declared flows in a clean copy of the project. For a product",
+    "used through a browser, the gate runs the manifest's `start` entrypoint (`npm start` in a Node project)",
     "from the project root, with `PORT` and `HOST` set in the environment, and walks the flows at that",
     "address. The entrypoint must exist and listen on that `PORT` and `HOST`; a server that only",
     "listens on a fixed port fails the gate. The project may keep its own variable names, as long as",
@@ -465,25 +432,6 @@ export function fixPrompt(context: FixContext): string {
     `${note}${context.cause}`,
     "````",
     "",
-    ...(context.gate.includes("gate 4")
-      ? [
-          "## If the product is right and the SCRIPT is wrong",
-          "",
-          "The flow script is written by another session, from the phase and the real markup. It can be",
-          "wrong: anchored to a container the element does not live in, asserting a structure no acceptance",
-          "criterion asks for, expecting a label the phase never promised.",
-          "",
-          "When that is the case, DO NOT reshape the product to satisfy it. Moving a heading inside a form",
-          "because a selector looks for it there makes the application worse to make a test pass, and the",
-          "next reader inherits a layout nobody chose.",
-          "",
-          `Answer with this line instead, and say why on the same line: \`${BUILDER_FLOW_WRONG_MARKER}: <why>\``,
-          "The harness rewrites the script — another independent session, reading the product again — and",
-          "runs the flow once more. If the product really is wrong, the new script fails too and the phase",
-          "still owes what it owes. So use it when you are right, and fix the product when you are not.",
-          "",
-        ]
-      : []),
     "When the phase is genuinely finished, end your answer with this line, alone:",
     BUILDER_COMPLETE_MARKER,
     "",

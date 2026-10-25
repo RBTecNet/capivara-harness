@@ -19,13 +19,12 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdir, readFile, readdir, realpath, rm, writeFile, stat } from "node:fs/promises";
-import { isAbsolute, join, posix, relative, resolve as resolvePath } from "node:path";
+import { mkdir, readFile, readdir, rm, writeFile, stat } from "node:fs/promises";
+import { join, resolve as resolvePath } from "node:path";
 import type { SkeletonWorkflow } from "../contract/index.js";
-import { FORA_DO_NAVEGADOR, extractFlowScript, lerForaDoNavegador, lerProvas, lerTriagem, stepLabel, type PassoSemProva, type ProvaCitada, type Triagem } from "../prompts/index.js";
+import { FORA_DO_NAVEGADOR, extractFlowScript, lerForaDoNavegador, stepLabel } from "../prompts/index.js";
 import { comandoDeMigracao } from "./ambiente.js";
 import { FLOW_HELPER, VARIAVEL_DO_INICIO, bancosDeclarados, criarAmbienteDaPassagem, renderFlowHelper } from "./passagem.js";
-import { testeDotnetAprovado } from "./teste-declarado.js";
 import { runtimeEnvironment } from "../provider/runtime-env.js";
 import { portaLivre } from "./ports.js";
 import { invalidFlowNetwork } from "./flow-network.js";
@@ -585,30 +584,6 @@ export interface FlowGateOptions {
    * nunca acontece.
    */
   executar?: (comando: string, cwd: string, env: Record<string, string>) => Promise<{ exitCode: number; output: string }>;
-  /**
-   * O executor declarou que o roteiro é que está errado, e por quê.
-   *
-   * Quando isto vem preenchido, o roteiro é reescrito ANTES de rodar, com o
-   * motivo dele na mão de quem reescreve. É a alternativa a remodelar o produto
-   * para caber num seletor — e ela se corrige sozinha: se o produto estiver
-   * mesmo errado, o roteiro novo reprova igual.
-   */
-  roteiroContestado?: string;
-  /**
-   * Os fluxos cujos roteiros falharam na passagem que o executor contestou.
-   *
-   * A contestação reescrevia só os roteiros DA FASE. Na P04 do `assistencia2`
-   * quem falhava era o roteiro de regressão da P02, o executor contestou certo
-   * duas vezes, e as duas reescritas foram para os roteiros que nem tinham rodado.
-   * Sem esta lista, vale o comportamento antigo.
-   */
-  roteirosQueFalharam?: string[];
-  /**
-   * A triagem: devolve o texto cru da sessão que decide de quem é a falha.
-   *
-   * Sem ela, o gate faz o que fazia antes — o rastro vai ao executor.
-   */
-  triagem?: (entrada: EntradaDaTriagem) => Promise<string>;
   port?: number;
   /**
    * A porta tentada primeiro, quando não é a de sempre.
@@ -633,69 +608,9 @@ export interface FlowGateOptions {
    * regressão que esta passagem roda (§133). Para eles a marca não vale.
    */
   jaPercorridos?: readonly string[];
-  /**
-   * Sem `start`, perguntar de novo ao roteirista se o fluxo se percorre num
-   * navegador, antes de cobrar o entrypoint. O runner liga uma vez por fase (§133).
-   */
-  confirmarSemStart?: boolean;
   /** Os fluxos que já avançaram passos no navegador numa passagem anterior desta fase (§134): para eles a marca não vale. */
   jaAbertos?: readonly string[];
-  /** O próximo ciclo substitui estes roteiros antes de executá-los outra vez. */
-  rejectedScripts?: readonly string[];
   announce?: (message: string) => void;
-}
-
-/** O que a triagem recebe de UM roteiro que falhou. */
-export interface EntradaDaTriagem {
-  workflow: SkeletonWorkflow;
-  script: string;
-  failure: string;
-  snapshot: string;
-  serverErrors: string[];
-}
-
-/**
- * O retrato da página no instante de cada falha, por roteiro.
- *
- * O Playwright grava um `error-context.md` por teste que falhou, com a árvore de
- * acessibilidade da página. O roteiro é identificado pela linha `Location`, e não
- * pelo nome da pasta, que o Playwright encurta e sanitiza.
- */
-export async function retratosDaFalha(projectRoot: string): Promise<Map<string, string>> {
-  const base = join(projectRoot, FLOWS_DIR, FLOW_RESULTS);
-  const retratos = new Map<string, string>();
-  const pastas = await readdir(base).catch(() => [] as string[]);
-  for (const pasta of pastas) {
-    const contexto = await readFile(join(base, pasta, "error-context.md"), "utf8").catch(() => null);
-    if (contexto === null) continue;
-    const roteiro = /Location:\s*([^\s:]+\.spec\.ts)/.exec(contexto)?.[1];
-    const retrato = /#\s*Page snapshot\s*```(?:yaml)?\n([\s\S]*?)```/.exec(contexto)?.[1];
-    if (roteiro && retrato && !retratos.has(roteiro)) retratos.set(roteiro, retrato.trim());
-  }
-  return retratos;
-}
-
-/** O que a triagem disse, como o executor precisa ler. */
-export function causaDaTriagem(triagem: Triagem, rastro: string): string {
-  const titulo =
-    triagem.tipo === "PRODUTO"
-      ? "O gate 4 reprovou e a triagem diz que o defeito é do PRODUTO. Corrija isto:"
-      : triagem.tipo === "CRITERIO"
-        ? "O gate 4 reprovou e a triagem diz que o CRITÉRIO não decide o caso. Vale esta leitura, que ficou " +
-          "registrada em .capivara/decisoes-do-build.md para o desenvolvedor revisar:"
-        : "O gate 4 identificou um defeito no ROTEIRO. A implementação deve ser preservada; " +
-          "a correção abaixo pertence ao teste do harness:";
-  return [
-    titulo,
-    "",
-    `- evidência: ${triagem.evidencia || "—"}`,
-    `- onde: ${triagem.onde || "—"}`,
-    `- critério: ${triagem.criterio || "—"}`,
-    `- correção: ${triagem.correcao}`,
-    "",
-    "O rastro do runner, para conferir:",
-    rastro,
-  ].join("\n");
 }
 
 /** O que o roteirista precisa saber sobre a passagem em que o roteiro dele vai rodar. */
@@ -757,124 +672,11 @@ export function passoQueFalhou(output: string, workflow: string): number | null 
 }
 
 /** O que o roteirista ouve quando o projeto não tem `start` e o roteiro já existe (§133). */
-export const MOTIVO_SEM_START =
-  "o projeto ainda não declara um entrypoint `start`, e este roteiro abre a aplicação servida por HTTP: " +
-  "se o contrato diz que o produto se usa num terminal, devolva o roteiro percorrendo o fluxo só com `comandoDoProjeto`, sem página (§134); " +
-  `se ele não se usa nem num navegador nem num terminal, responda com a linha ${FORA_DO_NAVEGADOR} e a prova de cada passo; ` +
-  "se ele se usa num navegador, devolva o roteiro como está (o executor declara o `start`)";
-
 /** O fluxo que o gate não percorreu porque o contrato põe o produto fora do navegador (§133). */
 export interface NaoPercorrido {
   number: string;
   /** A passagem do contrato que o roteirista citou, conferida. */
   trecho: string;
-  /** Os testes da suíte que o roteirista citou como prova de cada passo (§134) — ainda não conferidos. */
-  provas?: ProvaCitada[];
-  /** Os passos que ele disse não ter teste que os exercite, e por quê (§134). */
-  semProva?: PassoSemProva[];
-}
-
-/** Código-fonte de teste. Documento, dado, fixture ou relatório não é teste que rode. */
-const FONTE_DE_TESTE = /\.(?:cs|fs|vb|py|go|rs|php|[cm]?[jt]sx?|rb|java|kts?|scala|swift|dart|exs?|cljs?|lua|c|cc|cpp|cxx|m|mm)$/iu;
-
-/** O que o relatório TRX do G2 cobre: os testes .NET (§134). */
-const FONTE_DOTNET = /\.(?:cs|fs|vb)$/iu;
-
-/**
- * Onde não mora a suíte do projeto: o harness, dependências e ambientes virtuais
- * em qualquer profundidade, a saída de build do .NET em qualquer projeto, e as
- * pastas de build na raiz — um pacote Go chamado `build` continua sendo do projeto.
- */
-const FORA_DA_SUITE = /(?:^|\/)(?:\.capivara|\.git|node_modules|vendor|\.?venv|site-packages|TestResults|obj)(?:\/|$)|(?:^|\/)bin\/(?:Debug|Release)(?:\/|$)|^(?:target|dist|build|bin)\//u;
-
-/**
- * O teste citado como prova de um passo rodou e passou nesta execução da suíte? (§134)
- *
- * Devolve o motivo da recusa, ou `null`. O roteirista julga se o teste exercita o
- * passo; o Core confere que ele é do projeto e que o RUNNER relatou que ele rodou e
- * passou — `testes` é o que o relatório da suíte disse, teste a teste, sobre esta
- * árvore (`lerResultadosDotnet`). Ler o código não basta: três revisões
- * adversariais acharam, a cada rodada, um teste pulado que a leitura dava como
- * ativo. Hoje o relatório por teste existe para o .NET (TRX); nas outras suítes o
- * runner não o dá sem mudar o comando do projeto, e a citação é recusada — o
- * passo fica pendente e nomeado, nunca aprovado.
- *
- * O caminho é resolvido de verdade (link simbólico incluído) e tem de ficar dentro
- * do projeto, fora do harness, das dependências e da saída de build.
- */
-export async function conferirCitacao(projectRoot: string, prova: ProvaCitada, testes?: ReadonlyMap<string, boolean> | null, suite?: string | null): Promise<string | null> {
-  const citado = `${prova.arquivo} :: ${prova.teste}`;
-  const arquivo = prova.arquivo.trim().replace(/^[`"']+|[`"']+$/g, "").replace(/\\/g, "/").replace(/^\.\//u, "");
-  const normal = posix.normalize(arquivo);
-  if (arquivo === "" || isAbsolute(arquivo) || /^[A-Za-z]:\//u.test(arquivo) || normal.startsWith("../") || normal === "..") return `a citação ${citado} aponta para fora do projeto`;
-  if (FORA_DA_SUITE.test(normal)) return `a citação ${citado} aponta para um arquivo do harness, de dependência ou de build, não da suíte do projeto`;
-  if (!FONTE_DE_TESTE.test(normal)) return `a citação ${citado} não é um arquivo de teste: a prova de um passo é um teste da suíte, não um documento ou um dado`;
-  if (!FONTE_DOTNET.test(normal)) {
-    return `a citação ${citado} é de uma suíte que não relata, teste a teste, o que rodou e passou: a prova pela suíte exige esse relatório do runner, e hoje ele existe para o .NET`;
-  }
-  const raiz = await realpath(projectRoot).catch(() => resolvePath(projectRoot));
-  const real = await realpath(join(projectRoot, normal)).catch(() => null);
-  if (real === null) return `o arquivo citado em ${citado} não existe no projeto`;
-  const relativoReal = posix.normalize(relative(raiz, real).replace(/\\/g, "/"));
-  if (relativoReal.startsWith("../") || isAbsolute(relativoReal) || FORA_DA_SUITE.test(relativoReal)) return `a citação ${citado} aponta para fora do projeto`;
-  const conteudo = await readFile(real, "utf8").catch(() => null);
-  if (conteudo === null) return `o arquivo citado em ${citado} não existe no projeto`;
-  if (testes === undefined || testes === null) {
-    return `a suíte não relatou quais testes rodaram nesta execução: ${citado} não tem prova de execução — o relatório TRX vem do \`dotnet test\` que o harness resolve, não de \`npm test\`, \`--test-cmd\` ou \`CAPIVARA_TEST_CMD\``;
-  }
-  // O arquivo tem de estar num projeto de teste que o comando rodou: o que fica fora não compila, nem roda.
-  const projetos = [...(suite ?? "").matchAll(/dotnet\s+test\s+(?:--project\s+)?(?:'([^']+)'|"([^"]+)"|(\S+\.(?:cs|fs|vb)proj))/gu)].map((casou) => posix.normalize(posix.dirname(casou[1] ?? casou[2] ?? casou[3] ?? "")));
-  if (projetos.length > 0 && !projetos.some((pasta) => pasta === "." || normal.startsWith(`${pasta}/`))) {
-    return `${citado}: o arquivo está fora dos projetos de teste que a suíte rodou`;
-  }
-  const recusa = testeDotnetAprovado(conteudo, posix.extname(normal).slice(1), prova.teste, testes);
-  return recusa === null ? null : `${citado}: ${recusa}`;
-}
-
-const SEM_SUITE = "nenhuma suíte do projeto rodou verde neste código, e só o teste que roda prova um passo";
-
-/**
- * O que a suíte prova do fluxo que não se percorre (§134): cada passo com um teste
- * citado e conferido, ou nomeado sem prova, com o porquê.
- *
- * `suite` é o comando que passou NESTE código, no G2; sem ele, nenhuma citação vale
- * — teste que não rodou verde no código de agora não é prova de nada. Compilar,
- * abrir ou a suíte verde sozinha não provam passo nenhum: cada um precisa do seu
- * teste. O passo sem prova não vira defeito do produto nem pedido ao executor: é
- * a pendência que a guarda final nomeia.
- */
-export async function conferirProvas(
-  projectRoot: string,
-  workflow: SkeletonWorkflow,
-  citadas: { provas?: readonly ProvaCitada[]; semProva?: readonly PassoSemProva[] },
-  suite: string | null,
-  /** O que o relatório da suíte disse, teste a teste, sobre esta árvore; `null` sem relatório. */
-  testes: ReadonlyMap<string, boolean> | null = null,
-): Promise<{ provas: ProvaCitada[]; semProva: PassoSemProva[] }> {
-  const provas: ProvaCitada[] = [];
-  const semProva: PassoSemProva[] = [];
-  for (let passo = 1; passo <= workflow.steps.length; passo += 1) {
-    const dele = (citadas.provas ?? []).filter((prova) => prova.passo === passo);
-    const disse = (citadas.semProva ?? []).find((sem) => sem.passo === passo)?.motivo;
-    if (suite === null) {
-      // A mesma frase de uma resposta refeita não se aninha: a decisão que não mudou não é registrada de novo.
-      semProva.push({ passo, motivo: disse === undefined || disse.startsWith(SEM_SUITE) ? disse ?? SEM_SUITE : `${SEM_SUITE} (${disse})` });
-      continue;
-    }
-    const recusas: string[] = [];
-    let aceita: ProvaCitada | null = null;
-    for (const prova of dele) {
-      const recusa = await conferirCitacao(projectRoot, prova, testes, suite);
-      if (recusa === null) {
-        aceita = prova;
-        break;
-      }
-      recusas.push(recusa);
-    }
-    if (aceita !== null) provas.push(aceita);
-    else semProva.push({ passo, motivo: recusas.length > 0 ? recusas.join("; ") : disse ?? "nenhum teste da suíte foi citado para ele" });
-  }
-  return { provas, semProva };
 }
 
 export type FlowGateResult =
@@ -897,12 +699,10 @@ export type FlowGateResult =
       perguntouSemStart?: boolean;
       /** Os fluxos que avançaram passos no navegador nesta chamada (§134). */
       abertos?: string[];
-      /** O veredito da triagem, quando ela correu e foi legível. */
-      triagem?: Triagem;
       toolMissing?: boolean;
       startupFailed?: boolean;
       scriptFailed?: boolean;
-      /** Os fluxos cujos roteiros falharam — é o que uma contestação vai reescrever. */
+      /** Os fluxos cujos roteiros falharam. */
       falharam?: string[];
     };
 
@@ -1159,9 +959,8 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
     if (abertos.has(workflow.number)) {
       return { problema: `o fluxo ${workflow.number} já avançou passos num percurso desta fase (no navegador ou no terminal): ele se percorre ali — devolva o roteiro corrigido` };
     }
-    // A última resposta é a mais informada: substitui a anterior do mesmo fluxo, com as provas que trouxer (§134).
-    const { provas, semProva } = lerProvas(resposta);
-    const fluxo: NaoPercorrido = { number: workflow.number, trecho, ...(provas.length > 0 ? { provas } : {}), ...(semProva.length > 0 ? { semProva } : {}) };
+    // A última resposta é a mais informada: substitui a anterior do mesmo fluxo.
+    const fluxo: NaoPercorrido = { number: workflow.number, trecho };
     const anterior = naoPercorridos.findIndex((outro) => outro.number === workflow.number);
     if (anterior >= 0) naoPercorridos.splice(anterior, 1, fluxo);
     else {
@@ -1189,12 +988,11 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
       aEscrever.push(workflow);
       continue;
     }
-    if (options.rejectedScripts?.includes(workflow.number) || (daFase && checkFlowScript(existente, workflow).length > 0)) aEscrever.push(workflow);
+    if (daFase && checkFlowScript(existente, workflow).length > 0) aEscrever.push(workflow);
   }
 
   for (const workflow of aEscrever) {
     const arquivo = join(pasta, flowScriptName(workflow.number));
-    const anterior = options.rejectedScripts?.includes(workflow.number) ? await readFile(arquivo, "utf8").catch(() => null) : null;
     let rejeitado: string[] = [];
     let gravado = false;
     const tentativas = options.maxDrafts ?? 2;
@@ -1214,7 +1012,6 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
       }
       const script = extractFlowScript(resposta);
       const defeitos = checkFlowScript(script, workflow);
-      if (anterior !== null && comMarca(script) === anterior) defeitos.push({ problem: "o roteirista devolveu o mesmo roteiro que já falhou", hint: "aplique o diagnóstico recebido antes de devolver o arquivo; não repetir o mesmo teste" });
       if (defeitos.length === 0) {
         await writeFile(arquivo, comMarca(script), "utf8");
         gravado = true;
@@ -1270,41 +1067,6 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
   };
 
   /*
-   * O executor contestou o roteiro: reescreve antes de rodar — e antes de cobrar o
-   * `start` (§133). No desktop, o executor que não cria servidor contesta o roteiro
-   * web; tratada depois da cobrança, a contestação nunca chegava ao roteirista.
-   *
-   * Ele acabou de ler o produto e o erro do seletor, e é a única parte do ciclo
-   * que viu os dois. Quem reescreve é outra sessão, que lê o produto de novo —
-   * então a contestação não vira licença para ignorar o fluxo, só troca quem é
-   * corrigido primeiro.
-   */
-  if (options.roteiroContestado) {
-    announce(`o executor contestou o roteiro: ${options.roteiroContestado}`);
-    for (const workflow of alvos(options.roteirosQueFalharam)) {
-      const arquivo = join(pasta, flowScriptName(workflow.number));
-      const resposta = await options.author(
-        workflow,
-        [`o executor diz que este roteiro está errado, e não o produto: ${options.roteiroContestado}`],
-        baseUrl,
-        passagemDe(workflow),
-      );
-      const fora = await foraDaResposta(workflow, resposta);
-      if (fora !== null && "trecho" in fora) continue;
-      const script = extractFlowScript(resposta);
-      const defeitos = fora !== null ? [{ problem: fora.problema, hint: "" }] : checkFlowScript(script, workflow);
-      if (defeitos.length === 0) {
-        await writeFile(arquivo, comMarca(script), "utf8");
-        announce(`  roteiro do fluxo ${workflow.number} reescrito`);
-      } else {
-        announce(`  o roteiro reescrito do fluxo ${workflow.number} veio com defeito; mantive o anterior`);
-      }
-    }
-    scripts = await aPercorrer();
-    if (scripts.length === 0) return semRoteiro();
-  }
-
-  /*
    * A falta de `start` é cobrada aqui, depois da redação, e não antes (§133): é o
    * roteirista quem diz, lendo o contrato, se o produto se usa num navegador. No
    * Luna, cobrada antes, ela fez o executor criar `package.json` e um servidor
@@ -1330,31 +1092,6 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
       "O gate o executa com PORT e HOST no ambiente, e a aplicação precisa escutar nesse endereço.",
   });
   if (startCommand === null && (await precisaDoServidor())) {
-    /*
-     * Sem `start`, uma pergunta a mais, uma vez por fase (o runner decide quando):
-     * o roteiro que já está no disco pode ter sido escrito como se o produto fosse
-     * web. No Luna, três de cinco roteiristas inventaram seletores; sem esta volta,
-     * o executor que não cria servidor para um desktop ficava sem saída (§133).
-     */
-    if (options.confirmarSemStart === true) {
-      // Só quem escreveu roteiro que abre a aplicação: o de comandos não precisa de `start` (§134).
-      const abrem = new Set<string>();
-      for (const nome of scripts) if (!produtoDeTerminal || roteiroUsaOServidor(await readFile(join(pasta, nome), "utf8").catch(() => ""))) abrem.add(nome);
-      const daFase = options.workflows.filter((workflow) =>
-        !jaPercorridos.has(workflow.number) && abrem.has(flowScriptName(workflow.number)));
-      // Só conta como feita quando chegou a alguém: a passagem que reprovou antes não a gasta.
-      if (daFase.length > 0) sinais.perguntouSemStart = true;
-      for (const workflow of daFase) {
-        announce(`o projeto não declara \`start\`: o roteirista confirma se o fluxo ${workflow.number} se percorre num navegador`);
-        const resposta = await options.author(workflow, [MOTIVO_SEM_START], baseUrl, passagemDe(workflow));
-        const fora = await foraDaResposta(workflow, resposta);
-        if (fora !== null) continue;
-        const script = extractFlowScript(resposta);
-        if (checkFlowScript(script, workflow).length === 0) await writeFile(join(pasta, flowScriptName(workflow.number)), comMarca(script), "utf8");
-      }
-      scripts = await aPercorrer();
-      if (scripts.length === 0) return semRoteiro();
-    }
     if (await precisaDoServidor()) return semComoSubir();
   }
   // `null`: nenhum roteiro desta passagem abre a aplicação, e nada sobe (§134).
@@ -1592,111 +1329,6 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
 
   if (run.exitCode !== 0) {
     /*
-     * Antes do executor, a triagem: de quem é esta falha?
-     *
-     * ROTEIRO é resolvido aqui, sem gastar ciclo: o roteiro é reescrito com o
-     * retrato da página e o motivo, e a passagem roda de novo — até duas correções
-     * por passo declarado. PRODUTO e CRITERIO chegam ao executor como correção, não
-     * como rastro.
-     */
-    const triar = async (corrida: FlowRun): Promise<{ triagem: Triagem; workflow: SkeletonWorkflow } | null> => {
-      if (!options.triagem) return null;
-      const numero = fluxosQueFalharam(corrida.output, ordem)[0];
-      const workflow = ordem.find((candidato) => candidato.number === numero);
-      if (!workflow) return null;
-      const nome = flowScriptName(workflow.number);
-      const entrada: EntradaDaTriagem = {
-        workflow,
-        script: await readFile(join(pasta, nome), "utf8").catch(() => ""),
-        failure: tail(corrida.output, 60),
-        snapshot: (await retratosDaFalha(options.projectRoot)).get(nome) ?? "",
-        serverErrors: errosDoServidor(corrida.output),
-      };
-      // Sem `catch`: credencial recusada e limite de uso param o build pela mesma
-      // via do roteirista (§83). Engolir aqui transformaria a parada em rastro.
-      const triagem = lerTriagem(await options.triagem(entrada));
-      if (triagem === null) {
-        announce("a triagem não devolveu um veredito legível; o rastro vai ao executor como antes");
-        return null;
-      }
-      announce(`triagem do fluxo ${workflow.number}: ${triagem.tipo} — ${triagem.correcao}`);
-      return { triagem, workflow };
-    };
-
-    let triada = await triar(run);
-    const correcoesDoRoteiro = new Set<string>();
-    const correcoesPorPasso = new Map<string, number>();
-    let passoEmFalha = "";
-    while (triada?.triagem.tipo === "ROTEIRO") {
-      const numero = Number(/›\s*passo\s+(\d+)(?:\s*:|\s*$)/im.exec(run.output)?.[1]);
-      const passo = Number.isSafeInteger(numero) && numero >= 1 && numero <= triada.workflow.steps.length ? numero : null;
-      passoEmFalha = passo === null ? `fluxo ${triada.workflow.number} (passo não identificado)` : `passo ${passo} do fluxo ${triada.workflow.number}`;
-      const endereco = JSON.stringify([triada.workflow.number, passo]);
-      const tentativas = correcoesPorPasso.get(endereco) ?? 0;
-      if (tentativas >= 2) break;
-      const chave = JSON.stringify([endereco, triada.triagem.onde, triada.triagem.correcao]);
-      if (correcoesDoRoteiro.has(chave)) break;
-      correcoesDoRoteiro.add(chave);
-      correcoesPorPasso.set(endereco, tentativas + 1);
-      const caminhoDoRoteiro = join(pasta, flowScriptName(triada.workflow.number));
-      const antesDaCorrecao = await readFile(caminhoDoRoteiro, "utf8");
-      let patchAplicado = false;
-      const patch = triada.triagem.patch;
-      if (patch) {
-        const arquivo = join(pasta, flowScriptName(triada.workflow.number));
-        const anterior = await readFile(arquivo, "utf8");
-        const posicao = anterior.indexOf(patch.before);
-        if (posicao >= 0 && anterior.indexOf(patch.before, posicao + 1) === -1) {
-          const corrigido = anterior.slice(0, posicao) + patch.after + anterior.slice(posicao + patch.before.length);
-          if (checkFlowScript(corrigido, triada.workflow, nomesNaoDefinidos(run.output)).length === 0) {
-            await writeFile(arquivo, corrigido, "utf8");
-            patchAplicado = true;
-            announce(`correção pontual do roteiro do fluxo ${triada.workflow.number} aplicada; nenhuma nova chamada ao roteirista`);
-          }
-        }
-      }
-      if (!patchAplicado) {
-        const retrato = (await retratosDaFalha(options.projectRoot)).get(flowScriptName(triada.workflow.number)) ?? "";
-        announce(`o roteiro do fluxo ${triada.workflow.number} é que está errado; reescrevendo sem gastar ciclo do executor`);
-        const falhas = await reescrever(
-          [triada.workflow],
-          [
-            `a triagem leu a falha e diz que o ROTEIRO está errado, não o produto: ${triada.triagem.correcao}`,
-            ...(triada.triagem.evidencia !== "" ? [`evidência: ${triada.triagem.evidencia}`] : []),
-            ...(retrato !== "" ? [`a página, no instante da falha, era esta — escreva contra ela:\n${retrato}`] : []),
-          ],
-          nomesNaoDefinidos(run.output),
-        );
-        if (falhas.length > 0) return {
-          green: false, scriptFailed: true, output: run.output,
-          falharam: fluxosQueFalharam(run.output, ordem), triagem: triada.triagem,
-          cause: `O roteirista não entregou uma correção executável. Isto é do harness; não executar de novo o roteiro antigo nem devolver o produto ao executor.\n${falhas.join("\n")}`,
-        };
-      }
-      const numeroDaTriagem = triada.workflow.number;
-      const saiuDoNavegador = naoPercorridos.some((fluxo) => fluxo.number === numeroDaTriagem);
-      if (!saiuDoNavegador && await readFile(caminhoDoRoteiro, "utf8").catch(() => null) === antesDaCorrecao) return {
-        green: false, scriptFailed: true, output: run.output,
-        falharam: fluxosQueFalharam(run.output, ordem), triagem: triada.triagem,
-        cause: `O roteirista não alterou o roteiro que já falhou no ${passoEmFalha}. Isto é do harness; ` +
-          `não repetir o mesmo teste nem reconstruir o produto.\n${causaDaTriagem(triada.triagem, tail(run.output))}`,
-      };
-      run = await rodar();
-      if (run.semStart === true) return semComoSubir();
-      if (run.exitCode === 0) return scripts.length === 0 ? semRoteiro() : { green: true, skipped: "", scripts, output: run.output };
-      triada = await triar(run);
-    }
-
-    if (triada?.triagem.tipo === "ROTEIRO") {
-      return {
-        green: false, scriptFailed: true, output: run.output,
-        falharam: fluxosQueFalharam(run.output, ordem), triagem: triada.triagem,
-        cause: `O roteiro continua incorreto após ${correcoesDoRoteiro.size} correção(ões); a falha está no ${passoEmFalha}. Isto é do harness: ` +
-          `não pedir ao executor que altere produto aprovado por causa deste roteiro.\n${causaDaTriagem(triada.triagem, tail(run.output))}`,
-      };
-    }
-
-    /*
      * Quando o servidor registrou erro, ELE vem primeiro na causa.
      *
      * A ordem é o conserto: o executor lê o começo da mensagem e age. Deixar o
@@ -1725,8 +1357,7 @@ async function percorrerFluxos(options: FlowGateOptions, naoPercorridos: NaoPerc
       green: false,
       output: run.output,
       falharam: fluxosQueFalharam(run.output, ordem),
-      ...(triada ? { triagem: triada.triagem } : {}),
-      cause: triada ? causaDaTriagem(triada.triagem, rastro) : rastro,
+      cause: rastro,
     };
   }
 

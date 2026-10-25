@@ -89,7 +89,7 @@ describe("§13.15 · TUI, eventos e relatório contam a mesma recuperação", ()
         return ok(verificacoes === 1 ? "TASK 1: INCOMPLETE — CRITERION: o compromisso; OBSERVED: sem data; EXPECTED: com data; FIX: gravar a data" : "TASK 1: DONE");
       },
     });
-    expect(outcome.status).toBe("complete");
+    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
 
     const naTui = progresso.flatMap((evento) => (evento.kind === "recovery" ? [evento.line] : []));
     const nosEventos = (await lerTransicoes(root, RUN)).map((transicao) => transicao.linha);
@@ -105,15 +105,15 @@ describe("§13.15 · TUI, eventos e relatório contam a mesma recuperação", ()
     const fase = resumo.fases.find((cada) => cada.id === "P01")!;
     expect(fase.transicoes).toEqual(nosEventos);
     expect(fase.status).toBe("complete");
-    // O defeito do G3, a ação do executor e a validação: os mesmos que a TUI anunciou.
+    // O defeito do G3 e a ação do executor, sem segunda revisão (etapa 4 da redução): os mesmos que a TUI anunciou.
     expect(fase.defeitos).toHaveLength(1);
     const [defeito] = fase.defeitos;
-    expect(defeito).toMatchObject({ id: "P01-D1", gates: ["G3"], status: "RESOLVED" });
-    expect(defeito!.tentativas).toEqual([expect.objectContaining({ estrategia: "executor", gate: "G3", resultado: "resolved" })]);
+    expect(defeito).toMatchObject({ id: "P01-D1", gates: ["G3"], status: "AWAITING_VALIDATION" });
+    expect(defeito!.tentativas).toEqual([expect.objectContaining({ estrategia: "executor", gate: "G3", resultado: "pending" })]);
     expect(naTui.some((linha) => linha.includes("P01-D1") && linha.includes("estratégia: executor"))).toBe(true);
     // As provas: o que o livro tem, com a validade que ele diz.
     expect(fase.evidencias.map((evidencia) => evidencia.checkId)).toEqual(expect.arrayContaining(["suite", "task-1"]));
-    expect(fase.evidencias.find((evidencia) => evidencia.checkId === "task-1")).toMatchObject({ resultado: "PASS", validade: "VALID" });
+    expect(fase.evidencias.find((evidencia) => evidencia.checkId === "task-1")).toMatchObject({ resultado: "REPAIR_REQUIRED" });
     // Sem calls.jsonl (o runner foi chamado direto), o relatório não inventa contagem.
     expect(resumo.chamadas).toBeNull();
     expect(markdown).not.toContain("Chamadas de agente");

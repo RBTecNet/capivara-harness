@@ -1700,7 +1700,7 @@ export function createProgram(): Command {
       .option("--keep-going", "continua mesmo depois de uma fase falhar")
       .option("--no-system-install", "mantém o executor dentro do workspace, sem instalar pacotes de sistema")
       .option("--no-acceptance", "pula a aceitação operacional final")
-      .option("--no-flows", "pula o gate 4: não abre a aplicação para percorrer os fluxos do esqueleto")
+      .option("--no-flows", "pula o percurso dos fluxos do esqueleto na aceitação final (o desfecho fica em verificação inconclusiva)")
       .option("--rebuild-all", "refaz todas as fases, inclusive as fechadas em runs anteriores")
       .option("--no-git", "não cria repositório Git em pasta nova; sem ele não há commit por fase")
       .option("--mcp <url>", "base documental por MCP, de onde vêm as skills do projeto")

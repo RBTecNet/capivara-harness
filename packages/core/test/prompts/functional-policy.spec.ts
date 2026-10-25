@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fixPrompt, flowPrompt, implementPrompt, triagePrompt, verifierRepairPrompt, verifyPrompt } from "../../src/prompts/index.js";
+import { fixPrompt, flowPrompt, implementPrompt, verifierRepairPrompt, verifyPrompt } from "../../src/prompts/index.js";
 
 const base = { language: "pt-BR", phaseMarkdown: "requisitos atuais", testCommand: "npm test", e2eCommand: "npm run test:e2e" };
 const workflow = { number: "1", name: "Cadastro", steps: ["carrega e cadastra"] };
@@ -29,15 +29,11 @@ describe("aceitação funcional e custo proporcional", () => {
     expect(prompt).toContain("observable failure");
   });
 
-  it("roteirista e triagem não exigem atrasar produto para capturar um carregamento transitório", () => {
+  it("o roteirista não exige atrasar produto para capturar um carregamento transitório", () => {
     const author = flowPrompt({ language: "pt-BR", workflow, baseUrl: "http://127.0.0.1:4000" });
-    const triage = triagePrompt({ ...base, workflow, script: "roteiro", failure: "loading not found", snapshot: "lista pronta", serverErrors: [] });
-    for (const prompt of [author, triage]) {
-      expect(prompt).toContain("Never add artificial latency to the product");
-      expect(prompt).toContain("page.goto");
-      expect(prompt).toContain("focused test");
-    }
-    expect(triage).toContain("classify this as ROTEIRO");
+    expect(author).toContain("Never add artificial latency to the product");
+    expect(author).toContain("page.goto");
+    expect(author).toContain("focused test");
     expect(author).toContain("Never fabricate the product backend's responses");
   });
 });

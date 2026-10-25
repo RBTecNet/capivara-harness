@@ -55,7 +55,7 @@ describe.skipIf(process.platform === "win32")("OpenCode 2 pela ponte", () => {
         const limits = { ...DEFAULT_LIMITS, wallSeconds };
         const bridge = createAgentBridge({ projectRoot: directory, runId: "g4", language: "pt-BR", credentialsFile: join(directory, "credentials.json"),
           roles: { writer: config, auditor: config, builder: config, verifier: config }, limits });
-        for (const purpose of ["flow-author", "flow-triage"] as const) {
+        for (const purpose of ["flow-author"] as const) {
           await bridge({ role: "verifier", purpose, stage: purpose, prompt: "Ler as fontes e devolver a correção." });
           expect(requests.at(-1)?.limits).toEqual({ ...limits,
             ...(cli === "claude" ? { firstOutputSeconds: 0, idleSeconds: 0 } : {}),

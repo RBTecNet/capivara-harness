@@ -116,7 +116,7 @@ function pastaDosTemporarios(ambiente: NodeJS.ProcessEnv): string {
 export function createAgentBridge(options: AgentBridgeOptions): (request: BridgeRequest) => Promise<BridgeResponse> {
   return async (request) => {
     if (request.purpose && (request.role !== "verifier" || request.repair)) {
-      throw new Error("a revisão do G4 só se aplica ao verificador somente leitura");
+      throw new Error("o roteiro dos fluxos só se escreve pelo verificador somente leitura");
     }
     // Quem julga nasce limpo: só o reparo retoma uma sessão (§125 E).
     if (request.resumeSessionId !== undefined && request.repair !== true) {

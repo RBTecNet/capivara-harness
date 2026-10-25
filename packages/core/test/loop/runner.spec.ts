@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -28,162 +28,6 @@ function session(): PhaseSession {
 }
 
 const ok = (stdout = "feito"): EngineResult => ({ exitCode: 0, stdout, stderr: "", timedOut: null });
-
-it.each(["quota", "configuration"] as const)("recusa permanente %s do roteirista não gasta os próximos ciclos", async providerFailure => {
-  const target = session();
-  let reviews = 0;
-  const outcome = await runPhase({
-    projectRoot, runId: RUN, language: "pt-BR", engine: "opencode", session: target,
-    testCommand: null, commitsEnabled: false, maxCycles: 3,
-    flows: { workflows: [{ number: "4", name: "Navegação", steps: ["abre a aplicação"] }], resolveStart: async () => "npm start", runner: async () => { throw new Error("não abrir navegador sem roteiro"); } },
-    call: async call => {
-      if (call.role === "builder") { await writeFile(join(projectRoot, "produto.ts"), "export const pronto = true;\n"); return ok("CAPIVARA_BUILDER_STATUS: COMPLETE"); }
-      if (call.purpose) { reviews += 1; return { ...ok("recusa permanente"), exitCode: 1, providerFailure, engineError: true }; }
-      return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
-    },
-  });
-  expect(outcome).toMatchObject({ status: "failed", gate: "gate 0 — engine", cycles: 1 });
-  expect(reviews).toBe(1);
-});
-
-/*
- * §125: a correção do roteiro (ou a nova sessão do roteirista que caiu) é um
- * reparo local do G4 — não abre outro ciclo da fase. Antes ela consumia o
- * ciclo 2; agora tudo acontece no ciclo 1, com builder, G2 e G3 preservados.
- */
-it.each(["roteiro", "timeout"] as const)("G4 recupera %s sem abrir outro ciclo, preservando builder, G2 e G3 aprovados", async failure => {
-  const target = session();
-  const calls: EngineCall[] = [];
-  let authors = 0;
-  let suites = 0;
-  let browsers = 0;
-  const invalid = "```ts\n// rascunho sem passos\nconst faltou = 'roteiro';\n```";
-  const valid = "```ts\nimport { test, expect } from '@playwright/test';\ntest('workflow 4', async ({ page }) => { await test.step('passo 1: abre a aplicação', async () => { await page.goto('/'); await expect(page.getByRole('main')).toBeVisible(); }); });\n```";
-  const outcome = await runPhase({
-    projectRoot, runId: RUN, language: "pt-BR", engine: "opencode", session: target,
-    testCommand: { command: "npm test", source: "teste", containerized: false }, commitsEnabled: false, maxCycles: 3,
-    testRunner: async () => { suites += 1; return { exitCode: 0, output: "1 passed" }; },
-    flows: { workflows: [{ number: "4", name: "Navegação", steps: ["abre a aplicação"] }], resolveStart: async () => "npm start",
-      runner: async () => { browsers += 1; return { exitCode: 0, output: "1 passed" }; } },
-    call: async call => {
-      calls.push(call);
-      if (call.role === "builder") { await writeFile(join(projectRoot, "produto.ts"), "export const pronto = true;\n"); return ok("CAPIVARA_BUILDER_STATUS: COMPLETE"); }
-      if (call.purpose === "flow-author") {
-        authors += 1;
-        if (failure === "timeout" && authors === 1) return { exitCode: 124, stdout: "", stderr: "rede interrompida", timedOut: "wall" };
-        if (failure === "roteiro" && authors <= 2) return ok(invalid);
-        expect(call.attempt).toBe(1);
-        if (failure === "roteiro") {
-          expect(call.prompt).toContain("const faltou");
-          expect(call.prompt).toContain("conferência estrutural");
-        }
-        return ok(valid);
-      }
-      return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
-    },
-  });
-  expect(outcome).toMatchObject({ status: "complete", cycles: 1 });
-  expect(calls.filter(call => call.role === "builder")).toHaveLength(1);
-  expect(calls.filter(call => call.role === "verifier" && !call.purpose)).toHaveLength(1);
-  expect(suites).toBe(1);
-  expect(browsers).toBe(1);
-  const events = await readEvents(runPaths(projectRoot, RUN).events);
-  expect(events.some(event => event.status === "retry" && event.detail.includes("roteiro"))).toBe(true);
-});
-
-/*
- * §125: a sessão de revisão que cai ganha UMA sessão nova daquele gate; caindo
- * de novo, igual, a fase para (mesma falha, sem informação nova) — sem usar os
- * ciclos restantes para repetir a mesma queda, e sem reconstruir o produto.
- */
-it.each(["flow-author", "flow-triage"] as const)("timeout persistente de %s para sem reconstruir o produto nem repetir a mesma queda", async purpose => {
-  const target = session();
-  const calls: EngineCall[] = [];
-  let browsers = 0;
-  const notices: string[] = [];
-  const outcome = await runPhase({
-    projectRoot, runId: RUN, language: "pt-BR", engine: "opencode", session: target,
-    testCommand: null, commitsEnabled: false, maxCycles: 3, announce: line => notices.push(line),
-    flows: {
-      workflows: [{ number: "4", name: "Navegação", steps: ["abre a aplicação"] }],
-      resolveStart: async () => "npm start",
-      runner: async () => { browsers += 1; return { exitCode: 1, output: "  1) [workflow-4] › workflow-4.spec.ts:1:1 › workflow 4\nError: expect(locator).toBeVisible() failed\n1 failed" }; },
-    },
-    call: async call => {
-      calls.push(call);
-      if (call.role === "builder") {
-        await writeFile(join(projectRoot, "produto.ts"), "export const pronto = true;\n");
-        return ok("CAPIVARA_BUILDER_STATUS: COMPLETE");
-      }
-      const author = call.prompt.includes("CAPIVARA_FLOW");
-      const triage = call.prompt.includes("CAPIVARA_TRIAGE");
-      if (author || triage) {
-        const paths = runPaths(projectRoot, RUN);
-        const prompts = await readdir(paths.prompts).catch(() => []);
-        const header = author ? "CAPIVARA_FLOW" : "CAPIVARA_TRIAGE";
-        expect(await Promise.all(prompts.map(name => readFile(join(paths.prompts, name), "utf8")))).toEqual(expect.arrayContaining([expect.stringContaining(header)]));
-        if ((purpose === "flow-author" && author) || (purpose === "flow-triage" && triage)) {
-          return { exitCode: 124, stdout: "sessão interrompida", stderr: "", timedOut: "wall" };
-        }
-        return ok("```ts\nimport { test, expect } from '@playwright/test';\ntest('workflow 4', async ({ page }) => { await test.step('passo 1: abre a aplicação', async () => { await page.goto('/'); await expect(page.getByRole('main')).toBeVisible(); }); });\n```");
-      }
-      return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
-    },
-  });
-  expect(outcome).toMatchObject({ status: "failed", gate: "gate 0 — engine", cycles: 1 });
-  expect(calls.filter(call => call.role === "builder")).toHaveLength(1);
-  expect(calls.filter(call => call.purpose === purpose)).toHaveLength(2);
-  expect(browsers).toBe(purpose === "flow-author" ? 0 : 2);
-  expect(notices.join("\n")).toContain("G4");
-  const logs = await readdir(runPaths(projectRoot, RUN).logs);
-  const reviewLogs = logs.filter(name => name.includes(purpose === "flow-author" ? ".flow-4-" : ".triagem-"));
-  expect(reviewLogs).toHaveLength(2);
-  expect(await readFile(join(runPaths(projectRoot, RUN).logs, reviewLogs[0]!), "utf8")).toContain("sessão interrompida");
-  expect(await readFile(join(projectRoot, "produto.ts"), "utf8")).toContain("pronto = true");
-});
-
-/*
- * §125: a reescrita do roteiro que volta com o MESMO defeito estrutural não se
- * repete até esgotar os ciclos — duas passagens do roteirista (quatro rascunhos)
- * e a fase para por esgotamento técnico, com cada evidência no disco.
- */
-it("falha estrutural do roteirista não gasta outro ciclo do construtor e preserva cada evidência", async () => {
-  const target = session();
-  let builders = 0;
-  let authors = 0;
-  let browsers = 0;
-  const outcome = await runPhase({
-    projectRoot, runId: RUN, language: "pt-BR", engine: "opencode", session: target,
-    testCommand: null, commitsEnabled: false, maxCycles: 3,
-    flows: { workflows: [{ number: "4", name: "Navegação", steps: ["abre a aplicação"] }], resolveStart: async () => "npm start", runner: async () => { browsers += 1; return { exitCode: 0, output: "1 passed" }; } },
-    call: async call => {
-      if (call.role === "builder") {
-        builders += 1;
-        await writeFile(join(projectRoot, "produto.ts"), "export const pronto = true;\n");
-        return ok("CAPIVARA_BUILDER_STATUS: COMPLETE");
-      }
-      if (call.prompt.includes("CAPIVARA_FLOW")) {
-        authors += 1;
-        return ok(`\`\`\`ts\nconsole.log('rascunho ${authors}');\n\`\`\``);
-      }
-      return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
-    },
-  });
-  expect(outcome.status).toBe("failed");
-  if (outcome.status !== "failed") throw new Error("esperava falha do roteirista");
-  expect(outcome.cycles).toBe(1);
-  expect(builders).toBe(1);
-  expect(authors).toBe(4);
-  expect(browsers).toBe(0);
-  expect(await readFile(join(projectRoot, "produto.ts"), "utf8")).toContain("pronto = true");
-  const paths = runPaths(projectRoot, RUN);
-  const logs = await readdir(paths.logs);
-  expect(logs.some(name => name.includes("[object Object]"))).toBe(false);
-  const authorLogs = logs.filter(name => name.startsWith(`${target.id}.flow-4-`));
-  expect(authorLogs).toHaveLength(4);
-  for (const name of authorLogs) expect(await readFile(join(paths.prompts, name.replace(/\.log$/, ".txt")), "utf8")).toContain("CAPIVARA_FLOW");
-  expect(await readFile(join(paths.logs, `${target.id}.flow-run-1.log`), "utf8")).toContain("Isto é do harness");
-});
 
 interface Scenario {
   /** O executor só escreve na implementação: as correções não mudam nada. */
@@ -273,12 +117,12 @@ describe("ciclo de fase — caminho verde", () => {
     expect(events.some(event => event.status === "retry")).toBe(false);
   });
 
-  // §125: o verificador que cai ganha UMA sessão nova do mesmo gate; caindo de novo, a fase para — nunca outra construção.
-  it("timeout do verificador não vira nova sessão do construtor", async () => {
+  // Etapa 4 da redução: a revisão que cai não ganha segunda sessão nem nova construção — a fase sai com verificação inconclusiva.
+  it("timeout do verificador não vira nova sessão do construtor nem segunda revisão: a fase sai com verificação inconclusiva", async () => {
     const { outcome, calls } = await phase({ maxCycles: 3, verifier: async () => ({ exitCode: 124, stdout: "Investigando critérios", stderr: "", timedOut: "wall" }) });
-    expect(outcome).toMatchObject({ status: "failed", cycles: 1 });
+    expect(outcome).toMatchObject({ status: "complete", cycles: 1, estado: "verificação inconclusiva" });
     expect(calls.filter(call => call.role === "builder")).toHaveLength(1);
-    expect(calls.filter(call => call.role === "verifier")).toHaveLength(2);
+    expect(calls.filter(call => call.role === "verifier")).toHaveLength(1);
   });
 
   it("timeout confirmado não vira repetição por texto de rate limit na resposta parcial", async () => {
@@ -309,24 +153,28 @@ describe("ciclo de fase — caminho verde", () => {
 });
 
 describe("a palavra do agente nunca supera um gate", () => {
-  it("executor declara COMPLETE mas a suíte está vermelha: reprova mesmo assim", async () => {
+  it("executor declara COMPLETE mas a suíte está vermelha: a fase não é aceita, e a suíte é a pendência dita", async () => {
     const { outcome } = await phase({
       builder: async () => ok("pronto\nCAPIVARA_BUILDER_STATUS: COMPLETE"),
-      testExit: [1, 1, 1, 1, 1, 1],
+      testExit: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
     });
-    expect(outcome.status).toBe("failed");
-    if (outcome.status !== "failed") return;
-    expect(outcome.gate).toBe("gate 2 — suíte do projeto");
+    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
+    if (outcome.status !== "complete") return;
+    expect(outcome.pendencias?.join("\n")).toContain("(G2) a suíte falhou");
   });
 
-  it("executor declara COMPLETE mas o verificador vê task incompleta: reprova", async () => {
-    const { outcome } = await phase({
+  it("executor declara COMPLETE mas o verificador vê task incompleta: o reparo não ganha segunda revisão, e a task sai como pendência", async () => {
+    const { outcome, calls } = await phase({
       builder: async () => ok("CAPIVARA_BUILDER_STATUS: COMPLETE"),
       verifier: async () => ok("TASK 1: DONE\nTASK 2: INCOMPLETE — falta o seed"),
     });
-    expect(outcome.status).toBe("failed");
-    if (outcome.status !== "failed") return;
-    expect(outcome.cause).toContain("falta o seed");
+    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
+    if (outcome.status !== "complete") return;
+    expect(outcome.pendencias?.join("\n")).toContain("falta o seed");
+    expect(outcome.pendencias?.join("\n")).toContain("sem segunda revisão");
+    expect(calls.filter((call) => call.role === "verifier")).toHaveLength(1);
+    // O achado chegou ao executor: a correção dele leva o diagnóstico da revisão.
+    expect(calls.filter((call) => call.role === "builder").at(-1)?.prompt).toContain("falta o seed");
   });
 });
 
@@ -349,29 +197,28 @@ describe("ciclos de correção", () => {
   /*
    * §125 (spec §5.2 e §5.3): a correção que muda o código sem resolver não se
    * repete no MESMO ciclo; o ciclo seguinte recomeça a escada com a história
-   * no handoff — uma correção por ciclo novo — e a fase para quando os ciclos
-   * acabam. Antes, três ciclos davam três sessões; agora a correção local do
-   * ciclo 1 não gasta ciclo, e cada ciclo seguinte tem a sua.
+   * no handoff — uma correção por ciclo novo — e, quando os ciclos acabam, a
+   * fase é entregue com a pendência dita (etapa 4 da redução): o build segue,
+   * e nunca a chama de aceita.
    */
-  it("a mesma falha com o código mudando passa pelos ciclos e PARA quando eles acabam — não segue para a próxima fase", async () => {
+  it("a mesma falha com o código mudando passa pelos ciclos e, quando eles acabam, a fase sai entregue com pendências", async () => {
     const { outcome, calls } = await phase({ testExit: [1, 1, 1, 1, 1, 1], maxCycles: 3 });
-    expect(outcome).toMatchObject({ status: "failed", cycles: 3 });
-    if (outcome.status === "failed") expect(outcome.cause).toContain("esperava 409, recebeu 500");
+    expect(outcome).toMatchObject({ status: "complete", cycles: 3, estado: "entregue com pendências" });
     expect(calls.filter((call) => call.role === "builder")).toHaveLength(4);
     const events = await readEvents(runPaths(projectRoot, RUN).events);
-    expect(events.some((event) => event.detail.includes("ciclo(s) desta execução se esgotaram"))).toBe(true);
+    expect(events.some((event) => event.detail.includes("ciclo(s) de correção desta execução se esgotaram"))).toBe(true);
   });
 
-  // §125 (spec §5.3): a correção que não muda nada não é repetida — é a impossibilidade real, e a fase para antes dos ciclos.
-  it("a correção que não muda nada PARA por esgotamento técnico, sem gastar os ciclos restantes", async () => {
+  // §125 (spec §5.3): a correção que não muda nada não é repetida — é a impossibilidade real, e a fase é entregue antes dos ciclos.
+  it("a correção que não muda nada termina por esgotamento técnico, sem gastar os ciclos restantes, com a pendência dita", async () => {
     const { outcome, calls } = await phase({ testExit: [1, 1, 1, 1, 1, 1], maxCycles: 3, soNaImplementacao: true });
-    expect(outcome).toMatchObject({ status: "failed", cycles: 1 });
+    expect(outcome).toMatchObject({ status: "complete", cycles: 1, estado: "entregue com pendências" });
     expect(calls.filter((call) => call.role === "builder")).toHaveLength(2);
     const events = await readEvents(runPaths(projectRoot, RUN).events);
-    expect(events.some((event) => event.detail.includes("esgotamento técnico"))).toBe(true);
+    expect(events.some((event) => event.detail.includes("nenhuma estratégia restante tem informação nova"))).toBe(true);
   });
 
-  it("com progresso a cada correção, os ciclos se esgotam e a fase PARA — não segue para a próxima fase", async () => {
+  it("com progresso a cada correção, os ciclos se esgotam e a fase sai entregue com pendências", async () => {
     const target = session();
     const calls: EngineCall[] = [];
     let suites = 0;
@@ -391,11 +238,11 @@ describe("ciclos de correção", () => {
         return { exitCode: 1, output: `FAIL reserva.spec.ts > caso ${nome}\n  esperava o caso ${nome}` };
       },
     });
-    expect(outcome).toMatchObject({ status: "failed", gate: "gate 2 — suíte do projeto", cycles: 2 });
+    expect(outcome).toMatchObject({ status: "complete", cycles: 2, estado: "entregue com pendências" });
     // Implementação + duas correções por ciclo (o orçamento do defeito), em dois ciclos.
     expect(calls.filter((call) => call.role === "builder")).toHaveLength(5);
     const events = await readEvents(runPaths(projectRoot, RUN).events);
-    expect(events.some((event) => event.detail.includes("os 2 ciclo(s) desta execução se esgotaram"))).toBe(true);
+    expect(events.some((event) => event.detail.includes("os 2 ciclo(s) de correção desta execução se esgotaram"))).toBe(true);
     expect(events.some((event) => event.stage === "recover" && event.detail.startsWith("novo ciclo"))).toBe(true);
   });
 
@@ -516,10 +363,11 @@ describe("fase que para deixando trabalho na árvore", () => {
       maxCycles: 1,
       sleep: async () => undefined,
       announce: (mensagem) => avisos.push(mensagem),
+      // A fase para de verdade — o provider recusa a sessão depois de ela escrever —, e o parcial fica na árvore.
       call: async (call) => {
         if (call.role === "verifier") return ok("TASK 1: INCOMPLETE — falta tudo");
         await writeFile(join(projectRoot, "parcial.ts"), "export const x = 1;", "utf8");
-        return ok("escrevi algo mas não terminei");
+        return { ...ok("escrevi algo mas não terminei"), engineError: true, providerFailure: "quota" };
       },
     });
 
@@ -656,7 +504,7 @@ describe("o runner de fluxos é dito antes, não depois", () => {
       commitsEnabled: false,
       maxCycles: 1,
       sleep: async () => undefined,
-      flows: { workflows: [fluxo], resolveStart: async () => null, runner: async () => ({ exitCode: 0, output: "" }) },
+      flows: { workflows: [fluxo], resolveStart: async () => null },
       call: async (call) => {
         chamadas.push(call);
         return ok(call.role === "verifier" ? "CAPIVARA_VERIFY: 1.1 | DONE | pronto" : "feito");
@@ -688,7 +536,7 @@ describe("o runner de fluxos é dito antes, não depois", () => {
  * último ciclo, e P03, P04 e P05 bloquearam com a aplicação na 3001 da `PORTA`.
  */
 describe("o contrato de subida do gate 4 é dito desde o primeiro ciclo", () => {
-  async function primeiroPrompt(workflows: { number: string; name: string; steps: string[] }[], start: string | null = null) {
+  async function primeiroPrompt(workflows: { number: string; name: string; steps: string[] }[] | null, start: string | null = null) {
     const chamadas: EngineCall[] = [];
     await runPhase({
       projectRoot,
@@ -700,7 +548,7 @@ describe("o contrato de subida do gate 4 é dito desde o primeiro ciclo", () => 
       commitsEnabled: false,
       maxCycles: 1,
       sleep: async () => undefined,
-      flows: { workflows, resolveStart: async () => start, runner: async () => ({ exitCode: 0, output: "" }) },
+      ...(workflows !== null ? { flows: { workflows, resolveStart: async () => start } } : {}),
       call: async (call) => {
         chamadas.push(call);
         return ok(call.role === "verifier" ? "CAPIVARA_VERIFY: 1.1 | DONE | pronto" : "feito");
@@ -727,8 +575,8 @@ describe("o contrato de subida do gate 4 é dito desde o primeiro ciclo", () => 
     expect(await primeiroPrompt(fluxo, "npm start")).not.toContain("does NOT declare that entrypoint");
   });
 
-  it("a fase sem fluxo não recebe o contrato", async () => {
-    const prompt = await primeiroPrompt([]);
+  it("a fase sem fluxo, e sem fluxo antes dela, não recebe o contrato", async () => {
+    const prompt = await primeiroPrompt(null);
     expect(prompt).not.toBe("");
     expect(prompt).not.toContain("How the application is started for the flow gate");
   });
@@ -818,205 +666,6 @@ describe("comandos negados por permissão ao executor", () => {
   });
 });
 
-/*
- * A P04 do `assistencia2`: quem reprovava era o roteiro de REGRESSÃO da P02, o
- * executor contestou certo, e a reescrita foi para os roteiros da fase — que
- * nem tinham rodado, porque o de regressão falhou antes deles.
- */
-describe("a contestação reescreve o roteiro que falhou", () => {
-  const regressao = { number: "4", name: "Entrada e senha", steps: ["entra no painel"] };
-  const daFase = { number: "2", name: "Cadastro de tenant", steps: ["cadastra"] };
-  const roteiro = (fluxo: { number: string; steps: string[] }, texto: string): string =>
-    "import { expect, test } from '@playwright/test';\n" +
-    `test('workflow ${fluxo.number}', async ({ page }) => {\n` +
-    fluxo.steps
-      .map((passo, i) => `  await test.step('passo ${i + 1}: ${passo}', async () => { await page.goto('/'); expect('${texto}').toBeTruthy(); });`)
-      .join("\n") +
-    "\n});";
 
-  it("o roteiro de regressão reprovado é o que vai para o roteirista", async () => {
-    const pasta = join(projectRoot, ".capivara", "flows");
-    await mkdir(pasta, { recursive: true });
-    const { FLOW_MARK } = await import("../../src/loop/flows.js");
-    await writeFile(join(pasta, "workflow-4.spec.ts"), `${FLOW_MARK}\n${roteiro(regressao, "frase antiga")}\n`, "utf8");
-    await writeFile(join(pasta, "workflow-2.spec.ts"), `${FLOW_MARK}\n${roteiro(daFase, "ok")}\n`, "utf8");
 
-    const target = session();
-    const reescritos: string[] = [];
-    let passagem = 0;
-
-    await runPhase({
-      projectRoot,
-      runId: RUN,
-      language: "pt-BR",
-      engine: "codex",
-      session: target,
-      testCommand: null,
-      commitsEnabled: false,
-      maxCycles: 3,
-      sleep: async () => undefined,
-      flows: {
-        workflows: [daFase],
-        regressao: [regressao],
-        resolveStart: async () => "npm start",
-        runner: async () => {
-          passagem += 1;
-          return passagem === 1
-            ? {
-                exitCode: 1,
-                output:
-                  "  ✘  1 [workflow-4] › workflow-4.spec.ts:7:5 › workflow 4 — Entrada e senha (9.0s)\n" +
-                  "  1) [workflow-4] › workflow-4.spec.ts:7:5 › workflow 4 — Entrada e senha › passo 1\n" +
-                  "  1 failed\n  1 did not run",
-              }
-            : { exitCode: 0, output: "2 passed" };
-        },
-      },
-      call: async (call) => {
-        if (call.role === "verifier" && call.prompt.includes("CAPIVARA_FLOW")) {
-          const fluxo = call.prompt.includes("workflow 4:") ? regressao : daFase;
-          reescritos.push(fluxo.number);
-          return ok("```ts\n" + roteiro(fluxo, "novo") + "\n```");
-        }
-        if (call.role === "verifier") {
-          return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
-        }
-        await writeFile(join(projectRoot, `fase-${call.attempt}.ts`), `export const x = ${call.attempt};`, "utf8");
-        return ok(call.attempt === 1 ? "feito" : "CAPIVARA_ROTEIRO_ERRADO: a frase saiu do painel e nenhum critério a pede");
-      },
-      testRunner: async () => ({ exitCode: 0, output: "" }),
-    });
-
-    expect(reescritos).toEqual(["4"]);
-  });
-});
-
-/*
- * A P05 do `assistencia2`: a contestação do ciclo 2 reescreveu o roteiro, o
- * roteiro novo nasceu com OUTRO defeito, e o executor o diagnosticou certo nos
- * ciclos seguintes — ignorado, porque a contestação valia uma vez por fase.
- * Quatro ciclos rodaram o mesmo roteiro contra o mesmo produto.
- */
-describe("a contestação vale uma vez por VERSÃO do roteiro", () => {
-  const fluxo = { number: "6", name: "Catálogos", steps: ["exclui o registro"] };
-  const roteiro = (marca: string): string =>
-    "import { expect, test } from '@playwright/test';\n" +
-    `test('workflow 6', async ({ page }) => {\n` +
-    `  await test.step('passo 1: exclui o registro', async () => { await page.goto('/'); expect('${marca}').toBeTruthy(); });\n` +
-    "});";
-  const FALHOU = {
-    exitCode: 1,
-    output: "  ✘  1 [workflow-6] › workflow-6.spec.ts:8:5 › workflow 6 (1s)\n  1) [workflow-6] › workflow-6.spec.ts:8:5 › passo 1\n  1 failed",
-  };
-
-  async function fase(autor: (vez: number) => string, passagens: Array<{ exitCode: number; output: string }>) {
-    const pasta = join(projectRoot, ".capivara", "flows");
-    await mkdir(pasta, { recursive: true });
-    const { FLOW_MARK } = await import("../../src/loop/flows.js");
-    await writeFile(join(pasta, "workflow-6.spec.ts"), `${FLOW_MARK}\n${roteiro("v1")}\n`, "utf8");
-
-    const target = session();
-    let reescritas = 0;
-    let passagem = 0;
-    const outcome = await runPhase({
-      projectRoot,
-      runId: RUN,
-      language: "pt-BR",
-      engine: "codex",
-      session: target,
-      testCommand: null,
-      commitsEnabled: false,
-      maxCycles: 4,
-      sleep: async () => undefined,
-      flows: {
-        workflows: [fluxo],
-        resolveStart: async () => "npm start",
-        runner: async () => passagens[passagem++] ?? { exitCode: 0, output: "1 passed" },
-      },
-      call: async (call) => {
-        if (call.role === "verifier" && call.prompt.includes("CAPIVARA_FLOW")) {
-          reescritas += 1;
-          return ok("```ts\n" + autor(reescritas) + "\n```");
-        }
-        if (call.role === "verifier") {
-          return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
-        }
-        return ok(call.attempt === 1 ? "feito" : "CAPIVARA_ROTEIRO_ERRADO: o roteiro procura o que a tela não tem");
-      },
-      testRunner: async () => ({ exitCode: 0, output: "" }),
-    });
-    return { outcome, reescritas };
-  }
-
-  it("o roteiro reescrito que falha por outro motivo pode ser contestado de novo", async () => {
-    const { outcome, reescritas } = await fase((vez) => roteiro(`v${vez + 1}`), [FALHOU, FALHOU]);
-    expect(reescritas).toBe(2);
-    expect(outcome.status).toBe("complete");
-  });
-
-  it("a mesma versão não é contestada duas vezes", async () => {
-    // A reescrita volta com defeito estrutural: o roteiro gravado continua o mesmo.
-    // O fluxo continua falhando em toda passagem (a contestação de uma versão já contestada não se repete).
-    const { outcome, reescritas } = await fase(() => "não é um roteiro", Array.from({ length: 16 }, () => FALHOU));
-    expect(reescritas).toBe(1);
-    expect(outcome.status).not.toBe("complete");
-  });
-});
-
-/*
- * Decisão do desenvolvedor: quando a triagem diz que o critério não decide o
- * caso, o build segue com a leitura recomendada e deixa o caso escrito.
- */
-describe("o caso que o critério não decidia fica registrado", () => {
-  it("CRITERIO vira entrada em .capivara/decisoes-do-build.md", async () => {
-    const pasta = join(projectRoot, ".capivara", "flows");
-    await mkdir(pasta, { recursive: true });
-    const { FLOW_MARK } = await import("../../src/loop/flows.js");
-    const fluxo = { number: "5", name: "Permissões", steps: ["edita sem consultar"] };
-    await writeFile(
-      join(pasta, "workflow-5.spec.ts"),
-      `${FLOW_MARK}\nimport { expect, test } from '@playwright/test';\ntest('workflow 5', async ({ page }) => {\n` +
-        "  await test.step('passo 1: edita sem consultar', async () => { await page.goto('/'); expect(1).toBeTruthy(); });\n});\n",
-      "utf8",
-    );
-    const target = session();
-    await runPhase({
-      projectRoot,
-      runId: RUN,
-      language: "pt-BR",
-      engine: "codex",
-      session: target,
-      testCommand: null,
-      commitsEnabled: false,
-      maxCycles: 1,
-      sleep: async () => undefined,
-      flows: {
-        workflows: [fluxo],
-        resolveStart: async () => "npm start",
-        runner: async () => ({
-          exitCode: 1,
-          output: "  ✘  1 [workflow-5] › workflow-5.spec.ts:6:5 › workflow 5\n  1) [workflow-5] › workflow-5.spec.ts:6:5 › passo 1\n  1 failed",
-        }),
-      },
-      call: async (call) => {
-        if (call.role === "verifier" && call.prompt.includes("CAPIVARA_TRIAGE")) {
-          return ok(
-            "CAPIVARA_TRIAGEM: CRITERIO\nCAPIVARA_EVIDENCIA: editar sem consultar\nCAPIVARA_ONDE: -\n" +
-              "CAPIVARA_CRITERIO: conforme a permissão de cada operação\nCAPIVARA_CORRECAO: editar implica consultar",
-          );
-        }
-        if (call.role === "verifier") {
-          return ok(Array.from({ length: target.taskCount }, (_, index) => `TASK ${index + 1}: DONE`).join("\n"));
-        }
-        return ok("feito");
-      },
-      testRunner: async () => ({ exitCode: 0, output: "" }),
-    });
-
-    const registro = await readFile(join(projectRoot, ".capivara", "decisoes-do-build.md"), "utf8");
-    expect(registro).toContain("# Decisões tomadas pelo build");
-    expect(registro).toContain("- leitura seguida: editar implica consultar");
-    expect(registro).toContain("conforme a permissão de cada operação");
-  });
-});
 

@@ -59,12 +59,17 @@ interface Passo {
   escreve: Record<string, { path: string; content: string }[]>;
   /** Quanto o executor demora, por fase, para dar tempo de as outras correrem. */
   demora?: Record<string, number>;
-  /** Fases cujo verificador nunca aprova. */
+  /**
+   * Fases que param de verdade: o provider recusa a revisão. O achado que o
+   * orçamento não fecha não para mais o build (etapa 4 da redução).
+   */
   reprova?: string[];
   /** O que o verificador responde, por fase, quando não é o DONE de sempre. */
   veredito?: Record<string, string>;
   /** Fases cujo executor escreve e então lança — o provider que cai no meio. */
   lanca?: string[];
+  /** Fases em que o provider recusa a sessão de correção do executor: a fase para depois da revisão. */
+  paraNaCorrecao?: string[];
 }
 
 let projectRoot: string;
@@ -109,7 +114,11 @@ function motor(passo: Passo) {
     if (chamada.role === "verifier") {
       const reprova = passo.reprova?.includes(chamada.phase.id) === true;
       const proprio = passo.veredito?.[chamada.phase.id];
-      return { exitCode: 0, stdout: proprio ?? (reprova ? "TASK 1: INCOMPLETE — falta o arquivo" : "TASK 1: DONE"), stderr: "", timedOut: null };
+      if (reprova && proprio === undefined) return { exitCode: 1, stdout: "TASK 1: INCOMPLETE — falta o arquivo", stderr: "", timedOut: null, engineError: true, providerFailure: "quota" };
+      return { exitCode: 0, stdout: proprio ?? "TASK 1: DONE", stderr: "", timedOut: null };
+    }
+    if (passo.paraNaCorrecao?.includes(chamada.phase.id) === true && chamada.attempt > 1) {
+      return { exitCode: 1, stdout: "", stderr: "quota", timedOut: null, engineError: true, providerFailure: "quota" };
     }
     ativos += 1;
     pico = Math.max(pico, ativos);
@@ -208,8 +217,8 @@ describe("build paralelo", () => {
       },
     });
     expect(outcome.exitCode).toBe(2);
-    // §125 (spec §6): o executor tenta antes; sem progresso, o verificador repara — e o reparo que escreve na principal para.
-    expect(calls.map((c) => [c.role, c.repair === true])).toEqual([["builder", false], ["verifier", false], ["builder", false], ["verifier", false], ["verifier", true]]);
+    // O achado da revisão vai primeiro ao reparo do verificador, coautor (etapa 4 da redução) — e o reparo que escreve na principal para.
+    expect(calls.map((c) => [c.role, c.repair === true])).toEqual([["builder", false], ["verifier", false], ["verifier", true]]);
     expect(anuncios.join("\n")).toContain("PARADA DE ISOLAMENTO");
     expect(await readFile(join(projectRoot, "reparo-fora.txt"), "utf8")).toBe("preservar\n");
   });
@@ -674,7 +683,7 @@ describe("build paralelo — auditoria (§99)", () => {
     await git(["add", ".capivara/init/environment.json"]);
     await git(["commit", "-qm", "metadado do plano atual"]);
 
-    const primeiro = await construir({ escreve: ESCRITAS, veredito: { P02: "TASK 1: DONE\nTASK 2: INCOMPLETE — falta o resto" } });
+    const primeiro = await construir({ escreve: ESCRITAS, veredito: { P02: "TASK 1: DONE\nTASK 2: INCOMPLETE — falta o resto" }, paraNaCorrecao: ["P02"] });
     expect(primeiro.outcome.exitCode, primeiro.anuncios.join("\n")).toBe(2);
     // O código da task 1 foi para o branch da fase; a árvore principal não o tem.
     expect(await existe(join(projectRoot, "cadastro.txt"))).toBe(false);
@@ -1122,7 +1131,9 @@ describe("build paralelo — fundação do gate 4 e verde preservado (§110)", (
       call: engine.call,
       sleep: async () => undefined,
       environment: { XDG_CACHE_HOME: cache },
-      skipAcceptance: true,
+      // Os fluxos são percorridos na aceitação final (etapa 4 da redução): os passos do manifesto respondem pelo teste.
+      acceptanceRunner: async () => ({ exitCode: 0, output: "ok" }),
+      acceptanceService: async () => ({ exitCode: 0, output: "de pé" }),
       explicitTestCommand: "npm test",
       testRunner: async () => ({ exitCode: 0, output: "1 passed" }),
       skeleton: ESQUELETO,

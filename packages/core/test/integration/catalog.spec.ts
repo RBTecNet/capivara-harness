@@ -15,8 +15,8 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { InitBlockedError, runInit } from "../../src/init/index.js";
-import { detectPrerequisites, isRepository, registrarFaseFechada, runBuild, shaDaFase, splitPhases } from "../../src/loop/index.js";
-import type { FlowRunner } from "../../src/loop/index.js";
+import { detectPrerequisites, isRepository, runBuild, splitPhases } from "../../src/loop/index.js";
+import type { CommandRunner, FlowRunner } from "../../src/loop/index.js";
 import type { BuildProgress } from "../../src/loop/index.js";
 import { readEvents, runIdFor, runPaths } from "../../src/state/index.js";
 import { ID_DO_BANCO } from "../../src/interview/index.js";
@@ -161,6 +161,8 @@ async function build(
     skeleton?: Skeleton;
     flowRunner?: FlowRunner;
     skipAcceptance?: boolean;
+    acceptanceRunner?: CommandRunner;
+    acceptanceService?: CommandRunner;
     rebuildAll?: boolean;
     roles?: Record<string, { provider: string; model: string; effort: string }>;
     onProgress?: (evento: BuildProgress) => void;
@@ -182,6 +184,8 @@ async function build(
     ...(options.skeleton !== undefined ? { skeleton: options.skeleton } : {}),
     ...(options.flowRunner !== undefined ? { flowRunner: options.flowRunner } : {}),
     ...(options.skipAcceptance !== undefined ? { skipAcceptance: options.skipAcceptance } : {}),
+    ...(options.acceptanceRunner !== undefined ? { acceptanceRunner: options.acceptanceRunner } : {}),
+    ...(options.acceptanceService !== undefined ? { acceptanceService: options.acceptanceService } : {}),
     ...(options.rebuildAll !== undefined ? { rebuildAll: options.rebuildAll } : {}),
     ...(options.askGit !== undefined ? { askGit: options.askGit } : {}),
     ...(options.gitInit !== undefined ? { gitInit: options.gitInit } : {}),
@@ -273,28 +277,6 @@ describe("o build retomado mostra o que já fechou", () => {
     expect(verdes.map((evento) => (evento.kind === "gate" ? evento.gate : ""))).toEqual(["G0", "G1", "G2", "G3"]);
   }, 20_000);
 
-  /*
-   * Sem esqueleto não há gate 4 nem na primeira passagem. Pintá-lo verde diria
-   * que a aplicação foi aberta e percorrida — que é exatamente o que este gate
-   * existe para provar, e o que não aconteceu.
-   */
-  it("o gate 4 só volta verde quando este run tem fluxos", async () => {
-    await init(happyPath());
-    const { tasks } = await publishPlan();
-
-    const passos: EngineStep[] = [
-      { match: { role: "builder" }, writes: [{ path: "src/app.ts", content: "export const app = 1;" }], respond: { stdout: "feito" }, repeat: true },
-      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0]!) } },
-      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) } },
-    ];
-
-    await build(passos);
-
-    const eventos: BuildProgress[] = [];
-    await build(passos, { onProgress: (evento) => void eventos.push(evento) });
-
-    expect(eventos.some((evento) => evento.kind === "gate" && evento.gate === "G4")).toBe(false);
-  }, 20_000);
 });
 
 /**
@@ -710,7 +692,8 @@ describe("B-39 · a causa aparece uma vez só", () => {
     expect(anunciado).toHaveLength(1);
   });
 
-  it("a causa da fase que para sai inteira pelo anúncio", async () => {
+  // Etapa 4 da redução: a fase que não fecha não para o build; o que ela deve sai dito uma vez, como pendência.
+  it("a pendência da fase sai inteira pelo anúncio, uma vez", async () => {
     const { tasks } = await publishPlan();
     const avisos: string[] = [];
 
@@ -728,18 +711,16 @@ describe("B-39 · a causa aparece uma vez só", () => {
       ]).call,
     });
 
-    expect(outcome.exitCode).toBe(2);
-    const texto = avisos.join("\n");
-    expect(texto).toContain("PAROU");
-    expect(texto).toContain("falta a migration inteira");
+    expect(outcome.exitCode).toBe(3);
+    expect(outcome.pendencias?.join("\n")).toContain("falta a migration inteira");
     /*
-     * Uma vez só no bloco da parada; `errors` é dado para quem consome, não
-     * segunda via. O defeito aparece também nas transições da recuperação
+     * Uma vez só, na linha da pendência; `pendencias` é dado para quem consome,
+     * não segunda via. O defeito aparece também nas transições da recuperação
      * (§125, spec §9) — é a mesma linha do events.tsv, não uma reimpressão.
      */
-    const inicio = avisos.findIndex((aviso) => aviso.includes("PAROU"));
-    const bloco = avisos.slice(inicio).filter((aviso) => !/^\[P\d+\] (?:defeito|recuperação|validação|parada|revalidação|evidência preservada|novo ciclo) · /u.test(aviso)).join("\n");
-    expect(bloco.split("falta a migration inteira").length - 1).toBe(1);
+    const inicio = avisos.findIndex((aviso) => aviso.includes("pendência:"));
+    const bloco = avisos.slice(inicio).filter((aviso) => !/^\[P\d+\] (?:defeito|recuperação|validação|parada|revalidação|evidência preservada|novo ciclo|entrega) · /u.test(aviso)).join("\n");
+    expect(bloco.split("falta a migration inteira").length - 1, bloco).toBe(1);
   });
 });
 
@@ -773,7 +754,7 @@ describe("B-14 a B-18 · gates do loop", () => {
     expect(outcome.phases.every((phase) => phase.outcome.status === "already-implemented")).toBe(true);
   });
 
-  it("B-16 sessão que não escreve nada e a fase NÃO está pronta: reprova", async () => {
+  it("B-16 sessão que não escreve nada e a fase NÃO está pronta: não é aceita, e o que falta é dito", async () => {
     const { tasks } = await publishPlan();
     const { outcome } = await build(
       [
@@ -782,8 +763,9 @@ describe("B-14 a B-18 · gates do loop", () => {
       ],
       { maxCycles: 1 },
     );
-    expect(outcome.exitCode).toBe(2);
-    expect(outcome.errors[0]).toContain("a migration não existe");
+    expect(outcome.exitCode).toBe(3);
+    expect(outcome.estado).toBe("entregue com pendências");
+    expect(outcome.pendencias?.join("\n")).toContain("a migration não existe");
   });
 
   it("B-17 suíte vermelha reprova com a saída real", async () => {
@@ -796,8 +778,9 @@ describe("B-14 a B-18 · gates do loop", () => {
       { maxCycles: 1, testExit: [1] },
     );
     // Sem comando de teste resolvido o gate 2 é pulado; aqui não há manifesto,
-    // então a fase passa e o testExit não é consultado.
-    expect([0, 2]).toContain(outcome.exitCode);
+    // então o testExit não é consultado. A revisão da P02 recebe a contagem da P01
+    // e não se lê: verificação inconclusiva, nunca parada (etapa 4 da redução).
+    expect([0, 3]).toContain(outcome.exitCode);
   });
 
   it("B-18 projeto sem comando de teste: gate 2 pulado com aviso", async () => {
@@ -822,22 +805,25 @@ describe("B-19 a B-22 · verificador", () => {
       ],
       { maxCycles: 1 },
     );
-    expect(outcome.errors[0]).toContain(`cobriu 1 de ${tasks[0]}`);
+    expect(outcome.estado).toBe("verificação inconclusiva");
+    expect(outcome.pendencias?.join("\n")).toContain(`cobriu 1 de ${tasks[0]}`);
   });
 
-  it("B-20 INCOMPLETE e depois DONE: o ciclo converge", async () => {
+  // Etapa 4 da redução: a revisão é uma só; o reparo do que ela achou é provado pela suíte e dito como pendência.
+  it("B-20 INCOMPLETE na revisão: o reparo é feito, sem segunda revisão, e a fase sai entregue com a pendência", async () => {
     const { tasks } = await publishPlan();
-    const { outcome } = await build([
+    const { outcome, engine } = await build([
       { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
       { match: { role: "verifier", phase: "P01", attempt: 1 }, respond: { stdout: someIncomplete(tasks[0]!, 2, "falta o seed") } },
       { match: { role: "verifier", phase: "P01", attempt: 2 }, respond: { stdout: allDone(tasks[0]!) } },
       { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) }, repeat: true },
     ]);
-    expect(outcome.exitCode).toBe(0);
-    expect(outcome.phases[0]?.outcome.status).toBe("complete");
+    expect(outcome.exitCode).toBe(3);
+    expect(outcome.phases[0]?.outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
+    expect(engine.calls.filter((call) => call.role === "verifier" && call.phase.id === "P01" && !call.repair)).toHaveLength(1);
   });
 
-  it("B-21 verificador sem nenhuma linha TASK reprova", async () => {
+  it("B-21 verificador sem nenhuma linha TASK: verificação inconclusiva, sem segunda chamada", async () => {
     const { tasks } = await publishPlan();
     expect(tasks.length).toBeGreaterThan(0);
     const { outcome } = await build(
@@ -847,7 +833,8 @@ describe("B-19 a B-22 · verificador", () => {
       ],
       { maxCycles: 1 },
     );
-    expect(outcome.errors[0]).toContain("não emitiu nenhuma linha");
+    expect(outcome.estado).toBe("verificação inconclusiva");
+    expect(outcome.pendencias?.join("\n")).toContain("não emitiu nenhuma linha");
   });
 
   it("B-22 o prompt do verificador proíbe escrever", async () => {
@@ -876,7 +863,8 @@ describe("B-23 · plano de controle", () => {
 });
 
 describe("B-24 a B-26 · parada, limite e falso positivo", () => {
-  it("B-24 fase que esgota os ciclos para o run, retomável", async () => {
+  // Etapa 4 da redução: só `falhou` para o build; a fase que não fecha é entregue com a pendência, e o build segue.
+  it("B-24 a fase que não fecha é entregue com a pendência, e o build segue para a próxima", async () => {
     const { tasks } = await publishPlan();
     const { outcome, engine } = await build(
       [
@@ -885,10 +873,10 @@ describe("B-24 a B-26 · parada, limite e falso positivo", () => {
       ],
       { maxCycles: 3 },
     );
-    expect(outcome.exitCode).toBe(2);
-    // Parou na primeira fase: a segunda nunca foi tentada.
-    expect(engine.calls.every((call) => call.phase.id === "P01")).toBe(true);
-    expect(outcome.phases).toHaveLength(1);
+    expect(outcome.exitCode).toBe(3);
+    expect(outcome.phases.map((fase) => fase.id)).toEqual(["P01", "P02"]);
+    expect(engine.calls.some((call) => call.phase.id === "P02")).toBe(true);
+    expect(outcome.phases[0]?.outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
   });
 
   it("B-25 limite de uso espera e repete a mesma fase sem consumir ciclo", async () => {
@@ -1101,290 +1089,74 @@ const ROTEIRO = [
 
 const MANIFESTO = { path: "package.json", content: JSON.stringify({ name: "p", scripts: { start: "node server.js" } }) };
 
-describe("o build retomado, quando o run tem fluxos", () => {
-  it("o gate 4 da fase já fechada volta verde junto com os outros", async () => {
+/*
+ * B-41 · os fluxos do esqueleto não são percorridos por fase: a aceitação final
+ * os percorre uma vez, todos, na cópia limpa em que acabou de subir o produto
+ * (etapa 4 da redução). O que reprova é defeito do produto e volta ao executor;
+ * a saída do runner fica no log da entrega.
+ */
+describe("B-41 · os fluxos percorridos uma vez, na aceitação final", () => {
+  const passos = (tasks: number[]): EngineStep[] => [
+    { match: { role: "builder", phase: "P01" }, writes: [MANIFESTO, { path: "src/a.ts", content: "export const a = 1;" }], respond: { stdout: "fiz" }, repeat: true },
+    { match: { role: "builder" }, writes: [{ path: "src/b.ts", content: "export const b = 2;" }], respond: { stdout: "fiz" }, repeat: true },
+    { match: { role: "verifier", prompt: "CAPIVARA_FLOW" }, respond: { stdout: ROTEIRO }, repeat: true },
+    { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0] ?? 2) }, repeat: true },
+    { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1] ?? 2) }, repeat: true },
+  ];
+  const aceitacao = { acceptanceRunner: async () => ({ exitCode: 0, output: "ok" }), acceptanceService: async () => ({ exitCode: 0, output: "de pé" }) };
+
+  it("uma passagem só, na cópia limpa, com o roteiro de cada fluxo escrito uma vez, e a saída no log da entrega", async () => {
     const { tasks } = await publishPlan();
-    const passos: EngineStep[] = [
-      { match: { role: "builder" }, writes: [MANIFESTO, { path: "src/a.ts", content: "export const a = 1;" }], respond: { stdout: "fiz" }, repeat: true },
-      { match: { role: "verifier", prompt: "CAPIVARA_FLOW" }, respond: { stdout: ROTEIRO }, repeat: true },
-      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0] ?? 2) }, repeat: true },
-      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1] ?? 2) }, repeat: true },
-    ];
-    const comFluxos = { skeleton: ESQUELETO, skipAcceptance: true, flowRunner: async () => ({ exitCode: 0, output: "3 passed" }) };
+    const corridas: { raiz: string; scripts: string[] }[] = [];
+    const { outcome, engine } = await build(passos(tasks), {
+      skeleton: ESQUELETO,
+      ...aceitacao,
+      flowRunner: async (raiz, scripts) => {
+        corridas.push({ raiz, scripts });
+        return { exitCode: 0, output: "Running 1 test using 1 worker\n  1 passed (2s)" };
+      },
+    });
+    expect(outcome.exitCode, outcome.errors.join("\n")).toBe(0);
+    expect(outcome.estado).toBe("aceito");
+    expect(corridas.map((corrida) => corrida.scripts)).toEqual([["workflow-1.spec.ts"]]);
+    expect(corridas[0]!.raiz).not.toBe(projectRoot);
+    expect(engine.calls.filter((call) => call.purpose === "flow-author")).toHaveLength(1);
+    expect(await readFile(join(runPaths(projectRoot, outcome.runId).logs, "entrega.flow-run-1.log"), "utf8")).toContain("1 passed");
+    // O roteiro volta ao projeto: a aceitação seguinte o percorre sem escrever outro.
+    expect(await readFile(join(projectRoot, ".capivara/flows/workflow-1.spec.ts"), "utf8")).toContain("passo 3");
+  }, 30_000);
 
-    expect((await build(passos, comFluxos)).outcome.exitCode).toBe(0);
-
-    const eventos: BuildProgress[] = [];
-    const segundo = await build(passos, { ...comFluxos, onProgress: (evento) => void eventos.push(evento) });
-    expect(segundo.engine.calls).toHaveLength(0);
-
-    const verdes = eventos
-      .filter((evento) => evento.kind === "gate" && evento.id === "P01" && evento.state === "verde")
-      .map((evento) => (evento.kind === "gate" ? evento.gate : ""));
-    expect(verdes).toEqual(["G0", "G1", "G2", "G3", "G4"]);
-  }, 20_000);
-});
-
-describe("a prova do gate 4 fica no disco", () => {
-  /*
-   * A fase 3 do MCP_teste reprovou três vezes no gate 4 e não havia no disco uma
-   * linha do que o Playwright tinha dito: o evento do run guarda só a primeira
-   * linha da causa e o painel some com o resto. Diagnosticar virou adivinhação.
-   */
-  it("a saída do runner vira log da fase, verde ou vermelho", async () => {
-    const { tasks } = await publishPlan();
-    const SAIDA = "Running 1 test using 1 worker\n  ✓ workflow 1 (1.2s)\n\n  1 passed (2s)";
-
-    const { outcome } = await build(
-      [
-        { match: { role: "builder" }, writes: [MANIFESTO, { path: "src/a.ts", content: "export const a = 1;" }], respond: { stdout: "fiz" }, repeat: true },
-        { match: { role: "verifier", prompt: "CAPIVARA_FLOW" }, respond: { stdout: ROTEIRO }, repeat: true },
-        { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0] ?? 2) }, repeat: true },
-        { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1] ?? 2) }, repeat: true },
-      ],
-      { skeleton: ESQUELETO, skipAcceptance: true, flowRunner: async () => ({ exitCode: 0, output: SAIDA }) },
-    );
-
-    const log = join(runPaths(projectRoot, outcome.runId).logs, "P01.flow-run-1.log");
-    expect(await readFile(log, "utf8")).toContain("1 passed");
-  });
-});
-
-describe("B-41 · o gate que abre a aplicação", () => {
-  it("fluxo reprovado devolve a fase ao ciclo de correção, e a causa fala de fluxo", async () => {
+  it("o fluxo que reprova volta ao executor como defeito do produto, e a aceitação percorre de novo sem outro roteiro", async () => {
     const { tasks } = await publishPlan();
     let passagem = 0;
-    const { outcome } = await build(
-      [
-        { match: { role: "builder", phase: "P01" }, writes: [MANIFESTO, { path: "src/a.ts", content: "export const a = 1;" }], respond: { stdout: "fiz" }, repeat: true },
-        { match: { role: "builder", phase: "P02" }, writes: [{ path: "src/b.ts", content: "export const b = 2;" }], respond: { stdout: "fiz" }, repeat: true },
-        { match: { role: "verifier", prompt: "CAPIVARA_FLOW" }, respond: { stdout: ROTEIRO }, repeat: true },
-        { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0] ?? 2) }, repeat: true },
-        { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1] ?? 2) }, repeat: true },
-      ],
-      {
-        skeleton: ESQUELETO,
-        skipAcceptance: true,
-        flowRunner: async () => {
-          passagem += 1;
-          // A primeira passagem encontra o produto sem o passo 2; a segunda, com.
-          return passagem === 1
-            ? { exitCode: 1, output: "1) passo 2: confirma a reserva\n   locator('#ok') não encontrado" }
-            : { exitCode: 0, output: "3 passed" };
-        },
-      },
-    );
-
-    expect(outcome.exitCode).toBe(0);
-    const eventos = await readEvents(runPaths(projectRoot, outcome.runId).events);
-    const devolucao = eventos.find((evento) => evento.status === "retry");
-    expect(devolucao?.detail).toContain("gate 4");
-    expect(devolucao?.detail).toContain("fluxo");
-    // O roteiro ficou no projeto: a fase 2 vai percorrê-lo de novo, de graça.
-    expect(await readFile(join(projectRoot, ".capivara/flows/workflow-1.spec.ts"), "utf8")).toContain("passo 3");
-  });
-
-  it("o fluxo da fase 1 continua sendo percorrido na fase 2", async () => {
-    const { tasks } = await publishPlan();
-    const percorridos: string[][] = [];
-    const { outcome } = await build(
-      [
-        { match: { role: "builder", phase: "P01" }, writes: [MANIFESTO, { path: "src/a.ts", content: "export const a = 1;" }], respond: { stdout: "fiz" }, repeat: true },
-        { match: { role: "builder", phase: "P02" }, writes: [{ path: "src/b.ts", content: "export const b = 2;" }], respond: { stdout: "fiz" }, repeat: true },
-        { match: { role: "verifier", prompt: "CAPIVARA_FLOW" }, respond: { stdout: ROTEIRO }, repeat: true },
-        { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0] ?? 2) }, repeat: true },
-        { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1] ?? 2) }, repeat: true },
-      ],
-      {
-        skeleton: ESQUELETO,
-        skipAcceptance: true,
-        flowRunner: async (_root, scripts) => {
-          percorridos.push(scripts);
-          return { exitCode: 0, output: "3 passed" };
-        },
-      },
-    );
-
-    expect(outcome.exitCode).toBe(0);
-    expect(percorridos).toEqual([["workflow-1.spec.ts"], ["workflow-1.spec.ts"]]);
-  });
-
-  /*
-   * §103 — a P06 do piloto paralelo cobria os cinco fluxos já cumpridos, e a
-   * regressão, que excluía os fluxos da fase, ficou vazia: a passagem caiu na
-   * ordem do plano, e os roteiros escritos para outra ordem reprovaram.
-   */
-  it("a fase que cobre de novo fluxos já cumpridos os percorre na ordem em que foram cumpridos", async () => {
-    const { tasks } = await publishPlan({ extra: PHASE_3 });
-    const passos = ["escolhe a data", "confirma a reserva", "vê a reserva na lista"];
-    const esqueleto: Skeleton = {
-      ...ESQUELETO,
-      workflows: [
-        { number: "1", name: "Reservar uma diária", steps: passos },
-        { number: "2", name: "Rever a reserva", steps: passos },
-      ],
-      phases: [
-        { number: 1, title: "Fundação de dados", goal: "migrations", dependsOn: "none", covers: ["workflow 2"], areas: ["dados"], taskCount: 2 },
-        { number: 2, title: "API", goal: "rotas", dependsOn: "Phase 1", covers: ["workflow 1"], areas: ["backend"], taskCount: 2 },
-        { number: 3, title: "Editar a reserva", goal: "edição", dependsOn: "Phase 2", covers: ["workflow 1", "workflow 2"], areas: ["backend"], taskCount: 1 },
-      ],
-      mvpCutPhase: 3,
-    };
-    const percorridos: string[][] = [];
-    const { outcome } = await build(
-      [
-        { match: { role: "builder", phase: "P01" }, writes: [MANIFESTO, { path: "src/a.ts", content: "export const a = 1;" }], respond: { stdout: "fiz" }, repeat: true },
-        { match: { role: "builder", phase: "P02" }, writes: [{ path: "src/b.ts", content: "export const b = 2;" }], respond: { stdout: "fiz" }, repeat: true },
-        { match: { role: "builder", phase: "P03" }, writes: [{ path: "src/c.ts", content: "export const c = 3;" }], respond: { stdout: "fiz" }, repeat: true },
-        { match: { role: "verifier", prompt: "CAPIVARA_FLOW" }, respond: { stdout: ROTEIRO }, repeat: true },
-        { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0] ?? 2) }, repeat: true },
-        { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1] ?? 2) }, repeat: true },
-        { match: { role: "verifier", phase: "P03" }, respond: { stdout: allDone(tasks[2] ?? 1) }, repeat: true },
-      ],
-      {
-        skeleton: esqueleto,
-        skipAcceptance: true,
-        flowRunner: async (_root, scripts) => {
-          percorridos.push(scripts);
-          return { exitCode: 0, output: "3 passed" };
-        },
-      },
-    );
-
-    expect(outcome.errors).toEqual([]);
-    expect(percorridos).toEqual([
-      ["workflow-2.spec.ts"],
-      ["workflow-2.spec.ts", "workflow-1.spec.ts"],
-      // Não a ordem do plano (1, 2): a ordem em que os roteiros já passaram juntos.
-      ["workflow-2.spec.ts", "workflow-1.spec.ts"],
-    ]);
-  }, 20_000);
-
-  /*
-   * §104 — no paralelo, as fases fecham fora da ordem do plano (no piloto,
-   * P01, P02, P05, P03, P04), e a retomada reconstruía os cumpridos na ordem do
-   * plano. A passagem precisa da ordem em que fecharam, que é a do ledger.
-   */
-  it("retomado, os fluxos cumpridos voltam na ordem em que as fases fecharam, não na do plano", async () => {
-    const { tasks } = await publishPlan({ extra: PHASE_3 });
-    const plano = await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8");
-    const split = splitPhases(plano, projectRoot, runIdFor("build", sha12(plano)));
-    if (!split.ok) throw new Error("plano de teste inválido");
-    // A P02 fechou antes da P01 — o que o paralelo produz.
-    for (const [indice, quando] of [[1, "2026-01-01T10:00:00.000Z"], [0, "2026-01-01T11:00:00.000Z"]] as const) {
-      const fase = split.sessions[indice]!;
-      await registrarFaseFechada(projectRoot, { id: fase.id, title: fase.title, sha: shaDaFase(fase.markdown), runId: "build-anterior", closedAt: quando });
-    }
-    await writeFile(join(projectRoot, "package.json"), MANIFESTO.content, "utf8");
-    await gitRepo();
-    const passos = ["escolhe a data", "confirma a reserva", "vê a reserva na lista"];
-    const esqueleto: Skeleton = {
-      ...ESQUELETO,
-      workflows: [
-        { number: "1", name: "Reservar uma diária", steps: passos },
-        { number: "2", name: "Rever a reserva", steps: passos },
-      ],
-      phases: [
-        { number: 1, title: "Fundação de dados", goal: "migrations", dependsOn: "none", covers: ["workflow 1"], areas: ["dados"], taskCount: 2 },
-        { number: 2, title: "API", goal: "rotas", dependsOn: "none", covers: ["workflow 2"], areas: ["backend"], taskCount: 2 },
-        { number: 3, title: "Editar a reserva", goal: "edição", dependsOn: "Phase 2", covers: ["workflow 1", "workflow 2"], areas: ["backend"], taskCount: 1 },
-      ],
-      mvpCutPhase: 3,
-    };
-    const percorridos: string[][] = [];
-    const { outcome } = await build(
-      [
-        { match: { role: "builder", phase: "P03" }, writes: [{ path: "src/c.ts", content: "export const c = 3;" }], respond: { stdout: "fiz" }, repeat: true },
-        { match: { role: "verifier", prompt: "CAPIVARA_FLOW" }, respond: { stdout: ROTEIRO }, repeat: true },
-        { match: { role: "verifier", phase: "P03" }, respond: { stdout: allDone(tasks[2] ?? 1) }, repeat: true },
-      ],
-      {
-        skeleton: esqueleto,
-        skipAcceptance: true,
-        flowRunner: async (_root, scripts) => {
-          percorridos.push(scripts);
-          return { exitCode: 0, output: "3 passed" };
-        },
-      },
-    );
-
-    expect(outcome.errors).toEqual([]);
-    expect(percorridos).toEqual([["workflow-2.spec.ts", "workflow-1.spec.ts"]]);
-  }, 20_000);
-
-  /*
-   * A P04 do `assistencia2`, retomada: P01 a P03 tinham fechado NESTE run, e o
-   * ramo que as pula não as punha na regressão — o ramo irmão, o das fases
-   * fechadas em runs anteriores, punha. A passagem perdeu os fluxos 1 e 4, e o
-   * fluxo 2, escrito para rodar depois do 1, rodou primeiro num banco sem tabela.
-   */
-  it("retomado, o fluxo da fase que fechou neste run continua sendo regressão", async () => {
-    const { tasks } = await publishPlan();
-    const passosDaPrimeira: EngineStep[] = [
-      { match: { role: "builder", phase: "P01" }, writes: [MANIFESTO, { path: "src/a.ts", content: "export const a = 1;" }], respond: { stdout: "fiz" }, repeat: true },
-      { match: { role: "builder", phase: "P02" }, writes: [{ path: "src/b.ts", content: "export const b = 2;" }], respond: { stdout: "fiz" }, repeat: true },
-      { match: { role: "verifier", prompt: "CAPIVARA_FLOW" }, respond: { stdout: ROTEIRO }, repeat: true },
-      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0] ?? 2) }, repeat: true },
-      { match: { role: "verifier", phase: "P02" }, respond: { stdout: someIncomplete(tasks[1] ?? 2, 1, "falta a rota") }, repeat: true },
-    ];
-    const primeira = await build(passosDaPrimeira, {
+    const { outcome, engine } = await build(passos(tasks), {
       skeleton: ESQUELETO,
-      skipAcceptance: true,
-      maxCycles: 1,
-      flowRunner: async () => ({ exitCode: 0, output: "3 passed" }),
-    });
-    expect(primeira.outcome.exitCode).not.toBe(0);
-    // O que o desenvolvedor faz com o trabalho parcial antes de retomar.
-    await run("git", ["add", "-A"], { cwd: projectRoot });
-    await run("git", ["commit", "-q", "-m", "wip: P02 parcial"], { cwd: projectRoot });
-
-    const percorridos: string[][] = [];
-    const segunda = await build(
-      [
-        { match: { role: "builder", phase: "P02" }, writes: [{ path: "src/b.ts", content: "export const b = 3;" }], respond: { stdout: "fiz" }, repeat: true },
-        { match: { role: "verifier", prompt: "CAPIVARA_FLOW" }, respond: { stdout: ROTEIRO }, repeat: true },
-        { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1] ?? 2) }, repeat: true },
-      ],
-      {
-        skeleton: ESQUELETO,
-        skipAcceptance: true,
-        flowRunner: async (_root, scripts) => {
-          percorridos.push(scripts);
-          return { exitCode: 0, output: "3 passed" };
-        },
-      },
-    );
-
-    expect(segunda.outcome.errors).toEqual([]);
-    expect(percorridos).toEqual([["workflow-1.spec.ts"]]);
-  }, 20_000);
-
-  it("sem esqueleto, o build avisa e roda como antes — nunca para por causa do gate novo", async () => {
-    const { tasks } = await publishPlan();
-    const avisos: string[] = [];
-    const engine = fakeEngine(projectRoot, [
-      { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "export const a = 1;" }], respond: { stdout: "fiz" }, repeat: true },
-      { match: { role: "verifier", phase: "P01" }, respond: { stdout: allDone(tasks[0] ?? 2) }, repeat: true },
-      { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1] ?? 2) }, repeat: true },
-    ]);
-    const outcome = await runBuild({
-      projectRoot,
-      language: "português do Brasil",
-      engine: "codex",
-      call: engine.call,
-      sleep: async () => undefined,
-      environment: {},
-      announce: (message) => avisos.push(message),
-      testRunner: async () => ({ exitCode: 0, output: "ok" }),
+      ...aceitacao,
       flowRunner: async () => {
-        throw new Error("o gate 4 não deveria rodar sem esqueleto");
+        passagem += 1;
+        return passagem === 1
+          ? { exitCode: 1, output: "  1) workflow-1.spec.ts:3:1 › workflow 1 › passo 2: confirma a reserva\n   locator('#ok') não encontrado\n  1 failed" }
+          : { exitCode: 0, output: "1 passed" };
       },
     });
+    expect(outcome.exitCode, outcome.errors.join("\n")).toBe(0);
+    expect(passagem).toBe(2);
+    const correcao = engine.calls.find((call) => call.role === "builder" && call.prompt.includes("locator('#ok') não encontrado"));
+    expect(correcao, "a falha do fluxo não chegou ao executor").toBeDefined();
+    expect(engine.calls.filter((call) => call.purpose === "flow-author")).toHaveLength(1);
+  }, 30_000);
 
-    expect(outcome.exitCode).toBe(0);
-    expect(avisos.join("\n")).toContain("sem esqueleto legível");
-  });
+  it("sem a aceitação, os fluxos declarados não foram percorridos: verificação inconclusiva, nunca aceito", async () => {
+    const { tasks } = await publishPlan();
+    const { outcome, engine } = await build(passos(tasks), { skeleton: ESQUELETO, skipAcceptance: true, flowRunner: async () => ({ exitCode: 0, output: "1 passed" }) });
+    expect(outcome.exitCode).toBe(3);
+    expect(outcome.estado).toBe("verificação inconclusiva");
+    expect(outcome.pendencias?.join("\n")).toContain("`--no-acceptance`");
+    expect(engine.calls.filter((call) => call.purpose === "flow-author")).toHaveLength(0);
+  }, 30_000);
 });
+
+
 
 /**
  * O plano que cresceu.
@@ -1531,9 +1303,11 @@ describe("M-01 a M-03 · os cenários medidos", () => {
     expect(reparou, "a P03 passou sem nenhum reparo: o defeito do cenário não foi visto").toBe(true);
   });
 
-  it("M-03 orçamento esgotado: a fase com o defeito não é aceita", async () => {
+  it("M-03 orçamento esgotado: a fase com o defeito não é aceita, e o build não termina aceito", async () => {
     const { build } = await rodar(cenarioOrcamentoEsgotado);
     expect(build?.exitCode).not.toBe(0);
-    expect(build?.phases.find((fase) => fase.id === "P03")?.outcome.status).not.toBe("complete");
+    expect(build?.estado).not.toBe("aceito");
+    const p03 = build?.phases.find((fase) => fase.id === "P03")?.outcome;
+    expect(p03 && (p03.status === "complete" || p03.status === "already-implemented") ? p03.estado : "falhou").not.toBe("aceito");
   });
 });

@@ -173,6 +173,28 @@ export type RelatorioDoBuild = { tipo: "conclusao"; conclusao: Conclusao } | { t
 export function relatorioDoBuild(outcome: BuildOutcome, contexto: ContextoDaParada = {}): RelatorioDoBuild {
   const fechadasAgora = fechadas(outcome.phases).length + (contexto.fechadasAntes ?? 0);
 
+  /*
+   * Entregue sem ser aceito (etapa 4 da redução): o build terminou, e o que não
+   * se provou é dito aqui, uma linha cada — nunca "CONCLUÍDO" com pendência.
+   */
+  if (outcome.exitCode === 3) {
+    const pendencias = outcome.pendencias ?? [];
+    return {
+      tipo: "conclusao",
+      conclusao: {
+        estado: outcome.estado ?? "entregue com pendências",
+        oQue: `as ${fechadasAgora} fase(s) foram entregues; ${pendencias.length} pendência(s) sem prova`,
+        custou: `${fechadasAgora} fase(s) implementadas; o que não se provou está abaixo e na entrega`,
+        evidencia: [join(".capivara", "runs", outcome.runId, "entrega.md")],
+        ...(pendencias.length > 0 ? { pendencias } : {}),
+        paraSeguir: [
+          "leia cada pendência: é o que o build entregou sem conseguir provar",
+          "para tentar de novo uma fase entregue com pendência, rode `capivara build --rebuild-all` ou corrija o plano com `capivara change`",
+        ],
+      },
+    };
+  }
+
   if (outcome.exitCode === 0) {
     return {
       tipo: "conclusao",

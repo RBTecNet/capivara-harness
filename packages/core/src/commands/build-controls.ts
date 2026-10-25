@@ -73,7 +73,6 @@ const NOME_DO_GATE: Record<(typeof GATES)[number], string> = {
   G1: "escrita",
   G2: "suíte",
   G3: "verificação",
-  G4: "fluxos",
 };
 
 const COR_DO_GATE = { verde: "green", vermelho: "red", corrente: "yellow", neutro: "gray", aguardando: "gray" } as const;

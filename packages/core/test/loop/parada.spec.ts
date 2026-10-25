@@ -175,7 +175,7 @@ describe("relatório do build", () => {
       build({
         phases: [fechada("P01")],
         errors: ["`npm start` não subiu"],
-        acceptance: { accepted: false, steps: [], failure: { id: "start", cause: "`npm start` não subiu" } },
+        acceptance: { accepted: false, steps: [], failure: { id: "start", cause: "`npm start` não subiu", natureza: "produto" } },
       }),
     );
 

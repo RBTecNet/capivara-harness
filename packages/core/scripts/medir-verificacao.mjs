@@ -141,6 +141,8 @@ const PASSAGEM = String.raw`[\w-]+`;
 const UNICO = String.raw`(?:\.\d+)?`;
 const UUID = String.raw`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`;
 const NOMES_DO_BUILD = [
+  // O roteirista da aceitação final (etapa 4): os fluxos percorridos uma vez, na cópia limpa.
+  [new RegExp(String.raw`^entrega\.flow-.+-${UUID}\.txt$`), "aceitação", "verifier"],
   [new RegExp(String.raw`\.cycle-1${UNICO}\.txt$`), "escrita", "builder"],
   [new RegExp(String.raw`\.part-\d+-of-\d+${UNICO}\.txt$`), "escrita", "builder"],
   [new RegExp(String.raw`\.cycle-\d+${UNICO}\.txt$`), "reparo", "builder"],
@@ -152,9 +154,11 @@ const NOMES_DO_BUILD = [
   [new RegExp(String.raw`\.guidance${UNICO}\.txt$`), "reparo", "verifier"],
 ];
 const LOG_DA_SUITE = new RegExp(String.raw`\.g2-${PASSAGEM}${UNICO}\.log$|^entrega\.suite-.+\.log$`);
-const LOG_DO_FLUXO = new RegExp(String.raw`\.flow-run-${PASSAGEM}${UNICO}\.log$`);
+const LOG_DO_FLUXO = new RegExp(String.raw`^(?!entrega\.).+\.flow-run-${PASSAGEM}${UNICO}\.log$`);
+const LOG_DA_FUMACA = /^entrega\.flow-run-\d+\.log$/;
 
-const CATEGORIAS = ["escrita", "auditoria", "verificação", "reparo", "roteirista", "triagem", "formato", "repetição", "outra"];
+/** `roteirista` e `triagem` são do G4 por fase; `aceitação` é o roteirista da aceitação final. */
+const CATEGORIAS = ["escrita", "auditoria", "verificação", "reparo", "roteirista", "triagem", "formato", "repetição", "aceitação", "outra"];
 
 function zerado() {
   return Object.fromEntries(CATEGORIAS.map((categoria) => [categoria, 0]));
@@ -201,7 +205,7 @@ async function medirCenario(resultado) {
     }
   }
 
-  const execucoes = { suite: 0, g3: 0, g4: 0, aceitacao: 0, reparosDaAceitacao: 0 };
+  const execucoes = { suite: 0, g3: 0, g4: 0, fumaca: 0, aceitacao: 0, reparosDaAceitacao: 0 };
   let relatorio = null;
   if (runBuild) {
     const pasta = join(RUNS(raiz), runBuild);
@@ -218,6 +222,7 @@ async function medirCenario(resultado) {
     for (const nome of await listar(join(pasta, "logs"))) {
       if (LOG_DA_SUITE.test(nome)) execucoes.suite += 1;
       if (LOG_DO_FLUXO.test(nome)) execucoes.g4 += 1;
+      if (LOG_DA_FUMACA.test(nome)) execucoes.fumaca += 1;
     }
     relatorio = JSON.parse(await readFile(join(pasta, "relatorio.json"), "utf8").catch(() => "null"));
   }
@@ -244,7 +249,14 @@ async function medirCenario(resultado) {
     plano: { fases: contarFases(plano), tasks: contarTasks(plano), criterios: contarCriterios(plano), devolucoes, reescritas },
     duracoes: resultado.observado.duracoes,
     relatorio,
-    build: resultado.build ? { exitCode: resultado.build.exitCode, fases: resultado.build.phases.map((fase) => [fase.id, fase.outcome.status, fase.outcome.gate ?? ""]) } : null,
+    build: resultado.build
+      ? {
+          exitCode: resultado.build.exitCode,
+          // O estado final (etapa 4); o build anterior a ele só tinha o código de saída.
+          estado: resultado.build.estado ?? (resultado.build.exitCode === 0 ? "aceito" : "falhou"),
+          fases: resultado.build.phases.map((fase) => [fase.id, fase.outcome.status, fase.outcome.gate ?? fase.outcome.estado ?? ""]),
+        }
+      : null,
     planoPronto: resultado.plan?.readiness.ready === true,
   };
 }
@@ -406,7 +418,9 @@ function imprimirCenario(medida) {
       [
         ["suíte (G2 e entrega)", medida.execucoes.suite, c.suitesDisparadas],
         ["G3 (sessões do verificador)", medida.execucoes.g3, "-"],
-        ["G4 (passagens de fluxo)", medida.execucoes.g4, c.fluxosDisparados],
+        ["G4 por fase (passagens de fluxo)", medida.execucoes.g4, "-"],
+        ["fluxos na aceitação final (passagens)", medida.execucoes.fumaca ?? 0, "-"],
+        ["passagens de fluxo, todas", medida.execucoes.g4 + (medida.execucoes.fumaca ?? 0), c.fluxosDisparados],
         ["aceitação operacional", "-", medida.execucoes.aceitacao],
         ["reparos da aceitação", medida.execucoes.reparosDaAceitacao, "-"],
       ],
@@ -415,7 +429,7 @@ function imprimirCenario(medida) {
     `plano: ${medida.plano.fases} fase(s), ${medida.plano.tasks} task(s), ${medida.plano.criterios} critério(s); ${medida.plano.devolucoes} devolução(ões) da auditoria; ${medida.plano.reescritas} reescrita(s) do escritor${medida.planoPronto ? "" : " — o plano NÃO ficou pronto"}`,
     `tempo (ms): ${ESTAGIOS.map((estagio) => `${estagio} ${medida.duracoes[estagio] ?? "-"}`).join(" · ")}`,
     medida.build
-      ? `build: código ${medida.build.exitCode}; ${medida.build.fases.map(([id, status, gate]) => `${id} ${status}${gate ? ` (${gate})` : ""}`).join(", ")}; relatório: ${medida.relatorio?.status ?? "-"}`
+      ? `build: código ${medida.build.exitCode} (${medida.build.estado}); ${medida.build.fases.map(([id, status, gate]) => `${id} ${status}${gate ? ` (${gate})` : ""}`).join(", ")}; relatório: ${medida.relatorio?.status ?? "-"}`
       : "build: não rodou",
     "",
   ].join("\n");
@@ -425,6 +439,7 @@ function imprimirCenario(medida) {
 function mecanismo(registroComUuid) {
   const registro = registroComUuid.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "…");
   if (/\.verify-/.test(registro)) return `G3, verificação da fase (${registro})`;
+  if (/^entrega\.flow-run-/.test(registro)) return `aceitação final, fluxo percorrido na cópia limpa (${registro})`;
   if (/\.flow-run-/.test(registro)) return `G4, fluxo na aplicação de pé (${registro})`;
   if (/\.triagem-/.test(registro)) return `triagem do G4 (${registro})`;
   if (/^audit\.project-phases\.md-P(\d+)\./.test(registro)) return `auditoria da fase P${/-P(\d+)\./.exec(registro)[1]} (${registro})`;
@@ -461,7 +476,7 @@ const codigo = await linhasDeCodigo();
 
 const saida = [];
 saida.push(`medir-verificacao · capivara ${versao} · commit ${commit} · node ${process.version}`);
-saida.push("orçamentos do build: --max-cycles 3, --max-verifier-repairs 1 (os padrões do CLI); aceitação e gate de fluxos ligados");
+saida.push("orçamentos do build: --max-cycles 3, --max-verifier-repairs 1 (os padrões do CLI); aceitação e fluxos ligados");
 saida.push("");
 saida.push("## Cenários");
 saida.push("");
@@ -484,10 +499,10 @@ const fasesDoPlano = esgotado.plano.fases;
 const rodadas = esgotado.build?.fases ?? [];
 saida.push("## Quando o orçamento esgota (cenário orcamento-esgotado)");
 saida.push("");
-saida.push(`build: código ${esgotado.build?.exitCode ?? "-"}; relatório: ${esgotado.relatorio?.status ?? "-"}`);
+saida.push(`build: código ${esgotado.build?.exitCode ?? "-"} (${esgotado.build?.estado ?? "-"}); relatório: ${esgotado.relatorio?.status ?? "-"}`);
 saida.push(`fases: ${rodadas.map(([id, status, gate]) => `${id} ${status}${gate ? ` (${gate})` : ""}`).join(", ")}; não iniciadas: ${fasesDoPlano - rodadas.length}`);
 saida.push(`aceitação operacional: ${esgotado.execucoes.aceitacao > 0 ? "rodou" : "não rodou"}`);
-saida.push(`o que acontece: ${esgotado.build && esgotado.build.exitCode !== 0 && rodadas.length < fasesDoPlano ? "o build para na fase que esgotou; as seguintes não rodam" : "o build segue"}`);
+saida.push(`o que acontece: ${esgotado.build && esgotado.build.exitCode !== 0 && rodadas.length < fasesDoPlano ? "o build para na fase que esgotou; as seguintes não rodam" : `o build segue até o fim e termina ${esgotado.build?.estado ?? "-"}`}`);
 saida.push("");
 
 saida.push("## Garantias");
@@ -521,7 +536,7 @@ if (saidaJson) {
       execucoes: medida.execucoes,
       plano: medida.plano,
       tempo: medida.duracoes,
-      build: medida.build ? { exitCode: medida.build.exitCode, fases: medida.build.fases.map(([id, status]) => `${id}:${status}`).join(",") } : null,
+      build: medida.build ? { exitCode: medida.build.exitCode, estado: medida.build.estado, fases: medida.build.fases.map(([id, status]) => `${id}:${status}`).join(",") } : null,
     };
   }
   numeros.testes = { porCriterio: exigencias.testesPorCriterio, modoDeFalha: exigencias.modoDeFalha !== null, desconfiancaDaSuite: exigencias.desconfiancaDaSuite !== null };

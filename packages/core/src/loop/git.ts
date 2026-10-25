@@ -336,17 +336,6 @@ export async function arquivosMudados(projectRoot: string, de: string | null, pa
   }
 }
 
-/** Dos caminhos, os que existiam num estado de conteúdo (`estadoDoCodigo`); sem árvore do Git, todos (ninguém pode afirmar que eram novos). */
-export async function existiamNaArvore(projectRoot: string, tree: string | null, caminhos: readonly string[]): Promise<string[]> {
-  if (caminhos.length === 0) return [];
-  if (tree === null || !ID_DE_ARVORE.test(tree)) return [...caminhos];
-  const existiam: string[] = [];
-  for (const caminho of caminhos) {
-    if (await run("git", ["cat-file", "-e", `${tree}:${caminho}`], { cwd: projectRoot }).then(() => true, () => false)) existiam.push(caminho);
-  }
-  return existiam;
-}
-
 /** O commit continua no histórico do HEAD? null quando não dá para saber (sem Git, commit desconhecido). */
 export async function noHistoricoDoHead(projectRoot: string, commit: string): Promise<boolean | null> {
   if (!/^[0-9a-f]{7,64}$/u.test(commit) || !(await isRepository(projectRoot))) return null;
@@ -392,36 +381,6 @@ export async function restaurarDoEstado(projectRoot: string, tree: string, arqui
     }
   }
   return falharam;
-}
-
-/**
- * Os arquivos que cada fase escreveu, pelos commits `feat(phase-N)` do histórico.
- *
- * É a autoria que o Core já registra: cada fase verde vira um commit com o
- * número dela, no serial e no paralelo (o cherry-pick mantém a mensagem). O
- * build usa isto para saber de quem é um arquivo sem montar um grafo próprio.
- */
-export async function arquivosDasFases(projectRoot: string): Promise<Map<number, Set<string>>> {
-  const fases = new Map<number, Set<string>>();
-  if (!(await isRepository(projectRoot))) return fases;
-  try {
-    const { stdout } = await run(
-      "git",
-      ["-c", "core.quotePath=false", "log", "--no-renames", "--name-only", "--format=%x00%s", "--grep=^feat(phase-[0-9][0-9]*):", "HEAD"],
-      { cwd: projectRoot, ...GRANDE },
-    );
-    for (const bloco of stdout.split("\0").slice(1)) {
-      const [assunto = "", ...arquivos] = bloco.split("\n");
-      const numero = /^feat\(phase-(\d+)\):/.exec(assunto.trim());
-      if (!numero) continue;
-      const conjunto = fases.get(Number(numero[1])) ?? new Set<string>();
-      for (const arquivo of arquivos.map((linha) => linha.trim()).filter(Boolean)) conjunto.add(arquivo);
-      fases.set(Number(numero[1]), conjunto);
-    }
-  } catch {
-    // Sem histórico legível, ninguém é dono de nada: o impacto fica desconhecido.
-  }
-  return fases;
 }
 
 export async function hasPendingChanges(projectRoot: string): Promise<boolean> {

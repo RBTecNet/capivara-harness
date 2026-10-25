@@ -17,8 +17,10 @@ import {
   defeitoCitado,
   defeitosDoRun,
   escadaDe,
+  mesmoDefeito,
   severidadeDoAchado,
   testesQueFalharam,
+  type Defect,
   type DefeitoEncontrado,
   type Estrategia,
   type OrcamentoDaRecuperacao,
@@ -77,11 +79,25 @@ describe("identidade entre achados", () => {
   it("entre gates diferentes, a ponte é a mensagem citada literalmente ou o id que o verificador citou", async () => {
     const r = await registro();
     const suite = r.registrar(achado({ gate: "G2", nature: "suite", anchors: { quotes: citacoes("expected 'Reserva criada com sucesso' to be visible") } })).defeito;
-    const fluxo = r.registrar(achado({ gate: "G4", nature: "fluxo-produto", anchors: { workflow: "1", quotes: citacoes("não mostrou \"Reserva criada com sucesso\"") } }));
-    expect(fluxo.defeito).toBe(suite);
-    expect(suite.gates).toEqual(["G2", "G4"]);
-    const outro = r.registrar(achado({ gate: "G3", nature: "task", anchors: { task: 1 } })).defeito;
-    expect(r.registrar(achado({ gate: "G4", nature: "fluxo-produto", anchors: { workflow: "2" }, tag: outro.defectId })).defeito).toBe(outro);
+    const revisao = r.registrar(achado({ gate: "G3", nature: "task", anchors: { task: 1, quotes: citacoes("não mostrou \"Reserva criada com sucesso\"") } }));
+    expect(revisao.defeito).toBe(suite);
+    expect(suite.gates).toEqual(["G2", "G3"]);
+    const outro = r.registrar(achado({ gate: "G3", nature: "task", anchors: { task: 2 } })).defeito;
+    expect(r.registrar(achado({ gate: "G2", nature: "integracao-teste", anchors: {}, tag: outro.defectId })).defeito).toBe(outro);
+  });
+
+  it("um nome comum (rota, arquivo) não junta dois defeitos de gates diferentes; a frase literal e o código de erro juntam", () => {
+    const existente = (quotes: string[]): Defect => ({
+      defectId: "P01-D1", phaseId: "P01", nature: "suite", discovered: { gate: "G2", cycle: 1, at: "" }, gates: ["G2"], severity: "B1",
+      anchors: { quotes, signature: "x" }, summary: "", detail: "", criterion: "", observed: "", expected: "", hypothesis: "", components: [],
+      status: "OPEN", attempts: [], failedStrategies: [], evidence: [], invalidated: [], handoffs: [], rediagnoses: [], costs: { calls: 0, seconds: 0, costUsd: 0 },
+    });
+    const daRevisao = (quotes: string[]): DefeitoEncontrado => ({ gate: "G3", nature: "task", anchors: { task: 1, quotes }, summary: "", detail: "" });
+    expect(mesmoDefeito(existente(["/categorias"]), daRevisao(["/categorias"]))).toBe(false);
+    expect(mesmoDefeito(existente(["categoriaspage.tsx"]), daRevisao(["categoriaspage.tsx"]))).toBe(false);
+    expect(mesmoDefeito(existente(["reserva criada com sucesso"]), daRevisao(["reserva criada com sucesso"]))).toBe(true);
+    expect(mesmoDefeito(existente(["err_module_not_found"]), daRevisao(["err_module_not_found"]))).toBe(true);
+    expect(mesmoDefeito(existente(["econnrefused 127.0.0.1:3000"]), daRevisao(["econnrefused 127.0.0.1:3000"]))).toBe(true);
   });
 
   it("o defeito que volta guarda a história, os gates e o rediagnóstico", async () => {
@@ -89,20 +105,12 @@ describe("identidade entre achados", () => {
     const d = r.registrar(achado({ gate: "G3", nature: "task", anchors: { task: 1 }, detail: "primeiro" })).defeito;
     r.consumir({ estrategia: "executor", defeitos: [d] }, agente);
     r.validar(d, null, false);
-    const volta = r.registrar(achado({ gate: "G4", nature: "task", anchors: { task: 1 }, detail: "segundo" }));
+    const volta = r.registrar(achado({ gate: "G2", nature: "task", anchors: { task: 1 }, detail: "segundo" }));
     expect(volta).toMatchObject({ novo: false, reaberto: true });
     expect(d.status).toBe("OPEN");
     expect(d.attempts).toHaveLength(1);
     expect(d.rediagnoses.map((item) => item.excerpt)).toEqual(["segundo"]);
-    expect(d.gates).toEqual(["G3", "G4"]);
-  });
-
-  it("a versão do roteiro entra na assinatura sem normalização", async () => {
-    const r = await registro();
-    const d = r.registrar(achado({ gate: "G4", nature: "fluxo-roteiro", anchors: { workflow: "1", version: "aaaaaaaaaaaa" } })).defeito;
-    const antes = d.anchors.signature;
-    r.registrar(achado({ gate: "G4", nature: "fluxo-roteiro", anchors: { workflow: "1", version: "bbbbbbbbbbbb" } }));
-    expect(d.anchors.signature).not.toBe(antes);
+    expect(d.gates).toEqual(["G3", "G2"]);
   });
 });
 
@@ -126,7 +134,8 @@ describe("orçamento em três escalas, derivado das tentativas", () => {
     const r = await registro();
     const d1 = r.registrar(achado({ gate: "G3", nature: "task", anchors: { task: 1 } })).defeito;
     const d2 = r.registrar(achado({ gate: "G3", nature: "task", anchors: { task: 2 } })).defeito;
-    const acao = r.planejar(ORCAMENTO, todas)!;
+    // Sem reparo do verificador (o primeiro degrau do achado da revisão), a correção do executor agrupa os dois.
+    const acao = r.planejar(ORCAMENTO, (estrategia: Estrategia) => estrategia === "executor")!;
     expect(acao).toMatchObject({ estrategia: "executor", defeitos: [d1, d2] });
     r.consumir(acao, agente);
     expect(r.uso()).toMatchObject({ repairs: 1, byGate: { G3: 1 }, byDefect: { [d1.defectId]: 1, [d2.defectId]: 1 } });
@@ -200,11 +209,11 @@ describe("progresso e escada", () => {
 
   it("sem estratégia possível em nenhum defeito aberto é esgotamento técnico; sem orçamento, não", async () => {
     const r = await registro();
-    const d = r.registrar(achado({ gate: "G4", nature: "fluxo-roteiro", anchors: { workflow: "1" } })).defeito;
-    r.consumir({ estrategia: "roteiro", defeitos: [d] }, { role: "verifier", attempt: 1 });
+    const d = r.registrar(achado({ gate: "G0", nature: "engine", anchors: {} })).defeito;
+    r.consumir({ estrategia: "executor", defeitos: [d] }, agente);
+    // A correção não mudou nada e a falha é a mesma: a única estratégia da natureza falhou, e nenhum ciclo novo a destrava.
+    d.attempts.at(-1)!.changed = false;
     r.validar(d, { assinatura: d.anchors.signature }, false);
-    // O roteiro reescrito saiu igual (a versão está na assinatura): nada mudou, e nenhum ciclo novo o destrava.
-    expect(d.attempts.at(-1)!.changed).toBe(false);
     expect(r.semSaida(todas)).toBe(true);
     // A correção que MUDOU o código sem resolver fica bloqueada só neste ciclo: o próximo recomeça com a história.
     const r3 = await RegistroDeDefeitos.abrir(raiz, "build-x", "P03");
@@ -220,13 +229,13 @@ describe("progresso e escada", () => {
     const r2 = await RegistroDeDefeitos.abrir(raiz, "build-x", "P02");
     r2.registrar(achado({ gate: "G3", nature: "task", anchors: { task: 1 } }));
     expect(r2.semSaida(todas)).toBe(false);
-    expect(r2.semSaida((estrategia: Estrategia) => estrategia === "roteiro")).toBe(true);
+    expect(r2.semSaida((estrategia: Estrategia) => estrategia === "conciliacao")).toBe(true);
   });
 
-  it("a escada segue a natureza: suíte começa pelo verificador, o achado do verificador pelo executor", () => {
+  it("a escada segue a natureza: a suíte e o achado da revisão começam pelo verificador, coautor", () => {
     expect(escadaDe("suite")).toEqual(["verificador", "executor"]);
-    expect(escadaDe("task")).toEqual(["executor", "verificador"]);
-    expect(escadaDe("fluxo-roteiro")).toEqual(["roteiro"]);
+    expect(escadaDe("task")).toEqual(["verificador", "executor"]);
+    expect(escadaDe("engine")).toEqual(["executor"]);
     expect(escadaDe("integracao-conflito")[0]).toBe("conciliacao");
   });
 });

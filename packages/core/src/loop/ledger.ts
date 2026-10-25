@@ -23,7 +23,6 @@ import { artifactPaths } from "../state/paths.js";
 import { writeAtomic } from "../state/atomic.js";
 import { sha12 } from "../contract/stamps.js";
 import { PLANNING_CONTRACT } from "../contract/environment.js";
-import type { ProvaCitada } from "../prompts/index.js";
 
 export interface FaseFechada {
   id: string;
@@ -59,13 +58,13 @@ export interface FaseFechada {
    */
   semCommit?: boolean;
   /**
-   * Os fluxos que a fase fechou sem percorrer porque o contrato põe o produto fora
-   * do navegador (§133). Ausente é o registro anterior ao campo: a fase percorreu
-   * o que cobriu, como sempre. Com `provas`, a suíte do projeto o provou passo a
-   * passo e ele é cumprido (§134); sem, é pendência, e a fase volta a ser
-   * verificada na execução seguinte.
+   * Como a fase foi entregue, quando não foi `aceito` (etapa 4 da redução): o
+   * estado e o que não se provou. A fase não é refeita por isso — o build seguinte
+   * a pula como qualquer fechada —, e a entrega final continua dizendo o que ela
+   * deve. Ausente é `aceito`, e o registro anterior ao campo.
    */
-  foraDoNavegador?: { workflow: string; trecho: string; provas?: ProvaCitada[] }[];
+  estado?: "entregue com pendências" | "verificação inconclusiva";
+  pendencias?: string[];
 }
 
 function caminho(projectRoot: string): string {

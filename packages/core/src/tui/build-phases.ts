@@ -12,8 +12,8 @@
 
 import { paint, padVisible, truncateVisible, visibleWidth, type Style } from "./ansi.js";
 
-/** Os cinco gates, na ordem em que a fase passa por eles. */
-export const GATES = ["G0", "G1", "G2", "G3", "G4"] as const;
+/** Os quatro gates da fase, na ordem em que ela passa por eles; os fluxos são da aceitação final. */
+export const GATES = ["G0", "G1", "G2", "G3"] as const;
 export type GateId = (typeof GATES)[number];
 
 /**
@@ -89,7 +89,7 @@ const PHASE_TONE: Record<PhaseState, "green" | "yellow" | "gray" | "red"> = {
 };
 
 export function emptyGates(): Record<GateId, GateState> {
-  return { G0: "aguardando", G1: "aguardando", G2: "aguardando", G3: "aguardando", G4: "aguardando" };
+  return { G0: "aguardando", G1: "aguardando", G2: "aguardando", G3: "aguardando" };
 }
 
 /** As colunas do `plan`, todas por começar. */

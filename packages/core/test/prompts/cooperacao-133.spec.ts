@@ -10,17 +10,15 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { FORA_DO_NAVEGADOR, flowPrompt, implementPrompt, lerForaDoNavegador, triagePrompt, verifyPrompt } from "../../src/prompts/index.js";
+import { FORA_DO_NAVEGADOR, flowPrompt, implementPrompt, lerForaDoNavegador, verifyPrompt } from "../../src/prompts/index.js";
 import { stackDoSkeleton } from "../../src/prompts/acceptance-policy.js";
 
 const workflow = { number: "1", name: "Cadastrar compromisso", steps: ["abre o calendário", "cadastra um compromisso"] };
 const autor = flowPrompt({ language: "pt-BR", workflow, baseUrl: "http://127.0.0.1:47533" });
-const triagem = triagePrompt({ language: "pt-BR", phaseMarkdown: "requisitos", workflow, script: "roteiro", failure: "falhou", snapshot: "", serverErrors: [] });
 
 describe("§133 · quem lê o produto pode ler (Astra)", () => {
   it.each([
     ["roteirista", autor],
-    ["triagem", triagem],
   ])("%s pode ler o código com comandos que não mudam nada, como o verificador", (_papel, prompt) => {
     expect(prompt).toContain("You may run commands that change nothing");
     expect(prompt).not.toContain("Do not run commands,");
@@ -28,7 +26,6 @@ describe("§133 · quem lê o produto pode ler (Astra)", () => {
 
   it.each([
     ["roteirista", autor],
-    ["triagem", triagem],
   ])("%s continua proibido de rodar teste, servidor, sonda de navegador, instalação e de escrever", (_papel, prompt) => {
     expect(prompt).toContain("Do not run tests, servers, builds, browser probes or installations");
     expect(prompt).toMatch(/never write, edit, create(,| or) delete/);

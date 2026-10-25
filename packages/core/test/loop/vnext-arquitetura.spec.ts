@@ -89,6 +89,12 @@ async function publicar(arch: Architecture, opcoes: { carimbo?: string | null; d
 
 const ok = (stdout: string): EngineResult => ({ exitCode: 0, stdout, stderr: "", timedOut: null });
 
+/**
+ * O desfecho destes builds: as fases fecham, e os fluxos do esqueleto ficam sem
+ * percurso (`--no-flows`), ditos como verificação inconclusiva (etapa 4 da redução).
+ */
+const ENTREGUE_SEM_FLUXOS = 3;
+
 async function construir(arch: Architecture | null) {
   const calls: EngineCall[] = [];
   const outcome = await runBuild({
@@ -173,7 +179,7 @@ describe("a fatia chega a quem implementa e a quem verifica", () => {
     const arch = arquitetura();
     await publicar(arch);
     const { outcome, calls } = await construir(arch);
-    expect(outcome.exitCode, outcome.errors.join("\n")).toBe(0);
+    expect(outcome.exitCode, outcome.errors.join("\n")).toBe(ENTREGUE_SEM_FLUXOS);
 
     const builderP2 = calls.find((c) => c.role === "builder" && c.phase.id === "P02")!;
     const verifierP2 = calls.find((c) => c.role === "verifier" && c.phase.id === "P02")!;
@@ -218,7 +224,7 @@ describe("a fatia chega a quem implementa e a quem verifica", () => {
         return ok(Array.from({ length: call.phase.taskCount }, (_, i) => `TASK ${i + 1}: DONE`).join("\n"));
       },
     });
-    expect(outcome.exitCode).toBe(0);
+    expect(outcome.exitCode).toBe(ENTREGUE_SEM_FLUXOS);
     expect(notices.join("\n")).toContain("a forma estruturada da arquitetura não está disponível");
     expect(calls.every((c) => !c.prompt.includes("## Architecture decided by the plan for this phase"))).toBe(true);
     expect(calls.find((c) => c.role === "builder")!.prompt).toContain(".capivara/init/architecture.md");
@@ -230,7 +236,7 @@ describe("aprovação anterior não vale para uma fatia que ela não viu (§13 i
     const arch = arquitetura();
     await publicar(arch);
     const primeiro = await construir(arch);
-    expect(primeiro.outcome.exitCode).toBe(0);
+    expect(primeiro.outcome.exitCode).toBe(ENTREGUE_SEM_FLUXOS);
     const fechadas = await lerFasesFechadas(projectRoot);
     expect(fechadas.map((f) => [f.id, typeof f.sliceSha12])).toEqual([["P01", "string"], ["P02", "string"]]);
 
@@ -250,7 +256,7 @@ describe("aprovação anterior não vale para uma fatia que ela não viu (§13 i
     await run("git", ["commit", "-q", "-m", "arquitetura revisada"], { cwd: projectRoot });
 
     const segundo = await construir(revisada);
-    expect(segundo.outcome.exitCode, segundo.outcome.errors.join("\n")).toBe(0);
+    expect(segundo.outcome.exitCode, segundo.outcome.errors.join("\n")).toBe(ENTREGUE_SEM_FLUXOS);
     expect(segundo.outcome.runId === primeiro.outcome.runId).toBe(variante === "mesmo run");
     // Só a P02 volta, e volta para ser VERIFICADA contra o contrato novo — sem sessão de implementação (§125).
     expect(segundo.calls.filter((c) => c.role === "builder")).toEqual([]);

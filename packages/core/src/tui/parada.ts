@@ -184,19 +184,29 @@ export function renderParada(parada: Parada, style: Style = { enabled: false }):
  * ninguém a atribuir.
  */
 export interface Conclusao {
+  /** O estado da entrega quando ela não foi aceita: o título diz isso, e não "CONCLUÍDO". */
+  estado?: string;
   oQue: string;
   custou: string;
   evidencia?: string[];
+  /** O que não se provou, uma linha cada. */
+  pendencias?: string[];
   paraSeguir?: string[];
 }
 
 export function renderConclusao(conclusao: Conclusao, style: Style = { enabled: false }): string {
-  const linhas: string[] = ["", paint("CONCLUÍDO", "green", style), ""];
+  const titulo = conclusao.estado !== undefined ? paint(conclusao.estado.toUpperCase(), "yellow", style) : paint("CONCLUÍDO", "green", style);
+  const linhas: string[] = ["", titulo, ""];
   linhas.push(...campo("o quê", conclusao.oQue, style));
   linhas.push(...campo("custou", conclusao.custou, style));
 
   for (const [indice, caminho] of (conclusao.evidencia ?? []).entries()) {
     linhas.push(...campo(indice === 0 ? "evidência" : "", caminho, style));
+  }
+
+  if (conclusao.pendencias && conclusao.pendencias.length > 0) {
+    linhas.push("", `  ${paint("pendências", "yellow", style)}`);
+    for (const pendencia of conclusao.pendencias) linhas.push(`    - ${pendencia}`);
   }
 
   if (conclusao.paraSeguir && conclusao.paraSeguir.length > 0) {

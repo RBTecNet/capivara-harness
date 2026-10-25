@@ -521,7 +521,7 @@ describe("reparo limitado pelo verificador", () => {
     // Sem Git não há como listar o que mudou: o verificador é mandado ler o código atual.
     expect(checks[2]?.prompt).toContain("unknown (read the current code)");
     expect(checks[2]?.prompt).not.toContain("name found in the tree");
-    expect(checks[2]?.prompt).toContain("Choose the smallest sufficient verification");
+    expect(checks[2]?.prompt).toContain("## Test policy — the same for the builder and the verifier");
   });
 
   it.each([

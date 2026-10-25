@@ -9,6 +9,7 @@
 
 import { languageBlock } from "./language.js";
 import { functionalAcceptanceBlock, proportionateChecksBlock } from "./acceptance-policy.js";
+import { testPolicyBlock } from "./test-policy.js";
 
 export interface BuilderContext {
   language: string;
@@ -255,8 +256,6 @@ export function testBlock(context: BuilderContext): string {
     "",
     "This is the exact command the gate uses to validate the phase after your handoff.",
     "Use focused checks for changed code and relevant browser or end-to-end tests. Do not add a watch mode.",
-    "Reuse existing browser coverage and implement concrete checks requested by the independent validator; do not design a speculative test suite.",
-    "A test from an earlier phase that contradicts what this phase requires is out of date: update it.",
   ];
   if (context.containerized) {
     lines.push("This project runs its suite inside a container: run the language tooling and the tests");
@@ -349,7 +348,8 @@ export function completionBlock(): string {
     "## Finish and hand off to independent verification",
     functionalAcceptanceBlock(),
     proportionateChecksBlock(),
-    "Implement every acceptance criterion and its required positive and negative test cases.",
+    testPolicyBlock(),
+    "Implement every acceptance criterion.",
     "After the relevant checks pass, finish using this role's required output protocol so the harness can run its independent gates.",
     "Do not keep inventing new verification infrastructure after completing the phase.",
     "Mutation-testing frameworks, driver interception, loader monkey-patching and persistent test telemetry",
@@ -404,14 +404,9 @@ export function implementPrompt(context: BuilderContext): string {
     "",
     "For each item:",
     "1. Write the complete code. No TODO, no placeholder, no stub.",
-    "2. Reuse or add focused tests for the task's required behaviour, following the project's framework.",
-    "3. Run the relevant focused checks for that change, not the complete suite for every item.",
-    "4. Fix an actual product failure; correct a demonstrably wrong test expectation while preserving its public scenario.",
-    "5. Preserve passing work and proceed once the affected behaviour is verified.",
-    "A test must assert the behaviour and failure mode the acceptance criterion actually names.",
-    "A matching test name or an alert's existence is not enough: when the criterion requires a",
-    "localized network error, reject the real fetch or use `route.abort()` and assert the message;",
-    "an HTTP 503 returned by `route.fulfill()` exercises a different path.",
+    "2. Run the relevant focused checks for that change, not the complete suite for every item.",
+    "3. Fix an actual product failure; correct a demonstrably wrong test expectation while preserving its public scenario.",
+    "4. Preserve passing work and proceed once the affected behaviour is verified.",
     "",
     "## Mandatory rules",
     "- Use the commands, the test runner and the tooling the project already adopted.",
@@ -460,9 +455,6 @@ export function fixPrompt(context: FixContext): string {
     "- The cause below may include evidence, a concrete correction and a regression check from the",
     "  verifier. Use them as your repair plan after checking the current files. If an instruction no",
     "  longer applies, report the exact evidence instead of silently replacing the required behaviour.",
-    "- Test the actual failure mode named in each finding. A transport failure needs a rejected fetch",
-    "  or `route.abort()`; an HTTP 503 from `route.fulfill()` does not exercise it. When the requirement",
-    "  is a localized error, assert the displayed message/language, not just the presence of an alert.",
     "- Do not weaken assertions, skip checks, or substitute an easier scenario to obtain a green test.",
     "- Leave no TODO, no placeholder and no skipped test.",
     "- Run focused checks for the actual fix and hand off for the harness's independent full suite.",

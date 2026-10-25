@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { tasksBlock } from "../../src/contract/index.js";
-import { phaseFromSlicePrompt, skeletonPrompt, verifyPrompt } from "../../src/prompts/index.js";
+import { phaseFromSlicePrompt, skeletonPrompt } from "../../src/prompts/index.js";
 
 it("o planejamento descreve comportamento sem prescrever testes", () => {
   const grammar = tasksBlock(1);
@@ -33,11 +33,4 @@ it("a fatia da arquitetura chega ao escritor e à emenda da fase quando existe, 
   const emenda = amendPhasePrompt({ language: "pt-BR", current: "- [ ] **Task:** x", findings: [], architecture: "### api\n- POST /clientes → 201" });
   expect(emenda).toContain("## This phase's architecture slice");
   expect(emenda).not.toContain("feature tests");
-});
-
-it("validador escolhe prova suficiente sem obrigações herdadas de nomes de teste", () => {
-  const prompt = verifyPrompt({ language: "pt-BR", taskCount: 1, phaseMarkdown: "entrega observável" });
-  expect(prompt).toContain("Choose the smallest sufficient verification");
-  expect(prompt).toContain("Legacy test names and test-file requirements in a plan are suggestions");
-  expect(prompt).toContain("Reuse passing gate results");
 });

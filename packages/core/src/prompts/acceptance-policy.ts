@@ -4,14 +4,11 @@ export function functionalAcceptanceBlock(): string {
     "## Functional acceptance and user cost",
     "Every return costs the user time and money. Aim to deliver the phase in one construction cycle.",
     "Judge required behaviour and operational usability. Equivalent working implementations are acceptable.",
-    "The plan defines observable product requirements. The independent validator selects the smallest sufficient proof.",
-    "Legacy prescriptions of test names, files, counts or organization are advisory, unless explicitly requested by the developer.",
-    "The executor implements concrete verification requested by the validator; do not generate a speculative suite from the plan.",
+    "The plan defines observable product requirements.",
     "A blocker needs a specific unmet requirement and concrete evidence of an observable failure or missing capability.",
     "Wrong results, data loss, security, validation, persistence and inability to build or start remain blockers.",
     "Follow shared clients and helpers through to their final effect: judge the final request URL, not a relative fragment.",
-    "Do not demand a preferred folder, layer, helper, extra assertion or duplicate test when the required behaviour is established.",
-    "Missing test names alone are not a functional defect. Reuse equivalent coverage; do not demand the same scenario at every layer.",
+    "Do not demand a preferred folder, layer or helper when the required behaviour is established.",
     "Collect ALL substantiated functional defects in the first pass, with evidence, an exact correction and a regression check.",
     "Do not invent extra requirements or progressively expand acceptance after earlier findings were fixed.",
     "Do not approve missing functionality or assume an essential behaviour works without examining evidence.",
@@ -20,8 +17,6 @@ export function functionalAcceptanceBlock(): string {
     "Tests must use their own temporary data and preserve existing local databases and caches. Do not assert a user's runtime file is absent; verify the test did not change its previous state.",
     "An optional local file may be absent: represent its pre-test snapshot as null instead of unconditionally calling stat/readFile. Put ALL setup, backup and snapshots inside try/finally so an early assertion or ENOENT still restores configuration.",
     "Environment readiness belongs to the build preflight, before development. Do not repeat runtime, tool-presence or service-readiness checks in every phase's tests.",
-    "The tests the developer asked for are the shared contract's rules about tests (subject starting with \"testes\") and its stack entry about tests.",
-    "The plan does not carry them — no phase lists test tasks or test criteria — so the build honours them, for what each phase delivers and under the conditions they state.",
   ].join("\n");
 }
 

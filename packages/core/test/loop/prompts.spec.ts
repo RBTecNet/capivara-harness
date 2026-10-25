@@ -42,14 +42,12 @@ describe("prompt de implementação", () => {
     expect(implementPrompt({ ...base, testCommand: "npm test" })).not.toContain("end-to-end tests run with");
   });
 
-  it("reaproveita cobertura e deixa novos testes a cargo do validador", () => {
+  it("nomeia o comando do gate e não manda escrever teste de navegador", () => {
     const prompt = implementPrompt({ ...base, testCommand: "npm test" });
     expect(prompt).not.toContain("Do not use another runner");
     expect(prompt).toContain("This is the exact command the gate uses to validate the phase");
     expect(prompt).toContain("relevant browser or end-to-end tests");
-    expect(prompt).toContain("concrete checks requested by the independent validator");
     expect(prompt).not.toContain("Write a browser test and run it");
-    expect(prompt).toContain("A test from an earlier phase that contradicts what this phase requires is out of date: update it.");
   });
 
   it("instala o que a infraestrutura aprovada declara, e nunca acrescenta, troca ou atualiza dependência por conta própria (§129)", () => {
@@ -74,12 +72,6 @@ describe("prompt de implementação", () => {
     expect(implementPrompt(base)).toContain(BUILDER_COMPLETE_MARKER);
   });
 
-  it("cobra o comportamento real do critério desde a implementação", () => {
-    const prompt = implementPrompt(base);
-    expect(prompt).toContain("behaviour and failure mode the acceptance criterion actually names");
-    expect(prompt).toContain("assert the message");
-    expect(prompt).toContain("`route.fulfill()` exercises a different path");
-  });
 });
 
 describe("prompt de correção", () => {
@@ -114,8 +106,6 @@ describe("prompt de correção", () => {
     expect(prompt).toContain(orientacao);
     expect(prompt).toContain("Use them as your repair plan");
     expect(prompt).toContain("do not recreate the phase from scratch");
-    expect(prompt).toContain("HTTP 503 from `route.fulfill()` does not exercise it");
-    expect(prompt).toContain("assert the displayed message/language");
   });
 });
 
@@ -151,18 +141,8 @@ describe("prompt e protocolo do verificador", () => {
     expect(prompt).toContain("You report the repair; you still never perform it here");
   });
 
-  it("distingue a falha real de transporte da resposta HTTP e exige o idioma do alerta", () => {
-    const prompt = verifyPrompt(context);
-    expect(prompt).toContain("route.abort()");
-    expect(prompt).toContain("does NOT prove transport handling");
-    expect(prompt).toContain("merely asserting that an alert exists is insufficient");
-    expect(prompt).toContain("requirements actually stated");
-  });
-
-  it("o validador escolhe a prova sem inventário de nomes prescritos pelo plan", () => {
-    const prompt = verifyPrompt(context);
-    expect(prompt).toContain("Choose the smallest sufficient verification");
-    expect(prompt).not.toContain("NAME NOT FOUND");
+  it("o validador não recebe inventário de nomes prescritos pelo plan", () => {
+    expect(verifyPrompt(context)).not.toContain("NAME NOT FOUND");
   });
 
   it("sem inventário, o prompt é o de sempre — nada de seção vazia", () => {
@@ -228,7 +208,6 @@ describe("reparo pelo validador separado da aprovação", () => {
     expect(prompt).toContain("Do not commit, stage files, change Git branches/refs");
     expect(prompt).toContain("Never edit the specification");
     expect(prompt).toContain("Never delete, skip or disable tests");
-    expect(prompt).toContain("cannot replace a transport failure");
   });
 
   it("amarra instalação e testes ao runtime real do harness", () => {

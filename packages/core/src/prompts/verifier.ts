@@ -13,7 +13,8 @@
 import { languageBlock } from "./language.js";
 import { architectureSliceBlock, completionBlock, processBlock } from "./builder.js";
 import { desgrudarChaves } from "../contract/protocolo.js";
-import { functionalAcceptanceBlock, proportionateChecksBlock } from "./acceptance-policy.js";
+import { functionalAcceptanceBlock } from "./acceptance-policy.js";
+import { testPolicyBlock } from "./test-policy.js";
 
 export interface VerifierContext {
   language: string;
@@ -200,12 +201,8 @@ export function verifyPrompt(context: VerifierContext): string {
     "its result.",
     "",
     "Your only job is to read the real code and say what is done and what is not.",
-    "Choose the smallest sufficient verification for the behaviour delivered in this phase.",
-    "Reuse passing gate results and existing evidence; do not invent a new test for every criterion.",
-    "Legacy test names and test-file requirements in a plan are suggestions, unless explicitly required by the developer.",
-    "You choose the proof. Do not reject working functionality for a missing planned test name, file, count or organization.",
-    "If a material behaviour is unproven, name the risk and the exact minimal scenario and expected result needed to establish it.",
     functionalAcceptanceBlock(),
+    testPolicyBlock(),
     "",
     "For EACH task marked `- [ ]` or `- [x]` in the phase below, in the order they appear, check",
     "its acceptance criteria against the real code — files, classes, tests, routes, migrations,",
@@ -223,7 +220,7 @@ export function verifyPrompt(context: VerifierContext): string {
     "- If an observation means a required criterion is unmet, emit INCOMPLETE with evidence and a concrete fix.",
     "- Missing required functionality, a placeholder or a demonstrated functional defect means INCOMPLETE.",
     "- A task marked [x] is verified like any other. The mark is a claim, not evidence.",
-    "- Investigate uncertainty. Block on concrete material evidence; additional test coverage alone is ADVISORY when behaviour is established.",
+    "- Investigate uncertainty. Block on concrete material evidence.",
     "",
     "## Findings must be executable repair instructions",
     "Inspect EVERY acceptance criterion of each task under verification before answering. Report ALL",
@@ -251,13 +248,6 @@ export function verifyPrompt(context: VerifierContext): string {
     "check needed under the SAME runtime as the harness. Do not ask to rewrite working product code",
     "to compensate for a broken environment. You report the repair; you still never perform it here.",
     "",
-    "## A passing test must prove the specified failure mode",
-    "Read the setup AND assertions of the tests; a matching name or a green suite is not proof.",
-    "A rejected fetch or browser `route.abort()` exercises a transport/network failure. An HTTP 503",
-    "created with `route.fulfill()` exercises a server response and does NOT prove transport handling.",
-    "When the criterion requires a localized network error, require the real transport failure and an",
-    "assertion of the displayed message/language; merely asserting that an alert exists is insufficient.",
-    "Apply this distinction only to requirements actually stated in the phase or its cited specification.",
     "Never suggest weakening an assertion, replacing the failing scenario with an easier mock, hiding",
     "a failure from the checks, or changing the specification to pass. Preserve fixes already delivered.",
     "",
@@ -324,8 +314,6 @@ export function verifierRepairPrompt(context: VerifierRepairContext): string {
     ...architectureSliceBlock(context.architectureSlice),
     "",
     "You are repairing explicit findings from an independent verification of this phase.",
-    functionalAcceptanceBlock(),
-    proportionateChecksBlock(),
     processBlock(),
     completionBlock(),
     "This is a bounded REPAIR session, not the read-only verification session and not a new implementation.",
@@ -354,16 +342,14 @@ export function verifierRepairPrompt(context: VerifierRepairContext): string {
     "- Never edit the specification under `.capivara/init/`, phase requirements, or run state under",
     "  `.capivara/runs/`. Do not alter the acceptance criteria to fit the implementation.",
     "- Never delete, skip or disable tests, weaken assertions, suppress failures to pass checks, or replace",
-    "  a failing scenario with an easier mock. HTTP 503 via `route.fulfill()` cannot replace a transport failure",
-    "  via rejected fetch or `route.abort()` when the requirement is network-failure handling.",
+    "  a failing scenario with an easier mock.",
     "",
     "## Runtime and verification",
     `For Node projects the harness uses \`${process.execPath}\` (${process.version}, ABI ${process.versions.modules}).`,
     "Use that SAME Node executable for installation, rebuilds and checks, with its directory first in",
     "PATH for package-manager scripts. Do not activate another Node/NVM version to make a command pass.",
     "For other stacks use the runtime and commands already declared by this project.",
-    "First add or strengthen the regression check for the actual finding, then apply the smallest fix",
-    "and run the relevant check. Preserve the original failing scenario and assert the required result.",
+    "Apply the smallest fix and run the relevant check. Preserve the original failing scenario.",
     ...(context.testCommand
       ? ["The harness will run the complete gate command independently after handoff; use focused checks while repairing:", "", `    ${context.testCommand}`, ""]
       : ["No gate test command was resolved; report that explicitly and use the project's documented checks."]),

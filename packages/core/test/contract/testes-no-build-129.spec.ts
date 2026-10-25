@@ -35,7 +35,8 @@ import {
   testRequirements,
 } from "../../src/contract/index.js";
 import type { Skeleton } from "../../src/contract/index.js";
-import { functionalAcceptanceBlock, sharedContractFromSkeleton } from "../../src/prompts/acceptance-policy.js";
+import { sharedContractFromSkeleton } from "../../src/prompts/acceptance-policy.js";
+import { testPolicyBlock } from "../../src/prompts/test-policy.js";
 import { architectPrompt, architectureAuditPrompt, phaseAuditPrompt, planningScopeBlock, skeletonPrompt } from "../../src/prompts/index.js";
 
 const fixture = (nome: string): string => readFileSync(join(import.meta.dirname, "..", "fixtures", nome), "utf8");
@@ -201,7 +202,8 @@ describe("§129 · o esqueleto guarda o pedido de testes para o build, e o plano
     const contrato = sharedContractFromSkeleton(renderSkeleton(ESQUELETO));
     expect(contrato).toContain(`- testes.requisito: ${requisito}`);
     expect(contrato).toContain("- Testes: Testes automatizados, executados contra um banco isolado");
-    expect(functionalAcceptanceBlock()).toContain("rules about tests (subject starting with \"testes\")");
+    // A instrução vive na política de teste, que o executor e o verificador leem (etapa 1 da redução).
+    expect(testPolicyBlock()).toContain("rules about tests (subject starting with \"testes\")");
     // O plano não os vê: nem a fatia da fase, nem o esqueleto que o arquiteto, a coerência e a triagem recebem.
     for (const fase of ESQUELETO.phases) expect(sliceForPhase(ESQUELETO, fase.number)).not.toContain(requisito);
     expect(renderSkeleton(skeletonForPlanning(ESQUELETO))).not.toContain(requisito);

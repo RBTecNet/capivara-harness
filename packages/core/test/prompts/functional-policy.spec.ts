@@ -24,7 +24,6 @@ describe("aceitação funcional e custo proporcional", () => {
     const prompt = verifyPrompt({ ...base, taskCount: 2 });
     expect(prompt).toContain("DONE — ADVISORY:");
     expect(prompt).toContain("final request URL");
-    expect(prompt).toContain("Missing test names alone");
     expect(prompt).toContain("data loss, security, validation");
     expect(prompt).not.toContain("When in doubt, INCOMPLETE");
     expect(prompt).toContain("observable failure");

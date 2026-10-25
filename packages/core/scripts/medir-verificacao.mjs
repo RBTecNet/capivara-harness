@@ -12,7 +12,7 @@
  *
  *   node packages/core/scripts/medir-verificacao.mjs
  *   node packages/core/scripts/medir-verificacao.mjs --json medida.json
- *   node packages/core/scripts/medir-verificacao.mjs --comparar antes.json depois.json
+ *   node packages/core/scripts/medir-verificacao.mjs --comparar antes.json depois.json [--tudo]
  *   --manter   deixa as pastas dos cenários no disco (o caminho é impresso)
  *
  * O módulo de cenários é TypeScript; o esbuild (já dependência do build) o
@@ -44,10 +44,13 @@ if (args[0] === "--comparar") {
     );
   const a = new Map(achatar(antes.numeros));
   const b = new Map(achatar(depois.numeros));
+  // O tempo muda a cada rodada; sem --tudo, só aparece o que mudou.
+  const tudo = args.includes("--tudo");
   for (const chave of [...new Set([...a.keys(), ...b.keys()])]) {
     const va = a.get(chave);
     const vb = b.get(chave);
     const delta = typeof va === "number" && typeof vb === "number" ? (vb - va > 0 ? `+${vb - va}` : String(vb - va)) : va === vb ? "" : "≠";
+    if (!tudo && (va === vb || /\.tempo\./.test(chave))) continue;
     linhas.push([chave, String(va ?? "-"), String(vb ?? "-"), delta]);
   }
   console.log(`antes: ${antes.commit}   depois: ${depois.commit}\n`);
@@ -311,7 +314,7 @@ const VERIFICACAO = [
   "src/audit/authority.ts", "src/audit/coherence.ts", "src/audit/cycle.ts", "src/audit/envelope.ts", "src/audit/index.ts",
   "src/audit/materiality.ts", "src/audit/protocol.ts", "src/audit/sem-teste.ts", "src/audit/tasks.ts",
   "src/prompts/auditor.ts", "src/prompts/rehearsal.ts", "src/prompts/verifier.ts", "src/prompts/flows.ts", "src/prompts/triagem.ts",
-  "src/prompts/repair.ts", "src/prompts/acceptance-policy.ts",
+  "src/prompts/repair.ts", "src/prompts/acceptance-policy.ts", "src/prompts/test-policy.ts",
   "src/contract/coverage.ts", "src/contract/disponibilidade.ts", "src/contract/drift.ts", "src/contract/invariants.ts",
   "src/contract/mechanism-prescription.ts", "src/contract/ownership.ts", "src/contract/phase-references.ts",
   "src/contract/test-prescription.ts", "src/contract/protocolo.ts", "src/contract/upstream.ts",
@@ -409,8 +412,9 @@ function imprimirCenario(medida) {
   ].join("\n");
 }
 
-/** O nome do registro, dito como o mecanismo que o gravou. */
-function mecanismo(registro) {
+/** O nome do registro, dito como o mecanismo que o gravou (sem o uuid, que muda a cada rodada). */
+function mecanismo(registroComUuid) {
+  const registro = registroComUuid.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "…");
   if (/\.verify-/.test(registro)) return `G3, verificação da fase (${registro})`;
   if (/\.flow-run-/.test(registro)) return `G4, fluxo na aplicação de pé (${registro})`;
   if (/\.triagem-/.test(registro)) return `triagem do G4 (${registro})`;

@@ -14627,3 +14627,90 @@ Nas quatro rodadas, ficaram de pé:
 fim (load 9,5). Numa rodada anterior, com o revisor rodando testes ao lado,
 caiu o `coerencia-temporal-127` ("correm juntas"): é a instabilidade conhecida
 de sobreposição temporal sob carga, e ela não foi afrouxada.
+
+---
+
+## §138 — O Core exige menos trabalho: a verificação reduzida, com prova medida
+
+(Os números §136 e §137 estão na branch `fix/ensaio-eco-136`, fora desta base.)
+
+A Capivara não se simplifica convencendo os modelos a trabalhar menos: muda-se o
+Core para exigir menos deles. Esta seção registra a redução em cinco etapas,
+cada uma com o seu commit e a medida de antes e de depois
+(`node packages/core/scripts/medir-verificacao.mjs`, cenários em
+`packages/core/test/support/cenarios-de-medicao.ts`).
+
+### 138.1 O que cada estágio faz
+
+- `init` fecha as lacunas com entrevista.
+- `plan` escreve as dependências e as fases numa passada: uma auditoria do plano
+  inteiro, mais uma depois da emenda no máximo. O Core decide o que devolve —
+  `CONTRADICTION` com as duas passagens citadas existindo, `INTERFACE` com o
+  nome dos dois lados, `DEPENDENCY` com o pacote fora de
+  `infrastructure.dependencies` —; o resto é observação do relatório. A
+  pergunta do `plan` tem prazo (`--prazo-da-pergunta`, 10 min); vencido, segue
+  com a leitura recomendada, registrada como suposição. A leitura do protocolo
+  é tolerante num lugar só (`contract/protocolo.ts`): a embalagem sai, o
+  conteúdo fica, e o ilegível nunca é aprovação.
+- `build` prepara o ambiente uma vez, constrói, valida e entrega, sem
+  perguntar. Uma política de teste só para executor e verificador
+  (`prompts/test-policy.ts`): nenhum critério exige teste próprio. Até 2
+  critérios por task.
+
+### 138.2 A fase no build
+
+- A suíte roda no máximo uma vez por estado (código e ambiente).
+- A revisão da fase (G3) é uma por execução, numa chamada: sem correção de
+  formato e sem segunda sessão. Ilegível ou caída é `verificação inconclusiva`.
+- O validador é coautor: o que a implementação não fechou — a suíte vermelha e
+  o achado da revisão — vai primeiro ao reparo do verificador que diagnosticou
+  (com o handoff, e retomando a sessão dele quando o provider garante), e o
+  executor vem depois. O reparo é provado pela suíte; sem segunda revisão, o
+  achado reparado sai como pendência.
+- O orçamento esgotado, a escada sem saída e o defeito que o diagnóstico diz ser
+  do documento (pacote de reparo documental, §125 H) entregam a fase com as
+  pendências ditas, e o build segue.
+- Param o build (`falhou`) só: a sessão que não entrega resultado utilizável, a
+  credencial recusada, o limite de uso esgotado, o Git movido por um agente, a
+  árvore principal alterada durante o paralelo e o commit recusado.
+- Não há G4 por fase. Saíram com ele o roteirista e a triagem por fase, a
+  contestação do roteiro, o fluxo adiado no build (§127), o fora-do-navegador
+  por fase (§133), a prova pela suíte (§134), a oscilação G3×G4 (§127) e a
+  exigência de histórico do G4 no fim.
+
+### 138.3 A entrega
+
+A aceitação operacional, na cópia limpa, instala, migra e sobe o produto e
+percorre os fluxos essenciais do esqueleto uma vez, todos, pelos meios da
+plataforma (navegador ou terminal), pelo gate de fluxos de sempre e sem
+triagem. O roteiro escrito volta ao projeto e é reaproveitado. O defeito do
+produto (não instala, não sobe, um fluxo reprova) volta ao executor; a falha da
+ferramenta do harness (runner ausente, roteiro que falha por si, porta do gate)
+é `verificação inconclusiva`, sem reparo.
+
+Os estados finais:
+
+| estado | quando | código |
+|---|---|---|
+| `aceito` | todas as fases aceitas e a aceitação limpa | 0 |
+| `entregue com pendências` | alguma fase ou a aceitação deixou um defeito sem prova de correção | 3 |
+| `verificação inconclusiva` | uma verificação não pôde ser feita ou lida (inclusive fluxos declarados e não percorridos: `--no-acceptance`, `--no-flows`) | 3 |
+| `falhou` | o build parou antes do fim | 2 (1 antes das fases) |
+
+### 138.4 O orçamento de prova
+
+`packages/core/test/architecture/orcamento-de-prova.spec.ts` roda os cenários
+da medição e falha quando o motor dispara, em algum papel, mais chamadas do que
+o fim da etapa 4 mediu. Conta as chamadas que chegam aos provedores falsos,
+nunca o texto dos prompts. As garantias G-1 a G-4 do catálogo continuam: gastar
+menos nunca vale deixar de pegá-las.
+
+### 138.5 Contrato
+
+Planos e runs da 0.7.10 continuam lidos. A memória do plano ignora os campos
+antigos de aprovação por fase; as evidências G4 antigas não valem mais na
+revalidação; o ledger de fases fechadas passa a guardar `estado` e
+`pendencias`, e o campo `foraDoNavegador` antigo é lido e não é mais escrito.
+Na API: `decideStandoff`, `maxRehearsalRounds` e `maxCriteriaPerRehearsalBatch`
+saíram de `InitOptions`; `PhaseRunOptions.flows` ficou só com `workflows` e
+`resolveStart`; `BuildOutcome` ganhou `estado`, `pendencias` e o código 3.

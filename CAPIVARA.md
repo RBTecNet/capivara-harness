@@ -16,6 +16,18 @@ implementar qualquer coisa sobre documentação, leia §26 primeiro.
 
 Uma mudança de comportamento começa no plano, não no código.
 
+## O código funcional vem antes do fail-closed
+
+O objetivo é entregar código funcional com qualquer modelo capaz, a um custo
+proporcional à complexidade do pedido (§138). Quando os dois princípios puxam
+para lados opostos, este vence o fail-closed:
+
+- **Não se simplifica a Capivara convencendo os modelos a trabalhar menos.** Muda-se o Core para que ele exija menos deles.
+- **Fail-closed vale para o que se prova falso**: protocolo ilegível nunca é aprovação, citação inventada nunca bloqueia, suíte vermelha nunca é verde. **Não vale para o que não se conseguiu provar dentro do orçamento**: isso é dito como pendência, e a entrega segue.
+- **Verificação além do orçamento é defeito do harness**, não do produto nem do modelo. A medida é `node packages/core/scripts/medir-verificacao.mjs`, e `packages/core/test/architecture/orcamento-de-prova.spec.ts` falha quando o motor pede mais chamadas do que a redução mediu.
+- O build termina em `aceito`, `entregue com pendências`, `verificação inconclusiva` ou `falhou`; só `falhou` para antes do fim.
+- As garantias G-1 a G-4 do catálogo não se trocam por economia.
+
 ## Comandos
 
 | Comando | O que faz |

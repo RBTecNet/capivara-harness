@@ -29,11 +29,16 @@
  * A fase que cabe inteira nesses limites vai numa sessão só, como sempre foi.
  */
 
-import { MAX_CRITERIA_PER_PHASE } from "../authoring/index.js";
 import { parsePhaseFragment } from "../contract/index.js";
 
+/*
+ * 15 critérios por parte, como sempre foi. O número nasceu como um quarto do
+ * teto antigo por fase (60); desde que o teto caiu para 30 (etapa 3 da redução)
+ * ele é fixo aqui, para os planos publicados antes não passarem a ser partidos
+ * em mais sessões.
+ */
 export const ORCAMENTO_DA_PARTE = {
-  criterios: MAX_CRITERIA_PER_PHASE / 4,
+  criterios: 15,
   caracteres: 48_000,
   pisoDasTasks: 16_000,
 } as const;

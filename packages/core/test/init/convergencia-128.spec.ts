@@ -37,7 +37,7 @@ import type { AgentCall } from "../../src/init/index.js";
 import type { Question } from "../../src/interview/index.js";
 import { NO_QUESTIONS, approve, fakeAgent, reject } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
-import { arquiteturaSemTestes, faseSemTestes } from "../support/sem-testes.js";
+import { arquiteturaSemTestes, faseSemTestes, noTetoDeCriterios } from "../support/sem-testes.js";
 
 const fixture = (nome: string): string => readFileSync(join(import.meta.dirname, "..", "fixtures", nome), "utf8");
 
@@ -54,10 +54,11 @@ const V5 = arquiteturaSemTestes(fixture("parallel-lab-128.architecture-v5.json")
 const V6 = arquiteturaSemTestes(fixture("parallel-lab-128.architecture-v6.json"));
 const FASES_DO_RUN = JSON.parse(fixture("parallel-lab-128.fases.json")) as { r1: Record<string, string>; r3: Record<string, string> };
 const FASES = {
-  r1: Object.fromEntries(Object.entries(FASES_DO_RUN.r1).map(([numero, texto]) => [numero, faseSemTestes(texto)])),
-  r3: Object.fromEntries(Object.entries(FASES_DO_RUN.r3).map(([numero, texto]) => [numero, faseSemTestes(texto)])),
+  // No teto de critérios de hoje (etapa 3 da redução), consolidadas sem perder texto.
+  r1: Object.fromEntries(Object.entries(FASES_DO_RUN.r1).map(([numero, texto]) => [numero, noTetoDeCriterios(faseSemTestes(texto))])),
+  r3: Object.fromEntries(Object.entries(FASES_DO_RUN.r3).map(([numero, texto]) => [numero, noTetoDeCriterios(faseSemTestes(texto))])),
 };
-const EMENDA_P1 = fixture("parallel-lab-128.p1-emenda-rodada2.md");
+const EMENDA_P1 = noTetoDeCriterios(fixture("parallel-lab-128.p1-emenda-rodada2.md"));
 
 /** A oração da Task 10 da fase 3 que o I-16 deixava passar. */
 const ORACAO_DE_TESTE = " e concluir a cobertura automatizada própria do módulo";

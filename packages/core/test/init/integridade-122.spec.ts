@@ -35,6 +35,7 @@ import type { AgentCall } from "../../src/init/index.js";
 import type { Question } from "../../src/interview/index.js";
 import { ARCHITECTURE, PHASE_1, PHASE_2, SKELETON, approve, fakeAgent, reject, skeletonPath } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
+import { noTetoDeCriterios } from "../support/sem-testes.js";
 
 let projectRoot = "";
 beforeEach(async () => {
@@ -95,10 +96,10 @@ const TASK_DE_TESTES_FIX = "Acrescentar em Phase 2 uma task equivalente a P2.T9/
 
 /* ---------- as versões da fase 2 ---------- */
 
-const COM_PREFIXO = PHASE_2.replace(
+const COM_PREFIXO = noTetoDeCriterios(PHASE_2.replace(
   "    - Datas sobrepostas no mesmo quarto devolvem erro e não persistem nada",
   "    - Datas sobrepostas no mesmo quarto devolvem erro e não persistem nada\n    - `src/api/reservas.ts` declara `export const prefixo = '/reservas'` e a fundação monta o Router em `/api` + `prefixo`",
-);
+));
 const COM_PREFIXO_E_409 = COM_PREFIXO.replace("devolvem erro e não persistem nada", "respondem 409 e nada é persistido");
 const COM_STATUS = PHASE_2.replace("Uma reserva nova nasce com status pendente", "A resposta 201 traz status pendente");
 const revisao = (base: string, n: number) => base.replace("Uma reserva nova nasce com status pendente", `Uma reserva nova nasce com status pendente (revisão ${n})`);
@@ -120,14 +121,15 @@ const COM_REQUISITO = PHASE_2.replace(
 );
 
 /** O lado da APLICAÇÃO, que é produto e fica: a aplicação aceita o banco descartável (§126, §129). */
-const COM_LADO_DA_APLICACAO = PHASE_2.replace(
+const COM_LADO_DA_APLICACAO = noTetoDeCriterios(PHASE_2.replace(
   "    - Datas sobrepostas no mesmo quarto devolvem erro e não persistem nada",
   "    - Datas sobrepostas no mesmo quarto devolvem erro e não persistem nada\n    - A aplicação aceita um banco descartável apontado por DATABASE_PATH, sem ler nem migrar o banco do .env",
-);
+));
 
+// No teto de critérios (etapa 3): os dois critérios do produto juntos, e o marcador numa linha própria.
 const COM_MARCADOR = PHASE_2.replace(
-  "    - Datas sobrepostas no mesmo quarto devolvem erro e não persistem nada",
-  "    - Datas sobrepostas no mesmo quarto devolvem erro e não persistem nada\n    - [NEEDS DECISION] o `rotas.ts` do módulo exporta `prefixo` ou `registrarRotasApi(app)` deriva o prefixo do diretório?",
+  "    - Uma reserva nova nasce com status pendente\n    - Datas sobrepostas no mesmo quarto devolvem erro e não persistem nada",
+  "    - Uma reserva nova nasce com status pendente; datas sobrepostas no mesmo quarto devolvem erro e não persistem nada\n    - [NEEDS DECISION] o `rotas.ts` do módulo exporta `prefixo` ou `registrarRotasApi(app)` deriva o prefixo do diretório?",
 );
 
 async function init(pedido = request) {

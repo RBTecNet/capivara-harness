@@ -732,10 +732,11 @@ describe("gate de prontidão", () => {
   });
 
   it.each([
-    { tasks: 1, criteria: 5, passed: false, detail: "P1.T1: 5 critérios; limite 4" },
+    // Os tetos da etapa 3 da redução: 2 critérios por task, 30 por fase.
+    { tasks: 1, criteria: 3, passed: false, detail: "P1.T1: 3 critérios; limite 2" },
     { tasks: 16, criteria: 1, passed: false, detail: "16 tasks; limite 15" },
-    { tasks: 15, criteria: 5, passed: false, detail: "75 critérios; limite 60" },
-    { tasks: 15, criteria: 4, passed: true, detail: "" },
+    { tasks: 15, criteria: 3, passed: false, detail: "45 critérios; limite 30" },
+    { tasks: 15, criteria: 2, passed: true, detail: "" },
   ])("dimensionamento com $tasks tasks e $criteria critérios por task", ({ tasks, criteria, passed, detail }) => {
     const body = Array.from({ length: tasks }, (_, index) =>
       `- [ ] **Task:** Construir item ${index + 1}\n  - **Acceptance criteria:**\n` +

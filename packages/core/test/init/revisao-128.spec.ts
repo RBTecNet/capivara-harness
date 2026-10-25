@@ -21,14 +21,14 @@ import type { AgentCall } from "../../src/init/index.js";
 import type { Question } from "../../src/interview/index.js";
 import { NO_QUESTIONS, approve, fakeAgent } from "../support/fake-agent.js";
 import type { ScriptStep } from "../support/fake-agent.js";
-import { arquiteturaSemTestes, faseSemTestes } from "../support/sem-testes.js";
+import { arquiteturaSemTestes, faseSemTestes, noTetoDeCriterios } from "../support/sem-testes.js";
 
 const fixture = (nome: string): string => readFileSync(join(import.meta.dirname, "..", "fixtures", nome), "utf8");
 const PEDIDO = fixture("parallel-lab-128.pedido.md");
 const ESQUELETO = fixture("parallel-lab-128.skeleton.json");
 // O texto do run sem o "o módulo possui testes automatizados próprios" que a §129 recusa (`sem-testes.ts`).
 const V5 = arquiteturaSemTestes(fixture("parallel-lab-128.architecture-v5.json"));
-const FASES = { r1: Object.fromEntries(Object.entries((JSON.parse(fixture("parallel-lab-128.fases.json")) as { r1: Record<string, string> }).r1).map(([numero, texto]) => [numero, faseSemTestes(texto)])) };
+const FASES = { r1: Object.fromEntries(Object.entries((JSON.parse(fixture("parallel-lab-128.fases.json")) as { r1: Record<string, string> }).r1).map(([numero, texto]) => [numero, noTetoDeCriterios(faseSemTestes(texto))])) };
 const P3_SEM_TESTE = FASES.r1["3"]!.replace(" e concluir a cobertura automatizada própria do módulo", "");
 const faseR1 = (numero: number): string => (numero === 3 ? P3_SEM_TESTE : FASES.r1[String(numero)]!);
 

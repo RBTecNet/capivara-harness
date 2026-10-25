@@ -60,3 +60,19 @@ export function arquiteturaSemTestes(json: string): string {
   };
   return JSON.stringify(limpa(JSON.parse(json)), null, 2);
 }
+
+/**
+ * A fase de um run real no teto de critérios de hoje (etapa 3 da redução: 2 por
+ * task), consolidada como o escritor faria: o primeiro critério fica, e os
+ * seguintes viram um só, juntos por "; ". Nenhum texto se perde — o que um
+ * cenário procura por trecho continua lá. Os runs de então tinham 2 a 3
+ * critérios por task, e os cenários que os usam provam outro mecanismo.
+ */
+export function noTetoDeCriterios(fase: string, teto = 2): string {
+  return fase.replace(/( {2}- \*\*Acceptance criteria:\*\*\n)((?: {4}- [^\n]*\n?)+)/g, (_bloco, cabecalho: string, itens: string) => {
+    const linhas = itens.split("\n").filter((linha) => linha.trim() !== "");
+    if (linhas.length <= teto) return `${cabecalho}${itens}`;
+    const juntos = linhas.slice(teto - 1).map((linha) => linha.replace(/^ {4}- /, "")).join("; ");
+    return `${cabecalho}${[...linhas.slice(0, teto - 1), `    - ${juntos}`].join("\n")}\n`;
+  });
+}

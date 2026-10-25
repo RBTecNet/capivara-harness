@@ -3180,9 +3180,15 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
              * critérios". Cada correção obedecia a um teto e quebrava o outro,
              * porque cada uma só sabia do seu.
              */
+            /*
+             * Consolidar antes de dividir (etapa 3 da redução): dividir uma task de
+             * três critérios em duas mantém os três e só acrescenta uma task. O
+             * teto existe para haver menos obrigação a conferir pelo mesmo produto.
+             */
             fix:
-              `uma task com mais de ${MAX_CRITERIA_PER_TASK} critérios está fazendo mais de uma coisa: divida-a em tasks` +
-              ` que façam uma coisa cada, com dois ou três critérios. Nenhuma condição verificável pode desaparecer no corte.` +
+              `uma task tem no máximo ${MAX_CRITERIA_PER_TASK} critérios: junte num só os critérios que provam o mesmo comportamento` +
+              ` e tire o que repete o esqueleto ou outra task; só se sobrarem mais de ${MAX_CRITERIA_PER_TASK} comportamentos distintos,` +
+              ` divida a task. Nenhuma condição do produto pode desaparecer.` +
               ` E a fase inteira não pode passar de ${MAX_TASKS_PER_PHASE} tasks — ela tem ${tasksNaFase} agora: se a divisão` +
               ` estourar esse teto, consolide outras tasks desta fase NA MESMA REESCRITA, até a fase caber nos dois limites` +
               ` ao mesmo tempo. Uma correção que respeita um teto e quebra o outro volta para cá`,

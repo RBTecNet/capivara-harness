@@ -207,7 +207,7 @@ export function architectPrompt(context: ArchitectContext): string {
     "hold in context at once, how many components it touches, how many decisions it would face.",
     "A phase that touches one component through a fixed contract is cheap even with many tasks; a",
     "phase that spans three components with contracts still open is expensive even with four.",
-    `- Up to ${context.maxTasksPerPhase} tasks per phase, each with two or three acceptance criteria (${context.maxCriteriaPerTask} at most).`,
+    `- Up to ${context.maxTasksPerPhase} tasks per phase, each with one or two acceptance criteria (${context.maxCriteriaPerTask} at most).`,
     "  That ceiling is a limit, never a target. Do not merge work that is already complex to fit a",
     "  number, and do not pad a small phase to reach one.",
     "- A phase never needs an architectural decision you did not take. If writing it would require",

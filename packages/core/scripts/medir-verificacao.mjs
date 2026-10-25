@@ -279,6 +279,15 @@ const OBRIGACOES_DE_TESTE = [{ padrao: /positive and negative test cases/i, test
 const PROVA_DO_MODO_DE_FALHA = /test must assert the behaviou?r and failure mode/i;
 const DESCONFIANCA_DA_SUITE = /green suite is not proof/i;
 
+/** O teto de critérios por task e a quantidade pedida, como o prompt do escritor de fase os diz. */
+async function tetoDeCriterios(medida) {
+  const pasta = join(RUNS(medida.raiz), (await listar(RUNS(medida.raiz))).find((nome) => nome.startsWith("init-")) ?? "-", "prompts");
+  const nome = (await listar(pasta)).find((arquivo) => /^authoring\.phase-p01\.writer\.1-1\./.test(arquivo));
+  const prompt = nome ? await readFile(join(pasta, nome), "utf8") : "";
+  const linha = prompt.split("\n").find((cada) => /acceptance criteria per task, \d+ at the very most/.test(cada)) ?? "";
+  return { porTask: Number(/(\d+) at the very most/.exec(linha)?.[1] ?? NaN), linha: linha.trim() };
+}
+
 async function exigenciasDeTeste(medida) {
   const pasta = join(RUNS(medida.raiz), medida.runBuild ?? "-", "prompts");
   const nomes = await listar(pasta);
@@ -447,6 +456,7 @@ for (const funcao of ["garantiaG1", "garantiaG2", "garantiaG3", "garantiaG4"]) {
   garantias.push({ ...garantia, medida: await medirCenario(garantia.cenario) });
 }
 const exigencias = await exigenciasDeTeste(medidas[0]);
+const teto = await tetoDeCriterios(medidas[0]);
 const codigo = await linhasDeCodigo();
 
 const saida = [];
@@ -464,6 +474,7 @@ saida.push(`testes exigidos por critério: ${exigencias.testesPorCriterio}`);
 for (const obrigacao of exigencias.obrigacoes) saida.push(`  ${obrigacao.testes} — ${obrigacao.nome}: «${obrigacao.linha}»`);
 saida.push(`prova obrigatória do modo de falha: ${exigencias.modoDeFalha ? `sim — «${exigencias.modoDeFalha}»` : "não"}`);
 saida.push(`o verificador é instruído a desconfiar da suíte verde: ${exigencias.desconfiancaDaSuite ? `sim — «${exigencias.desconfiancaDaSuite}»` : "não"}`);
+saida.push(`teto de critérios por task no prompt do escritor de fase: ${teto.porTask} — «${teto.linha}»`);
 saida.push(`linhas do prompt do executor que falam de teste e de critério (${exigencias.mencoes.length}):`);
 for (const linha of exigencias.mencoes) saida.push(`  «${linha}»`);
 saida.push("");
@@ -514,6 +525,7 @@ if (saidaJson) {
     };
   }
   numeros.testes = { porCriterio: exigencias.testesPorCriterio, modoDeFalha: exigencias.modoDeFalha !== null, desconfiancaDaSuite: exigencias.desconfiancaDaSuite !== null };
+  numeros.criterios = { tetoPorTask: teto.porTask };
   numeros.garantias = Object.fromEntries(garantias.map((garantia) => [garantia.id, garantia.pega ? `pega: ${mecanismo(garantia.registro)}` : "NÃO PEGA"]));
   numeros.linhas = Object.fromEntries(Object.entries(codigo).map(([grupo, valor]) => [grupo, valor.total]));
   await writeFile(saidaJson, JSON.stringify({ commit, versao, numeros }, null, 2) + "\n");

@@ -21,3 +21,4 @@ export type { CliRoleFlags } from "./commands/options.js";
 export type { ConfigurationState, ProviderListing, ProviderKind } from "./commands/providers.js";
 export { createProgram } from "./cli-program.js";
 export { VERSION } from "./version.js";
+export * from "./aptidao/index.js";

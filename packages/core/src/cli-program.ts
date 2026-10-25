@@ -7,6 +7,8 @@ import { stdin, stdout } from "node:process";
 import { Command } from "commander";
 import { listProviders, renderProviderList } from "./commands/providers.js";
 import { diagnose, renderDiagnosis } from "./commands/doctor.js";
+import { LIMITES_DA_APTIDAO, modoDoPapel, papeisParaProvar, provarAptidao, resumirAptidao, type ResultadoDaAptidao } from "./aptidao/index.js";
+import { ROLE_NAMES } from "./provider/roles.js";
 import { DEFAULT_LIMITS, createAgentBridge } from "./commands/agent.js";
 import { FLOW_REVIEWS } from "./provider/flow-review.js";
 import { ensureApiCredential, registerApiLogin } from "./commands/api-login.js";
@@ -903,6 +905,50 @@ export function createProgram(): Command {
       stdout.write(options.json ? `${JSON.stringify(diagnoses, null, 2)}\n` : `${renderDiagnosis(diagnoses)}\n`);
       process.exitCode = diagnoses.some((diagnosis) => diagnosis.health === "ausente") ? 1 : 0;
     });
+
+  /*
+   * A prova de aptidão: cada modelo configurado faz uma tarefa de um ou
+   * dois minutos pelo mesmo caminho do trabalho real, e o Core confere. Separa o
+   * modelo abaixo do piso (inapto) do provedor instável no momento, antes de um
+   * run longo descobrir isso pela metade.
+   */
+  roleFlags(
+    program
+      .command("aptidao")
+      .description("Prova, antes de gastar, se cada modelo configurado consegue operar no harness")
+      .option("--json", "emite JSON")
+      .option("--tentativas <n>", "tentativas quando a sessão é instável", "2"),
+  ).action(async (flags: CommonFlags & { json?: boolean; tentativas?: string }) => {
+    const roles = rolesFromFlags(flags);
+    const papeis = papeisParaProvar(roles, ROLE_NAMES);
+    if (papeis.length === 0) {
+      process.stderr.write("Nenhum papel configurado. Use --provider e --model, ou --<papel>-provider e --<papel>-model.\n");
+      process.exitCode = 2;
+      return;
+    }
+    const language = flags.language ?? "português do Brasil";
+    const runId = `aptidao-${sha12(`${Date.now()}-${process.pid}`)}`;
+    const cache = process.env.XDG_CACHE_HOME?.trim() || join(process.env.HOME ?? ".", ".cache");
+    const pastaBase = join(cache, "capivara", "aptidao", runId);
+    const tentativas = Math.max(1, Number.parseInt(flags.tentativas ?? "2", 10) || 2);
+    const resultados: (ResultadoDaAptidao & { provider: string; model: string })[] = [];
+    for (const papel of papeis) {
+      const config = roles[papel];
+      const rotulo = `${papel}: ${config.provider} ${config.model}`.trim();
+      if (!flags.json) stdout.write(`Provando ${rotulo}...\n`);
+      const resultado = await provarAptidao({
+        papel,
+        modo: modoDoPapel(papel, config),
+        pastaBase,
+        tentativas,
+        criarPonte: (raiz) => createAgentBridge({ projectRoot: raiz, runId, language, roles, limits: LIMITES_DA_APTIDAO }),
+      });
+      resultados.push({ ...resultado, provider: config.provider, model: config.model });
+      if (!flags.json) stdout.write(`${resumirAptidao(resultado, rotulo)}\n`);
+    }
+    if (flags.json) stdout.write(`${JSON.stringify(resultados, null, 2)}\n`);
+    process.exitCode = resultados.every((resultado) => resultado.veredito === "apto") ? 0 : 1;
+  });
 
   roleFlags(
     program

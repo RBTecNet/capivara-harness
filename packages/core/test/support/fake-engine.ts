@@ -17,10 +17,14 @@ export interface EngineStep {
    * perguntas diferentes: verificar as tasks (gate 3) e redigir o roteiro de um
    * fluxo (gate 4). Sem distinguir as duas, um roteiro responderia à outra.
    */
-  match: { role?: "builder" | "verifier"; phase?: string; attempt?: number; prompt?: string };
-  /** Arquivos que a sessão escreve, relativos à raiz do projeto. */
-  writes?: { path: string; content: string }[];
-  respond: { stdout: string; exitCode?: number; timedOut?: string | null };
+  match: { role?: "builder" | "verifier"; phase?: string; attempt?: number; prompt?: string; purpose?: string; repair?: boolean };
+  /**
+   * Arquivos que a sessão escreve, relativos à raiz do projeto. Como função
+   * quando o que se escreve depende do que já está na árvore da chamada.
+   */
+  writes?: { path: string; content: string }[] | ((call: EngineCall) => Promise<{ path: string; content: string }[]>);
+  /** `stdout` como função quando a resposta depende do código que a sessão leria. */
+  respond: { stdout: string | ((call: EngineCall) => Promise<string>); exitCode?: number; timedOut?: string | null };
   repeat?: boolean;
 }
 
@@ -41,6 +45,8 @@ export function fakeEngine(projectRoot: string, steps: EngineStep[]): FakeEngine
         if (step.match.phase !== undefined && step.match.phase !== call.phase.id) return false;
         if (step.match.attempt !== undefined && step.match.attempt !== call.attempt) return false;
         if (step.match.prompt !== undefined && !call.prompt.includes(step.match.prompt)) return false;
+        if (step.match.purpose !== undefined && step.match.purpose !== call.purpose) return false;
+        if (step.match.repair !== undefined && step.match.repair !== (call.repair === true)) return false;
         return true;
       });
       if (index === -1) {
@@ -50,7 +56,7 @@ export function fakeEngine(projectRoot: string, steps: EngineStep[]): FakeEngine
       if (step.match.attempt === undefined && step.repeat !== true) used.add(index);
 
       // No build paralelo a sessão escreve no worktree da fase, não na raiz.
-      for (const file of step.writes ?? []) {
+      for (const file of typeof step.writes === "function" ? await step.writes(call) : (step.writes ?? [])) {
         const absolute = join(call.root ?? projectRoot, file.path);
         await mkdir(dirname(absolute), { recursive: true });
         await writeFile(absolute, file.content, "utf8");
@@ -58,7 +64,7 @@ export function fakeEngine(projectRoot: string, steps: EngineStep[]): FakeEngine
 
       return {
         exitCode: step.respond.exitCode ?? 0,
-        stdout: step.respond.stdout,
+        stdout: typeof step.respond.stdout === "function" ? await step.respond.stdout(call) : step.respond.stdout,
         stderr: "",
         timedOut: step.respond.timedOut ?? null,
       };

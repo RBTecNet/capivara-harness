@@ -46,6 +46,8 @@ import {
 import type { ScriptStep } from "../support/fake-agent.js";
 import { allDone, fakeEngine, someIncomplete } from "../support/fake-engine.js";
 import type { EngineStep } from "../support/fake-engine.js";
+import { cenarioAppPequeno, cenarioOrcamentoEsgotado, cenarioReparo, garantiaG1, garantiaG2, garantiaG3, garantiaG4 } from "../support/cenarios-de-medicao.js";
+import type { Garantia, ResultadoDoCenario } from "../support/cenarios-de-medicao.js";
 
 const run = promisify(execFile);
 let projectRoot = "";
@@ -1731,4 +1733,73 @@ describe("o run diz quem o executou", () => {
     expect(estado.roles.builder).toEqual({ provider: "codex", model: "gpt-6", effort: "high" });
     expect(estado.roles.verifier.provider).toBe("claude");
   }, 20_000);
+});
+
+/*
+ * O que reduzir a verificação não pode deixar escapar.
+ *
+ * Cada garantia é a cadeia inteira — init, plan, build — com os papéis falsos
+ * lendo a árvore em vez de responder fixo: a revisão diz INCOMPLETE porque o
+ * arquivo não tem a restrição, o fluxo reprova porque o botão não chama a
+ * operação. Elas são pegas na 0.7.10 (G-1 pelo G3, G-2 pelo G4, G-3 pela
+ * auditoria da fase, G-4 pelo G3 com o build parado) e precisam continuar
+ * pegas depois de cada etapa, pelo mecanismo que sobrar. O mecanismo e o
+ * custo de cada uma saem de `scripts/medir-verificacao.mjs`.
+ */
+describe("G-1 a G-4 · as garantias da redução da verificação", () => {
+  const conferir = async (garantia: Garantia): Promise<void> => {
+    try {
+      expect(garantia.pega, `${garantia.id}: ${garantia.detalhe}`).toBe(true);
+    } finally {
+      await rm(garantia.cenario.projectRoot, { recursive: true, force: true });
+    }
+  };
+
+  it("G-1 suíte verde não prova requisito ausente: a revisão da fase aponta a restrição a administradores", async () => {
+    await conferir(await garantiaG1());
+  });
+
+  it("G-2 serviço funcionando não prova fluxo funcionando: o fluxo reprova com o botão Salvar mudo", async () => {
+    await conferir(await garantiaG2());
+  });
+
+  it("G-3 contradição entre decisões do plano: o plan bloqueia, com as duas citações", async () => {
+    await conferir(await garantiaG3());
+  });
+
+  it("G-4 pendência não vira pronto: sem a recuperação de senha o build não termina aceito", async () => {
+    await conferir(await garantiaG4());
+  });
+});
+
+/*
+ * Os cenários que o script de medição conta. Aqui só se confere que eles
+ * terminam como foram desenhados — o número de chamadas é do script.
+ */
+describe("M-01 a M-03 · os cenários medidos", () => {
+  const rodar = async (cenario: () => Promise<ResultadoDoCenario>): Promise<ResultadoDoCenario> => {
+    const resultado = await cenario();
+    await rm(resultado.projectRoot, { recursive: true, force: true });
+    return resultado;
+  };
+
+  it("M-01 a aplicação pequena publica o plano e fecha as quatro fases", async () => {
+    const { plan, build } = await rodar(cenarioAppPequeno);
+    expect(plan?.readiness.ready).toBe(true);
+    expect(build?.exitCode).toBe(0);
+    expect(build?.phases.map((fase) => fase.outcome.status)).toEqual(["complete", "complete", "complete", "complete"]);
+  });
+
+  it("M-02 o executor falha uma vez, o primeiro reparo resolve e o build fecha", async () => {
+    const { build, observado } = await rodar(cenarioReparo);
+    expect(build?.exitCode).toBe(0);
+    const reparou = observado.chamadasDoBuild.some((chamada) => chamada.repair === true || (chamada.role === "builder" && chamada.attempt > 1));
+    expect(reparou, "a P03 passou sem nenhum reparo: o defeito do cenário não foi visto").toBe(true);
+  });
+
+  it("M-03 orçamento esgotado: a fase com o defeito não é aceita", async () => {
+    const { build } = await rodar(cenarioOrcamentoEsgotado);
+    expect(build?.exitCode).not.toBe(0);
+    expect(build?.phases.find((fase) => fase.id === "P03")?.outcome.status).not.toBe("complete");
+  });
 });

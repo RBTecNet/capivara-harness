@@ -1,0 +1,13 @@
+{
+  "parser": "audit",
+  "origem": "laravel/minimax, run init-dc741f0d7b92, auditoria de coerência do plano (attempt 9); o run.json não registra o modelo",
+  "habito": "REJECTED com três CAPIVARA_FINDING e uma CAPIVARA_DECISION, sem a linha CAPIVARA_REASON (item 2)",
+  "esperado": {
+    "legivel": true,
+    "status": "REJECTED",
+    "achados": 3,
+    "ressalvas": 0,
+    "decisoes": 1,
+    "motivo": ""
+  }
+}

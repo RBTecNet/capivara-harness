@@ -1,0 +1,44 @@
+Everything checks out. Let me summarize my findings:
+
+**Task 1** — package.json has all required scripts and dependencies; `.env.example` lists `DB_PATH`, `PORT`, `HOST` (plus `ORIGEM_INTERFACE`) with harmless values; `.gitignore` contains `.env`. Advisory: `PORTA_WEB`/`PORT_WEB` are read by `vite.config.ts`/`scripts/iniciar.ts` but not listed in `.env.example`.
+
+**Task 2** — `src/config/env.ts` exports all four functions with correct defaults; `.env` is the only environment file with content besides `.env.example`; no credentials anywhere in the tree.
+
+**Task 3** — `src/dados/esquema.ts` declares all three tables with the exact required columns and DDL, indexes, unique index and FK with `ON DELETE SET NULL`.
+
+**Task 4** — `abrirBanco` opens/creates the file and directory, applies the schema; no `DROP TABLE`/`DELETE`; preserves existing rows.
+
+**Task 5** — `executarMigracao` exists; `npm run migrate` runs `scripts/migrar.ts` against `config.caminhoBanco()`; idempotency covered by the isolated test.
+
+**Task 6** — All four count functions plus `validarVersaoEsperada` present with correct semantics.
+
+**Task 7** — All validation functions present with correct semantics.
+
+**Task 8** — All response/error shapes present, all messages in pt-BR, `ErroCategoriaEmUso` → 409 with `tarefasVinculadas`.
+
+**Task 9** — `criarServidor`, `registrarRotas`, CORS with OPTIONS → 204, 404 JSON outside `/api`.
+
+**Task 10** — `tokens.css` is the only color source; `global.css` consumes variables; `registrarPagina` exported; theme persisted.
+
+**Task 11** — Sidebar with 4 links, active highlight, responsive menu button; API client with all 5 verbs throwing `ApiErro`.
+
+**Task 12** — **DEFECT**: `Aviso.tsx` never hides itself; auto-expiry only happens if the parent passes `aoFechar`. The documented contract `Aviso(tipo, mensagem)` would leave the notice permanently on screen, breaking `interface.feedbackSucesso`.
+
+**Task 13** — `main.tsx` renders App with sidebar/router/theme toggle; empty state shown; no fictitious data.
+
+**Task 14** — `scripts/iniciar.ts` binds to `config.host()`/`config.porta()` and applies schema; `npm run dev` starts API + Vite; README documents all commands.
+
+TASK 1: DONE — ADVISORY: `PORTA_WEB` e `PORT_WEB` são lidas por `vite.config.ts` (linha 5) e `scripts/iniciar.ts` (linha 115) mas não constam do `.env.example`; a regra ".env.example" pede todas as variáveis lidas — acrescentá-las ao `.env.example` com valores inofensivos (ex.: `PORTA_WEB=5173`) deixaria o arquivo completo sem alterar comportamento.
+TASK 2: DONE
+TASK 3: DONE
+TASK 4: DONE
+TASK 5: DONE
+TASK 6: DONE
+TASK 7: DONE
+TASK 8: DONE
+TASK 9: DONE
+TASK 10: DONE
+TASK 11: DONE
+TASK 12: INCOMPLETE — B1: CRITERION: "`src/web/componentes/Aviso.tsx` renderiza aviso de sucesso e de erro com mensagem em português do Brasil e remove o aviso sozinho poucos segundos depois de exibido"; OBSERVED: `src/web/componentes/Aviso.tsx` (linhas 26-48) não tem estado interno de visibilidade: o `useEffect` das linhas 27-30 apenas agenda `aoFechar?.()`, e o `onClick` do botão "Dispensar aviso" (linha 42) também apenas chama `aoFechar?.()`; sem `aoFechar` o componente renderiza a mensagem para sempre e nunca se remove — o próprio cabeçalho do arquivo (linha 7) afirma "O aviso some sozinho", o que não ocorre sem callback; o contrato publicado em `architecture.md` linha 131 é `Aviso(tipo:'sucesso'|'erro', mensagem)`, sem `aoFechar`, e `project-phases.md` linha 345 exige que a página apenas exiba "o componente `Aviso` com tipo `sucesso` e mensagem" e que "o aviso desaparece sozinho em poucos segundos"; EXPECTED: o aviso se remove sozinho poucos segundos depois de exibido mesmo quando consumido com a assinatura documentada `Aviso(tipo, mensagem)`, isto é, sem obrigar quem usa a passar `aoFechar`; LOCATION: `src/web/componentes/Aviso.tsx`, função `Aviso` (linhas 26-48); HYPOTHESIS: o componente foi escrito como controlado (a remoção depende do pai desmontá-lo) em vez de autoexpirar, e o teste de fluxo `tests/fluxos/componentes.spec.ts` só passa porque `tests/fluxos/bancada.tsx` (linhas 38-44) passa explicitamente `aoFechar={() => setAviso(null)}`, encobrindo a lacuna; FIX: dar ao componente estado interno de exibição (ex.: `const [visivel, setVisivel] = useState(true)`), agendar `setVisivel(false)` no `useEffect` junto com a chamada opcional de `aoFechar`, e devolver `null` quando `visivel` for falso; o botão de dispensa deve chamar `setVisivel(false)` e `aoFechar?.()`; manter `aoFechar` como callback opcional para quem quiser limpar o estado do pai; CHECK: em `tests/fluxos/bancada.tsx` renderizar `<Aviso tipo="sucesso" mensagem="Tarefa criada com sucesso." />` sem `aoFechar` e afirmar em `tests/fluxos/componentes.spec.ts` que `page.locator('.aviso')` fica visível e depois `toBeHidden({ timeout: 6000 })` sem o contador `aoFechar`; comando: `npm run test:fluxos`
+TASK 13: DONE
+TASK 14: DONE

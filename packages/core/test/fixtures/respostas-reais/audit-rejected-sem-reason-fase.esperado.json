@@ -1,0 +1,13 @@
+{
+  "parser": "audit",
+  "origem": "laravel/minimax, run init-dc741f0d7b92, auditoria da Phase 3 (attempt 8); o run.json não registra o modelo",
+  "habito": "REJECTED com seis CAPIVARA_FINDING, duas CAPIVARA_REMARK e uma CAPIVARA_DECISION, sem a linha CAPIVARA_REASON (item 2)",
+  "esperado": {
+    "legivel": true,
+    "status": "REJECTED",
+    "achados": 6,
+    "ressalvas": 2,
+    "decisoes": 1,
+    "motivo": ""
+  }
+}

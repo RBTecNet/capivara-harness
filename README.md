@@ -332,9 +332,9 @@ guardadas como parcial antes da limpeza; a fase volta aos gates normalmente.
 Todos verdes com a árvore suja → um commit por fase. Todos verdes com a árvore
 limpa → a fase já estava implementada. O que a implementação não fechou — a
 suíte vermelha, o achado da revisão — vai primeiro ao reparo do verificador que
-o diagnosticou, e o executor vem depois. O reparo é provado pela suíte; sem
-segunda revisão, o achado reparado fica como pendência nomeada. Esgotados os
-ciclos, a fase é entregue com as pendências ditas, e o build segue.
+o diagnosticou, e o executor vem depois. O reparo é provado pela suíte, e o
+achado reparado volta à revisão. Esgotada a escada, a fase falha com o defeito
+exato, e o build para, retomável.
 
 Os fluxos do esqueleto são percorridos **uma vez, na aceitação final**, numa
 cópia limpa do projeto: cada fluxo vira um roteiro, escrito por uma sessão que
@@ -397,7 +397,7 @@ fase, por padrão. Nessa sessão separada, o verificador pode corrigir código,
 fortalecer testes e instalar as dependências declaradas do projeto que o
 construtor não conseguiu preparar — nunca uma que a infraestrutura aprovada não
 declare (§129). Depois, o Core executa novamente a suíte; o reparo
-de um achado da revisão, sem segunda revisão, fica como pendência nomeada. O
+de um achado da revisão volta à revisão, que relê o que estava aberto. O
 reparador não aprova sua própria alteração nem faz commits. `--max-verifier-repairs 0` desliga os reparos;
 valores de 1 a 10 definem o orçamento por fase. Com API direta, o verificador
 fornece orientação, e o construtor continua responsável pelas alterações.
@@ -522,9 +522,10 @@ Nenhum dos dois aparece em `argv`, onde ficariam visíveis em `ps`.
 
 | Código | Significado |
 |---:|---|
-| 0 | concluído |
+| 0 | aceito |
 | 1 | erro de contrato, configuração ou preflight |
-| 2 | pausado e **retomável** |
+| 2 | falhou: pausado e **retomável** |
+| 3 | verificação inconclusiva: uma verificação não pôde rodar, dita com o porquê |
 
 ## Desenvolvimento
 

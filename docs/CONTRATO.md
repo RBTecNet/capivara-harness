@@ -21,11 +21,12 @@ Três regras atravessam os três estágios:
    decide por ele uma questão de produto.
 2. **O objetivo é concluir.** Cada estágio procura o caminho para terminar dentro
    dos limites que já existem; parar é o último recurso, sempre retomável e com
-   diagnóstico. Nunca se aprova o que não foi verificado: o que não se provou é
-   entregue como pendência nomeada, nunca como aceito.
+   diagnóstico. Nunca se aprova o que não foi verificado: o que não se provou não
+   é aceito — a fase falha com a causa exata, e a verificação que não pôde rodar é
+   dita como inconclusiva, com o porquê.
 3. **Quem escreve não aprova o que escreveu.** Escritor, auditor e verificador são
    sessões e papéis separados; o reparo é provado pela suíte, e o achado reparado
-   que nenhuma leitura reviu fica como pendência.
+   volta à revisão, que relê o que estava aberto.
 
 ## Fluxograma geral
 
@@ -333,11 +334,11 @@ flowchart TD
    reparo do verificador que diagnosticou, em sessão própria, e o executor vem
    depois, recebendo todas as pendências de uma vez; o engine que não terminou vai
    ao executor; o conflito do paralelo, à conciliação. O verificador não valida o
-   próprio reparo: ele é provado pela suíte, e o achado reparado, sem segunda
-   revisão, fica como pendência. Orçamentos: 3 ciclos por fase, 6 reparos por
-   ciclo, 2 por gate, 3 por defeito, reparos do verificador configuráveis (1 por
-   padrão com verificador por CLI). Esgotado o orçamento, ou sem estratégia, a
-   fase é entregue com as pendências ditas, e o build segue.
+   próprio reparo: ele é provado pela suíte, e o achado reparado volta à revisão.
+   Orçamentos: 3 ciclos por fase, 6 reparos por ciclo, 2 por gate, 3 por defeito,
+   reparos do verificador configuráveis (1 por padrão com verificador por CLI).
+   Esgotado o orçamento, sem estratégia, ou num ciclo sem progresso em nenhum
+   defeito, a fase falha com o defeito e a evidência, e o build para, retomável.
 7. **Dependências**: o executor, o reparo, o G2 e a aceitação instalam só o que a
    infraestrutura aprovada e os manifestos declaram. Nunca acrescentam, trocam nem
    atualizam uma dependência; a necessidade comprovada de uma não prevista é dita
@@ -391,7 +392,7 @@ ficou verde; a fase que uma versão anterior fechou sem aceitar volta a ser veri
 | 0 | aceito |
 | 1 | erro de contrato, configuração ou preflight |
 | 2 | falhou: pausado e retomável |
-| 3 | entregue sem ser aceito: com pendências ou com a verificação inconclusiva |
+| 3 | verificação inconclusiva: uma verificação não pôde rodar, dita com o porquê |
 
 Toda parada diz o que estava em aberto, o que foi tentado e como retomar. Nada do que
 foi publicado ou aprovado se perde numa parada.

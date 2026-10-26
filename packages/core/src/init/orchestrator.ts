@@ -33,7 +33,8 @@ import { appendEvent, artifactPaths, createRunState, ensureArtifactTree, readEve
 import type { RunStage } from "../state/index.js";
 import { detectRateLimit, planWait } from "../loop/ratelimit.js";
 import { renderEnvironmentPlan } from "../loop/environment-plan.js";
-import { inspectProject, summarizeInventory } from "./inventory.js";
+import { sondasDoRuntimeQueFalham, type PrerequisiteStatus } from "../loop/prerequisites.js";
+import { ambienteDoHarness, descreverAmbiente, inspectProject, summarizeInventory } from "./inventory.js";
 import { decisoesComoMemorias, renderLibraryBlock, type McpDocument, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { INIT_ARTIFACTS, evaluateReadiness } from "./readiness.js";
 import { decisaoDoAuditorComoFinding, perguntaDoAuditor } from "../interview/index.js";
@@ -598,6 +599,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const lacunasDecididas = new Set<string>();
   /** Marcadores de engenharia já devolvidos ao escritor uma vez (§122); se voltarem, a pendência é preservada e perguntada. */
   const marcadoresDevolvidos = new Set<string>();
+  /** A arquitetura já voltou uma vez pela sonda do runtime que a máquina não satisfaz (`sondasImpossiveis`). */
+  let sondasDevolvidas = false;
   const marcadorDaPergunta = new Map<string, string>();
 
   /*
@@ -1541,15 +1544,18 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     if (contratoAtual !== null && !contratoAtual.ok) {
       announce(`  a arquitetura guardada não passa no contrato atual (${contratoAtual.defects.map((defeito) => defeito.problem).join("; ")}); vou desenhá-la de novo`);
     }
-    if (guardada && mesmaOrigem && contratoAtual?.ok === true) {
+    const reaproveitavel = guardada !== null && mesmaOrigem && contratoAtual?.ok === true;
+    const impossiveisDaGuardada = reaproveitavel ? await sondasImpossiveis(guardada.architecture) : [];
+    if (reaproveitavel && impossiveisDaGuardada.length === 0) {
       announce("  arquitetura reaproveitada de uma execução anterior: esqueleto e decisões não mudaram");
       await event("authoring", "architecture", "complete", "reaproveitada: esqueleto e decisões não mudaram");
       await publicarArquitetura(guardada.architecture, autoridade);
       return guardada.architecture;
     }
+    if (impossiveisDaGuardada.length > 0) announce("  a arquitetura guardada tem sonda que esta máquina não satisfaz; vou desenhá-la de novo com o achado");
 
     await event("authoring", "architecture", "started");
-    const desenhada = await desenharArquitetura({});
+    const desenhada = impossiveisDaGuardada.length > 0 ? await devolverPelasSondas(impossiveisDaGuardada, {}, "writer") : await desenharArquitetura({});
     const auditada = await auditarArquitetura(desenhada);
     await publicarArquitetura(auditada, autoridade);
     return auditada;
@@ -1583,6 +1589,8 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }
       for (const conserto of lida.applied) announce(`    arquitetura: ${conserto}`);
       if (guardada === null) memoria.guardarArquitetura(prompt, saida);
+      const impossiveis = await sondasImpossiveis(lida.architecture);
+      if (impossiveis.length > 0) return await devolverPelasSondas(impossiveis, extras, papel);
       return lida.architecture;
     }
     /*
@@ -1603,6 +1611,46 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         "O esqueleto e as decisões continuam em disco; nada se perdeu. Verifique os modelos dos papéis writer e auditor e rode `capivara plan` de novo."),
       runId,
     );
+  }
+
+  /**
+   * A sonda do runtime que nenhum build satisfaz, conferida antes de publicar.
+   *
+   * As sondas rodam com o Node do harness, e o build não troca de Node nem de
+   * npm: a sonda que exige outra série (`principal===22` numa máquina com Node
+   * 25) parava o build no preflight, depois de sessões inteiras de instalação
+   * que não tinham como satisfazê-la. Aqui ela roda como o build a rodaria, sem
+   * modelo nenhum. A arquitetura volta UMA vez com o achado; se insistir, o
+   * plano para com a mesma frase.
+   */
+  async function sondasImpossiveis(arquitetura: Architecture): Promise<string[]> {
+    const falharam = await sondasDoRuntimeQueFalham(arquitetura.infrastructure.requirements, { cwd: options.projectRoot });
+    if (falharam.length === 0) return [];
+    const maquina = descreverAmbiente(await ambienteDoHarness());
+    return falharam.map((sonda) => `a sonda ${comoSonda(sonda)} exige o que a máquina não tem: o harness roda ${maquina}`);
+  }
+  function comoSonda(sonda: PrerequisiteStatus): string {
+    const comando = [sonda.binary, ...(sonda.checkArgs ?? [])].map((parte) => (/[\s"'`]/u.test(parte) ? JSON.stringify(parte) : parte)).join(" ");
+    return `${sonda.technology} (\`${comando}\`)`;
+  }
+  async function devolverPelasSondas(
+    impossiveis: string[],
+    extras: Parameters<typeof desenharArquitetura>[0],
+    papel: "writer" | "auditor",
+  ): Promise<Architecture> {
+    if (sondasDevolvidas) {
+      await event("authoring", "architecture", "blocked", impossiveis.join("; "));
+      throw new InitBlockedError(
+        diagnostico("architecture.md", impossiveis,
+          "A sonda de versão confere um mínimo (>=) do Node e do npm que o harness roda. Se o pedido exige outra versão, rode a Capivara com esse Node; senão, rode `capivara plan` de novo."),
+        runId,
+      );
+    }
+    sondasDevolvidas = true;
+    announce(`  ${impossiveis.length} sonda(s) da arquitetura exigem o que esta máquina não tem; devolvendo ao arquiteto, uma vez`);
+    registrarEstrategia("architecture.md", "devolução ao arquiteto: sonda do runtime que esta máquina não satisfaz");
+    await event("authoring", "architecture", "retry", impossiveis.join("; "));
+    return await desenharArquitetura({ ...extras, defects: impossiveis }, papel);
   }
 
   /**

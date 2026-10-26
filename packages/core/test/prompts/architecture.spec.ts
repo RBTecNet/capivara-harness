@@ -38,8 +38,11 @@ describe("o prompt do arquiteto", () => {
     expect(prompt).toContain("A phase never needs an architectural decision you did not take");
   });
 
-  it("não inventa versão nem pacote, não prescreve teste e não escreve código", () => {
-    expect(prompt).toContain("Never invent a version or a package");
+  it("não inventa pacote, adota a versão instalada, confere mínimo, não prescreve teste e não escreve código", () => {
+    expect(prompt).toContain("Never invent a package that no source");
+    expect(prompt).toContain("a runtime installed on the machine takes the");
+    expect(prompt).toContain("A version probe checks a minimum (>=), never an exact series nor a ceiling");
+    expect(prompt).toContain("The build cannot change the Node.js and npm the harness runs");
     expect(prompt).toContain("Prescribe tests, test files, test names, validation procedures or a testing strategy");
     expect(prompt).toContain("Write application code");
   });

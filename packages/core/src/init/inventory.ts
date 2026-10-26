@@ -7,14 +7,45 @@
  * real e caro do harness anterior.
  *
  * Arquivos de segredo nunca são lidos: a existência é registrada, o conteúdo não.
+ *
+ * Da máquina, só os runtimes que o próprio harness usa: o Node dele e o npm que
+ * ele resolve. É com eles que as sondas de prontidão rodam, e o build não os
+ * troca — o modelo que não sabe disso escolhe outra versão e escreve uma sonda
+ * que nenhuma preparação satisfaz.
  */
 
+import { execFile } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
+import { promisify } from "node:util";
+import { runtimeEnvironment } from "../provider/runtime-env.js";
+
+const run = promisify(execFile);
 
 export interface InventoryEntry {
   path: string;
   bytes: number;
+}
+
+/** O Node que roda o harness e o npm que ele resolve; `npm` é null quando não há. */
+export interface AmbienteDoHarness {
+  node: string;
+  npm: string | null;
+}
+
+let ambiente: Promise<AmbienteDoHarness> | null = null;
+
+/** Perguntado uma vez por processo: o Node não muda enquanto o harness roda. */
+export function ambienteDoHarness(): Promise<AmbienteDoHarness> {
+  ambiente ??= run("npm", ["--version"], { env: runtimeEnvironment(), timeout: 5_000 })
+    .then(({ stdout }) => stdout.trim() || null, () => null)
+    .then((npm) => ({ node: process.version.replace(/^v/u, ""), npm }));
+  return ambiente;
+}
+
+/** "Node 25.9.0 / npm 11.12.1": como o achado da sonda impossível nomeia a máquina. */
+export function descreverAmbiente(ambienteDaMaquina: AmbienteDoHarness): string {
+  return `Node ${ambienteDaMaquina.node} / npm ${ambienteDaMaquina.npm ?? "ausente"}`;
 }
 
 export interface Inventory {
@@ -25,6 +56,8 @@ export interface Inventory {
   /** Arquivos de segredo: registrados pela existência, nunca pelo conteúdo. */
   secretsPresent: string[];
   truncated: boolean;
+  /** Os runtimes que o harness fornece às sondas. */
+  runtime?: AmbienteDoHarness;
 }
 
 const IGNORED_DIRECTORIES = new Set([
@@ -93,12 +126,16 @@ export async function inspectProject(projectRoot: string): Promise<Inventory> {
   await walk(projectRoot, 0);
   files.sort((left, right) => left.path.localeCompare(right.path));
 
-  return { empty: files.length === 0, files, manifests, secretsPresent, truncated };
+  return { empty: files.length === 0, files, manifests, secretsPresent, truncated, runtime: await ambienteDoHarness() };
 }
 
 /** Resumo compacto para o prompt. O modelo recebe o mapa, não o repositório. */
 export function summarizeInventory(inventory: Inventory): string {
-  if (inventory.empty) return "O diretório do projeto está vazio: não há stack, código nem convenção a descobrir.";
+  const maquina = inventory.runtime
+    ? `Ambiente da máquina: o harness roda Node.js ${inventory.runtime.node} e ${inventory.runtime.npm ? `npm ${inventory.runtime.npm}` : "nenhum npm junto dele"}. ` +
+      "As sondas de prontidão rodam com esse Node e esse npm, e o build não os troca."
+    : "";
+  if (inventory.empty) return ["O diretório do projeto está vazio: não há stack, código nem convenção a descobrir.", ...(maquina ? [maquina] : [])].join("\n");
   const lines = [`${inventory.files.length} arquivo(s)${inventory.truncated ? " (listagem truncada)" : ""}.`];
   if (inventory.manifests.length > 0) {
     lines.push("Manifestos encontrados:");
@@ -107,5 +144,6 @@ export function summarizeInventory(inventory: Inventory): string {
   if (inventory.secretsPresent.length > 0) {
     lines.push(`Arquivos de segredo presentes (conteúdo NÃO lido): ${inventory.secretsPresent.join(", ")}`);
   }
+  if (maquina) lines.push(maquina);
   return lines.join("\n");
 }

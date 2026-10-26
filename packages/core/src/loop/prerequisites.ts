@@ -11,6 +11,7 @@
  */
 
 import { execFile } from "node:child_process";
+import { basename } from "node:path";
 import { promisify } from "node:util";
 import { renderEscolhaNumerada, type EscolhaNumerada } from "./escolha.js";
 import type { EnvironmentRequirement } from "../contract/environment.js";
@@ -131,6 +132,33 @@ export async function checkPrerequisites(prerequisites: readonly Prerequisite[],
     } else statuses.push({ ...prerequisite, present: path !== null, path });
   }
   return statuses;
+}
+
+/**
+ * A sonda confere só o runtime que o próprio harness fornece — o Node dele e o
+ * npm que ele resolve —, e nada do projeto? `node --version`, `npm --version`,
+ * ou um `node -e` que só lê `process.version(s)`. A sonda que lê pacote
+ * (`require`, `import`, `npm exec`) só passa depois de a preparação do build
+ * instalar o que o plano declara, e não é desta conta.
+ */
+export function sondaDoRuntimeDoHarness(requisito: EnvironmentRequirement): boolean {
+  const binario = basename(requisito.binary);
+  const args = requisito.checkArgs ?? [];
+  if (binario !== "node" && binario !== "npm") return false;
+  if (args.length === 1 && (args[0] === "--version" || args[0] === "-v")) return true;
+  if (binario !== "node" || args.length !== 2 || !["-e", "--eval", "-p", "--print"].includes(args[0]!)) return false;
+  return /\bprocess\.versions?\b/u.test(args[1]!) && !/\brequire\s*\(|\bimport\b|\bcreateRequire\b/u.test(args[1]!);
+}
+
+/**
+ * As sondas do runtime do harness que falham nesta máquina, rodadas como o
+ * build as roda (o Node do harness à frente do PATH). Nenhum build satisfaz uma
+ * delas: o build não troca o Node nem o npm que o harness usa.
+ */
+export async function sondasDoRuntimeQueFalham(requisitos: readonly EnvironmentRequirement[], options: { cwd?: string } = {}): Promise<PrerequisiteStatus[]> {
+  const doRuntime = requisitos.filter(sondaDoRuntimeDoHarness);
+  if (doRuntime.length === 0) return [];
+  return (await checkPrerequisites(doRuntime, options)).filter((status) => !status.present);
 }
 
 export function describeMissing(statuses: readonly PrerequisiteStatus[], systemInstallAllowed: boolean): string {

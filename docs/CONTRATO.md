@@ -176,7 +176,12 @@ flowchart TD
    runner da stack, Playwright para interface web), serviços, bancos,
    compatibilidade, pré-condições e sondas de prontidão, cada item com a autoridade
    da escolha — e a divisão de fases que vale. Toda fase cobre algo; o goal de uma
-   fase promete só o que os componentes dela entregam.
+   fase promete só o que os componentes dela entregam. Sem versão no pedido, o
+   runtime da máquina vale com a versão instalada (o inventário diz o Node e o npm
+   que o harness roda), e a sonda de versão confere um mínimo. As sondas desse
+   Node e desse npm rodam antes de a arquitetura valer, como o build as rodaria e
+   sem modelo: a que a máquina não satisfaz volta ao arquiteto uma vez; se ele
+   insistir, o `plan` para com a sonda e as versões da máquina.
 2. **Fases**, uma chamada por fase, em paralelo, cada uma vendo só a sua fatia. Até
    15 tasks por fase, até 2 critérios por task e 30 por fase, dimensionadas pela
    complexidade efetiva para um executor econômico de contexto pequeno. As tasks

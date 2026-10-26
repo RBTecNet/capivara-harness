@@ -291,9 +291,9 @@ describe("§133 · o build de um produto desktop com fluxos declarados", () => {
     // O que não se percorreu é dito, com o trecho do contrato: nunca aceito.
     expect(outcome.exitCode).toBe(3);
     expect(outcome.estado).toBe("verificação inconclusiva");
-    const pendencias = (outcome.pendencias ?? []).join("\n");
-    expect(pendencias).toContain("o fluxo 1 não foi percorrido");
-    expect(pendencias).toContain(DESKTOP);
+    const naoVerificado = (outcome.naoVerificado ?? []).join("\n");
+    expect(naoVerificado).toContain("o fluxo 1 não foi percorrido");
+    expect(naoVerificado).toContain(DESKTOP);
   }, 60_000);
 });
 
@@ -326,7 +326,7 @@ describe("item 6 · o aplicativo desktop que sobe chega a aceito", () => {
     expect(anuncios.join("\n")).toContain("provado pela subida do executável na cópia limpa");
   }, 60_000);
 
-  it("o executável que quebra ao iniciar é pego: nunca aceito, e a causa é o passo start", async () => {
+  it("o executável que quebra ao iniciar é pego: o reparo não o conserta, e o build falha com a causa no passo start", async () => {
     await writeFile(join(projectRoot, "Agenda.csproj"), AVALONIA, "utf8");
     const esqueleto = await publicar(DESKTOP);
     const { outcome } = await construir(esqueleto, motor(false), corredor().runner, {
@@ -336,9 +336,8 @@ describe("item 6 · o aplicativo desktop que sobe chega a aceito", () => {
       acceptanceService: async () => ({ exitCode: 134, output: "Unhandled exception. System.NullReferenceException" }),
     });
 
-    expect(outcome.estado).not.toBe("aceito");
-    expect(outcome.exitCode).not.toBe(0);
-    expect((outcome.pendencias ?? []).join("\n")).toContain('"start"');
+    expect(outcome).toMatchObject({ exitCode: 2, estado: "falhou" });
+    expect(outcome.errors.join("\n")).toContain('"start"');
   }, 60_000);
 });
 

@@ -16,6 +16,7 @@ import { promisify } from "node:util";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { InitBlockedError, runInit } from "../../src/init/index.js";
 import { detectPrerequisites, isRepository, runBuild, splitPhases } from "../../src/loop/index.js";
+import { estadoDoBuild } from "../../src/loop/build.js";
 import type { CommandRunner, FlowRunner } from "../../src/loop/index.js";
 import type { BuildProgress } from "../../src/loop/index.js";
 import { readEvents, runIdFor, runPaths } from "../../src/state/index.js";
@@ -713,14 +714,14 @@ describe("B-39 · a causa aparece uma vez só", () => {
       ]).call,
     });
 
-    expect(outcome.exitCode).toBe(3);
-    expect(outcome.pendencias?.join("\n")).toContain("falta a migration inteira");
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.errors.join("\n")).toContain("falta a migration inteira");
     /*
-     * Uma vez só, na linha da pendência; `pendencias` é dado para quem consome,
-     * não segunda via. O defeito aparece também nas transições da recuperação
+     * Uma vez só, na linha da parada; `errors` é dado para quem consome, não
+     * segunda via. O defeito aparece também nas transições da recuperação
      * (§125, spec §9) — é a mesma linha do events.tsv, não uma reimpressão.
      */
-    const inicio = avisos.findIndex((aviso) => aviso.includes("pendência:"));
+    const inicio = avisos.findIndex((aviso) => aviso.includes("PAROU"));
     const bloco = avisos.slice(inicio).filter((aviso) => !/^\[P\d+\] (?:defeito|recuperação|validação|parada|revalidação|evidência preservada|novo ciclo|entrega) · /u.test(aviso)).join("\n");
     expect(bloco.split("falta a migration inteira").length - 1, bloco).toBe(1);
   });
@@ -756,7 +757,7 @@ describe("B-14 a B-18 · gates do loop", () => {
     expect(outcome.phases.every((phase) => phase.outcome.status === "already-implemented")).toBe(true);
   });
 
-  it("B-16 sessão que não escreve nada e a fase NÃO está pronta: não é aceita, e o que falta é dito", async () => {
+  it("B-16 sessão que não escreve nada e a fase NÃO está pronta: não é aceita — falha, e o que falta é dito", async () => {
     const { tasks } = await publishPlan();
     const { outcome } = await build(
       [
@@ -765,9 +766,9 @@ describe("B-14 a B-18 · gates do loop", () => {
       ],
       { maxCycles: 1 },
     );
-    expect(outcome.exitCode).toBe(3);
-    expect(outcome.estado).toBe("entregue com pendências");
-    expect(outcome.pendencias?.join("\n")).toContain("a migration não existe");
+    expect(outcome.exitCode).toBe(2);
+    expect(estadoDoBuild(outcome)).toBe("falhou");
+    expect(outcome.errors.join("\n")).toContain("a migration não existe");
   });
 
   it("B-17 suíte vermelha reprova com a saída real", async () => {
@@ -808,11 +809,11 @@ describe("B-19 a B-22 · verificador", () => {
       { maxCycles: 1 },
     );
     expect(outcome.estado).toBe("verificação inconclusiva");
-    expect(outcome.pendencias?.join("\n")).toContain(`cobriu 1 de ${tasks[0]}`);
+    expect(outcome.naoVerificado?.join("\n")).toContain(`cobriu 1 de ${tasks[0]}`);
   });
 
-  // Etapa 4 da redução: a revisão é uma só; o reparo do que ela achou é provado pela suíte e dito como pendência.
-  it("B-20 INCOMPLETE na revisão: o reparo é feito, sem segunda revisão, e a fase sai entregue com a pendência", async () => {
+  // A fase só fecha com a revisão aprovando: o reparo do que ela achou volta a ela.
+  it("B-20 INCOMPLETE na revisão: o reparo é feito, volta à revisão, que o aprova, e a fase fecha aceita", async () => {
     const { tasks } = await publishPlan();
     const { outcome, engine } = await build([
       { match: { role: "builder" }, writes: [{ path: "src/a.ts", content: "x" }], respond: { stdout: "feito" }, repeat: true },
@@ -820,12 +821,12 @@ describe("B-19 a B-22 · verificador", () => {
       { match: { role: "verifier", phase: "P01", attempt: 2 }, respond: { stdout: allDone(tasks[0]!) } },
       { match: { role: "verifier", phase: "P02" }, respond: { stdout: allDone(tasks[1]!) }, repeat: true },
     ]);
-    expect(outcome.exitCode).toBe(3);
-    expect(outcome.phases[0]?.outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
-    expect(engine.calls.filter((call) => call.role === "verifier" && call.phase.id === "P01" && !call.repair)).toHaveLength(1);
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.phases[0]?.outcome).toMatchObject({ status: "complete" });
+    expect(engine.calls.filter((call) => call.role === "verifier" && call.phase.id === "P01" && !call.repair)).toHaveLength(2);
   });
 
-  it("B-21 verificador sem nenhuma linha TASK: verificação inconclusiva, sem segunda chamada", async () => {
+  it("B-21 verificador sem nenhuma linha TASK: uma revisão a mais, e sem leitura o build para em verificação inconclusiva", async () => {
     const { tasks } = await publishPlan();
     expect(tasks.length).toBeGreaterThan(0);
     const { outcome } = await build(
@@ -835,8 +836,9 @@ describe("B-19 a B-22 · verificador", () => {
       ],
       { maxCycles: 1 },
     );
+    expect(outcome.exitCode).toBe(3);
     expect(outcome.estado).toBe("verificação inconclusiva");
-    expect(outcome.pendencias?.join("\n")).toContain("não emitiu nenhuma linha");
+    expect(outcome.naoVerificado?.join("\n")).toContain("não emitiu nenhuma linha");
   });
 
   it("B-22 o prompt do verificador proíbe escrever", async () => {
@@ -866,7 +868,7 @@ describe("B-23 · plano de controle", () => {
 
 describe("B-24 a B-26 · parada, limite e falso positivo", () => {
   // Etapa 4 da redução: só `falhou` para o build; a fase que não fecha é entregue com a pendência, e o build segue.
-  it("B-24 a fase que não fecha é entregue com a pendência, e o build segue para a próxima", async () => {
+  it("B-24 a fase que não fecha falha, e o build para: nada se constrói por cima dela", async () => {
     const { tasks } = await publishPlan();
     const { outcome, engine } = await build(
       [
@@ -875,10 +877,10 @@ describe("B-24 a B-26 · parada, limite e falso positivo", () => {
       ],
       { maxCycles: 3 },
     );
-    expect(outcome.exitCode).toBe(3);
-    expect(outcome.phases.map((fase) => fase.id)).toEqual(["P01", "P02"]);
-    expect(engine.calls.some((call) => call.phase.id === "P02")).toBe(true);
-    expect(outcome.phases[0]?.outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.phases.map((fase) => fase.id)).toEqual(["P01"]);
+    expect(engine.calls.some((call) => call.phase.id === "P02")).toBe(false);
+    expect(outcome.phases[0]?.outcome).toMatchObject({ status: "failed", gate: "gate 3 — verificação independente" });
   });
 
   it("B-25 limite de uso espera e repete a mesma fase sem consumir ciclo", async () => {
@@ -1153,7 +1155,7 @@ describe("B-41 · os fluxos percorridos uma vez, na aceitação final", () => {
     const { outcome, engine } = await build(passos(tasks), { skeleton: ESQUELETO, skipAcceptance: true, flowRunner: async () => ({ exitCode: 0, output: "1 passed" }) });
     expect(outcome.exitCode).toBe(3);
     expect(outcome.estado).toBe("verificação inconclusiva");
-    expect(outcome.pendencias?.join("\n")).toContain("`--no-acceptance`");
+    expect(outcome.naoVerificado?.join("\n")).toContain("`--no-acceptance`");
     expect(engine.calls.filter((call) => call.purpose === "flow-author")).toHaveLength(0);
   }, 30_000);
 });
@@ -1305,11 +1307,11 @@ describe("M-01 a M-03 · os cenários medidos", () => {
     expect(reparou, "a P03 passou sem nenhum reparo: o defeito do cenário não foi visto").toBe(true);
   });
 
-  it("M-03 orçamento esgotado: a fase com o defeito não é aceita, e o build não termina aceito", async () => {
-    const { build } = await rodar(cenarioOrcamentoEsgotado);
-    expect(build?.exitCode).not.toBe(0);
-    expect(build?.estado).not.toBe("aceito");
-    const p03 = build?.phases.find((fase) => fase.id === "P03")?.outcome;
-    expect(p03 && (p03.status === "complete" || p03.status === "already-implemented") ? p03.estado : "falhou").not.toBe("aceito");
+  it("M-03 orçamento esgotado: a fase com o defeito falha, o build para nela, e as seguintes não são construídas", async () => {
+    const { build, observado } = await rodar(cenarioOrcamentoEsgotado);
+    expect(build?.exitCode).toBe(2);
+    expect(build && estadoDoBuild(build)).toBe("falhou");
+    expect(build?.phases.map((fase) => [fase.id, fase.outcome.status])).toEqual([["P01", "complete"], ["P02", "complete"], ["P03", "failed"]]);
+    expect(observado.chamadasDoBuild.some((chamada) => chamada.phase.id === "P04")).toBe(false);
   });
 });

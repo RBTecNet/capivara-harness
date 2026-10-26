@@ -119,7 +119,7 @@ function comTeto<T extends (...args: never[]) => unknown>(original: T, teto: num
 
 describe("laços que a revisão achou", () => {
 
-  it("o comando de teste que some depois da suíte vermelha não conserta nada: sem laço, e a fase não é aceita", async () => {
+  it("o comando de teste que some depois da suíte vermelha não conserta nada: sem laço, e a fase falha", async () => {
     await escrever("package.json", JSON.stringify({ name: "x", scripts: { test: "node t.js" } }));
     await run("git", ["add", "-A"], { cwd: root });
     await run("git", ["commit", "-q", "-m", "pkg"], { cwd: root });
@@ -138,8 +138,8 @@ describe("laços que a revisão achou", () => {
       resolveTest: () => resolveTestCommand(root),
       testRunner: async () => ({ exitCode: 1, output: "FAIL src/a.test.ts > cria\n1 failed" }),
     });
-    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
-    if (outcome.status === "complete") expect(outcome.pendencias?.join("\n")).toContain("o comando de teste deixou de existir depois que a suíte falhou");
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 2 — suíte do projeto" });
+    if (outcome.status === "failed") expect(outcome.cause).toContain("O projeto deixou de declarar o comando de teste");
   });
 });
 

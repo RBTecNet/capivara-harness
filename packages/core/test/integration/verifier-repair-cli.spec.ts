@@ -179,15 +179,15 @@ app_conteudo();
    * progresso para a fase — o reparador nunca é chamado.
    */
   // Etapa 4 da redução: o orçamento esgotado entrega a fase com a pendência dita (código 3), e o build termina sem ser aceito.
-  it("orçamento zero não chama o reparador: depois de uma correção localizada do executor, a suíte vermelha sai como pendência", async () => {
+  it("orçamento zero não chama o reparador: depois de uma correção localizada do executor, a suíte vermelha faz o build falhar", async () => {
     const result = await execute(["--max-verifier-repairs", "0"]);
-    expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(3);
+    expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(2);
     expect(await readFile(join(projectRoot, "app.txt"), "utf8")).toBe("errado");
     const calls = jsonLines<AdapterCall>(await readFile(adapterLog, "utf8"));
     expect(calls.map(({ role, repair }) => ({ role, repair }))).toEqual([{ role: "builder", repair: "0" }, { role: "builder", repair: "0" }]);
     const runId = runIdFor("build", sha12(PLAN));
-    expect(await readRunState(projectRoot, runId)).toMatchObject({ status: "complete" });
-    expect(result.stdout).toContain("ENTREGUE COM PENDÊNCIAS");
-    expect(result.stdout).toContain("(G2) a suíte falhou");
+    expect(await readRunState(projectRoot, runId)).toMatchObject({ status: "paused" });
+    expect(result.stdout).toContain("PAROU");
+    expect(result.stdout).toContain("gate 2 — suíte do projeto");
   }, 120_000);
 });

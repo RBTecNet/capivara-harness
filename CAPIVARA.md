@@ -23,9 +23,10 @@ proporcional à complexidade do pedido (§138). Quando os dois princípios puxam
 para lados opostos, este vence o fail-closed:
 
 - **Não se simplifica a Capivara convencendo os modelos a trabalhar menos.** Muda-se o Core para que ele exija menos deles.
-- **Fail-closed vale para o que se prova falso**: protocolo ilegível nunca é aprovação, citação inventada nunca bloqueia, suíte vermelha nunca é verde. **Não vale para o que não se conseguiu provar dentro do orçamento**: isso é dito como pendência, e a entrega segue.
+- **Fail-closed vale para o que se prova falso**: protocolo ilegível nunca é aprovação, citação inventada nunca bloqueia, suíte vermelha nunca é verde.
+- **O único fim aceitável é `aceito`.** O `init` e o `plan` fecham as lacunas antes do código: a dúvida que sobra é perguntada ao desenvolvedor, e a pergunta sem resposta no prazo segue com a leitura recomendada, como decisão. O `build` não pergunta: conserta até o código cumprir o que foi decidido, e esgotada de verdade a escada a fase falha, com a causa exata. Não há entrega com pendência.
 - **Verificação além do orçamento é defeito do harness**, não do produto nem do modelo. A medida é `node packages/core/scripts/medir-verificacao.mjs`, e `packages/core/test/architecture/orcamento-de-prova.spec.ts` falha quando o motor pede mais chamadas do que a redução mediu.
-- O build termina em `aceito`, `entregue com pendências`, `verificação inconclusiva` ou `falhou`; só `falhou` para antes do fim.
+- O build termina em `aceito`, `verificação inconclusiva` (só a verificação que não pôde rodar, dita) ou `falhou` (a causa exata, e o build para na fase que não fechou).
 - As garantias G-1 a G-4 do catálogo não se trocam por economia.
 
 ## Comandos
@@ -101,9 +102,9 @@ cada uma com a medida de antes e de depois (`medir-verificacao.mjs`).
   final, numa cópia limpa. Saíram o G4 por fase, a triagem, a contestação do
   roteiro, a correção de formato, a oscilação G3×G4 e a prova pela suíte da
   0.7.9.
-- O build termina em `aceito`, `entregue com pendências`, `verificação
-  inconclusiva` ou `falhou` (código 0, 3, 3 ou 2); o orçamento esgotado entrega
-  a fase com as pendências ditas.
+- O build termina em `aceito`, `verificação inconclusiva` ou `falhou` (código 0,
+  3 ou 2); "só existe aceito" (26/10/2026) tirou a entrega com pendência: o
+  orçamento esgotado é `falhou`, e o build para na fase que não fechou.
 - `test/architecture/orcamento-de-prova.spec.ts` falha quando o motor pede mais
   chamadas do que a redução mediu, e as garantias G-1 a G-4 do catálogo
   continuam.

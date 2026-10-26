@@ -174,22 +174,23 @@ export function relatorioDoBuild(outcome: BuildOutcome, contexto: ContextoDaPara
   const fechadasAgora = fechadas(outcome.phases).length + (contexto.fechadasAntes ?? 0);
 
   /*
-   * Entregue sem ser aceito (etapa 4 da redução): o build terminou, e o que não
-   * se provou é dito aqui, uma linha cada — nunca "CONCLUÍDO" com pendência.
+   * Verificação inconclusiva: uma verificação não pôde rodar — a ferramenta, a
+   * plataforma, a revisão que não se leu. O que não rodou é dito aqui, uma linha
+   * cada, com o porquê — nunca "CONCLUÍDO", e nunca uma entrega.
    */
   if (outcome.exitCode === 3) {
-    const pendencias = outcome.pendencias ?? [];
+    const naoVerificado = outcome.naoVerificado ?? [];
     return {
       tipo: "conclusao",
       conclusao: {
-        estado: outcome.estado ?? "entregue com pendências",
-        oQue: `as ${fechadasAgora} fase(s) foram entregues; ${pendencias.length} pendência(s) sem prova`,
-        custou: `${fechadasAgora} fase(s) implementadas; o que não se provou está abaixo e na entrega`,
-        evidencia: [join(".capivara", "runs", outcome.runId, "entrega.md")],
-        ...(pendencias.length > 0 ? { pendencias } : {}),
+        estado: outcome.estado ?? "verificação inconclusiva",
+        oQue: `${fechadasAgora} fase(s) fecharam aceitas; ${naoVerificado.length} verificação(ões) não puderam rodar`,
+        custou: `${fechadasAgora} fase(s) implementadas e verificadas; o que não rodou está abaixo`,
+        evidencia: [join(".capivara", "runs", outcome.runId)],
+        ...(naoVerificado.length > 0 ? { naoVerificado } : {}),
         paraSeguir: [
-          "leia cada pendência: é o que o build entregou sem conseguir provar",
-          "para tentar de novo uma fase entregue com pendência, rode `capivara build --rebuild-all` ou corrija o plano com `capivara change`",
+          "leia cada verificação que não rodou e o porquê: a ferramenta, a plataforma ou a revisão",
+          "resolva a causa e rode `capivara build` de novo: ele retoma de onde parou, sem refazer o que passou",
         ],
       },
     };

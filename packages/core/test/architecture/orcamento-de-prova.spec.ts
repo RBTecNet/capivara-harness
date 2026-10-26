@@ -13,6 +13,16 @@
  * no commit 24b462e). Subir um teto é decisão de produto: a mudança que precisa
  * de mais verificação diz por quê, com a medida de antes e de depois.
  *
+ * "Só existe aceito" (decisão do desenvolvedor, 26/10/2026) mudou três, todos no
+ * caminho de falha; o caminho limpo não mudou:
+ * - g1, revisor 1 → 2: o reparo do achado da revisão volta a ela, que o aprova;
+ *   sem a segunda leitura, uma fase fecharia aceita sem prova do reparo.
+ * - g4, revisor 1 → 2 e executor 1 → 2: o reparo e a correção do executor
+ *   voltam à revisão (a releitura do mesmo código é uma), e o ciclo sem
+ *   progresso encerra a escada — a fase falha, em vez de sair com pendência.
+ * - orcamento-esgotado, executor 10 → 4, revisor 2 → 2, reparador 6 → 1: o
+ *   build para na fase que não fechou (P03), e a P04 não é construída.
+ *
  * As garantias G-1 a G-4 continuam no catálogo (`test/integration/catalog.spec.ts`):
  * gastar menos nunca vale deixar de pegar o que elas pegam.
  */
@@ -54,14 +64,14 @@ function porPapel(resultado: ResultadoDoCenario): PorPapel {
   };
 }
 
-/** Medidos no fim da etapa 4. */
+/** Medidos no fim da etapa 4; os de falha revistos em "só existe aceito" (ver o cabeçalho). */
 const TETOS: Record<string, PorPapel> = {
   "app-pequeno": { escritor: 7, auditor: 2, verificadorDoPlano: 0, executor: 4, revisor: 4, reparador: 0, roteirista: 2 },
   reparo: { escritor: 7, auditor: 2, verificadorDoPlano: 0, executor: 4, revisor: 4, reparador: 1, roteirista: 2 },
-  "orcamento-esgotado": { escritor: 7, auditor: 2, verificadorDoPlano: 0, executor: 10, revisor: 2, reparador: 6, roteirista: 2 },
-  g1: { escritor: 4, auditor: 2, verificadorDoPlano: 0, executor: 1, revisor: 1, reparador: 1, roteirista: 0 },
+  "orcamento-esgotado": { escritor: 7, auditor: 2, verificadorDoPlano: 0, executor: 4, revisor: 2, reparador: 1, roteirista: 0 },
+  g1: { escritor: 4, auditor: 2, verificadorDoPlano: 0, executor: 1, revisor: 2, reparador: 1, roteirista: 0 },
   g2: { escritor: 4, auditor: 2, verificadorDoPlano: 0, executor: 2, revisor: 1, reparador: 0, roteirista: 1 },
-  g4: { escritor: 4, auditor: 2, verificadorDoPlano: 0, executor: 1, revisor: 1, reparador: 1, roteirista: 0 },
+  g4: { escritor: 4, auditor: 2, verificadorDoPlano: 0, executor: 2, revisor: 2, reparador: 1, roteirista: 0 },
 };
 
 async function medir(cenario: () => Promise<ResultadoDoCenario>): Promise<{ nome: string; medido: PorPapel }> {

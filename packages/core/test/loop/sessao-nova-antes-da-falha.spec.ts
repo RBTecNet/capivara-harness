@@ -1,16 +1,16 @@
 /**
- * A sessão nova antes da falha por sessão (item 7 de "atacar os pontos frágeis").
+ * A sessão nova do verificador de outro modelo, como executor, antes da falha.
  *
  * A sessão de construção que não entregava resultado utilizável até o fim da
- * escada levava a `fecharFalha` e o build parava com código 2. Agora, antes de
- * fechar a fase como falha, UMA sessão nova: do verificador como executor,
- * quando ele roda outro modelo e pode escrever — o validador coautor aplicado à
- * falta de sessão —; senão, do executor. Só depois disso é falha.
+ * escada levava a `fecharFalha`. Agora, antes de a fase falhar, quando o
+ * verificador roda outro modelo e pode escrever, UMA sessão nova dele com o
+ * prompt do executor — o validador coautor aplicado à troca de modelo. O que
+ * ela entrega passa pelos gates e pela revisão de sempre, e a fase fecha aceita
+ * ou falha. Sem verificador de outro modelo, a escada acaba no degrau de antes.
  *
  * A recusa do provider, o timeout e a parte que cai continuam parando sem outra
  * chamada do mesmo modelo (§115.14, §115.17, §130): repetir a mesma recusa
- * custa dinheiro e devolve a mesma recusa. Com o verificador de outro modelo, é
- * ele quem faz a sessão nova.
+ * custa dinheiro e devolve a mesma recusa.
  */
 
 import { readFile, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -88,36 +88,35 @@ async function fase(cenario: Cenario) {
   return { outcome, calls, doExecutor, escritasDoVerificador };
 }
 
-describe("a sessão nova antes de a fase fechar como falha", () => {
-  it("o executor devolve vazio duas vezes, o verificador de outro modelo implementa, e a fase segue — dita como não revisada por quem não a escreveu", async () => {
+describe("a sessão nova do verificador de outro modelo antes de a fase falhar", () => {
+  it("o executor devolve vazio duas vezes, o verificador de outro modelo implementa, e a fase fecha aceita", async () => {
     const { outcome, doExecutor, escritasDoVerificador } = await fase({ executor: () => vazia(), verificadorComOutroModelo: true });
 
     expect(doExecutor).toHaveLength(2);
     expect(escritasDoVerificador).toHaveLength(1);
-    expect(escritasDoVerificador[0]!.prompt).toContain("Esta é uma sessão nova, a última antes de a fase fechar como falha");
+    expect(escritasDoVerificador[0]!.prompt).toContain("Esta é uma sessão nova, de outro modelo, a última antes de a fase falhar");
     expect(await readFile(join(projectRoot, "pelo-verificador.ts"), "utf8")).toContain("implementada");
-    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
-    if (outcome.status === "complete") expect(outcome.pendencias).toEqual([expect.stringContaining("o verificador implementou a fase numa sessão nova")]);
+    expect(outcome).toMatchObject({ status: "complete" });
   });
 
-  it("com o verificador do mesmo modelo, a sessão nova é do executor; entregue, a fase é aceita", async () => {
-    const { outcome, doExecutor, escritasDoVerificador } = await fase({ executor: (n) => (n <= 2 ? vazia() : ok()) });
-
-    expect(doExecutor).toHaveLength(3);
-    expect(doExecutor[2]!.prompt).toContain("Esta é uma sessão nova, a última antes de a fase fechar como falha");
+  it("com o verificador do mesmo modelo não há sessão nova: o executor vazio duas vezes faz a fase falhar", async () => {
+    const { outcome, doExecutor, escritasDoVerificador } = await fase({ executor: () => vazia() });
+    expect(doExecutor).toHaveLength(2);
     expect(escritasDoVerificador).toHaveLength(0);
-    expect(outcome).toMatchObject({ status: "complete", estado: "aceito" });
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 0 — engine" });
   });
 
-  it("o verificador de outro modelo que não pode escrever (sem reparo do verificador) não faz a sessão nova: o executor a faz", async () => {
-    const { doExecutor, escritasDoVerificador } = await fase({ executor: (n) => (n <= 2 ? vazia() : ok()), verificadorComOutroModelo: true, maxVerifierRepairs: 0 });
-    expect(doExecutor).toHaveLength(3);
+  it("o verificador de outro modelo que não pode escrever (sem reparo do verificador) não faz a sessão nova", async () => {
+    const { outcome, doExecutor, escritasDoVerificador } = await fase({ executor: () => vazia(), verificadorComOutroModelo: true, maxVerifierRepairs: 0 });
+    expect(doExecutor).toHaveLength(2);
     expect(escritasDoVerificador).toHaveLength(0);
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 0 — engine" });
   });
 
-  it("a sessão nova também vazia: só então é falha, com uma sessão a mais e nenhuma outra", async () => {
-    const { outcome, doExecutor } = await fase({ executor: () => vazia() });
-    expect(doExecutor).toHaveLength(3);
+  it("a sessão nova do verificador também vazia: só então é falha, com uma sessão a mais e nenhuma outra", async () => {
+    const { outcome, doExecutor, escritasDoVerificador } = await fase({ executor: () => vazia(), verificadorComOutroModelo: true, verificadorQueEscreve: () => vazia() });
+    expect(doExecutor).toHaveLength(2);
+    expect(escritasDoVerificador).toHaveLength(1);
     expect(outcome).toMatchObject({ status: "failed", gate: "gate 0 — engine" });
   });
 
@@ -132,7 +131,7 @@ describe("a sessão nova antes de a fase fechar como falha", () => {
     const { outcome, doExecutor, escritasDoVerificador } = await fase({ executor: () => ok(), verificadorComOutroModelo: true });
     expect(doExecutor).toHaveLength(1);
     expect(escritasDoVerificador).toHaveLength(0);
-    expect(outcome).toMatchObject({ status: "complete", estado: "aceito" });
+    expect(outcome).toMatchObject({ status: "complete" });
   });
 });
 

@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runBuild, type EngineCall, type EngineResult } from "../../src/loop/index.js";
+import { estadoDoBuild } from "../../src/loop/build.js";
 import type { BuildOptions } from "../../src/loop/index.js";
 import { runPaths } from "../../src/state/index.js";
 import { certifyCurrentPlan } from "../support/current-plan.js";
@@ -88,15 +89,15 @@ async function construir(extra: Partial<BuildOptions> & { reprova?: string[]; re
 }
 
 describe("§10 · concluída só com todas as fases fechadas", () => {
-  // Etapa 4 da redução: só `falhou` para o build; a fase entregue com pendência segue, e o desfecho nunca é `aceito`.
-  it("a fase entregue com pendências não para o build, mas impede o aceito: a aceitação roda e o desfecho diz o que falta", async () => {
-    const { outcome, passos, anuncios } = await construir({ reprova: ["P01"], maxCycles: 1, maxVerifierRepairs: 0 });
-    expect(outcome.exitCode).toBe(3);
-    expect(outcome.estado).toBe("entregue com pendências");
-    expect((outcome.pendencias ?? []).join("\n")).toContain("falta o arquivo");
-    expect(anuncios.some((linha) => linha.startsWith("aplicação ENTREGUE COM PENDÊNCIAS"))).toBe(true);
+  // Só existe `aceito`: a fase que a escada não fecha falha, e nada se constrói por cima dela.
+  it("a fase que não fecha para o build: falhou, com o defeito dito, sem construir a seguinte e sem aceitação", async () => {
+    const { outcome, passos, anuncios, chamadas } = await construir({ reprova: ["P01"], maxCycles: 1, maxVerifierRepairs: 0 });
+    expect(outcome.exitCode).toBe(2);
+    expect(estadoDoBuild(outcome)).toBe("falhou");
+    expect(outcome.errors.join("\n")).toContain("falta o arquivo");
+    expect(chamadas.some((chamada) => chamada.phase.id === "P02")).toBe(false);
     expect(anuncios).not.toContain("aplicação aceita: todas as fases verdes e a aceitação limpa");
-    expect(passos.length).toBeGreaterThan(0);
+    expect(passos).toEqual([]);
   });
 });
 
@@ -185,7 +186,7 @@ describe("da revisão adversarial do G: o reparo da aceitação e o commit que f
         if (reparos === 1) await writeFile(join(root, "server.js"), "quebra a suíte\n");
       },
     });
-    expect(outcome).toMatchObject({ exitCode: 3, estado: "entregue com pendências" });
+    expect(outcome).toMatchObject({ exitCode: 2, estado: "falhou" });
     expect(await git(["log", "--format=%s"])).not.toContain("fix(entrega)");
   });
 

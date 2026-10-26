@@ -59,7 +59,7 @@ import { prepareBuildEnvironment } from "./environment-prepare.js";
 import { autoridadePublicada, readEnvironmentPlan, type AutoridadeDaAdocao } from "./environment-plan.js";
 import type { EscolhaNumerada } from "./escolha.js";
 import { resolveTestCommand } from "./testcmd.js";
-import { DEFAULT_MAX_CYCLES, runPhase, type EngineCaller, type EngineResult, type EstadoDaEntrega, type PhaseOutcome } from "./runner.js";
+import { DEFAULT_MAX_CYCLES, runPhase, type EngineCaller, type EngineResult, type PhaseOutcome } from "./runner.js";
 import { runAcceptance, type AcceptanceResult, type CommandRunner, type ResultadoDoSmoke } from "./acceptance.js";
 import { acceptancePrompt, flowPrompt, installPrompt } from "../prompts/index.js";
 import type { BuildProgressListener } from "./progress.js";
@@ -208,10 +208,12 @@ export interface PhaseReport {
 }
 
 /**
- * O estado final do build (etapa 4 da redução): os três da entrega, e `falhou`,
- * o único que para o build antes do fim.
+ * O estado final do build. O único fim aceitável é `aceito`: todas as fases
+ * aceitas e a aceitação limpa. `falhou` diz a causa exata do que a escada
+ * inteira não fechou. `verificação inconclusiva` é só a verificação que não pôde
+ * rodar — a ferramenta, a plataforma —, e diz qual e por quê; nunca entrega.
  */
-export type EstadoDoBuild = EstadoDaEntrega | "falhou";
+export type EstadoDoBuild = "aceito" | "verificação inconclusiva" | "falhou";
 
 /** O estado de um desfecho; o desfecho sem o campo é o que parou antes do fim, ou o aceito de antes dele. */
 export function estadoDoBuild(outcome: Pick<BuildOutcome, "estado" | "exitCode">): EstadoDoBuild {
@@ -221,14 +223,14 @@ export function estadoDoBuild(outcome: Pick<BuildOutcome, "estado" | "exitCode">
 export interface BuildOutcome {
   runId: string;
   /**
-   * 0 aceito · 1 erro de contrato ou configuração · 2 pausado e retomável ·
-   * 3 entregue, sem ser aceito: com pendências ou com verificação inconclusiva.
+   * 0 aceito · 1 erro de contrato ou configuração · 2 falhou: parado, retomável ·
+   * 3 verificação inconclusiva: uma verificação não pôde rodar.
    */
   exitCode: 0 | 1 | 2 | 3;
   /** Ausente nas paradas antes do fim: `estadoDoBuild` diz `falhou`. */
   estado?: EstadoDoBuild;
-  /** O que não se provou, uma linha cada: das fases e da aceitação. */
-  pendencias?: string[];
+  /** As verificações que não puderam rodar, uma linha cada, com o porquê: só na verificação inconclusiva. */
+  naoVerificado?: string[];
   phases: PhaseReport[];
   warnings: PreflightWarning[];
   errors: string[];
@@ -985,7 +987,7 @@ async function performBuild(
       };
     };
 
-    /** O que toda fase entregue deixa: o registro no ledger, com o estado da entrega quando não foi `aceito`. */
+    /** O que toda fase aceita deixa: o registro no ledger. */
     const aposVerde = async (session: PhaseSession, outcome?: PhaseOutcome): Promise<void> => {
       const fechadaEm = now().toISOString();
       const fatia = arquitetura.fatia(session.number);
@@ -993,9 +995,6 @@ async function performBuild(
       const semCommit = checked.commitsEnabled && outcome?.status === "complete" && !outcome.committed;
       // No paralelo, depois do cherry-pick: o HEAD da principal, que já tem a fase.
       const head = checked.commitsEnabled && !semCommit ? (await estadoDoCodigo(options.projectRoot)).head : null;
-      const entrega = outcome && (outcome.status === "complete" || outcome.status === "already-implemented") && outcome.estado !== undefined && outcome.estado !== "aceito"
-        ? { estado: outcome.estado, pendencias: outcome.pendencias ?? [] }
-        : null;
       await registrarFaseFechada(options.projectRoot, {
         id: session.id,
         title: session.title,
@@ -1006,7 +1005,6 @@ async function performBuild(
         sliceSha12: fatia?.sha12 ?? "",
         ...(head ? { head } : {}),
         ...(semCommit ? { semCommit: true } : {}),
-        ...(entrega ?? {}),
       });
     };
 
@@ -1034,6 +1032,12 @@ async function performBuild(
         return false;
       }
       const fechadaAntes = registrada;
+      // Fechada sem ser aceita, por uma versão anterior: não vale como fechada, e a retomada a verifica de novo.
+      if (fechadaAntes?.estado !== undefined) {
+        announce(`[${session.id}] fechou no run ${fechadaAntes.runId} sem ser aceita (${fechadaAntes.estado}); volta a ser verificada, sem nova implementação`);
+        revalidarFase.set(session.id, `a fase fechou no run ${fechadaAntes.runId} sem ser aceita (${fechadaAntes.estado})`);
+        return false;
+      }
       const noHistorico = fechadaAntes ? historicoDaFechada.get(fechadaAntes.sha) : undefined;
       if (fechadaAntes?.semCommit === true) {
         announce(`[${session.id}] fechou no run ${fechadaAntes.runId} sem commit (o git recusou): o código pode não estar mais na árvore; volta a ser verificada, sem nova implementação`);
@@ -1075,7 +1079,7 @@ async function performBuild(
       return false;
     };
 
-    /** A parada do build, igual no serial e no paralelo: evento, estado na base, código 2. */
+    /** A parada do build, igual no serial e no paralelo: evento, estado na base, código 2 — ou 3, quando a fase parou porque a revisão não pôde rodar. */
     const parar = async (outcome: PhaseOutcome): Promise<BuildOutcome> => {
       const detail =
         outcome.status === "failed"
@@ -1094,6 +1098,9 @@ async function performBuild(
         detail,
       });
       await registrarEstado(phases, checked.sessions, outcome);
+      if (outcome.status === "failed" && outcome.inconclusiva !== undefined) {
+        return { runId, exitCode: 3, estado: "verificação inconclusiva", naoVerificado: [outcome.inconclusiva], phases, warnings: checked.warnings, errors: [detail], acceptance: null };
+      }
       return { runId, exitCode: 2, phases, warnings: checked.warnings, errors: [detail], acceptance: null };
     };
 
@@ -1287,10 +1294,10 @@ async function performBuild(
       if (desktopSubiu) {
         for (const fluxo of naoPercorridos) announce(`aceitação · o fluxo ${fluxo.number} é de janela («${fluxo.trecho}»): provado pela subida do executável na cópia limpa`);
       }
-      const pendencias = desktopSubiu
+      const naoVerificado = desktopSubiu
         ? []
         : naoPercorridos.map((fluxo) => `aceitação · o fluxo ${fluxo.number} não foi percorrido: o contrato descreve o produto fora do navegador e do terminal («${fluxo.trecho}»)`);
-      if (resultado.green) return { ok: true, pendencias };
+      if (resultado.green) return { ok: true, naoVerificado };
       const daFerramenta = resultado.toolMissing === true || resultado.scriptFailed === true || /Isto é do ambiente/u.test(resultado.cause);
       const falhou = resultado.falharam?.[0];
       return { ok: false, natureza: daFerramenta ? "ferramenta" : "produto", id: falhou !== undefined ? `fluxo ${falhou}` : "fluxos", cause: resultado.cause };
@@ -1306,8 +1313,8 @@ async function performBuild(
     let reparoSemSuite = false;
     /** O último estado que a suíte provou: o das fases fechadas, até um reparo da aceitação passar por ela. */
     let provadoEm: string | null = null;
-    /** O que a aceitação não provou: o defeito que o orçamento não fechou, a ferramenta que falhou, o fluxo que ela não alcança. */
-    const pendenciasDaAceitacao: string[] = [];
+    /** O que a aceitação não pôde verificar: a ferramenta que falhou, o fluxo que nada alcança, o passo que esta plataforma não executa. */
+    const naoVerificadoNaAceitacao: string[] = [];
     let aceitacaoInconclusiva = false;
     if (options.skipAcceptance !== true) {
       announce("aceitação operacional: copiando o projeto para uma pasta limpa");
@@ -1404,15 +1411,15 @@ async function performBuild(
       }
 
       if (acceptance.accepted) {
-        pendenciasDaAceitacao.push(...(acceptance.pendencias ?? []));
-        if ((acceptance.pendencias ?? []).length > 0) aceitacaoInconclusiva = true;
+        naoVerificadoNaAceitacao.push(...(acceptance.naoVerificado ?? []));
+        if ((acceptance.naoVerificado ?? []).length > 0) aceitacaoInconclusiva = true;
         announce(acceptance.skipped !== "" ? `aceitação operacional: ${acceptance.skipped}` : "aceitação operacional: o produto sobe a partir de uma cópia limpa");
       } else {
         const daFerramenta = acceptance.failure.natureza === "ferramenta";
-        if (daFerramenta) aceitacaoInconclusiva = true;
-        pendenciasDaAceitacao.push(
-          `aceitação · ${daFerramenta ? "verificação inconclusiva, a ferramenta do harness falhou" : "defeito do produto que o orçamento da aceitação não fechou"} em "${acceptance.failure.id}": ${acceptance.failure.cause.split("\n")[0] ?? ""}`,
-        );
+        if (daFerramenta) {
+          aceitacaoInconclusiva = true;
+          naoVerificadoNaAceitacao.push(`aceitação · a ferramenta do harness falhou em "${acceptance.failure.id}": ${acceptance.failure.cause.split("\n")[0] ?? ""}`);
+        }
         announce(`aceitação operacional ${daFerramenta ? "INCONCLUSIVA" : "REPROVOU"}: ${acceptance.failure.cause.split("\n")[0] ?? ""}`);
         await appendEvent(paths.events, {
           timestamp: now().toISOString(),
@@ -1433,33 +1440,29 @@ async function performBuild(
     const fluxosDeclarados = options.skeleton?.workflows ?? [];
     if (fluxosDeclarados.length > 0 && (options.skipFlows === true || options.skipAcceptance === true)) {
       aceitacaoInconclusiva = true;
-      pendenciasDaAceitacao.push(
+      naoVerificadoNaAceitacao.push(
         `aceitação · os ${fluxosDeclarados.length} fluxo(s) do esqueleto não foram percorridos: ${options.skipFlows === true ? "o percurso dos fluxos está desligado (`--no-flows`)" : "a aceitação final está desligada (`--no-acceptance`)"}`,
       );
     }
 
     /*
-     * O estado da entrega (etapa 4 da redução): `aceito` só com todas as fases
-     * aceitas e a aceitação limpa. O que uma fase deixou pendente numa execução
-     * anterior continua dito: o ledger o guarda, e a fase pulada não o apaga.
+     * O defeito do produto que o orçamento da aceitação não fechou: o produto
+     * não cumpre o que foi decidido, e o build falha com a causa — nunca uma
+     * entrega com o defeito dito. A retomada roda a aceitação de novo.
      */
-    const registradas = new Map((await lerFasesFechadas(options.projectRoot)).map((fase) => [fase.sha, fase]));
-    const entregaDasFases = checked.sessions.map((session): { estado: EstadoDaEntrega; pendencias: string[] } => {
-      const relatada = phases.find((fase) => fase.id === session.id)?.outcome;
-      if (relatada && (relatada.status === "complete" || relatada.status === "already-implemented") && relatada.estado !== undefined) {
-        return { estado: relatada.estado, pendencias: relatada.pendencias ?? [] };
-      }
-      const registrada = registradas.get(shaDaFase(session.markdown));
-      return { estado: registrada?.estado ?? "aceito", pendencias: registrada?.pendencias ?? [] };
-    });
-    const pendencias = [...entregaDasFases.flatMap((fase) => fase.pendencias), ...pendenciasDaAceitacao];
-    const comPendencia = entregaDasFases.some((fase) => fase.estado === "entregue com pendências") || (acceptance !== null && !acceptance.accepted && acceptance.failure.natureza === "produto");
-    const inconclusivo = aceitacaoInconclusiva || entregaDasFases.some((fase) => fase.estado === "verificação inconclusiva");
-    const estadoFinal: EstadoDoBuild = comPendencia ? "entregue com pendências" : inconclusivo ? "verificação inconclusiva" : "aceito";
+    if (acceptance !== null && !acceptance.accepted && acceptance.failure.natureza === "produto") {
+      const causa = `aceitação · defeito do produto que o orçamento da aceitação não fechou em "${acceptance.failure.id}": ${acceptance.failure.cause}`;
+      announce(`aplicação NÃO aceita — ${causa.split("\n")[0] ?? ""}`);
+      await appendEvent(paths.events, { timestamp: now().toISOString(), stage: "implement", subject: "-", attempt: 1, status: "paused", detail: causa.split("\n")[0] ?? "" });
+      return { runId, exitCode: 2, estado: "falhou", phases, warnings: checked.warnings, errors: [causa], acceptance };
+    }
+    /** Só a verificação que não pôde rodar fica por dizer: a ferramenta, a plataforma, os fluxos que nada alcança. */
+    const naoVerificado = [...naoVerificadoNaAceitacao];
+    const estadoFinal: EstadoDoBuild = aceitacaoInconclusiva ? "verificação inconclusiva" : "aceito";
 
     // As instruções e as limitações conhecidas, do que de fato rodou (spec §10).
     const entrega = await montarEntrega(options.projectRoot, acceptance, [
-      ...pendencias,
+      ...naoVerificado,
       ...(tocadosNaEntrega.length > 0 || reparoSemLista
         ? [
             `o reparo da aceitação tocou ${tocadosNaEntrega.length > 0 ? [...new Set(tocadosNaEntrega)].join(", ") : "arquivos que não puderam ser determinados (sem árvore do Git)"}: ` +
@@ -1483,15 +1486,15 @@ async function performBuild(
       subject: "-",
       attempt: 1,
       status: "complete",
-      detail: `${phases.length} fase(s) · ${estadoFinal}${pendencias.length > 0 ? ` · ${pendencias.length} pendência(s)` : ""}`,
+      detail: `${phases.length} fase(s) · ${estadoFinal}${naoVerificado.length > 0 ? ` · ${naoVerificado.length} verificação(ões) não rodaram` : ""}`,
     });
     if (estadoFinal === "aceito") announce("aplicação aceita: todas as fases verdes e a aceitação limpa");
-    else announce(`aplicação ${estadoFinal.toUpperCase()}: ${pendencias.length} pendência(s), ditas em ${caminhoDaEntrega}`);
+    else announce(`aplicação com VERIFICAÇÃO INCONCLUSIVA: ${naoVerificado.length} verificação(ões) não puderam rodar, ditas em ${caminhoDaEntrega}`);
     return {
       runId,
       exitCode: estadoFinal === "aceito" ? 0 : 3,
       estado: estadoFinal,
-      ...(pendencias.length > 0 ? { pendencias } : {}),
+      ...(naoVerificado.length > 0 ? { naoVerificado } : {}),
       phases,
       warnings: checked.warnings,
       errors: [],

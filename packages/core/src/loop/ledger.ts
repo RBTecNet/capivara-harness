@@ -58,12 +58,11 @@ export interface FaseFechada {
    */
   semCommit?: boolean;
   /**
-   * Como a fase foi entregue, quando não foi `aceito` (etapa 4 da redução): o
-   * estado e o que não se provou. A fase não é refeita por isso — o build seguinte
-   * a pula como qualquer fechada —, e a entrega final continua dizendo o que ela
-   * deve. Ausente é `aceito`, e o registro anterior ao campo.
+   * O estado com que uma versão anterior a fechou sem ser aceita. Hoje uma fase
+   * só fecha aceita, e quem o encontra no registro não a pula: ela volta a ser
+   * verificada. Ausente é `aceito`, e é o que se grava agora.
    */
-  estado?: "entregue com pendências" | "verificação inconclusiva";
+  estado?: string;
   pendencias?: string[];
 }
 

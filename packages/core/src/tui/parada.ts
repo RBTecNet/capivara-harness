@@ -184,13 +184,13 @@ export function renderParada(parada: Parada, style: Style = { enabled: false }):
  * ninguém a atribuir.
  */
 export interface Conclusao {
-  /** O estado da entrega quando ela não foi aceita: o título diz isso, e não "CONCLUÍDO". */
+  /** O estado quando o build não foi aceito — a verificação inconclusiva: o título diz isso, e não "CONCLUÍDO". */
   estado?: string;
   oQue: string;
   custou: string;
   evidencia?: string[];
-  /** O que não se provou, uma linha cada. */
-  pendencias?: string[];
+  /** As verificações que não puderam rodar, uma linha cada, com o porquê. */
+  naoVerificado?: string[];
   paraSeguir?: string[];
 }
 
@@ -204,9 +204,9 @@ export function renderConclusao(conclusao: Conclusao, style: Style = { enabled: 
     linhas.push(...campo(indice === 0 ? "evidência" : "", caminho, style));
   }
 
-  if (conclusao.pendencias && conclusao.pendencias.length > 0) {
-    linhas.push("", `  ${paint("pendências", "yellow", style)}`);
-    for (const pendencia of conclusao.pendencias) linhas.push(`    - ${pendencia}`);
+  if (conclusao.naoVerificado && conclusao.naoVerificado.length > 0) {
+    linhas.push("", `  ${paint("não verificado", "yellow", style)}`);
+    for (const linha of conclusao.naoVerificado) linhas.push(`    - ${linha}`);
   }
 
   if (conclusao.paraSeguir && conclusao.paraSeguir.length > 0) {

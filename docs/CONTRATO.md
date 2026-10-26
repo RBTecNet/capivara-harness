@@ -248,13 +248,14 @@ flowchart TD
     RX --> IM["Revalidação por impacto: refaz só a prova que a mudança atingiu"]
     RV --> IM
     IM --> G2
-    ES -- "orçamento esgotado ou nenhuma estratégia" --> PD["Pendências nomeadas; UPSTREAM_REPAIR_REQUIRED quando o documento é a causa"] --> CM
+    ES -- "orçamento esgotado, nenhuma estratégia ou um ciclo sem progresso" --> TM["Verificador de outro modelo como executor, uma sessão, quando há"] --> FL["falhou: o defeito e a evidência; UPSTREAM_REPAIR_REQUIRED quando o documento é a causa; o build para"]
     CM --> NX{"mais fases?"}
     NX -- sim --> FA
     NX -- não --> AC["Aceitação final numa cópia limpa: instala, migra, sobe e percorre os fluxos do esqueleto uma vez"]
     AC -- "defeito do produto" --> RX2["Correção pelo executor"] --> AC
     AC -- "falha da ferramenta do harness" --> AI["verificação inconclusiva"]
-    AC --> EE{"aceito, entregue com pendências ou verificação inconclusiva"}
+    AC -- "o reparo não conserta o produto" --> FL
+    AC --> EE{"aceito, ou verificação inconclusiva quando uma verificação não pôde rodar"}
 ```
 
 **Faz:**
@@ -364,18 +365,20 @@ flowchart TD
    impacto além do defeito pede autorização ao desenvolvedor. O encaminhamento ao
    INIT ainda não está habilitado.
 
-**Sai:** um commit por fase e um de quatro estados:
+**Sai:** um commit por fase aceita e um de três estados; o único aceitável é o primeiro:
 
 | estado | quando |
 |---|---|
-| `aceito` | todas as fases aceitas e a aceitação limpa |
-| `entregue com pendências` | alguma fase ou a aceitação deixou um defeito sem prova de correção |
-| `verificação inconclusiva` | uma verificação não pôde ser feita ou lida, inclusive fluxos declarados e não percorridos (`--no-acceptance`, `--no-flows`) |
-| `falhou` | o build parou antes do fim |
+| `aceito` | todas as fases aceitas — a suíte e a revisão aprovaram — e a aceitação limpa |
+| `verificação inconclusiva` | uma verificação não pôde rodar — a ferramenta, a plataforma, a revisão que não se leu nem na segunda chamada, fluxos declarados que nada alcança ou que foram desligados (`--no-acceptance`, `--no-flows`) —, dita com o porquê |
+| `falhou` | a escada inteira não fechou uma fase, ou a aceitação reprovou o produto e o reparo não o consertou, ou o build parou antes do fim |
 
-`entrega.md` lista as pendências. A fase entregue com pendências não reabre
-sozinha (`--rebuild-all` ou `capivara change`); o build que falhou é retomável, e
-`capivara build` de novo continua de onde parou, sem refazer o que ficou verde.
+Nenhuma fase fecha com pendência. O reparo do que a revisão achou volta a ela (a
+releitura do mesmo código é uma por execução); o ciclo de correção sem progresso
+em nenhum defeito encerra a escada; o verificador de outro modelo, quando pode
+escrever, faz uma sessão como executor antes de a fase falhar. O build que falhou
+é retomável, e `capivara build` de novo continua de onde parou, sem refazer o que
+ficou verde; a fase que uma versão anterior fechou sem aceitar volta a ser verificada.
 
 ## Paradas e retomada
 

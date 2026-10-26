@@ -6,11 +6,12 @@ Versão **0.8.0**: o Core exige menos trabalho dos modelos, e cada redução tem
 medida de antes e de depois (§138). O `plan` escreve as dependências e as fases
 numa passada, com uma auditoria do plano inteiro; o Core decide o que devolve
 (contradição, interface ou dependência, com as citações conferidas), e a
-pergunta ao desenvolvedor tem prazo. O `build` revisa cada fase uma vez, numa
-chamada; o verificador repara primeiro o que diagnosticou; os fluxos do
-esqueleto são percorridos uma vez, na aceitação final, numa cópia limpa; e o
-build termina em `aceito`, `entregue com pendências`, `verificação inconclusiva`
-ou `falhou` — só o último o para antes do fim. Continuam: a recuperação por
+pergunta ao desenvolvedor tem prazo. O `build` revisa cada fase, e o reparo do
+que a revisão achou volta a ela; o verificador repara primeiro o que diagnosticou;
+os fluxos do esqueleto são percorridos uma vez, na aceitação final, numa cópia
+limpa; e o único fim aceitável é `aceito` — o que a escada inteira não fecha é
+`falhou`, com a causa, e `verificação inconclusiva` é só a verificação que não
+pôde rodar. Continuam: a recuperação por
 defeito, revalidando só a prova que a correção atingiu (§125), a fase grande em
 partes (§130), o ambiente que a instalação estrita aceita (§131), a preparação
 que o contrato do PLAN autoriza (§135), e o `plan` que não planeja teste e
@@ -342,19 +343,19 @@ ferramenta do harness (runner ausente, roteiro que falha por si) deixa a
 verificação inconclusiva, sem reparo. `--no-flows` pula o percurso, e o
 desfecho fica inconclusivo.
 
-O build termina num de quatro estados:
+O build termina num de três estados, e o único aceitável é o primeiro:
 
 | estado | quando | código |
 |---|---|---|
-| `aceito` | todas as fases aceitas e a aceitação limpa | 0 |
-| `entregue com pendências` | alguma fase ou a aceitação deixou um defeito sem prova de correção | 3 |
-| `verificação inconclusiva` | uma verificação não pôde ser feita ou lida, inclusive fluxos declarados e não percorridos | 3 |
-| `falhou` | o build parou antes do fim: sessão sem resultado utilizável mesmo depois da sessão nova (do verificador como executor, se ele roda outro modelo; senão, do executor — e, na recusa do provider ou no tempo esgotado, só a do verificador de outro modelo), credencial, limite de uso, Git movido por um agente (fora o commit novo no mesmo branch, que o Core desfaz mantendo as alterações), commit recusado | 2 |
+| `aceito` | todas as fases aceitas — a suíte e a revisão aprovaram — e a aceitação limpa | 0 |
+| `verificação inconclusiva` | uma verificação não pôde rodar: a ferramenta do harness, a plataforma, a revisão que não se leu nem na segunda chamada, os fluxos declarados que nada alcança ou que foram desligados; o build diz qual e por quê | 3 |
+| `falhou` | a escada inteira não fechou uma fase — o executor, o reparo do verificador e, quando ele roda outro modelo e pode escrever, a sessão dele como executor; a aceitação reprovou o produto e o reparo não o consertou; credencial, limite de uso, Git movido por um agente (fora o commit novo no mesmo branch, que o Core desfaz mantendo as alterações), commit recusado | 2 |
 
-`entrega.md` lista as pendências. A fase entregue com pendências não reabre
-sozinha: `capivara build --rebuild-all` ou `capivara change` refazem. O build
-que falhou é retomável: `capivara build` de novo continua de onde parou, sem
-refazer o que já ficou verde.
+Nenhuma fase fecha com pendência: a revisão e os gates aprovam, ou a fase falha
+com o defeito exato e a evidência, e o build para — nada se constrói por cima de
+uma fase que não fechou. O ciclo de correção que não trouxe progresso em nenhum
+defeito encerra a escada. O build que falhou é retomável: `capivara build` de
+novo continua de onde parou, sem refazer o que já ficou verde.
 
 O verificador informa, para cada pendência, a evidência, como corrigir e qual
 teste ou comando confirma a correção. Ele deve cobrir todos os critérios da

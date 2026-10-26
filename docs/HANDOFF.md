@@ -21,6 +21,21 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
 
+## 2026-10-26 — Só existe "aceito"
+
+O desenvolvedor corrigiu a regra de entrega da §138: o único fim aceitável de um
+build é `aceito`. Saiu o estado "entregue com pendências" (código 3), e o plano
+nunca é publicado com pendência. A fase só fecha com a revisão e os gates
+aprovando; o reparo do que a revisão achou volta a ela (a releitura do mesmo
+código é uma por execução); o ciclo de correção sem progresso em nenhum defeito
+encerra a escada; o verificador de outro modelo, quando pode escrever, faz uma
+sessão como executor; esgotado, a fase falha com o defeito e o build para.
+`verificação inconclusiva` (código 3) ficou só para a verificação que não pôde
+rodar — a revisão que não se leu nem na segunda chamada para a fase. Os tetos do
+orçamento de prova mudaram só no caminho de falha: g1 revisor 2; g4 executor 2 e
+revisor 2; orcamento-esgotado executor 4, revisor 2, reparador 1. A §138 fica como
+registro do que valia antes.
+
 ## 2026-10-25 — O Core exige menos trabalho: a verificação reduzida, com prova medida (§138)
 
 A especificação "Correção da Capivara" pediu a redução em cinco etapas, cada uma

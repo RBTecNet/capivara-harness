@@ -184,38 +184,40 @@ describe("§13.12 no runner · o BUILD encaminha o que o diagnóstico diz ser do
     return { outcome, anuncios, chamadas, RUN };
   }
 
-  // Etapa 4 da redução: uma revisão, o reparo do coautor, e então o pacote — a fase é entregue com a pendência que o aponta.
-  it("o reparo do verificador sem segunda revisão, e então o pacote: o defeito vira UPSTREAM_REPAIR_REQUIRED, nada é editado", async () => {
+  // A escada inteira — o reparo do coautor e o executor, cada um relido pela revisão —, e então o pacote: a fase falha apontando-o.
+  it("o reparo do verificador e o do executor voltam à revisão, e então o pacote: o defeito vira UPSTREAM_REPAIR_REQUIRED, nada é editado, e a fase falha", async () => {
     const { outcome, chamadas, RUN } = await fase(true);
-    expect(chamadas).toEqual(["builder", "verifier", "reparo"]);
-    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
-    if (outcome.status !== "complete") return;
+    // A releitura do mesmo código é uma: depois da correção do executor, que também não mudou nada, o achado vale sem outra.
+    expect(chamadas).toEqual(["builder", "verifier", "reparo", "verifier", "builder"]);
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 3 — verificação independente" });
+    if (outcome.status !== "failed") return;
     const [repairId] = await readdir(pastaDosReparos(root));
     expect(repairId).toBe(`UR-${RUN}-P01-P01-D1-c1`);
-    expect(outcome.pendencias?.join("\n")).toContain(`reparo documental pendente (${repairId})`);
+    expect(outcome.cause).toContain(`reparo documental necessário`);
+    expect(outcome.cause).toContain(repairId!);
     const pacote = await validarReparo(root, repairId!);
     expect(pacote).toMatchObject({ ok: true, manifest: { target: "plan", document: { name: "project-phases.md" }, state: "UPSTREAM_REPAIR_REQUIRED" } });
-    if (pacote.ok) expect(pacote.evidence.recovery).toEqual([{ strategy: "verificador", result: "sem segunda revisão", cycle: 1 }]);
+    if (pacote.ok) expect(pacote.evidence.recovery).toEqual([{ strategy: "verificador", result: "no-progress", cycle: 1 }, { strategy: "executor", result: "no-progress", cycle: 1 }]);
     const estado = JSON.parse(await readFile(join(defeitosDoRun(runPaths(root, RUN).root), "P01.json"), "utf8")) as { defects: { status: string }[] };
     expect(estado.defects[0]!.status).toBe("UPSTREAM_REPAIR_REQUIRED");
     expect(await readFile(join(root, ".capivara", "init", "project-phases.md"), "utf8")).toBe(PLANO);
   });
 
-  it("sem o documento publicado, o pacote é recusado: entrega com a pendência comum, sem estado de reparo documental", async () => {
+  it("sem o documento publicado, o pacote é recusado: a fase falha com o defeito comum, sem estado de reparo documental", async () => {
     const { outcome, anuncios } = await fase(false);
-    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
-    if (outcome.status === "complete") expect(outcome.pendencias?.join("\n")).not.toContain("reparo documental");
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 3 — verificação independente" });
+    if (outcome.status === "failed") expect(outcome.cause).not.toContain("reparo documental");
     expect(anuncios.filter((linha) => linha.includes("encaminhamento")), anuncios.join("\n")).toEqual([expect.stringContaining("o encaminhamento documental de P01-D1 foi recusado")]);
     expect(await readdir(pastaDosReparos(root)).catch(() => [])).toEqual([]);
   });
   // Da revisão adversarial do H.
   it("na retomada, o pacote ainda válido para a fase de novo; com o documento revisado, o defeito volta à escada", async () => {
     const primeira = await fase(true);
-    expect(primeira.outcome.status).toBe("complete");
-    // Mesmo run, documento intacto: nenhuma chamada, a entrega aponta o reparo pendente.
+    expect(primeira.outcome.status).toBe("failed");
+    // Mesmo run, documento intacto: nenhuma chamada, a falha aponta o reparo pendente.
     const segunda = await fase(true);
     expect(segunda.chamadas).toEqual([]);
-    expect(segunda.outcome.status === "complete" ? segunda.outcome.pendencias?.join("\n") : "").toContain("reparo documental pendente");
+    expect(segunda.outcome.status === "failed" ? segunda.outcome.cause : "").toContain("reparo documental pendente");
     // O documento muda (o PLAN foi revisado): o pacote fica velho e o defeito é reaberto — o BUILD volta a trabalhar.
     await writeFile(join(root, ".capivara", "init", "project-phases.md"), `${PLANO}\n<!-- revisado -->\n`);
     const terceira = await fase(false, { verificador: () => "TASK 1: DONE" });
@@ -229,7 +231,7 @@ describe("§13.12 no runner · o BUILD encaminha o que o diagnóstico diz ser do
       diagnostico,
       architecture: { texto: "fatia", sha12: "abcdefabcdef", componentes: ["agenda"], arquivos: [], contratosProprios: ["GET /agenda"], consumidoras: [2, 3] },
     });
-    expect(outcome.status).toBe("complete");
+    expect(outcome.status).toBe("failed");
     const [repairId] = await readdir(pastaDosReparos(root));
     const pacote = await validarReparo(root, repairId!);
     expect(pacote).toMatchObject({ ok: true, manifest: { document: { name: "architecture.md" }, impact: { phases: [1, 2, 3], contracts: ["GET /agenda"] } } });

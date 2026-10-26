@@ -393,7 +393,7 @@ describe("§130.9 · os gates não mudam e não se repetem por parte", () => {
 });
 
 describe("§130.10 · a revalidação por impacto continua valendo sobre a fase feita em partes", () => {
-  it("o reparo de src/t12.ts reabre a suíte; sem segunda revisão, a task 12 sai como pendência e as outras onze não são reperguntadas", async () => {
+  it("o reparo de src/t12.ts reabre a suíte; a revisão relê, aprova a task 12, e a fase fecha aceita", async () => {
     const plano = envelope([faseGrande()]);
     let leituras = 0;
     const { outcome, calls, suites } = await fase(plano, async (chamada) => {
@@ -405,12 +405,10 @@ describe("§130.10 · a revalidação por impacto continua valendo sobre a fase 
       leituras += 1;
       return ok(leituras === 1 ? `${todasDone(11)}\nTASK 12: INCOMPLETE — CRITERION: a regra 1; OBSERVED: src/t12.ts; EXPECTED: a regra; FIX: corrigir src/t12.ts` : todasDone(12));
     });
-    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
+    expect(outcome).toMatchObject({ status: "complete" });
     expect(suites()).toBe(2);
-    expect(calls.filter((chamada) => chamada.role === "verifier" && !chamada.repair)).toHaveLength(1);
-    const pendencias = outcome.status === "complete" ? (outcome.pendencias ?? []).join("\n") : "";
-    expect(pendencias).toContain("TASK 12");
-    expect(pendencias).not.toContain("TASK 1 ");
+    // O reparo volta à revisão: a fase só fecha com ela aprovando.
+    expect(calls.filter((chamada) => chamada.role === "verifier" && !chamada.repair)).toHaveLength(2);
   });
 });
 
@@ -601,7 +599,7 @@ describe("§130.14 · sem capacidade conhecida do modelo: a política fixa, a me
 });
 
 describe("§130.15 · a fase só fecha inteira", () => {
-  it("depois da última parte, a task 2 incompleta vai ao reparo, e a fase fecha com ela dita como pendência", async () => {
+  it("depois da última parte, a task 2 incompleta vai ao reparo, volta à revisão, e a fase fecha aceita", async () => {
     const plano = envelope([faseGrande()]);
     let leituras = 0;
     const { outcome, construcao } = await fase(plano, async (chamada) => {
@@ -612,9 +610,9 @@ describe("§130.15 · a fase só fecha inteira", () => {
       leituras += 1;
       return ok(leituras === 1 ? todasDone(12).replace("TASK 2: DONE", "TASK 2: INCOMPLETE — CRITERION: a regra 3; OBSERVED: falta; EXPECTED: a regra; FIX: src/t2.ts") : todasDone(12));
     });
-    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
+    expect(outcome).toMatchObject({ status: "complete" });
     expect(construcao).toHaveLength(6);
-    expect(leituras).toBe(1);
+    expect(leituras).toBe(2);
     expect((await defeitos()).implementation).toBe("done");
   });
 });

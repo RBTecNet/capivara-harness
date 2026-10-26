@@ -116,7 +116,7 @@ async function defeitos(): Promise<EstadoDaRecuperacao> {
 }
 
 describe("§13.1 · a mudança localizada invalida só a evidência associada", () => {
-  it("o reparo de b.ts invalida a suíte e deixa a prova da task de a.ts sem validade demonstrada; sem segunda revisão, é pendência", async () => {
+  it("o reparo de b.ts invalida a suíte e deixa a prova da task de a.ts sem validade demonstrada; a revisão relê, aprova, e a fase fecha aceita", async () => {
     let verificacoes = 0;
     const { outcome, calls } = await fase(async (chamada) => {
       if (chamada.role === "builder") {
@@ -131,7 +131,7 @@ describe("§13.1 · a mudança localizada invalida só a evidência associada", 
       verificacoes += 1;
       return ok(verificacoes === 1 ? "TASK 1: DONE\nTASK 2: INCOMPLETE — CRITERION: a listagem; OBSERVED: src/b.ts devolve 'faltando'; EXPECTED: as reservas; FIX: corrigir src/b.ts" : DONE);
     });
-    expect(outcome).toMatchObject({ status: "complete", cycles: 1, estado: "entregue com pendências" });
+    expect(outcome).toMatchObject({ status: "complete", cycles: 1 });
     const livro = await evidencias();
     const historico = livro.historico();
     const primeiraDaTask1 = historico.find((evidencia) => evidencia.checkId === "task-1")!;
@@ -139,9 +139,8 @@ describe("§13.1 · a mudança localizada invalida só a evidência associada", 
     expect(livro.validadeDe(primeiraDaTask1.evidenceId)?.state).not.toBe("VALID");
     const primeiraDaSuite = historico.find((evidencia) => evidencia.checkId === "suite")!;
     expect(livro.validadeDe(primeiraDaSuite.evidenceId)).toMatchObject({ state: "INVALIDATED" });
-    // A revisão é uma só: o reparo da task 2 é provado pela suíte, e dito como pendência.
-    expect(calls.filter((chamada) => chamada.role === "verifier" && !chamada.repair)).toHaveLength(1);
-    if (outcome.status === "complete") expect(outcome.pendencias?.join("\n")).toContain("sem segunda revisão");
+    // O reparo da task 2 volta à revisão: a fase só fecha com ela aprovando.
+    expect(calls.filter((chamada) => chamada.role === "verifier" && !chamada.repair)).toHaveLength(2);
   });
 
   it("o mesmo conteúdo reaproveita a prova: a correção que não muda nada não roda a suíte de novo", async () => {
@@ -227,7 +226,7 @@ describe("§13.8 · esgotar o orçamento do ciclo abre o seguinte sem perder nad
 describe("§13.9 e §13.10 · handoff antes de qualquer reparo, retomada e quem valida", () => {
   const incompleto = "TASK 1: DONE\nTASK 2: INCOMPLETE — CRITERION: a listagem; OBSERVED: src/b.ts vazio; EXPECTED: as reservas; FIX: preencher src/b.ts; CHECK: npm test";
 
-  it("o handoff existe ANTES do primeiro reparo, e quem repara não se valida: não há segunda revisão", async () => {
+  it("o handoff existe ANTES do primeiro reparo, e o reparo do verificador volta à revisão, que o aprova", async () => {
     let handoffsNaCorrecao: string[] | null = null;
     const sessoes: string[] = [];
     let n = 0;
@@ -251,10 +250,9 @@ describe("§13.9 e §13.10 · handoff antes de qualquer reparo, retomada e quem 
     const handoff = JSON.parse(await readFile(join(defeitosDoRun(runPaths(root, RUN).root), "P01", "P01-D1", "handoff-G3-c1.json"), "utf8")) as Record<string, unknown>;
     expect(handoff).toMatchObject({ identity: { runId: RUN, phaseId: "P01", gate: "G3", cycle: 1, defectId: "P01-D1" }, minimalRepair: "preencher src/b.ts", requiredProof: "npm test" });
     const reparo = calls.find((chamada) => chamada.repair)!;
-    // O reparo é do verificador que diagnosticou (o coautor), e nenhuma leitura o valida depois: a revisão é uma só.
-    expect(calls.slice(calls.indexOf(reparo) + 1).filter((chamada) => chamada.role === "verifier" && !chamada.repair)).toHaveLength(0);
-    expect(sessoes).toHaveLength(1);
-    expect(outcome.status === "complete" ? outcome.estado : "").toBe("entregue com pendências");
+    // O reparo é do verificador que diagnosticou (o coautor), e a revisão relê o que ele mudou: a fase só fecha com ela aprovando.
+    expect(calls.slice(calls.indexOf(reparo) + 1).filter((chamada) => chamada.role === "verifier" && !chamada.repair)).toHaveLength(1);
+    expect(sessoes).toHaveLength(2);
   });
 
   const garantida = { maxVerifierRepairs: 1, verifierResume: { estado: "garantido" as const, elevacao: "por-invocacao" as const, motivo: "teste" } };

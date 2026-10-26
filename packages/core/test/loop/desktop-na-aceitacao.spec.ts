@@ -100,7 +100,7 @@ describe("a aceitação de um aplicativo desktop, numa cópia limpa", () => {
     const iniciar = registrar();
     const resultado = await runAcceptance({ projectRoot, runner: compilar.runner, service: iniciar.runner, plataforma: LINUX_COM_TELA });
     expect(resultado.accepted).toBe(true);
-    if (resultado.accepted) expect(resultado.pendencias ?? []).toEqual([]);
+    if (resultado.accepted) expect(resultado.naoVerificado ?? []).toEqual([]);
     expect(compilar.passos.map((passo) => passo.comando)).toEqual(['dotnet build "src/Agenda/Agenda.csproj"']);
     expect(iniciar.passos).toEqual([{ comando: 'dotnet run --no-build --project "src/Agenda/Agenda.csproj"', segundos: 10 }]);
   });
@@ -129,7 +129,7 @@ describe("a aceitação de um aplicativo desktop, numa cópia limpa", () => {
     expect(resultado.accepted).toBe(true);
     expect(compilar.passos.map((passo) => passo.comando)).toEqual(['dotnet build "src/Agenda/Agenda.csproj" -p:EnableWindowsTargeting=true']);
     expect(iniciar.passos).toEqual([]);
-    if (resultado.accepted) expect(resultado.pendencias).toEqual([expect.stringContaining("verificação inconclusiva: plataforma")]);
+    if (resultado.accepted) expect(resultado.naoVerificado).toEqual([expect.stringContaining("verificação inconclusiva: plataforma")]);
   });
 
   it("o executável de janela não é servidor: o percurso dos fluxos não o sobe", async () => {

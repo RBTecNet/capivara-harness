@@ -58,14 +58,14 @@ export type AcceptanceResult =
       accepted: true;
       steps: StepResult[];
       skipped: string;
-      /** O que a aceitação não pôde percorrer pelos meios da plataforma: pendência, nunca prova. */
-      pendencias?: string[];
+      /** O que a aceitação não pôde percorrer pelos meios da plataforma: verificação que não rodou, nunca prova. */
+      naoVerificado?: string[];
     }
   | { accepted: false; steps: StepResult[]; failure: { id: string; cause: string; natureza: NaturezaDaFalha } };
 
 /** O smoke dos fluxos essenciais, na sala limpa em que os passos acabaram de passar. */
 export type ResultadoDoSmoke =
-  | { ok: true; pendencias: string[] }
+  | { ok: true; naoVerificado: string[] }
   | { ok: false; id: string; cause: string; natureza: NaturezaDaFalha };
 
 /**
@@ -453,11 +453,11 @@ export async function runAcceptance(options: AcceptanceOptions): Promise<Accepta
       }
     }
 
-    if (!options.smoke) return { accepted: true, steps: results, skipped: "", ...(inconclusivas.length > 0 ? { pendencias: inconclusivas } : {}) };
+    if (!options.smoke) return { accepted: true, steps: results, skipped: "", ...(inconclusivas.length > 0 ? { naoVerificado: inconclusivas } : {}) };
     const smoke = await options.smoke(room, { desktopSubiu });
     if (!smoke.ok) return { accepted: false, steps: results, failure: { id: smoke.id, cause: smoke.cause, natureza: smoke.natureza } };
-    const pendencias = [...inconclusivas, ...smoke.pendencias];
-    return { accepted: true, steps: results, skipped: "", ...(pendencias.length > 0 ? { pendencias } : {}) };
+    const naoVerificado = [...inconclusivas, ...smoke.naoVerificado];
+    return { accepted: true, steps: results, skipped: "", ...(naoVerificado.length > 0 ? { naoVerificado } : {}) };
   } finally {
     if (room !== options.projectRoot) await rm(room, { recursive: true, force: true });
   }

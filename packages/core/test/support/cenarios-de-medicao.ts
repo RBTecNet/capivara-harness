@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { InitBlockedError, readArchitectureState, readSkeletonState, runInit, runPlan } from "../../src/init/index.js";
 import type { AgentCall, InitOutcome } from "../../src/init/index.js";
 import { runBuild } from "../../src/loop/index.js";
+import { estadoDoBuild } from "../../src/loop/build.js";
 import type { BuildOutcome, EngineCall } from "../../src/loop/index.js";
 import { runIdFor } from "../../src/state/index.js";
 import { NO_QUESTIONS, approve, fakeAgent } from "./fake-agent.js";
@@ -510,8 +511,8 @@ export async function garantiaG1(): Promise<Garantia> {
   const runId = cenario.build?.runId ?? "";
   const registro = await primeiroLogCom(cenario.projectRoot, runId, ACHADO_G1);
   const final = await lerArquivo(cenario.projectRoot, "src/usuarios.js");
-  // Fechar sem a restrição é a fase aceita sem ela: entregue com a pendência dita, ela não foi escondida.
-  const aceita = cenario.build?.phases.some((fase) => fase.outcome.status === "complete" && (fase.outcome.estado ?? "aceito") === "aceito") === true;
+  // Uma fase só fecha aceita: fechar sem a restrição é aceitá-la sem ela.
+  const aceita = cenario.build?.phases.some((fase) => fase.outcome.status === "complete") === true;
   const fechouSemRestricao = aceita && !final.includes("papel !== 'admin'");
   return {
     id: "G-1",
@@ -652,8 +653,8 @@ export async function cenarioDaPendenciaDoPlano(nome: string, sha12: string, con
 /**
  * G-3 · contradição entre decisões do plano. Ela nunca passa calada: o `plan`
  * bloqueia com as duas citações, ou publica a contradição como pendência da
- * fase afetada — ela chega ao executor, nomeada, e ao relatório final, e o
- * build não termina aceito sem a revisão confirmar que o código a resolveu.
+ * fase afetada — ela chega ao executor, nomeada, e a fase falha com ela na
+ * causa se a revisão não confirmar que o código a resolveu.
  */
 export async function garantiaG3(): Promise<Garantia> {
   const cenario = await cenarioDaPendenciaDoPlano("g3", "9a7a00000003", false);
@@ -663,7 +664,8 @@ export async function garantiaG3(): Promise<Garantia> {
   const fase2 = publicado.split("## Phase 2")[1] ?? "";
   const pendencia = fase2.split("\n").find((linha) => linha.startsWith("**Pendência do plano:**")) ?? "";
   const noExecutor = cenario.observado.chamadasDoBuild.some((call) => call.role === "builder" && call.phase.number === 2 && call.prompt.includes(pendencia) && pendencia !== "");
-  const noRelatorio = (cenario.build?.pendencias ?? []).some((linha) => linha.includes("pendência do plano") && citaAsDuas(linha));
+  const noRelatorio = [...(cenario.build?.errors ?? []), ...(cenario.build?.phases.map((fase) => ("cause" in fase.outcome ? fase.outcome.cause : "")) ?? [])]
+    .some((linha) => linha.includes("pendência do plano") && citaAsDuas(linha));
   const aceito = cenario.build?.exitCode === 0 || cenario.build?.estado === "aceito";
   const registro = await primeiroLogCom(cenario.projectRoot, runIdFor("init", "9a7a00000003"), `«${CITACAO_DA_FASE}» contradiz`);
   const pega = bloqueou
@@ -676,7 +678,7 @@ export async function garantiaG3(): Promise<Garantia> {
     detalhe: bloqueou
       ? `o plan parou (${cenario.bloqueio !== null ? "bloqueio" : "NOT READY"})${pega ? " e a parada cita a fase e a decisão" : ", mas a parada não cita as duas passagens"}`
       : pega
-        ? `o plan publicou a contradição como pendência da Phase 2; ela chegou ao executor e ao relatório, e o build terminou com código ${cenario.build?.exitCode ?? "-"} (${cenario.build?.estado ?? "-"})`
+        ? `o plan publicou a contradição como pendência da Phase 2; ela chegou ao executor, e o build terminou com código ${cenario.build?.exitCode ?? "-"} (falhou), com ela na causa`
         : `a contradição passou calada: pendência na fase ${citaAsDuas(pendencia) ? "sim" : "não"}, no executor ${noExecutor ? "sim" : "não"}, no relatório ${noRelatorio ? "sim" : "não"}, build ${aceito ? "aceito" : "não aceito"}`,
     cenario,
   };
@@ -723,22 +725,24 @@ export async function garantiaG4(): Promise<Garantia> {
         ? allDone(call.phase.taskCount)
         : `TASK 1: DONE\nTASK 2: DONE\nTASK 3: INCOMPLETE — ${ACHADO_G4}; não existe src/recuperacao.js nem rota de redefinição; implemente recuperar(email) enviando o link; teste o envio do link`,
   }, { sha12: "9a7a00000004" });
+  // G-4 redefinida: o requisito ausente nunca vira aceito — o build conserta, ou termina falhou com a causa.
   const aceito = cenario.build?.exitCode === 0 || cenario.build?.estado === "aceito";
+  const consertou = (await lerArquivo(cenario.projectRoot, "src/recuperacao.js")) !== "";
+  const falhou = cenario.build !== null && estadoDoBuild(cenario.build) === "falhou";
   const parada = [
     ...(cenario.build?.errors ?? []),
-    ...(cenario.build?.pendencias ?? []),
     ...(cenario.build?.phases.map((fase) => ("cause" in fase.outcome ? fase.outcome.cause : "")) ?? []),
   ].join("\n");
   const nomeada = /recupera[çc][ãa]o de senha/i.test(parada);
   return {
     id: "G-4",
-    pega: !aceito && nomeada,
+    pega: aceito ? consertou : falhou && nomeada,
     registro: await primeiroLogCom(cenario.projectRoot, cenario.build?.runId ?? "", ACHADO_G4),
     detalhe: aceito
-      ? "o build terminou concluído sem a recuperação de senha"
-      : nomeada
-        ? `o build não aceitou (código ${cenario.build?.exitCode ?? "-"}, ${cenario.build?.estado ?? "falhou"}; ${cenario.build?.phases.map((fase) => `${fase.id}: ${fase.outcome.status}`).join(", ")}); a pendência é nomeada`
-        : "o build não aceitou, mas não diz qual obrigação ficou pendente",
+      ? consertou ? "o build consertou: a recuperação de senha existe e o build foi aceito" : "o build terminou aceito sem a recuperação de senha"
+      : falhou && nomeada
+        ? `o build terminou falhou (código ${cenario.build?.exitCode ?? "-"}; ${cenario.build?.phases.map((fase) => `${fase.id}: ${fase.outcome.status}`).join(", ")}), com a recuperação de senha na causa`
+        : `o build não aceitou, mas ${falhou ? "não diz qual obrigação falta" : `terminou em ${cenario.build?.estado ?? "-"}, não em falhou`}`,
     cenario,
   };
 }

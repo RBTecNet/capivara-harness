@@ -147,7 +147,7 @@ describe("o bloqueio que sobra depois da emenda vai uma vez à arquitetura", () 
 });
 
 describe("a pendência do plano no build", () => {
-  it("a contradição que persiste chega ao executor e à revisão, e sem a revisão confirmar a fase termina entregue com pendências", async () => {
+  it("a contradição que persiste chega ao executor e à revisão, e sem a revisão confirmar a fase falha com ela na causa", async () => {
     const cenario = await cenarioDaPendenciaDoPlano("pendencia-aberta", "pendencia0a1", false);
     try {
       expect(cenario.plan?.readiness.ready).toBe(true);
@@ -156,9 +156,8 @@ describe("a pendência do plano no build", () => {
       expect(chamadas.find((call) => call.role === "verifier" && call.purpose === undefined)?.prompt).toContain("PLAN_ISSUE <n>: RESOLVED");
       // A fase sem pendência não recebe nem o bloco nem a linha.
       expect(cenario.observado.chamadasDoBuild.find((call) => call.phase.number === 1 && call.role === "builder")?.prompt).not.toContain("Plan issues");
-      expect(cenario.build?.exitCode).toBe(3);
-      expect(cenario.build?.estado).toBe("entregue com pendências");
-      expect(cenario.build?.pendencias).toEqual([expect.stringContaining("P02 · pendência do plano, sem a revisão confirmar que o código a resolveu")]);
+      expect(cenario.build?.exitCode).toBe(2);
+      expect(cenario.build?.errors.join("\n")).toContain("P02 · pendência do plano, sem a revisão confirmar que o código a resolveu");
     } finally {
       await rm(cenario.projectRoot, { recursive: true, force: true });
     }

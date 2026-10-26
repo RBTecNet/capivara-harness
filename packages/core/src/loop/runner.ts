@@ -1,14 +1,14 @@
 /**
  * O ciclo de fase.
  *
- * Sessão nova a cada tentativa, prompt auto-contido, a suíte e UMA revisão da
+ * Sessão nova a cada tentativa, prompt auto-contido, a suíte e a revisão da
  * fase, e um commit pelo Core. Verde com a árvore limpa significa que a fase já
  * estava implementada em HEAD: concluída, sem commit.
  *
  * Os fluxos não são percorridos aqui: a aceitação final os percorre uma vez, na
- * cópia limpa (etapa 4 da redução). Esgotado o orçamento, a fase é entregue com
- * as pendências ditas; só a sessão que não trabalha, a credencial, o Git e o
- * commit param o build.
+ * cópia limpa (etapa 4 da redução). A fase só fecha aceita; esgotada a escada —
+ * o executor, o reparo do verificador e, quando ele roda outro modelo, a sessão
+ * dele como executor —, a fase falha com o defeito dito, e o build para.
  */
 
 import { readFile } from "node:fs/promises";
@@ -258,29 +258,25 @@ export interface PhaseRunOptions {
 }
 
 /**
- * Como a fase foi entregue (etapa 4 da redução). `aceito`: a suíte e a revisão
- * da fase passaram. `entregue com pendências`: o código foi commitado e há o que
- * não se provou — o achado da revisão que recebeu reparo sem segunda revisão, o
- * defeito que o orçamento não fechou. `verificação inconclusiva`: a revisão não
- * pôde ser lida. Nenhum dos três para o build; só `failed` para.
+ * O fim de uma fase. Ela só fecha (`complete`) aceita: a suíte e a revisão
+ * aprovaram, e nada ficou aberto. O que a escada inteira não fechou é `failed`,
+ * com o defeito e a evidência, e o build para — nada se constrói por cima de uma
+ * fase que não fechou. Não há estado intermediário de entrega.
  */
-export type EstadoDaEntrega = "aceito" | "entregue com pendências" | "verificação inconclusiva";
-
-/** Ausente é `aceito`: a fase pulada por já ter fechado, e o registro anterior ao campo. */
-export interface EntregaDaFase {
-  estado?: EstadoDaEntrega;
-  /** O que não se provou, uma linha cada, para o relatório e a entrega. */
-  pendencias?: string[];
-}
-
 export type PhaseOutcome =
-  | ({ status: "complete"; committed: boolean; message: string; cycles: number } & EntregaDaFase)
-  | ({ status: "already-implemented"; cycles: number } & EntregaDaFase)
+  | { status: "complete"; committed: boolean; message: string; cycles: number }
+  | { status: "already-implemented"; cycles: number }
   | {
       status: "failed";
       gate: GateName;
       cause: string;
       cycles: number;
+      /**
+       * A verificação que não pôde rodar, quando foi por isso que a fase parou:
+       * a revisão que não concluiu ou não se leu, nem na segunda vez. O build
+       * termina em `verificação inconclusiva`, não em `falhou`, e diz qual e por quê.
+       */
+      inconclusiva?: string;
       /**
        * Onde está a prova da parada, relativo à raiz do projeto (§125 G): o
        * handoff do defeito que parou e o log da evidência que reprovou. O nome
@@ -497,9 +493,9 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
    * código contra o qual foi tirada. A ordem é sempre: verificar o que não tem
    * prova válida (G2 e depois a revisão da fase, G3), registrar o que falhou como
    * defeito, escolher a ação pela escada do defeito dentro do orçamento, e depois
-   * da ação invalidar só o que a mudança atingiu. A revisão é uma por execução
-   * da fase: o reparo do que ela achou é provado pela suíte, e o que ela não
-   * revê fica dito como pendência (etapa 4 da redução).
+   * da ação invalidar só o que a mudança atingiu. O reparo do que a revisão
+   * achou volta a ela, que relê só o que estava aberto e o que o reparo mudou:
+   * a fase só fecha com a revisão aprovando.
    */
   const livro = options.evidencias ?? (await LivroDeEvidencias.abrir(paths.root, options.runId));
   const registro = await RegistroDeDefeitos.abrir(paths.root, options.runId, session.id, now, options.refazer === true);
@@ -546,16 +542,16 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   let verificadorEscreveuDesdeOG3 = false;
   let previousWroteNothing = false;
   let ultimoRelatorioDeReparo = "";
-  /** A revisão da fase já rodou nesta execução: ela é uma só, e o reparo do que achou não a chama de novo. */
-  let revisouNestaExecucao = false;
-  /** Por que a revisão não pôde ser lida, quando não pôde: a fase sai com `verificação inconclusiva`. */
-  let inconclusiva: string | null = null;
+  /** A revisão que não se leu já ganhou a segunda chamada nesta execução: ela é uma só. */
+  let revisaoRepetida = false;
+  /** O código que a última revisão lida julgou: sobre o mesmo código, o achado dela continua valendo sem outra leitura. */
+  let arvoreDaUltimaRevisao: string | null = null;
+  /** A releitura do mesmo código já aconteceu nesta execução: ela é uma, para o achado falso; depois o achado vale. */
+  let releuOMesmoCodigo = false;
   /** As pendências do plano que a revisão desta execução leu resolvidas no código; as outras impedem `aceito`. */
   let pendenciasDoPlanoResolvidas = new Set<number>();
-  /** A sessão nova antes da falha por sessão já foi usada nesta execução: ela é uma só. */
+  /** A sessão nova do verificador de outro modelo, como executor, já foi usada nesta execução: ela é uma só. */
   let resgateUsado = false;
-  /** Quem implementou a fase foi o verificador, na sessão nova: a revisão dele sobre ela não é independente. */
-  let implementadaPeloVerificador = false;
   let julgandoParcial = false;
   /** A retomada sobre código que mudou começa por uma sessão do executor (ver o início do laço). */
   let retomarPeloExecutor: { defeitos: Defect[]; mudouDesde: string[] | null } | null = null;
@@ -1202,13 +1198,12 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   };
 
   /**
-   * A revisão da fase é UMA por execução (etapa 4 da redução): depois dela, o
-   * reparo do que ela achou é provado pela suíte, e o que ela não revê sai como
-   * pendência. A aprovação de uma execução anterior sobre o mesmo código também
-   * vale — é a retomada, não outra regra.
+   * A fase só fecha com a revisão aprovando: o reparo do que ela achou volta a
+   * ela, que relê só o que estava aberto e o que o reparo mudou. A aprovação de
+   * uma execução anterior sobre o mesmo código também vale — é a retomada, não
+   * outra regra.
    */
   const g3Valido = async (): Promise<boolean> => {
-    if (revisouNestaExecucao) return true;
     if (estado.defects.some((defeito) => defeito.status === "AWAITING_VALIDATION" && (defeito.gates.at(-1) ?? defeito.discovered.gate) === "G3")) return false;
     return !(await planoDoG3()).exigeChamada;
   };
@@ -1221,6 +1216,20 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     if (!plano.exigeChamada && pendentesDoG3.length === 0) {
       gate("G3", "verde", ciclosAbertos);
       return "verde";
+    }
+    /*
+     * O reparo que não mudou o código ganha UMA releitura por execução — a do
+     * achado que a revisão deu por engano sobre código certo. Depois dela,
+     * sobre o mesmo código, o achado da última revisão continua valendo, e o
+     * defeito volta sem progresso, sem chamada nenhuma.
+     */
+    const mesmoCodigo = pendentesDoG3.length > 0 && arvoreDaUltimaRevisao !== null && codigo.atual.tree === arvoreDaUltimaRevisao;
+    if (mesmoCodigo && !releuOMesmoCodigo) releuOMesmoCodigo = true;
+    else if (mesmoCodigo) {
+      announce(`[${session.id}] o reparo não mudou o código que a revisão julgou: o achado continua valendo, sem outra leitura`);
+      await validarDoGate("G3", new Map(pendentesDoG3.map((defeito) => [defeito.defectId, { assinatura: defeito.anchors.signature }])), false);
+      gate("G3", "vermelho", ciclosAbertos);
+      return "vermelho";
     }
     if (plano.aprovadas.length > 0) {
       announce(`[${session.id}] ${plano.aprovadas.length} de ${session.taskCount} task(s) já verificadas com este texto; não vou reperguntar sobre elas`);
@@ -1244,30 +1253,49 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     });
     const indicesAprovados = new Set([...plano.aprovadas, ...plano.confirmar].map((task) => task.index));
     await writeAtomic(`${paths.prompts}/${nome}.txt`, verificationPrompt);
-    const verification = await chamarLeitor({ role: "verifier", phase: session, attempt: ordinal(), prompt: verificationPrompt });
-    const log = await gravarUnico(`${paths.logs}/${nome}.log`, `${verification.stdout}\n${verification.stderr}`);
-    const g0Verifier = gate0(verification, options.engine);
-    revisouNestaExecucao = true;
+    const revisar = async (prompt: string, arquivo: string) => {
+      const resposta = await chamarLeitor({ role: "verifier", phase: session, attempt: ordinal(), prompt });
+      const registrado = await gravarUnico(`${paths.logs}/${arquivo}.log`, `${resposta.stdout}\n${resposta.stderr}`);
+      return { resposta, registrado, g0: gate0(resposta, options.engine), g3: gate3(resposta.stdout, session.taskCount, indicesAprovados) };
+    };
+    const naoSeLe = (leitura: Awaited<ReturnType<typeof revisar>>): string | null =>
+      !leitura.g0.green
+        ? `a sessão da revisão não concluiu (${leitura.g0.cause.split("\n")[0] ?? ""})`
+        : !leitura.g3.green && leitura.g3.repairable !== true
+          ? `a revisão veio ilegível (${leitura.g3.cause.split("\n")[0] ?? ""})`
+          : null;
+    let leitura = await revisar(verificationPrompt, nome);
+    /*
+     * A revisão que não concluiu, ou que não se lê, ganha UMA chamada com o
+     * protocolo repetido, só neste caminho. Não lida duas vezes, a verificação
+     * não pôde rodar: a fase não fecha, e o build para em verificação
+     * inconclusiva, dizendo qual revisão e por quê. Ilegível nunca é aprovação.
+     */
+    if (naoSeLe(leitura) !== null && !leitura.resposta.providerFailure && !revisaoRepetida) {
+      revisaoRepetida = true;
+      const primeira = naoSeLe(leitura)!;
+      announce(`[${session.id}] ${primeira}; uma revisão a mais, com o protocolo repetido`);
+      await event("retry", `revisão a mais: ${primeira}`, ciclosAbertos);
+      leitura = await revisar(
+        `${verificationPrompt}\n\n## The previous review could not be read\n${primeira}.\nRepeat the review: exactly one TASK line per task of the phase, in the protocol above, and nothing else.`,
+        `${nome}.repetida`,
+      );
+    }
+    const { resposta: verification, registrado: log, g0: g0Verifier, g3 } = leitura;
     // A recusa do provider não é desta fase: a próxima chamada recusaria igual, e o build para.
     if (!g0Verifier.green && verification.providerFailure) {
       gate("G3", "vermelho", ciclosAbertos);
       return { parar: await pararPorSessao("gate 0 — engine", `A sessão de verificação independente não concluiu: ${g0Verifier.cause}`, false) };
     }
-    const g3 = gate3(verification.stdout, session.taskCount, indicesAprovados);
-    /*
-     * A revisão que não concluiu, ou que não se lê, não ganha segunda chamada nem
-     * correção de formato: a fase sai com `verificação inconclusiva`, dita, e o
-     * código segue para a entrega. Ilegível nunca é aprovação.
-     */
-    if (!g0Verifier.green || (!g3.green && g3.repairable !== true)) {
-      const motivo = !g0Verifier.green ? `a sessão da revisão não concluiu (${g0Verifier.cause.split("\n")[0] ?? ""})` : `a revisão veio ilegível (${g3.green ? "" : g3.cause.split("\n")[0] ?? ""})`;
-      inconclusiva = `${motivo}; resposta em ${relative(options.projectRoot, log)}`;
+    const ilegivel = naoSeLe(leitura);
+    if (ilegivel !== null) {
+      const motivo = `a revisão da fase ${session.id} não pôde ser lida ${revisaoRepetida ? "nem na segunda chamada" : ""}: ${ilegivel}; resposta em ${relative(options.projectRoot, log)}`.replace(/\s+:/u, ":");
       gate("G3", "neutro", ciclosAbertos);
-      announce(`[${session.id}] verificação inconclusiva: ${inconclusiva}`);
-      await transicao({ tipo: "resultado", gate: "G3", motivo: `verificação inconclusiva — ${inconclusiva}; sem segunda chamada, a fase segue para a entrega` });
-      return "verde";
+      announce(`[${session.id}] verificação inconclusiva: ${motivo}`);
+      return { parar: await pararInconclusiva(motivo) };
     }
     verificadorEscreveuDesdeOG3 = false;
+    arvoreDaUltimaRevisao = codigo.atual.tree;
     pendenciasDoPlanoResolvidas = pendenciasResolvidas(verification.stdout);
     const vereditos = parseVerification(verification.stdout);
     for (const verdict of vereditos) {
@@ -1707,58 +1735,59 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   };
 
   /**
-   * A sessão nova antes da falha por sessão (item 7 de "atacar os pontos frágeis").
+   * O último degrau da escada: o verificador de outro modelo como executor.
    *
-   * A sessão de construção que não entrega resultado utilizável fechava a fase
-   * como falha, e o build parava com código 2. Antes disso, UMA sessão nova:
-   * do verificador como executor, quando ele roda outro modelo e pode escrever
-   * — é o validador coautor aplicado à falta de sessão —; senão, do executor.
-   * Só se ela também não entregar a fase é falha. Verdadeiro quando entregou.
+   * Quando o executor e o reparo do verificador não fecham a fase — a sessão
+   * que não entrega resultado utilizável, ou os defeitos que a escada inteira
+   * não fechou —, e o verificador roda outro provider ou modelo e pode escrever,
+   * vem UMA sessão nova dele com o prompt do executor (o validador coautor
+   * aplicado à troca de modelo). O que ela entrega volta aos gates de sempre, e
+   * a fase só fecha se eles e a revisão aprovarem. Sem verificador de outro
+   * modelo, a escada acaba no degrau de antes, e a fase falha. Verdadeiro
+   * quando a sessão entregou resultado utilizável.
    */
-  const resgatarSessao = async (causa: string): Promise<boolean> => {
-    if (resgateUsado) return false;
+  const resgatarSessao = async (causa: string, situacao: string): Promise<boolean> => {
+    if (resgateUsado || options.verificadorComOutroModelo !== true || maxVerifierRepairs === 0) return false;
     resgateUsado = true;
-    const peloVerificador = options.verificadorComOutroModelo === true && maxVerifierRepairs > 0;
-    const doEngine = estado.defects.filter((defeito) => defeito.nature === "engine" && defeito.status !== "RESOLVED");
-    const quem = peloVerificador ? "o verificador, que roda outro modelo, como executor" : "o executor";
-    announce(`[${session.id}] a sessão não entregou resultado utilizável; antes de fechar a fase como falha, uma sessão nova: ${quem}`);
-    await event("retry", `sessão nova antes da falha por sessão (${peloVerificador ? "verificador como executor" : "executor"}): ${causa.split("\n")[0] ?? ""}`, ciclosAbertos);
+    const abertos = estado.defects.filter((defeito) => defeito.status === "OPEN");
+    announce(`[${session.id}] ${situacao}; antes de a fase falhar, uma sessão nova do verificador, que roda outro modelo, como executor`);
+    await event("retry", `sessão nova do verificador de outro modelo como executor: ${causa.split("\n")[0] ?? ""}`, ciclosAbertos);
     const ctx = await contexto();
     const prompt = fixPrompt({
       ...ctx,
-      gate: "gate 0 — engine",
-      cause: `${causa}\n\nA sessão de construção não entregou resultado utilizável. Esta é uma sessão nova, a última antes de a fase fechar como falha: leia o código atual e implemente o que falta da fase.`,
+      gate: abertos[0] ? nomeDoGate(abertos[0].gates.at(-1) ?? abertos[0].discovered.gate) : "gate 0 — engine",
+      cause: `${causa}\n\n${situacao}. Esta é uma sessão nova, de outro modelo, a última antes de a fase falhar: leia o código atual e implemente o que falta da fase.`,
       previousWroteNothing,
     });
-    if (doEngine.length > 0) registro.consumir({ estrategia: peloVerificador ? "verificador" : "executor", defeitos: doEngine }, { role: peloVerificador ? "verifier" : "builder", attempt: ordinal() });
+    if (abertos.length > 0) registro.consumir({ estrategia: "verificador", defeitos: abertos }, { role: "verifier", attempt: ordinal() });
     await registro.salvar();
     await transicao({
-      tipo: "estrategia", gate: "G0", defeitos: doEngine.map((defeito) => defeito.defectId),
-      estrategia: peloVerificador ? "verificador como executor, sessão nova" : "executor, sessão nova",
-      agente: peloVerificador ? "verificador, com o prompt do executor" : "executor", orcamento: [{ escopo: "sessão nova antes da falha", usado: 1, max: 1 }],
-      motivo: "a sessão não entregou resultado utilizável; uma sessão nova antes de a fase fechar como falha", proximo: "G0, depois os gates de sempre",
+      tipo: "estrategia", gate: "G0", defeitos: abertos.map((defeito) => defeito.defectId),
+      estrategia: "verificador de outro modelo como executor, sessão nova", agente: "verificador, com o prompt do executor",
+      orcamento: [{ escopo: "troca de modelo antes da falha", usado: 1, max: 1 }],
+      motivo: `${situacao}; a troca de modelo é o último degrau antes de a fase falhar`, proximo: "G0, depois os gates e a revisão de sempre",
     });
-    let resultado: EngineResult;
-    if (peloVerificador) {
-      const antes = codigo.atual;
-      gate("G0", "corrente", ciclosAbertos);
-      resultado = await chamarLeitor({ role: "verifier", repair: true, phase: session, attempt: ordinal(), prompt });
-      await gravarUnico(`${paths.logs}/${evidencePrefix}.sessao-nova.log`, `${resultado.stdout}\n${resultado.stderr}`);
-      codigo.atual = await estadoDoCodigo(arvore);
-      const escreveu = antes.tree !== codigo.atual.tree;
-      gate("G1", escreveu ? "verde" : "neutro", ciclosAbertos);
-      if (escreveu) previousWroteNothing = false;
-      verificadorEscreveuDesdeOG3 = true;
-    } else {
-      resultado = (await sessaoDoExecutor(prompt)).result;
-    }
+    const antes = codigo.atual;
+    gate("G0", "corrente", ciclosAbertos);
+    const resultado = await chamarLeitor({ role: "verifier", repair: true, phase: session, attempt: ordinal(), prompt });
+    await gravarUnico(`${paths.logs}/${evidencePrefix}.troca-de-modelo.log`, `${resultado.stdout}\n${resultado.stderr}`);
+    codigo.atual = await estadoDoCodigo(arvore);
+    const escreveu = antes.tree !== codigo.atual.tree;
+    gate("G1", escreveu ? "verde" : "neutro", ciclosAbertos);
+    if (escreveu) previousWroteNothing = false;
+    verificadorEscreveuDesdeOG3 = true;
     const g0 = gate0(resultado, options.engine);
     gate("G0", g0.green ? "verde" : "vermelho", ciclosAbertos);
-    for (const defeito of doEngine) registro.validar(defeito, g0.green ? null : { assinatura: assinaturaDaFalha(g0.cause) }, false);
+    for (const defeito of abertos) {
+      const tentativa = defeito.attempts.at(-1);
+      if (tentativa) tentativa.changed = escreveu;
+    }
+    // O defeito de sessão se valida pela sessão; os outros, pelo gate que os achou.
+    for (const defeito of abertos.filter((cada) => cada.nature === "engine")) registro.validar(defeito, g0.green ? null : { assinatura: assinaturaDaFalha(g0.cause) }, false);
+    registro.aguardarValidacao(abertos.filter((cada) => cada.nature !== "engine"));
     if (g0.green) {
       estado.implementation = "done";
       julgandoParcial = false;
-      if (peloVerificador) implementadaPeloVerificador = true;
     }
     await registro.salvar();
     return g0.green;
@@ -1774,7 +1803,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
    * diagnóstico do verificador não são construção: sem sessão nova.
    */
   const pararPorSessao = async (gateDaFalha: GateName, causa: string, resgatavel = true): Promise<PhaseOutcome> => {
-    if (resgatavel && options.verificadorComOutroModelo === true && maxVerifierRepairs > 0 && (await resgatarSessao(causa))) {
+    if (resgatavel && (await resgatarSessao(causa, "a sessão não entregou resultado utilizável"))) {
       await revalidar("sessão nova antes da falha por sessão");
       return await seguirPelosGates();
     }
@@ -1782,7 +1811,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     return fecharFalha(gateDaFalha, causa, "a sessão de um agente não entregou resultado utilizável; parcial e defeitos preservados para a retomada");
   };
 
-  /** Um defeito que a fase não fechou, numa linha, para quem recebe a entrega. */
+  /** Um defeito que a fase não fechou, numa linha, para a causa da falha. */
   const pendenciaDe = (defeito: Defect): string => {
     const gateDoDefeito = defeito.gates.at(-1) ?? defeito.discovered.gate;
     const situacao = defeito.status === "AWAITING_VALIDATION"
@@ -1794,29 +1823,24 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   };
 
   /**
-   * O commit pelo Core e a conclusão, com o estado da entrega: as provas
-   * valeram (`aceito`), ou há o que não se provou e é dito (`motivo`, os
-   * defeitos que não fecharam, a revisão que não se leu).
+   * O commit pelo Core e a conclusão. A fase só fecha aceita: a suíte e a
+   * revisão aprovaram, e nenhum defeito ficou aberto. O que ainda estiver
+   * aberto aqui não entra como entrega — a fase falha, com o defeito dito.
    */
-  const fechar = async (motivo?: string): Promise<PhaseOutcome> => {
-    // O defeito que o diagnóstico diz ser do documento aprovado vira pacote de reparo documental antes da entrega (§125 H).
+  const fechar = async (): Promise<PhaseOutcome> => {
+    // O defeito que o diagnóstico diz ser do documento aprovado vira pacote de reparo documental antes de a fase falhar (§125 H).
     if (!upstreamConferido && estado.defects.some((defeito) => defeito.status !== "RESOLVED" && defeito.status !== "UPSTREAM_REPAIR_REQUIRED")) await encaminharUpstream();
-    const pendencias = [
-      ...(motivo !== undefined ? [`${session.id} · ${motivo}`] : []),
-      ...(inconclusiva !== null ? [`${session.id} · verificação inconclusiva: ${inconclusiva}`] : []),
-      ...estado.defects.filter((defeito) => defeito.status !== "RESOLVED").map(pendenciaDe),
-      ...(implementadaPeloVerificador
-        ? [`${session.id} · a sessão do executor não entregou resultado utilizável e o verificador implementou a fase numa sessão nova; a revisão dela, pelo mesmo papel, não é independente`]
-        : []),
-      // A pendência do plano só sai daqui quando a revisão leu, no código, que ela foi resolvida.
-      ...pendenciasDoPlano(session.markdown)
-        .filter((_, indice) => !pendenciasDoPlanoResolvidas.has(indice + 1))
-        .map((pendencia) => `${session.id} · pendência do plano, sem a revisão confirmar que o código a resolveu: ${pendencia}`),
-    ];
-    const estadoDaEntrega: EstadoDaEntrega = inconclusiva !== null ? "verificação inconclusiva" : pendencias.length > 0 ? "entregue com pendências" : "aceito";
-    const entrega: EntregaDaFase = { estado: estadoDaEntrega, ...(pendencias.length > 0 ? { pendencias } : {}) };
-    if (pendencias.length > 0) {
-      for (const linha of pendencias) announce(`[${session.id}] pendência: ${linha.slice(session.id.length + 3)}`);
+    // A suíte da árvore integrada reparada se valida na integração, depois desta fase: é ela que a confere (como o `g2Valido`).
+    const abertos = estado.defects.filter((defeito) => defeito.status !== "RESOLVED" && !(defeito.nature === "integracao-teste" && defeito.status === "AWAITING_VALIDATION"));
+    // A pendência do plano só sai daqui quando a revisão leu, no código, que ela foi resolvida.
+    const doPlano = pendenciasDoPlano(session.markdown).filter((_, indice) => !pendenciasDoPlanoResolvidas.has(indice + 1));
+    if (abertos.length > 0 || doPlano.length > 0) {
+      const { gate: gateDaFalha, cause } = abertos.length > 0 ? causaDaParada() : { gate: "gate 3 — verificação independente" as GateName, cause: "" };
+      const causa = [
+        ...(abertos.length > 0 ? [cause, "", ...abertos.map(pendenciaDe)] : []),
+        ...doPlano.map((pendencia) => `${session.id} · pendência do plano, sem a revisão confirmar que o código a resolveu: ${pendencia}`),
+      ].join("\n").trim();
+      return await fecharFalha(gateDaFalha, causa, "a fase não fecha com o que a revisão e os gates não aprovaram");
     }
     if (options.conciliacao) {
       // A última barreira: nenhum arquivo com marcador de conflito entra no commit da fase (§125 F).
@@ -1838,10 +1862,10 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       return { status: "commit-blocked", bloqueios: commit.bloqueios, cause: commit.message, cycles: ciclosAbertos };
     }
     if (!commit.committed && commit.message.includes("já estava implementada")) {
-      await concluir(`já implementada em HEAD · ${estadoDaEntrega}`, ciclosAbertos);
+      await concluir("já implementada em HEAD · aceito", ciclosAbertos);
       relatar({ kind: "phase", id: session.id, state: "concluído", cycle: ciclosAbertos, detail: "já implementada" });
-      announce(`[${session.id}] JÁ IMPLEMENTADA — nada a commitar · ${estadoDaEntrega}`);
-      return { status: "already-implemented", cycles: ciclosAbertos, ...entrega };
+      announce(`[${session.id}] JÁ IMPLEMENTADA — nada a commitar · aceito`);
+      return { status: "already-implemented", cycles: ciclosAbertos };
     }
     if (options.commitsEnabled && !commit.committed && noWorktree) {
       /*
@@ -1853,24 +1877,26 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     }
     if (options.commitsEnabled && !commit.committed) announce(`[${session.id}] gates verdes, mas o commit não foi criado — ${commit.message}; o código fica na árvore, fora do histórico`);
     await recolher(ciclosAbertos);
-    await concluir(`${commit.message} · ${estadoDaEntrega}`, ciclosAbertos);
-    relatar({ kind: "phase", id: session.id, state: "concluído", cycle: ciclosAbertos, detail: estadoDaEntrega === "aceito" ? (commit.committed ? "commitada" : "completa") : estadoDaEntrega });
-    announce(`[${session.id}] ${estadoDaEntrega === "aceito" ? "COMPLETA" : estadoDaEntrega.toUpperCase()}${commit.committed ? ` — ${commit.message}` : ""}`);
-    return { status: "complete", committed: commit.committed, message: commit.message, cycles: ciclosAbertos, ...entrega };
+    await concluir(`${commit.message} · aceito`, ciclosAbertos);
+    relatar({ kind: "phase", id: session.id, state: "concluído", cycle: ciclosAbertos, detail: commit.committed ? "commitada" : "completa" });
+    announce(`[${session.id}] COMPLETA${commit.committed ? ` — ${commit.message}` : ""}`);
+    return { status: "complete", committed: commit.committed, message: commit.message, cycles: ciclosAbertos };
   };
 
   /**
-   * O orçamento da fase acabou, ou o defeito é do documento: a fase é entregue
-   * com o que não se provou dito, e o build segue (etapa 4 da redução). O
-   * trabalho entra no histórico pelo Core, como em qualquer entrega.
+   * A escada acabou — o orçamento, as estratégias com informação nova, ou o
+   * defeito é do documento —: a fase falha, com o defeito exato e a evidência, e
+   * o build para. A retomada continua dos defeitos registrados.
    */
-  const entregarComPendencias = async (motivo: string): Promise<PhaseOutcome> => {
-    await transicao({
-      tipo: "entrega",
-      defeitos: estado.defects.filter((defeito) => defeito.status !== "RESOLVED").map((defeito) => defeito.defectId),
-      motivo: `${motivo}; a fase é entregue com as pendências ditas, e o build segue`,
-    });
-    return fechar(motivo);
+  const falharComOsDefeitos = async (motivo: string): Promise<PhaseOutcome> => {
+    const { gate: gateDaFalha, cause } = causaDaParada();
+    return await fecharFalha(gateDaFalha, `${motivo}\n\n${cause}`, motivo);
+  };
+
+  /** A revisão da fase não pôde ser lida, nem na segunda chamada: a verificação não rodou, e a fase não fecha sem ela. */
+  const pararInconclusiva = async (motivo: string): Promise<PhaseOutcome> => {
+    const saida = await fecharFalha("gate 3 — verificação independente", `verificação inconclusiva: ${motivo}`, "a revisão da fase não pôde ser lida; a fase não fecha sem ela");
+    return saida.status === "failed" ? { ...saida, inconclusiva: motivo } : saida;
   };
 
   /**
@@ -1884,7 +1910,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       const pacote = defeito.upstream ? await validarReparo(options.projectRoot, defeito.upstream) : null;
       if (pacote?.ok && pacote.manifest.state !== "ABORTED") {
         pacoteUpstream = relative(options.projectRoot, join(pastaDosReparos(options.projectRoot), pacote.manifest.repairId));
-        return entregarComPendencias(`reparo documental pendente: o pacote ${pacote.manifest.repairId} (${pacoteUpstream}) continua válido e o documento não mudou; o BUILD não repara o que o documento impede`);
+        return falharComOsDefeitos(`reparo documental pendente: o pacote ${pacote.manifest.repairId} (${pacoteUpstream}) continua válido e o documento não mudou; o BUILD não repara o que o documento impede`);
       }
       defeito.status = "OPEN";
       await transicao({ tipo: "upstream", defeitos: [defeito.defectId], motivo: `o pacote ${defeito.upstream ?? "?"} não vale mais (${pacote && !pacote.ok ? pacote.errors[0] ?? "inválido" : "abortado ou ausente"}): o defeito volta à escada do BUILD` });
@@ -1953,24 +1979,47 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         const semSessaoUtil = estado.defects.some((defeito) => defeito.nature === "engine" && defeito.status !== "RESOLVED");
         if (semSessaoUtil && (registro.semSaida(possivel) || ciclosAbertos >= maxCycles)) {
           const { gate: gateDaFalha, cause } = causaDaParada();
-          if (await resgatarSessao(cause)) {
-            await revalidar("sessão nova antes da falha por sessão");
+          if (await resgatarSessao(cause, "a sessão do executor não entregou resultado utilizável dentro do orçamento")) {
+            await revalidar("sessão nova do verificador de outro modelo");
             break;
           }
-          return await fecharFalha(gateDaFalha, cause, "a sessão do executor não entregou resultado utilizável dentro do orçamento, nem na sessão nova antes da falha");
+          return await fecharFalha(gateDaFalha, cause, "a sessão do executor não entregou resultado utilizável dentro do orçamento");
         }
         if (registro.semSaida(possivel)) {
-          const { gate: gateDaFalha } = causaDaParada();
+          const { gate: gateDaFalha, cause } = causaDaParada();
           if (declaredComplete(estado.defects.map((defeito) => defeito.detail).join("\n"))) announce(`[${session.id}] o executor declarou conclusão, mas ${gateDaFalha} reprovou`);
           await encaminharUpstream();
           if (pacoteUpstream !== null) {
-            return await entregarComPendencias(`reparo documental necessário: o defeito é do documento aprovado, segundo o diagnóstico, e o pacote validado está em ${pacoteUpstream}; nenhum documento foi alterado`);
+            return await falharComOsDefeitos(`reparo documental necessário: o defeito é do documento aprovado, segundo o diagnóstico, e o pacote validado está em ${pacoteUpstream}; nenhum documento foi alterado`);
           }
-          return await entregarComPendencias(`${gateDaFalha}: nenhuma estratégia restante tem informação nova para os defeitos abertos`);
+          if (await resgatarSessao(cause, `${gateDaFalha}: a escada não tem estratégia com informação nova para os defeitos abertos`)) {
+            await revalidar("sessão nova do verificador de outro modelo");
+            break;
+          }
+          return await falharComOsDefeitos(`${gateDaFalha}: nenhuma estratégia restante tem informação nova para os defeitos abertos`);
         }
         if (ciclosAbertos >= maxCycles) {
-          const { gate: gateDaFalha } = causaDaParada();
-          return await entregarComPendencias(`${gateDaFalha}: os ${maxCycles} ciclo(s) de correção desta execução se esgotaram`);
+          const { gate: gateDaFalha, cause } = causaDaParada();
+          if (await resgatarSessao(cause, `${gateDaFalha}: os ${maxCycles} ciclo(s) de correção desta execução se esgotaram`)) {
+            await revalidar("sessão nova do verificador de outro modelo");
+            break;
+          }
+          return await falharComOsDefeitos(`${gateDaFalha}: os ${maxCycles} ciclo(s) de correção desta execução se esgotaram`);
+        }
+        /*
+         * O ciclo que não trouxe progresso em nenhum defeito — a mesma falha,
+         * nenhuma tentativa resolvida nem com a falha mudando — esgotou a escada
+         * de verdade: o seguinte repetiria as mesmas estratégias sobre o mesmo
+         * nada. A fase falha ali, depois da troca de modelo, quando houver.
+         */
+        const tentativasDoCiclo = estado.defects.flatMap((defeito) => defeito.attempts.filter((tentativa) => tentativa.cycle === estado.cycle));
+        if (!tentativasDoCiclo.some((tentativa) => tentativa.result === "progress" || tentativa.result === "resolved")) {
+          const { gate: gateDaFalha, cause } = causaDaParada();
+          if (await resgatarSessao(cause, `${gateDaFalha}: o ciclo de correção ${ciclosAbertos} não trouxe progresso em nenhum defeito aberto`)) {
+            await revalidar("sessão nova do verificador de outro modelo");
+            break;
+          }
+          return await falharComOsDefeitos(`${gateDaFalha}: o ciclo de correção ${ciclosAbertos} não trouxe progresso em nenhum defeito aberto; outro ciclo repetiria as mesmas estratégias`);
         }
         ciclosAbertos += 1;
         registro.novoCiclo();

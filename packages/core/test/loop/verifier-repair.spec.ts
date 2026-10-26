@@ -91,7 +91,7 @@ describe("reparo limitado pelo verificador", () => {
       flows: { workflows: [{ number: "1", name: "Save", steps: ["save"] }], resolveStart: async () => "npm start" },
       call: async call => ok(call.role === "verifier" ? `TASK 1: DONE — ADVISORY: ${note}\nTASK 2: DONE` : "feito"),
     });
-    expect(outcome).toMatchObject({ status: "complete", cycles: 1, estado: "aceito" });
+    expect(outcome).toMatchObject({ status: "complete", cycles: 1 });
     expect(calls.map(call => call.role)).toEqual(["builder", "verifier"]);
     expect(messages.join("\n")).toContain(`observação não bloqueante: ${note}`);
     expect(registry.jaAprovadas(target.id, tasksDaFase(target.markdown))).toHaveLength(2);
@@ -99,9 +99,9 @@ describe("reparo limitado pelo verificador", () => {
 
   /*
    * §125: o achado do verificador vai primeiro ao executor, como correção
-   * localizada DENTRO do ciclo (spec §6). A revisão é uma só (etapa 4 da
-   * redução): a correção não ganha segunda revisão, a fase é entregue com a
-   * pendência dita — e não anuncia um ciclo que não existe.
+   * localizada DENTRO do ciclo (spec §6). A correção volta à revisão; a task que
+   * segue incompleta faz a fase falhar com o defeito dito — e ela não anuncia um
+   * ciclo que não existe.
    */
   it("observação não aprova defeito funcional e o último ciclo não anuncia retorno inexistente", async () => {
     const notices: string[] = [];
@@ -110,8 +110,9 @@ describe("reparo limitado pelo verificador", () => {
       announce: (line) => notices.push(line),
       call: async call => ok(call.role === "verifier" ? `TASK 1: DONE — ADVISORY: nome de teste diferente\n${guidance.split("\n")[1]}` : "feito"),
     });
-    expect(outcome).toMatchObject({ status: "complete", cycles: 1, estado: "entregue com pendências" });
-    expect(calls.map(call => call.role)).toEqual(["builder", "verifier", "builder"]);
+    expect(outcome).toMatchObject({ status: "failed", cycles: 1, gate: "gate 3 — verificação independente" });
+    // A correção volta à revisão; sem progresso no ciclo, a escada acaba.
+    expect(calls.map(call => call.role)).toEqual(["builder", "verifier", "builder", "verifier"]);
     const events = await readEvents(runPaths(projectRoot, RUN).events);
     expect(events.filter(event => event.status === "retry")).toHaveLength(1);
     expect(notices.join("\n")).not.toContain("ciclo de correção 2");
@@ -121,7 +122,10 @@ describe("reparo limitado pelo verificador", () => {
   it("cada nova construção registra causa completa e ação concreta do verificador", async () => {
     const { outcome, calls } = await phase({
       maxCycles: 2, maxVerifierRepairs: 0,
-      call: async call => ok(call.role === "verifier" ? call.attempt === 1 ? guidance : done : "feito"),
+      call: async call => {
+        if (call.role === "builder") await writeFile(join(call.root ?? projectRoot, "seed.ts"), call.attempt === 1 ? "two statuses" : "three statuses");
+        return ok(call.role === "verifier" ? call.attempt === 1 ? guidance : done : "feito");
+      },
     });
     expect(outcome.status).toBe("complete");
     expect(calls.filter(call => call.role === "builder")).toHaveLength(2);
@@ -140,16 +144,17 @@ describe("reparo limitado pelo verificador", () => {
     ["resposta vazia", ""],
     ["índice repetido", "TASK 1: DONE\nTASK 1: DONE"],
     ["índice fora da fase", "TASK 1: DONE\nTASK 3: DONE"],
-  ])("protocolo inválido (%s): sem correção de formato, sem builder e sem reparo — a fase sai com verificação inconclusiva", async (_label, malformed) => {
+  ])("protocolo inválido (%s): sem builder e sem reparo, uma revisão a mais — ilegível de novo, a fase para em verificação inconclusiva", async (_label, malformed) => {
     const { outcome, calls } = await phase({
       maxCycles: 3,
       call: async call => ok(call.role === "verifier" ? malformed : "feito"),
     });
-    expect(outcome).toMatchObject({ status: "complete", cycles: 1, estado: "verificação inconclusiva" });
-    if (outcome.status !== "complete") throw new Error("deveria entregar");
-    expect(outcome.pendencias?.join("\n")).toContain("a revisão veio ilegível");
-    expect(outcome.pendencias?.join("\n")).toContain("P01.verify-1.log");
-    expect(calls.map(call => call.role)).toEqual(["builder", "verifier"]);
+    expect(outcome).toMatchObject({ status: "failed", cycles: 1, gate: "gate 3 — verificação independente" });
+    if (outcome.status !== "failed") throw new Error("deveria parar");
+    expect(outcome.inconclusiva).toContain("a revisão veio ilegível");
+    expect(outcome.inconclusiva).toContain("P01.verify-1.repetida.log");
+    expect(calls.map(call => call.role)).toEqual(["builder", "verifier", "verifier"]);
+    expect(calls[2]?.prompt).toContain("## The previous review could not be read");
     expect(calls.some(call => call.repair)).toBe(false);
   });
 
@@ -199,7 +204,7 @@ describe("reparo limitado pelo verificador", () => {
       testRunner: async () => ({ exitCode: 1, output: "dependency still missing" }),
       call: async () => ok("I fixed everything"),
     });
-    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 2 — suíte do projeto" });
     // §125: o reparo assistido (primeiro degrau no G2, §114) e a correção do executor; a mesma falha não se repete.
     expect(suiteRuns).toBe(3);
     expect(calls.filter((call) => call.repair)).toHaveLength(1);
@@ -227,17 +232,18 @@ describe("reparo limitado pelo verificador", () => {
    * tirava a vez do G3. A alternância entre estratégias é a informação nova.
    */
   it("o orçamento do verificador é por gate e ciclo, e renova no ciclo seguinte", async () => {
-    // Cada ação muda o código (informação nova para a estratégia seguinte), mas a suíte continua quebrada.
+    // O reparo do verificador muda a falha (progresso: o ciclo seguinte abre); a correção do executor não. A suíte continua quebrada.
     let escrita = 0;
+    let suites = 0;
     const { outcome, calls } = await phase({
       maxCycles: 2,
-      testRunner: async () => ({ exitCode: 1, output: "always broken" }),
+      testRunner: async () => ({ exitCode: 1, output: `broken: caso ${["alfa", "beta", "beta", "gama", "gama", "delta"][suites++] ?? "omega"}` }),
       call: async (call) => {
         if (call.role === "builder" || call.repair) await writeFile(join(call.root ?? projectRoot, "tentativa.ts"), `export const n = ${++escrita};\n`);
         return ok();
       },
     });
-    expect(outcome).toMatchObject({ status: "complete", cycles: 2, estado: "entregue com pendências" });
+    expect(outcome).toMatchObject({ status: "failed", cycles: 2, gate: "gate 2 — suíte do projeto" });
     expect(calls.filter((call) => call.repair)).toHaveLength(2);
     expect(calls.filter((call) => call.role === "builder")).toHaveLength(3);
   });
@@ -252,7 +258,7 @@ describe("reparo limitado pelo verificador", () => {
       testRunner: async () => ({ exitCode: 1, output: "still missing statuses" }),
       call: async (call) => ok(call.repair ? "FIX: seed.ts needs an explicit cancelled row; run npm test -- statuses" : "feito"),
     });
-    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 2 — suíte do projeto" });
     const correction = calls.find((call) => call.role === "builder" && call.attempt === 2)?.prompt;
     expect(correction).toContain("still missing statuses");
     expect(correction).toContain("FIX: seed.ts needs an explicit cancelled row");
@@ -265,9 +271,11 @@ describe("reparo limitado pelo verificador", () => {
     ["índices repetidos", ok("TASK 1: DONE\nTASK 1: INCOMPLETE — missing")],
     ["cobertura parcial", ok("TASK 2: INCOMPLETE — missing")],
     ["sessão com engineError", { ...ok(guidance), engineError: true }],
-  ])("não transforma %s em autorização para editar: a fase sai com verificação inconclusiva", async (_label, response) => {
+  ])("não transforma %s em autorização para editar: uma revisão a mais, e a fase para em verificação inconclusiva", async (_label, response) => {
     const { outcome, calls } = await phase({ call: async (call) => call.role === "verifier" ? response : ok() });
-    expect(outcome).toMatchObject({ status: "complete", estado: "verificação inconclusiva" });
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 3 — verificação independente" });
+    if (outcome.status === "failed") expect(outcome.inconclusiva).toBeDefined();
+    expect(calls.filter((call) => call.role === "verifier")).toHaveLength(2);
     expect(calls.some((call) => call.repair)).toBe(false);
   });
 
@@ -275,7 +283,10 @@ describe("reparo limitado pelo verificador", () => {
     const { outcome, calls } = await phase({
       maxVerifierRepairs: 0,
       maxCycles: 2,
-      call: async (call) => ok(call.role === "verifier" ? call.attempt === 1 ? guidance : done : "feito"),
+      call: async (call) => {
+        if (call.role === "builder") await writeFile(join(call.root ?? projectRoot, "seed.ts"), call.attempt === 1 ? "two statuses" : "three statuses");
+        return ok(call.role === "verifier" ? call.attempt === 1 ? guidance : done : "feito");
+      },
     });
     expect(outcome.status).toBe("complete");
     const fix = calls.find((call) => call.role === "builder" && call.attempt === 2)?.prompt;
@@ -453,7 +464,7 @@ describe("dependências preparadas sem consumir ciclos funcionais", () => {
       },
       call: async () => ok("install remains blocked"),
     });
-    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 2 — suíte do projeto" });
     expect(commands.filter((command) => command.startsWith("npm install"))).toHaveLength(1);
     expect(calls.find((call) => call.role === "builder")?.prompt).toContain("registry unreachable");
     expect(calls.find((call) => call.repair)?.prompt).toContain("registry unreachable");
@@ -469,7 +480,7 @@ describe("dependências preparadas sem consumir ciclos funcionais", () => {
       testRunner: async (command) => { commands.push(command); return { exitCode: 1, output: "expected 3 rows, received 2" }; },
       call: async () => ok(),
     });
-    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 2 — suíte do projeto" });
     // Nenhuma reinstalação: só a suíte, que roda de novo depois da correção do executor (§125).
     expect(commands.length).toBeGreaterThan(0);
     expect(commands.every((command) => command === "npm test")).toBe(true);

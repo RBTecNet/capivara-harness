@@ -117,12 +117,13 @@ describe("ciclo de fase — caminho verde", () => {
     expect(events.some(event => event.status === "retry")).toBe(false);
   });
 
-  // Etapa 4 da redução: a revisão que cai não ganha segunda sessão nem nova construção — a fase sai com verificação inconclusiva.
-  it("timeout do verificador não vira nova sessão do construtor nem segunda revisão: a fase sai com verificação inconclusiva", async () => {
+  // A revisão que cai não vira nova construção: ganha uma revisão a mais e, sem leitura, a fase não fecha — para em verificação inconclusiva.
+  it("timeout do verificador não vira nova sessão do construtor: uma revisão a mais, e sem leitura a fase para em verificação inconclusiva", async () => {
     const { outcome, calls } = await phase({ maxCycles: 3, verifier: async () => ({ exitCode: 124, stdout: "Investigando critérios", stderr: "", timedOut: "wall" }) });
-    expect(outcome).toMatchObject({ status: "complete", cycles: 1, estado: "verificação inconclusiva" });
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 3 — verificação independente", cycles: 1 });
+    if (outcome.status === "failed") expect(outcome.inconclusiva).toContain("nem na segunda chamada");
     expect(calls.filter(call => call.role === "builder")).toHaveLength(1);
-    expect(calls.filter(call => call.role === "verifier")).toHaveLength(1);
+    expect(calls.filter(call => call.role === "verifier")).toHaveLength(2);
   });
 
   it("timeout confirmado não vira repetição por texto de rate limit na resposta parcial", async () => {
@@ -153,26 +154,26 @@ describe("ciclo de fase — caminho verde", () => {
 });
 
 describe("a palavra do agente nunca supera um gate", () => {
-  it("executor declara COMPLETE mas a suíte está vermelha: a fase não é aceita, e a suíte é a pendência dita", async () => {
+  it("executor declara COMPLETE mas a suíte está vermelha: a fase não é aceita — falha, com a suíte como causa", async () => {
     const { outcome } = await phase({
       builder: async () => ok("pronto\nCAPIVARA_BUILDER_STATUS: COMPLETE"),
       testExit: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
     });
-    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
-    if (outcome.status !== "complete") return;
-    expect(outcome.pendencias?.join("\n")).toContain("(G2) a suíte falhou");
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 2 — suíte do projeto" });
+    if (outcome.status !== "failed") return;
+    expect(outcome.cause).toContain("esperava 409, recebeu 500");
   });
 
-  it("executor declara COMPLETE mas o verificador vê task incompleta: o reparo não ganha segunda revisão, e a task sai como pendência", async () => {
+  it("executor declara COMPLETE mas o verificador vê task incompleta: o reparo volta à revisão, e a task que segue incompleta faz a fase falhar", async () => {
     const { outcome, calls } = await phase({
       builder: async () => ok("CAPIVARA_BUILDER_STATUS: COMPLETE"),
       verifier: async () => ok("TASK 1: DONE\nTASK 2: INCOMPLETE — falta o seed"),
     });
-    expect(outcome).toMatchObject({ status: "complete", estado: "entregue com pendências" });
-    if (outcome.status !== "complete") return;
-    expect(outcome.pendencias?.join("\n")).toContain("falta o seed");
-    expect(outcome.pendencias?.join("\n")).toContain("sem segunda revisão");
-    expect(calls.filter((call) => call.role === "verifier")).toHaveLength(1);
+    expect(outcome).toMatchObject({ status: "failed", gate: "gate 3 — verificação independente" });
+    if (outcome.status !== "failed") return;
+    expect(outcome.cause).toContain("falta o seed");
+    // A revisão relê depois de cada reparo: a fase só fecharia com ela aprovando.
+    expect(calls.filter((call) => call.role === "verifier").length).toBeGreaterThan(1);
     // O achado chegou ao executor: a correção dele leva o diagnóstico da revisão.
     expect(calls.filter((call) => call.role === "builder").at(-1)?.prompt).toContain("falta o seed");
   });
@@ -196,29 +197,28 @@ describe("ciclos de correção", () => {
 
   /*
    * §125 (spec §5.2 e §5.3): a correção que muda o código sem resolver não se
-   * repete no MESMO ciclo; o ciclo seguinte recomeça a escada com a história
-   * no handoff — uma correção por ciclo novo — e, quando os ciclos acabam, a
-   * fase é entregue com a pendência dita (etapa 4 da redução): o build segue,
-   * e nunca a chama de aceita.
+   * repete no MESMO ciclo. O ciclo inteiro sem progresso em nenhum defeito — a
+   * mesma falha — esgotou a escada de verdade: outro ciclo repetiria as mesmas
+   * estratégias, e a fase falha com o defeito dito, sem abri-lo.
    */
-  it("a mesma falha com o código mudando passa pelos ciclos e, quando eles acabam, a fase sai entregue com pendências", async () => {
+  it("a mesma falha com o código mudando: o ciclo sem progresso encerra a escada, e a fase falha sem abrir outro ciclo", async () => {
     const { outcome, calls } = await phase({ testExit: [1, 1, 1, 1, 1, 1], maxCycles: 3 });
-    expect(outcome).toMatchObject({ status: "complete", cycles: 3, estado: "entregue com pendências" });
-    expect(calls.filter((call) => call.role === "builder")).toHaveLength(4);
+    expect(outcome).toMatchObject({ status: "failed", cycles: 1, gate: "gate 2 — suíte do projeto" });
+    expect(calls.filter((call) => call.role === "builder")).toHaveLength(2);
     const events = await readEvents(runPaths(projectRoot, RUN).events);
-    expect(events.some((event) => event.detail.includes("ciclo(s) de correção desta execução se esgotaram"))).toBe(true);
+    expect(events.some((event) => event.detail.includes("não trouxe progresso em nenhum defeito aberto"))).toBe(true);
   });
 
-  // §125 (spec §5.3): a correção que não muda nada não é repetida — é a impossibilidade real, e a fase é entregue antes dos ciclos.
-  it("a correção que não muda nada termina por esgotamento técnico, sem gastar os ciclos restantes, com a pendência dita", async () => {
+  // §125 (spec §5.3): a correção que não muda nada não é repetida — é a impossibilidade real, e a fase falha antes dos ciclos.
+  it("a correção que não muda nada termina por esgotamento técnico, sem gastar os ciclos restantes: a fase falha com o defeito dito", async () => {
     const { outcome, calls } = await phase({ testExit: [1, 1, 1, 1, 1, 1], maxCycles: 3, soNaImplementacao: true });
-    expect(outcome).toMatchObject({ status: "complete", cycles: 1, estado: "entregue com pendências" });
+    expect(outcome).toMatchObject({ status: "failed", cycles: 1, gate: "gate 2 — suíte do projeto" });
     expect(calls.filter((call) => call.role === "builder")).toHaveLength(2);
     const events = await readEvents(runPaths(projectRoot, RUN).events);
     expect(events.some((event) => event.detail.includes("nenhuma estratégia restante tem informação nova"))).toBe(true);
   });
 
-  it("com progresso a cada correção, os ciclos se esgotam e a fase sai entregue com pendências", async () => {
+  it("com progresso a cada correção, os ciclos se esgotam e a fase falha", async () => {
     const target = session();
     const calls: EngineCall[] = [];
     let suites = 0;
@@ -238,7 +238,7 @@ describe("ciclos de correção", () => {
         return { exitCode: 1, output: `FAIL reserva.spec.ts > caso ${nome}\n  esperava o caso ${nome}` };
       },
     });
-    expect(outcome).toMatchObject({ status: "complete", cycles: 2, estado: "entregue com pendências" });
+    expect(outcome).toMatchObject({ status: "failed", cycles: 2, gate: "gate 2 — suíte do projeto" });
     // Implementação + duas correções por ciclo (o orçamento do defeito), em dois ciclos.
     expect(calls.filter((call) => call.role === "builder")).toHaveLength(5);
     const events = await readEvents(runPaths(projectRoot, RUN).events);

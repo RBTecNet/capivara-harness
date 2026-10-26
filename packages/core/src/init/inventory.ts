@@ -19,6 +19,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { runtimeEnvironment } from "../provider/runtime-env.js";
+import { nomeDoSistema } from "../interview/plataforma.js";
 
 const run = promisify(execFile);
 
@@ -27,10 +28,11 @@ export interface InventoryEntry {
   bytes: number;
 }
 
-/** O Node que roda o harness e o npm que ele resolve; `npm` é null quando não há. */
+/** O Node que roda o harness, o npm que ele resolve (`null` quando não há) e o sistema operacional. */
 export interface AmbienteDoHarness {
   node: string;
   npm: string | null;
+  sistema: NodeJS.Platform;
 }
 
 let ambiente: Promise<AmbienteDoHarness> | null = null;
@@ -39,7 +41,7 @@ let ambiente: Promise<AmbienteDoHarness> | null = null;
 export function ambienteDoHarness(): Promise<AmbienteDoHarness> {
   ambiente ??= run("npm", ["--version"], { env: runtimeEnvironment(), timeout: 5_000 })
     .then(({ stdout }) => stdout.trim() || null, () => null)
-    .then((npm) => ({ node: process.version.replace(/^v/u, ""), npm }));
+    .then((npm) => ({ node: process.version.replace(/^v/u, ""), npm, sistema: process.platform }));
   return ambiente;
 }
 
@@ -132,7 +134,7 @@ export async function inspectProject(projectRoot: string): Promise<Inventory> {
 /** Resumo compacto para o prompt. O modelo recebe o mapa, não o repositório. */
 export function summarizeInventory(inventory: Inventory): string {
   const maquina = inventory.runtime
-    ? `Ambiente da máquina: o harness roda Node.js ${inventory.runtime.node} e ${inventory.runtime.npm ? `npm ${inventory.runtime.npm}` : "nenhum npm junto dele"}. ` +
+    ? `Ambiente da máquina: o harness roda Node.js ${inventory.runtime.node} e ${inventory.runtime.npm ? `npm ${inventory.runtime.npm}` : "nenhum npm junto dele"}, em ${nomeDoSistema(inventory.runtime.sistema)}. ` +
       "As sondas de prontidão rodam com esse Node e esse npm, e o build não os troca."
     : "";
   if (inventory.empty) return ["O diretório do projeto está vazio: não há stack, código nem convenção a descobrir.", ...(maquina ? [maquina] : [])].join("\n");

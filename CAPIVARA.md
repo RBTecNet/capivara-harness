@@ -104,7 +104,9 @@ cada uma com a medida de antes e de depois (`medir-verificacao.mjs`).
   0.7.9.
 - O build termina em `aceito`, `verificação inconclusiva` ou `falhou` (código 0,
   3 ou 2); "só existe aceito" (26/10/2026) tirou a entrega com pendência: o
-  orçamento esgotado é `falhou`, e o build para na fase que não fechou.
+  orçamento esgotado é `falhou`, e o build para na fase que não fechou. A
+  contradição que sobra no plano vira pergunta ao desenvolvedor, e a plataforma
+  do aplicativo de janela é decidida no `init`.
 - `test/architecture/orcamento-de-prova.spec.ts` falha quando o motor pede mais
   chamadas do que a redução mediu, e as garantias G-1 a G-4 do catálogo
   continuam.

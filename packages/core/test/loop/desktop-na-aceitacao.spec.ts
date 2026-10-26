@@ -7,7 +7,9 @@
  * de janela e o inicia por 10 segundos: passa se o processo não terminou com
  * erro, e a árvore de processos é encerrada. Com alvo `net*-windows` fora do
  * Windows, compila com `-p:EnableWindowsTargeting=true` e registra a execução
- * como "verificação inconclusiva: plataforma".
+ * como "verificação inconclusiva: plataforma" — a menos que o desenvolvedor
+ * tenha mantido esse alvo no init (item C de "só existe aceito"): então a
+ * execução é dita como não provada aqui, por decisão dele, e não é inconclusiva.
  */
 
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
@@ -129,6 +131,27 @@ describe("a aceitação de um aplicativo desktop, numa cópia limpa", () => {
     expect(resultado.accepted).toBe(true);
     expect(compilar.passos.map((passo) => passo.comando)).toEqual(['dotnet build "src/Agenda/Agenda.csproj" -p:EnableWindowsTargeting=true']);
     expect(iniciar.passos).toEqual([]);
+    if (resultado.accepted) expect(resultado.naoVerificado).toEqual([expect.stringContaining("verificação inconclusiva: plataforma")]);
+  });
+
+  it("o alvo net*-windows que o desenvolvedor manteve no init: compila, não executa, e a nota diz que foi por decisão dele — nada fica não verificado", async () => {
+    await projeto(WPF);
+    const compilar = registrar();
+    const iniciar = registrar();
+    const resultado = await runAcceptance({ projectRoot, runner: compilar.runner, service: iniciar.runner, plataforma: LINUX_COM_TELA, plataformaDecidida: true });
+    expect(resultado.accepted).toBe(true);
+    expect(compilar.passos.map((passo) => passo.comando)).toEqual(['dotnet build "src/Agenda/Agenda.csproj" -p:EnableWindowsTargeting=true']);
+    expect(iniciar.passos).toEqual([]);
+    if (resultado.accepted) {
+      expect(resultado.naoVerificado).toBeUndefined();
+      expect(resultado.notas).toEqual([expect.stringContaining("por decisão do desenvolvedor registrada no init")]);
+    }
+  });
+
+  it("a decisão do init não cobre o Linux sem tela: o Avalonia que não abre janela continua verificação inconclusiva: plataforma", async () => {
+    await projeto(AVALONIA);
+    const resultado = await runAcceptance({ projectRoot, runner: registrar().runner, service: registrar().runner, plataforma: { sistema: "linux", tela: false }, plataformaDecidida: true });
+    expect(resultado.accepted).toBe(true);
     if (resultado.accepted) expect(resultado.naoVerificado).toEqual([expect.stringContaining("verificação inconclusiva: plataforma")]);
   });
 

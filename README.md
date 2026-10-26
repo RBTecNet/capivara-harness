@@ -237,6 +237,13 @@ A entrevista pergunta uma coisa por vez, mostra a evidência antes da pergunta, 
 classifica cada resposta. Só uma resposta aceita vira decisão confirmada —
 `não sei` nunca confirma a recomendação que estava na tela.
 
+O inventário diz o sistema operacional da máquina. Um aplicativo de janela de
+outra plataforma — WinForms ou WPF num Linux — é perguntado no `init`: manter o
+alvo Windows (o build compila, mas não executa nem prova o aplicativo aqui) ou
+trocar para Avalonia, que roda nesta máquina, a recomendação. A resposta vira
+regra do esqueleto; com o alvo mantido, o build termina `aceito` e o relatório
+diz que a execução não foi provada aqui, por decisão sua registrada no `init`.
+
 Termina em **PLAN READY**, que é mecânico: nenhuma chamada de modelo. As fases
 cobrem tudo o que foi declarado, são contíguas, dependem só do que vem antes, e
 nenhuma decisão material ficou em aberto.

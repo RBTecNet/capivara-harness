@@ -29,6 +29,7 @@ import {
 } from "../mcp/index.js";
 import { startCommandFor } from "./acceptance.js";
 import { fotografarAcima, restaurarAcima, type FotoAcima } from "./fora-do-projeto.js";
+import { alvoMantidoNoEsqueleto } from "../interview/plataforma.js";
 import type { FlowRunner } from "./flows.js";
 import {
   acquireLock,
@@ -48,7 +49,7 @@ import {
   type RunBudgets,
 } from "../state/index.js";
 import { arquivosMudados, commitDaEntrega, estadoDoCodigo, escolhaSemRepositorio, noHistoricoDoHead, iniciarRepositorio, isClean, isRepository, lerEscolhaDeRepositorio, renderSemRepositorio } from "./git.js";
-import { gravarRelatorio } from "./relatorio.js";
+import { POR_DECISAO_DO_INIT, gravarRelatorio } from "./relatorio.js";
 import { comBancosDeTeste } from "./test-databases.js";
 import { prepararAmbiente } from "./ambiente.js";
 import { montarEntrega, renderEntrega } from "./entrega.js";
@@ -231,6 +232,8 @@ export interface BuildOutcome {
   estado?: EstadoDoBuild;
   /** As verificações que não puderam rodar, uma linha cada, com o porquê: só na verificação inconclusiva. */
   naoVerificado?: string[];
+  /** O que não se provou nesta máquina por decisão do desenvolvedor no `init` (o alvo de outra plataforma): dito, e não impede o aceito. */
+  notas?: string[];
   phases: PhaseReport[];
   warnings: PreflightWarning[];
   errors: string[];
@@ -1238,7 +1241,7 @@ async function performBuild(
      */
     const fluxosDaEntrega = esqueleto?.workflows ?? [];
     let passagensDoSmoke = 0;
-    const smoke = async (sala: string, { desktopSubiu }: { desktopSubiu: boolean }): Promise<ResultadoDoSmoke> => {
+    const smoke = async (sala: string, { desktopSubiu, desktopPorDecisao }: { desktopSubiu: boolean; desktopPorDecisao: boolean }): Promise<ResultadoDoSmoke> => {
       passagensDoSmoke += 1;
       const passagem = passagensDoSmoke;
       const ultima = checked.sessions.at(-1)!;
@@ -1294,10 +1297,14 @@ async function performBuild(
       if (desktopSubiu) {
         for (const fluxo of naoPercorridos) announce(`aceitação · o fluxo ${fluxo.number} é de janela («${fluxo.trecho}»): provado pela subida do executável na cópia limpa`);
       }
-      const naoVerificado = desktopSubiu
+      // O alvo de outra plataforma que o desenvolvedor manteve no init: o fluxo de janela não se percorre aqui, por decisão dele.
+      const notas = desktopPorDecisao && !desktopSubiu
+        ? naoPercorridos.map((fluxo) => `aceitação · o fluxo ${fluxo.number} é de janela («${fluxo.trecho}»): não percorrido nesta máquina, por decisão do desenvolvedor registrada no init`)
+        : [];
+      const naoVerificado = desktopSubiu || desktopPorDecisao
         ? []
         : naoPercorridos.map((fluxo) => `aceitação · o fluxo ${fluxo.number} não foi percorrido: o contrato descreve o produto fora do navegador e do terminal («${fluxo.trecho}»)`);
-      if (resultado.green) return { ok: true, naoVerificado };
+      if (resultado.green) return { ok: true, naoVerificado, ...(notas.length > 0 ? { notas } : {}) };
       const daFerramenta = resultado.toolMissing === true || resultado.scriptFailed === true || /Isto é do ambiente/u.test(resultado.cause);
       const falhou = resultado.falharam?.[0];
       return { ok: false, natureza: daFerramenta ? "ferramenta" : "produto", id: falhou !== undefined ? `fluxo ${falhou}` : "fluxos", cause: resultado.cause };
@@ -1324,6 +1331,7 @@ async function performBuild(
           ...(options.acceptanceRunner !== undefined ? { runner: options.acceptanceRunner } : {}),
           ...(options.acceptanceService !== undefined ? { service: options.acceptanceService } : {}),
           ...(options.acceptancePlatform !== undefined ? { plataforma: options.acceptancePlatform } : {}),
+          ...(alvoMantidoNoEsqueleto(options.skeleton?.rules ?? []) ? { plataformaDecidida: true } : {}),
           ...(fluxosDaEntrega.length > 0 ? { smoke } : {}),
         });
       acceptance = await aceitar();
@@ -1463,6 +1471,8 @@ async function performBuild(
     // As instruções e as limitações conhecidas, do que de fato rodou (spec §10).
     const entrega = await montarEntrega(options.projectRoot, acceptance, [
       ...naoVerificado,
+      // O que não se provou aqui por decisão do desenvolvedor no init: dito, e não é pendência.
+      ...(acceptance?.accepted === true ? acceptance.notas ?? [] : []),
       ...(tocadosNaEntrega.length > 0 || reparoSemLista
         ? [
             `o reparo da aceitação tocou ${tocadosNaEntrega.length > 0 ? [...new Set(tocadosNaEntrega)].join(", ") : "arquivos que não puderam ser determinados (sem árvore do Git)"}: ` +
@@ -1480,6 +1490,11 @@ async function performBuild(
     await writeAtomic(caminhoDaEntrega, renderEntrega(runId, entrega));
     announce(`entrega: instruções e limitações em ${caminhoDaEntrega}`);
 
+    // O relatório diz o que não se provou aqui por decisão do desenvolvedor no init. `started`, como o narrador: nunca `skipped`, que a retomada contaria como concluído.
+    const notas = acceptance?.accepted === true ? acceptance.notas ?? [] : [];
+    for (const nota of notas) {
+      await appendEvent(paths.events, { timestamp: now().toISOString(), stage: "validate", subject: "aceitação", attempt: 1, status: "started", detail: `${POR_DECISAO_DO_INIT} ${nota}` });
+    }
     await appendEvent(paths.events, {
       timestamp: now().toISOString(),
       stage: "complete",
@@ -1488,6 +1503,7 @@ async function performBuild(
       status: "complete",
       detail: `${phases.length} fase(s) · ${estadoFinal}${naoVerificado.length > 0 ? ` · ${naoVerificado.length} verificação(ões) não rodaram` : ""}`,
     });
+    for (const nota of notas) announce(nota);
     if (estadoFinal === "aceito") announce("aplicação aceita: todas as fases verdes e a aceitação limpa");
     else announce(`aplicação com VERIFICAÇÃO INCONCLUSIVA: ${naoVerificado.length} verificação(ões) não puderam rodar, ditas em ${caminhoDaEntrega}`);
     return {
@@ -1495,6 +1511,7 @@ async function performBuild(
       exitCode: estadoFinal === "aceito" ? 0 : 3,
       estado: estadoFinal,
       ...(naoVerificado.length > 0 ? { naoVerificado } : {}),
+      ...(notas.length > 0 ? { notas } : {}),
       phases,
       warnings: checked.warnings,
       errors: [],

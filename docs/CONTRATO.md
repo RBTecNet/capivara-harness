@@ -105,7 +105,8 @@ edita, e um documento mudado fora do PLAN invalida o `environment.json`.
 ## INIT
 
 **Entra:** o pedido do desenvolvedor (texto, arquivo ou documento do doc-center) e
-o inventário do diretório.
+o inventário do diretório e da máquina (o Node e o npm do harness, e o sistema
+operacional).
 
 **Faz:**
 
@@ -113,7 +114,13 @@ o inventário do diretório.
    evidência antes da pergunta, em até 3 rodadas. Cada resposta é classificada; só
    `ACCEPTED` vira decisão confirmada, e "não sei" nunca confirma a recomendação. A
    decisão de banco gera as regras de banco do harness (`.env`, `.env.example`,
-   migração, banco dos testes, a aplicação escolhe o banco pelo ambiente).
+   migração, banco dos testes, a aplicação escolhe o banco pelo ambiente). O
+   aplicativo de janela de outra plataforma que a máquina — Windows Forms, WPF,
+   WinUI ou UWP fora do Windows, AppKit fora do macOS — é lacuna: o Core a
+   reconhece pelo pedido, sem modelo, e pergunta se o alvo fica (o build compila,
+   mas não executa nem prova o aplicativo aqui) ou se troca para Avalonia, que roda
+   nesta máquina (a recomendação). A resposta vira a regra `plataforma do
+   aplicativo` do esqueleto.
 2. **Esqueleto** (`capivara-skeleton/v2`): stack, sondas de ambiente, entidades com
    campos, stories, fluxos com passos, regras transversais (cada uma nomeia o alvo e
    o momento), fases preliminares com o que cada uma cobre, corte do MVP, o que
@@ -360,9 +367,12 @@ flowchart TD
    exceção é o aplicativo desktop .NET (WPF, Windows Forms, WinUI, MAUI, Avalonia
    ou `WinExe` no `.csproj`): a aceitação o compila e o inicia por 10 segundos
    (`dotnet run`); ficar de pé sem terminar com erro é a prova da plataforma, e a
-   árvore de processos é encerrada no fim. Com alvo `net*-windows` fora do Windows
-   (compilado com `-p:EnableWindowsTargeting=true`) ou no Linux sem tela, a
-   execução é "verificação inconclusiva: plataforma".
+   árvore de processos é encerrada no fim. Com alvo `net*-windows` fora do Windows,
+   o projeto é compilado com `-p:EnableWindowsTargeting=true`; se o desenvolvedor
+   manteve esse alvo no init, a execução não roda, o build é aceito e o relatório
+   diz que ela não foi provada nesta máquina, por decisão dele registrada no init —
+   não é pendência, e o build não espera. Sem essa decisão, ou no Linux sem tela,
+   a execução é "verificação inconclusiva: plataforma".
 10. **Reparo documental**: quando nenhuma estratégia resta e o verificador apontou que
    o documento aprovado é a causa, o build publica um pacote de reparo
    (`.capivara/repairs/`) com o defeito, o observado, o esperado, os contornos

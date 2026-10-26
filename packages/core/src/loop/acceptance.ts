@@ -36,6 +36,8 @@ export interface AcceptanceStep {
   desktop?: boolean;
   /** O passo que esta máquina não pode executar, e por quê: a aceitação o registra como verificação inconclusiva. */
   inconclusiva?: string;
+  /** Não executa porque o alvo é de outra plataforma (não por falta de tela): com a decisão do `init`, é nota, não inconclusiva. */
+  alvoDeOutraPlataforma?: boolean;
 }
 
 export interface StepResult {
@@ -60,12 +62,14 @@ export type AcceptanceResult =
       skipped: string;
       /** O que a aceitação não pôde percorrer pelos meios da plataforma: verificação que não rodou, nunca prova. */
       naoVerificado?: string[];
+      /** O que não se provou aqui por decisão do desenvolvedor no `init` — a execução de um alvo de outra plataforma: dito, e não é pendência. */
+      notas?: string[];
     }
   | { accepted: false; steps: StepResult[]; failure: { id: string; cause: string; natureza: NaturezaDaFalha } };
 
 /** O smoke dos fluxos essenciais, na sala limpa em que os passos acabaram de passar. */
 export type ResultadoDoSmoke =
-  | { ok: true; naoVerificado: string[] }
+  | { ok: true; naoVerificado: string[]; notas?: string[] }
   | { ok: false; id: string; cause: string; natureza: NaturezaDaFalha };
 
 /**
@@ -222,6 +226,7 @@ function desktopDotnetSteps(projetos: readonly { caminho: string; conteudo: stri
       seconds: 10,
       desktop: true,
       ...((alvoWindows && foraDoWindows) || !plataforma.tela ? { inconclusiva: "plataforma" } : {}),
+      ...(alvoWindows && foraDoWindows ? { alvoDeOutraPlataforma: true } : {}),
     },
   ];
 }
@@ -332,9 +337,11 @@ export interface AcceptanceOptions {
    * meios da plataforma (etapa 4 da redução). Ausente: o projeto não tem fluxos,
    * ou o build roda sem eles.
    */
-  smoke?: (room: string, contexto: { desktopSubiu: boolean }) => Promise<ResultadoDoSmoke>;
+  smoke?: (room: string, contexto: { desktopSubiu: boolean; desktopPorDecisao: boolean }) => Promise<ResultadoDoSmoke>;
   /** O sistema e se há tela; ausente é esta máquina. Existe para teste, como `runner` e `service`. */
   plataforma?: { sistema: NodeJS.Platform; tela: boolean };
+  /** O desenvolvedor manteve, no `init`, o alvo de outra plataforma: a execução que não roda aqui é dita como decisão dele. */
+  plataformaDecidida?: boolean;
 }
 
 async function lerManifesto(projectRoot: string, nome: string): Promise<string | null> {
@@ -427,8 +434,15 @@ export async function runAcceptance(options: AcceptanceOptions): Promise<Accepta
 
     const results: StepResult[] = [];
     const inconclusivas: string[] = [];
+    const notas: string[] = [];
     let desktopSubiu = false;
+    let desktopPorDecisao = false;
     for (const step of steps) {
+      if (step.alvoDeOutraPlataforma === true && options.plataformaDecidida === true) {
+        desktopPorDecisao = true;
+        notas.push(`aceitação · o passo "${step.id}" (${step.command}) não rodou nesta máquina: a execução do aplicativo não é provada aqui, por decisão do desenvolvedor registrada no init`);
+        continue;
+      }
       if (step.inconclusiva !== undefined) {
         inconclusivas.push(`aceitação · o passo "${step.id}" (${step.command}) não rodou nesta máquina: verificação inconclusiva: ${step.inconclusiva}`);
         continue;
@@ -453,11 +467,12 @@ export async function runAcceptance(options: AcceptanceOptions): Promise<Accepta
       }
     }
 
-    if (!options.smoke) return { accepted: true, steps: results, skipped: "", ...(inconclusivas.length > 0 ? { naoVerificado: inconclusivas } : {}) };
-    const smoke = await options.smoke(room, { desktopSubiu });
+    const ditas = (todas: string[]) => (todas.length > 0 ? { notas: todas } : {});
+    if (!options.smoke) return { accepted: true, steps: results, skipped: "", ...(inconclusivas.length > 0 ? { naoVerificado: inconclusivas } : {}), ...ditas(notas) };
+    const smoke = await options.smoke(room, { desktopSubiu, desktopPorDecisao });
     if (!smoke.ok) return { accepted: false, steps: results, failure: { id: smoke.id, cause: smoke.cause, natureza: smoke.natureza } };
     const naoVerificado = [...inconclusivas, ...smoke.naoVerificado];
-    return { accepted: true, steps: results, skipped: "", ...(naoVerificado.length > 0 ? { naoVerificado } : {}) };
+    return { accepted: true, steps: results, skipped: "", ...(naoVerificado.length > 0 ? { naoVerificado } : {}), ...ditas([...notas, ...(smoke.notas ?? [])]) };
   } finally {
     if (room !== options.projectRoot) await rm(room, { recursive: true, force: true });
   }

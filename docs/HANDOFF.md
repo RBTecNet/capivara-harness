@@ -36,6 +36,15 @@ orçamento de prova mudaram só no caminho de falha: g1 revisor 2; g4 executor 2
 revisor 2; orcamento-esgotado executor 4, revisor 2, reparador 1. A §138 fica como
 registro do que valia antes.
 
+O plano também: a contradição que sobra depois da volta única à arquitetura vira
+pergunta ao desenvolvedor (as duas citações, a correção do auditor como leitura
+recomendada, prazo → recomendada); a decisão é aplicada e conferida sem modelo, e
+o plano só é publicado limpo. E a plataforma do aplicativo de janela é decidida no
+`init`: o inventário diz o sistema operacional, e o WinForms/WPF num Linux é
+pergunta — trocar para Avalonia (recomendado) ou manter o alvo Windows, que
+compila com `EnableWindowsTargeting` e termina `aceito` com a execução dita como
+não provada aqui, por decisão do desenvolvedor.
+
 ## 2026-10-25 — O Core exige menos trabalho: a verificação reduzida, com prova medida (§138)
 
 A especificação "Correção da Capivara" pediu a redução em cinco etapas, cada uma

@@ -38,6 +38,7 @@ import { ambienteDoHarness, descreverAmbiente, inspectProject, summarizeInventor
 import { decisoesComoMemorias, renderLibraryBlock, type McpDocument, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { INIT_ARTIFACTS, evaluateReadiness } from "./readiness.js";
 import { contradicaoDecididaComoFinding, decisaoDoAuditorComoFinding, perguntaDaContradicao, perguntaDoAuditor } from "../interview/index.js";
+import { ASSUNTO_DA_PLATAFORMA, decisaoDaPlataforma, desktopDeOutraPlataforma, perguntaDaPlataforma, regrasDaPlataforma } from "../interview/index.js";
 import { NOTA_DE_ENGENHARIA, autoridadeDaDecisao, decisaoDeEngenhariaComoFinding, shaDaAutoridade, sinaisDeEngenharia } from "../audit/index.js";
 import { MemoriaDoPlano } from "./plan-cache.js";
 import type { PlanProgressListener } from "./progress.js";
@@ -106,6 +107,8 @@ export interface InitOptions {
    * Vencido, o run segue com a leitura recomendada e a registra como suposição.
    */
   planQuestionTimeoutMs?: number;
+  /** O sistema operacional desta máquina; ausente é o do processo. Existe para teste, como o `ask`. */
+  sistema?: NodeJS.Platform;
   /**
    * A tela de fases do `plan`.
    *
@@ -362,6 +365,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const maxInterviewRounds = options.maxInterviewRounds ?? 3;
   const maxGapQuestions = options.maxGapQuestions ?? 5;
   const maxParallelParts = Math.max(1, options.maxParallelParts ?? 3);
+  const sistema = options.sistema ?? process.platform;
+  // O aplicativo de janela de outra plataforma é uma lacuna: o init a pergunta, e a resposta vira regra do esqueleto.
+  const desktopDeFora = desktopDeOutraPlataforma(options.request.text, sistema);
   const maxMechanicalRounds = Math.max(1, options.maxMechanicalRounds ?? 3);
   const maxArchitectureReturns = Math.max(0, options.maxArchitectureReturns ?? 2);
   const esperar = options.sleep ?? ((seconds: number) => new Promise<void>((resolve) => setTimeout(resolve, seconds * 1000)));
@@ -753,6 +759,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      * sem um segundo caminho para manter.
      */
     if (document === "skeleton") questions.push(perguntaDoBanco(options.request.text));
+    if (document === "skeleton" && desktopDeFora !== null) questions.push(perguntaDaPlataforma(desktopDeFora, sistema));
 
     const retomado = options.fresh === true ? null : await readHandoff(options.projectRoot, runId, document);
     if (retomado && retomado.answers.length > 0) {
@@ -1361,6 +1368,12 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
         rules: [...existentes, ...regrasDoBanco.filter((regra) => !existentes.some((atual) => atual.subject === regra.subject))],
       };
       announce(`  ${regrasDoBanco.length} regra(s) de banco escritas a partir da sua decisão: .env, .env.example, migração e banco descartável nos testes`);
+    }
+    // A plataforma do aplicativo de janela, com as palavras da decisão: o build as lê para saber o que provar aqui.
+    const regrasDaPlataformaDecidida = regrasDaPlataforma(decisaoDaPlataforma(entrevista.questions, entrevista.answers), desktopDeFora, sistema);
+    if (regrasDaPlataformaDecidida.length > 0) {
+      esqueleto = { ...esqueleto, rules: [...esqueleto.rules.filter((regra) => regra.subject !== ASSUNTO_DA_PLATAFORMA), ...regrasDaPlataformaDecidida] };
+      announce(`  plataforma do aplicativo escrita a partir da sua decisão: ${regrasDaPlataformaDecidida[0]!.statement}`);
     }
 
     await publish(options.projectRoot, [{ name: "skeleton.md", content: renderSkeleton(esqueleto) }]);

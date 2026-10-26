@@ -64,7 +64,12 @@ export interface ResumoDoRun {
    * o detalhe começando por `alerta:`, na ordem em que aconteceram.
    */
   alertas: string[];
+  /** O que não se provou nesta máquina por decisão do desenvolvedor no `init`: dito, e não é pendência. */
+  porDecisao: string[];
 }
+
+/** O prefixo do evento que registra o que não se provou aqui por decisão do desenvolvedor no `init`. */
+export const POR_DECISAO_DO_INIT = "decisão do init:";
 
 async function instantaneos(runRoot: string): Promise<Map<string, EstadoDaRecuperacao>> {
   const pasta = defeitosDoRun(runRoot);
@@ -156,6 +161,8 @@ export async function resumirRun(projectRoot: string, runId: string, now: () => 
     fases,
     chamadas,
     alertas: eventos.filter((evento) => evento.detail.startsWith("alerta:")).map((evento) => `${evento.subject} · ${evento.detail.slice("alerta:".length).trim()}`),
+    // A retomada que roda a aceitação de novo registra a mesma nota: uma vez basta.
+    porDecisao: [...new Set(eventos.filter((evento) => evento.detail.startsWith(POR_DECISAO_DO_INIT)).map((evento) => evento.detail.slice(POR_DECISAO_DO_INIT.length).trim()))],
   };
 }
 
@@ -175,6 +182,9 @@ export function renderRelatorio(resumo: ResumoDoRun): string {
   }
   if (resumo.alertas.length > 0) {
     linhas.push("## Alertas", "", ...resumo.alertas.map((alerta) => `- ${alerta}`), "");
+  }
+  if (resumo.porDecisao.length > 0) {
+    linhas.push("## Não provado nesta máquina, por decisão do desenvolvedor no init", "", ...resumo.porDecisao.map((nota) => `- ${nota}`), "");
   }
   for (const fase of resumo.fases) {
     linhas.push(`## ${fase.id} — ${fase.status}${fase.ciclo !== null ? ` · ciclo ${fase.ciclo}` : ""}`, "");

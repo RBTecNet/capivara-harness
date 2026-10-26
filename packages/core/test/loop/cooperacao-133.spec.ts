@@ -26,6 +26,8 @@ import { FLOWS_DIR, gate4, runBuild, type EngineCall, type EngineResult } from "
 import type { BuildOptions } from "../../src/loop/index.js";
 import { FORA_DO_NAVEGADOR, stepLabel } from "../../src/prompts/index.js";
 import type { Skeleton, SkeletonWorkflow } from "../../src/contract/index.js";
+import { regrasDaPlataforma } from "../../src/interview/index.js";
+import { runPaths } from "../../src/state/index.js";
 
 const run = promisify(execFile);
 let projectRoot = "";
@@ -338,6 +340,90 @@ describe("item 6 · o aplicativo desktop que sobe chega a aceito", () => {
 
     expect(outcome).toMatchObject({ exitCode: 2, estado: "falhou" });
     expect(outcome.errors.join("\n")).toContain('"start"');
+  }, 60_000);
+});
+
+/*
+ * Item C de "só existe aceito": a plataforma do aplicativo de janela é decidida
+ * no init. Quem manteve o alvo Windows num Linux tem o build aceito: a aceitação
+ * compila com EnableWindowsTargeting, não executa, e o relatório diz que a
+ * execução não foi provada aqui por decisão dele — não é pendência, nem
+ * verificação inconclusiva. O que quebra ao iniciar é consertado pelo reparo da
+ * aceitação e o build termina aceito.
+ */
+describe("item C · a plataforma decidida no init", () => {
+  const WPF_STACK = "Interface visual: WPF para aplicativo desktop Windows";
+  const WPF = '<Project Sdk="Microsoft.NET.Sdk">\n  <PropertyGroup>\n    <OutputType>WinExe</OutputType>\n    <TargetFramework>net8.0-windows</TargetFramework>\n    <UseWPF>true</UseWPF>\n  </PropertyGroup>\n</Project>\n';
+  const AVALONIA = '<Project Sdk="Microsoft.NET.Sdk">\n  <PropertyGroup>\n    <OutputType>WinExe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n  </PropertyGroup>\n  <ItemGroup>\n    <PackageReference Include="Avalonia" Version="11.0.10" />\n  </ItemGroup>\n</Project>\n';
+  const comTela = { acceptancePlatform: { sistema: "linux" as const, tela: true } };
+
+  it("o alvo Windows mantido no init: compila com EnableWindowsTargeting, não executa, e o build é aceito com a decisão dita no relatório", async () => {
+    await writeFile(join(projectRoot, "Agenda.csproj"), WPF, "utf8");
+    const esqueleto = await publicar(WPF_STACK);
+    esqueleto.rules = regrasDaPlataforma("manter", { pilha: "WPF", alvo: "windows" }, "linux");
+    const compilados: string[] = [];
+    const iniciados: string[] = [];
+    const { outcome, anuncios } = await construir(esqueleto, motor(false, () => `${FORA_DO_NAVEGADOR}: ${WPF_STACK}`), corredor().runner, {
+      ...comAceitacao,
+      ...comTela,
+      acceptanceRunner: async (comando) => {
+        compilados.push(comando);
+        return { exitCode: 0, output: "Build succeeded." };
+      },
+      acceptanceService: async (comando) => {
+        iniciados.push(comando);
+        return { exitCode: 0, output: "de pé" };
+      },
+    });
+
+    expect(compilados).toEqual(['dotnet build "Agenda.csproj" -p:EnableWindowsTargeting=true']);
+    expect(iniciados).toEqual([]);
+    expect(outcome.estado, anuncios.join("\n")).toBe("aceito");
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.naoVerificado).toBeUndefined();
+    const notas = (outcome.notas ?? []).join("\n");
+    expect(notas).toContain("por decisão do desenvolvedor registrada no init");
+    expect(notas).toContain("o fluxo 1 é de janela");
+    const relatorio = await readFile(join(runPaths(projectRoot, outcome.runId).root, "relatorio.md"), "utf8");
+    expect(relatorio).toContain("## Não provado nesta máquina, por decisão do desenvolvedor no init");
+    expect(relatorio).toContain("não rodou nesta máquina: a execução do aplicativo não é provada aqui, por decisão do desenvolvedor registrada no init");
+    expect(await readFile(join(runPaths(projectRoot, outcome.runId).root, "entrega.md"), "utf8")).toContain("por decisão do desenvolvedor registrada no init");
+  }, 60_000);
+
+  it("sem a decisão no esqueleto, o mesmo projeto continua verificação inconclusiva: plataforma — nunca aceito", async () => {
+    await writeFile(join(projectRoot, "Agenda.csproj"), WPF, "utf8");
+    const esqueleto = await publicar(WPF_STACK);
+    const { outcome } = await construir(esqueleto, motor(false, () => `${FORA_DO_NAVEGADOR}: ${WPF_STACK}`), corredor().runner, { ...comAceitacao, ...comTela });
+    expect(outcome).toMatchObject({ exitCode: 3, estado: "verificação inconclusiva" });
+    expect((outcome.naoVerificado ?? []).join("\n")).toContain("verificação inconclusiva: plataforma");
+  }, 60_000);
+
+  it("o executável que quebra ao iniciar é consertado pelo reparo da aceitação, e o build termina aceito", async () => {
+    await writeFile(join(projectRoot, "Agenda.csproj"), AVALONIA, "utf8");
+    const esqueleto = await publicar(DESKTOP);
+    const engine = motor(false);
+    const reparos: string[] = [];
+    const call = async (chamada: EngineCall): Promise<EngineResult> => {
+      if (chamada.role === "builder" && chamada.prompt.includes("NullReferenceException")) {
+        reparos.push(chamada.prompt);
+        await writeFile(join(projectRoot, "App.cs"), "// a janela inicializa o calendário antes de usá-lo\n", "utf8");
+        return { exitCode: 0, stdout: "consertado", stderr: "", timedOut: null };
+      }
+      return engine.call(chamada);
+    };
+    const { outcome, anuncios } = await construir(esqueleto, { ...engine, call }, corredor().runner, {
+      ...comAceitacao,
+      ...comTela,
+      acceptanceService: async (_comando, cwd) =>
+        (await readFile(join(cwd, "App.cs"), "utf8").then(() => true, () => false))
+          ? { exitCode: 0, output: "de pé" }
+          : { exitCode: 134, output: "Unhandled exception. System.NullReferenceException: Object reference not set" },
+    });
+
+    expect(reparos).toHaveLength(1);
+    expect(outcome.estado, anuncios.join("\n")).toBe("aceito");
+    expect(outcome.exitCode).toBe(0);
+    expect(anuncios.join("\n")).toContain('aceitação reprovou em "start"; ciclo de correção 1');
   }, 60_000);
 });
 

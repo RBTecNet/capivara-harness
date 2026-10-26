@@ -27,6 +27,8 @@ export type { RoundPlan, RoundState, UnresolvedItem } from "./rounds.js";
 export { HANDOFF_CONTRACT, handoffPath, readHandoff, writeHandoff } from "./handoff.js";
 export { ID_DO_BANCO, PERGUNTA_DO_BANCO, bancoNoPedido, decisaoDeBanco, perguntaDoBanco, regrasDeBanco } from "./banco.js";
 export type { DecisaoDeBanco } from "./banco.js";
+export { ASSUNTO_DA_PLATAFORMA, EXECUCAO_NAO_PROVADA, ID_DA_PLATAFORMA, alvoMantidoNoEsqueleto, decisaoDaPlataforma, desktopDeOutraPlataforma, nomeDoSistema, perguntaDaPlataforma, regrasDaPlataforma } from "./plataforma.js";
+export type { AlvoDoDesktop, DecisaoDaPlataforma, DesktopDeOutraPlataforma } from "./plataforma.js";
 export { PREFIXO_DA_CONTRADICAO, PREFIXO_DA_DECISAO_DO_AUDITOR, contradicaoDecididaComoFinding, decisaoDoAuditorComoFinding, perguntaDaContradicao, perguntaDoAuditor } from "./levantamento.js";
 export {
   DELEGAR,

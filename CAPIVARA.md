@@ -85,11 +85,12 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-Na versão 0.8.0, `npm run check` passa: build, typecheck e **3000 testes**, incluindo o catálogo de
+Na versão 0.8.1, `npm run check` passa: build, typecheck e **3134 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
 
-A 0.8.0 traz a §138: o Core exige menos trabalho dos modelos, em cinco etapas,
-cada uma com a medida de antes e de depois (`medir-verificacao.mjs`).
+A 0.8.0 trouxe a §138, e a 0.8.1 as correções de 26/10/2026: o Core exige
+menos trabalho dos modelos, em cinco etapas, cada uma com a medida de antes e de
+depois (`medir-verificacao.mjs`).
 - Uma política de teste só, para o executor e o verificador: nenhum critério
   exige teste próprio.
 - O `plan` numa passada: uma auditoria do plano inteiro, mais uma depois da

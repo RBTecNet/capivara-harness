@@ -2,7 +2,7 @@
 
 Do prompt à aplicação final, em três comandos.
 
-Versão **0.8.0**: o Core exige menos trabalho dos modelos, e cada redução tem a
+Versão **0.8.1**: o Core exige menos trabalho dos modelos, e cada redução tem a
 medida de antes e de depois (§138). O `plan` escreve as dependências e as fases
 numa passada, com uma auditoria do plano inteiro; o Core decide o que devolve
 (contradição, interface ou dependência, com as citações conferidas), e a

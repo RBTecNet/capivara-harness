@@ -297,8 +297,9 @@ CAPIVARA_API_MAX_OUTPUT_TOKENS=65536 capivara plan
 
 O teto pode incluir raciocínio e texto final, conforme o provider. Aumentá-lo
 permite maior consumo; a Capivara mantém o padrão até você escolher outro valor.
-Se a geração for cortada, ela para sem repetir automaticamente e grava o consumo
-informado pela API no diagnóstico. No `init` e no `plan`, o texto visível
+Se a geração for cortada no `init` ou no `plan`, vem UMA chamada nova pedindo a
+mesma resposta, compacta (sem prosa, só o contrato); cortada de novo, ela para e
+grava o consumo informado pela API no diagnóstico. No `init` e no `plan`, o texto visível
 incompleto fica em `.partial.txt`, separado do documento e do cache. Isso não
 muda os limites das CLIs.
 

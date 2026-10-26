@@ -338,6 +338,14 @@ interface Authored {
   rewrite: (findings: Finding[], attempt: number, opcoes?: OpcoesDaEmenda) => Promise<Authored>;
 }
 
+/** O que a segunda chamada acrescenta ao prompt depois de a resposta ser cortada pelo limite de tokens. */
+const RESPOSTA_COMPACTA = [
+  "## Compact answer",
+  "Your previous answer to this same request was cut by the output token limit and was discarded.",
+  "Answer the same request again, compactly: no prose, no explanation, no repetition — only the contract the",
+  "request asks for, complete and in the same format.",
+].join("\n");
+
 export class InitBlockedError extends Error {
   readonly runId: string;
   constructor(message: string, runId: string) {
@@ -390,9 +398,11 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
   const arquivoDaChamada = (call: AgentCall, tentativa: number, id: string): string =>
     `${call.stage}.${call.subject.replace(/[^A-Za-z0-9_.-]+/g, "-")}.${call.role}.${call.attempt ?? 1}-${tentativa}.${id}`;
 
-  const track = async (call: AgentCall): Promise<string> => {
+  const track = async (pedida: AgentCall): Promise<string> => {
     let esperas = 0;
     let indisponibilidades = 0;
+    // A chamada desta tentativa: a segunda, depois do limite de tokens, pede a mesma resposta compacta.
+    let call = pedida;
 
     for (let tentativa = 1; tentativa <= 2; tentativa += 1) {
       const startedAt = Date.now();
@@ -515,8 +525,19 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       }
 
       if (/a geração atingiu o limite de tokens/i.test(response.stdout)) {
+        /*
+         * O limite de saída cortou a resposta: UMA chamada nova pedindo a
+         * mesma resposta, compacta — sem prosa, só o contrato. Estourar de novo
+         * para, como antes; o texto parcial nunca é aprovado.
+         */
+        if (tentativa === 1) {
+          announce(`  a geração de ${call.role} em ${call.subject} atingiu o limite de tokens; pedindo a mesma resposta, compacta, uma vez`);
+          await event(call.stage, call.subject, "retry", "limite de tokens: a mesma resposta, compacta", call.attempt);
+          call = { ...pedida, prompt: `${pedida.prompt}\n\n${RESPOSTA_COMPACTA}` };
+          continue;
+        }
         throw new InitBlockedError([
-          `A geração de ${call.role} em ${call.subject} atingiu o limite de tokens.`,
+          `A geração de ${call.role} em ${call.subject} atingiu o limite de tokens${call !== pedida ? ", também na chamada que pedia a resposta compacta" : ""}.`,
           "",
           "O que o provider respondeu:",
           recorte(response.stdout),

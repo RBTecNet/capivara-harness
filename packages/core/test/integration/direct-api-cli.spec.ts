@@ -26,15 +26,17 @@ afterEach(async () => {
 });
 
 describe("init com API direta pela CLI", () => {
-  it("corte por tokens guarda parcial separado e consumo, sem publicar documento ou repetir", async () => {
-    const fetcher = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+  it("corte por tokens: uma chamada pedindo a resposta compacta e, cortada de novo, para — guarda parcial separado e consumo, sem publicar documento", async () => {
+    // Uma resposta nova por chamada: o corpo de uma Response só se lê uma vez.
+    const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({
       choices: [{ message: { content: "documento parcial sk-teste-cli-apenas", reasoning: "pensamento privado" }, finish_reason: "length" }],
       usage: { prompt_tokens: 3000, completion_tokens: 32768, completion_tokens_details: { reasoning_tokens: 32000 } },
     })));
     await createProgram().parseAsync(["init", "um aplicativo de tarefas", "--provider", "openrouter", "--model", "vendor/model", "--project", directory, "--no-dashboard"], { from: "user" });
-    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(String(fetcher.mock.calls[1]?.[1]?.body)).toContain("## Compact answer");
     expect(process.exitCode).toBe(2);
-    expect(output).toContain("atingiu o limite de tokens");
+    expect(output).toContain("atingiu o limite de tokens, também na chamada que pedia a resposta compacta");
     expect(output).toContain("CAPIVARA_API_MAX_OUTPUT_TOKENS");
     expect(output).not.toContain("Verifique o modelo e a credencial");
     expect(output).not.toContain("sk-teste-cli-apenas");

@@ -5,7 +5,8 @@ import { certifyCurrentPlan } from "../support/current-plan.js";
  * Duas fronteiras, com Git de verdade:
  *
  * - o AGENTE que roda `git commit`, `git stash` ou `git push` por conta própria
- *   — no serial, no worktree do paralelo, e na principal a partir do worktree;
+ *   — no serial, no worktree do paralelo, e na principal a partir do worktree.
+ *   O commit novo em cima do HEAD, no mesmo branch, o Core absorve; o resto para;
  * - a JANELA entre a conferência dos arquivos e o que de fato vai para o commit:
  *   um hook `pre-commit` que prepara outra coisa, ou o disco que muda depois do
  *   `add`.
@@ -20,6 +21,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { commitPhase, runBuild, type EngineCall, type EngineResult } from "../../src/loop/index.js";
+import { absorverCommits, fotografarRefs } from "../../src/loop/autoridade.js";
 import type { BuildOptions } from "../../src/loop/index.js";
 import { readEvents, replayEvents, runIdFor, runPaths } from "../../src/state/index.js";
 import { sha12 } from "../../src/contract/index.js";
@@ -204,6 +206,19 @@ const commitDoAgente: Bypass = async (raiz) => {
   await git(["commit", "-q", "-m", "commit feito pelo agente"], raiz);
 };
 
+const tresCommitsDoAgente: Bypass = async (raiz) => {
+  await commitDoAgente(raiz);
+  for (const numero of [2, 3]) {
+    await escrever(`extra-${numero}.txt`, `extra ${numero}\n`, raiz);
+    await git(["add", `extra-${numero}.txt`], raiz);
+    await git(["commit", "-q", "-m", `commit ${numero} feito pelo agente`], raiz);
+  }
+};
+
+async function alertas(): Promise<string[]> {
+  return (await readEvents(runPaths(projectRoot, RUN()).events)).filter((evento) => evento.detail.startsWith("alerta:")).map((evento) => evento.detail);
+}
+
 describe("o agente que mexe no Git — serial", () => {
   beforeEach(async () => {
     await repositorio();
@@ -213,22 +228,93 @@ describe("o agente que mexe no Git — serial", () => {
     await git(["commit", "-q", "-m", "docs: plano"]);
   });
 
-  it("commit do executor na árvore principal: a fase para, não é concluída, e nada é desfeito", async () => {
+  it("um commit do executor em cima do HEAD: o Core o desfaz, os arquivos continuam, as refs voltam e o build segue", async () => {
     const anuncios: string[] = [];
     const engine = motor({ P02: commitDoAgente });
     const outcome = await runBuild(opcoes(engine, anuncios, { systemInstall: true }));
 
-    expect(outcome.exitCode, anuncios.join("\n")).toBe(2);
-    expect(outcome.errors.join("\n")).toContain("refs/heads/main");
-    // A P02 não foi registrada como concluída, e a P03 não rodou sobre ela.
-    expect(await concluidas()).not.toContain("P02");
-    expect(engine.chamadas.some((chamada) => chamada.phase.id === "P03")).toBe(false);
-    // O Core não publicou commit seu da P02; o do agente continua lá — não se reescreve histórico.
+    expect(outcome.errors, anuncios.join("\n")).toEqual([]);
+    expect(await concluidas()).toEqual(expect.arrayContaining(["P01", "P02", "P03"]));
+    // O commit do agente saiu do histórico; o da fase, pelo Core, levou o arquivo que ele tinha commitado.
     const historico = (await git(["log", "--format=%s"])).split("\n");
-    expect(historico).toContain("commit feito pelo agente");
-    expect(historico.some((linha) => linha.startsWith("feat(phase-2)"))).toBe(false);
+    expect(historico).not.toContain("commit feito pelo agente");
+    expect(historico.some((linha) => linha.startsWith("feat(phase-2)"))).toBe(true);
+    expect(await git(["log", "--format=%s", "-1", "--", "cadastro.txt"])).toMatch(/^feat\(phase-2\)/);
+    expect(await alertas()).toEqual(["alerta: o executor fez 1 commit(s) por conta própria; o Core os desfez e manteve as alterações na árvore"]);
     // O build declarou, antes, o que estava e o que não estava garantido.
     expect(anuncios.some((linha) => linha.startsWith("autoridade Git:") && linha.includes("nada impede"))).toBe(true);
+  });
+
+  it("três commits do executor em cima do HEAD: absorvidos juntos, e os três arquivos vão no commit da fase", async () => {
+    const anuncios: string[] = [];
+    const outcome = await runBuild(opcoes(motor({ P02: tresCommitsDoAgente }), anuncios));
+
+    expect(outcome.errors, anuncios.join("\n")).toEqual([]);
+    expect(await concluidas()).toContain("P02");
+    expect((await git(["log", "--format=%s"])).split("\n").filter((linha) => linha.includes("feito pelo agente"))).toEqual([]);
+    const daFase = (await git(["log", "--format=%H", "--grep=^feat(phase-2)", "-1"]));
+    expect((await git(["show", "--name-only", "--format=", daFase])).split("\n").sort()).toEqual(["cadastro.txt", "extra-2.txt", "extra-3.txt"]);
+    expect(await alertas()).toEqual(["alerta: o executor fez 3 commit(s) por conta própria; o Core os desfez e manteve as alterações na árvore"]);
+  });
+
+  it("commit do executor em outro branch: para, e o branch dele fica", async () => {
+    const outcome = await runBuild(
+      opcoes(
+        motor({
+          P02: async (raiz) => {
+            await git(["checkout", "-q", "-b", "do-agente"], raiz);
+            await commitDoAgente(raiz);
+            await git(["checkout", "-q", "main"], raiz);
+          },
+        }),
+        [],
+      ),
+    );
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.errors.join("\n")).toContain("refs/heads/do-agente");
+    expect(await concluidas()).not.toContain("P02");
+    expect(await git(["log", "--format=%s", "-1", "do-agente"])).toBe("commit feito pelo agente");
+  });
+
+  it("commit do executor com tag: para, e nada é desfeito", async () => {
+    const outcome = await runBuild(
+      opcoes(
+        motor({
+          P02: async (raiz) => {
+            await commitDoAgente(raiz);
+            await git(["tag", "v0.1.0"], raiz);
+          },
+        }),
+        [],
+      ),
+    );
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.errors.join("\n")).toContain("refs/tags/v0.1.0");
+    expect(await git(["log", "--format=%s", "-1"])).toBe("commit feito pelo agente");
+  });
+
+  it("reset --hard do executor para um commit anterior: o depois não descende do antes, e para", async () => {
+    const outcome = await runBuild(opcoes(motor({ P02: async (raiz) => void (await git(["reset", "-q", "--hard", "HEAD~1"], raiz)) }), []));
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.errors.join("\n")).toContain("refs/heads/main");
+    expect(await concluidas()).not.toContain("P02");
+  });
+
+  it("commit do executor com a ref remota movida: para, mesmo sem push de verdade", async () => {
+    const outcome = await runBuild(
+      opcoes(
+        motor({
+          P02: async (raiz) => {
+            await commitDoAgente(raiz);
+            await git(["update-ref", "refs/remotes/origin/main", "HEAD"], raiz);
+          },
+        }),
+        [],
+      ),
+    );
+    expect(outcome.exitCode).toBe(2);
+    expect(outcome.errors.join("\n")).toContain("refs/remotes/origin/main");
+    expect(await git(["log", "--format=%s", "-1"])).toBe("commit feito pelo agente");
   });
 
   it("git stash do executor: detectado, e o trabalho guardado no stash não se perde", async () => {
@@ -275,15 +361,16 @@ describe("o agente que mexe no Git — paralelo", () => {
     await git(["commit", "-q", "-m", "docs: plano"]);
   });
 
-  it("commit do agente no worktree: nada dele entra na principal, e o branch fica para exame", async () => {
+  it("commit do agente no worktree, no branch da fase: absorvido, e a fase entra pelo integrador", async () => {
     const anuncios: string[] = [];
     const outcome = await runBuild(opcoes(motor({ P02: commitDoAgente }, { P02: 20, P03: 120 }), anuncios, PARALELO));
 
-    expect(outcome.exitCode).toBe(2);
-    expect(await existe(join(projectRoot, "cadastro.txt"))).toBe(false);
-    expect((await git(["log", "--format=%s", "main"])).split("\n")).not.toContain("commit feito pelo agente");
-    expect(await git(["log", "--format=%s", "-1", `capivara/${RUN()}/P02`])).toBe("commit feito pelo agente");
-    expect(outcome.errors.join("\n")).toContain("mexeu no Git");
+    expect(outcome.errors, anuncios.join("\n")).toEqual([]);
+    expect(await existe(join(projectRoot, "cadastro.txt"))).toBe(true);
+    const historico = (await git(["log", "--format=%s", "main"])).split("\n");
+    expect(historico).not.toContain("commit feito pelo agente");
+    expect(historico.some((linha) => linha.startsWith("feat(phase-2)"))).toBe(true);
+    expect(await alertas()).toEqual(["alerta: o executor fez 1 commit(s) por conta própria; o Core os desfez e manteve as alterações na árvore"]);
     // A fase independente seguiu e entrou pelo integrador.
     expect(await existe(join(projectRoot, "relatorio.txt"))).toBe(true);
   });
@@ -303,6 +390,37 @@ describe("o agente que mexe no Git — paralelo", () => {
     const historico = (await git(["log", "--format=%s", "main"])).split("\n");
     expect(historico[0]).toBe("commit do agente na principal");
     expect(historico.some((linha) => linha.startsWith("feat(phase-2)") || linha.startsWith("feat(phase-3)"))).toBe(false);
+  });
+});
+
+describe("absorverCommits, direto no Git", () => {
+  beforeEach(async () => {
+    await repositorio();
+    await escrever("README.md", "inicial\n");
+    await git(["add", "-A"]);
+    await git(["commit", "-q", "-m", "inicial"]);
+  });
+
+  it("o reset que falha não absorve nada, e o commit do agente fica onde estava", async () => {
+    const antes = await fotografarRefs(projectRoot);
+    await escrever("a.txt", "a\n");
+    await commitDoAgente(projectRoot);
+    const depois = await fotografarRefs(projectRoot);
+    // Uma trava na ref do branch faz o `reset --soft` recusar a escrita.
+    await writeFile(join(projectRoot, ".git", "refs", "heads", "main.lock"), "");
+
+    expect(await absorverCommits(projectRoot, antes, depois)).toBeNull();
+    expect(await git(["log", "--format=%s", "-1"])).toBe("commit feito pelo agente");
+  });
+
+  it("o HEAD destacado não é absorvido, mesmo descendendo do de antes", async () => {
+    await git(["checkout", "-q", "--detach"]);
+    const antes = await fotografarRefs(projectRoot);
+    await escrever("a.txt", "a\n");
+    await commitDoAgente(projectRoot);
+
+    expect(await absorverCommits(projectRoot, antes, await fotografarRefs(projectRoot))).toBeNull();
+    expect(await git(["log", "--format=%s", "-1"])).toBe("commit feito pelo agente");
   });
 });
 

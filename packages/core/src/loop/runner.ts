@@ -19,7 +19,7 @@ import { writeAtomic } from "../state/atomic.js";
 import { conflictPrompt, fixPrompt, implementPrompt, MUDADOS_NA_PARTE, verifierRepairPrompt, verifyPrompt } from "../prompts/index.js";
 import type { BuildProgressListener, LoopGate, LoopGateState } from "./progress.js";
 import { alteracoesParaCommit, type Bloqueio } from "./admissao.js";
-import { fotografarRefs, publicacaoProvavel, refsMovidas } from "./autoridade.js";
+import { absorverCommits, fotografarRefs, publicacaoProvavel, refsMovidas } from "./autoridade.js";
 import { arquivosMudados, comMarcadorDeConflito, commitPhase, estadoDoCodigo, hasPendingChanges, restaurarDoEstado } from "./git.js";
 import { declaredComplete, defaultTestRunner, gate0, gate2, gate3, type GateName, type TestRunner } from "./gates.js";
 import { detectCredentialRejection, detectRateLimit, planWait } from "./ratelimit.js";
@@ -322,10 +322,12 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   const noWorktree = arvore !== options.projectRoot;
   /*
    * Só o Core registra no Git (§101). As referências são fotografadas antes e
-   * depois de TODA chamada de agente; referência movida é violação, e a fase
-   * para sem registrar nada. No worktree, o integrador e os outros agentes
-   * movem branches e a principal no meio da chamada — ali o que se confere é o
-   * HEAD deste worktree (que cobre o branch da fase), tags e rastreio remoto.
+   * depois de TODA chamada de agente. O commit novo do agente em cima do HEAD,
+   * no mesmo branch, é desfeito com as alterações mantidas, e a fase segue; o
+   * resto é violação, e a fase para sem registrar nada. No worktree, o
+   * integrador e os outros agentes movem branches e a principal no meio da
+   * chamada — ali o que se confere é o HEAD deste worktree (que cobre o branch
+   * da fase), tags e rastreio remoto.
    */
   const refsDeOutros = noWorktree ? ["refs/heads/", "refs/stash"] : [];
   class AutoridadeViolada extends Error {
@@ -358,8 +360,18 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     } finally {
       await conferirPrincipal();
     }
-    const movidas = refsMovidas(antes, await fotografarRefs(arvore, refsDeOutros));
-    if (movidas.length > 0) throw new AutoridadeViolada(movidas, chamada.role === "builder" ? "executor" : "verificador");
+    const depois = await fotografarRefs(arvore, refsDeOutros);
+    if (refsMovidas(antes, depois).length > 0) {
+      const papel = chamada.role === "builder" ? "executor" : "verificador";
+      const absorvidos = await absorverCommits(arvore, antes, depois, refsDeOutros);
+      if (absorvidos === null) {
+        const movidas = refsMovidas(antes, await fotografarRefs(arvore, refsDeOutros));
+        throw new AutoridadeViolada(movidas.length > 0 ? movidas : refsMovidas(antes, depois), papel);
+      }
+      const alerta = `o ${papel} fez ${absorvidos} commit(s) por conta própria; o Core os desfez e manteve as alterações na árvore`;
+      await event("retry", `alerta: ${alerta}`, chamada.attempt);
+      announce(`[${session.id}] ${alerta}`);
+    }
     return resposta;
   };
   /** A conclusão vai ao log do run só quando a fase já está no produto. */

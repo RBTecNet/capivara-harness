@@ -397,7 +397,7 @@ describe("build paralelo", () => {
     expect(await readFile(join(pasta, unica!, "certs", "cliente.key"), "utf8")).toBe("chave\n");
   });
 
-  it("a integração confere o que recebe: o commit do agente com .env não entra na principal", async () => {
+  it("o commit do agente com .env é desfeito, e a admissão do commit da fase barra o .env: nada entra na principal", async () => {
     const escreve = { ...ESCRITAS, P02: [...ESCRITAS.P02!, { path: ".env", content: `${SEGREDO}\n` }] };
     const anuncios: string[] = [];
     const outcome = await runBuild(
@@ -409,10 +409,15 @@ describe("build paralelo", () => {
     expect(await git(["ls-tree", "-r", "--name-only", "main"])).not.toContain(".env");
     expect(await existe(join(projectRoot, "cadastro.txt"))).toBe(false);
     expect(await existe(join(projectRoot, ".env"))).toBe(false);
-    // O branch, feito pelo agente, é mantido — apagá-lo seria perder o trabalho — e a tela diz para não publicá-lo.
-    expect(await git(["log", "--format=%s", "-1", `capivara/${RUN()}/P02`])).toBe("commit feito pelo agente");
-    // Quem para primeiro é a guarda das referências (§101); a conferência da integração é a segunda barreira.
-    expect(outcome.errors.join("\n")).toContain("mexeu no Git");
+    // O commit do agente saiu do branch (o Core o desfez); o parcial da fase ficou nele, sem o .env…
+    const branch = `capivara/${RUN()}/P02`;
+    expect(await git(["log", "--format=%s", branch])).not.toContain("commit feito pelo agente");
+    expect((await git(["ls-tree", "-r", "--name-only", branch])).split("\n")).not.toContain(".env");
+    expect(await historicoInteiro()).not.toContain("valor-real");
+    // …e o .env, fora do Git, na recuperação local do run.
+    const pasta = join(runPaths(projectRoot, RUN()).root, "recuperacao");
+    const [unica] = (await readdir(pasta)).filter((nome) => nome.startsWith("P02-"));
+    expect(await readFile(join(pasta, unica!, ".env"), "utf8")).toBe(`${SEGREDO}\n`);
     expect([...anuncios, ...outcome.errors].join("\n")).not.toContain("valor-real");
   });
 });

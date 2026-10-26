@@ -14671,7 +14671,9 @@ cada uma com o seu commit e a medida de antes e de depois
   do documento (pacote de reparo documental, §125 H) entregam a fase com as
   pendências ditas, e o build segue.
 - Param o build (`falhou`) só: a sessão que não entrega resultado utilizável, a
-  credencial recusada, o limite de uso esgotado, o Git movido por um agente, a
+  credencial recusada, o limite de uso esgotado, o Git movido por um agente (o
+  commit novo em cima do HEAD, no mesmo branch, o Core desfaz com `reset --soft`
+  e segue, com as alterações mantidas e um alerta no `events.tsv`), a
   árvore principal alterada durante o paralelo e o commit recusado.
 - Não há G4 por fase. Saíram com ele o roteirista e a triagem por fase, a
   contestação do roteiro, o fluxo adiado no build (§127), o fora-do-navegador

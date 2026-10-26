@@ -18,11 +18,13 @@
  *
  * Onde não há impedimento, o que o Core impõe de forma determinística é
  * DETECÇÃO e CONTENÇÃO: as referências do repositório são fotografadas antes e
- * depois de cada chamada de agente. Qualquer referência movida — commit,
- * reset, stash, tag, ou o rastreio remoto que um `push` atualiza — é violação:
- * a fase para, nada dela é registrado nem integrado, e a tela diz quais refs
- * mudaram. O que já foi feito não é desfeito (o histórico não é reescrito), e o
- * `push` que não atualiza rastreio remoto não é detectável daqui.
+ * depois de cada chamada de agente. O commit novo em cima do HEAD de antes, no
+ * mesmo branch, o Core absorve (`absorverCommits`): desfaz com `reset --soft`,
+ * as alterações ficam na árvore, e a fase segue até o commit dela. Qualquer
+ * outra referência movida — reset, stash, tag, troca de branch, outro branch, ou
+ * o rastreio remoto que um `push` atualiza — é violação: a fase para, nada dela
+ * é registrado nem integrado, e a tela diz quais refs mudaram. Isso não é
+ * desfeito, e o `push` que não atualiza rastreio remoto não é detectável daqui.
  */
 
 import { execFile } from "node:child_process";
@@ -65,6 +67,37 @@ export function refsMovidas(antes: FotoDasRefs, depois: FotoDasRefs): string[] {
   return [...nomes].filter((nome) => antes.get(nome) !== depois.get(nome)).sort();
 }
 
+/**
+ * Os commits que o agente fez em cima do HEAD de antes, no mesmo branch,
+ * desfeitos sem perder nada: `reset --soft` para o commit de antes, e as
+ * alterações ficam na árvore e no índice, para o commit da fase pelo Core.
+ *
+ * Só quando é exatamente isso: as refs movidas são o HEAD e o branch dele (no
+ * worktree, só o HEAD, que cobre o branch da fase); o HEAD aponta para o mesmo
+ * branch, nunca destacado; o commit de depois descende do de antes. Tag,
+ * rastreio remoto e stash mudados são outra ref, e não passam. Depois do reset,
+ * as refs são fotografadas de novo e têm de ser as de antes.
+ *
+ * Devolve quantos commits foram desfeitos, ou null quando o caso não é esse ou
+ * o reset falhou — e aí é violação, como sempre.
+ */
+export async function absorverCommits(root: string, antes: FotoDasRefs, depois: FotoDasRefs, ignorar: readonly string[] = []): Promise<number | null> {
+  const [ramo, de] = (antes.get("HEAD") ?? "").split(" ");
+  const [ramoDepois, para] = (depois.get("HEAD") ?? "").split(" ");
+  if (!ramo?.startsWith("refs/heads/") || ramo !== ramoDepois || !de || !para || de === para) return null;
+  if (refsMovidas(antes, depois).some((nome) => nome !== "HEAD" && nome !== ramo)) return null;
+  const descende = await run("git", ["merge-base", "--is-ancestor", de, para], { cwd: root }).then(() => true, () => false);
+  if (!descende) return null;
+  const quantos = await run("git", ["rev-list", "--count", `${de}..${para}`], { cwd: root }).then((resultado) => Number(resultado.stdout.trim()), () => 0);
+  try {
+    await run("git", ["reset", "-q", "--soft", de], { cwd: root });
+  } catch {
+    return null;
+  }
+  if (refsMovidas(antes, await fotografarRefs(root, ignorar)).length > 0) return null;
+  return quantos;
+}
+
 /** Um `push` acompanhado: ele atualiza o rastreio remoto. */
 export function publicacaoProvavel(movidas: readonly string[]): boolean {
   return movidas.some((nome) => nome.startsWith("refs/remotes/"));
@@ -78,7 +111,7 @@ export function garantiaDeAutoridade(provider: string, systemInstall: boolean): 
   if (systemInstall) {
     return (
       `${provider} com acesso de sistema: nada impede o executor de rodar git commit ou git push. ` +
-      "O Core detecta referência movida e para a fase sem registrar nada, mas não desfaz o que foi feito; " +
+      "O commit novo no mesmo branch o Core desfaz, mantendo as alterações; qualquer outra referência movida para a fase sem registrar nada, e não é desfeita; " +
       "use --no-system-install para restringir o executor ao workspace"
     );
   }
@@ -87,6 +120,6 @@ export function garantiaDeAutoridade(provider: string, systemInstall: boolean): 
   }
   return (
     `${provider} em workspace: sem sandbox de sistema verificado sobre o .git — o executor pode commitar. ` +
-    "O Core detecta referência movida e para a fase sem registrar nada, mas não desfaz o que foi feito"
+    "O commit novo no mesmo branch o Core desfaz, mantendo as alterações; qualquer outra referência movida para a fase sem registrar nada, e não é desfeita"
   );
 }

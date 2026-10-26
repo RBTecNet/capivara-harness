@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 import { lerProtocolo } from "../../src/contract/protocolo.js";
-import { parseVerification, pendenciasResolvidas } from "../../src/prompts/verifier.js";
+import { parseVerification } from "../../src/prompts/verifier.js";
 
 const DONE = [{ index: 1, done: true, missing: "" }];
 const INCOMPLETO = [{ index: 1, done: false, missing: "falta X" }];
@@ -51,10 +51,5 @@ describe("a revisão da fase, em treze formatos", () => {
     expect(parseVerification("TASK 1: INCOMPLETE — falta: a rota")).toEqual([{ index: 1, done: false, missing: "falta: a rota" }]);
     expect(lerProtocolo("CAPIVARA_FINDING: Arquitetura: o componente | x | y", "CAPIVARA_FINDING")).toBe("CAPIVARA_FINDING: Arquitetura: o componente | x | y");
     expect(parseVerification("**TASK** um: feito")).toEqual([]);
-  });
-
-  it("a linha da pendência do plano é lida com a mesma tolerância", () => {
-    expect([...pendenciasResolvidas("`PLAN_ISSUE 1: RESOLVED`\nPLAN_ISSUE 2: **OPEN**: o código ainda exclui")]).toEqual([1]);
-    expect([...pendenciasResolvidas("PLAN_ISSUE 1: RESOLVED.\nPLAN_ISSUE 2: RESOLVED — src/clientes.js desativa")]).toEqual([1, 2]);
   });
 });

@@ -270,10 +270,12 @@ com o pacote fora da infraestrutura aprovada. Precisão, completude e estilo vir
 observações do relatório, sem rodada nem pergunta, e o auditor não cria decisão
 de produto. O bloqueio que sobrevive à emenda vai uma vez à arquitetura, com as
 citações; a refeita é auditada uma vez, e as fases cujo contrato mudou são
-reescritas e auditadas uma vez. O que ainda sobrar não para o `plan`: entra na
-fase afetada como `**Pendência do plano:**`, com as duas citações e a correção
-sugerida, chega ao executor no prompt da fase, e a fase só fecha `aceito` se a
-revisão confirmar que o código a resolveu. Um achado sobre o envelope de uma fase volta à arquitetura, e
+reescritas e auditadas uma vez. O que ainda sobrar vira pergunta ao
+desenvolvedor, com as passagens em conflito e a correção do auditor como leitura
+recomendada; a resposta vira decisão, e as fases afetadas são reescritas uma vez.
+O plano só é publicado limpo: se as passagens ainda coexistem — o escritor não
+aplicou a decisão, ou a passagem recusada está no esqueleto ou na arquitetura —,
+o `plan` para citando as duas. Um achado sobre o envelope de uma fase volta à arquitetura, e
 as fases cujo envelope não mudou voltam do cache. A pergunta ao desenvolvedor
 tem prazo (`--prazo-da-pergunta`, 10 minutos): sem resposta, o `plan` segue com
 a leitura recomendada e a registra como suposição.

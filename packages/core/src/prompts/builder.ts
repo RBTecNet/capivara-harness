@@ -10,7 +10,6 @@
 import { languageBlock } from "./language.js";
 import { functionalAcceptanceBlock, proportionateChecksBlock } from "./acceptance-policy.js";
 import { testPolicyBlock } from "./test-policy.js";
-import { PENDENCIA_DO_PLANO, pendenciasDoPlano } from "../contract/phases.js";
 
 export interface BuilderContext {
   language: string;
@@ -332,24 +331,6 @@ export function completionBlock(): string {
   ].join("\n");
 }
 
-/**
- * A pendência que o plano deixou na fase: a contradição que a auditoria do
- * plano não fechou, com as duas passagens e a correção sugerida. Ela chega ao
- * executor nomeada, e a revisão da fase confirma, ou não, que o código a resolveu.
- */
-export function pendenciasBlock(phaseMarkdown: string): string[] {
-  const pendencias = pendenciasDoPlano(phaseMarkdown);
-  if (pendencias.length === 0) return [];
-  return [
-    "## Plan issues this phase carries",
-    `The plan audit could not close ${pendencias.length === 1 ? "one issue" : `${pendencias.length} issues`} in this phase; each is a \`${PENDENCIA_DO_PLANO}\` line below,`,
-    "with the passages that conflict and the auditor's suggested correction. Implement the phase so the code",
-    "resolves each one the way the correction suggests, and say in your report how you resolved it. The",
-    "independent review checks it: a phase whose issue is not resolved is delivered with it pending.",
-    "",
-  ];
-}
-
 export function implementPrompt(context: BuilderContext): string {
   return [
     languageBlock(context.language),
@@ -408,7 +389,6 @@ export function implementPrompt(context: BuilderContext): string {
     ...(context.skills && context.skills.trim() !== "" ? [context.skills, ""] : []),
     ...memoriaBlock(context),
     ...parteBlock(context.parte),
-    ...pendenciasBlock(context.phaseMarkdown),
     context.parte ? "## The part of the phase to implement" : "## The phase to implement",
     context.phaseMarkdown,
   ].join("\n");
@@ -457,7 +437,6 @@ export function fixPrompt(context: FixContext): string {
     "",
     ...(context.skills && context.skills.trim() !== "" ? [context.skills, ""] : []),
     ...memoriaBlock(context),
-    ...pendenciasBlock(context.phaseMarkdown),
     "## The phase to complete",
     context.phaseMarkdown,
   ].join("\n");

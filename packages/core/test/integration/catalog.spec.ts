@@ -496,7 +496,7 @@ describe("B-08 a B-12 · auditoria", () => {
     expect(agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-phases.md")).toHaveLength(0);
   });
 
-  it("B-10 o bloqueio que sobrevive à emenda e à volta à arquitetura vira pendência do plano, sem nova rodada e sem pergunta", async () => {
+  it("B-10 o bloqueio que sobrevive à emenda e à volta à arquitetura vira pergunta; a decisão que o escritor não aplica faz o plan parar, sem nova rodada de auditoria", async () => {
     const steps = happyPath();
     steps.unshift({
       match: { role: "auditor", stage: "audit", subject: "project-phases.md" },
@@ -504,11 +504,12 @@ describe("B-08 a B-12 · auditoria", () => {
       repeat: true,
     });
     const agent = fakeAgent(steps);
-    const outcome = await runInit({ projectRoot, request, language: "português do Brasil", call: agent.call, ask: async () => "1" });
-    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+    const perguntas: string[] = [];
+    await expect(runInit({ projectRoot, request, language: "português do Brasil", call: agent.call, ask: async (pergunta) => (perguntas.push(pergunta.topic), "1") })).rejects.toThrow(/continuam no plano depois da decisão/);
     // Uma auditoria e mais uma depois da emenda; a arquitetura voltou igual, e não há terceira.
     expect(agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-phases.md")).toHaveLength(2);
-    expect(await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).toContain("**Pendência do plano:** a auditoria do plano não fechou esta contradição");
+    expect(perguntas.filter((topico) => topico.startsWith("plano · "))).toEqual(["plano · Phase 1"]);
+    await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).rejects.toThrow();
   });
 
   it("B-11 aprovação com ressalva não bloqueia e aparece no relatório", async () => {
@@ -1273,7 +1274,7 @@ describe("G-1 a G-4 · as garantias da redução da verificação", () => {
     await conferir(await garantiaG2());
   });
 
-  it("G-3 contradição entre decisões do plano: o plan bloqueia com as duas citações, ou a publica como pendência que chega ao executor e ao relatório", async () => {
+  it("G-3 contradição entre decisões do plano: nunca chega ao build — o plan a resolve, ou bloqueia com as duas citações", async () => {
     await conferir(await garantiaG3());
   });
 

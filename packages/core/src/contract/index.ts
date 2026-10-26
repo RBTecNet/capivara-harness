@@ -2,7 +2,7 @@ export { INVARIANTS, PHASES_CONTRACT, invariant } from "./invariants.js";
 export { ENVIRONMENT_CONTRACT, PLANNING_CONTRACT, PLANNING_UPGRADE, environmentRequirements } from "./environment.js";
 export type { EnvironmentRequirement } from "./environment.js";
 export type { Invariant, InvariantChecker, InvariantCode, InvariantEnforcement } from "./invariants.js";
-export { checkDesignRefs, comPendenciasDoPlano, parsePhases, pendenciasDoPlano, PENDENCIA_DO_PLANO } from "./phases.js";
+export { checkDesignRefs, parsePhases } from "./phases.js";
 export type {
   ContractError,
   InputStamp,

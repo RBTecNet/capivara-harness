@@ -30,13 +30,13 @@ import { sharedContractFromSkeleton } from "../prompts/acceptance-policy.js";
 import { portaLivre } from "./ports.js";
 import { faltaOPacoteDoRunner } from "./dependencias.js";
 import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mcp/index.js";
-import { DOCUMENTOS_DA_ETAPA, ENVIRONMENT_CONTRACT, pendenciasDoPlano, phaseReferences, recorteDaFase, sha12 } from "../contract/index.js";
+import { DOCUMENTOS_DA_ETAPA, ENVIRONMENT_CONTRACT, phaseReferences, recorteDaFase, sha12 } from "../contract/index.js";
 import type { SkeletonWorkflow, TaskBlock } from "../contract/index.js";
 import type { PhaseSession } from "./split.js";
 import { lerResultadosDotnet, limparResultadosDotnet, RESULTADOS_DOTNET, resolveE2eCommand, type TestCommand } from "./testcmd.js";
 import { falhaDeInstalacaoNode, inspecionarInstalacaoNode, MARCA_DE_INSTALACAO_NODE, registrarInstalacaoNode, runtimeNode } from "./instalacao-node.js";
 import { comandoDeInstalacao, type ConciliacaoDaIntegracao } from "./worktree.js";
-import { parseVerification, pendenciasResolvidas, testRepairGuidancePrompt } from "../prompts/verifier.js";
+import { parseVerification, testRepairGuidancePrompt } from "../prompts/verifier.js";
 import type { FlowReviewPurpose } from "../provider/flow-review.js";
 import type { FatiaDaArquitetura } from "./arquitetura.js";
 import { emptyScope, LivroDeEvidencias, referenciaDeArtefato, type ArtifactRef, type EvidenceInputs } from "./evidencias.js";
@@ -548,8 +548,6 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   let arvoreDaUltimaRevisao: string | null = null;
   /** A releitura do mesmo código já aconteceu nesta execução: ela é uma, para o achado falso; depois o achado vale. */
   let releuOMesmoCodigo = false;
-  /** As pendências do plano que a revisão desta execução leu resolvidas no código; as outras impedem `aceito`. */
-  let pendenciasDoPlanoResolvidas = new Set<number>();
   /** A sessão nova do verificador de outro modelo, como executor, já foi usada nesta execução: ela é uma só. */
   let resgateUsado = false;
   let julgandoParcial = false;
@@ -1296,7 +1294,6 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     }
     verificadorEscreveuDesdeOG3 = false;
     arvoreDaUltimaRevisao = codigo.atual.tree;
-    pendenciasDoPlanoResolvidas = pendenciasResolvidas(verification.stdout);
     const vereditos = parseVerification(verification.stdout);
     for (const verdict of vereditos) {
       if (verdict.done && verdict.missing.startsWith("ADVISORY:")) {
@@ -1832,15 +1829,9 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     if (!upstreamConferido && estado.defects.some((defeito) => defeito.status !== "RESOLVED" && defeito.status !== "UPSTREAM_REPAIR_REQUIRED")) await encaminharUpstream();
     // A suíte da árvore integrada reparada se valida na integração, depois desta fase: é ela que a confere (como o `g2Valido`).
     const abertos = estado.defects.filter((defeito) => defeito.status !== "RESOLVED" && !(defeito.nature === "integracao-teste" && defeito.status === "AWAITING_VALIDATION"));
-    // A pendência do plano só sai daqui quando a revisão leu, no código, que ela foi resolvida.
-    const doPlano = pendenciasDoPlano(session.markdown).filter((_, indice) => !pendenciasDoPlanoResolvidas.has(indice + 1));
-    if (abertos.length > 0 || doPlano.length > 0) {
-      const { gate: gateDaFalha, cause } = abertos.length > 0 ? causaDaParada() : { gate: "gate 3 — verificação independente" as GateName, cause: "" };
-      const causa = [
-        ...(abertos.length > 0 ? [cause, "", ...abertos.map(pendenciaDe)] : []),
-        ...doPlano.map((pendencia) => `${session.id} · pendência do plano, sem a revisão confirmar que o código a resolveu: ${pendencia}`),
-      ].join("\n").trim();
-      return await fecharFalha(gateDaFalha, causa, "a fase não fecha com o que a revisão e os gates não aprovaram");
+    if (abertos.length > 0) {
+      const { gate: gateDaFalha, cause } = causaDaParada();
+      return await fecharFalha(gateDaFalha, [cause, "", ...abertos.map(pendenciaDe)].join("\n").trim(), "a fase não fecha com o que a revisão e os gates não aprovaram");
     }
     if (options.conciliacao) {
       // A última barreira: nenhum arquivo com marcador de conflito entra no commit da fase (§125 F).

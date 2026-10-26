@@ -13,7 +13,6 @@
 import { languageBlock } from "./language.js";
 import { architectureSliceBlock, completionBlock, processBlock } from "./builder.js";
 import { lerProtocolo } from "../contract/protocolo.js";
-import { pendenciasDoPlano } from "../contract/phases.js";
 import { functionalAcceptanceBlock } from "./acceptance-policy.js";
 import { testPolicyBlock } from "./test-policy.js";
 
@@ -182,41 +181,6 @@ function defeitosBlock(defeitos: readonly { id: string; status: string; gate: st
   ];
 }
 
-/**
- * As pendências que o plano deixou na fase, do lado de quem julga.
- *
- * Uma pendência impede `aceito` até a revisão dizer, na mesma chamada, que o
- * código a resolveu. A linha é separada das TASK porque a pendência não é de
- * uma task: é a contradição que o plano não fechou.
- */
-function pendenciasDoPlanoBlock(phaseMarkdown: string): string[] {
-  const pendencias = pendenciasDoPlano(phaseMarkdown);
-  if (pendencias.length === 0) return [];
-  return [
-    "",
-    "## Plan issues this phase carries",
-    "The plan audit could not close these issues; the builder was told to resolve them in the code. After the",
-    "TASK lines, emit exactly one line per issue, numbered as below:",
-    "",
-    "PLAN_ISSUE <n>: RESOLVED — <the file and behaviour that resolve it>",
-    "PLAN_ISSUE <n>: OPEN — <why the code does not resolve it>",
-    "",
-    "RESOLVED only when you read the code that resolves it. When in doubt, OPEN: the phase is then delivered",
-    "with the issue pending, named, and never blocked for it.",
-    ...pendencias.map((pendencia, indice) => `${indice + 1}. ${pendencia}`),
-  ];
-}
-
-/** O que a revisão disse de cada pendência do plano: o número das que ela leu resolvidas no código. */
-export function pendenciasResolvidas(output: string): Set<number> {
-  const resolvidas = new Set<number>();
-  for (const linha of lerProtocolo(output, String.raw`PLAN_ISSUE\s+\d+`, "RESOLVED|OPEN").split("\n")) {
-    const lida = /^PLAN_ISSUE\s+(\d+):\s*(RESOLVED|OPEN)\b/iu.exec(linha.trim());
-    if (lida && (lida[2] ?? "").toUpperCase() === "RESOLVED") resolvidas.add(Number(lida[1]));
-  }
-  return resolvidas;
-}
-
 export const VERIFY_HEADER = "CAPIVARA_VERIFY";
 
 export function verifyPrompt(context: VerifierContext): string {
@@ -251,9 +215,7 @@ export function verifyPrompt(context: VerifierContext): string {
     "Rules:",
     "- <n> is the index of the task within the phase, starting at 1.",
     `- One TASK line for every task. This phase has ${context.taskCount}. No exception, no grouping, no reordering.`,
-    pendenciasDoPlano(context.phaseMarkdown).length > 0
-      ? "- Emit no other text than the TASK lines and the PLAN_ISSUE lines below: no preamble, no summary, no closing sentence."
-      : "- Emit no other text: no preamble, no summary, no closing sentence.",
+    "- Emit no other text: no preamble, no summary, no closing sentence.",
     "- End DONE immediately, or use the exact separator ` — ADVISORY: ` for a non-blocking suggestion. Never `DONE; ...`.",
     "- If an observation means a required criterion is unmet, emit INCOMPLETE with evidence and a concrete fix.",
     "- Missing required functionality, a placeholder or a demonstrated functional defect means INCOMPLETE.",
@@ -293,7 +255,6 @@ export function verifyPrompt(context: VerifierContext): string {
     ...confirmarBlock(context.tasksParaConfirmar ?? []),
     ...defeitosBlock(context.defeitosConhecidos ?? []),
     ...subidaDoGate4Block(context.temFluxos),
-    ...pendenciasDoPlanoBlock(context.phaseMarkdown),
     "",
     "## The phase to verify",
     context.phaseMarkdown,

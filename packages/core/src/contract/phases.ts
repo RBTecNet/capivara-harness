@@ -473,34 +473,3 @@ export function checkDesignRefs(
   }
   return errors;
 }
-
-/**
- * A pendência que o plano publica numa fase.
- *
- * O bloqueio da auditoria que nem a emenda nem a volta à arquitetura fecharam
- * não para mais o plano: ele entra na fase afetada, nomeado, entre a linha de
- * metadados e a primeira task — onde a gramática não lê nada, e de onde ele
- * segue no recorte que o executor e a revisão recebem. A fase com pendência
- * não fecha `aceito` sem a revisão confirmar que o código a resolveu.
- */
-export const PENDENCIA_DO_PLANO = "**Pendência do plano:**";
-
-/** As pendências que o plano deixou nesta fase, na ordem em que aparecem; vazio quando não há. */
-export function pendenciasDoPlano(markdown: string): string[] {
-  const pendencias: string[] = [];
-  for (const linha of markdown.split(/\r?\n/)) {
-    if (TASK.test(linha.trim())) break;
-    if (linha.startsWith(PENDENCIA_DO_PLANO)) pendencias.push(linha.slice(PENDENCIA_DO_PLANO.length).trim());
-  }
-  return pendencias.filter((texto) => texto !== "");
-}
-
-/** A fase com as pendências logo depois da linha de metadados; a fase sem essa linha volta como veio. */
-export function comPendenciasDoPlano(markdown: string, pendencias: readonly string[]): string {
-  if (pendencias.length === 0) return markdown;
-  const linhas = markdown.split("\n");
-  const metadados = linhas.findIndex((linha) => METADATA.test(linha));
-  if (metadados === -1) return markdown;
-  const bloco = pendencias.flatMap((texto) => ["", `${PENDENCIA_DO_PLANO} ${texto.replace(/\s+/gu, " ").trim()}`]);
-  return [...linhas.slice(0, metadados + 1), ...bloco, ...linhas.slice(metadados + 1)].join("\n");
-}

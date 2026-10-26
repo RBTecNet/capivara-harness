@@ -101,22 +101,22 @@ describe("o plan de uma passada", () => {
     expect(outcome.report.remarks.some((entrada) => entrada.remark.observation.includes("A reserva nasce pendente ou confirmada?"))).toBe(true);
   });
 
-  it("o bloqueio que sobrevive à emenda vai uma vez à arquitetura e, sobrando, é publicado como pendência da fase, com as duas citações e a correção", async () => {
+  it("o bloqueio que sobrevive à emenda vai uma vez à arquitetura e, sobrando, vira pergunta; o escritor que não aplica a decisão faz o plan parar com as duas citações, e nada é publicado", async () => {
     await init();
     const { run, agent } = await plan(() => reject("Phase 1", "o seed contradiz a regra", "declare a ordem do seed"));
-    const outcome = await run;
-    expect(outcome.readiness.ready).toBe(true);
+    const erro = await run.then(() => null, (e: Error) => e.message);
+    expect(erro).toContain("continuam no plano depois da decisão");
+    expect(erro).toContain("«A tabela statuses existe e contém exatamente pendente, confirmada e cancelada»");
+    expect(erro).toContain("«duas reservas do mesmo quarto não se sobrepõem»");
     expect(por(agent, { role: "auditor", stage: "audit", subject: "project-phases.md" })).toHaveLength(2);
     // A arquitetura voltou com as citações; o arquiteto a devolveu igual, e ela foi descartada sem auditoria.
     const arquitetos = por(agent, { role: "writer", stage: "authoring", subject: "architecture" });
     expect(arquitetos).toHaveLength(2);
     expect(arquitetos[1]?.prompt).toContain("passagens conferidas pelo Core");
     expect(por(agent, { role: "auditor", stage: "audit", subject: "architecture" })).toHaveLength(1);
-    const fase1 = (await publicado()).split("## Phase 2")[0]!;
-    expect(fase1).toContain("**Pendência do plano:** a auditoria do plano não fechou esta contradição");
-    expect(fase1).toContain("«A tabela statuses existe e contém exatamente pendente, confirmada e cancelada»");
-    expect(fase1).toContain("«duas reservas do mesmo quarto não se sobrepõem»");
-    expect(fase1).toContain("Correção sugerida pelo auditor: declare a ordem do seed");
+    // A decisão chegou à reescrita da fase 1.
+    expect(emendas(agent).at(-1)?.prompt).toContain("o desenvolvedor decidiu");
+    await expect(publicado()).rejects.toThrow();
   });
 
   it("o achado sobre o envelope da fase vai à arquitetura já na primeira vez, e nunca ao desenvolvedor", async () => {

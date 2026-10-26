@@ -161,7 +161,9 @@ flowchart TD
     RT -- "na fase" --> EF["Emenda da fase, só do que o achado alcança"] --> AU2{"auditoria depois da emenda, no máximo uma"}
     RT -- "no envelope ou na divisão" --> RO["Reorganização pela arquitetura; fases intactas mantidas"] --> AR
     AU2 -- "o bloqueio sobrevive" --> VA["Volta única à arquitetura, com as citações: uma auditoria dela, as fases cujo contrato mudou reescritas, uma auditoria do plano"]
-    VA -- "ainda sobra, ou a refeita é reprovada" --> PP["RALPH READY com **Pendência do plano:** na fase afetada"]
+    VA -- "ainda sobra, ou a refeita é reprovada" --> PQ["Pergunta ao desenvolvedor: as passagens, a correção do auditor como leitura recomendada; a resposta vira decisão e reescreve as fases afetadas uma vez"]
+    PQ -- "as passagens não coexistem mais" --> RR
+    PQ -- "as passagens ainda coexistem" --> PB["o plan para, citando as duas"]
     VA -- ok --> RR
     AU2 -- ok --> RR
     OB --> RR
@@ -207,9 +209,11 @@ flowchart TD
    embalagem sai, o conteúdo fica, e o ilegível nunca é aprovação.
 5. **Recuperação orientada à conclusão**: a emenda toca só a fase citada e só o que o
    achado alcança (o resto volta byte a byte); o bloqueio que sobrevive à emenda
-   vai uma vez à arquitetura, com as citações, e o que ainda sobrar é publicado
-   como `**Pendência do plano:**` na fase afetada — o executor a recebe, e a fase
-   só fecha `aceito` com a revisão confirmando que o código a resolveu; o defeito de envelope ou de divisão
+   vai uma vez à arquitetura, com as citações, e o que ainda sobrar vira pergunta
+   ao desenvolvedor (a correção do auditor como leitura recomendada, aplicada como
+   decisão quando o prazo vence); as fases afetadas são reescritas uma vez com a
+   decisão, e o Core confere que as passagens não coexistem mais — senão o `plan`
+   para citando as duas, e nada chega ao build; o defeito de envelope ou de divisão
    volta à arquitetura, e as fases que a reorganização não tocou mantêm o texto e são
    relidas contra a fatia nova; aprovações valem para o mesmo texto e a mesma fatia;
    só decisão genuína de produto vai ao desenvolvedor.

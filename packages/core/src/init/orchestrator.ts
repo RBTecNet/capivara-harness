@@ -16,7 +16,7 @@ import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, fasesIntactas, blocoDaDisponibilidade, disponibilidadeDaArquitetura, tabelaDaDisponibilidade, buildStamp, checkCoverage, checkDesignRefs, checkTestPrescription, checkWriteOwnership, testPrescriptionHint, testPrescriptions, testToolPrescriptions, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parseArchitecture, parsePhaseFragment, parseSkeleton, phaseHeading, phasesFromArchitecture, renderArchitecture, renderSkeleton, requirementsFromArchitecture, skeletonForPlanning, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12, comPendenciasDoPlano, pendenciasDoPlano } from "../contract/index.js";
+import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, fasesIntactas, blocoDaDisponibilidade, disponibilidadeDaArquitetura, tabelaDaDisponibilidade, buildStamp, checkCoverage, checkDesignRefs, checkTestPrescription, checkWriteOwnership, testPrescriptionHint, testPrescriptions, testToolPrescriptions, checkEntities, checkStories, checkWorkflows, assemblePhase, checkRewriteDrift, coverageFromSkeleton, extractTasks, parseArchitecture, parsePhaseFragment, parseSkeleton, phaseHeading, phasesFromArchitecture, renderArchitecture, renderSkeleton, requirementsFromArchitecture, skeletonForPlanning, sliceForPhase, normalizePhasePart, parsePhases, preserveUnaddressedTasks, sha12 } from "../contract/index.js";
 import { achadoNaOrigem, alvoNoEnvelope, veioDoEnvelope } from "../audit/envelope.js";
 import { tirarPedidoDeTeste } from "../audit/sem-teste.js";
 import { admitir, citacoesConferidas, type Lugar } from "../audit/admissibilidade.js";
@@ -37,7 +37,7 @@ import { sondasDoRuntimeQueFalham, type PrerequisiteStatus } from "../loop/prere
 import { ambienteDoHarness, descreverAmbiente, inspectProject, summarizeInventory } from "./inventory.js";
 import { decisoesComoMemorias, renderLibraryBlock, type McpDocument, type MemoriaParaRegistrar } from "../mcp/index.js";
 import { INIT_ARTIFACTS, evaluateReadiness } from "./readiness.js";
-import { decisaoDoAuditorComoFinding, perguntaDoAuditor } from "../interview/index.js";
+import { contradicaoDecididaComoFinding, decisaoDoAuditorComoFinding, perguntaDaContradicao, perguntaDoAuditor } from "../interview/index.js";
 import { NOTA_DE_ENGENHARIA, autoridadeDaDecisao, decisaoDeEngenhariaComoFinding, shaDaAutoridade, sinaisDeEngenharia } from "../audit/index.js";
 import { MemoriaDoPlano } from "./plan-cache.js";
 import type { PlanProgressListener } from "./progress.js";
@@ -1497,7 +1497,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     remarks.push(...final.remarks.map((remark) => ({ document: "project-phases.md", remark })));
 
     await publish(options.projectRoot, [{ name: "project-phases.md", content: final.content }]);
-    await event("publish", "project-phases.md", "complete", final.pendencias > 0 ? `com ${final.pendencias} pendência(s) do plano` : "");
+    await event("publish", "project-phases.md", "complete");
 
     return await concluir();
   }
@@ -3562,11 +3562,13 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * uma emenda e mais uma auditoria. O que continuar bloqueando vai UMA vez à
    * arquitetura, qualquer que seja o campo — o escritor da fase copia o
    * contrato do componente, e nenhuma emenda de fase alcança a origem —, e o
-   * plano refeito é auditado uma vez. O que ainda sobrar não para o `plan`: o
-   * plano é publicado com a pendência na fase afetada, e a fase não fecha
-   * `aceito` sem a revisão confirmar que o código a resolveu.
+   * plano refeito é auditado uma vez. O que ainda sobrar vira pergunta ao
+   * desenvolvedor, com as passagens e a correção do auditor como leitura
+   * recomendada; a resposta é aplicada como decisão, e as fases afetadas são
+   * reescritas uma vez. O plano só é publicado limpo: o Core confere que as
+   * passagens em conflito não coexistem mais, e se coexistem o `plan` para.
    */
-  async function auditarPlano(initial: Authored, writer: WriterContext): Promise<{ content: string; remarks: Remark[]; pendencias: number }> {
+  async function auditarPlano(initial: Authored, writer: WriterContext): Promise<{ content: string; remarks: Remark[] }> {
     let authored = initial;
     const observacoes = new Map<string, Remark>();
     let auditorias = 0;
@@ -3596,7 +3598,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       auditorias += 1;
       const { bloqueios, observacoes: destaLeitura, lugares } = await auditarPlanoInteiro(authored.content, writer, attempt);
       for (const observacao of destaLeitura) observacoes.set(`${observacao.where}\n${observacao.observation}`, observacao);
-      if (bloqueios.length === 0) return { content: authored.content, remarks: [...observacoes.values()], pendencias: 0 };
+      if (bloqueios.length === 0) return { content: authored.content, remarks: [...observacoes.values()] };
 
       if (auditorias >= 2) {
         if (!voltouAArquitetura) {
@@ -3610,17 +3612,22 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
             continue;
           }
         }
-        const comPendencias = publicarComPendencias(authored.content, bloqueios, lugares);
-        announce(`  ${bloqueios.length} bloqueio(s) sobraram depois da volta à arquitetura: o plano é publicado com ${bloqueios.length} pendência(s) nomeada(s) nas fases ${comPendencias.fases.join(", ")}`);
-        await event("audit", "project-phases.md", "complete", `publicado com ${bloqueios.length} pendência(s) do plano`, attempt);
-        return {
-          content: comPendencias.content,
-          remarks: [
-            ...observacoes.values(),
-            ...bloqueios.map((finding) => ({ where: finding.where, observation: `pendência do plano (a auditoria não fechou): ${finding.problem} — correção sugerida: ${finding.fix}` })),
-          ],
-          pendencias: bloqueios.length,
-        };
+        authored = await decidirAsContradicoes(authored, bloqueios, lugares, attempt, writer);
+        const persistem = contradicoesQuePersistem(authored.content, bloqueios, lugares);
+        if (persistem.length > 0) {
+          await event("audit", "project-phases.md", "blocked", `${persistem.length} contradição(ões) persistem depois da decisão`, attempt);
+          throw new InitBlockedError(
+            diagnostico("project-phases.md", [
+              `As passagens em conflito continuam no plano depois da decisão: ${persistem.length} contradição(ões), conferida(s) pelo Core nos documentos.`,
+              "",
+              ...persistem.flatMap((finding) => [`  · [${finding.classe ?? "?"}] ${finding.where}: ${finding.problem}`, `    passagens: ${passagensConferidas(finding, lugares)}`]),
+            ], "A decisão está gravada. O escritor não a aplicou, ou a passagem que ela recusa está num documento que o plan não reescreve (o esqueleto ou a arquitetura): corrija a fonte e rode `capivara plan` de novo, ou troque o modelo do escritor."),
+            runId,
+          );
+        }
+        announce(`  ${bloqueios.length} contradição(ões) decidida(s); o plano é publicado sem elas`);
+        await event("audit", "project-phases.md", "complete", `${bloqueios.length} contradição(ões) decidida(s) pelo desenvolvedor`, attempt);
+        return { content: authored.content, remarks: [...observacoes.values()] };
       }
       /*
        * O envelope da fase — goal, covers, dependsOn — é escrito pela
@@ -3655,58 +3662,56 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     };
   }
 
+  /** O número da fase de um lugar da auditoria ("Phase 3"), ou `undefined` quando o lugar é um documento. */
+  function faseDoLugar(nome: string, fases: readonly { number: number }[]): number | undefined {
+    return fases.find((fase) => `Phase ${fase.number}` === nome)?.number;
+  }
+
   /**
-   * O plano com cada bloqueio restante na fase que ele afeta: as fases em que as
-   * passagens citadas estão e as que o endereço nomeia — todas, se nenhuma.
-   * Sem ler as fases, nada é publicado: a pendência que não chega à fase seria
-   * a contradição passando calada.
+   * Cada bloqueio que sobrou, perguntado ao desenvolvedor, e a resposta aplicada
+   * como decisão às fases afetadas — as em que as passagens estão, e as que o
+   * endereço nomeia —, numa reescrita só. Sem resposta no prazo, vale a leitura
+   * recomendada: a correção do auditor.
    */
-  function publicarComPendencias(content: string, bloqueios: readonly Finding[], lugares: readonly Lugar[]): { content: string; fases: number[] } {
-    const lido = parsePhases(stripAllMarkers(content).content);
-    if (!lido.ok) {
-      throw new InitBlockedError(
-        diagnostico("project-phases.md", [
-          `A auditoria do plano bloqueou de novo depois da volta à arquitetura (${bloqueios.length} bloqueio(s)), e o Core não conseguiu ler as fases para registrar a pendência em cada uma.`,
-          "",
-          ...bloqueios.flatMap((finding) => [`  · [${finding.classe ?? "?"}] ${finding.where}: ${finding.problem}`, `    correção pedida: ${finding.fix}`]),
-        ], "O esqueleto, a arquitetura e as fases estão em disco; `capivara plan` retoma daqui."),
-        runId,
-      );
-    }
-    const fases = lido.document.phases;
-    const numeroDoLugar = new Map(fases.map((fase) => [`Phase ${fase.number}`, fase.number]));
-    const porFase = new Map<number, string[]>();
-    for (const finding of bloqueios) {
+  async function decidirAsContradicoes(authored: Authored, bloqueios: readonly Finding[], lugares: readonly Lugar[], attempt: number, writer: WriterContext): Promise<Authored> {
+    announce(`  ${bloqueios.length} bloqueio(s) sobraram depois da volta à arquitetura; perguntando a você, com as passagens e a correção do auditor como leitura recomendada`);
+    await event("audit", "project-phases.md", "retry", `${bloqueios.length} contradição(ões) para o desenvolvedor decidir`, attempt);
+    const lido = parsePhases(stripAllMarkers(authored.content).content);
+    const fases = lido.ok ? lido.document.phases : [];
+    const decididas: Finding[] = [];
+    for (const [indice, finding] of bloqueios.entries()) {
       const conferidas = citacoesConferidas(finding, lugares);
+      const resposta = await perguntarEGravar("project-phases.md", perguntaDaContradicao(finding, conferidas, indice + 1), indice + 1, bloqueios.length, attempt, "contradicao", writer);
+      if (resposta.disposition !== "ACCEPTED") continue;
       const nomeadas = new Set<number>([
-        ...conferidas.flatMap((conferida) => conferida.lugares.map((nome) => numeroDoLugar.get(nome)).filter((numero): numero is number => numero !== undefined)),
+        ...conferidas.flatMap((conferida) => conferida.lugares.map((nome) => faseDoLugar(nome, fases)).filter((numero): numero is number => numero !== undefined)),
         ...(finding.phase !== undefined ? [finding.phase] : []),
       ]);
       const alvos = nomeadas.size > 0 ? [...nomeadas] : affectedPhases([finding], fases.length);
-      const tipo = finding.classe === "INTERFACE" ? "esta interface" : finding.classe === "DEPENDENCY" ? "esta dependência" : "esta contradição";
-      const texto = `a auditoria do plano não fechou ${tipo}: ${conferidas.map((conferida) => `«${conferida.citacao}»`).join(" × ") || finding.problem}. Correção sugerida pelo auditor: ${finding.fix}`;
-      for (const numero of alvos) porFase.set(numero, [...(porFase.get(numero) ?? []), texto]);
+      for (const fase of alvos) decididas.push(contradicaoDecididaComoFinding(finding, resposta.decision, fase));
     }
-    let publicado = content;
-    for (const fase of fases) {
-      const textos = porFase.get(fase.number);
-      if (!textos) continue;
-      const recorte = fase.markdown.replace(/\n$/u, "");
-      const comElas = comPendenciasDoPlano(recorte, textos);
-      publicado = publicado.replace(recorte, () => comElas);
-    }
-    const relido = parsePhases(stripAllMarkers(publicado).content);
-    const semElas = [...porFase.keys()].filter((numero) => !relido.ok || pendenciasDoPlano(relido.document.phases[numero - 1]?.markdown ?? "").length === 0);
-    if (semElas.length > 0) {
-      throw new InitBlockedError(
-        diagnostico("project-phases.md", [
-          `A auditoria do plano bloqueou de novo depois da volta à arquitetura, e a pendência não pôde ser registrada na(s) fase(s) ${semElas.join(", ")}:`,
-          ...bloqueios.flatMap((finding) => [`  · [${finding.classe ?? "?"}] ${finding.where}: ${finding.problem}`, `    correção pedida: ${finding.fix}`]),
-        ], "O esqueleto, a arquitetura e as fases estão em disco; `capivara plan` retoma daqui."),
-        runId,
-      );
-    }
-    return { content: publicado, fases: [...porFase.keys()].sort((a, b) => a - b) };
+    if (decididas.length === 0) return authored;
+    let reescrito = await authored.rewrite(decididas, attempt + 1, { somenteNomeadas: true });
+    if (temDecisaoPendente(reescrito.content)) reescrito = await closeGaps("project-phases.md", reescrito, writer);
+    return reescrito;
+  }
+
+  /**
+   * A conferência do Core, sem modelo, depois da decisão: o bloqueio que ainda
+   * passa na admissibilidade — as passagens citadas coexistindo nas fases de
+   * agora e nos documentos — persiste. Os documentos são os da auditoria; as
+   * fases, as reescritas.
+   */
+  function contradicoesQuePersistem(content: string, bloqueios: readonly Finding[], lugares: readonly Lugar[]): Finding[] {
+    const lido = parsePhases(stripAllMarkers(content).content);
+    const fases = lido.ok ? lido.document.phases : [];
+    const agora: Lugar[] = [
+      ...fases.map((fase) => ({ nome: `Phase ${fase.number}`, texto: fase.markdown })),
+      // Só os documentos: as fases da auditoria (as de antes) dão lugar às de agora.
+      ...lugares.filter((lugar) => !lugar.nome.startsWith("Phase ")),
+    ];
+    const dependencias = arquiteturaAtual?.infrastructure.dependencies.map((dependencia) => dependencia.name) ?? [];
+    return bloqueios.filter((finding) => admitir(finding, agora, dependencias).bloqueia);
   }
 
   return await concluir();

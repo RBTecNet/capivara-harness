@@ -348,7 +348,7 @@ O build termina num de quatro estados:
 | `aceito` | todas as fases aceitas e a aceitação limpa | 0 |
 | `entregue com pendências` | alguma fase ou a aceitação deixou um defeito sem prova de correção | 3 |
 | `verificação inconclusiva` | uma verificação não pôde ser feita ou lida, inclusive fluxos declarados e não percorridos | 3 |
-| `falhou` | o build parou antes do fim: sessão sem resultado utilizável, credencial, limite de uso, Git movido por um agente (fora o commit novo no mesmo branch, que o Core desfaz mantendo as alterações), commit recusado | 2 |
+| `falhou` | o build parou antes do fim: sessão sem resultado utilizável mesmo depois da sessão nova (do verificador como executor, se ele roda outro modelo; senão, do executor — e, na recusa do provider ou no tempo esgotado, só a do verificador de outro modelo), credencial, limite de uso, Git movido por um agente (fora o commit novo no mesmo branch, que o Core desfaz mantendo as alterações), commit recusado | 2 |
 
 `entrega.md` lista as pendências. A fase entregue com pendências não reabre
 sozinha: `capivara build --rebuild-all` ou `capivara change` refazem. O build

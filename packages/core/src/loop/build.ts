@@ -956,6 +956,7 @@ async function performBuild(
         systemInstall: execucao?.systemInstall ?? options.systemInstall === true,
         ...(options.maxCycles !== undefined ? { maxCycles: options.maxCycles } : {}),
         ...(options.maxVerifierRepairs !== undefined ? { maxVerifierRepairs: options.maxVerifierRepairs } : {}),
+        ...(verificadorComOutroModelo(options.roles) ? { verificadorComOutroModelo: true } : {}),
         commitsEnabled: checked.commitsEnabled,
         announce,
         ...(options.onProgress !== undefined ? { onProgress: options.onProgress } : {}),
@@ -1501,4 +1502,11 @@ async function performBuild(
       await lock.release();
     }
   }
+}
+
+/** O verificador roda outro provider ou outro modelo que o executor: é ele quem faz a sessão nova antes da falha por sessão. */
+export function verificadorComOutroModelo(roles: BuildOptions["roles"]): boolean {
+  const executor = roles?.builder;
+  const verificador = roles?.verifier;
+  return executor !== undefined && verificador !== undefined && (executor.provider !== verificador.provider || executor.model !== verificador.model);
 }

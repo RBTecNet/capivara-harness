@@ -58,6 +58,12 @@ export interface ResumoDoRun {
   fases: FaseNoRelatorio[];
   /** As chamadas de agente DESTA execução, por papel, quando o CLI as registrou (`logs/calls.jsonl`). */
   chamadas: Record<string, number> | null;
+  /**
+   * O que o Core desfez de um agente e seguiu: o commit do executor absorvido,
+   * o manifesto acima do projeto devolvido pela preparação. Vêm dos eventos com
+   * o detalhe começando por `alerta:`, na ordem em que aconteceram.
+   */
+  alertas: string[];
 }
 
 async function instantaneos(runRoot: string): Promise<Map<string, EstadoDaRecuperacao>> {
@@ -149,6 +155,7 @@ export async function resumirRun(projectRoot: string, runId: string, now: () => 
     ...(estado?.budgets ? { budgets: estado.budgets } : {}),
     fases,
     chamadas,
+    alertas: eventos.filter((evento) => evento.detail.startsWith("alerta:")).map((evento) => `${evento.subject} · ${evento.detail.slice("alerta:".length).trim()}`),
   };
 }
 
@@ -165,6 +172,9 @@ export function renderRelatorio(resumo: ResumoDoRun): string {
   }
   if (resumo.chamadas) {
     linhas.push("## Chamadas de agente desta execução", "", ...Object.entries(resumo.chamadas).map(([papel, n]) => `- ${papel}: ${n}`), "");
+  }
+  if (resumo.alertas.length > 0) {
+    linhas.push("## Alertas", "", ...resumo.alertas.map((alerta) => `- ${alerta}`), "");
   }
   for (const fase of resumo.fases) {
     linhas.push(`## ${fase.id} — ${fase.status}${fase.ciclo !== null ? ` · ciclo ${fase.ciclo}` : ""}`, "");

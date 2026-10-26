@@ -278,7 +278,11 @@ flowchart TD
    sondas são lidos antes de qualquer sessão: a sessão não amplia o que a
    autoriza na execução em que roda, nem o contrato depois. A sessão de
    preparação é uma chamada de agente como as das fases: se ela move uma ref do
-   Git, o build para (§101, §135). Se a preparação deixou alteração que não se adota, o build
+   Git, o build para (§101, §135). Ela instala no projeto: antes de cada sessão o
+   Core guarda os manifestos e travas (`package.json`, `package-lock.json`,
+   `pnpm-lock.yaml`, `yarn.lock`, `composer.json`, `composer.lock`) de cada pasta
+   acima do projeto, até o `$HOME`; depois, o que mudou volta ao que era — o que
+   ela criou é apagado — e vira alerta no relatório. Se a preparação deixou alteração que não se adota, o build
    para antes da primeira fase, sem commitar nem apagar, e diz, arquivo por
    arquivo, a situação no Git, a proveniência, a comparação do sha256, a
    condição que falhou e a ação. Na execução seguinte do mesmo run, a preparação

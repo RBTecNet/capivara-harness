@@ -28,6 +28,7 @@ import {
   type MemoriaParaRegistrar,
 } from "../mcp/index.js";
 import { startCommandFor } from "./acceptance.js";
+import { fotografarAcima, restaurarAcima, type FotoAcima } from "./fora-do-projeto.js";
 import type { FlowRunner } from "./flows.js";
 import {
   acquireLock,
@@ -474,6 +475,14 @@ async function performBuild(
           }
         },
         install: async (faltando) => {
+          const devolverAcima = async (foto: FotoAcima, sessao: number): Promise<void> => {
+            const { restaurados, naoVoltaram } = await restaurarAcima(options.projectRoot, foto);
+            if (restaurados.length === 0 && naoVoltaram.length === 0) return;
+            const alerta = `alerta: a sessão de preparação escreveu fora do projeto — ${[...restaurados, ...naoVoltaram.map((item) => `${item}: não voltou`)].join(", ")}; ` +
+              "a preparação instala no projeto, e o Core devolveu os manifestos de cima ao que eram";
+            announce(alerta);
+            await appendEvent(runPaths(options.projectRoot, runId).events, { timestamp: now().toISOString(), stage: "preflight", subject: "environment", attempt: sessao, status: "retry", detail: alerta });
+          };
           const prompt = installPrompt({
             language: options.language,
             missing: faltando,
@@ -521,12 +530,16 @@ async function performBuild(
           let response: EngineResult | void;
           // Só o Core registra no Git (§101): a sessão de preparação é uma chamada de agente como as das fases.
           const refsAntes = repository ? await fotografarRefs(options.projectRoot) : null;
+          // A preparação instala no projeto: o que ela escrever nos manifestos acima dele volta ao que era.
+          const acima = await fotografarAcima(options.projectRoot);
           try {
             response = await options.installPrerequisites?.(prompt);
           } catch (error) {
+            await devolverAcima(acima, preparation.sessions);
             await writeAtomic(logPath, JSON.stringify({ ...metadata, ...(await proveniencia()), status: "failed", error: error instanceof Error ? error.message : String(error) }, null, 2));
             throw error;
           }
+          await devolverAcima(acima, preparation.sessions);
           const movidas = refsAntes ? refsMovidas(refsAntes, await fotografarRefs(options.projectRoot)) : [];
           if (movidas.length > 0) {
             const violacao = `referências do Git mudaram durante a sessão de preparação (${movidas.join(", ")}): só o Core registra no Git (§101), e nada da sessão foi adotado. ` +

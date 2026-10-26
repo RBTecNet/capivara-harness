@@ -61,16 +61,37 @@ const ENFEITE = "[*_\\x60]*";
  * volta como `CHAVE: resto`, com a chave na caixa canônica (maiúscula). O
  * travessão curto (`–`) entre palavras vira o travessão (`—`) dos protocolos.
  * Linha sem a chave volta como veio: o conteúdo não é de quem lê.
+ *
+ * A crase que envolve a linha INTEIRA — aberta antes da chave e fechada no fim
+ * da linha, com o mesmo número de crases — também é embalagem: `` `TASK 1: DONE` ``. Quem passa `veredito` (a
+ * fonte de um regex sem grupos com as palavras do veredito, `DONE|INCOMPLETE`)
+ * diz que o valor começa por uma delas, e então a marcação em volta dela
+ * (`**DONE**`), a pontuação final depois dela (`DONE.`) e o `:` no lugar do
+ * travessão antes do motivo (`INCOMPLETE: falta X`) também saem. Sem
+ * `veredito`, o valor não é tocado: num finding o primeiro campo é conteúdo.
  */
-export function lerProtocolo(output: string, chave: string): string {
+export function lerProtocolo(output: string, chave: string, veredito?: string): string {
   const embrulhada = new RegExp(`^[\\s>*_\\x60•+-]*(?:\\d+[.)]\\s+)?${ENFEITE}(${chave})${ENFEITE}\\s*:${ENFEITE}`, "iu");
-  return desgrudarChaves(semRaciocinio(output), `(?:${chave}):`)
+  // A crase que abre antes da chave e fecha no fim da linha, com o mesmo número de crases.
+  const entreCrases = new RegExp(`^(\\s*)(\\x60+)((?:${chave})\\s*:.*)\\2\\s*$`, "iu");
+  const doVeredito = veredito === undefined
+    ? null
+    : {
+        marcado: new RegExp(`^\\s*[*_\\x60]+\\s*(${veredito})\\s*[*_\\x60]*`, "iu"),
+        pontuado: new RegExp(`^(\\s*(?:${veredito}))[.!;,]+\\s*$`, "iu"),
+        doisPontos: new RegExp(`^(\\s*(?:${veredito}))\\s*:\\s*(?=\\S)`, "iu"),
+      };
+  const semCrasesEmVolta = semRaciocinio(output).split("\n").map((linha) => linha.replace(entreCrases, "$1$3")).join("\n");
+  return desgrudarChaves(semCrasesEmVolta, `(?:${chave}):`)
     .split("\n")
     .map((linha) => {
       const casada = embrulhada.exec(linha);
       if (!casada) return linha;
       // Só o fecho duplo (negrito, sublinhado) sai do fim: uma crase final é conteúdo — `codigo`.
-      const resto = linha.slice(casada[0].length).replace(/(?:\*\*|__)\s*$/u, "");
+      let resto = linha.slice(casada[0].length).replace(/(?:\*\*|__)\s*$/u, "");
+      if (doVeredito !== null) {
+        resto = resto.replace(doVeredito.marcado, " $1").replace(doVeredito.pontuado, "$1").replace(doVeredito.doisPontos, "$1 — ");
+      }
       return `${(casada[1] ?? "").toUpperCase()}:${resto}`.replace(/\s–\s/gu, " — ").trimEnd();
     })
     .join("\n");

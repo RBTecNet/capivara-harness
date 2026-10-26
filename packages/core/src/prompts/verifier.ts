@@ -210,7 +210,7 @@ function pendenciasDoPlanoBlock(phaseMarkdown: string): string[] {
 /** O que a revisão disse de cada pendência do plano: o número das que ela leu resolvidas no código. */
 export function pendenciasResolvidas(output: string): Set<number> {
   const resolvidas = new Set<number>();
-  for (const linha of lerProtocolo(output, String.raw`PLAN_ISSUE\s+\d+`).split("\n")) {
+  for (const linha of lerProtocolo(output, String.raw`PLAN_ISSUE\s+\d+`, "RESOLVED|OPEN").split("\n")) {
     const lida = /^PLAN_ISSUE\s+(\d+):\s*(RESOLVED|OPEN)\b/iu.exec(linha.trim());
     if (lida && (lida[2] ?? "").toUpperCase() === "RESOLVED") resolvidas.add(Number(lida[1]));
   }
@@ -431,7 +431,7 @@ const TASK_LINE = /^TASK\s+(\d+):\s*(DONE|INCOMPLETE)\s*(?:[—-]\s*(.*))?$/i;
  */
 export function parseVerification(output: string): TaskVerdict[] {
   const verdicts: TaskVerdict[] = [];
-  for (const rawLine of lerProtocolo(output, String.raw`TASK\s+\d+`).split("\n")) {
+  for (const rawLine of lerProtocolo(output, String.raw`TASK\s+\d+`, "DONE|INCOMPLETE").split("\n")) {
     const match = TASK_LINE.exec(rawLine.replace(/\r$/, "").trim());
     if (!match) continue;
     verdicts.push({

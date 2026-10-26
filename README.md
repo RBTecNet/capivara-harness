@@ -267,8 +267,12 @@ plano inteiro**, mais uma depois da emenda, no máximo. Quem decide o que devolv
 existindo no documento; a interface, com o nome dos dois lados; a dependência,
 com o pacote fora da infraestrutura aprovada. Precisão, completude e estilo viram
 observações do relatório, sem rodada nem pergunta, e o auditor não cria decisão
-de produto. O bloqueio que sobrevive à emenda para o `plan`, com as duas
-citações à vista. Um achado sobre o envelope de uma fase volta à arquitetura, e
+de produto. O bloqueio que sobrevive à emenda vai uma vez à arquitetura, com as
+citações; a refeita é auditada uma vez, e as fases cujo contrato mudou são
+reescritas e auditadas uma vez. O que ainda sobrar não para o `plan`: entra na
+fase afetada como `**Pendência do plano:**`, com as duas citações e a correção
+sugerida, chega ao executor no prompt da fase, e a fase só fecha `aceito` se a
+revisão confirmar que o código a resolveu. Um achado sobre o envelope de uma fase volta à arquitetura, e
 as fases cujo envelope não mudou voltam do cache. A pergunta ao desenvolvedor
 tem prazo (`--prazo-da-pergunta`, 10 minutos): sem resposta, o `plan` segue com
 a leitura recomendada e a registra como suposição.

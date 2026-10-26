@@ -160,7 +160,9 @@ flowchart TD
     AD -- "CONTRADICTION, INTERFACE ou DEPENDENCY, com as citações conferidas" --> RT{"onde está o defeito?"}
     RT -- "na fase" --> EF["Emenda da fase, só do que o achado alcança"] --> AU2{"auditoria depois da emenda, no máximo uma"}
     RT -- "no envelope ou na divisão" --> RO["Reorganização pela arquitetura; fases intactas mantidas"] --> AR
-    AU2 -- "o bloqueio sobrevive" --> NR["NOT READY, com as duas citações à vista"]
+    AU2 -- "o bloqueio sobrevive" --> VA["Volta única à arquitetura, com as citações: uma auditoria dela, as fases cujo contrato mudou reescritas, uma auditoria do plano"]
+    VA -- "ainda sobra, ou a refeita é reprovada" --> PP["RALPH READY com **Pendência do plano:** na fase afetada"]
+    VA -- ok --> RR
     AU2 -- ok --> RR
     OB --> RR
     AD -- "nada bloqueia" --> RR["RALPH READY: project-phases.md, architecture.md, environment.json"]
@@ -201,7 +203,9 @@ flowchart TD
    embalagem sai, o conteúdo fica, e o ilegível nunca é aprovação.
 5. **Recuperação orientada à conclusão**: a emenda toca só a fase citada e só o que o
    achado alcança (o resto volta byte a byte); o bloqueio que sobrevive à emenda
-   para o `plan`, com as duas citações à vista; o defeito de envelope ou de divisão
+   vai uma vez à arquitetura, com as citações, e o que ainda sobrar é publicado
+   como `**Pendência do plano:**` na fase afetada — o executor a recebe, e a fase
+   só fecha `aceito` com a revisão confirmando que o código a resolveu; o defeito de envelope ou de divisão
    volta à arquitetura, e as fases que a reorganização não tocou mantêm o texto e são
    relidas contra a fatia nova; aprovações valem para o mesmo texto e a mesma fatia;
    só decisão genuína de produto vai ao desenvolvedor.

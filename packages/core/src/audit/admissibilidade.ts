@@ -48,6 +48,13 @@ function ondeEsta(citacao: string, lugares: readonly Lugar[]): string[] {
   return lugares.filter((lugar) => normalizar(lugar.texto).includes(citacao)).map((lugar) => lugar.nome);
 }
 
+/** As passagens citadas pelo achado que existem nos lugares, cada uma com os lugares em que está. */
+export function citacoesConferidas(finding: Finding, lugares: readonly Lugar[]): { citacao: string; lugares: string[] }[] {
+  return citacoes(`${finding.where} ${finding.problem}`)
+    .map((citacao) => ({ citacao, lugares: ondeEsta(citacao, lugares) }))
+    .filter((conferida) => conferida.lugares.length > 0);
+}
+
 export function admitir(finding: Finding, lugares: readonly Lugar[], dependencias: readonly string[]): Admissao {
   const classe = finding.classe ?? "";
   if (!(CLASSES_QUE_BLOQUEIAM as readonly string[]).includes(classe)) {

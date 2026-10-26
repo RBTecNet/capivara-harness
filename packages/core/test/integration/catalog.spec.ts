@@ -495,7 +495,7 @@ describe("B-08 a B-12 · auditoria", () => {
     expect(agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-phases.md")).toHaveLength(0);
   });
 
-  it("B-10 o bloqueio que sobrevive à emenda para o plan, sem nova rodada e sem pergunta", async () => {
+  it("B-10 o bloqueio que sobrevive à emenda e à volta à arquitetura vira pendência do plano, sem nova rodada e sem pergunta", async () => {
     const steps = happyPath();
     steps.unshift({
       match: { role: "auditor", stage: "audit", subject: "project-phases.md" },
@@ -503,9 +503,11 @@ describe("B-08 a B-12 · auditoria", () => {
       repeat: true,
     });
     const agent = fakeAgent(steps);
-    await expect(runInit({ projectRoot, request, language: "português do Brasil", call: agent.call, ask: async () => "1" })).rejects.toThrow(/bloqueou de novo depois da emenda/);
-    // Uma auditoria e mais uma depois da emenda, no máximo.
+    const outcome = await runInit({ projectRoot, request, language: "português do Brasil", call: agent.call, ask: async () => "1" });
+    expect(outcome.readiness.ready, outcome.rendered).toBe(true);
+    // Uma auditoria e mais uma depois da emenda; a arquitetura voltou igual, e não há terceira.
     expect(agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-phases.md")).toHaveLength(2);
+    expect(await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).toContain("**Pendência do plano:** a auditoria do plano não fechou esta contradição");
   });
 
   it("B-11 aprovação com ressalva não bloqueia e aparece no relatório", async () => {
@@ -1269,7 +1271,7 @@ describe("G-1 a G-4 · as garantias da redução da verificação", () => {
     await conferir(await garantiaG2());
   });
 
-  it("G-3 contradição entre decisões do plano: o plan bloqueia, com as duas citações", async () => {
+  it("G-3 contradição entre decisões do plano: o plan bloqueia com as duas citações, ou a publica como pendência que chega ao executor e ao relatório", async () => {
     await conferir(await garantiaG3());
   });
 

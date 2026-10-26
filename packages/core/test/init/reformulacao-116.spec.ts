@@ -296,13 +296,15 @@ describe("6. um documento inválido não recebe aprovação indevida", () => {
     expect(chamadas(agent, { stage: "audit" })).toHaveLength(0);
   });
 
-  it("o plano reprovado por um auditor que não cede não vira RALPH READY", async () => {
+  it("o plano reprovado por um auditor que não cede não é publicado como aprovado: sai com a pendência nomeada na fase", async () => {
     await init(skeletonPath());
     const passos = skeletonPath().filter((passo) => passo.match.role !== "auditor");
     passos.push({ match: { role: "auditor", stage: "audit", subject: "architecture" }, respond: { stdout: approve() }, repeat: true });
     passos.push({ match: { role: "auditor", stage: "audit" }, respond: { stdout: reject("Tarefa «Criar a migration de statuses»", "o seed não diz a ordem das linhas", "diga a ordem") }, repeat: true });
-    await expect(plan(passos)).rejects.toThrow(/A auditoria do plano bloqueou de novo depois da emenda/);
-    await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).rejects.toThrow();
+    const { outcome } = await plan(passos);
+    expect(outcome.report.remarks.some((entrada) => entrada.remark.observation.startsWith("pendência do plano (a auditoria não fechou): o seed não diz a ordem das linhas"))).toBe(true);
+    const publicado = await readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8");
+    expect(publicado.split("## Phase 2")[0]).toContain("**Pendência do plano:**");
   });
 });
 

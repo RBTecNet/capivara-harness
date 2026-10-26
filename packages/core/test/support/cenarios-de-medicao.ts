@@ -621,11 +621,13 @@ const DESATIVACAO: Produto = {
 };
 
 /**
- * G-3 · contradição entre decisões do plano. O `init` decide que clientes são
- * desativados; uma fase manda excluir permanentemente, e o escritor não muda de
- * ideia. O `plan` tem de bloquear, com as duas citações à vista.
+ * O plano publicado com a pendência que a auditoria não fechou, e o build sobre
+ * ele (item 1 de "atacar os pontos frágeis"). O `init` decide que clientes são
+ * desativados; a Fase 2 manda excluir permanentemente, e nem o escritor nem o
+ * arquiteto mudam de ideia. `confirma` diz se a revisão da fase lê, no código,
+ * que a contradição foi resolvida.
  */
-export async function garantiaG3(): Promise<Garantia> {
+export async function cenarioDaPendenciaDoPlano(nome: string, sha12: string, confirma: boolean): Promise<ResultadoDoCenario> {
   const auditorQueLe: ScriptStep = {
     match: { role: "auditor", stage: "audit" },
     respond: {
@@ -640,21 +642,42 @@ export async function garantiaG3(): Promise<Garantia> {
     },
     repeat: true,
   };
-  const cenario = await cadeia("g3", DESATIVACAO, { executor: async () => [] }, { extraNoPlano: [auditorQueLe], sha12: "9a7a00000003" });
+  return await cadeia(nome, DESATIVACAO, {
+    executor: async () => [MANIFESTO, { path: "src/clientes.js", content: "export const retirar = (cliente) => ({ ...cliente, ativo: false });\n" }],
+    revisao: async (call) =>
+      `${allDone(call.phase.taskCount)}${confirma && call.prompt.includes("PLAN_ISSUE") ? "\nPLAN_ISSUE 1: RESOLVED — src/clientes.js desativa o cliente em retirar()" : ""}`,
+  }, { extraNoPlano: [auditorQueLe], sha12 });
+}
+
+/**
+ * G-3 · contradição entre decisões do plano. Ela nunca passa calada: o `plan`
+ * bloqueia com as duas citações, ou publica a contradição como pendência da
+ * fase afetada — ela chega ao executor, nomeada, e ao relatório final, e o
+ * build não termina aceito sem a revisão confirmar que o código a resolveu.
+ */
+export async function garantiaG3(): Promise<Garantia> {
+  const cenario = await cenarioDaPendenciaDoPlano("g3", "9a7a00000003", false);
   const publicado = await readFile(join(cenario.projectRoot, ".capivara/init/project-phases.md"), "utf8").catch(() => "");
-  const pronto = cenario.plan?.readiness.ready === true;
-  const texto = cenario.bloqueio ?? cenario.plan?.rendered ?? "";
-  const citaAsDuas = texto.includes(CITACAO_DA_FASE) && texto.includes(CITACAO_DA_DECISAO);
+  const citaAsDuas = (texto: string): boolean => texto.includes(CITACAO_DA_FASE) && texto.includes(CITACAO_DA_DECISAO);
+  const bloqueou = cenario.bloqueio !== null || cenario.plan?.readiness.ready !== true;
+  const fase2 = publicado.split("## Phase 2")[1] ?? "";
+  const pendencia = fase2.split("\n").find((linha) => linha.startsWith("**Pendência do plano:**")) ?? "";
+  const noExecutor = cenario.observado.chamadasDoBuild.some((call) => call.role === "builder" && call.phase.number === 2 && call.prompt.includes(pendencia) && pendencia !== "");
+  const noRelatorio = (cenario.build?.pendencias ?? []).some((linha) => linha.includes("pendência do plano") && citaAsDuas(linha));
+  const aceito = cenario.build?.exitCode === 0 || cenario.build?.estado === "aceito";
   const registro = await primeiroLogCom(cenario.projectRoot, runIdFor("init", "9a7a00000003"), `«${CITACAO_DA_FASE}» contradiz`);
+  const pega = bloqueou
+    ? citaAsDuas(cenario.bloqueio ?? cenario.plan?.rendered ?? "") && !publicado.includes(CITACAO_DA_FASE)
+    : citaAsDuas(pendencia) && noExecutor && noRelatorio && !aceito;
   return {
     id: "G-3",
-    pega: !pronto && !publicado.includes(CITACAO_DA_FASE) && citaAsDuas,
+    pega,
     registro,
-    detalhe: pronto
-      ? "o plan publicou RALPH READY com a fase que exclui permanentemente"
-      : citaAsDuas
-        ? `o plan parou (${cenario.bloqueio !== null ? "bloqueio" : "NOT READY"}) e a parada cita a fase e a decisão`
-        : `o plan parou, mas a parada não cita as duas passagens: ${texto.slice(0, 300)}`,
+    detalhe: bloqueou
+      ? `o plan parou (${cenario.bloqueio !== null ? "bloqueio" : "NOT READY"})${pega ? " e a parada cita a fase e a decisão" : ", mas a parada não cita as duas passagens"}`
+      : pega
+        ? `o plan publicou a contradição como pendência da Phase 2; ela chegou ao executor e ao relatório, e o build terminou com código ${cenario.build?.exitCode ?? "-"} (${cenario.build?.estado ?? "-"})`
+        : `a contradição passou calada: pendência na fase ${citaAsDuas(pendencia) ? "sim" : "não"}, no executor ${noExecutor ? "sim" : "não"}, no relatório ${noRelatorio ? "sim" : "não"}, build ${aceito ? "aceito" : "não aceito"}`,
     cenario,
   };
 }

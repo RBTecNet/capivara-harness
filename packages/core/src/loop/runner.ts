@@ -30,13 +30,13 @@ import { sharedContractFromSkeleton } from "../prompts/acceptance-policy.js";
 import { portaLivre } from "./ports.js";
 import { faltaOPacoteDoRunner } from "./dependencias.js";
 import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mcp/index.js";
-import { DOCUMENTOS_DA_ETAPA, ENVIRONMENT_CONTRACT, phaseReferences, recorteDaFase, sha12 } from "../contract/index.js";
+import { DOCUMENTOS_DA_ETAPA, ENVIRONMENT_CONTRACT, pendenciasDoPlano, phaseReferences, recorteDaFase, sha12 } from "../contract/index.js";
 import type { SkeletonWorkflow, TaskBlock } from "../contract/index.js";
 import type { PhaseSession } from "./split.js";
 import { lerResultadosDotnet, limparResultadosDotnet, RESULTADOS_DOTNET, resolveE2eCommand, type TestCommand } from "./testcmd.js";
 import { falhaDeInstalacaoNode, inspecionarInstalacaoNode, MARCA_DE_INSTALACAO_NODE, registrarInstalacaoNode, runtimeNode } from "./instalacao-node.js";
 import { comandoDeInstalacao, type ConciliacaoDaIntegracao } from "./worktree.js";
-import { parseVerification, testRepairGuidancePrompt } from "../prompts/verifier.js";
+import { parseVerification, pendenciasResolvidas, testRepairGuidancePrompt } from "../prompts/verifier.js";
 import type { FlowReviewPurpose } from "../provider/flow-review.js";
 import type { FatiaDaArquitetura } from "./arquitetura.js";
 import { emptyScope, LivroDeEvidencias, referenciaDeArtefato, type ArtifactRef, type EvidenceInputs } from "./evidencias.js";
@@ -544,6 +544,8 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   let revisouNestaExecucao = false;
   /** Por que a revisão não pôde ser lida, quando não pôde: a fase sai com `verificação inconclusiva`. */
   let inconclusiva: string | null = null;
+  /** As pendências do plano que a revisão desta execução leu resolvidas no código; as outras impedem `aceito`. */
+  let pendenciasDoPlanoResolvidas = new Set<number>();
   let julgandoParcial = false;
   /** A retomada sobre código que mudou começa por uma sessão do executor (ver o início do laço). */
   let retomarPeloExecutor: { defeitos: Defect[]; mudouDesde: string[] | null } | null = null;
@@ -1256,6 +1258,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       return "verde";
     }
     verificadorEscreveuDesdeOG3 = false;
+    pendenciasDoPlanoResolvidas = pendenciasResolvidas(verification.stdout);
     const vereditos = parseVerification(verification.stdout);
     for (const verdict of vereditos) {
       if (verdict.done && verdict.missing.startsWith("ADVISORY:")) {
@@ -1722,6 +1725,10 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       ...(motivo !== undefined ? [`${session.id} · ${motivo}`] : []),
       ...(inconclusiva !== null ? [`${session.id} · verificação inconclusiva: ${inconclusiva}`] : []),
       ...estado.defects.filter((defeito) => defeito.status !== "RESOLVED").map(pendenciaDe),
+      // A pendência do plano só sai daqui quando a revisão leu, no código, que ela foi resolvida.
+      ...pendenciasDoPlano(session.markdown)
+        .filter((_, indice) => !pendenciasDoPlanoResolvidas.has(indice + 1))
+        .map((pendencia) => `${session.id} · pendência do plano, sem a revisão confirmar que o código a resolveu: ${pendencia}`),
     ];
     const estadoDaEntrega: EstadoDaEntrega = inconclusiva !== null ? "verificação inconclusiva" : pendencias.length > 0 ? "entregue com pendências" : "aceito";
     const entrega: EntregaDaFase = { estado: estadoDaEntrega, ...(pendencias.length > 0 ? { pendencias } : {}) };

@@ -7,15 +7,15 @@
  * o build gastou duas sessões de instalação antes de parar no preflight. Aqui:
  * o inventário diz à entrevista, ao esqueleto e ao arquiteto qual Node e qual npm
  * o harness roda, e o `plan` roda as sondas desse runtime antes de publicar,
- * sem modelo nenhum.
+ * sem modelo nenhum. A sonda impossível volta ao arquiteto uma vez; se ele
+ * insistir, o Core a troca por `[binário, "--version"]` e diz no relatório.
  */
 
-import { existsSync } from "node:fs";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { InitBlockedError, runInit, runPlan } from "../../src/init/index.js";
+import { runInit, runPlan } from "../../src/init/index.js";
 import { ambienteDoHarness, inspectProject, summarizeInventory } from "../../src/init/inventory.js";
 import { ID_DO_BANCO } from "../../src/interview/index.js";
 import type { Question } from "../../src/interview/index.js";
@@ -118,17 +118,20 @@ describe("a sonda do runtime, conferida antes de publicar", () => {
     expect(ambiente.requirements.map((requisito) => requisito.checkArgs)).toEqual([SONDA_DO_MINIMO.checkArgs]);
   });
 
-  it("se o arquiteto insiste, o plano para com a frase que cita as duas versões, e nada é publicado", async () => {
+  it("se o arquiteto insiste, o Core troca a sonda por `node --version`, publica o plano e registra o alerta com as duas versões, sem parar", async () => {
     await init();
     const doPlan = plan(arquitetura([SONDA_DA_SERIE]));
-    const erro = await doPlan.run.then(() => null, (falha: unknown) => falha);
+    const outcome = await doPlan.run;
 
-    expect(erro).toBeInstanceOf(InitBlockedError);
-    const primeira = (erro as Error).message.split("\n")[0]!;
-    expect(primeira).toMatch(/^a sonda Node\.js \(`node -e "const \[principal\]/u);
-    expect(primeira.endsWith(await frase())).toBe(true);
+    expect(outcome.readiness.ready, doPlan.anunciado()).toBe(true);
     expect(doPlan.doArquiteto()).toHaveLength(2);
-    expect(existsSync(join(projectRoot, ".capivara/init/environment.json"))).toBe(false);
+    const ambiente = JSON.parse(await readFile(join(projectRoot, ".capivara/init/environment.json"), "utf8")) as { requirements: { binary: string; checkArgs?: string[] }[] };
+    expect(ambiente.requirements.map((requisito) => [requisito.binary, ...(requisito.checkArgs ?? [])])).toEqual([["node", "--version"]]);
+    const alerta = outcome.report.remarks.find((entrada) => entrada.remark.where === "sondas de prontidão")?.remark.observation ?? "";
+    expect(alerta).toMatch(/^a sonda Node\.js \(`node -e "const \[principal\]/u);
+    expect(alerta).toContain(await frase());
+    expect(alerta).toContain("o Core a trocou por `node --version`");
+    expect(outcome.rendered).toContain("o Core a trocou por `node --version`");
   });
 
   it("a sonda que confere mínimo passa sem nenhuma chamada a mais", async () => {

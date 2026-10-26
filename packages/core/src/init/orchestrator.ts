@@ -20,7 +20,7 @@ import { affectedPhases, architectureSliceForPhase, assemblePhasesDocument, fase
 import { achadoNaOrigem, alvoNoEnvelope, veioDoEnvelope } from "../audit/envelope.js";
 import { tirarPedidoDeTeste } from "../audit/sem-teste.js";
 import { admitir, citacoesConferidas, type Lugar } from "../audit/admissibilidade.js";
-import type { Architecture, ContractError, CoverageSources, PhasesDocument, Skeleton, StampInput } from "../contract/index.js";
+import type { Architecture, ContractError, CoverageSources, EnvironmentRequirement, PhasesDocument, Skeleton, StampInput } from "../contract/index.js";
 import { DEFAULT_MAX_RETURNS, enderecoDaDecisao, balancoDaRodada, descreverBalanco, fingerprint, nextAuditAction, parseAudit, persistentFindings, writerDid } from "../audit/index.js";
 import type { AuditAttempt, AuditVerdict, Finding, Remark } from "../audit/index.js";
 import { tasksBlock } from "../contract/templates.js";
@@ -1562,7 +1562,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     if (impossiveisDaGuardada.length > 0) announce("  a arquitetura guardada tem sonda que esta máquina não satisfaz; vou desenhá-la de novo com o achado");
 
     await event("authoring", "architecture", "started");
-    const desenhada = impossiveisDaGuardada.length > 0 ? await devolverPelasSondas(impossiveisDaGuardada, {}, "writer") : await desenharArquitetura({});
+    const desenhada = impossiveisDaGuardada.length > 0 ? await devolverPelasSondas(guardada!.architecture, impossiveisDaGuardada, {}, "writer") : await desenharArquitetura({});
     const auditada = await auditarArquitetura(desenhada);
     await publicarArquitetura(auditada, autoridade);
     return auditada;
@@ -1597,7 +1597,7 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
       for (const conserto of lida.applied) announce(`    arquitetura: ${conserto}`);
       if (guardada === null) memoria.guardarArquitetura(prompt, saida);
       const impossiveis = await sondasImpossiveis(lida.architecture);
-      if (impossiveis.length > 0) return await devolverPelasSondas(impossiveis, extras, papel);
+      if (impossiveis.length > 0) return await devolverPelasSondas(lida.architecture, impossiveis, extras, papel);
       return lida.architecture;
     }
     /*
@@ -1627,8 +1627,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * npm: a sonda que exige outra série (`principal===22` numa máquina com Node
    * 25) parava o build no preflight, depois de sessões inteiras de instalação
    * que não tinham como satisfazê-la. Aqui ela roda como o build a rodaria, sem
-   * modelo nenhum. A arquitetura volta UMA vez com o achado; se insistir, o
-   * plano para com a mesma frase.
+   * modelo nenhum. A arquitetura volta UMA vez com o achado; se insistir, o Core
+   * troca a sonda pela que ele sabe ser verdadeira — o binário é o runtime em
+   * que ele próprio roda, na versão instalada — e diz isso no relatório.
    */
   async function sondasImpossiveis(arquitetura: Architecture): Promise<string[]> {
     const falharam = await sondasDoRuntimeQueFalham(arquitetura.infrastructure.requirements, { cwd: options.projectRoot });
@@ -1641,23 +1642,48 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     return `${sonda.technology} (\`${comando}\`)`;
   }
   async function devolverPelasSondas(
+    arquitetura: Architecture,
     impossiveis: string[],
     extras: Parameters<typeof desenharArquitetura>[0],
     papel: "writer" | "auditor",
   ): Promise<Architecture> {
-    if (sondasDevolvidas) {
-      await event("authoring", "architecture", "blocked", impossiveis.join("; "));
-      throw new InitBlockedError(
-        diagnostico("architecture.md", impossiveis,
-          "A sonda de versão confere um mínimo (>=) do Node e do npm que o harness roda. Se o pedido exige outra versão, rode a Capivara com esse Node; senão, rode `capivara plan` de novo."),
-        runId,
-      );
-    }
+    if (sondasDevolvidas) return await trocarSondasDoRuntime(arquitetura, impossiveis);
     sondasDevolvidas = true;
     announce(`  ${impossiveis.length} sonda(s) da arquitetura exigem o que esta máquina não tem; devolvendo ao arquiteto, uma vez`);
     registrarEstrategia("architecture.md", "devolução ao arquiteto: sonda do runtime que esta máquina não satisfaz");
     await event("authoring", "architecture", "retry", impossiveis.join("; "));
     return await desenharArquitetura({ ...extras, defects: impossiveis }, papel);
+  }
+
+  /**
+   * A segunda vez da sonda impossível: o Core a troca por `[binário, "--version"]`.
+   *
+   * Ele sabe dois fatos sem modelo nenhum — o binário é o runtime em que ele
+   * próprio roda, e a versão é a instalada —, e a sonda que exige outra série
+   * nenhum build satisfaz. Parar o plano por ela era cobrar do desenvolvedor o
+   * que o Core já sabe. O que foi trocado, e as duas versões, vão ao relatório.
+   */
+  async function trocarSondasDoRuntime(arquitetura: Architecture, impossiveis: readonly string[]): Promise<Architecture> {
+    const falharam = await sondasDoRuntimeQueFalham(arquitetura.infrastructure.requirements, { cwd: options.projectRoot });
+    const maquina = descreverAmbiente(await ambienteDoHarness());
+    const falhou = (requisito: EnvironmentRequirement): boolean =>
+      falharam.some((sonda) => sonda.technology === requisito.technology && sonda.binary === requisito.binary && JSON.stringify(sonda.checkArgs ?? []) === JSON.stringify(requisito.checkArgs ?? []));
+    for (const sonda of falharam) {
+      avisosDoRelatorio.push({
+        document: "architecture.md",
+        remark: { where: "sondas de prontidão", observation: `a sonda ${comoSonda(sonda)} exige o que a máquina não tem: o harness roda ${maquina}; o arquiteto insistiu, e o Core a trocou por \`${sonda.binary} --version\`` },
+      });
+    }
+    announce(`  a arquitetura insistiu em ${falharam.length} sonda(s) que esta máquina não satisfaz (o harness roda ${maquina}); o Core as trocou por ${falharam.map((sonda) => `\`${sonda.binary} --version\``).join(", ")} e seguiu`);
+    registrarEstrategia("architecture.md", `sonda do runtime trocada pelo Core: ${falharam.map((sonda) => `${sonda.binary} --version`).join(", ")}`);
+    await event("authoring", "architecture", "retry", `sonda trocada pelo Core: ${impossiveis.join("; ")}`);
+    return {
+      ...arquitetura,
+      infrastructure: {
+        ...arquitetura.infrastructure,
+        requirements: arquitetura.infrastructure.requirements.map((requisito) => (falhou(requisito) ? { ...requisito, checkArgs: ["--version"] } : requisito)),
+      },
+    };
   }
 
   /**

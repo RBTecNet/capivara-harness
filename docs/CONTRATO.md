@@ -183,7 +183,8 @@ flowchart TD
    que o harness roda), e a sonda de versão confere um mínimo. As sondas desse
    Node e desse npm rodam antes de a arquitetura valer, como o build as rodaria e
    sem modelo: a que a máquina não satisfaz volta ao arquiteto uma vez; se ele
-   insistir, o `plan` para com a sonda e as versões da máquina.
+   insistir, o Core a troca por `[binário, "--version"]` e registra no relatório a
+   sonda trocada e as versões da máquina.
 2. **Fases**, uma chamada por fase, em paralelo, cada uma vendo só a sua fatia. Até
    15 tasks por fase, até 2 critérios por task e 30 por fase, dimensionadas pela
    complexidade efetiva para um executor econômico de contexto pequeno. As tasks

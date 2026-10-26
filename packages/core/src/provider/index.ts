@@ -47,6 +47,6 @@ export type { TokenUsage, Transcript, TranscriptKind } from "./transcript.js";
 export { CLI_ADAPTERS, cliAdapter, contratoDaRetomada, contratoDoWorkspace } from "./cli/index.js";
 export type { ContratoDoWorkspace } from "./cli/index.js";
 export type { AccessLevel, CliAdapter, CliInvocation, CliInvocationInput } from "./cli/index.js";
-export { CLAUDE_FAMILIES, MODEL_LISTINGS, cliDisponivel, listarEfforts, listarModelos } from "./models.js";
+export { CLAUDE_FAMILIES, MODEL_LISTINGS, cliDisponivel, listarDicas, listarEfforts, listarModelos } from "./models.js";
 export { limiteDaRotaNoOpenCode, raciocinioNoOpenCode } from "./cli/opencode-limits.js";
 export type { ModelListing } from "./models.js";

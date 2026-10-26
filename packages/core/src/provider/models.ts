@@ -44,6 +44,11 @@ export interface ModelListing {
    * lhe foi apresentada.
    */
   efforts?: (stdout: string) => Record<string, string[]>;
+  /**
+   * Uma dica curta por modelo, quando a saída diz algo que quem escolhe precisa
+   * saber: no codex, o modelo que ele esconde do seletor dele.
+   */
+  dicas?: (stdout: string) => Record<string, string>;
 }
 
 /**
@@ -80,6 +85,21 @@ function porSeparador(separador?: RegExp): (stdout: string) => string[] {
 /** Um identificador de modelo: sem espaço, e não uma frase em prosa. */
 const IDENTIFICADOR = /^[a-z0-9][a-z0-9._:/-]*$/i;
 
+interface CodexModel {
+  slug: string;
+  visibility?: string;
+}
+
+/** Contrato observado no codex-cli 0.163.0: debug models. */
+function codexModels(stdout: string): CodexModel[] {
+  try {
+    const objeto = JSON.parse(stdout) as { models?: { slug?: unknown; visibility?: string }[] };
+    return (objeto.models ?? []).filter((modelo): modelo is CodexModel => typeof modelo.slug === "string");
+  } catch {
+    return [];
+  }
+}
+
 interface OpenCodeModel {
   id: string;
   providerID: string;
@@ -99,22 +119,18 @@ function opencodeModels(stdout: string): OpenCodeModel[] | null {
 
 export const MODEL_LISTINGS: Record<string, ModelListing> = {
   /*
-   * O codex responde JSON e marca quais modelos ele quer que apareçam. Respeitar
-   * `visibility` é obedecer à própria CLI sobre o que mostrar: dos sete que ela
-   * conhece, cinco são para escolher.
+   * O codex responde JSON e marca, em `visibility`, os modelos que o seletor
+   * dele mostra. Os outros ele aceita em `--model` do mesmo jeito: nada na saída
+   * diz que os recusa. Vêm todos — primeiro os que ele mostra, depois os outros,
+   * com a dica —, na ordem em que ele os devolve.
    */
   codex: {
     command: ["debug", "models"],
     parse: (stdout) => {
-      try {
-        const objeto = JSON.parse(stdout) as { models?: { slug?: string; visibility?: string }[] };
-        return (objeto.models ?? [])
-          .filter((modelo) => modelo.visibility === "list" && typeof modelo.slug === "string")
-          .map((modelo) => modelo.slug as string);
-      } catch {
-        return [];
-      }
+      const modelos = codexModels(stdout);
+      return [...modelos.filter((modelo) => modelo.visibility === "list"), ...modelos.filter((modelo) => modelo.visibility !== "list")].map((modelo) => modelo.slug);
     },
+    dicas: (stdout) => Object.fromEntries(codexModels(stdout).filter((modelo) => modelo.visibility !== "list").map((modelo) => [modelo.slug, "o codex o esconde da própria lista"])),
     efforts: (stdout) => {
       try {
         const objeto = JSON.parse(stdout) as {
@@ -222,6 +238,20 @@ export async function listarModelos(
     return [...new Set(listagem.parse(stdout))];
   } catch {
     return [];
+  }
+}
+
+/** As dicas por modelo desta CLI; vazio quando ela não diz nada ou não responde. */
+export async function listarDicas(providerId: string, env: NodeJS.ProcessEnv = process.env): Promise<Record<string, string>> {
+  const listagem = MODEL_LISTINGS[providerId];
+  if (!listagem?.dicas || listagem.command.length === 0 || !(await cliDisponivel(providerId, env))) return {};
+  const adapter = CLI_ADAPTERS.find((entrada) => entrada.id === providerId);
+  const binary = env[adapter?.binaryEnv ?? ""]?.trim() || adapter?.defaultBinary || providerId;
+  try {
+    const { stdout } = await run(binary, listagem.command, { env, timeout: TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 });
+    return listagem.dicas(stdout);
+  } catch {
+    return {};
   }
 }
 

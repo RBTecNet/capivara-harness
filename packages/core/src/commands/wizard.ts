@@ -51,6 +51,8 @@ export interface WizardDeps {
    * devolvendo vazio, faz a pergunta voltar a ser o nome digitado.
    */
   listModels?: (providerId: string) => Promise<string[]>;
+  /** Uma dica curta por modelo listado, quando a CLI diz algo sobre ele (o codex: escondido do seletor dele). */
+  listModelHints?: (providerId: string) => Promise<Record<string, string>>;
   /** Oferece cadastrar a chave antes de consultar uma API ainda não configurada. */
   configureApi?: (provider: string, io: WizardIO) => Promise<boolean>;
   /**
@@ -328,7 +330,10 @@ async function escolherModelo(
   }
 
   let candidatos = modelos;
-  const opcaoDoModelo = (modelo: string): Choice => foraDoExecutor.has(modelo) ? { label: modelo, hint: "fora do catálogo do OpenCode: o executor não o roda" } : { label: modelo };
+  const dicas: Record<string, string> = await (deps.listModelHints ?? (async () => ({})))(providerId).catch(() => ({}));
+  const opcaoDoModelo = (modelo: string): Choice => foraDoExecutor.has(modelo)
+    ? { label: modelo, hint: "fora do catálogo do OpenCode: o executor não o roda" }
+    : dicas[modelo] ? { label: modelo, hint: dicas[modelo] } : { label: modelo };
   const muitos = modelos.length > MODELOS_SEM_FILTRO;
   const filtrar = async (): Promise<"voltar" | undefined> => {
     const filtro = (await pergunta(io, "Digite parte do nome para filtrar (vazio lista todos, 0 volta ao provider): ")).trim();

@@ -73,7 +73,7 @@ import { box } from "./tui/dashboard.js";
 import { renderSelect, type SelectSpec } from "./tui/select.js";
 import type { WizardIO } from "./commands/wizard.js";
 import type { LineIO } from "./commands/line-io.js";
-import { contratoDaRetomada, isCliProvider, isDirectProvider, listarEfforts, listarModelos } from "./provider/index.js";
+import { contratoDaRetomada, isCliProvider, isDirectProvider, listarDicas, listarEfforts, listarModelos } from "./provider/index.js";
 import type { RoleName } from "./provider/index.js";
 import { runIdFor, runPaths, safeProjectPath, writeAtomic } from "./state/index.js";
 import { architectureViewForPhase, sha12, type DecisaoDeEscopo } from "./contract/index.js";
@@ -224,6 +224,7 @@ async function completarPapeis<T extends CliRoleFlags>(comando: string, faltando
       current: rolesFromFlags(flags),
       listModels: (providerId) => listarModelos(providerId, process.env, undefined, (message) => entrada.io.write(`${message}\n`)),
       listEfforts: (providerId, model) => listarEfforts(providerId, model),
+      listModelHints: (providerId) => listarDicas(providerId),
       ...mundoDoWizard(),
     });
     if (escolha === null) return null;
@@ -2425,6 +2426,7 @@ export function createProgram(): Command {
         cwd: process.cwd(),
         listModels: (providerId) => listarModelos(providerId, process.env, undefined, (message) => entrada.io.write(`${message}\n`)),
         listEfforts: (providerId, model) => listarEfforts(providerId, model),
+        listModelHints: (providerId) => listarDicas(providerId),
         /*
          * O wizard conecta de verdade para listar os projetos. Perguntar o nome
          * do projeto num campo livre deixaria o erro de digitação para o run

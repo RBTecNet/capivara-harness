@@ -8,7 +8,7 @@
  * de existir listagem.
  */
 
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -105,14 +105,28 @@ describe("cada CLI separa identificador de descrição do seu jeito", () => {
     expect(MODEL_LISTINGS.opencode?.parse(saida)).toEqual(["ollama/qwen3:8b", "opencode/big-pickle"]);
   });
 
-  it("codex: JSON, e respeita o que a própria CLI marca como visível", () => {
+  it("codex: JSON, todos os modelos — primeiro os que o seletor dele mostra, depois os outros, com a dica", () => {
     const saida = JSON.stringify({
       models: [
-        { slug: "gpt-6-astra", visibility: "list" },
         { slug: "gpt-experimental", visibility: "hidden" },
+        { slug: "gpt-6-astra", visibility: "list" },
       ],
     });
-    expect(MODEL_LISTINGS.codex?.parse(saida)).toEqual(["gpt-6-astra"]);
+    expect(MODEL_LISTINGS.codex?.parse(saida)).toEqual(["gpt-6-astra", "gpt-experimental"]);
+    expect(MODEL_LISTINGS.codex?.dicas?.(saida)).toEqual({ "gpt-experimental": "o codex o esconde da própria lista" });
+  });
+
+  it("codex: a saída real de `codex debug models` (codex-cli 0.163.0) produz a lista completa, na ordem, e os efforts de cada um", async () => {
+    const saida = await readFile(join(import.meta.dirname, "../fixtures/models/codex-debug-models.json"), "utf8");
+    expect(MODEL_LISTINGS.codex?.parse(saida)).toEqual([
+      "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+      "gpt-6-chat-thinking", "gpt-reserve", "codex-auto-review",
+    ]);
+    expect(Object.keys(MODEL_LISTINGS.codex?.dicas?.(saida) ?? {})).toEqual(["gpt-6-chat-thinking", "gpt-reserve", "codex-auto-review"]);
+    const efforts = MODEL_LISTINGS.codex?.efforts?.(saida) ?? {};
+    expect(Object.keys(efforts)).toHaveLength(10);
+    expect(efforts["gpt-reserve"]).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(efforts["gpt-6.1-sol"]).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
   });
 
   it("claude: as famílias, porque a CLI resolve a versão sozinha", () => {

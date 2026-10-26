@@ -297,6 +297,51 @@ describe("§133 · o build de um produto desktop com fluxos declarados", () => {
   }, 60_000);
 });
 
+/*
+ * Item 6 de "atacar os pontos frágeis": o mesmo produto de janela, agora com o
+ * projeto .NET que o declara. A aceitação compila e inicia o executável por 10
+ * segundos na cópia limpa; de pé, o fluxo de janela tem a prova da plataforma e
+ * o build é aceito. O que quebra ao iniciar é pego.
+ */
+describe("item 6 · o aplicativo desktop que sobe chega a aceito", () => {
+  const AVALONIA = '<Project Sdk="Microsoft.NET.Sdk">\n  <PropertyGroup>\n    <OutputType>WinExe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n  </PropertyGroup>\n  <ItemGroup>\n    <PackageReference Include="Avalonia" Version="11.0.10" />\n  </ItemGroup>\n</Project>\n';
+  const comTela = { acceptancePlatform: { sistema: "linux" as const, tela: true } };
+
+  it("compilado e de pé por 10 segundos na cópia limpa: o fluxo de janela é provado pela subida, e o build termina aceito", async () => {
+    await writeFile(join(projectRoot, "Agenda.csproj"), AVALONIA, "utf8");
+    const esqueleto = await publicar(DESKTOP);
+    const iniciados: { comando: string; segundos: number }[] = [];
+    const { outcome, anuncios } = await construir(esqueleto, motor(false), corredor().runner, {
+      ...comAceitacao,
+      ...comTela,
+      acceptanceService: async (comando, _cwd, segundos) => {
+        iniciados.push({ comando, segundos });
+        return { exitCode: 0, output: "de pé" };
+      },
+    });
+
+    expect(iniciados).toEqual([{ comando: 'dotnet run --no-build --project "Agenda.csproj"', segundos: 10 }]);
+    expect(outcome.estado, anuncios.join("\n")).toBe("aceito");
+    expect(outcome.exitCode).toBe(0);
+    expect(anuncios.join("\n")).toContain("provado pela subida do executável na cópia limpa");
+  }, 60_000);
+
+  it("o executável que quebra ao iniciar é pego: nunca aceito, e a causa é o passo start", async () => {
+    await writeFile(join(projectRoot, "Agenda.csproj"), AVALONIA, "utf8");
+    const esqueleto = await publicar(DESKTOP);
+    const { outcome } = await construir(esqueleto, motor(false), corredor().runner, {
+      ...comAceitacao,
+      ...comTela,
+      maxCycles: 1,
+      acceptanceService: async () => ({ exitCode: 134, output: "Unhandled exception. System.NullReferenceException" }),
+    });
+
+    expect(outcome.estado).not.toBe("aceito");
+    expect(outcome.exitCode).not.toBe(0);
+    expect((outcome.pendencias ?? []).join("\n")).toContain('"start"');
+  }, 60_000);
+});
+
 describe("§133 · controle: o mesmo plano com produto web", () => {
   it("7 — o roteiro é escrito e percorrido na aceitação final, o build é aceito, e o verificador sabe que PORT e HOST são do harness", async () => {
     const esqueleto = await publicar(WEB);

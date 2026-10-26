@@ -181,6 +181,8 @@ export interface BuildOptions {
   skipAcceptance?: boolean;
   acceptanceRunner?: CommandRunner;
   acceptanceService?: CommandRunner;
+  /** Onde a aceitação roda: o sistema e se há tela. Ausente é esta máquina; existe para teste. */
+  acceptancePlatform?: { sistema: NodeJS.Platform; tela: boolean };
   /**
    * Execução paralela (§97): até `maxConcurrency` fases ao mesmo tempo, cada
    * uma no seu worktree, com o agente do pool que o escalonador der a ela.
@@ -1215,7 +1217,7 @@ async function performBuild(
      */
     const fluxosDaEntrega = esqueleto?.workflows ?? [];
     let passagensDoSmoke = 0;
-    const smoke = async (sala: string): Promise<ResultadoDoSmoke> => {
+    const smoke = async (sala: string, { desktopSubiu }: { desktopSubiu: boolean }): Promise<ResultadoDoSmoke> => {
       passagensDoSmoke += 1;
       const passagem = passagensDoSmoke;
       const ultima = checked.sessions.at(-1)!;
@@ -1261,8 +1263,19 @@ async function performBuild(
       }
       const saida = resultado.output ?? (resultado.green ? "" : resultado.cause);
       if (saida !== "") await writeAtomic(join(paths.logs, `entrega.flow-run-${passagem}.log`), saida);
-      // O fluxo que nem o navegador nem o terminal alcançam não é percorrido: é verificação inconclusiva, nunca prova.
-      const pendencias = (resultado.naoPercorridos ?? []).map((fluxo) => `aceitação · o fluxo ${fluxo.number} não foi percorrido: o contrato descreve o produto fora do navegador e do terminal («${fluxo.trecho}»)`);
+      /*
+       * O fluxo que nem o navegador nem o terminal alcançam não é percorrido. Sem
+       * outra prova, é verificação inconclusiva, nunca prova. Com o executável de
+       * janela compilado e de pé na cópia limpa, a prova é a da plataforma
+       * (item 6 de "atacar os pontos frágeis"), e o fluxo não fica pendente.
+       */
+      const naoPercorridos = resultado.naoPercorridos ?? [];
+      if (desktopSubiu) {
+        for (const fluxo of naoPercorridos) announce(`aceitação · o fluxo ${fluxo.number} é de janela («${fluxo.trecho}»): provado pela subida do executável na cópia limpa`);
+      }
+      const pendencias = desktopSubiu
+        ? []
+        : naoPercorridos.map((fluxo) => `aceitação · o fluxo ${fluxo.number} não foi percorrido: o contrato descreve o produto fora do navegador e do terminal («${fluxo.trecho}»)`);
       if (resultado.green) return { ok: true, pendencias };
       const daFerramenta = resultado.toolMissing === true || resultado.scriptFailed === true || /Isto é do ambiente/u.test(resultado.cause);
       const falhou = resultado.falharam?.[0];
@@ -1289,6 +1302,7 @@ async function performBuild(
           projectRoot: options.projectRoot,
           ...(options.acceptanceRunner !== undefined ? { runner: options.acceptanceRunner } : {}),
           ...(options.acceptanceService !== undefined ? { service: options.acceptanceService } : {}),
+          ...(options.acceptancePlatform !== undefined ? { plataforma: options.acceptancePlatform } : {}),
           ...(fluxosDaEntrega.length > 0 ? { smoke } : {}),
         });
       acceptance = await aceitar();

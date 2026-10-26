@@ -346,7 +346,13 @@ flowchart TD
    por si, porta do gate) deixa a verificação inconclusiva, sem reparo. O produto
    usado fora do navegador e do terminal (§133) — janela nativa, dispositivo,
    biblioteca — tem o fluxo nomeado como não percorrido
-   (`CAPIVARA_FORA_DO_NAVEGADOR`): verificação inconclusiva, nunca aprovação.
+   (`CAPIVARA_FORA_DO_NAVEGADOR`): verificação inconclusiva, nunca aprovação. A
+   exceção é o aplicativo desktop .NET (WPF, Windows Forms, WinUI, MAUI, Avalonia
+   ou `WinExe` no `.csproj`): a aceitação o compila e o inicia por 10 segundos
+   (`dotnet run`); ficar de pé sem terminar com erro é a prova da plataforma, e a
+   árvore de processos é encerrada no fim. Com alvo `net*-windows` fora do Windows
+   (compilado com `-p:EnableWindowsTargeting=true`) ou no Linux sem tela, a
+   execução é "verificação inconclusiva: plataforma".
 10. **Reparo documental**: quando nenhuma estratégia resta e o verificador apontou que
    o documento aprovado é a causa, o build publica um pacote de reparo
    (`.capivara/repairs/`) com o defeito, o observado, o esperado, os contornos

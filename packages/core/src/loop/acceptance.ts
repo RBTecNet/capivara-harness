@@ -15,7 +15,7 @@
  */
 
 import { execFile, spawn } from "node:child_process";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { killTree } from "../provider/supervisor.js";
@@ -26,6 +26,16 @@ export interface AcceptanceStep {
   command: string;
   /** Serviço não termina sozinho: sobe, fica de pé e é encerrado. */
   service: boolean;
+  /** A janela própria do passo, em segundos; sem ela, a de serviço ou a de passo. */
+  seconds?: number;
+  /**
+   * O executável de um aplicativo desktop: não é servidor — o percurso dos
+   * fluxos não o sobe —, e passar nele é a prova, pela plataforma, do produto
+   * que nem o navegador nem o terminal alcançam.
+   */
+  desktop?: boolean;
+  /** O passo que esta máquina não pode executar, e por quê: a aceitação o registra como verificação inconclusiva. */
+  inconclusiva?: string;
 }
 
 export interface StepResult {
@@ -78,6 +88,10 @@ export interface Manifests {
   cargoToml?: string | null;
   /** Página inicial de uma aplicação que roda direto no navegador. */
   indexHtml?: string | null;
+  /** Os projetos .NET (`*.csproj`), com o caminho relativo à raiz e o conteúdo. */
+  dotnet?: readonly { caminho: string; conteudo: string }[];
+  /** Onde a aceitação roda: o sistema e se há tela para uma janela. Ausente é esta máquina. */
+  plataforma?: { sistema: NodeJS.Platform; tela: boolean };
 }
 
 /**
@@ -93,6 +107,10 @@ export interface Manifests {
  * isso não é reprovação.
  */
 export function deriveAcceptance(manifests: Manifests): AcceptanceStep[] {
+  // O projeto .NET de janela é o produto: um manifesto Node ao lado dele é ferramenta.
+  const desktop = desktopDotnetSteps(manifests.dotnet ?? [], manifests.plataforma ?? estaPlataforma());
+  if (desktop.length > 0) return desktop;
+
   const node = nodeSteps(manifests.packageJson ?? null);
   if (node.length > 0) return node;
 
@@ -161,6 +179,51 @@ function pythonSteps(pyproject: string | null): AcceptanceStep[] {
   }
 
   return steps;
+}
+
+/** Esta máquina: o sistema, e se há tela (no Linux, um DISPLAY ou um WAYLAND_DISPLAY). */
+function estaPlataforma(): { sistema: NodeJS.Platform; tela: boolean } {
+  const tela = process.platform !== "linux" || Boolean(process.env.DISPLAY) || Boolean(process.env.WAYLAND_DISPLAY);
+  return { sistema: process.platform, tela };
+}
+
+/**
+ * O aplicativo desktop .NET: compilar e iniciar, por 10 segundos (item 6 de
+ * "atacar os pontos frágeis").
+ *
+ * A etapa 4 da redução tirou a prova fora do navegador, e o fluxo de um produto
+ * de janela ficava sem prova nenhuma: o build terminava "verificação
+ * inconclusiva", sempre. A prova que a plataforma dá é a mesma de um serviço:
+ * o executável sobe e não termina com erro na janela, e a árvore de processos é
+ * encerrada no fim. É de janela o projeto que diz isso no `.csproj` — WPF,
+ * Windows Forms, WinUI, MAUI, Avalonia ou `WinExe`.
+ *
+ * Com alvo `net*-windows` fora do Windows, o projeto compila com
+ * `-p:EnableWindowsTargeting=true`, e a execução não acontece: é "verificação
+ * inconclusiva: plataforma", com esse motivo. O mesmo vale para o Linux sem
+ * tela, onde nenhuma janela abre e a falha não diria nada do produto.
+ */
+function desktopDotnetSteps(projetos: readonly { caminho: string; conteudo: string }[], plataforma: { sistema: NodeJS.Platform; tela: boolean }): AcceptanceStep[] {
+  const deJanela = projetos.find((projeto) =>
+    /<(?:UseWPF|UseWindowsForms|UseWinUI|UseMaui)>\s*true\s*</iu.test(projeto.conteudo) ||
+    /<OutputType>\s*WinExe\s*</iu.test(projeto.conteudo) ||
+    /<PackageReference\s+Include="(?:Avalonia|Microsoft\.Maui[\w.]*)"/iu.test(projeto.conteudo),
+  );
+  if (!deJanela) return [];
+  const alvoWindows = /<TargetFrameworks?>[^<]*\bnet[\d.]+-windows/iu.test(deJanela.conteudo);
+  const foraDoWindows = plataforma.sistema !== "win32";
+  const caminho = JSON.stringify(deJanela.caminho);
+  return [
+    { id: "build", command: `dotnet build ${caminho}${alvoWindows && foraDoWindows ? " -p:EnableWindowsTargeting=true" : ""}`, service: false },
+    {
+      id: "start",
+      command: `dotnet run --no-build --project ${caminho}`,
+      service: true,
+      seconds: 10,
+      desktop: true,
+      ...((alvoWindows && foraDoWindows) || !plataforma.tela ? { inconclusiva: "plataforma" } : {}),
+    },
+  ];
 }
 
 export type CommandRunner = (command: string, cwd: string, seconds: number) => Promise<{ exitCode: number; output: string }>;
@@ -269,11 +332,44 @@ export interface AcceptanceOptions {
    * meios da plataforma (etapa 4 da redução). Ausente: o projeto não tem fluxos,
    * ou o build roda sem eles.
    */
-  smoke?: (room: string) => Promise<ResultadoDoSmoke>;
+  smoke?: (room: string, contexto: { desktopSubiu: boolean }) => Promise<ResultadoDoSmoke>;
+  /** O sistema e se há tela; ausente é esta máquina. Existe para teste, como `runner` e `service`. */
+  plataforma?: { sistema: NodeJS.Platform; tela: boolean };
 }
 
 async function lerManifesto(projectRoot: string, nome: string): Promise<string | null> {
   return readFile(join(projectRoot, nome), "utf8").catch(() => null);
+}
+
+/** Os `.csproj` da raiz e de até duas pastas abaixo, fora das de build, dependências e testes. */
+async function projetosDotnet(projectRoot: string): Promise<{ caminho: string; conteudo: string }[]> {
+  const fora = new Set([...EXCLUDED, "bin", "obj", "test", "tests"]);
+  const achados: { caminho: string; conteudo: string }[] = [];
+  const visitar = async (relativo: string, profundidade: number): Promise<void> => {
+    const entradas = await readdir(join(projectRoot, relativo), { withFileTypes: true }).catch(() => []);
+    for (const entrada of entradas.sort((a, b) => a.name.localeCompare(b.name))) {
+      const caminho = relativo === "" ? entrada.name : `${relativo}/${entrada.name}`;
+      if (entrada.isFile() && entrada.name.endsWith(".csproj")) {
+        const conteudo = await readFile(join(projectRoot, caminho), "utf8").catch(() => null);
+        if (conteudo !== null) achados.push({ caminho, conteudo });
+      } else if (entrada.isDirectory() && profundidade < 2 && !fora.has(entrada.name) && !/\.tests?$/iu.test(entrada.name)) {
+        await visitar(caminho, profundidade + 1);
+      }
+    }
+  };
+  await visitar("", 0);
+  return achados;
+}
+
+async function manifestosDe(projectRoot: string): Promise<Manifests> {
+  return {
+    packageJson: await lerManifesto(projectRoot, "package.json"),
+    pyproject: await lerManifesto(projectRoot, "pyproject.toml"),
+    goMod: await lerManifesto(projectRoot, "go.mod"),
+    cargoToml: await lerManifesto(projectRoot, "Cargo.toml"),
+    indexHtml: await lerManifesto(projectRoot, "index.html"),
+    dotnet: await projetosDotnet(projectRoot),
+  };
 }
 
 /**
@@ -284,15 +380,10 @@ async function lerManifesto(projectRoot: string, nome: string): Promise<string |
  * produto compilado servido a partir de código velho responde e engana.
  */
 export async function startCommandFor(projectRoot: string): Promise<string | null> {
-  const steps = deriveAcceptance({
-    packageJson: await lerManifesto(projectRoot, "package.json"),
-    pyproject: await lerManifesto(projectRoot, "pyproject.toml"),
-    goMod: await lerManifesto(projectRoot, "go.mod"),
-    cargoToml: await lerManifesto(projectRoot, "Cargo.toml"),
-    indexHtml: await lerManifesto(projectRoot, "index.html"),
-  });
+  const steps = deriveAcceptance(await manifestosDe(projectRoot));
 
-  const service = steps.find((step) => step.service);
+  // O executável de janela não é servidor: o percurso dos fluxos não o sobe.
+  const service = steps.find((step) => step.service && step.desktop !== true);
   if (!service) return null;
 
   const build = steps.find((step) => step.id === "build");
@@ -300,13 +391,7 @@ export async function startCommandFor(projectRoot: string): Promise<string | nul
 }
 
 export async function runAcceptance(options: AcceptanceOptions): Promise<AcceptanceResult> {
-  const steps = deriveAcceptance({
-    packageJson: await lerManifesto(options.projectRoot, "package.json"),
-    pyproject: await lerManifesto(options.projectRoot, "pyproject.toml"),
-    goMod: await lerManifesto(options.projectRoot, "go.mod"),
-    cargoToml: await lerManifesto(options.projectRoot, "Cargo.toml"),
-    indexHtml: await lerManifesto(options.projectRoot, "index.html"),
-  });
+  const steps = deriveAcceptance({ ...(await manifestosDe(options.projectRoot)), ...(options.plataforma !== undefined ? { plataforma: options.plataforma } : {}) });
 
   if (steps.length === 0 && !options.smoke) {
     return { accepted: true, steps: [], skipped: "o projeto não declara um ecossistema com build, instalação ou entrypoint: nada a aceitar operacionalmente" };
@@ -341,10 +426,17 @@ export async function runAcceptance(options: AcceptanceOptions): Promise<Accepta
     }
 
     const results: StepResult[] = [];
+    const inconclusivas: string[] = [];
+    let desktopSubiu = false;
     for (const step of steps) {
+      if (step.inconclusiva !== undefined) {
+        inconclusivas.push(`aceitação · o passo "${step.id}" (${step.command}) não rodou nesta máquina: verificação inconclusiva: ${step.inconclusiva}`);
+        continue;
+      }
       const executar = step.service ? service : runner;
-      const { exitCode, output } = await executar(step.command, room, step.service ? serviceSeconds : stepSeconds);
+      const { exitCode, output } = await executar(step.command, room, step.seconds ?? (step.service ? serviceSeconds : stepSeconds));
       results.push({ id: step.id, command: step.command, exitCode, output });
+      if (step.desktop === true && exitCode === 0) desktopSubiu = true;
 
       if (exitCode !== 0) {
         return {
@@ -361,10 +453,11 @@ export async function runAcceptance(options: AcceptanceOptions): Promise<Accepta
       }
     }
 
-    if (!options.smoke) return { accepted: true, steps: results, skipped: "" };
-    const smoke = await options.smoke(room);
+    if (!options.smoke) return { accepted: true, steps: results, skipped: "", ...(inconclusivas.length > 0 ? { pendencias: inconclusivas } : {}) };
+    const smoke = await options.smoke(room, { desktopSubiu });
     if (!smoke.ok) return { accepted: false, steps: results, failure: { id: smoke.id, cause: smoke.cause, natureza: smoke.natureza } };
-    return { accepted: true, steps: results, skipped: "", ...(smoke.pendencias.length > 0 ? { pendencias: smoke.pendencias } : {}) };
+    const pendencias = [...inconclusivas, ...smoke.pendencias];
+    return { accepted: true, steps: results, skipped: "", ...(pendencias.length > 0 ? { pendencias } : {}) };
   } finally {
     if (room !== options.projectRoot) await rm(room, { recursive: true, force: true });
   }

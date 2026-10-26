@@ -135,11 +135,21 @@ describe("o plan de uma passada", () => {
     expect(perguntadas.filter((pergunta) => pergunta.id !== ID_DO_BANCO)).toEqual([]);
   });
 
-  it("a auditoria ilegível não aprova e não ganha segunda chance", async () => {
+  it("a auditoria ilegível na primeira e legível na segunda: o plano segue, com uma chamada a mais só nesse caminho", async () => {
+    await init();
+    let leituras = 0;
+    const { run, agent } = await plan(() => ((leituras += 1) === 1 ? "CAPIVARA_AUDIT_STATUS: TALVEZ\nCAPIVARA_REASON: hum" : approve()));
+    expect((await run).readiness.ready).toBe(true);
+    expect(por(agent, { stage: "audit", subject: "project-phases.md" })).toHaveLength(2);
+  });
+
+  it("a auditoria ilegível ganha uma chamada com o protocolo repetido; ilegível duas vezes, não aprova", async () => {
     await init();
     const { run, agent } = await plan(() => "achei tudo ótimo");
-    await expect(run).rejects.toThrow(/a auditoria do plano veio ilegível/);
-    expect(por(agent, { stage: "audit", subject: "project-phases.md" })).toHaveLength(1);
+    await expect(run).rejects.toThrow(/a auditoria do plano veio ilegível duas vezes/);
+    const auditorias = por(agent, { stage: "audit", subject: "project-phases.md" });
+    expect(auditorias).toHaveLength(2);
+    expect(auditorias[1]?.prompt).toContain("## Repair the previous audit response");
     await expect(publicado()).rejects.toThrow();
   });
 });

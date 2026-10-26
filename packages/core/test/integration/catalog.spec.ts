@@ -472,18 +472,18 @@ describe("B-08 a B-12 · auditoria", () => {
   });
 
   /*
-   * Ilegível nunca vira aprovação, e não ganha segunda chance de formato
-   * (etapa 2 da redução): a auditoria que a leitura tolerante não entende é
-   * auditoria que não aconteceu, e o plano não é publicado por ela.
+   * Ilegível nunca vira aprovação: a auditoria que a leitura tolerante não
+   * entende ganha UMA chamada com o protocolo repetido, e a que continua
+   * ilegível é auditoria que não aconteceu — o plano não é publicado por ela.
    */
-  it("B-09 finding sem orientação é saída ilegível: o plan para sem publicar e sem repetir o auditor", async () => {
+  it("B-09 finding sem orientação é saída ilegível: o auditor repete uma vez, e ilegível de novo o plan para sem publicar", async () => {
     const steps = happyPath();
     const agent = fakeAgent([
       { match: { role: "auditor", stage: "audit", subject: "project-phases.md" }, respond: { stdout: "CAPIVARA_AUDIT_STATUS: REJECTED\nCAPIVARA_FINDING: Phase 1 | está ruim\nCAPIVARA_REASON: ruim" }, repeat: true },
       ...steps,
     ]);
-    await expect(runInit({ projectRoot, request, language: "português do Brasil", call: agent.call, ask: async () => "1" })).rejects.toThrow(/a auditoria do plano veio ilegível/);
-    expect(agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-phases.md")).toHaveLength(1);
+    await expect(runInit({ projectRoot, request, language: "português do Brasil", call: agent.call, ask: async () => "1" })).rejects.toThrow(/a auditoria do plano veio ilegível duas vezes/);
+    expect(agent.calls.filter((call) => call.role === "auditor" && call.subject === "project-phases.md")).toHaveLength(2);
     await expect(readFile(join(projectRoot, ".capivara/init/project-phases.md"), "utf8")).rejects.toThrow();
   });
 

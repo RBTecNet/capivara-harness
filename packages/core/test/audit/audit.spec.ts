@@ -71,22 +71,10 @@ describe("saída inválida repete só o auditor", () => {
     expect(defects.join(" ")).toContain("apenas repete o problema");
   });
 
-  it("APPROVED com finding", () => {
-    const defects = defectsOf(
-      "CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_FINDING: a | b | c\nCAPIVARA_REASON: x",
-    );
-    expect(defects.join(" ")).toContain("APPROVED com CAPIVARA_FINDING");
-  });
-
   it("status ausente, duplicado ou inventado", () => {
     expect(defectsOf("CAPIVARA_REASON: x").join(" ")).toContain("nenhum CAPIVARA_AUDIT_STATUS");
     expect(defectsOf(`${approved}\nCAPIVARA_AUDIT_STATUS: REJECTED`).join(" ")).toContain("exatamente uma");
     expect(defectsOf("CAPIVARA_AUDIT_STATUS: TALVEZ\nCAPIVARA_REASON: x").join(" ")).toContain("status inválido");
-  });
-
-  it("razão ausente ou vazia", () => {
-    expect(defectsOf("CAPIVARA_AUDIT_STATUS: APPROVED").join(" ")).toContain("CAPIVARA_REASON");
-    expect(defectsOf("CAPIVARA_AUDIT_STATUS: APPROVED\nCAPIVARA_REASON:   ").join(" ")).toContain("CAPIVARA_REASON");
   });
 
   it("aprovação com ressalva é válida e não bloqueia", () => {

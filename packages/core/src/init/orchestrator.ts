@@ -3436,8 +3436,9 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
    * interface citada dos dois lados e o pacote fora de
    * `infrastructure.dependencies`. O resto é observação do relatório.
    *
-   * Sem segunda chance de formato: o que a leitura tolerante não entende é
-   * auditoria que não aconteceu, e o plano não é publicado por ela.
+   * Uma segunda chance de formato, só quando a primeira veio ilegível: o que a
+   * leitura tolerante não entende duas vezes é auditoria que não aconteceu, e
+   * o plano não é publicado por ela.
    */
   async function auditarPlanoInteiro(content: string, writer: WriterContext, attempt: number): Promise<{ bloqueios: Finding[]; observacoes: Remark[]; lugares: Lugar[] }> {
     const lido = parsePhases(stripAllMarkers(content).content);
@@ -3457,13 +3458,26 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
     }
     for (const fase of fases) relatarFase({ kind: "audit", number: fase.number, state: "corrente" });
     await event("audit", "project-phases.md", "started", "", attempt);
-    const saida = await track({ role: "auditor", stage: "audit", subject: "project-phases.md", attempt, prompt });
-    const resposta = parseAudit(saida);
+    let saida = await track({ role: "auditor", stage: "audit", subject: "project-phases.md", attempt, prompt });
+    let resposta = parseAudit(saida);
+    /*
+     * Ilegível uma vez: UMA chamada com o protocolo repetido, só neste caminho.
+     * Uma auditoria que aprova sem escrever o motivo não pode parar o run; uma
+     * que ninguém consegue ler duas vezes para, como antes. Nunca se aprova o
+     * que não se leu.
+     */
+    if (!resposta.ok) {
+      announce(`  a auditoria do plano veio ilegível (${resposta.defects.join("; ")}); pedindo de novo, uma vez, com o protocolo repetido`);
+      await event("audit", "project-phases.md", "retry", `auditoria ilegível: ${resposta.defects.join("; ")}`, attempt);
+      saida = await track({ role: "auditor", stage: "audit", subject: "project-phases.md", attempt, prompt: auditRetryPrompt(prompt, saida, resposta.defects) });
+      resposta = parseAudit(saida);
+    }
+    if (resposta.ok) for (const nota of resposta.applied) announce(`  ${nota}`);
     if (!resposta.ok) {
       await event("audit", "project-phases.md", "blocked", `auditoria ilegível: ${resposta.defects.join("; ")}`, attempt);
       throw new InitBlockedError(
         diagnostico("project-phases.md", [
-          `a auditoria do plano veio ilegível: ${resposta.defects.join("; ")}`,
+          `a auditoria do plano veio ilegível duas vezes: ${resposta.defects.join("; ")}`,
           "",
           "O que veio, do começo:",
           `  ${saida.trim().slice(0, 300).replace(/\n/g, "\n  ") || "(nada)"}`,

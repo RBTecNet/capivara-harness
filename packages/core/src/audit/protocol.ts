@@ -212,6 +212,30 @@ function recuperarTravessao(fields: readonly string[]): { fields: string[]; nota
   };
 }
 
+/**
+ * O status como o auditor o escreveu, na palavra do protocolo.
+ *
+ * O prompt pede a resposta na língua do projeto, e o auditor obediente escreve
+ * `APROVADO`; outro fecha a linha com ponto. Os dois eram "status inválido", e
+ * uma aprovação limpa parava o plano. A palavra é embalagem; o que não é uma
+ * delas continua inválido.
+ */
+const SINONIMOS: Record<string, AuditStatus> = {
+  APPROVED: "APPROVED",
+  APROVADO: "APPROVED",
+  APROVADA: "APPROVED",
+  REJECTED: "REJECTED",
+  REPROVADO: "REJECTED",
+  REPROVADA: "REJECTED",
+  REJEITADO: "REJECTED",
+  REJEITADA: "REJECTED",
+};
+
+function statusDoProtocolo(escrito: string): string {
+  const palavra = escrito.trim().replace(/[.!;,]+$/u, "").trim().toUpperCase();
+  return SINONIMOS[palavra] ?? palavra;
+}
+
 export function parseAudit(rawOutput: string): AuditParse {
   const output = lerProtocolo(rawOutput, CHAVES);
   const defects: string[] = [];
@@ -227,8 +251,8 @@ export function parseAudit(rawOutput: string): AuditParse {
 
     const status = STATUS.exec(line);
     if (status) {
-      // A caixa é embalagem: "approved" é APPROVED.
-      statuses.push((status[1] ?? "").trim().toUpperCase());
+      // A caixa, o ponto final e a língua são embalagem: "approved.", "APROVADO" são APPROVED.
+      statuses.push(statusDoProtocolo(status[1] ?? ""));
       continue;
     }
 
@@ -296,28 +320,35 @@ export function parseAudit(rawOutput: string): AuditParse {
     );
   }
 
-  const status = statuses[0];
-  if (status !== undefined && status !== "APPROVED" && status !== "REJECTED") {
-    defects.push(`status inválido: "${status}"; use APPROVED ou REJECTED`);
+  const escrito = statuses[0];
+  if (escrito !== undefined && escrito !== "APPROVED" && escrito !== "REJECTED") {
+    defects.push(`status inválido: "${escrito}"; use APPROVED ou REJECTED`);
   }
 
-  if (reasons.length !== 1 || (reasons[0] ?? "") === "") {
-    defects.push("emita exatamente um CAPIVARA_REASON, não vazio");
+  // O motivo ausente é motivo vazio: a aprovação que não diz por quê continua sendo uma aprovação lida.
+  if (reasons.length > 1) {
+    defects.push("emita exatamente um CAPIVARA_REASON");
   }
 
-  if (status === "REJECTED" && findings.length === 0) {
+  if (escrito === "REJECTED" && findings.length === 0) {
     defects.push("REJECTED sem nenhum CAPIVARA_FINDING; uma devolução sem defeito não diz ao escritor o que corrigir");
-  }
-
-  if (status === "APPROVED" && findings.length > 0) {
-    defects.push("APPROVED com CAPIVARA_FINDING; o que não bloqueia é CAPIVARA_REMARK");
   }
 
   if (defects.length > 0) return { ok: false, defects };
 
+  /*
+   * APPROVED com CAPIVARA_FINDING: o status é irrelevante. O achado foi
+   * escrito, e quem decide se ele bloqueia é o Core (`admitir`), como qualquer
+   * outro — não o rótulo que o acompanha.
+   */
+  const status: AuditStatus = findings.length > 0 ? "REJECTED" : (escrito as AuditStatus);
+  if (escrito === "APPROVED" && findings.length > 0) {
+    applied.push(`a auditoria veio APPROVED com ${findings.length} CAPIVARA_FINDING; os achados seguem para a admissibilidade do Core, como qualquer outro`);
+  }
+
   return {
     ok: true,
-    verdict: { status: status as AuditStatus, findings, remarks, decisions, reason: reasons[0] ?? "" },
+    verdict: { status, findings, remarks, decisions, reason: reasons[0] ?? "" },
     applied,
   };
 }

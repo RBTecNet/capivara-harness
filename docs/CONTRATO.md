@@ -198,7 +198,10 @@ flowchart TD
    dos dois lados, `DEPENDENCY` com o pacote fora de `infrastructure.dependencies`.
    O resto — precisão, completude, estilo, a decisão de produto que o auditor
    levanta — é observação do relatório, sem rodada e sem pergunta. Teste nunca é
-   motivo de devolução. A auditoria ilegível não aprova e não ganha segunda chance.
+   motivo de devolução. A auditoria ilegível não aprova: ganha uma chamada com o protocolo
+   repetido, e ilegível duas vezes para o `plan`. O motivo ausente é motivo vazio, o
+   status em português (`APROVADO`, `REPROVADO`…) e com ponto final é lido, e o finding
+   que vem com APPROVED segue para a admissibilidade como qualquer outro.
    A leitura do protocolo é tolerante num lugar só (`contract/protocolo.ts`): a
    embalagem sai, o conteúdo fica, e o ilegível nunca é aprovação.
 5. **Recuperação orientada à conclusão**: a emenda toca só a fase citada e só o que o

@@ -418,6 +418,11 @@ async function escolherProviderModelo(
    * prova de que a rota o atende — no MiniMax, a documentação diz que não
    * atende. Esses aparecem com o motivo, e não são escolhidos da lista. Sem
    * resposta do OpenCode, a lista é a de sempre.
+   *
+   * O cruzamento não distingue caixa: a API e o catálogo podem grafar o mesmo
+   * modelo de jeitos diferentes, e o que vai para o OpenCode é sempre o
+   * identificador exato do catálogo dele. Outro providerID (`minimax-coding-plan`,
+   * `minimax-cn`) é outra rota, com outra credencial, e não entra.
    */
   const foraDoExecutor = new Map<string, string>();
   const limite = limiteDaRotaNoOpenCode(provider);
@@ -425,7 +430,8 @@ async function escolherProviderModelo(
     const [daApi, doOpenCode] = await Promise.all([listar(provider).catch(() => []), listar("opencode").catch(() => [])]);
     if (doOpenCode.length === 0) return [];
     const executaveis = doOpenCode.filter((model) => model.startsWith(prefixo));
-    const naApi = daApi.map((id) => `${prefixo}${id}`);
+    const doCatalogo = new Map(executaveis.map((model) => [model.toLowerCase(), model]));
+    const naApi = [...new Set(daApi.map((id) => doCatalogo.get(`${prefixo}${id}`.toLowerCase()) ?? `${prefixo}${id}`))];
     foraDoExecutor.clear();
     for (const model of naApi.filter((model) => !executaveis.includes(model))) {
       foraDoExecutor.set(model,

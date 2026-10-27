@@ -72,7 +72,7 @@ describe("§13.12 · sem pacote completo e íntegro, nada é publicado", () => {
 
   it.each([
     ["diagnóstico sem seção", { diagnosis: DIAGNOSTICO.replace("## Contornos tentados", "## Outra coisa") }, /sem as seções: Contornos tentados/u],
-    ["sem histórico de recuperação", { evidence: { ...pedido().evidence, recovery: [] } }, /histórico de recuperação/u],
+    ["sem histórico de recuperação", { evidence: { ...pedido().evidence, recovery: null } }, /histórico de recuperação/u],
     ["escada não esgotada", { evidence: { ...pedido().evidence, exhausted: false } }, /ainda há estratégia compatível/u],
     ["sem artefato", { evidence: { ...pedido().evidence, artifacts: [] } }, /sem artefatos/u],
     ["documento de outra versão", { document: { name: "project-phases.md", contract: "capivara-phases/v2", sha12: "aaaaaaaaaaaa" } }, /mudou desde o diagnóstico/u],
@@ -156,11 +156,16 @@ describe("§13.12 no runner · o BUILD encaminha o que o diagnóstico diz ser do
     "- [ ] **Task:** Listar os compromissos", "  - **Acceptance criteria:**", "    - A lista mostra o total de horas", "  - **Traces:** agenda", "",
     "## Open Questions", "", "Nenhuma.", "",
   ].join("\n");
-  const DIAGNOSTICO_UPSTREAM = "TASK 1: INCOMPLETE — B1: CRITERION: a lista mostra o total de horas; OBSERVED: o contrato GET /agenda não tem duração; " +
-    "EXPECTED: o total; UPSTREAM: PLAN — project-phases.md, critério da task 1 da Phase 1: o contrato da arquitetura não expõe duração, nenhuma implementação compatível mostra o total";
+  const CONTRATO = "GET /agenda devolve apenas títulos, sem duração";
+  const PROVA = "A resposta contém apenas títulos; não há duração disponível.";
+  const comProva = (diagnostico: string) => `${diagnostico}; «A lista mostra o total de horas» contra «${CONTRATO}»; LOCATION: \`agenda-contract.txt\`; EVIDENCE: «${PROVA}»`;
+  const DIAGNOSTICO_UPSTREAM = comProva("TASK 1: INCOMPLETE — B1: CRITERION: a lista mostra o total de horas; OBSERVED: o contrato GET /agenda não tem duração; " +
+    "EXPECTED: o total; UPSTREAM: PLAN — project-phases.md, critério da task 1 da Phase 1: o contrato da arquitetura não expõe duração, nenhuma implementação compatível mostra o total");
 
   async function fase(publicado: boolean, extra: { diagnostico?: string; architecture?: PhaseRunOptions["architecture"]; verificador?: () => string } = {}) {
     const RUN = "build-upstream000000";
+    await writeFile(join(root, ".capivara", "init", "architecture.md"), `# Arquitetura\n${CONTRATO}\n`);
+    await writeFile(join(root, "agenda-contract.txt"), PROVA);
     if (publicado) await writeFile(join(root, ".capivara", "init", "project-phases.md"), PLANO);
     else await rm(join(root, ".capivara", "init", "project-phases.md"), { force: true });
     const split = splitPhases(PLANO, root, RUN);
@@ -178,17 +183,15 @@ describe("§13.12 no runner · o BUILD encaminha o que o diagnóstico diz ser do
         chamadas.push(chamada.repair ? "reparo" : chamada.role);
         // Ninguém consegue mudar o que o documento impede: as correções não mudam nada.
         if (chamada.role === "builder" && chamada.attempt === 1) await writeFile(join(root, "agenda.ts"), "export const agenda = [];\n");
-        return ok(chamada.role === "verifier" && !chamada.repair ? (extra.verificador?.() ?? extra.diagnostico ?? DIAGNOSTICO_UPSTREAM) : "feito");
+        return ok(chamada.role === "verifier" && !chamada.repair ? (extra.verificador?.() ?? (extra.diagnostico ? comProva(extra.diagnostico) : DIAGNOSTICO_UPSTREAM)) : "feito");
       },
     });
     return { outcome, anuncios, chamadas, RUN };
   }
 
-  // A escada inteira — o reparo do coautor e o executor, cada um relido pela revisão —, e então o pacote: a fase falha apontando-o.
-  it("o reparo do verificador e o do executor voltam à revisão, e então o pacote: o defeito vira UPSTREAM_REPAIR_REQUIRED, nada é editado, e a fase falha", async () => {
+  it("sem reparo de código compatível, o conflito comprovado vira UPSTREAM_REPAIR_REQUIRED, nada é editado, e a fase falha", async () => {
     const { outcome, chamadas, RUN } = await fase(true);
-    // A releitura do mesmo código é uma: depois da correção do executor, que também não mudou nada, o achado vale sem outra.
-    expect(chamadas).toEqual(["builder", "verifier", "reparo", "verifier", "builder"]);
+    expect(chamadas).toEqual(["builder", "verifier"]);
     expect(outcome).toMatchObject({ status: "failed", gate: "gate 3 — verificação independente" });
     if (outcome.status !== "failed") return;
     const [repairId] = await readdir(pastaDosReparos(root));
@@ -197,7 +200,7 @@ describe("§13.12 no runner · o BUILD encaminha o que o diagnóstico diz ser do
     expect(outcome.cause).toContain(repairId!);
     const pacote = await validarReparo(root, repairId!);
     expect(pacote).toMatchObject({ ok: true, manifest: { target: "plan", document: { name: "project-phases.md" }, state: "UPSTREAM_REPAIR_REQUIRED" } });
-    if (pacote.ok) expect(pacote.evidence.recovery).toEqual([{ strategy: "verificador", result: "no-progress", cycle: 1 }, { strategy: "executor", result: "no-progress", cycle: 1 }]);
+    if (pacote.ok) expect(pacote.evidence.recovery).toEqual([]);
     const estado = JSON.parse(await readFile(join(defeitosDoRun(runPaths(root, RUN).root), "P01.json"), "utf8")) as { defects: { status: string }[] };
     expect(estado.defects[0]!.status).toBe("UPSTREAM_REPAIR_REQUIRED");
     expect(await readFile(join(root, ".capivara", "init", "project-phases.md"), "utf8")).toBe(PLANO);
@@ -207,7 +210,7 @@ describe("§13.12 no runner · o BUILD encaminha o que o diagnóstico diz ser do
     const { outcome, anuncios } = await fase(false);
     expect(outcome).toMatchObject({ status: "failed", gate: "gate 3 — verificação independente" });
     if (outcome.status === "failed") expect(outcome.cause).not.toContain("reparo documental");
-    expect(anuncios.filter((linha) => linha.includes("encaminhamento")), anuncios.join("\n")).toEqual([expect.stringContaining("o encaminhamento documental de P01-D1 foi recusado")]);
+    expect(anuncios.some(linha => linha.includes("pacote validado"))).toBe(false);
     expect(await readdir(pastaDosReparos(root)).catch(() => [])).toEqual([]);
   });
   // Da revisão adversarial do H.

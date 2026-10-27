@@ -18,7 +18,7 @@
 import { link, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
-import { defeitosDoRun, type Defect, type DefectGate } from "./defeitos.js";
+import { citacoes, defeitosDoRun, type Defect, type DefectGate } from "./defeitos.js";
 import type { CodeState } from "./evidencias.js";
 
 export const HANDOFF_CONTRACT = "capivara-verifier-handoff/v1" as const;
@@ -97,6 +97,17 @@ export function camposDoDiagnostico(texto: string): CamposDoDiagnostico {
     if (chave && campos[chave] === "") campos[chave] = valor;
   });
   return campos;
+}
+
+/** A→B seguido de B→A no mesmo diagnóstico. Não decide qual deles está certo. */
+export function reparoInverteDiagnostico(anterior: CamposDoDiagnostico, atual: CamposDoDiagnostico): boolean {
+  const contem = (a: string, b: string) => a === b || a.startsWith(`${b} `) || b.startsWith(`${a} `);
+  const observadas = citacoes(anterior.observed);
+  const correcoes = citacoes(anterior.minimalRepair);
+  const novas = correcoes.filter(c => !observadas.some(o => contem(o, c)));
+  const antigas = observadas.filter(o => !correcoes.some(c => contem(o, c)));
+  return novas.some(c => citacoes(atual.observed).some(o => contem(o, c)))
+    && antigas.some(o => citacoes(atual.minimalRepair).some(c => contem(o, c)));
 }
 
 function pastaDoDefeito(runRoot: string, identidade: HandoffIdentity): string {

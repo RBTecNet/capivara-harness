@@ -12,8 +12,10 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { admitir, citacoesConferidas } from "../audit/admissibilidade.js";
+import { camposDoDiagnostico } from "./handoff.js";
 import {
   checkUpstreamPackage,
   escopoDoReparo,
@@ -33,6 +35,57 @@ import { artifactPaths } from "../state/paths.js";
 
 export function pastaDosReparos(projectRoot: string): string {
   return join(artifactPaths(projectRoot).root, "repairs", "upstream");
+}
+
+/** A prova técnica já disponível; o Core confere os bytes, sem executar prosa do modelo. */
+export async function conferirEvidenciaTecnica(projectRoot: string, sourceRoot: string, raw: string, diagnosticos: readonly string[] = []): Promise<UpstreamEvidence["artifacts"]> {
+  const campos = camposDoDiagnostico(raw);
+  const artifacts: UpstreamEvidence["artifacts"] = [];
+  const bases = await Promise.all([...new Set([sourceRoot, projectRoot])].map(p => realpath(p)));
+  const excluidos = new Set(await Promise.all(diagnosticos.map(p => realpath(p).catch(() => resolve(p)))));
+  for (const match of `${campos.location} ${campos.evidence}`.matchAll(/`([^`]+)`/gu)) {
+    for (const base of bases) {
+      const caminho = await realpath(resolve(base, match[1]!)).catch(() => null);
+      if (!caminho || excluidos.has(caminho)) continue;
+      const rel = relative(base, caminho);
+      if (rel.startsWith("..") || isAbsolute(rel) || rel.startsWith(".capivara/init/")) continue;
+      const texto = await readFile(caminho, "utf8").catch(() => "");
+      if (!texto || citacoesConferidas({ where: "", problem: campos.evidence, fix: "" }, [{ nome: rel, texto }]).length === 0) continue;
+      artifacts.push({ path: relative(projectRoot, caminho), sha12: sha12(texto) });
+      break;
+    }
+  }
+  return artifacts;
+}
+
+/**
+ * A mesma admissibilidade do PLAN: duas passagens publicadas, mais a prova
+ * técnica citada pelo G3 e conferida no disco. Isto admite o encaminhamento,
+ * nunca a mudança da decisão. Prosa, hipótese e preferência não o autorizam.
+ */
+export async function conferirConflitoDocumental(projectRoot: string, sourceRoot: string, raw: string, diagnosticos: readonly string[] = []): Promise<{
+  document: string;
+  artifacts: UpstreamEvidence["artifacts"];
+} | null> {
+  const campos = camposDoDiagnostico(raw);
+  if (!/^PLAN\b/iu.test(campos.upstream) || !campos.criterion || !campos.observed || !campos.expected || !campos.evidence) return null;
+  const documentos = await Promise.all(["project-phases.md", "architecture.md", "environment.json", "skeleton.md"].map(async nome => ({
+    nome, texto: await readFile(join(artifactPaths(projectRoot).init, nome), "utf8").catch(() => ""),
+  })));
+  const document = ["project-phases.md", "architecture.md", "environment.json"].find(nome => campos.upstream.includes(nome));
+  if (!document) return null;
+  const finding = { classe: "CONTRADICTION", where: document, problem: campos.upstream, fix: campos.minimalRepair };
+  if (!admitir(finding, documentos, []).bloqueia) return null;
+  const citadas = citacoesConferidas(finding, documentos);
+  if (!citadas.some(c => c.lugares.includes(document))) return null;
+  // LOCATION/EVIDENCE já carregam os caminhos. Não executar o CHECK sugerido
+  // nem aceitar uma citação que só existe na resposta que alega o conflito.
+  const artifacts = await conferirEvidenciaTecnica(projectRoot, sourceRoot, raw, diagnosticos);
+  if (artifacts.length === 0) return null;
+  for (const doc of documentos.filter(d => citadas.some(c => c.lugares.includes(d.nome)))) {
+    artifacts.push({ path: relative(projectRoot, join(artifactPaths(projectRoot).init, doc.nome)), sha12: sha12(doc.texto) });
+  }
+  return { document, artifacts };
 }
 
 /** Os hashes dos documentos publicados que um reparo pode alcançar, lidos agora. */

@@ -29,13 +29,15 @@ export type DecisaoDeBanco = "embutido" | "informado" | "instalado" | "sem-banco
 const EMBUTIDO = "Ainda não existe: o projeto cria o dele, embutido em arquivo";
 const INFORMADO = "Já existe um servidor: eu informo a conexão no .env";
 const INSTALADO = "Instale um servidor nesta máquina durante o build";
-const SEM_BANCO = "A aplicação não guarda dados";
+const SEM_BANCO = "A aplicação não precisa de banco próprio";
 
 const ROTULOS: Record<string, DecisaoDeBanco> = {
   [EMBUTIDO]: "embutido",
   [INFORMADO]: "informado",
   [INSTALADO]: "instalado",
   [SEM_BANCO]: "sem-banco",
+  // Respostas já aprovadas em runs anteriores continuam válidas.
+  "A aplicação não guarda dados": "sem-banco",
 };
 
 /**
@@ -76,6 +78,18 @@ export function bancoNoPedido(request: string): string | null {
 export function perguntaDoBanco(request = ""): Question {
   const servidor = bancoNoPedido(request);
 
+  // Dados mantidos por um serviço, ferramenta ou arquivo existente não
+  // autorizam criar persistência da aplicação. A decisão explícita vale mais
+  // que a recomendação genérica; uma escolha diferente continua sendo do usuário.
+  const semBancoProprio = /\b(?:sem(?:\s+(?:usar|utilizar|manter|criar|ter))?|n[aã]o\s+(?:(?:deve|deverá|vai|pode)\s+)?(?:usa|usar|utiliza|utilizar|mant[eé]m|manter|cria|criar|tem|ter|precisa(?:\s+de)?))\s+(?:um[a]?\s+)?banco(?:\s+de\s+dados)?(?:\s+pr[oó]pri[oa]\b|(?=\s*(?:[.!;,]|$)))/iu.test(request)
+    || /\b(?:no|without)\s+(?:its\s+own\s+|an?\s+)?database(?=\s*(?:[.!;,]|$))/iu.test(request);
+  if (semBancoProprio) return {
+    ...PERGUNTA_BASE,
+    evidence: "O pedido exclui banco próprio da aplicação; administrar dados mantidos externamente não cria essa necessidade.",
+    recommended: SEM_BANCO,
+    recommendationBasis: "Preservar a restrição explícita do produto. Criar banco, configuração e migração ampliaria o escopo; confirme outra opção somente se quiser mudar essa decisão.",
+  };
+
   return {
     ...PERGUNTA_BASE,
     ...(servidor === null
@@ -101,7 +115,7 @@ const PERGUNTA_BASE: Question = {
     "e não pode instalar um servidor sem você saber.",
   decision: "De onde vem o banco desta aplicação?",
   why:
-    "Ela muda o que o projeto entrega e contra o que os testes rodam. Em qualquer resposta, a conexão fica " +
+    "Ela muda o que o projeto entrega e contra o que os testes rodam. Quando houver banco próprio, a conexão fica " +
     "no seu .env (nunca versionado), o projeto entrega um .env.example sem credencial e um comando de " +
     "migração que cria o esquema do zero — e os testes do harness rodam sempre contra um banco descartável, " +
     "nunca contra o seu. Se o pedido já disser qual banco usar, a resposta precisa ser a que combina com ele.",
@@ -127,7 +141,7 @@ const PERGUNTA_BASE: Question = {
     },
     {
       label: SEM_BANCO,
-      consequence: "Nenhuma fase cria esquema, migração ou .env: a aplicação não persiste nada entre execuções.",
+      consequence: "Não criar banco, esquema, migração ou .env só para o harness. Os dados podem continuar sob responsabilidade dos sistemas ou arquivos que o produto administra.",
     },
   ],
   recommended: EMBUTIDO,
@@ -276,7 +290,7 @@ export function regrasDeBanco(decisao: DecisaoDeBanco): SkeletonRule[] {
         "a origem do banco é uma variável de ambiente, e o banco DESCARTÁVEL é uma das origens que a " +
         "APLICAÇÃO aceita — não só a suíte dela. Subir a aplicação com o `.env.example`, numa máquina sem " +
         "servidor de banco nenhum instalado, tem de funcionar: é assim que os fluxos são percorridos, num " +
-        "navegador, contra o produto de pé. Um produto que só conecta no servidor de produção não pode ser " +
+        "ambiente de uso contratado, contra o produto de pé. Um produto que só conecta no servidor de produção não pode ser " +
         "aberto em máquina que não tenha esse servidor, e a verificação que mais importa deixa de existir",
     },
   ];

@@ -1,6 +1,6 @@
 # O contrato da Capivara — INIT, PLAN e BUILD
 
-Versão **0.8.1** (com a execução progressiva das fases, §130, a preparação, o raciocínio e o catálogo de modelos do §131, o produto fora do navegador do §133, o percurso de terminal da §134, a adoção da preparação pelo contrato do PLAN da §135 e a redução da verificação da §138: o plan de uma passada, uma revisão por fase, os fluxos só na aceitação final e os estados da entrega; e a regra de 26/10/2026, só existe `aceito`). Este documento descreve, num lugar só, o que cada estágio da
+Versão **0.8.2** (com a execução progressiva das fases, §130, a preparação, o raciocínio e o catálogo de modelos do §131, o produto fora do navegador do §133, o percurso de terminal da §134, a adoção da preparação pelo contrato do PLAN da §135 e a redução da verificação da §138: o plan de uma passada, uma revisão por fase, os fluxos só na aceitação final e os estados da entrega; e a regra de 26/10/2026, só existe `aceito`). Este documento descreve, num lugar só, o que cada estágio da
 Capivara recebe, decide, produz e não pode fazer, e como o trabalho passa de um
 para o outro. O porquê de cada regra está numerado em `docs/PLANO.md` (§NNN); o
 estado do trabalho, em `docs/HANDOFF.md`. Quando este documento e o código
@@ -385,7 +385,7 @@ flowchart TD
 | estado | quando |
 |---|---|
 | `aceito` | todas as fases aceitas — a suíte e a revisão aprovaram — e a aceitação limpa |
-| `verificação inconclusiva` | uma verificação não pôde rodar — a ferramenta, a plataforma, a revisão que não se leu nem na segunda chamada, fluxos declarados que nada alcança ou que foram desligados (`--no-acceptance`, `--no-flows`) —, dita com o porquê |
+| `verificação inconclusiva` | uma verificação não pôde rodar — a ferramenta, a plataforma, a revisão que não se leu nem na segunda chamada ou cujos diagnósticos inversos não têm prova nova para arbitrar, fluxos declarados que nada alcança ou que foram desligados (`--no-acceptance`, `--no-flows`) —, dita com o porquê |
 | `falhou` | a escada inteira não fechou uma fase, ou a aceitação reprovou o produto e o reparo não o consertou, ou o build parou antes do fim |
 
 Nenhuma fase fecha com pendência. O reparo do que a revisão achou volta a ela (a
@@ -395,6 +395,15 @@ escrever, faz uma sessão como executor antes de a fase falhar. O build que falh
 é retomável, e `capivara build` de novo continua de onde parou, sem refazer o que
 ficou verde; a fase que uma versão anterior fechou sem aceitar volta a ser verificada.
 
+Um conflito técnico no contrato segue pela recuperação upstream existente antes
+de outra escrita incompatível: o Core confere duas passagens publicadas e a prova
+técnica citada em um artefato existente. O próprio diagnóstico não é prova. O
+pacote mantém o código e as evidências; o BUILD não muda a decisão aprovada. Uma
+recomendação inversa para o mesmo defeito, sem prova nova para arbitrar, deixa a
+revisão inconclusiva; uma regressão comprovada continua no reparo normal. A edição
+documental automática permanece desabilitada (§125 H); a retomada revalida o que
+a correção aprovada atingir.
+
 ## Paradas e retomada
 
 | código | significado |
@@ -402,7 +411,7 @@ ficou verde; a fase que uma versão anterior fechou sem aceitar volta a ser veri
 | 0 | aceito |
 | 1 | erro de contrato, configuração ou preflight |
 | 2 | falhou: pausado e retomável |
-| 3 | verificação inconclusiva: uma verificação não pôde rodar, dita com o porquê |
+| 3 | verificação inconclusiva: uma verificação não pôde rodar ou sustentar um diagnóstico consistente, dita com o porquê |
 
 Toda parada diz o que estava em aberto, o que foi tentado e como retomar. Nada do que
 foi publicado ou aprovado se perde numa parada.

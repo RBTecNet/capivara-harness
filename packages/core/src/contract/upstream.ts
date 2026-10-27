@@ -64,7 +64,7 @@ export interface UpstreamManifest {
 export interface UpstreamEvidence {
   artifacts: { path: string; sha12: string; lines?: string }[];
   handoffs: string[];
-  /** As tentativas no BUILD antes do encaminhamento: o último recurso tem de ser o último. */
+  /** As tentativas reais no BUILD; vazia quando a prova já exclui reparos de código compatíveis. */
   recovery: { strategy: string; result: string; cycle: number }[];
   /** A escada do defeito acabou sem estratégia com informação nova. */
   exhausted: boolean;
@@ -182,7 +182,7 @@ export function checkUpstreamPackage(pacote: PacoteLido, documentos: Readonly<Re
       errors.push("evidence.json sem artefatos com caminho e sha12");
     }
     if (!Array.isArray(evidence.handoffs)) errors.push("evidence.json sem a lista de handoffs");
-    if (!Array.isArray(evidence.recovery) || evidence.recovery.length === 0) errors.push("evidence.json sem o histórico de recuperação no BUILD: o encaminhamento é o último recurso");
+    if (!Array.isArray(evidence.recovery)) errors.push("evidence.json sem o histórico de recuperação no BUILD: o encaminhamento é o último recurso");
     if (evidence.exhausted !== true) errors.push("evidence.json não registra a escada esgotada: ainda há estratégia compatível no BUILD");
   }
   return errors.length === 0 ? { ok: true, manifest: m as UpstreamManifest, evidence: evidence! } : { ok: false, errors };

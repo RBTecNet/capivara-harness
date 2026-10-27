@@ -42,7 +42,7 @@ export interface VerifierContext {
    * Os defeitos desta fase que o build já conhece — abertos e resolvidos —,
    * para o verificador dizer quando um achado é o mesmo: `[P03-D1]` na linha.
    */
-  defeitosConhecidos?: readonly { id: string; status: string; gate: string; summary: string }[];
+  defeitosConhecidos?: readonly { id: string; status: string; gate: string; summary: string; diagnoses?: readonly string[] }[];
   /** A fase passa pelo gate 4: o executor recebeu o contrato de subida dele (§107), e o verificador precisa conhecê-lo (§133). */
   temFluxos?: boolean;
 }
@@ -171,13 +171,17 @@ function confirmarBlock(tasks: readonly { index: number; title: string; mudancas
 }
 
 /** Os defeitos que o build já conhece, para o achado repetido manter a identidade (§125). */
-function defeitosBlock(defeitos: readonly { id: string; status: string; gate: string; summary: string }[]): string[] {
+function defeitosBlock(defeitos: NonNullable<VerifierContext["defeitosConhecidos"]>): string[] {
   if (defeitos.length === 0) return [];
   return [
     "",
     "## Defects of this phase the harness already knows",
-    ...defeitos.map((defeito) => `- [${defeito.id}] ${defeito.gate}, ${defeito.status}: ${defeito.summary}`),
+    ...defeitos.flatMap((defeito) => [`- [${defeito.id}] ${defeito.gate}, ${defeito.status}: ${defeito.summary}`,
+      ...(defeito.diagnoses ?? []).map(d => `  Previous diagnosis (evidence, not authority): ${d}`)]),
     "When an INCOMPLETE finding is one of these, start its text with the id in brackets, e.g. `[" + (defeitos[0]?.id ?? "P01-D1") + "]`.",
+    "Before recommending an inverse repair, compare the earlier OBSERVED, FIX and CHECK with the current code.",
+    "Distinguish an actual regression or a valid contract violation from inconsistent advice or a technical impossibility in the plan.",
+    "If the plan is impossible, report the evidenced UPSTREAM conflict below; do not ask to restore the already disproven operation.",
   ];
 }
 
@@ -235,7 +239,12 @@ export function verifyPrompt(context: VerifierContext): string {
     "contradict each other, the phase demonstrably needs a dependency the approved infrastructure does not",
     "declare — add `UPSTREAM: PLAN — <document and exact passage>: <why no compatible implementation",
     "exists>` (INIT instead of PLAN when the product definition in skeleton.md is the source). It is a claim, not a",
-    "way out: the harness forwards it only after the build exhausted every repair, and keeps the task INCOMPLETE.",
+    "way out: the harness checks the evidence, keeps the task INCOMPLETE and forwards it to the existing upstream recovery.",
+    "Quote BOTH incompatible published passages literally between « » in UPSTREAM, naming the affected document.",
+    "In EVIDENCE quote the technical behaviour literally between « », with its existing project file or captured command-output path in backticks in LOCATION or EVIDENCE.",
+    "Explain why those facts prevent a compatible implementation. A hypothesis or a preferred mechanism is insufficient.",
+    "A proven documentary conflict leaves no compatible code repair: preserve working code for upstream approval.",
+    "Valid explicit decisions of the plan remain binding; equivalent internals that honour them are DONE, not an UPSTREAM conflict.",
     "A finding without the unmet requirement, the observed behaviour and the expected behaviour is not a material block.",
     "For each missing criterion include: (1) which requirement is unmet, (2) the file, symbol or test",
     "and its actual behaviour, (3) the smallest concrete change that closes it, and (4) the exact",

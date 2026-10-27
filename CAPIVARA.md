@@ -26,7 +26,7 @@ para lados opostos, este vence o fail-closed:
 - **Fail-closed vale para o que se prova falso**: protocolo ilegível nunca é aprovação, citação inventada nunca bloqueia, suíte vermelha nunca é verde.
 - **O único fim aceitável é `aceito`.** O `init` e o `plan` fecham as lacunas antes do código: a dúvida que sobra é perguntada ao desenvolvedor, e a pergunta sem resposta no prazo segue com a leitura recomendada, como decisão. O `build` não pergunta: conserta até o código cumprir o que foi decidido, e esgotada de verdade a escada a fase falha, com a causa exata. Não há entrega com pendência.
 - **Verificação além do orçamento é defeito do harness**, não do produto nem do modelo. A medida é `node packages/core/scripts/medir-verificacao.mjs`, e `packages/core/test/architecture/orcamento-de-prova.spec.ts` falha quando o motor pede mais chamadas do que a redução mediu.
-- O build termina em `aceito`, `verificação inconclusiva` (só a verificação que não pôde rodar, dita) ou `falhou` (a causa exata, e o build para na fase que não fechou).
+- O build termina em `aceito`, `verificação inconclusiva` (a verificação que não pôde rodar ou sustentar um diagnóstico consistente, dita) ou `falhou` (a causa exata, e o build para na fase que não fechou).
 - As garantias G-1 a G-4 do catálogo não se trocam por economia.
 
 ## Comandos
@@ -38,6 +38,14 @@ para lados opostos, este vence o fail-closed:
 | `npm test` | Suíte com vitest |
 | `npm run check` | build + typecheck + test — o portão antes de qualquer commit |
 | `npm run install:user` | Instala o binário `capivara` em `~/.local` |
+
+## Entrega autorizada
+
+O desenvolvedor autoriza, após alterações neste repositório, atualizar a versão,
+fazer commit, fazer push na branch de trabalho e executar `npm run install:user`,
+sem pedir confirmação novamente. Execute `npm run check` antes do commit e
+confira a versão instalada ao concluir. Essa autorização não inclui merge nem
+mudanças nos requisitos do produto.
 
 ## Runtime
 
@@ -85,8 +93,13 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-Na versão 0.8.1, `npm run check` passa: build, typecheck e **3134 testes**, incluindo o catálogo de
+Na versão 0.8.2, `npm run check` passa: build, typecheck e **3147 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
+
+A 0.8.2 impede que diagnósticos inversos desfaçam uma correção sem prova nova:
+conflito documental comprovado segue pela recuperação upstream existente; sem
+prova suficiente, a revisão fica inconclusiva. O INIT respeita a restrição de
+banco próprio ao recomendar sua ausência, sem substituir decisões aprovadas.
 
 A 0.8.0 trouxe a §138, e a 0.8.1 as correções de 26/10/2026: o Core exige
 menos trabalho dos modelos, em cinco etapas, cada uma com a medida de antes e de

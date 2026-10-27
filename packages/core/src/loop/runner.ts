@@ -30,7 +30,7 @@ import { sharedContractFromSkeleton } from "../prompts/acceptance-policy.js";
 import { portaLivre } from "./ports.js";
 import { faltaOPacoteDoRunner } from "./dependencias.js";
 import { MEMORIAS_DIR, recolherMemorias, type MemoriaParaRegistrar } from "../mcp/index.js";
-import { DOCUMENTOS_DA_ETAPA, ENVIRONMENT_CONTRACT, phaseReferences, recorteDaFase, sha12 } from "../contract/index.js";
+import { ENVIRONMENT_CONTRACT, phaseReferences, recorteDaFase, sha12 } from "../contract/index.js";
 import type { SkeletonWorkflow, TaskBlock } from "../contract/index.js";
 import type { PhaseSession } from "./split.js";
 import { lerResultadosDotnet, limparResultadosDotnet, RESULTADOS_DOTNET, resolveE2eCommand, type TestCommand } from "./testcmd.js";
@@ -57,11 +57,11 @@ import {
   type PartesDaImplementacao,
 } from "./defeitos.js";
 import { dividirEmPartes, ORCAMENTO_DA_PARTE } from "./partes.js";
-import { camposDoDiagnostico, gravarHandoff, HANDOFF_CONTRACT, lerHandoff, renderHandoff } from "./handoff.js";
+import { camposDoDiagnostico, gravarHandoff, HANDOFF_CONTRACT, lerHandoff, renderHandoff, reparoInverteDiagnostico } from "./handoff.js";
 import { criarNarrador, type Transicao } from "./narrador.js";
 import { escopoDaTask, impactoNaSuite, impactoNaTask } from "./impacto.js";
 import { shaDaFase } from "./ledger.js";
-import { documentosPublicados, pastaDosReparos, publicarReparo, validarReparo } from "./upstream.js";
+import { conferirConflitoDocumental, conferirEvidenciaTecnica, documentosPublicados, pastaDosReparos, publicarReparo, validarReparo } from "./upstream.js";
 import { bancosDeclarados } from "./passagem.js";
 import type { ContratoDaRetomada } from "../provider/cli/types.js";
 
@@ -714,8 +714,20 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     await registro.salvar();
   };
 
-  const defeitosConhecidos = () =>
-    estado.defects.map((defeito) => ({ id: defeito.defectId, status: defeito.status, gate: defeito.gates.at(-1) ?? defeito.discovered.gate, summary: defeito.summary }));
+  const defeitosConhecidos = async () =>
+    Promise.all(estado.defects.map(async (defeito) => {
+      const original = defeito.handoffs[0] ? await lerHandoff(join(paths.root, defeito.handoffs[0])) : null;
+      return { id: defeito.defectId, status: defeito.status, gate: defeito.gates.at(-1) ?? defeito.discovered.gate, summary: defeito.summary,
+        diagnoses: [...new Set([original?.raw ?? "", ...defeito.rediagnoses.map(d => d.excerpt), defeito.detail].filter(Boolean))],
+      };
+    }));
+
+  // O próprio veredito (ou outro handoff do G3) não prova a alegação técnica.
+  const fontesDeDiagnostico = (): string[] => [
+    ...estado.defects.flatMap(d => d.handoffs.map(p => join(paths.root, p))),
+    ...livro.historico().filter(evidence => evidence.phaseId === session.id && evidence.gate === "G3")
+      .flatMap(evidence => evidence.artifactRefs.map(ref => join(paths.root, ref.path))),
+  ];
 
   /** Registra o achado, grava o handoff quando o verificador diagnosticou, e diz na tela. */
   const achar = async (achado: DefeitoEncontrado, handoff?: { raw: string; sessionId?: string; purpose?: string; log?: string }): Promise<Defect> => {
@@ -1245,7 +1257,7 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       taskCount: session.taskCount,
       ...(plano.aprovadas.length > 0 ? { tasksJaAprovadas: plano.aprovadas } : {}),
       ...(plano.confirmar.length > 0 ? { tasksParaConfirmar: plano.confirmar } : {}),
-      ...(estado.defects.length > 0 ? { defeitosConhecidos: defeitosConhecidos() } : {}),
+      ...(estado.defects.length > 0 ? { defeitosConhecidos: await defeitosConhecidos() } : {}),
       // O mesmo critério do contexto do executor: quem julga conhece o contrato de subida que ele recebeu (§133).
       ...(options.flows !== undefined ? { temFluxos: true } : {}),
     });
@@ -1338,9 +1350,9 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
           nature: "task",
           severity: severidadeDoAchado(verdict.missing),
           anchors: { task: verdict.index, ...(task ? { taskSha: shaDaTask(task) } : {}), quotes: citacoes(verdict.missing) },
-          // A mesma falha reescrita em outras palavras não é progresso: o que identifica é o critério que não se cumpre.
-          // Sem o rótulo, a identidade é a task: prosa diferente para a mesma task não é progresso (spec §5.3).
-          assinaturaDe: camposDoDiagnostico(verdict.missing).criterion || `task ${verdict.index} incompleta`,
+          // A redação de CRITERION também pode mudar sem mudar o defeito.
+          // Uma task ainda incompleta não ganha progresso só por outra prosa.
+          assinaturaDe: `task ${verdict.index} incompleta`,
           ...(provaDaTask.get(verdict.index) ? { evidenceId: provaDaTask.get(verdict.index)! } : {}),
           ...(options.architecture ? { components: options.architecture.componentes } : {}),
           summary: `TASK ${verdict.index}${task ? ` (${task.title})` : ""}: ${verdict.missing.split(/[;\n]/u)[0]?.slice(0, 160) ?? ""}`,
@@ -1605,9 +1617,9 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
   let upstreamConferido = false;
 
   /**
-   * O último recurso (§125 H; spec §8): a escada do BUILD acabou sem
-   * informação nova, e o verificador disse — no diagnóstico, com `UPSTREAM:` —
-   * que o defeito é do documento aprovado. O Core monta o pacote do que já
+   * A escada do BUILD não tem reparo compatível com um conflito documental
+   * comprovado. O verificador o aponta com `UPSTREAM:`; o Core confere as
+   * citações e a prova técnica, e monta o pacote do que já
    * está registrado (handoff, tentativas, provas), valida e publica; só então
    * o defeito vira `UPSTREAM_REPAIR_REQUIRED`. Pacote recusado não vira estado,
    * e nenhum agente é chamado para inventar a correção.
@@ -1625,7 +1637,10 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     for (const defeito of estado.defects.filter((cada) => cada.status === "OPEN" || cada.status === "ESCALATED" || cada.status === "AWAITING_VALIDATION")) {
       const ultimo = defeito.handoffs.at(-1);
       const handoff = ultimo ? await lerHandoff(join(paths.root, ultimo)) : null;
-      const alegacao = (handoff?.upstream ?? "") || camposDoDiagnostico(defeito.rediagnoses.at(-1)?.excerpt ?? "").upstream;
+      // O handoff é imutável por ciclo; o rediagnóstico pode trazer a prova
+      // que ainda não existia na primeira leitura. Não a esconder pelo original.
+      const diagnostico = camposDoDiagnostico(defeito.detail);
+      const alegacao = diagnostico.upstream;
       const alvo = /^\s*INIT\b/iu.test(alegacao) ? "init" : /^\s*PLAN\b/iu.test(alegacao) ? "plan" : null;
       if (alvo === null) continue;
       if (alvo === "init") {
@@ -1634,19 +1649,22 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
         continue;
       }
       // Só os documentos da etapa destino: citar um de outra etapa não muda a autoridade do reparo.
-      const nome = DOCUMENTOS_DA_ETAPA[alvo].find((documento) => alegacao.includes(documento)) ?? DOCUMENTOS_DA_ETAPA[alvo][0]!;
+      const conflito = await conferirConflitoDocumental(options.projectRoot, arvore, defeito.detail, fontesDeDiagnostico());
+      if (!conflito) continue;
+      const nome = conflito.document;
       const documentos = await documentosPublicados(options.projectRoot);
       const gateDoDefeito = defeito.gates.at(-1) ?? defeito.discovered.gate;
-      const artefatos = livro.daFase(session.id).map(({ evidence }) => evidence)
+      const artefatos = [...conflito.artifacts, ...livro.daFase(session.id).map(({ evidence }) => evidence)
         .filter((evidencia) => evidencia.outcome === "REPAIR_REQUIRED" && evidencia.gate === gateDoDefeito)
-        .flatMap((evidencia) => evidencia.artifactRefs.map((ref) => ({ path: daRaiz(ref.path), sha12: ref.sha12 })));
+        .flatMap((evidencia) => evidencia.artifactRefs.map((ref) => ({ path: daRaiz(ref.path), sha12: ref.sha12 })))];
       // A tentativa sem segunda revisão entra como foi: tentada, e não provada (etapa 4 da redução).
       const tentativas = defeito.attempts.map((tentativa) => ({ ...tentativa, result: tentativa.result === "pending" ? "sem segunda revisão" : tentativa.result }));
       const diagnosis = [
         "## Defeito", `${defeito.defectId} (${defeito.nature}, ${gateDoDefeito}): ${defeito.summary}${defeito.criterion ? `\nCritério: ${defeito.criterion}` : ""}`, "",
-        "## Observado", defeito.observed || defeito.detail.split("\n").slice(0, 12).join("\n"), "",
-        "## Esperado", defeito.expected || "o critério da fase satisfeito pelo código, sem contradizer o documento aprovado", "",
-        "## Contornos tentados", ...tentativas.map((tentativa) => `- ciclo ${tentativa.cycle}, ${tentativa.strategy}: ${tentativa.result}`), "",
+        "## Observado", diagnostico.observed || defeito.observed, diagnostico.evidence || handoff?.evidence || "", "",
+        "## Esperado", diagnostico.expected || defeito.expected, "",
+        "## Contornos tentados", ...(tentativas.length ? tentativas.map((tentativa) => `- ciclo ${tentativa.cycle}, ${tentativa.strategy}: ${tentativa.result}`) : ["Nenhum reparo de código compatível com as passagens e a prova técnica conferidas."]),
+        "", "Diagnósticos preservados:", handoff?.raw ?? "", ...defeito.rediagnoses.map(d => d.excerpt), "",
         "## Limites da edição", alegacao, "",
       ].join("\n");
       const publicado = await publicarReparo(options.projectRoot, {
@@ -1884,9 +1902,9 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
     return await fecharFalha(gateDaFalha, `${motivo}\n\n${cause}`, motivo);
   };
 
-  /** A revisão da fase não pôde ser lida, nem na segunda chamada: a verificação não rodou, e a fase não fecha sem ela. */
+  /** A revisão é ilegível ou não sustenta um diagnóstico consistente: a fase não fecha sem ela. */
   const pararInconclusiva = async (motivo: string): Promise<PhaseOutcome> => {
-    const saida = await fecharFalha("gate 3 — verificação independente", `verificação inconclusiva: ${motivo}`, "a revisão da fase não pôde ser lida; a fase não fecha sem ela");
+    const saida = await fecharFalha("gate 3 — verificação independente", `verificação inconclusiva: ${motivo}`, "a revisão da fase é inconclusiva; a fase não fecha sem verificação independente");
     return saida.status === "failed" ? { ...saida, inconclusiva: motivo } : saida;
   };
 
@@ -1942,6 +1960,21 @@ export async function runPhase(options: PhaseRunOptions): Promise<PhaseOutcome> 
       if (julgandoParcial) {
         const { gate: gateDaFalha, cause } = causaDaParada();
         return await pararPorSessao(gateDaFalha, cause);
+      }
+      // Com o conflito documentado, uma escrita no código não traz informação
+      // nova. Esgotam-se as estratégias compatíveis, sem gastar uma alternância.
+      await encaminharUpstream();
+      if (pacoteUpstream !== null) return await falharComOsDefeitos(`reparo documental necessário: ${pacoteUpstream}; código e evidências preservados, nenhum documento foi alterado`);
+      for (const defeito of estado.defects.filter(d => d.status === "OPEN" && d.gates.at(-1) === "G3" && d.handoffs.length > 0 && d.attempts.some(t => t.changed === true))) {
+        const original = await lerHandoff(join(paths.root, defeito.handoffs[0]!));
+        const atual = camposDoDiagnostico(defeito.detail);
+        // Só a inversão explícita do MESMO defeito, citado pelo verificador.
+        // Nova falha com prova técnica segue o reparo normal. Sem prova para
+        // arbitrar, a revisão é inconclusiva: não culpar o executor nem mudar PLAN.
+        if (!original || !original.documents.every(d => documentosDaFase().some(atual => atual.name === d.name && atual.sha12 === d.sha12))
+          || !defeito.detail.includes(`[${defeito.defectId}]`) || !reparoInverteDiagnostico(original, atual)) continue;
+        const provaNova = atual.evidence !== original.evidence && (await conferirEvidenciaTecnica(options.projectRoot, arvore, defeito.detail, fontesDeDiagnostico())).length > 0;
+        if (!provaNova) return await pararInconclusiva(`diagnósticos incompatíveis de ${defeito.defectId}: a revisão pede restaurar a operação que antes mandou corrigir, sem nova prova técnica ou conflito upstream comprovado; código e handoffs preservados`);
       }
       for (;;) {
         const acao = registro.planejar(orcamento, disponivel);

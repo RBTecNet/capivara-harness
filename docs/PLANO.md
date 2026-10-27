@@ -14716,3 +14716,26 @@ revalidação; o ledger de fases fechadas passa a guardar `estado` e
 Na API: `decideStandoff`, `maxRehearsalRounds` e `maxCriteriaPerRehearsalBatch`
 saíram de `InitOptions`; `PhaseRunOptions.flows` ficou só com `workflows` e
 `resolveStart`; `BuildOutcome` ganhou `estado`, `pendencias` e o código 3.
+
+### 138.6 A recuperação que preserva correções — 0.8.2
+
+A regra de entrega da 0.8.1 continua: a fase só fecha aceita. Um conflito técnico
+entre a prescrição do PLAN e o resultado obrigatório não é resolvido por alternar
+código. Antes de outra escrita, o Core reutiliza a admissibilidade de
+`CONTRADICTION`, confere as passagens publicadas e a citação técnica num artefato
+existente, e publica o pacote upstream da §125 H. As tentativas registradas são
+as reais: o histórico pode ser vazio quando já não há reparo de código compatível.
+O BUILD não edita a decisão aprovada nem transforma o conflito em aprovação.
+
+A revisão recebe os diagnósticos anteriores. A inversão explícita da correção do
+mesmo defeito, sob os mesmos documentos e sem prova técnica nova, fica em
+verificação inconclusiva; regressão comprovada mantém o reparo normal. Prosa
+reformulada não conta como progresso da task ainda incompleta. A edição
+documental automática permanece desabilitada; uma correção aprovada invalida só
+a prova atingida na retomada. Nenhum gate, auditor, protocolo ou orçamento novo.
+
+A pergunta de banco do INIT distingue banco próprio de dados administrados
+externamente. A restrição explícita orienta a recomendação; escolher outra coisa
+continua sendo decisão do usuário. As regras de banco não prescrevem navegador
+para toda interface. A proveniência e as medidas antes/depois estão no registro
+de 27/10/2026 em `docs/HANDOFF.md`.

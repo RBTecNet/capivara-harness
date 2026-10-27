@@ -408,7 +408,7 @@ describe("o esqueleto é conferido no laço, não só no portão", () => {
     expect(tentativas).toHaveLength(2);
   });
 
-  it("insistindo no defeito, o run publica e o portão reporta NOT READY em vez de estourar", async () => {
+  it("insistindo no defeito, esgota as três tentativas com diagnóstico e não publica o esqueleto incompleto", async () => {
     const steps = skeletonPath();
     steps.unshift({
       match: { role: "writer", stage: "authoring", subject: "skeleton" },
@@ -416,10 +416,12 @@ describe("o esqueleto é conferido no laço, não só no portão", () => {
       repeat: true,
     });
 
-    const { outcome, agent } = await init(steps);
+    const agent = fakeAgent(steps);
+    const run = runInit({ projectRoot, request, ...comum, stage: "init", call: agent.call });
+    await expect(run).rejects.toBeInstanceOf(InitBlockedError);
+    await expect(run).rejects.toThrow("US-2.2");
     expect(agent.calls.filter((call) => call.subject === "skeleton" && call.stage === "authoring")).toHaveLength(3);
-    expect(outcome.readiness.ready).toBe(false);
-    expect(outcome.rendered).toContain("US-2.2");
+    await expect(readFile(join(projectRoot, ".capivara/init/skeleton.md"), "utf8")).rejects.toThrow("ENOENT");
   });
 });
 

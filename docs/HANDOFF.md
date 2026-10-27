@@ -14,12 +14,43 @@ está, o que não está feito, e as armadilhas que custaram caro para descobrir.
 
 | | |
 |---|---|
-| branch | `refactor/core-exige-menos` (§138 e as correções de 26 e 27/10/2026, 0.8.2, sem merge) sobre a `main` (0.7.10); a §136 e a §137 estão em `fix/ensaio-eco-136`, fora desta base; na `main`, a cadeia §133–§135 (`fix/cooperacao-build-133` → `fix/conclusao-generalista-134` → `fix/preparacao-135`) entrou por fast-forward em 24/10/2026, e as três branches foram apagadas, local e no `origin`; a §129–§132 entrou em 22/10/2026 (a §122–§128 em 21/10/2026), e as branches de ajuste delas foram apagadas, local e no `origin` |
-| versão | 0.8.2 (conflitos PLAN × BUILD e restrição de banco próprio); 0.8.1 na `refactor/core-exige-menos` (§138 e as correções de 26/10/2026: só existe `aceito`); 0.8.0 sem as correções; 0.7.10 na `main` (§135; 0.7.9 sem a §135, 0.7.8 sem a §134, 0.7.7 sem as correções da §133.9; a §132 entrou na `main` sem versão própria, sobre a 0.7.6); planos da 0.6.x e da 0.7.x valem na 0.8.0 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
-| suíte | 3147 testes em 187 arquivos na 0.8.2, `npm run check` verde (rc=0); 3134 testes em 185 arquivos na 0.8.1, `npm run check` verde (rc=0); 3000 testes em 171 arquivos na 0.8.0 (§138), `npm run check` verde (rc=0; a redução apagou os testes do que saiu, listados no relatório de cada etapa, e o `coerencia-temporal-127`, instável, saiu com a oscilação); 3390 testes em 173 arquivos na 0.7.10 (§135), `npm run check` verde (rc=0, rodado sozinho; com o revisor rodando ao lado, o `coerencia-temporal-127` caiu uma vez; na rodada da versão, duas execuções logo depois de load 19 caíram, com testes diferentes em cada uma: três da §135 cuja sonda real do Vite, `npm exec`, passou do prazo de 5 s das sondas, o conflito binário do `paralelo` e o `prompt-engineer/terminal`, morto por prazo; todos passaram sozinhos e na rodada seguinte, com load abaixo de 3); 3321 testes em 172 arquivos na 0.7.9 (§134), `npm run check` verde (rc=0; o `coerencia-temporal-127` caiu uma vez sob load 12 e passou intercalado com a HEAD e na rodada seguinte); 3240 testes em 170 arquivos na 0.7.8 (§133.9), `npm run check` verde (rc=0); 3234 na 0.7.7 (§133), `npm run check` verde (rc=0; as duas instabilidades conhecidas, `coerencia-temporal-127` e `integridade-122`, caíram uma vez cada sob load 10–13 e passaram na rodada seguinte); 3203 em 168 na `main` com a §132, `npm run check` verde (rc=0); 3130 em 167 na 0.7.6 sem a §132 (3121 em 166 na 0.7.5), `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na 0.7.4 (§130); 3020 em 163 na 0.7.3 (§129); 2989 em 161 na 0.7.2 (2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
+| branch | `refactor/core-exige-menos` (§138 e as correções de 26 e 27/10/2026, 0.8.3, sem merge) sobre a `main` (0.7.10); a §136 e a §137 estão em `fix/ensaio-eco-136`, fora desta base; na `main`, a cadeia §133–§135 (`fix/cooperacao-build-133` → `fix/conclusao-generalista-134` → `fix/preparacao-135`) entrou por fast-forward em 24/10/2026, e as três branches foram apagadas, local e no `origin`; a §129–§132 entrou em 22/10/2026 (a §122–§128 em 21/10/2026), e as branches de ajuste delas foram apagadas, local e no `origin` |
+| versão | 0.8.3 (preservação de cobertura na recuperação do INIT); 0.8.2 (conflitos PLAN × BUILD e restrição de banco próprio); 0.8.1 na `refactor/core-exige-menos` (§138 e as correções de 26/10/2026: só existe `aceito`); 0.8.0 sem as correções; 0.7.10 na `main` (§135; 0.7.9 sem a §135, 0.7.8 sem a §134, 0.7.7 sem as correções da §133.9; a §132 entrou na `main` sem versão própria, sobre a 0.7.6); planos da 0.6.x e da 0.7.x valem na 0.8.0 (a arquitetura com teste nos componentes é redesenhada, §129.10); os da 0.5.0 e anteriores são incompatíveis, ver §116 e §115.26 |
+| suíte | 3153 testes em 188 arquivos na 0.8.3, `npm run check` verde (rc=0); 3147 testes em 187 arquivos na 0.8.2, `npm run check` verde (rc=0); 3134 testes em 185 arquivos na 0.8.1, `npm run check` verde (rc=0); 3000 testes em 171 arquivos na 0.8.0 (§138), `npm run check` verde (rc=0; a redução apagou os testes do que saiu, listados no relatório de cada etapa, e o `coerencia-temporal-127`, instável, saiu com a oscilação); 3390 testes em 173 arquivos na 0.7.10 (§135), `npm run check` verde (rc=0, rodado sozinho; com o revisor rodando ao lado, o `coerencia-temporal-127` caiu uma vez; na rodada da versão, duas execuções logo depois de load 19 caíram, com testes diferentes em cada uma: três da §135 cuja sonda real do Vite, `npm exec`, passou do prazo de 5 s das sondas, o conflito binário do `paralelo` e o `prompt-engineer/terminal`, morto por prazo; todos passaram sozinhos e na rodada seguinte, com load abaixo de 3); 3321 testes em 172 arquivos na 0.7.9 (§134), `npm run check` verde (rc=0; o `coerencia-temporal-127` caiu uma vez sob load 12 e passou intercalado com a HEAD e na rodada seguinte); 3240 testes em 170 arquivos na 0.7.8 (§133.9), `npm run check` verde (rc=0); 3234 na 0.7.7 (§133), `npm run check` verde (rc=0; as duas instabilidades conhecidas, `coerencia-temporal-127` e `integridade-122`, caíram uma vez cada sob load 10–13 e passaram na rodada seguinte); 3203 em 168 na `main` com a §132, `npm run check` verde (rc=0); 3130 em 167 na 0.7.6 sem a §132 (3121 em 166 na 0.7.5), `npm run check` verde (rc=0; um teste de sobreposição temporal do §127 falha também no código base sob carga alta); 3052 em 164 na 0.7.4 (§130); 3020 em 163 na 0.7.3 (§129); 2989 em 161 na 0.7.2 (2866 na §125, 2889 na §126, 2933 na §127); `npm run check` verde |
 | estágios | `survey` (opcional) → `init` → `plan` → `build` → `change` (quantas vezes precisar) |
 | CLIs integradas | `codex`, `claude`, `opencode`, `agy`, `cursor` |
 
+
+## 2026-10-27 — Cobertura preservada na recuperação do INIT (0.8.3)
+
+No `init-19468373438e`, o auditor omitiu os cinco workflows em `covers` e
+reorganizou fases e fluxos. A omissão já estava na resposta; normalização,
+publicação e leitura não a introduziram. `buildFromSkeleton`, em
+`init/orchestrator.ts`, atribuía o candidato a `esqueleto` antes do PLAN READY:
+a terceira tentativa reprovada permanecia selecionada e era publicada ao sair
+do laço. As duas respostas anteriores não eram consideradas nessa seleção.
+
+O candidato só passa a ser publicável depois de aprovado pelo parser e pela
+conferência mecânica existente. Na última tentativa reprovada, o Core reavalia
+as respostas anteriores pela mesma política final e preserva uma resposta que
+passe inteira. No incidente, a primeira resposta tinha cobertura completa e
+falhava somente em I-17, já tolerado pela política existente da terceira
+tentativa. A segunda tinha stack vazia. Não houve transplante de vínculos entre
+as divisões diferentes do escritor e do auditor, nem alteração de decisão.
+
+O replay com os três logs reais e a entrevista aprovada passou de NOT READY,
+sem workflow coberto, para PLAN READY, com workflows 1 a 5 cobertos. Ambos usam
+duas chamadas de escrita ao writer e uma ao auditor; nenhuma pergunta adicional
+e nenhum verifier. Os artefatos originais foram apenas lidos. Uma associação
+ambígua sem candidato completo continua voltando ao agente com diagnóstico
+específico nas tentativas existentes. Esgotadas, a resposta incompleta não
+sobrescreve documento nem estado válidos.
+
+Seis regressões: quatro RED no HEAD 0.8.2, todas GREEN na correção, incluindo
+preservação, redivisão, diagnóstico ao responsável e caminho válido sem chamadas
+extras. O teste antigo que exigia publicar cobertura reprovada foi corrigido.
+`npm run check`: 3153 testes em 188 arquivos. A única mudança de comportamento
+está no laço do INIT; prompts, parser, PLAN, BUILD e limites não mudam.
 
 ## 2026-10-27 — Contradições PLAN × BUILD (0.8.2)
 

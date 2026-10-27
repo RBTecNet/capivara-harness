@@ -1242,6 +1242,11 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
      */
     let esqueleto: Skeleton | null = null;
     let defeitos: string[] = [];
+    const anteriores: string[] = [];
+    // A mesma conferência mecânica da saída, antes de aceitar ou guardar uma resposta.
+    const rejeicoesDoEsqueleto = (skeleton: Skeleton) => evaluatePlanReadiness({ skeleton, unresolvedQuestions: [] }).checks.filter(
+      (check) => !check.passed && check.id !== "esqueleto" && check.id !== "decisoes",
+    );
     for (let tentativa = 1; tentativa <= 3; tentativa += 1) {
       const promptBase = skeletonPrompt({
         language: options.language,
@@ -1284,11 +1289,30 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
        * autoridade é escolha dele. Um run que para por causa de um caminho de
        * arquivo numa regra é exatamente "encontrar um motivo para interromper".
        */
-      const lido = parseSkeleton(saida, {
+      const limites = {
         maxTasksPerPhase: MAX_TASKS_PER_PHASE,
         authority: autoridadeDeTeste(),
-        mechanisms: tentativa === 3 ? "tolerate" : "reject",
-      });
+        mechanisms: tentativa === 3 ? "tolerate" as const : "reject" as const,
+      };
+      let aceita = saida;
+      let lido = parseSkeleton(saida, limites);
+      let executaveis = lido.ok ? rejeicoesDoEsqueleto(lido.skeleton) : [];
+      // A última tentativa já tolera I-17. Uma resposta anterior pode passar
+      // nessa mesma política, sem perder os vínculos que a substituta omitiu. Reusar
+      // o documento completo evita inventar associações entre fases ou fluxos
+      // que o agente reorganizou. Só uma resposta que passa INTEIRA serve.
+      if (tentativa === 3 && (!lido.ok || executaveis.length > 0)) {
+        for (const anterior of anteriores.toReversed()) {
+          const relido = parseSkeleton(anterior, limites);
+          if (!relido.ok || rejeicoesDoEsqueleto(relido.skeleton).length > 0) continue;
+          aceita = anterior;
+          lido = relido;
+          executaveis = [];
+          announce("  a resposta substituta não passa na conferência estrutural; preservado o esqueleto anterior completo, conferido pela mesma política da tentativa final");
+          break;
+        }
+      }
+      anteriores.push(saida);
       if (!lido.ok) {
         defeitos = lido.defects.map((defeito) => `${defeito.problem} → ${defeito.hint}`);
         const comMecanismo = lido.defects.filter((defeito) => defeito.problem.includes("fixa mecanismo de implementação")).length;
@@ -1325,16 +1349,11 @@ export async function runInit(options: InitOptions): Promise<InitOutcome> {
        * Fora as decisões em aberto, que são da entrevista e não do escritor: ele
        * não tem como fechá-las reescrevendo.
        */
-      const portao = evaluatePlanReadiness({ skeleton: lido.skeleton, unresolvedQuestions: [] });
-      const executaveis = portao.checks.filter(
-        (check) => !check.passed && check.id !== "esqueleto" && check.id !== "decisoes",
-      );
-
-      esqueleto = lido.skeleton;
       if (executaveis.length === 0) {
+        esqueleto = lido.skeleton;
         // Só o esqueleto que PASSOU no gate entra na memória: uma resposta que
         // o gate recusou merece outra chamada, não a mesma resposta de novo.
-        if (guardado === null) memoria.guardarEsqueleto(promptDoEsqueleto, saida);
+        if (guardado === null || aceita !== saida) memoria.guardarEsqueleto(promptDoEsqueleto, aceita);
         break;
       }
 

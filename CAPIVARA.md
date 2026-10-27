@@ -93,8 +93,13 @@ workspace. Nenhum papel de leitura recebe essa permissão, e um teste garante.
 
 O ciclo de três estágios — `init` → `plan` → `build` — funciona de ponta a ponta
 com modelo real, em cinco CLIs (`codex`, `claude`, `opencode`, `agy`, `cursor`).
-Na versão 0.8.2, `npm run check` passa: build, typecheck e **3147 testes**, incluindo o catálogo de
+Na versão 0.8.3, `npm run check` passa: build, typecheck e **3153 testes**, incluindo o catálogo de
 cenários do Apêndice B rodando a cadeia inteira contra o provider falso.
+
+A 0.8.3 impede publicar um esqueleto reprovado em cobertura. Se a última resposta
+regredir, o INIT reavalia as respostas anteriores pela política existente da
+tentativa final e preserva uma resposta completa que passe integralmente. Não
+transplanta vínculos entre fases reorganizadas nem cria outra chamada de modelo.
 
 A 0.8.2 impede que diagnósticos inversos desfaçam uma correção sem prova nova:
 conflito documental comprovado segue pela recuperação upstream existente; sem

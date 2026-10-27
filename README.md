@@ -2,7 +2,7 @@
 
 Do prompt à aplicação final, em três comandos.
 
-Versão **0.8.2**: o Core exige menos trabalho dos modelos, e cada redução tem a
+Versão **0.8.3**: o Core exige menos trabalho dos modelos, e cada redução tem a
 medida de antes e de depois (§138). O `plan` escreve as dependências e as fases
 numa passada, com uma auditoria do plano inteiro; o Core decide o que devolve
 (contradição, interface ou dependência, com as citações conferidas), e a
@@ -13,7 +13,9 @@ limpa; e o único fim aceitável é `aceito` — o que a escada inteira não fec
 `falhou`, com a causa, e `verificação inconclusiva` é só a verificação que não
 pôde rodar ou sustentar um diagnóstico consistente. A 0.8.2 preserva correções
 funcionais diante de diagnósticos inversos e encaminha conflitos documentais
-comprovados pela recuperação upstream existente. Continuam: a recuperação por
+comprovados pela recuperação upstream existente. A 0.8.3 preserva um esqueleto
+anterior completo quando a resposta de recuperação perde cobertura, conferindo-o
+pela política existente antes de publicar. Continuam: a recuperação por
 defeito, revalidando só a prova que a correção atingiu (§125), a fase grande em
 partes (§130), o ambiente que a instalação estrita aceita (§131), a preparação
 que o contrato do PLAN autoriza (§135), e o `plan` que não planeja teste e

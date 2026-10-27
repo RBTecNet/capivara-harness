@@ -14739,3 +14739,17 @@ externamente. A restrição explícita orienta a recomendação; escolher outra 
 continua sendo decisão do usuário. As regras de banco não prescrevem navegador
 para toda interface. A proveniência e as medidas antes/depois estão no registro
 de 27/10/2026 em `docs/HANDOFF.md`.
+
+### 138.7 Cobertura preservada na recuperação do INIT — 0.8.3
+
+Uma resposta substituta não pode ser publicada depois de reprovar na conferência
+estrutural PLAN READY. O laço só seleciona o esqueleto depois dessa aprovação.
+Na tentativa final reprovada, as respostas anteriores são reavaliadas pelo mesmo
+parser e pela mesma política final; uma resposta que passe inteira pode ser
+preservada. Não há transplante de referências entre versões com fases ou fluxos
+diferentes, nem inferência de vínculos para satisfazer a cobertura.
+
+Sem candidato completo válido, o diagnóstico específico volta à escrita nas
+tentativas existentes; ao esgotá-las, o documento e o estado publicados ficam
+intactos. Nenhum novo gate, auditor, prompt ou limite de tentativas. O registro
+do replay com os logs reais de `init-19468373438e` está em `docs/HANDOFF.md`.

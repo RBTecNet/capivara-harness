@@ -1,6 +1,6 @@
 # O contrato da Capivara — INIT, PLAN e BUILD
 
-Versão **0.8.2** (com a execução progressiva das fases, §130, a preparação, o raciocínio e o catálogo de modelos do §131, o produto fora do navegador do §133, o percurso de terminal da §134, a adoção da preparação pelo contrato do PLAN da §135 e a redução da verificação da §138: o plan de uma passada, uma revisão por fase, os fluxos só na aceitação final e os estados da entrega; e a regra de 26/10/2026, só existe `aceito`). Este documento descreve, num lugar só, o que cada estágio da
+Versão **0.8.3** (com a execução progressiva das fases, §130, a preparação, o raciocínio e o catálogo de modelos do §131, o produto fora do navegador do §133, o percurso de terminal da §134, a adoção da preparação pelo contrato do PLAN da §135 e a redução da verificação da §138: o plan de uma passada, uma revisão por fase, os fluxos só na aceitação final e os estados da entrega; e a regra de 26/10/2026, só existe `aceito`). Este documento descreve, num lugar só, o que cada estágio da
 Capivara recebe, decide, produz e não pode fazer, e como o trabalho passa de um
 para o outro. O porquê de cada regra está numerado em `docs/PLANO.md` (§NNN); o
 estado do trabalho, em `docs/HANDOFF.md`. Quando este documento e o código
@@ -403,6 +403,14 @@ recomendação inversa para o mesmo defeito, sem prova nova para arbitrar, deixa
 revisão inconclusiva; uma regressão comprovada continua no reparo normal. A edição
 documental automática permanece desabilitada (§125 H); a retomada revalida o que
 a correção aprovada atingir.
+
+O INIT só aceita para publicação um esqueleto que passe no parser e na
+conferência estrutural PLAN READY. Quando a tentativa final perde cobertura ou
+volta inválida, respostas anteriores são reconferidas pela mesma política dessa
+tentativa; uma resposta completa válida pode ser preservada, sem misturar fases
+ou workflows de versões diferentes. Sem candidato válido, o documento publicado
+permanece intacto e a recuperação termina com o diagnóstico estrutural, sem
+pedir ao usuário para editar vínculos nem inventar uma decisão de produto.
 
 ## Paradas e retomada
 

@@ -1,3 +1,5 @@
+import type { ProgressMeasurement } from '../telemetry/progress.js';
+
 /** New execution boundary. A failed operation is data for the coordinator, never a process exit. */
 export interface AgentConfig {
   provider: string;
@@ -22,9 +24,10 @@ export interface ExecutionConstraints {
 }
 
 export interface RuntimeEvent {
-  type: 'agent' | 'output' | 'command' | 'tool' | 'recovery';
+  type: 'agent' | 'output' | 'command' | 'tool' | 'recovery' | 'progress';
   message: string;
   detail?: unknown;
+  progress?: ProgressMeasurement;
 }
 
 export interface RuntimeIssue {

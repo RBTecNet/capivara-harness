@@ -1,5 +1,6 @@
 import type { DevelopmentPlan, ProductBrief, Verification, WorkUnit } from '../domain/types.js';
 import type { AgentRequest, AgentResult, CommandRequest, CommandResult, RuntimeEvent, TerminalRequest } from '../runtime/types.js';
+import type { ProgressMeasurement } from '../telemetry/progress.js';
 
 export interface BuildIncident {
   id: string;
@@ -45,9 +46,10 @@ export interface BuildState {
   updatedAt: string;
 }
 export interface BuildEvent {
-  type: 'task' | 'environment' | 'verification' | 'recovery' | 'waiting' | 'complete';
+  type: 'task' | 'environment' | 'verification' | 'recovery' | 'waiting' | 'complete' | 'progress';
   message: string;
   subject?: string;
+  progress?: ProgressMeasurement;
 }
 export type BuildAgentRequest = Omit<AgentRequest, 'config'>;
 export interface BuildOptions {

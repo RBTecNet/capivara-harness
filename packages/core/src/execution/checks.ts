@@ -7,6 +7,7 @@ import type { CommandResult, TerminalRequest } from '../runtime/types.js';
 import { digest, inputHash } from './files.js';
 import { executionConstraints, type CommandExecutor } from './environment.js';
 import type { SelectedVerification, VerificationEvidence } from './types.js';
+import { emitProgress, type ProgressEvent } from '../telemetry/progress.js';
 
 /** Wrong instruments are replaced; their failure never becomes an invented product requirement. */
 export function selectVerifications(brief: ProductBrief, task: WorkUnit): SelectedVerification[] {
@@ -78,19 +79,25 @@ export function expectedResult(expected:string|undefined,result:CommandResult):{
   if(text.includes(expected))return{passed:true,detail:`Observed expected output: ${expected}`,instrument:false};
   return{passed:null,detail:`Semantic assertion for the reviewer: ${expected}`,instrument:false};
 }
-export async function runVerification(workspace:string,brief:ProductBrief,task:WorkUnit,plan:DevelopmentPlan,check:Verification,execute:CommandExecutor,terminal:(request:TerminalRequest)=>Promise<CommandResult>,options:{signal?:AbortSignal;allowSystemInstall?:boolean}={}):Promise<{evidence:VerificationEvidence;result:CommandResult|null;needsInstrument:boolean}> {
+export async function runVerification(workspace:string,brief:ProductBrief,task:WorkUnit,plan:DevelopmentPlan,check:Verification,execute:CommandExecutor,terminal:(request:TerminalRequest)=>Promise<CommandResult>,options:{signal?:AbortSignal;allowSystemInstall?:boolean;onEvent?:(event:ProgressEvent)=>void}={}):Promise<{evidence:VerificationEvidence;result:CommandResult|null;needsInstrument:boolean}> {
+  const progress = { id: `verification:${task.id}:${check.id}`, label: `${task.id}: ${check.id}`, stage: 'build' };
+  const finish = (result: {evidence:VerificationEvidence;result:CommandResult|null;needsInstrument:boolean}): typeof result => {
+    emitProgress(options.onEvent, { ...progress, status: result.evidence.passed ? 'complete' : 'waiting' });
+    return result;
+  };
+  emitProgress(options.onEvent, { ...progress, status: 'running' });
   const hash=await checkInputHash(workspace,plan,task,check,brief);
   const evidence:VerificationEvidence={id:digest(`${task.id}:${check.id}:${hash}`).slice(0,20),taskId:task.id,checkId:check.id,inputHash:hash,passed:false,command:check.command??'',output:'',terminal:false,checkedAt:new Date().toISOString()};
-  if(!check.command){evidence.output='No executable recipe is available for this proof. Derive a compatible recipe from the actual product; do not change the product to satisfy an invented convention.';return{evidence,result:null,needsInstrument:true};}
-  if(check.kind==='desktop'&&!nativeTargetAvailable(check)){evidence.output='A required desktop target has no native runner on this host. Continue independent work and provide a compatible runner; do not claim its workflows were executed.';return{evidence,result:null,needsInstrument:true};}
-  if(check.kind==='tui'&&(!terminalInteraction(check)||!check.expected)){evidence.output='Interactive terminal proof needs an observed ready screen BEFORE input and a newly observed screen/state AFTER that input. Provide synchronized steps and an expected result; repair this recipe rather than rewriting the product for a missing instrument.';return{evidence,result:null,needsInstrument:true};}
-  if(check.kind==='desktop'&&preparationOnly(check)){evidence.output='Compilation, installation and process status do not exercise native desktop interaction. Recover an actual native automation recipe and an observable assertion; preserve product code.';return{evidence,result:null,needsInstrument:true};}
+  if(!check.command){evidence.output='No executable recipe is available for this proof. Derive a compatible recipe from the actual product; do not change the product to satisfy an invented convention.';return finish({evidence,result:null,needsInstrument:true});}
+  if(check.kind==='desktop'&&!nativeTargetAvailable(check)){evidence.output='A required desktop target has no native runner on this host. Continue independent work and provide a compatible runner; do not claim its workflows were executed.';return finish({evidence,result:null,needsInstrument:true});}
+  if(check.kind==='tui'&&(!terminalInteraction(check)||!check.expected)){evidence.output='Interactive terminal proof needs an observed ready screen BEFORE input and a newly observed screen/state AFTER that input. Provide synchronized steps and an expected result; repair this recipe rather than rewriting the product for a missing instrument.';return finish({evidence,result:null,needsInstrument:true});}
+  if(check.kind==='desktop'&&preparationOnly(check)){evidence.output='Compilation, installation and process status do not exercise native desktop interaction. Recover an actual native automation recipe and an observable assertion; preserve product code.';return finish({evidence,result:null,needsInstrument:true});}
   const request={cwd:workspace,command:check.args?[check.command,...check.args]:check.command,constraints:executionConstraints(brief,options.allowSystemInstall),capabilities:check.requiredCapabilities,inputs:taskInputs(plan,task),...(check.kind!=='tui'&&check.input?{input:check.input.join('')}:{}),...(check.timeoutMs?{timeoutMs:check.timeoutMs}:{}),...(options.signal?{signal:options.signal}:{})};
   const result=check.kind==='tui'?await terminal({...request,steps:check.steps??[],closeInput:check.closeInput??'\u0003'}):await execute(request);
   evidence.command=result.command;evidence.output=`Command: ${result.command}\nExit code: ${result.exitCode}${result.timedOut?' (timed out)':''}${result.cancelled?' (cancelled)':''}\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`;evidence.terminal=result.terminal===true;
   if(result.issue)evidence.output+=`\nRuntime issue (${result.issue.kind}): ${result.issue.message}`;
   const assertion=expectedResult(check.expected,result);
-  if(check.kind==='desktop'&&assertion.passed!==true){evidence.output+='\nNative interaction needs an assertion that was actually observed. A semantic statement that a window opens does not prove the workflow.';return{evidence,result,needsInstrument:true};}
+  if(check.kind==='desktop'&&assertion.passed!==true){evidence.output+='\nNative interaction needs an assertion that was actually observed. A semantic statement that a window opens does not prove the workflow.';return finish({evidence,result,needsInstrument:true});}
   const expectedExit=check.expectedExitCode??inferredExpectedExit(check.expected)??0;
   const exitedAsExpected=result.exitCode===expectedExit;
   const terminalClosed=check.kind==='tui'&&result.terminal===true&&result.exitCode===130&&expectedExit===0&&assertion.passed===true;
@@ -98,5 +105,5 @@ export async function runVerification(workspace:string,brief:ProductBrief,task:W
   evidence.output+=`\nExpected exit code: ${expectedExit}\nAssertion: ${assertion.detail}${assertion.passed===null?' (requires semantic review)':''}`;
   evidence.kind=check.kind;evidence.target=check.target??hostTarget();
   const needsInstrument=assertion.instrument||!!result.issue || result.exitCode===127&&expectedExit!==127 || /(?:command not found|not recognized as|cannot find module|no module named|ENOENT|ECONNREFUSED|ENETUNREACH)/i.test(evidence.output);
-  return{evidence,result,needsInstrument};
+  return finish({evidence,result,needsInstrument});
 }

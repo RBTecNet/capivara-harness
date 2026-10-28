@@ -4,6 +4,7 @@ import { applyRepositoryConstraints, resolveQuestions, splitText } from "./init.
 import { cancelled, object, pause, records, requestObject, string, strings } from "./json.js";
 import { boundedReferences } from "./material.js";
 import type { CommandRecipe, DevelopmentPlan, DomainHooks, EnvironmentNode, IntegrationContract, PlanOptions, ProductBrief, Requirement, Verification, WorkUnit } from "./types.js";
+import { emitEvent, emitProgress } from "../telemetry/progress.js";
 
 const cleanId = (value: unknown, fallback: string): string => string(value).replace(/[^a-zA-Z0-9_.:-]+/g, "-") || fallback;
 const unique = <T extends { id: string }>(items: T[]): T[] => [...new Map(items.map((item) => [item.id, item])).values()];
@@ -128,6 +129,8 @@ export function normalizeTasks(value: unknown, brief: ProductBrief, environment:
 async function repairGraph(plan: DevelopmentPlan, brief: ProductBrief, kind: "environment" | "tasks", hooks: DomainHooks): Promise<void> {
   let previous = "";
   let repeated = 0;
+  const progress = { id: `plan:graph:${kind}`, label: kind === "environment" ? "Dependências do ambiente" : "Dependências das tarefas", stage: "plan" };
+  let repairing = false;
   for (;;) {
     cancelled(hooks.signal);
     const nodes: (EnvironmentNode | WorkUnit)[] = plan[kind];
@@ -138,6 +141,7 @@ async function repairGraph(plan: DevelopmentPlan, brief: ProductBrief, kind: "en
     if (!sorted.unresolved.length) {
       if (kind === "environment") plan.environment = sorted.ready.filter((node): node is EnvironmentNode => "kind" in node);
       else plan.tasks = sorted.ready.filter((node): node is WorkUnit => "goal" in node);
+      if (repairing) emitProgress(hooks.onEvent, { ...progress, status: "complete" });
       return;
     }
     const missingNode = sorted.unresolved.find((node) => node.dependsOn.some((id) => !ids.has(id)));
@@ -162,7 +166,9 @@ async function repairGraph(plan: DevelopmentPlan, brief: ProductBrief, kind: "en
     repeated = description === previous ? repeated + 1 : 0;
     previous = description;
     if (repeated > 0) await pause(Math.min(30_000, repeated * 2_000), hooks.signal);
-    hooks.onEvent?.({ type: "recovering", message: "Corrigindo dependência ausente ou circular na origem, preservando o trabalho válido.", subject: kind });
+    repairing = true;
+    emitProgress(hooks.onEvent, { ...progress, status: "running" });
+    emitEvent(hooks.onEvent, { type: "recovering", message: "Corrigindo dependência ausente ou circular na origem, preservando o trabalho válido.", subject: kind });
     const answer = await requestObject({ ...hooks, operation: "repair", prompt: [
       `Correct this ${kind} dependency graph locally. Missing IDs: ${missing.join(", ") || "none; unresolved nodes form a cycle"}.`,
       'Return {"updates":[{"id":"existing id","addDependsOn":[],"removeDependsOn":[]}],"additions":[],"reason":"technical correction"}. Additions are complete environment/task objects only if an omitted prerequisite is genuinely required. You may return dependsOn instead of add/remove only when replacing the complete prerequisite list is necessary.',
@@ -204,12 +210,13 @@ async function executableEnvironment(value: unknown, brief: ProductBrief, hooks:
   const pending: unknown[] = Array.isArray(value) ? [...value] : value == null ? [] : [value];
   const complete: EnvironmentNode[] = [];
   const repeats = new Map<string, number>();
+  let repairing = false;
   while (pending.length) {
     cancelled(hooks.signal);
     const candidate = pending.shift();
     if (object(candidate) && string(candidate.name) && recipe(candidate.check)) {
       const nodes = normalizeEnvironment([candidate], brief);
-      if (!nodes.length) hooks.onEvent?.({ type: "recovering", message: "Pré-requisito incompatível com o produto rejeitado antes de preparar o ambiente.", subject: string(candidate.id) });
+      if (!nodes.length) emitEvent(hooks.onEvent, { type: "recovering", message: "Pré-requisito incompatível com o produto rejeitado antes de preparar o ambiente.", subject: string(candidate.id) });
       complete.push(...nodes);
       continue;
     }
@@ -217,7 +224,9 @@ async function executableEnvironment(value: unknown, brief: ProductBrief, hooks:
     const repeated = repeats.get(serialized) ?? 0;
     repeats.set(serialized, repeated + 1);
     if (repeated) await pause(Math.min(30_000, repeated * 2_000), hooks.signal);
-    hooks.onEvent?.({ type: "recovering", message: "Completando a receita executável de um pré-requisito, sem perder a dependência.", subject: "environment" });
+    repairing = true;
+    emitProgress(hooks.onEvent, { id: "plan:environment-repair", label: "Receitas dos pré-requisitos", status: "running", stage: "plan" });
+    emitEvent(hooks.onEvent, { type: "recovering", message: "Completando a receita executável de um pré-requisito, sem perder a dependência.", subject: "environment" });
     const result = await requestObject({ ...hooks, operation: "repair", prompt: [
       "Repair this incomplete technical prerequisite. An environment node needs a real availability check and preparation recipes, not a prose placeholder. Do not edit files.",
       'Return {"environment":[{"id":"stable id","name":"prerequisite","kind":"runtime|sdk|tool|package|service|database","dependsOn":[],"targets":[],"reason":"actual consumer","check":{"command":"availability command","args":[]},"prepare":[{"command":"preparation command","args":[],"system":false}]}],"unnecessary":false,"reason":"technical explanation"}. Use unnecessary=true and environment=[] only if this is actually an optional or forbidden instrument.',
@@ -226,9 +235,10 @@ async function executableEnvironment(value: unknown, brief: ProductBrief, hooks:
     ].join("\n\n") });
     const corrected = Array.isArray(result.environment) ? result.environment : [];
     if (corrected.length) pending.unshift(...corrected);
-    else if (result.unnecessary === true && string(result.reason)) hooks.onEvent?.({ type: "replanned", message: `Pré-requisito dispensado com justificativa técnica: ${string(result.reason)}`, subject: "environment" });
+    else if (result.unnecessary === true && string(result.reason)) emitEvent(hooks.onEvent, { type: "replanned", message: `Pré-requisito dispensado com justificativa técnica: ${string(result.reason)}`, subject: "environment" });
     else pending.unshift(candidate);
   }
+  if (repairing) emitProgress(hooks.onEvent, { id: "plan:environment-repair", label: "Receitas dos pré-requisitos", status: "complete", stage: "plan" });
   return normalizeEnvironment(complete, brief);
 }
 
@@ -236,16 +246,22 @@ async function executableEnvironment(value: unknown, brief: ProductBrief, hooks:
 async function repairReferences(plan: DevelopmentPlan, brief: ProductBrief, hooks: DomainHooks): Promise<void> {
   let previous = "";
   let repeated = 0;
+  let repairing = false;
   for (;;) {
     const task = plan.tasks.find((unit) => unit.environmentIds.some((id) => !plan.environment.some((node) => node.id === id)) || unit.contractIds.some((id) => !plan.contracts.some((contract) => contract.id === id)));
-    if (!task) return;
+    if (!task) {
+      if (repairing) emitProgress(hooks.onEvent, { id: "plan:references", label: "Referências técnicas das tarefas", status: "complete", stage: "plan" });
+      return;
+    }
     cancelled(hooks.signal);
     const missingEnvironment = task.environmentIds.filter((id) => !plan.environment.some((node) => node.id === id));
     const missingContracts = task.contractIds.filter((id) => !plan.contracts.some((contract) => contract.id === id));
     const state = JSON.stringify([task.id, missingEnvironment, missingContracts]);
     repeated = previous === state ? repeated + 1 : 0; previous = state;
     if (repeated) await pause(Math.min(30_000, repeated * 2_000), hooks.signal);
-    hooks.onEvent?.({ type: "recovering", message: "Resolvendo pré-requisito ou contrato citado por uma tarefa antes da construção.", subject: task.id });
+    repairing = true;
+    emitProgress(hooks.onEvent, { id: "plan:references", label: "Referências técnicas das tarefas", status: "running", stage: "plan" });
+    emitEvent(hooks.onEvent, { type: "recovering", message: "Resolvendo pré-requisito ou contrato citado por uma tarefa antes da construção.", subject: task.id });
     const result = await requestObject({ ...hooks, operation: "repair", prompt: [
       "Resolve missing technical references in this local task. Add the real prerequisite/interface or correct an inaccurate identifier. Preserve product behavior and prerequisite ordering. Do not merely erase a required dependency.",
       'Return {"environment":[{"id":"id","name":"name","kind":"tool","dependsOn":[],"targets":[],"check":{"command":"availability command"},"prepare":[]}],"contracts":[{"id":"id","name":"name","description":"actual interface","inputs":[],"outputs":[],"requirementIds":[]}],"task":{"environmentIds":[],"contractIds":[]},"reason":"technical correction"}. Return only new nodes; include all retained references in task.',
@@ -316,8 +332,11 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
   const groups = requirementGroups(brief, Math.max(400, Math.floor(limit / 4)));
   const environmentScopes: Set<string>[] = [];
   const plan: DevelopmentPlan = { schema: "capivara/plan/1", status: "planning", revision: (options.existing?.revision ?? 0) + 1, briefId: brief.id, briefRevision: brief.revision, environment: [], contracts: [], tasks: [] };
+  const environmentProgress = { id: "plan:environment", label: "Grupos de pré-requisitos", total: groups.length, stage: "plan", unit: "grupos" };
+  const outlineProgress = { id: "plan:outline", label: "Grupos de tarefas", total: groups.length, stage: "plan", unit: "grupos" };
+  emitProgress(options.onEvent, { ...environmentProgress, completed: 0, status: groups.length ? "running" : "complete" });
   // Environment is generated and persisted before requesting any construction tasks.
-  for (const requirements of groups) {
+  for (const [groupIndex, requirements] of groups.entries()) {
     cancelled(options.signal);
     const result = await requestObject({ ...options, operation: "environment", prompt: [
       "Plan executable technical prerequisites before implementation. Do not edit files. Return JSON.",
@@ -332,10 +351,12 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
     environmentScopes.push(new Set(additions.map((node) => normalize(`${node.kind}:${node.name}`))));
     plan.environment = normalizeEnvironment([...plan.environment, ...additions], brief);
     await options.save?.({ brief, plan });
+    emitProgress(options.onEvent, { ...environmentProgress, completed: groupIndex + 1, status: groupIndex + 1 === groups.length ? "complete" : "running" });
   }
   await repairGraph(plan, brief, "environment", options);
   await options.save?.({ brief, plan });
-  options.onEvent?.({ type: "environment", message: "Árvore de preparação registrada antes das tarefas.", subject: "plan" });
+  emitEvent(options.onEvent, { type: "environment", message: "Árvore de preparação registrada antes das tarefas.", subject: "plan" });
+  emitProgress(options.onEvent, { ...outlineProgress, completed: 0, status: groups.length ? "running" : "complete" });
   for (const [index, requirements] of groups.entries()) {
     const scopedIds = new Set(plan.environment.filter((node, nodeIndex) => environmentScopes[index]?.has(normalize(`${node.kind}:${node.name}`)) || nodeIndex < 2 && ["runtime", "sdk"].includes(node.kind)).map((node) => node.id));
     for (;;) {
@@ -364,6 +385,7 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
     for (const task of tasks) task.dependsOn = task.dependsOn.map((id) => aliases.get(id) ?? id);
     plan.tasks.push(...tasks);
     await options.save?.({ brief, plan });
+    emitProgress(options.onEvent, { ...outlineProgress, completed: index + 1, status: index + 1 === groups.length ? "complete" : "running" });
   }
   ensureCoverage(brief, plan);
   plan.tasks = unique(plan.tasks);
@@ -385,7 +407,7 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
   }
   plan.status = "ready";
   await options.save?.({ brief, plan });
-  options.onEvent?.({ type: "complete", message: "Dependências, contratos e fragmentos de desenvolvimento estão estruturados.", subject: "plan" });
+  emitEvent(options.onEvent, { type: "complete", message: "Dependências, contratos e fragmentos de desenvolvimento estão estruturados.", subject: "plan" });
   return plan;
 }
 
@@ -403,6 +425,8 @@ export async function repairWorkPlan(options: RepairPlanOptions): Promise<Develo
   plan.status = "planning";
   const task = plan.tasks.find((candidate) => candidate.id === options.taskId);
   if (!task) return options.plan;
+  const progress = { id: `plan:repair:${task.id}`, label: `Revisão do plano: ${task.title}`, stage: "plan" };
+  emitProgress(options.onEvent, { ...progress, status: "running" });
   const brief = options.brief;
   const requirements = brief.requirements.filter((requirement) => task.requirementIds.includes(requirement.id));
   const prompt = [
@@ -435,7 +459,7 @@ export async function repairWorkPlan(options: RepairPlanOptions): Promise<Develo
     plan.contracts = unique([...plan.contracts, ...contractsFrom(repaired.contracts, brief.requirements)]);
     replacements = normalizeTasks(repaired.tasks, brief, plan.environment, plan.contracts, requirements);
     if (replacements.length) break;
-    options.onEvent?.({ type: "recovering", message: "O reparo local não trouxe unidades executáveis; preservando a tarefa e buscando uma decomposição útil.", subject: task.id });
+    emitEvent(options.onEvent, { type: "recovering", message: "O reparo local não trouxe unidades executáveis; preservando a tarefa e buscando uma decomposição útil.", subject: task.id });
     emptyResponses += 1;
     await pause(Math.min(30_000, emptyResponses * 2_000), options.signal);
   }
@@ -470,6 +494,7 @@ export async function repairWorkPlan(options: RepairPlanOptions): Promise<Develo
   }
   plan.status = options.finalize === false ? "planning" : "ready";
   await options.save?.({ brief, plan });
-  options.onEvent?.({ type: "replanned", message: "Premissa técnica corrigida na origem; trabalho independente preservado.", subject: task.id });
+  emitProgress(options.onEvent, { ...progress, status: "complete" });
+  emitEvent(options.onEvent, { type: "replanned", message: "Premissa técnica corrigida na origem; trabalho independente preservado.", subject: task.id });
   return plan;
 }

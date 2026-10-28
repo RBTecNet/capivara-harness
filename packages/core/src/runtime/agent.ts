@@ -42,9 +42,10 @@ function decodeOutput(stdout: string, provider: string): { text: string; usage?:
       if (typeof event.sessionID === 'string') sessionId = event.sessionID;
       if (event.type === 'step_finish' && part.tokens) {
         const tokens = object(part.tokens), cache = object(tokens.cache);
-        usage ??= { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, costUsd: 0 };
+        usage ??= { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 };
         usage.inputTokens += number(tokens.input); usage.outputTokens += number(tokens.output);
-        usage.cachedInputTokens = (usage.cachedInputTokens ?? 0) + number(cache.read); usage.costUsd = (usage.costUsd ?? 0) + number(part.cost);
+        usage.cachedInputTokens = (usage.cachedInputTokens ?? 0) + number(cache.read);
+        if (typeof part.cost === 'number' && Number.isFinite(part.cost)) usage.costUsd = (usage.costUsd ?? 0) + part.cost;
       }
     }
   }

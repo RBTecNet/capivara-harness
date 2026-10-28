@@ -200,5 +200,38 @@
       "pipedAnswersPreserved": true,
       "multilineRequestPreserved": true
     }
+  },
+  "dashboardUpdate": {
+    "verifiedAt": "2026-10-28T12:01:56.586830+00:00",
+    "command": "npm run check",
+    "testFiles": 15,
+    "tests": 89,
+    "build": "passed",
+    "typecheck": "passed",
+    "paidInferenceCalls": 0,
+    "terminalPty": {
+      "realPty": true,
+      "phases": 60,
+      "logEvents": 1401,
+      "allPanelsSelectable": true,
+      "completePhaseTextAccessible": true,
+      "firstAndLastLogAccessible": true,
+      "liveUpdateWhileExpanded": true,
+      "mouseWheelAccepted": true,
+      "brandAndMascotAbsent": true,
+      "exitCode": 0,
+      "terminalRestored": true
+    },
+    "workflow": {
+      "agent": "simulated",
+      "realFileAndCommand": true,
+      "malformedAnalysisRecovered": true,
+      "throwingObserversDoNotStopConstruction": true
+    },
+    "installation": {
+      "displayVersion": "0.9.0_RC1",
+      "dashboardCommandAvailable": true,
+      "installedCliMatchesBuiltCli": true
+    }
   }
 }

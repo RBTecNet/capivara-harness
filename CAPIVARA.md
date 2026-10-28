@@ -8,6 +8,8 @@ Versão pública `0.9.0_RC1`; pacote `0.9.0-RC1`. Node.js >=24. Os motores anter
 - `packages/core/src/execution`: preparação do ambiente, agendamento, editor, prova pertinente, revisor cooperativo e recuperação da causa na execução ativa.
 - `packages/core/src/runtime`: chamadas CLI/API, ferramentas reais, processos, isolamento disponível, comandos e pseudoterminal.
 - `packages/core/src/wizard`: painel de início, navegação, leitura por linha e comando equivalente.
+- `packages/core/src/dashboard`: projeção dos eventos e estado, painéis, progresso, rolagem e controle do terminal.
+- `packages/core/src/telemetry`: medições de progresso e entrega de eventos sem propagar falhas dos observadores.
 - `packages/core/src/data-center`: cliente MCP de leitura, projetos, prompts e materiais selecionados.
 - `packages/core/src/app`: coordenação das etapas, perguntas, configuração e SQLite transacional.
 - `packages/core/src/cli-program.ts`: comandos públicos; `src/version.ts`: versão exibida.
@@ -31,6 +33,12 @@ Falha recuperável é dado para a próxima ação. Corrigir ambiente, transporte
 Use `npm run check` para build, tipos e cenários locais relevantes. Não invocar provedores pagos automaticamente na suíte. Pilotos reais devem registrar pedido, transporte, resultado e limites da evidência, sem divulgar credenciais nem inventar custo quando o provedor não informa.
 
 A documentação histórica não impõe gates nem regras ao motor novo. A [auditoria](docs/AUDITORIA-RECONSTRUCAO-MOTORES.md) registra defeitos anteriores, e a [entrega](docs/RECONSTRUCAO-0.9.0_RC1.md) registra o que foi implementado e conferido.
+
+## Dashboard
+
+O dashboard observa o motor; fechar uma área ou ocultar o painel não cancela a construção. Barras mostram contagens reais quando existem e atividade indeterminada quando não existe total conhecido. Não criar metas, verificações ou chamadas de agente para alimentar a interface. Dados financeiros ausentes permanecem ausentes.
+
+O conteúdo integral dos painéis é separado da prévia compacta. A ampliação e a rolagem não descartam fases ou linhas antigas. O acompanhamento independente lê o estado e o diário sem reivindicar a execução. Somente uma resposta explícita pode ser gravada por essa janela. Detalhes: [dashboard da execução](docs/DASHBOARD-EXECUCAO.md).
 
 
 ## Wizard e origem documental

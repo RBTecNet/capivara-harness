@@ -2,6 +2,7 @@ import { allowedCapabilities, explicitConstraints, explicitModes, explicitTarget
 import { cancelled, object, records, requestObject, string, strings } from "./json.js";
 import { documentaryAuthority, materialReferences, materialRevision, selectedMaterial } from "./material.js";
 import type { ApplicationMode, Gap, InitOptions, ProductBrief, ProductConstraint, Question, Requirement, Source, TargetPlatform } from "./types.js";
+import { emitEvent, emitProgress } from "../telemetry/progress.js";
 
 const MODES = new Set<ApplicationMode>(["web", "desktop", "tui", "cli", "api", "service", "library", "other"]);
 const TARGETS = new Set<TargetPlatform>(["linux", "windows", "macos", "browser", "portable"]);
@@ -141,7 +142,7 @@ export async function resolveQuestions(brief: ProductBrief, candidates: unknown[
     const rawAnswer = await hooks.ask(gap);
     const raw = rawAnswer?.trim() ?? "";
     if (!raw || /^(?:nao sei|não sei|idk|i don.t know|voltar)$/i.test(raw)) {
-      hooks.onEvent?.({ type: "waiting", message: `Decisão pendente: ${gap.question}`, subject: gap.id });
+      emitEvent(hooks.onEvent, { type: "waiting", message: `Decisão pendente: ${gap.question}`, subject: gap.id });
       continue;
     }
     const selected = /^\d+$/.test(raw) ? gap.options[Number(raw) - 1] : undefined;
@@ -166,7 +167,7 @@ export async function resolveQuestions(brief: ProductBrief, candidates: unknown[
     brief.revision += 1;
     // Persistence occurs before proceeding to the next question or model call.
     await hooks.save?.({ brief });
-    hooks.onEvent?.({ type: "decision", message: `Decisão registrada: ${gap.fact}`, subject: gap.id });
+    emitEvent(hooks.onEvent, { type: "decision", message: `Decisão registrada: ${gap.fact}`, subject: gap.id });
   }
   if (brief.status !== "discovering") {
     brief.status = brief.gaps.some((gap) => gap.status === "pending") ? "waiting" : "ready";
@@ -217,9 +218,15 @@ export async function runInit(options: InitOptions): Promise<ProductBrief> {
     { text: request, origin: { kind: "request", reference: "request" } },
     ...factDocuments.map((document) => ({ text: document.text, origin: { kind: "repository" as const, reference: document.reference, ...(document.localPath ? { localPath: document.localPath } : {}) }, ...(document.title ? { title: document.title } : {}) })),
   ];
+  let completedSources = 0;
+  let completedChunks = 0;
+  emitProgress(options.onEvent, { id: "init:sources", label: "Fontes analisadas", completed: 0, total: sources.length, status: "running", stage: "init", unit: "fontes" });
   for (const source of sources) {
     let remaining = source.text.trim();
     let index = 0;
+    const sourceLength = remaining.length;
+    const sourceProgress = { id: `init:source:${source.origin.reference}`, label: source.title ?? (source.origin.kind === "request" ? "Pedido" : source.origin.reference), total: sourceLength, stage: "init", unit: "caracteres" };
+    emitProgress(options.onEvent, { ...sourceProgress, completed: 0, status: "running" });
     while (remaining) {
       cancelled(options.signal);
       const prefix = [
@@ -238,7 +245,9 @@ export async function runInit(options: InitOptions): Promise<ProductBrief> {
       const chunk = splitText(remaining, size)[0]!;
       remaining = remaining.slice(chunk.length).trimStart();
       index += 1;
-      options.onEvent?.({ type: "working", message: source.origin.kind === "request" ? "Entendendo o resultado pedido e suas restrições." : "Lendo os documentos selecionados e suas restrições.", subject: `${source.origin.reference}#${index}` });
+      emitEvent(options.onEvent, { type: "working", message: source.origin.kind === "request" ? "Entendendo o resultado pedido e suas restrições." : "Lendo os documentos selecionados e suas restrições.", subject: `${source.origin.reference}#${index}` });
+      // The prefix can change as facts are discovered, so future fragment counts are unknown.
+      emitProgress(options.onEvent, { id: "init:chunks", label: "Fragmentos analisados", completed: completedChunks, status: "running", stage: "init", unit: "fragmentos" });
       const result = await requestObject({ ...options, operation: "discover", prompt: `${prefix}${chunk}` });
       if (brief.name === "Aplicação") brief.name = string(result.name, brief.name).slice(0, 120);
       if (!brief.summary) brief.summary = string(result.summary, chunk.slice(0, 800)).slice(0, 1_600);
@@ -250,11 +259,18 @@ export async function runInit(options: InitOptions): Promise<ProductBrief> {
       brief.requirements = [...new Map(brief.requirements.map((requirement) => [requirement.id, requirement])).values()];
       brief.constraints = [...new Map(brief.constraints.map((constraint) => [constraint.id, constraint])).values()];
       await options.save?.({ brief });
+      completedChunks += 1;
+      emitProgress(options.onEvent, { id: "init:chunks", label: "Fragmentos analisados", completed: completedChunks, status: "running", stage: "init", unit: "fragmentos" });
+      emitProgress(options.onEvent, { ...sourceProgress, completed: sourceLength - remaining.length, status: remaining ? "running" : "complete" });
     }
     // A restriction crossing a packet boundary keeps its complete literal source.
     brief.constraints.push(...constraintsFrom(source.text, [], source.origin));
     brief.constraints = [...new Map(brief.constraints.map((constraint) => [constraint.id, constraint])).values()];
+    completedSources += 1;
+    emitProgress(options.onEvent, { ...sourceProgress, completed: sourceLength, status: "complete" });
+    emitProgress(options.onEvent, { id: "init:sources", label: "Fontes analisadas", completed: completedSources, total: sources.length, status: completedSources === sources.length ? "complete" : "running", stage: "init", unit: "fontes" });
   }
+  emitProgress(options.onEvent, { id: "init:chunks", label: "Fragmentos analisados", completed: completedChunks, total: completedChunks, status: "complete", stage: "init", unit: "fragmentos" });
   if (brief.modes.length === 0) {
     candidates.push({ fact: "interface de uso", question: "Como as pessoas usarão a aplicação: terminal, navegador, janela nativa ou outra interface?", reason: "O pedido não identifica a interface de uso.", impact: "Define como entregar e executar o comportamento solicitado.", category: "platform", modes: [], options: ["TUI interativa no terminal", "CLI por comandos", "Aplicação web no navegador", "Aplicação desktop nativa"], blocks: [] });
   }
@@ -262,6 +278,6 @@ export async function runInit(options: InitOptions): Promise<ProductBrief> {
   applyRepositoryConstraints(brief, options.repositoryConstraints);
   brief.status = brief.gaps.some((gap) => gap.status === "pending") ? "waiting" : "ready";
   await options.save?.({ brief });
-  options.onEvent?.({ type: "complete", message: brief.gaps.some((gap: Gap) => gap.status === "pending") ? "Pedido registrado; decisões reais pendentes permanecem disponíveis, sem inventar respostas." : "Pedido esclarecido e pronto para estruturar o desenvolvimento.", subject: brief.id });
+  emitEvent(options.onEvent, { type: "complete", message: brief.gaps.some((gap: Gap) => gap.status === "pending") ? "Pedido registrado; decisões reais pendentes permanecem disponíveis, sem inventar respostas." : "Pedido esclarecido e pronto para estruturar o desenvolvimento.", subject: brief.id });
   return brief;
 }

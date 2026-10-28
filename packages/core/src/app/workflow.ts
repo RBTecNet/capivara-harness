@@ -2,7 +2,7 @@ import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { join, resolve, relative, isAbsolute, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { runInit, runPlan, repairWorkPlan } from '../domain/index.js';
-import type { ProductBrief, DomainAgentRequest, DevelopmentPlan, SelectedDocument } from '../domain/types.js';
+import type { ProductBrief, DomainAgentRequest, DevelopmentPlan, SelectedDocument, Question } from '../domain/types.js';
 import { runAgent } from '../runtime/index.js';
 import type { AgentConfig, AgentRequest, AgentResult } from '../runtime/types.js';
 import { runBuild } from '../execution/index.js';
@@ -11,6 +11,17 @@ import { ProjectStore } from './store.js';
 import { readSettings } from './settings.js';
 import { questionChannel } from './questions.js';
 import { Cancelled, recoverOperation, waitForRecovery } from './recovery.js';
+import { emitEvent, type ProgressMeasurement } from '../telemetry/progress.js';
+import type { SavedProject } from './store.js';
+
+export interface WorkflowEvent {
+  type: string;
+  message?: string;
+  subject?: string;
+  detail?: unknown;
+  progress?: ProgressMeasurement;
+  at?: string;
+}
 
 export interface WorkflowOptions {
   workspace: string;
@@ -22,6 +33,9 @@ export interface WorkflowOptions {
   allowSystemInstall?: boolean;
   signal: AbortSignal;
   announce?: (message: string) => void;
+  onEvent?: (event: WorkflowEvent) => void;
+  onState?: (state: SavedProject) => void;
+  ask?: (question: Question) => Promise<string | null>;
   agent?: typeof runAgent;
   /** The CLI can retain one ownership lease while preparing remote inputs and constructing. */
   store?: ProjectStore;
@@ -66,12 +80,17 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
   const workspace = resolve(options.workspace);
   await mkdir(workspace, { recursive: true });
   const store = options.store ?? new ProjectStore(workspace);
+  const publish = (detail: WorkflowEvent): void => {
+    const event = { ...detail, at: detail.at ?? new Date().toISOString() };
+    store.event(detail.type, event);
+    emitEvent(options.onEvent, event);
+  };
   const announce = (message: string): void => {
-    store.event('message', { message });
+    publish({ type: 'message', message });
     try { options.announce?.(message); } catch { /* Observer cannot end execution. */ }
   };
   const persist = async (patch: Parameters<ProjectStore['update']>[0]): Promise<void> => {
-    await recoverOperation(async () => { store.update(patch); }, { signal: options.signal, announce });
+    await recoverOperation(async () => { const state = store.update(patch); emitEvent(options.onState, state); }, { signal: options.signal, announce });
   };
   try {
     while (!store.claim()) {
@@ -105,11 +124,13 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
       await persist({ config: config!, reviewer, allowSystemInstall });
     };
     await persist({ config, reviewer, allowSystemInstall, status: 'working', stage: options.stage });
-    const ask = questionChannel(store, options.signal, announce);
+    const ask = questionChannel(store, options.signal, announce, options.ask);
     const agent = options.agent ?? runAgent;
-    const event = (detail: { type: string; message: string }): void => {
-      store.event(detail.type, detail);
-      if (detail.type !== 'output') announce(detail.message);
+    const event = (detail: WorkflowEvent): void => {
+      publish(detail);
+      if (detail.message && !['output', 'progress'].includes(detail.type)) {
+        try { options.announce?.(detail.message); } catch { /* Observation cannot end execution. */ }
+      }
     };
     const invoke = async (request: Omit<AgentRequest, 'config'>): Promise<AgentResult> => {
       await refreshSettings();
@@ -120,10 +141,19 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
         await mkdir(callDirectory, { recursive: true, mode: 0o700 });
         await writeFile(join(callDirectory, `${id}.input.txt`), `${request.instruction}\n${request.context ?? ''}`, { mode: 0o600 });
       } catch { /* Auxiliary transcripts cannot prevent execution. */ }
-      const result = await agent({ ...request, config: selected, signal: options.signal, onEvent: event });
-      store.event('agent.result', { id, role: request.role, status: result.status, usage: result.usage, issue: result.issue });
-      await writeFile(join(callDirectory, `${id}.result.json`), JSON.stringify(result, null, 2), { mode: 0o600 }).catch(() => undefined);
-      return result;
+      const progress = { id: `agent:${id}`, label: `${request.role} · ${selected.provider}${selected.model ? ` / ${selected.model}` : ''}`, stage: store.read().stage ?? options.stage };
+      event({ type: 'agent.start', message: `Agente ${request.role} em execução.`, detail: { id, role: request.role, provider: selected.provider, model: selected.model } });
+      event({ type: 'progress', progress: { ...progress, status: 'running' } });
+      try {
+        const result = await agent({ ...request, config: selected, signal: options.signal, onEvent: event });
+        event({ type: 'agent.result', detail: { id, role: request.role, status: result.status, usage: result.usage, issue: result.issue } });
+        event({ type: 'progress', progress: { ...progress, status: result.status === 'complete' ? 'complete' : 'waiting' } });
+        await writeFile(join(callDirectory, `${id}.result.json`), JSON.stringify(result, null, 2), { mode: 0o600 }).catch(() => undefined);
+        return result;
+      } catch (error) {
+        event({ type: 'progress', progress: { ...progress, status: 'waiting' } });
+        throw error;
+      }
     };
     const domainAgent = async (request: DomainAgentRequest): Promise<string> => recoverOperation(async () => {
       const result = await invoke({ workspace, role: request.operation === 'discover' ? 'analyst' : 'planner', instruction: request.prompt, readOnly: true, constraints: { allowSystemInstall: false } });

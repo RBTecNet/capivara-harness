@@ -9,6 +9,7 @@ import { projectPath, writeProductFile } from '../runtime/files.js';
 import { ProjectStore } from './store.js';
 import { readSettings } from './settings.js';
 import { waitForRecovery } from './recovery.js';
+import { emitEvent, type ProgressMeasurement } from '../telemetry/progress.js';
 
 export interface DataCenterSelection { url: string; project?: string; prompt?: string; }
 export interface SelectedInputAsset {
@@ -111,7 +112,7 @@ async function writeInput(workspace: string, path: string, contents: string | Ui
 }
 
 /** Restore files before publishing the manifest, including binary references after an outage. */
-async function publishInput(workspace: string, input: SelectedProjectInput): Promise<void> {
+async function publishInput(workspace: string, input: SelectedProjectInput, onProgress?: (progress: ProgressMeasurement) => void): Promise<void> {
   const assets = input.assets ?? (input.documents.length ? undefined : []);
   if (!assets) throw new Error('O cache antigo precisa atualizar seu manifesto de arquivos antes de continuar.');
   const directory = await blobDirectory(workspace);
@@ -121,7 +122,11 @@ async function publishInput(workspace: string, input: SelectedProjectInput): Pro
     safeAssetPath(asset.path);
     contents.push({ asset, bytes: await readBlob(directory, asset.blob) });
   }
-  for (const { asset, bytes } of contents) await writeInput(workspace, asset.path, bytes);
+  emitEvent(onProgress, { id: 'inputs.files', label: 'Arquivos de entrada preparados', completed: 0, total: contents.length, status: contents.length ? 'running' : 'complete', stage: 'init', unit: 'arquivos' });
+  for (const [index, { asset, bytes }] of contents.entries()) {
+    await writeInput(workspace, asset.path, bytes);
+    emitEvent(onProgress, { id: 'inputs.files', label: 'Arquivos de entrada preparados', completed: index + 1, total: contents.length, status: index + 1 === contents.length ? 'complete' : 'running', stage: 'init', unit: 'arquivos' });
+  }
   await writeInput(workspace, '.project-inputs/index.json', JSON.stringify(assets.map(({ blob: _blob, ...asset }) => asset), null, 2));
   const ignored = await readFile(join(workspace, '.gitignore'), 'utf8').catch(() => '');
   const lines = new Set(ignored.split(/\r?\n/).map(line => line.trim()));
@@ -130,7 +135,7 @@ async function publishInput(workspace: string, input: SelectedProjectInput): Pro
 }
 
 /** Selected packages retain their relative references; immutable bytes make the manifest recoverable. */
-async function prepareMaterial(workspace: string, selection: DataCenterSelection, material: DataCenterMaterial): Promise<SelectedProjectInput> {
+async function prepareMaterial(workspace: string, selection: DataCenterSelection, material: DataCenterMaterial, onProgress?: (progress: ProgressMeasurement) => void): Promise<SelectedProjectInput> {
   if (material.project !== selection.project || material.requestUri !== `capivara://${selection.project}/pedido`) throw new Error('O material recebido pertence a outra seleção da base documental.');
   if (material.warnings.length) throw new Error('A base não conseguiu ler todos os documentos e arquivos selecionados; o material anterior será preservado.');
   const directory = await blobDirectory(workspace);
@@ -160,7 +165,7 @@ async function prepareMaterial(workspace: string, selection: DataCenterSelection
     }
   }
   const input: SelectedProjectInput = { selection, request: material.request, requestUri: material.requestUri, documents, assets, fetchedAt: new Date().toISOString() };
-  await publishInput(workspace, input);
+  await publishInput(workspace, input, onProgress);
   return input;
 }
 
@@ -168,6 +173,7 @@ async function prepareMaterial(workspace: string, selection: DataCenterSelection
 export async function loadProjectInput(options: {
   workspace: string; selection: DataCenterSelection; cached?: SelectedProjectInput;
   signal: AbortSignal; announce: (message: string) => void;
+  onProgress?: (progress: ProgressMeasurement) => void;
 }): Promise<SelectedProjectInput> {
   const selection = canonicalSelection(options.selection);
   let cached: SelectedProjectInput | undefined;
@@ -181,6 +187,7 @@ export async function loadProjectInput(options: {
   let attempt = 0;
   for (;;) {
     if (options.signal.aborted) throw options.signal.reason;
+    emitEvent(options.onProgress, { id: 'inputs.source', label: 'Leitura da base documental', status: 'running', stage: 'init' });
     try {
       const endpoint = await dataCenterEndpoint(selection.url);
       const client = createDataCenterClient(endpoint, { signal: options.signal });
@@ -189,23 +196,26 @@ export async function loadProjectInput(options: {
         // Context history is auxiliary. Every selected document must be read before replacing a complete cache.
         const material = dataCenterValue(await client.listMaterial(selection.project));
         if (!material.request.trim()) throw new Error('O projeto selecionado ainda não possui pedido.');
-        input = await prepareMaterial(options.workspace, selection, material);
+        input = await prepareMaterial(options.workspace, selection, material, options.onProgress);
       } else {
         const request = dataCenterValue(await client.readPrompt(selection.prompt!));
         if (!request.trim()) throw new Error('O prompt selecionado está vazio.');
         input = { selection, request, documents: [], assets: [], fetchedAt: new Date().toISOString() };
-        await publishInput(options.workspace, input);
+        await publishInput(options.workspace, input, options.onProgress);
       }
       const store = new ProjectStore(options.workspace);
       try { store.update({ dataCenter: input }); } finally { store.close(); }
       announce(`Base documental carregada: ${selection.project ?? selection.prompt}; ${input.documents.filter(document => document.kind !== 'reference').length} documento(s) e ${input.documents.filter(document => document.kind === 'reference').length} referência(s) selecionada(s).`);
+      emitEvent(options.onProgress, { id: 'inputs.source', label: 'Base documental carregada', completed: 1, total: 1, status: 'complete', stage: 'init', unit: 'origens' });
       return input;
     } catch (error) {
       if (options.signal.aborted) throw error;
+      emitEvent(options.onProgress, { id: 'inputs.source', label: 'Recuperando acesso à base documental', status: 'waiting', stage: 'init' });
       if (cached) {
         try {
-          await publishInput(options.workspace, cached);
+          await publishInput(options.workspace, cached, options.onProgress);
           announce('Base temporariamente indisponível; continuando com os materiais completos da mesma seleção já preservados neste projeto.');
+          emitEvent(options.onProgress, { id: 'inputs.source', label: 'Materiais preservados disponíveis', completed: 1, total: 1, status: 'complete', stage: 'init', unit: 'origens' });
           return cached;
         } catch { announce('A cópia dos insumos também precisa ser recuperada; aguardando a base sem substituir o material preservado.'); }
       }

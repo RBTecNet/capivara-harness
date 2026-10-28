@@ -27,6 +27,8 @@ interface RecoverySnapshot {
   answers: { id: string; body: string }[];
 }
 
+export interface ProjectEventRow { id: number; at: string; type: string; body: string; }
+
 /** One transaction owns the published project revision. The JSON copy is disaster recovery only. */
 export class ProjectStore {
   readonly directory: string;
@@ -102,6 +104,12 @@ export class ProjectStore {
 
   recent(limit = 20): unknown[] {
     return this.db.prepare('SELECT at,type,body FROM events ORDER BY id DESC LIMIT ?').all(limit);
+  }
+
+  /** Ordered pages let the dashboard reach the entire journal without a fixed history cutoff. */
+  eventsAfter(after = 0, limit = 1000): ProjectEventRow[] {
+    const pageSize = Math.max(1, Math.min(5000, Math.floor(limit)));
+    return this.db.prepare('SELECT id,at,type,body FROM events WHERE id>? ORDER BY id LIMIT ?').all(after, pageSize) as unknown as ProjectEventRow[];
   }
 
   answer(id: string, answer: string): void {

@@ -1,3 +1,5 @@
+import type { ProgressMeasurement } from '../telemetry/progress.js';
+
 /** Product data, independent of model transport, presentation and persistence. */
 export type ApplicationMode = "web" | "desktop" | "tui" | "cli" | "api" | "service" | "library" | "other";
 export type TargetPlatform = "linux" | "windows" | "macos" | "browser" | "portable";
@@ -155,6 +157,7 @@ export interface DomainEvent {
   type: string;
   message: string;
   subject?: string;
+  progress?: ProgressMeasurement;
 }
 
 export interface DomainHooks {

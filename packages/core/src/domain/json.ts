@@ -1,4 +1,5 @@
 import type { DomainAgent, DomainAgentRequest, DomainEvent } from "./types.js";
+import { emitEvent } from "../telemetry/progress.js";
 
 export const object = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 export const string = (value: unknown, fallback = ""): string => typeof value === "string" ? value.trim() : fallback;
@@ -70,7 +71,7 @@ export async function requestObject(options: {
     if (parsed) return parsed;
     repeated = response === previous ? repeated + 1 : 0;
     previous = response;
-    options.onEvent?.({ type: "recovering", message: "A resposta não contém objeto legível; recuperando sua estrutura sem reabrir o produto.", subject: options.operation });
+    emitEvent(options.onEvent, { type: "recovering", message: "A resposta não contém objeto legível; recuperando sua estrutura sem reabrir o produto.", subject: options.operation });
     if (repeated > 0) await pause(Math.min(30_000, repeated * 2_000), options.signal);
     const prefix = "Return one valid JSON object. Repair the preceding undecodable answer without changing the product facts:\n";
     const remaining = (options.contextChars ?? 24_000) - options.prompt.length - prefix.length - 4;

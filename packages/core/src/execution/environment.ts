@@ -6,10 +6,11 @@ import type { CommandRequest, CommandResult, ExecutionConstraints, TerminalReque
 import { runTerminal as realTerminal } from '../runtime/terminal.js';
 import type { BuildIncident } from './types.js';
 import { digest } from './files.js';
+import { emitProgress, type ProgressEvent } from '../telemetry/progress.js';
 
 export type CommandExecutor = (request: CommandRequest) => Promise<CommandResult>;
 export interface PreparationResult { ready: boolean; results: CommandResult[]; incidents: BuildIncident[]; }
-export interface PreparationOptions { allowSystemInstall?: boolean; signal?: AbortSignal; terminal?: (request: TerminalRequest) => Promise<CommandResult>; }
+export interface PreparationOptions { allowSystemInstall?: boolean; signal?: AbortSignal; terminal?: (request: TerminalRequest) => Promise<CommandResult>; onEvent?: (event: ProgressEvent) => void; }
 export const forbiddenCapabilities = (brief: ProductBrief): string[] => [...new Set(brief.constraints.flatMap(value=>value.forbiddenCapabilities))];
 export function executionConstraints(brief: ProductBrief, allowSystemInstall = false): ExecutionConstraints {
   const implicit=['http-server','browser'].filter(capability=>!allowedCapabilities(brief,[capability]));
@@ -31,8 +32,12 @@ function okay(result: CommandResult): boolean { return result.exitCode === 0 && 
 export async function runRecipe(workspace: string, recipe: CommandRecipe, brief: ProductBrief, execute: CommandExecutor, options: PreparationOptions = {}): Promise<CommandResult> {
   const request: CommandRequest = {cwd:recipeCwd(workspace,recipe.cwd),command:recipeCommand(recipe),constraints:executionConstraints(brief,options.allowSystemInstall),capabilities:recipe.capabilities??[],...(recipe.timeoutMs?{timeoutMs:recipe.timeoutMs}:{}),...(options.signal?{signal:options.signal}:{})};
   const needsTerminal = recipe.capabilities?.some(capability => /^(?:pty|terminal|interactive-terminal|pseudoterminal)$/i.test(capability));
+  const progress = { id: `environment:command:${digest(JSON.stringify({ cwd: request.cwd, command: request.command })).slice(0, 16)}`, label: `Preparação: ${recipe.command}`, stage: 'build' };
+  emitProgress(options.onEvent, { ...progress, status: 'running' });
   // Readiness of a terminal is an actual PTY operation, never a pipes-based process probe.
-  return needsTerminal ? (options.terminal ?? realTerminal)(request) : execute(request);
+  const result = await (needsTerminal ? (options.terminal ?? realTerminal)(request) : execute(request));
+  emitProgress(options.onEvent, { ...progress, status: okay(result) ? 'complete' : 'waiting' });
+  return result;
 }
 /** Reconcile a lock mismatch in the same project rather than treating installer preference as a failure. */
 export function installationAlternative(command: string, output: string): string | null {
@@ -45,11 +50,17 @@ export function installationAlternative(command: string, output: string): string
 }
 export async function prepareEnvironmentNode(workspace: string, node: EnvironmentNode, brief: ProductBrief, execute: CommandExecutor, options: PreparationOptions = {}): Promise<PreparationResult> {
   const results: CommandResult[] = [];
+  const progress = { id: `environment:node:${node.id}`, label: node.name, stage: 'build' };
+  const finish = (result: PreparationResult): PreparationResult => {
+    emitProgress(options.onEvent, { ...progress, status: result.ready ? 'complete' : 'waiting' });
+    return result;
+  };
+  emitProgress(options.onEvent, { ...progress, status: 'running' });
   const check = await runRecipe(workspace,node.check,brief,execute,options); results.push(check);
-  if (okay(check)) return {ready:true,results,incidents:[]};
+  if (okay(check)) return finish({ready:true,results,incidents:[]});
   for (const recipe of node.prepare) {
     if (options.signal?.aborted) break;
-    if (recipe.system && !options.allowSystemInstall) return {ready:false,results,incidents:[issue(node.id,'This recipe needs system access; find a local or isolated installation.',recipe.command,true)]};
+    if (recipe.system && !options.allowSystemInstall) return finish({ready:false,results,incidents:[issue(node.id,'This recipe needs system access; find a local or isolated installation.',recipe.command,true)]});
     const result = await runRecipe(workspace,recipe,brief,execute,options); results.push(result);
     if (!okay(result)) {
       const alternative = installationAlternative(result.command,`${result.stdout}\n${result.stderr}`);
@@ -60,12 +71,12 @@ export async function prepareEnvironmentNode(workspace: string, node: Environmen
       }
       // Readiness can have been achieved despite a failed optional post-install command.
       const readiness = await runRecipe(workspace,node.check,brief,execute,options); results.push(readiness);
-      if (okay(readiness)) return {ready:true,results,incidents:[]};
-      return {ready:false,results,incidents:[issue(node.id,`Environment ${node.name} is not ready.`,`${result.command}\n${result.stderr}\n${result.stdout}`,result.issue?.recoverable===true)]};
+      if (okay(readiness)) return finish({ready:true,results,incidents:[]});
+      return finish({ready:false,results,incidents:[issue(node.id,`Environment ${node.name} is not ready.`,`${result.command}\n${result.stderr}\n${result.stdout}`,result.issue?.recoverable===true)]});
     }
   }
   const readiness = await runRecipe(workspace,node.check,brief,execute,options); results.push(readiness);
-  return okay(readiness) ? {ready:true,results,incidents:[]} : {ready:false,results,incidents:[issue(node.id,`Environment ${node.name} still needs preparation.`,`${readiness.command}\n${readiness.stderr}\n${readiness.stdout}`)]};
+  return finish(okay(readiness) ? {ready:true,results,incidents:[]} : {ready:false,results,incidents:[issue(node.id,`Environment ${node.name} still needs preparation.`,`${readiness.command}\n${readiness.stderr}\n${readiness.stdout}`)]});
 }
 async function exists(path: string): Promise<boolean> { return stat(path).then(()=>true).catch(()=>false); }
 export async function manifestRecipes(workspace: string): Promise<CommandRecipe[]> {
@@ -91,17 +102,26 @@ export async function manifestRecipes(workspace: string): Promise<CommandRecipe[
 }
 export async function prepareProjectDependencies(workspace: string, brief: ProductBrief, execute: CommandExecutor, options: PreparationOptions = {}): Promise<PreparationResult> {
   let recipes: CommandRecipe[];
+  const progress = { id: 'environment:dependencies', label: 'Dependências do projeto', stage: 'build', unit: 'receitas' };
+  emitProgress(options.onEvent, { ...progress, status: 'running' });
   try { recipes=await manifestRecipes(workspace); }
-  catch(error) { return {ready:false,results:[],incidents:[issue('manifest',`The manifest is not readable: ${String(error)}`,'Repair only the manifest syntax without changing the requested dependencies.')]}; }
+  catch(error) {
+    emitProgress(options.onEvent, { ...progress, status: 'waiting' });
+    return {ready:false,results:[],incidents:[issue('manifest',`The manifest is not readable: ${String(error)}`,'Repair only the manifest syntax without changing the requested dependencies.')]};
+  }
   const results: CommandResult[]=[];
+  let completed = 0;
+  const report = (status: ProgressEvent['progress']['status']): void => emitProgress(options.onEvent, { ...progress, completed, total: recipes.length, status });
+  report(recipes.length ? 'running' : 'complete');
   for (const recipe of recipes) {
     const result=await runRecipe(workspace,recipe,brief,execute,options);results.push(result);
-    if (okay(result)) continue;
+    if (okay(result)) { completed += 1; report(completed === recipes.length ? 'complete' : 'running'); continue; }
     const alternative=installationAlternative(result.command,`${result.stdout}\n${result.stderr}`);
     if(alternative) {
       const repaired=await execute({cwd:workspace,command:alternative,constraints:executionConstraints(brief,options.allowSystemInstall),...(options.signal?{signal:options.signal}:{})});results.push(repaired);
-      if(okay(repaired))continue;
+      if(okay(repaired)){completed += 1; report(completed === recipes.length ? 'complete' : 'running'); continue;}
     }
+    report('waiting');
     return {ready:false,results,incidents:[issue('dependencies','Project dependencies need recovery.',`${result.command}\n${result.stderr}\n${result.stdout}`,!!result.issue?.recoverable)]};
   }
   return {ready:true,results,incidents:[]};

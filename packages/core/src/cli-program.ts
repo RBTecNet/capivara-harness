@@ -9,6 +9,7 @@ import { configuredAgent, bindCredential } from './app/catalog.js';
 import { dataCenterEndpoint, loadProjectInput } from './app/data-source.js';
 import { validateDataCenterEndpoint } from './data-center/index.js';
 import { waitForRecovery } from './app/recovery.js';
+import type { DashboardTerminal } from './dashboard/terminal.js';
 import type { AgentConfig } from './runtime/types.js';
 
 interface Flags {
@@ -18,6 +19,7 @@ interface Flags {
   contextTokens?: string; maxOutputTokens?: string; json?: boolean;
   modelDefault?: boolean; effortDefault?: boolean; reviewerModelDefault?: boolean; reviewerEffortDefault?: boolean;
   mcp?: string; mcpProject?: string; mcpPrompt?: string; mcpTokenEnv?: string;
+  dashboard?: boolean;
 }
 const PROVIDERS = ['codex', 'claude', 'opencode', 'openai', 'anthropic', 'gemini', 'openrouter', 'deepseek', 'minimax', 'custom'];
 const hideSecrets = (key: string, value: unknown): unknown => !/Env$/.test(key) && /api.?key|token|secret|password|access.?key|authorization|cookie/i.test(key) && typeof value === 'string' ? '[credencial ocultada]' : value;
@@ -49,6 +51,8 @@ function common(command: Command): Command {
     .option('--mcp-project <slug>', 'Usar pedido e documentos selecionados desse projeto')
     .option('--mcp-prompt <name>', 'Usar um prompt guardado na base documental')
     .option('--mcp-token-env <name>', 'Configurar a credencial da base a partir desta variável')
+    .option('--dashboard', 'Exibir o painel interativo quando houver terminal')
+    .option('--no-dashboard', 'Exibir somente mensagens de progresso em texto')
     .option('--json', 'Saída final estruturada');
 }
 
@@ -122,7 +126,9 @@ export function createProgram(): Command {
     const reviewer = baseReviewer ? await credentialsFor(baseReviewer) : undefined;
     const controller = new AbortController();
     let executionStore: typeof inspection | undefined;
-    const interrupt = (): void => controller.abort();
+    let dashboard: DashboardTerminal | undefined;
+    let finishing = false;
+    const interrupt = (): void => { controller.abort(); dashboard?.close(); };
     process.once('SIGINT', interrupt); process.once('SIGTERM', interrupt);
     try {
       if (flags.mcpProject && flags.mcpPrompt) throw new Error('Escolha projeto ou prompt da base; não ambos.');
@@ -134,13 +140,40 @@ export function createProgram(): Command {
         ...(flags.mcpProject ? { project: flags.mcpProject } : { prompt: flags.mcpPrompt! }),
       } : !explicitLocal && current.dataCenter ? { ...current.dataCenter.selection, ...(flags.mcp ? { url: flags.mcp } : {}) } : undefined;
       if (flags.mcp && !selection && !explicitLocal) throw new Error('Informe --mcp-project ou --mcp-prompt, ou escolha uma origem no wizard.');
-      const announce = (message: string): void => { if (!flags.json) stdout.write(`${message}\n`); };
-      executionStore = new ProjectStore(workspace);
-      if (!executionStore.claim()) {
-        announce('Outra execução trabalha neste projeto; aguardando antes de atualizar seus insumos.');
-        do { await waitForRecovery(2000, controller.signal); } while (!executionStore.claim());
+      if (!actualRequest?.trim() && !selection) {
+        if (stdin.isTTY) actualRequest = await ask('O que você quer construir? ');
+        if (!actualRequest?.trim()) throw new Error('Informe o pedido como texto, --file ou projeto/prompt da base documental.');
       }
-      const input = selection ? await loadProjectInput({ workspace, selection, ...(current.dataCenter ? { cached: current.dataCenter } : {}), signal: controller.signal, announce }) : undefined;
+      const announce = (message: string): void => { if (!flags.json && !dashboard?.active) stdout.write(`${message}\n`); };
+      const sourceEvent = (event: import('./app/workflow.js').WorkflowEvent): void => {
+        const observed = { ...event, at: new Date().toISOString() };
+        executionStore?.event(event.type, observed); dashboard?.observe(observed);
+      };
+      const sourceAnnounce = (message: string): void => { sourceEvent({ type: 'source', message }); announce(message); };
+      executionStore = new ProjectStore(workspace);
+      if (!flags.json && flags.dashboard !== false && stdin.isTTY && stdout.isTTY && process.env.CAPIVARA_LINE_INPUT !== '1') {
+        const { DashboardTerminal } = await import('./dashboard/terminal.js');
+        const { hydrateDashboard } = await import('./app/dashboard.js');
+        dashboard = new DashboardTerminal({ workspace, initial: { ...current, stage, status: 'working', config, ...(reviewer ? { reviewer } : {}) }, cancel: () => controller.abort(),
+          onClose: () => { if (!finishing && !controller.signal.aborted) stdout.write('Painel ocultado; a execução continua.\n'); },
+          onError: () => { if (!controller.signal.aborted) stdout.write('A interface ficou indisponível; o motor continua com saída em texto.\n'); },
+          onAnswer: async (id, answer) => {
+            const state = executionStore!.read();
+            if (!state.brief?.gaps.some(gap => gap.id === id)) throw new Error('Essa decisão já não pertence ao pedido atual.');
+            executionStore!.answer(id, answer);
+            try { executionStore!.update({ pendingQuestion: null }); } catch { /* The answer is already durable. */ }
+            dashboard!.updateProject(executionStore!.read());
+          },
+        });
+        try { hydrateDashboard(dashboard, executionStore); dashboard.start(); } catch { dashboard.close(); }
+      }
+      if (!executionStore.claim()) {
+        sourceAnnounce('Outra execução trabalha neste projeto; aguardando antes de atualizar seus insumos.');
+        sourceEvent({ type: 'progress', progress: { id: 'ownership', label: 'Aguardando acesso ao projeto', status: 'waiting', stage } });
+        do { await waitForRecovery(2000, controller.signal); } while (!executionStore.claim());
+        sourceEvent({ type: 'progress', progress: { id: 'ownership', label: 'Acesso ao projeto', status: 'complete', stage } });
+      }
+      const input = selection ? await loadProjectInput({ workspace, selection, ...(current.dataCenter ? { cached: current.dataCenter } : {}), signal: controller.signal, announce: sourceAnnounce, onProgress: progress => sourceEvent({ type: 'progress', progress }) }) : undefined;
       if (input) actualRequest = input.request;
       if (!actualRequest?.trim() && stdin.isTTY) actualRequest = await ask('O que você quer construir? ');
       if (!actualRequest?.trim()) throw new Error('Informe o pedido como texto, --file ou projeto/prompt da base documental.');
@@ -154,14 +187,18 @@ export function createProgram(): Command {
         ...(reviewer ? { reviewer } : {}),
         ...(flags.systemInstall === true ? { allowSystemInstall: true } : {}),
         signal: controller.signal, announce,
+        onEvent: event => dashboard?.observe(event),
+        onState: state => dashboard?.updateProject(state),
+        ...(dashboard?.active ? { ask: async (question: import('./domain/types.js').Question) => { dashboard!.updateProject(executionStore!.read()); return dashboard!.ask(question); } } : {}),
       });
+      finishing = true; dashboard?.close();
       if (flags.json) stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       else stdout.write(`\n${stage}: ${result.status}. Estado: ${workspace}/.capivara-next\n`);
       if (result.status === 'cancelled') process.exitCode = 130;
     } catch (error) {
       if (!controller.signal.aborted) throw error;
       stdout.write('Interrupção solicitada; materiais e trabalho preservados.\n'); process.exitCode = 130;
-    } finally { process.off('SIGINT', interrupt); process.off('SIGTERM', interrupt); executionStore?.close(); }
+    } finally { finishing = true; dashboard?.close(); process.off('SIGINT', interrupt); process.off('SIGTERM', interrupt); executionStore?.close(); }
   };
   for (const stage of ['init', 'plan', 'build', 'run'] as const) {
     common(program.command(stage).description({ init: 'Entende o pedido e resolve apenas lacunas reais', plan: 'Prepara a árvore de dependências e fragmentos', build: 'Constrói, confere e recupera sem reiniciar etapas', run: 'Executa init, plan e build até concluir' }[stage]).argument('[pedido]'))
@@ -195,6 +232,9 @@ export function createProgram(): Command {
         stdout.write(flags.json ? `${JSON.stringify(state, hideSecrets, 2)}\n` : `${state.stage ?? 'sem execução'}: ${state.status ?? 'novo'}\n${state.pendingQuestion ? `${state.pendingQuestion.id}: ${state.pendingQuestion.question}\n` : ''}`);
       } finally { store.close(); }
     });
+  program.command('dashboard').description('Acompanha o projeto com painéis, rolagem e áreas ampliadas')
+    .option('--project <path>', 'Pasta da aplicação', '.').option('--json', 'Dados integrais dos painéis em JSON')
+    .action(async (flags: Flags) => { const { showProjectDashboard } = await import('./app/dashboard.js'); await showProjectDashboard(resolve(flags.project), flags.json); });
   program.command('answer <id> <resposta>').description('Resolve uma lacuna de execução ativa ou preservada')
     .option('--project <path>', 'Pasta da aplicação', '.')
     .action(async (id: string, answer: string, flags: Flags) => {

@@ -54,6 +54,21 @@ O plan registra primeiro a árvore técnica de preparação: runtimes, SDKs, fer
 
 Editor e revisor recebem o fragmento, contratos relevantes, restrições e evidências locais. O revisor aponta defeitos concretos e orienta o reparo. Parecer malformado é esclarecido sem reabrir o editor. Não há obrigação de criar suíte nem metas sobre quantidade de testes. Evidência válida é reutilizada enquanto seus insumos continuam iguais.
 
+## Dashboard da execução
+
+Em um terminal interativo, `init`, `plan`, `build` e `run` abrem automaticamente o dashboard, sem mascote ou nome da aplicação. Ele reúne resumo, progresso, fases, ambiente, atividade, log e pendências. As barras usam contagens observadas; operações sem total conhecido mostram movimento sem inventar uma porcentagem. Para usar saída por linhas, acrescente `--no-dashboard`.
+
+Para acompanhar um projeto em outro terminal ou consultar uma execução concluída:
+
+```sh
+capivara dashboard --project ./app
+capivara dashboard --project ./app --json
+```
+
+Use Tab/Shift+Tab, ←/→, números de 1 a 7 ou clique para selecionar uma área. ↑/↓, PgUp/PgDn, Home/End e a roda do mouse percorrem o conteúdo. Enter amplia a área selecionada e permite ler todo o conteúdo; Esc volta ao dashboard preservando a posição anterior. Em logs e atividade, End volta a acompanhar as entradas novas. A tecla `a` abre uma pergunta pendente.
+
+`q` oculta o dashboard e mantém a construção em andamento; Ctrl+C solicita cancelamento. Na janela de acompanhamento independente, ambos apenas fecham essa janela. Uma falha da interface retorna à saída por linhas sem interromper o motor. Sem TTY, o comando `dashboard` imprime os dados e termina. Veja [detalhes e validação](docs/DASHBOARD-EXECUCAO.md).
+
 ## Base documental MCP/data-center
 
 No wizard, a origem do pedido pode ser texto, arquivo, projeto da base documental ou prompt guardado. A lista de projetos vem do servidor configurado, com a quantidade de documentos selecionados. O projeto fornece seu pedido e sua seleção documental; um prompt guardado fornece somente seu texto.
@@ -81,7 +96,7 @@ Cancelamento explícito por Ctrl+C é respeitado. Falta de credencial, rede, res
 
 O piloto real desta entrega usa Codex no Linux. APIs têm testes de protocolo e ferramentas locais, sem inferência paga em todos os provedores. A disponibilidade dos outros transportes depende da instalação e autenticação do usuário. Receitas web e desktop usam ferramentas do projeto ou da CLI selecionada; não há um navegador ou controlador gráfico universal embutido. Alvos nativos exigem runner compatível para evidência de comportamento.
 
-A superfície contém `wizard`, `init`, `plan`, `build`, `run`, `config`, `status`, `answer` e `providers`. O wizard e o acesso à base MCP foram recriados sobre os motores novos; `change`, `survey`, `prompt-engineer` e construtores paralelos antigos continuam fora desta RC. Os documentos antigos em `docs` estão marcados como históricos. Não há camada de compatibilidade com a versão 0.8.x.
+A superfície contém `wizard`, `init`, `plan`, `build`, `run`, `dashboard`, `config`, `status`, `answer` e `providers`. O wizard e o acesso à base MCP foram recriados sobre os motores novos; `change`, `survey`, `prompt-engineer` e construtores paralelos antigos continuam fora desta RC. Os documentos antigos em `docs` estão marcados como históricos. Não há camada de compatibilidade com a versão 0.8.x.
 
 ## Desenvolvimento e evidências
 

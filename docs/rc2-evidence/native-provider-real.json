@@ -1,0 +1,44 @@
+{
+  "generatedAt": "2026-10-28T19:24:18.546Z",
+  "passed": true,
+  "classification": null,
+  "exitCode": 0,
+  "runtimeProvider": {
+    "execPath": "/home/bruno/.nvm/versions/node/v24.22.1/bin/node",
+    "nativeFingerprint": "bb089ee3559ed4353ec2cb03d92faf6f8e3722ce55e7fa65c598aa49b3c82ae5",
+    "launcher": {
+      "path": "/home/bruno/.nvm/versions/node/v24.22.1/lib/node_modules/npm/bin/npm-cli.js",
+      "fingerprint": "ca74652bb9b2ad0072a91912cb4a2ca93aeee939d6b6071c0565d52755a17c43",
+      "shebang": "#!/usr/bin/env node",
+      "interpreter": [
+        "/home/bruno/.nvm/versions/node/v24.22.1/bin/node"
+      ]
+    },
+    "capability": "API REST e interface web com persistência em banco de dados SQLite local",
+    "kind": "runtime",
+    "provider": "Node.js",
+    "bindingCommand": [
+      "/home/bruno/.nvm/versions/node/v24.22.1/bin/npm"
+    ],
+    "fingerprint": "0221dedc961c1bd7e9f9076c3d2642f58f33bc4b344ec433d181d5ccfa37f692",
+    "observedAt": "2026-10-28T19:24:17.557Z"
+  },
+  "runtimeObservation": {
+    "enabled": true,
+    "diagnostics": []
+  },
+  "witnesses": [
+    {
+      "execPath": "/home/bruno/.nvm/versions/node/v24.22.1/bin/node",
+      "argv": [
+        "/home/bruno/.nvm/versions/node/v24.22.1/bin/node",
+        "/home/bruno/Documentos/Projetos/testes_capivara/samba_admin/server/src/index.ts"
+      ],
+      "inputs": {
+        "server/src/index.ts": "8e4826d66baa7eb64e1e1f51a58c82eca5028b10efba7a864f03c0c3134af0b4",
+        "server/src/db.ts": "e172b55881fca3d81aaffa663af2de9f952f10a506e9f0bd2b1d16aebcc56378"
+      }
+    }
+  ],
+  "conformanceIssues": []
+}

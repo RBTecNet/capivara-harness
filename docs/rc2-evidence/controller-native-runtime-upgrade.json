@@ -1,0 +1,8 @@
+{
+  "pid": 2120210,
+  "project": "/home/bruno/Documentos/Projetos/testes_capivara/samba_admin",
+  "snapshotUpdatedAt": "2026-10-28T19:17:25.913Z",
+  "reason": "Load the corrected runtime-provider identity observer and scope its proof recovery; the old observer probes npm with Node arguments and cannot prove the already running Node API.",
+  "active": 0,
+  "children": ""
+}

@@ -154,7 +154,7 @@ export interface Verification {
   /** A documented manifest adapter is a candidate invocation, never an approval. */
   recipeCandidate?: { kind: "package-script"; manifest: string; manifestHash: string; script: string; expandedArgv: string[]; target: string; original: { command: string; args?: string[]; cwd?: string } };
   /** Populated by a concrete runtime adapter, not accepted as a model assertion. */
-  instrument?: { provider: string; output: "runner"; originalKind?: Verification["kind"]; transformations?: { original: { command?: string; args?: string[]; cwd?: string }; removedPreparations: { command: string; args: string[]; cwd: string }[]; reason: string }[] };
+  instrument?: { provider: string; output: "runner"; originalKind?: Verification["kind"]; declaredInputs?: string[]; sourceInputs?: string[]; transformations?: { original: { command?: string; args?: string[]; cwd?: string }; removedPreparations: { command: string; args: string[]; cwd: string }[]; reason: string }[] };
   /** Dedicated proof that product inputs actually consume the mandatory provider. */
   conformance?: CapabilityIdentity & { requirementId: string; productInputs: string[]; providerCommand?: string[]; providerInputs?: string[]; artifacts?: string[] };
 }

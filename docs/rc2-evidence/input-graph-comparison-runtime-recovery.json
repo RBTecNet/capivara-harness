@@ -1,0 +1,55 @@
+{
+  "schema": "capivara/input-graph-comparison/1",
+  "capturedAt": "2026-10-28T18:00:17.622Z",
+  "baselineResolverCommit": "5c27692",
+  "taskId": "integrated-acceptance",
+  "checkId": "web-interface-e2e",
+  "workspace": "/home/bruno/Documentos/Projetos/testes_capivara/samba_admin/.capivara-next/workspaces/83c078ea39ca-a6a5a76f-9b0a-4c20-a3eb-759a46cbf005/product/.capivara-next/workspaces/2be95f3a42de-3e073622-05f5-464b-ae27-3768c177613b/product",
+  "commandNotExecuted": true,
+  "projectModified": false,
+  "before": {
+    "resolverSourceSHA256": "bfea138e6bc44cec6d702f40ef3c4b8abd50f19060b85288c6fd98801c7d8da1",
+    "selectors": [
+      "README.md",
+      "e2e/integration.spec.ts",
+      "package.json",
+      "server/src",
+      "src"
+    ],
+    "resolvedEntries": 3436,
+    "resolvedSetSHA256": "4291c2f79edabd45f14b94fbc2fefffdac6267c22431100cc6b214b8967309c7",
+    "snapshotEntries": 6869,
+    "inputSnapshotSHA256": "5f00fe5cb6f96334014ae8e8c46bc02adfe33ff012cbe3b771152aaa95c485f6",
+    "timings": {
+      "verificationInputSelectors": 0.75,
+      "resolveInputDependencies": 19951.97,
+      "inputSnapshot": 1020.32
+    }
+  },
+  "after": {
+    "resolverSourceSHA256": "5cf4aca68fde5858ee205e4ce0a37c5715e0f463c349ee2a4ff64aac33c2805d",
+    "selectors": [
+      "README.md",
+      "e2e/integration.spec.ts",
+      "package.json",
+      "server/src",
+      "src"
+    ],
+    "resolvedEntries": 3436,
+    "resolvedSetSHA256": "4291c2f79edabd45f14b94fbc2fefffdac6267c22431100cc6b214b8967309c7",
+    "snapshotEntries": 6869,
+    "inputSnapshotSHA256": "5f00fe5cb6f96334014ae8e8c46bc02adfe33ff012cbe3b771152aaa95c485f6",
+    "timings": {
+      "verificationInputSelectors": 0.79,
+      "resolveInputDependencies": 4903.99,
+      "inputSnapshot": 1081.49
+    }
+  },
+  "equalResolvedSet": true,
+  "equalContentSnapshot": true,
+  "limits": [
+    "Comparison changes only resolver implementation; both use the same current file inventory/hash helper and the same captured plan/check.",
+    "The resolver memoization is confined to each invocation; no cross-proof or cross-restart cache is used.",
+    "Concurrent live verification can influence elapsed time; the content and resolved-set hashes must still match."
+  ]
+}

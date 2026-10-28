@@ -71,6 +71,62 @@ it('persists effective definitions and prevents inverse restoration after a rest
   expect(second.restored).toEqual([]); expect(second.plan).toEqual(first.plan);
 });
 
+it('keeps a reconciled plan stable when its retired successor also has an approved exact definition', async () => {
+  const f = await fixture();
+  f.state.taskDefinitions = { records: f.original, 'records-proof': f.replacement };
+  const retired = f.state.tasks['records-proof']!;
+  retired.status = 'complete'; retired.definitionHash = digest(JSON.stringify(f.replacement));
+  const first = recoverPlanLineage(brief, f.plan, f.state);
+  expect(first.restored[0]?.replacementDefinitionHash).toBe(retired.definitionHash);
+  f.state.planLineage = first.restored;
+  f.state.tasks.records!.status = 'complete';
+  f.state.tasks.records!.definitionHash = digest(JSON.stringify(first.plan.tasks[0]));
+  delete f.state.tasks.records!.checkpoint;
+  let plan = first.plan;
+  for (let restart = 0; restart < 3; restart++) {
+    const result = recoverPlanLineage(brief, plan, JSON.parse(JSON.stringify(f.state)) as BuildState);
+    expect(result.restored).toEqual([]); expect(result.plan).toEqual(first.plan);
+    plan = result.plan;
+  }
+});
+
+it('recognizes an exact legacy retirement even after an old controller changed its strategy', async () => {
+  const f = await fixture();
+  f.state.taskDefinitions = { records: f.original, 'records-proof': f.replacement };
+  const first = recoverPlanLineage(brief, f.plan, f.state);
+  f.state.planLineage = first.restored.map(({ replacementDefinitionHash: _, ...legacy }) => legacy);
+  const retired = f.state.tasks['records-proof']!;
+  retired.status = 'complete'; retired.strategy = 'verified';
+  retired.definitionHash = digest(JSON.stringify(f.replacement));
+  const successor = { ...first.plan.tasks[0]!, id: 'records-delivery' };
+  const current = { ...first.plan, tasks: [successor, { ...first.plan.tasks[1]!, dependsOn: [successor.id] }] };
+  f.state.tasks.records!.status = 'complete'; f.state.tasks.records!.strategy = 'superseded-plan-lineage';
+  f.state.tasks.records!.definitionHash = digest(JSON.stringify(first.plan.tasks[0]));
+  delete f.state.tasks.records!.checkpoint;
+  const result = recoverPlanLineage(brief, current, f.state);
+  expect(result.restored).toEqual([]); expect(result.plan).toEqual(current);
+});
+
+it('preserves a genuinely new orphaned proposal after retirement of the same task ID', async () => {
+  for (const changedContract of [false, true]) {
+    const f = await fixture();
+    f.state.taskDefinitions = { records: f.original, 'records-proof': f.replacement };
+    const first = recoverPlanLineage(brief, f.plan, f.state);
+    f.state.planLineage = first.restored;
+    const definition = structuredClone(f.replacement);
+    if (changedContract) definition.criteria.push('New concrete delivery obligation');
+    const directory = join(f.root, 'new-private-proposal'); await mkdir(directory);
+    await writeFile(join(directory, 'records.js'), 'new unintegrated work');
+    f.state.taskDefinitions['records-proof'] = definition;
+    f.state.tasks['records-proof']!.status = 'checking';
+    f.state.tasks['records-proof']!.checkpoint = { directory, base: {}, phase: 'checking', taskHash: digest(JSON.stringify(definition)) };
+    const result = recoverPlanLineage(brief, first.plan, f.state);
+    expect(result.restored).toHaveLength(1);
+    expect(result.restored[0]).toMatchObject({ previousTaskId: 'records-proof', checkpointDirectory: directory });
+    expect(await readFile(join(directory, 'records.js'), 'utf8')).toBe('new unintegrated work');
+  }
+});
+
 it('does not replace a completed successor or introduce a missing original dependency', async () => {
   const f = await fixture(); f.state.tasks['records-proof']!.status = 'complete';
   f.state.evidence.push({id:'proved-successor',taskId:'records-proof',checkId:'record-proof',inputHash:'current',passed:true,command:'node test/records.js',output:'verified',terminal:false,level:'behavior',checkedAt:new Date().toISOString()});

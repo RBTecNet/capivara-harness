@@ -43,3 +43,25 @@ it.skipIf(process.platform==='win32')('does not enable the Node adapter for a di
   const root=await workspace(),environment=operational(root);environment.bindings.runtime!.command=['/bin/sh'];
   const observation=await startProviderObservation(root,check,environment);expect(observation.enabled).toBe(false);expect(await observation.finish()).toEqual([]);
 });
+it.skipIf(process.platform==='win32')('resolves the native Node interpreter of a real npm consumer binding without aliasing npm to Node',async()=>{
+  const {prepareEnvironmentNode}=await import('../../src/execution/environment.js');
+  const root=await workspace();await mkdir(join(root,'src'));await writeFile(join(root,'src/product.mjs'),'export const answer=42;');await writeFile(join(root,'verify.mjs'),'import {answer} from "./src/product.mjs";if(answer!==42)process.exit(7);console.log("verified")');await writeFile(join(root,'package.json'),JSON.stringify({scripts:{verify:`"${process.execPath}" verify.mjs`}}));
+  const brief={schema:'capivara/product/1' as const,status:'ready' as const,id:'b',revision:1,name:'Fixture',summary:'Fixture',request:'Verify the actual runtime.',modes:['cli' as const],targets:['portable' as const],requirements:[],constraints:[],decisions:[],gaps:[]};
+  const prepared=await prepareEnvironmentNode(root,{id:'runtime',name:'Selected launcher',kind:'runtime',identity:{capability:'product-runtime',kind:'runtime',provider:'selected-node'},dependsOn:[],targets:['portable'],reason:'Consumer launcher',check:{command:'npm',args:['--version']},prepare:[],provides:{command:['npm'],aliases:['npm']}},brief,executeCommand);expect(prepared.ready).toBe(true);
+  const binding=prepared.operational.bindings['product-runtime']!,observation=await startProviderObservation(root,check,prepared.operational);expect(observation.enabled,observation.reason).toBe(true);
+  expect(observation.runtimeProvider?.bindingCommand).toEqual(binding.command);expect(observation.runtimeProvider?.fingerprint).toBe(binding.fingerprint);expect(observation.runtimeProvider?.launcher.shebang).toBe('#!/usr/bin/env node');expect(observation.runtimeProvider?.execPath).toBe(process.execPath);expect(binding.aliases).toEqual(['npm']);
+  const result=await executeCommand({cwd:root,command:[...binding.command!,'run','verify'],environment:{...prepared.operational.env,...observation.environment}});expect(result.exitCode).toBe(0);const witnesses=await observation.finish();expect(witnesses.some(witness=>witness.execPath===observation.runtimeProvider!.execPath&&witness.inputs['src/product.mjs'])).toBe(true);await observation.cleanup();
+});
+it.skipIf(process.platform==='win32')('resolves env shebang interpreters from the actual request PATH rather than assuming the harness runtime',async()=>{
+  const {chmod,realpath}=await import('node:fs/promises');const {delimiter}=await import('node:path');
+  const root=await workspace(),environment=operational(root);const {resolveNativeNode}=await import('../../src/runtime/provider-observation.js');
+  const real=await resolveNativeNode(root,['npm'],environment.env);expect(real).toBeDefined();
+  const bin=join(root,'different-runtime');await mkdir(bin);await writeFile(join(bin,'node'),'#!/bin/sh\nexit 7\n');await chmod(join(bin,'node'),0o755);
+  environment.bindings.runtime!.command=[real!.launcher.path];environment.bindings.runtime!.aliases=['npm'];environment.env.PATH=`${bin}${delimiter}${process.env.PATH??''}`;
+  const observation=await startProviderObservation(root,check,environment);expect(observation.enabled).toBe(false);expect(await observation.finish()).toEqual([]);expect(await realpath(real!.execPath)).toBe(process.execPath);
+});
+it.skipIf(process.platform!=='linux')('preserves real env split-string flags and refuses an invalid non-split shebang',async()=>{
+  const {chmod}=await import('node:fs/promises');const {resolveNativeNode}=await import('../../src/runtime/provider-observation.js');const root=await workspace();
+  const valid=join(root,'launcher.cjs'),invalid=join(root,'invalid.cjs');await writeFile(valid,'#!/usr/bin/env -S node --no-warnings\nprocess.stdout.write(process.execPath);');await chmod(valid,0o755);await writeFile(invalid,'#!/usr/bin/env node --no-warnings\nprocess.stdout.write(process.execPath);');await chmod(invalid,0o755);
+  const actual=await executeCommand({cwd:root,command:[valid]});expect(actual.exitCode).toBe(0);const native=await resolveNativeNode(root,[valid],{});expect(native?.execPath).toBe(actual.stdout);expect(native?.launcher.interpreter.slice(1)).toEqual(['--no-warnings']);expect(await resolveNativeNode(root,[invalid],{})).toBeUndefined();expect((await executeCommand({cwd:root,command:[invalid]})).exitCode).not.toBe(0);
+});

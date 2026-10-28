@@ -1,0 +1,23 @@
+{
+  "at": "2026-10-28T20:02:59.336620+00:00",
+  "pid": 2199294,
+  "operation": "quiescent engineering controller replacement to fix retired plan and recovery replay",
+  "productStatus": "working",
+  "active": 0,
+  "children": [],
+  "runningDomainCalls": 0,
+  "taskIds": [
+    "implement-visual-plan-shell",
+    "foundation-api-db",
+    "module-tasks-api",
+    "module-categories-api",
+    "module-notes-api",
+    "module-tasks-ui",
+    "module-categories-ui",
+    "module-notes-ui",
+    "web-shell",
+    "integrated-acceptance"
+  ],
+  "statePreserved": true,
+  "automaticRecoveryClaim": false
+}

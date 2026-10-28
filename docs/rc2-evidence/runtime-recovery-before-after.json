@@ -1,6 +1,6 @@
 {
   "schema": "capivara/runtime-recovery-comparison/1",
-  "generatedAt": "2026-10-28T17:28:32.105Z",
+  "generatedAt": "2026-10-28T20:06:53.920Z",
   "baselineCommit": "0f193a3914c06307d60a48f17c1dc816da7e747d",
   "host": {
     "platform": "linux",
@@ -64,7 +64,7 @@
     }
   },
   "after": {
-    "sourceSHA256": "1321fa6bd9e4340273e457c69bae1c561f66a6024eb7629b17daffad9b28db97",
+    "sourceSHA256": "4f0353c858f72daa070655f6c2f0f70d6d91f27b55c2bd1a9d694e02bcd1d8e3",
     "invocation": {
       "ready": true,
       "command": [
@@ -131,7 +131,7 @@
         "kind": "instrument",
         "message": "alpha: Review remained unresolved after clarification; reconcile its evidence contract without silently approving or editing the product.\n{\"approved\":false,\"findings\":[]}",
         "fingerprint": "8a503a00e414ec669ecf624483cfdb7ea6c5a44ddafaef1e9a12c6a77c3beecb",
-        "at": "2026-10-28T17:28:34.240Z"
+        "at": "2026-10-28T20:06:56.092Z"
       },
       "blockers": [
         {

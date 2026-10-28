@@ -20,6 +20,12 @@ async function run(check:Partial<Verification>={}){
 }
 
 describe('predicados de prova explícitos e observações persistidas',()=>{
+  it('preserva um build executado com sucesso sem aprovar uma asserção explícita malformada',async()=>{
+    const result=await run({level:'build',assertionIssue:'The explicit assertion has an unsupported shape.'});
+    expect(result.result?.exitCode).toBe(0);expect(result.evidence.passed).toBe(false);
+    expect(result.classification).toBe('instrument');expect(result.evidence.assertionStatus).toBe('invalid');
+  });
+
   it('normaliza seletores tipados sem converter o critério humano em asserção',()=>{
     const [check]=normalizeChecks([{id:'typed',kind:'cli',command:'node',expected:'O registro é persistido.',assertion:{type:'contains',source:'stdout',value:'record saved'}}],product);
     expect(check?.expected).toBe('O registro é persistido.');

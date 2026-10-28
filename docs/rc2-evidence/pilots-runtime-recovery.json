@@ -1,16 +1,16 @@
 {
-  "generatedAt": "2026-10-28T17:47:02.882Z",
+  "generatedAt": "2026-10-28T20:06:48.737Z",
   "source": "scripted agents with real generated products and native commands",
   "paidInferenceCalls": 0,
   "reports": [
     {
       "name": "node-serial-control",
-      "workspace": "/tmp/capivara-rc2-node-serial-control-2qmKic",
+      "workspace": "/tmp/capivara-rc2-node-serial-control-OOAHgl",
       "status": "complete",
       "jobs": 1,
       "metrics": {
-        "startedAt": "2026-10-28T17:46:59.174Z",
-        "elapsedMs": 876,
+        "startedAt": "2026-10-28T20:06:44.532Z",
+        "elapsedMs": 972,
         "maxConcurrency": 1,
         "active": 0,
         "callsByRole": {
@@ -18,18 +18,18 @@
           "reviewer": 3
         },
         "timeByStageMs": {
-          "queueWait": 1,
-          "dependencies": 172,
-          "browserPreparation": 23,
-          "isolation": 6,
+          "queueWait": 0,
+          "dependencies": 182,
+          "browserPreparation": 28,
+          "isolation": 8,
           "agentInstrument": 7,
           "editor": 245,
-          "verificationIsolation": 15,
-          "verification": 157,
+          "verificationIsolation": 16,
+          "verification": 170,
           "reviewer": 0,
-          "cleanup": 6,
-          "integration": 40,
-          "proofRevalidation": 12
+          "cleanup": 9,
+          "integration": 53,
+          "proofRevalidation": 15
         },
         "invalidations": [],
         "repetitions": [],
@@ -37,38 +37,38 @@
           {
             "taskId": "alpha",
             "stage": "editor",
-            "start": 1793209619238,
-            "end": 1793209619321
+            "start": 1793218004596,
+            "end": 1793218004679
           },
           {
             "taskId": "alpha",
             "stage": "reviewer",
-            "start": 1793209619435,
-            "end": 1793209619435
+            "start": 1793218004832,
+            "end": 1793218004832
           },
           {
             "taskId": "beta",
             "stage": "editor",
-            "start": 1793209619484,
-            "end": 1793209619565
+            "start": 1793218004903,
+            "end": 1793218004984
           },
           {
             "taskId": "beta",
             "stage": "reviewer",
-            "start": 1793209619701,
-            "end": 1793209619701
+            "start": 1793218005130,
+            "end": 1793218005130
           },
           {
             "taskId": "cli",
             "stage": "editor",
-            "start": 1793209619755,
-            "end": 1793209619836
+            "start": 1793218005199,
+            "end": 1793218005280
           },
           {
             "taskId": "cli",
             "stage": "reviewer",
-            "start": 1793209619996,
-            "end": 1793209619996
+            "start": 1793218005432,
+            "end": 1793218005432
           }
         ]
       },
@@ -80,7 +80,7 @@
           "kind": "cli",
           "level": "behavior",
           "terminal": false,
-          "output": "Verification workspace: /tmp/capivara-rc2-node-serial-control-2qmKic/.capivara-next/workspaces/8ed3f6ad685b-139bad38-5a87-4aa0-8e56-9ee429bac24b/product/.capivara-next/workspaces/83e07e25fb6f-7b96e3cb-ddda-472d-84f2-02670c696dcc/product\nProduct proposal: /tmp/capivara-rc2-node-serial-control-2qmKic/.capivara-next/workspaces/8ed3f6ad685b-139bad38-5a87-4aa0-8e56-9ee429bac24b/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'alpha.mjs'\nExit code: 0\nSTDOUT:\n3\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"3\""
+          "output": "Verification workspace: /tmp/capivara-rc2-node-serial-control-OOAHgl/.capivara-next/workspaces/8ed3f6ad685b-91313ac7-b88c-49e3-aaeb-459fd6ecc1b8/product/.capivara-next/workspaces/83e07e25fb6f-d18e9da5-d7b2-421f-b6b2-8ed50007ae62/product\nProduct proposal: /tmp/capivara-rc2-node-serial-control-OOAHgl/.capivara-next/workspaces/8ed3f6ad685b-91313ac7-b88c-49e3-aaeb-459fd6ecc1b8/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'alpha.mjs'\nExit code: 0\nSTDOUT:\n3\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"3\""
         },
         {
           "task": "beta",
@@ -88,7 +88,7 @@
           "kind": "cli",
           "level": "behavior",
           "terminal": false,
-          "output": "Verification workspace: /tmp/capivara-rc2-node-serial-control-2qmKic/.capivara-next/workspaces/f44e64e75f39-a3b6ca6a-6f46-4f8e-b2d1-7c02ced65377/product/.capivara-next/workspaces/de20ad4b357c-a84da8d2-5272-44f8-a74e-4bca13691003/product\nProduct proposal: /tmp/capivara-rc2-node-serial-control-2qmKic/.capivara-next/workspaces/f44e64e75f39-a3b6ca6a-6f46-4f8e-b2d1-7c02ced65377/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'beta.mjs'\nExit code: 0\nSTDOUT:\n4\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"4\""
+          "output": "Verification workspace: /tmp/capivara-rc2-node-serial-control-OOAHgl/.capivara-next/workspaces/f44e64e75f39-a596999e-f25b-4c9d-b16c-b6518ad54530/product/.capivara-next/workspaces/de20ad4b357c-5698cd8c-e793-4b91-b33c-4bc6e007b099/product\nProduct proposal: /tmp/capivara-rc2-node-serial-control-OOAHgl/.capivara-next/workspaces/f44e64e75f39-a596999e-f25b-4c9d-b16c-b6518ad54530/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'beta.mjs'\nExit code: 0\nSTDOUT:\n4\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"4\""
         },
         {
           "task": "cli",
@@ -96,19 +96,19 @@
           "kind": "cli",
           "level": "behavior",
           "terminal": false,
-          "output": "Verification workspace: /tmp/capivara-rc2-node-serial-control-2qmKic/.capivara-next/workspaces/99bb88401742-58d4cc3f-826e-4c36-bc21-17d9a99d6648/product/.capivara-next/workspaces/77775ea297c1-a9c0d68c-02fb-40a7-933a-210fb3d01ffa/product\nProduct proposal: /tmp/capivara-rc2-node-serial-control-2qmKic/.capivara-next/workspaces/99bb88401742-58d4cc3f-826e-4c36-bc21-17d9a99d6648/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'cli.mjs'\nExit code: 0\nSTDOUT:\n3\n4\n7\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"7\""
+          "output": "Verification workspace: /tmp/capivara-rc2-node-serial-control-OOAHgl/.capivara-next/workspaces/99bb88401742-7d491498-38c7-4001-8fd5-b07a6cc50834/product/.capivara-next/workspaces/77775ea297c1-c114a820-362d-4fed-a717-0c81c4d131ae/product\nProduct proposal: /tmp/capivara-rc2-node-serial-control-OOAHgl/.capivara-next/workspaces/99bb88401742-7d491498-38c7-4001-8fd5-b07a6cc50834/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'cli.mjs'\nExit code: 0\nSTDOUT:\n3\n4\n7\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"7\""
         }
       ],
       "incidents": []
     },
     {
       "name": "node-parallel",
-      "workspace": "/tmp/capivara-rc2-node-parallel-WBe7o4",
+      "workspace": "/tmp/capivara-rc2-node-parallel-PbE0Va",
       "status": "complete",
       "jobs": 2,
       "metrics": {
-        "startedAt": "2026-10-28T17:47:00.052Z",
-        "elapsedMs": 615,
+        "startedAt": "2026-10-28T20:06:45.508Z",
+        "elapsedMs": 583,
         "maxConcurrency": 2,
         "active": 0,
         "callsByRole": {
@@ -116,18 +116,18 @@
           "reviewer": 3
         },
         "timeByStageMs": {
-          "queueWait": 29,
-          "dependencies": 133,
-          "browserPreparation": 27,
+          "queueWait": 39,
+          "dependencies": 136,
+          "browserPreparation": 31,
           "isolation": 5,
-          "agentInstrument": 5,
-          "editor": 244,
+          "agentInstrument": 8,
+          "editor": 243,
           "verificationIsolation": 14,
-          "verification": 205,
-          "reviewer": 1,
-          "cleanup": 5,
-          "integration": 38,
-          "proofRevalidation": 11
+          "verification": 148,
+          "reviewer": 2,
+          "cleanup": 6,
+          "integration": 39,
+          "proofRevalidation": 12
         },
         "invalidations": [],
         "repetitions": [],
@@ -135,38 +135,38 @@
           {
             "taskId": "alpha",
             "stage": "editor",
-            "start": 1793209620091,
-            "end": 1793209620172
+            "start": 1793218005557,
+            "end": 1793218005639
           },
           {
             "taskId": "beta",
             "stage": "editor",
-            "start": 1793209620095,
-            "end": 1793209620177
+            "start": 1793218005563,
+            "end": 1793218005643
           },
           {
             "taskId": "alpha",
             "stage": "reviewer",
-            "start": 1793209620306,
-            "end": 1793209620307
+            "start": 1793218005755,
+            "end": 1793218005755
           },
           {
             "taskId": "beta",
             "stage": "reviewer",
-            "start": 1793209620360,
-            "end": 1793209620360
+            "start": 1793218005765,
+            "end": 1793218005766
           },
           {
             "taskId": "cli",
             "stage": "editor",
-            "start": 1793209620414,
-            "end": 1793209620495
+            "start": 1793218005816,
+            "end": 1793218005897
           },
           {
             "taskId": "cli",
             "stage": "reviewer",
-            "start": 1793209620613,
-            "end": 1793209620613
+            "start": 1793218006036,
+            "end": 1793218006037
           }
         ]
       },
@@ -183,7 +183,7 @@
           "kind": "cli",
           "level": "behavior",
           "terminal": false,
-          "output": "Verification workspace: /tmp/capivara-rc2-node-parallel-WBe7o4/.capivara-next/workspaces/8ed3f6ad685b-4083ae18-9bd9-45bc-8bbe-332e6ba91cc5/product/.capivara-next/workspaces/83e07e25fb6f-f1ffc79f-1adc-4926-b8d4-86e8aaac1a77/product\nProduct proposal: /tmp/capivara-rc2-node-parallel-WBe7o4/.capivara-next/workspaces/8ed3f6ad685b-4083ae18-9bd9-45bc-8bbe-332e6ba91cc5/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'alpha.mjs'\nExit code: 0\nSTDOUT:\n3\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"3\""
+          "output": "Verification workspace: /tmp/capivara-rc2-node-parallel-PbE0Va/.capivara-next/workspaces/8ed3f6ad685b-9681f7fb-8c82-4955-ae80-1a54ec5ba4d6/product/.capivara-next/workspaces/83e07e25fb6f-a7333a41-d5b1-4670-9942-4d2cf6d27c46/product\nProduct proposal: /tmp/capivara-rc2-node-parallel-PbE0Va/.capivara-next/workspaces/8ed3f6ad685b-9681f7fb-8c82-4955-ae80-1a54ec5ba4d6/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'alpha.mjs'\nExit code: 0\nSTDOUT:\n3\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"3\""
         },
         {
           "task": "beta",
@@ -191,7 +191,7 @@
           "kind": "cli",
           "level": "behavior",
           "terminal": false,
-          "output": "Verification workspace: /tmp/capivara-rc2-node-parallel-WBe7o4/.capivara-next/workspaces/f44e64e75f39-478b8c93-3ac2-4749-b6c4-d900d43fff2c/product/.capivara-next/workspaces/de20ad4b357c-83714e65-f012-4276-9908-278d87ef8df9/product\nProduct proposal: /tmp/capivara-rc2-node-parallel-WBe7o4/.capivara-next/workspaces/f44e64e75f39-478b8c93-3ac2-4749-b6c4-d900d43fff2c/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'beta.mjs'\nExit code: 0\nSTDOUT:\n4\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"4\""
+          "output": "Verification workspace: /tmp/capivara-rc2-node-parallel-PbE0Va/.capivara-next/workspaces/f44e64e75f39-7ab99633-4404-4319-9847-7a895414b983/product/.capivara-next/workspaces/de20ad4b357c-c4b6176c-dbc5-413a-9529-0925e621f9f2/product\nProduct proposal: /tmp/capivara-rc2-node-parallel-PbE0Va/.capivara-next/workspaces/f44e64e75f39-7ab99633-4404-4319-9847-7a895414b983/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'beta.mjs'\nExit code: 0\nSTDOUT:\n4\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"4\""
         },
         {
           "task": "cli",
@@ -199,19 +199,19 @@
           "kind": "cli",
           "level": "behavior",
           "terminal": false,
-          "output": "Verification workspace: /tmp/capivara-rc2-node-parallel-WBe7o4/.capivara-next/workspaces/99bb88401742-4880ab7c-5b4d-4d45-9081-7ea6ba6112eb/product/.capivara-next/workspaces/77775ea297c1-777b4fc2-043e-4ffd-a94c-ee30353f6002/product\nProduct proposal: /tmp/capivara-rc2-node-parallel-WBe7o4/.capivara-next/workspaces/99bb88401742-4880ab7c-5b4d-4d45-9081-7ea6ba6112eb/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'cli.mjs'\nExit code: 0\nSTDOUT:\n3\n4\n7\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"7\""
+          "output": "Verification workspace: /tmp/capivara-rc2-node-parallel-PbE0Va/.capivara-next/workspaces/99bb88401742-eab8fd4a-6d56-4be9-8376-7c4e521ed254/product/.capivara-next/workspaces/77775ea297c1-2b9cb980-cef5-47d1-adaa-e7a80135efe1/product\nProduct proposal: /tmp/capivara-rc2-node-parallel-PbE0Va/.capivara-next/workspaces/99bb88401742-eab8fd4a-6d56-4be9-8376-7c4e521ed254/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'cli.mjs'\nExit code: 0\nSTDOUT:\n3\n4\n7\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"7\""
         }
       ],
       "incidents": []
     },
     {
       "name": "required-node-runtime",
-      "workspace": "/tmp/capivara-rc2-required-node-runtime-WtHHAO",
+      "workspace": "/tmp/capivara-rc2-required-node-runtime-zDOMRA",
       "status": "complete",
       "jobs": 2,
       "metrics": {
-        "startedAt": "2026-10-28T17:47:00.670Z",
-        "elapsedMs": 1325,
+        "startedAt": "2026-10-28T20:06:46.094Z",
+        "elapsedMs": 1772,
         "maxConcurrency": 2,
         "active": 0,
         "callsByRole": {
@@ -219,22 +219,22 @@
           "reviewer": 3
         },
         "timeByStageMs": {
-          "queueWait": 31,
-          "dependencies": 125,
-          "browserPreparation": 26,
-          "isolation": 8,
+          "queueWait": 35,
+          "dependencies": 135,
+          "browserPreparation": 28,
+          "isolation": 7,
           "agentInstrument": 6,
           "editor": 245,
-          "verificationIsolation": 15,
-          "verification": 300,
+          "verificationIsolation": 20,
+          "verification": 697,
           "reviewer": 0,
-          "cleanup": 12,
-          "integration": 48,
+          "cleanup": 4,
+          "integration": 32,
           "providerPublication": 1,
-          "environmentPreparation": 22,
-          "environmentRevalidation": 17,
+          "environmentPreparation": 23,
+          "environmentRevalidation": 22,
           "proofRevalidation": 8,
-          "acceptance": 146
+          "acceptance": 570
         },
         "invalidations": [],
         "repetitions": [],
@@ -242,38 +242,38 @@
           {
             "taskId": "alpha",
             "stage": "editor",
-            "start": 1793209620713,
-            "end": 1793209620794
+            "start": 1793218006140,
+            "end": 1793218006221
           },
           {
             "taskId": "beta",
             "stage": "editor",
-            "start": 1793209620718,
-            "end": 1793209620801
+            "start": 1793218006144,
+            "end": 1793218006227
           },
           {
             "taskId": "alpha",
             "stage": "reviewer",
-            "start": 1793209620914,
-            "end": 1793209620914
+            "start": 1793218006349,
+            "end": 1793218006349
           },
           {
             "taskId": "beta",
             "stage": "reviewer",
-            "start": 1793209620951,
-            "end": 1793209620951
+            "start": 1793218006350,
+            "end": 1793218006350
           },
           {
             "taskId": "cli",
             "stage": "editor",
-            "start": 1793209621562,
-            "end": 1793209621643
+            "start": 1793218006951,
+            "end": 1793218007032
           },
           {
             "taskId": "cli",
             "stage": "reviewer",
-            "start": 1793209621772,
-            "end": 1793209621772
+            "start": 1793218007161,
+            "end": 1793218007161
           }
         ]
       },
@@ -290,7 +290,7 @@
           "kind": "cli",
           "level": "behavior",
           "terminal": false,
-          "output": "Verification workspace: /tmp/capivara-rc2-required-node-runtime-WtHHAO/.capivara-next/workspaces/8ed3f6ad685b-030be74c-a3c8-4ee6-b222-73e0ca215f41/product/.capivara-next/workspaces/83e07e25fb6f-e34c019d-a5de-4ad8-88d6-6b617bf3b316/product\nProduct proposal: /tmp/capivara-rc2-required-node-runtime-WtHHAO/.capivara-next/workspaces/8ed3f6ad685b-030be74c-a3c8-4ee6-b222-73e0ca215f41/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'alpha.mjs'\nExit code: 0\nSTDOUT:\n3\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"3\""
+          "output": "Verification workspace: /tmp/capivara-rc2-required-node-runtime-zDOMRA/.capivara-next/workspaces/8ed3f6ad685b-3efc0f34-d0e3-4f6e-8517-10938796b1e7/product/.capivara-next/workspaces/83e07e25fb6f-d1fa1835-661c-46b6-9e7f-e8d2b40771fe/product\nProduct proposal: /tmp/capivara-rc2-required-node-runtime-zDOMRA/.capivara-next/workspaces/8ed3f6ad685b-3efc0f34-d0e3-4f6e-8517-10938796b1e7/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'alpha.mjs'\nExit code: 0\nSTDOUT:\n3\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"3\""
         },
         {
           "task": "beta",
@@ -298,7 +298,7 @@
           "kind": "cli",
           "level": "behavior",
           "terminal": false,
-          "output": "Verification workspace: /tmp/capivara-rc2-required-node-runtime-WtHHAO/.capivara-next/workspaces/f44e64e75f39-8ee443a8-5ca4-4741-a6e6-65c4e2c74926/product/.capivara-next/workspaces/de20ad4b357c-21b64636-1463-4e00-aa8a-70d935203115/product\nProduct proposal: /tmp/capivara-rc2-required-node-runtime-WtHHAO/.capivara-next/workspaces/f44e64e75f39-8ee443a8-5ca4-4741-a6e6-65c4e2c74926/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'beta.mjs'\nExit code: 0\nSTDOUT:\n4\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"4\""
+          "output": "Verification workspace: /tmp/capivara-rc2-required-node-runtime-zDOMRA/.capivara-next/workspaces/f44e64e75f39-3e68d3f0-e6ab-4d7b-baa4-309778865b2d/product/.capivara-next/workspaces/de20ad4b357c-5da3a60e-9b00-478c-a51c-b97c43f31b0d/product\nProduct proposal: /tmp/capivara-rc2-required-node-runtime-zDOMRA/.capivara-next/workspaces/f44e64e75f39-3e68d3f0-e6ab-4d7b-baa4-309778865b2d/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'beta.mjs'\nExit code: 0\nSTDOUT:\n4\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"4\""
         },
         {
           "task": "cli",
@@ -306,7 +306,7 @@
           "kind": "cli",
           "level": "behavior",
           "terminal": false,
-          "output": "Verification workspace: /tmp/capivara-rc2-required-node-runtime-WtHHAO/.capivara-next/workspaces/99bb88401742-a2e07dad-40b3-4ff8-9026-db68c23f4208/product/.capivara-next/workspaces/77775ea297c1-06039c90-3f96-4985-a5c2-8fe65640d1c6/product\nProduct proposal: /tmp/capivara-rc2-required-node-runtime-WtHHAO/.capivara-next/workspaces/99bb88401742-a2e07dad-40b3-4ff8-9026-db68c23f4208/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'cli.mjs'\nExit code: 0\nSTDOUT:\n3\n4\n7\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"7\""
+          "output": "Verification workspace: /tmp/capivara-rc2-required-node-runtime-zDOMRA/.capivara-next/workspaces/99bb88401742-c4782cc7-5378-41e9-804a-f82d53d3aa26/product/.capivara-next/workspaces/77775ea297c1-9ba761f7-9e95-4b1c-8719-5b782193a7c3/product\nProduct proposal: /tmp/capivara-rc2-required-node-runtime-zDOMRA/.capivara-next/workspaces/99bb88401742-c4782cc7-5378-41e9-804a-f82d53d3aa26/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'cli.mjs'\nExit code: 0\nSTDOUT:\n3\n4\n7\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"7\""
         },
         {
           "task": "$acceptance",
@@ -314,19 +314,19 @@
           "kind": "cli",
           "level": "behavior",
           "terminal": false,
-          "output": "Verification workspace: /tmp/capivara-rc2-required-node-runtime-WtHHAO/.capivara-next/workspaces/814fd9df0516-e12a6310-db65-4e75-b013-e39f176f2d75/product/.capivara-next/workspaces/f3cb20bc0059-ba7e95be-a3d6-465c-91fc-4ddbf5cefe03/product\nProduct proposal: /tmp/capivara-rc2-required-node-runtime-WtHHAO/.capivara-next/workspaces/814fd9df0516-e12a6310-db65-4e75-b013-e39f176f2d75/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'cli.mjs'\nExit code: 0\nSTDOUT:\n3\n4\n7\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"7\""
+          "output": "Verification workspace: /tmp/capivara-rc2-required-node-runtime-zDOMRA/.capivara-next/workspaces/814fd9df0516-b27f1639-1471-496c-9c0b-b408345d2fd9/product/.capivara-next/workspaces/f3cb20bc0059-685d6405-7fd9-4166-b0e0-e6f58f78325c/product\nProduct proposal: /tmp/capivara-rc2-required-node-runtime-zDOMRA/.capivara-next/workspaces/814fd9df0516-b27f1639-1471-496c-9c0b-b408345d2fd9/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'cli.mjs'\nExit code: 0\nSTDOUT:\n3\n4\n7\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"7\""
         }
       ],
       "incidents": []
     },
     {
       "name": "python-strict",
-      "workspace": "/tmp/capivara-rc2-python-strict-I3CuS2",
+      "workspace": "/tmp/capivara-rc2-python-strict-uY39JA",
       "status": "complete",
       "jobs": 3,
       "metrics": {
-        "startedAt": "2026-10-28T17:47:01.999Z",
-        "elapsedMs": 532,
+        "startedAt": "2026-10-28T20:06:47.869Z",
+        "elapsedMs": 537,
         "maxConcurrency": 1,
         "active": 0,
         "callsByRole": {
@@ -336,16 +336,16 @@
         "timeByStageMs": {
           "queueWait": 0,
           "dependencies": 97,
-          "browserPreparation": 21,
-          "isolation": 2,
-          "agentInstrument": 4,
+          "browserPreparation": 19,
+          "isolation": 4,
+          "agentInstrument": 5,
           "editor": 162,
           "verificationIsolation": 8,
-          "verification": 80,
+          "verification": 73,
           "reviewer": 0,
           "cleanup": 4,
-          "integration": 24,
-          "proofRevalidation": 11
+          "integration": 31,
+          "proofRevalidation": 8
         },
         "invalidations": [],
         "repetitions": [],
@@ -353,26 +353,26 @@
           {
             "taskId": "core",
             "stage": "editor",
-            "start": 1793209622037,
-            "end": 1793209622118
+            "start": 1793218007898,
+            "end": 1793218007979
           },
           {
             "taskId": "core",
             "stage": "reviewer",
-            "start": 1793209622224,
-            "end": 1793209622224
+            "start": 1793218008079,
+            "end": 1793218008079
           },
           {
             "taskId": "entry",
             "stage": "editor",
-            "start": 1793209622256,
-            "end": 1793209622337
+            "start": 1793218008142,
+            "end": 1793218008223
           },
           {
             "taskId": "entry",
             "stage": "reviewer",
-            "start": 1793209622477,
-            "end": 1793209622477
+            "start": 1793218008353,
+            "end": 1793218008353
           }
         ]
       },
@@ -384,7 +384,7 @@
           "kind": "command",
           "level": "behavior",
           "terminal": false,
-          "output": "Verification workspace: /tmp/capivara-rc2-python-strict-I3CuS2/.capivara-next/workspaces/0d45f5fd462b-d3fe122e-5d1d-4a27-95d0-acb7385c327d/product/.capivara-next/workspaces/8f4b0aa2de14-6acec520-8269-460f-82ba-0cc6710f731b/product\nProduct proposal: /tmp/capivara-rc2-python-strict-I3CuS2/.capivara-next/workspaces/0d45f5fd462b-d3fe122e-5d1d-4a27-95d0-acb7385c327d/product\nCommand: 'python3' '-c' 'from core import double; assert double(6)==12; print(\"double verified\")'\nExit code: 0\nSTDOUT:\ndouble verified\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"double verified\""
+          "output": "Verification workspace: /tmp/capivara-rc2-python-strict-uY39JA/.capivara-next/workspaces/0d45f5fd462b-00424015-a700-479d-8ca6-f44a28aea904/product/.capivara-next/workspaces/8f4b0aa2de14-072af5e5-6e41-434c-a33f-876877fde1a4/product\nProduct proposal: /tmp/capivara-rc2-python-strict-uY39JA/.capivara-next/workspaces/0d45f5fd462b-00424015-a700-479d-8ca6-f44a28aea904/product\nCommand: 'python3' '-c' 'from core import double; assert double(6)==12; print(\"double verified\")'\nExit code: 0\nSTDOUT:\ndouble verified\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"double verified\""
         },
         {
           "task": "entry",
@@ -392,19 +392,19 @@
           "kind": "cli",
           "level": "behavior",
           "terminal": false,
-          "output": "Verification workspace: /tmp/capivara-rc2-python-strict-I3CuS2/.capivara-next/workspaces/923fe53966c6-6626ae28-2570-4f4b-8ee1-bb69cc6482fa/product/.capivara-next/workspaces/b8cf23461950-8019fd51-95d7-46d6-8e21-dcef73f4df45/product\nProduct proposal: /tmp/capivara-rc2-python-strict-I3CuS2/.capivara-next/workspaces/923fe53966c6-6626ae28-2570-4f4b-8ee1-bb69cc6482fa/product\nCommand: 'python3' 'entry.py' '6'\nExit code: 0\nSTDOUT:\n12\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"12\""
+          "output": "Verification workspace: /tmp/capivara-rc2-python-strict-uY39JA/.capivara-next/workspaces/923fe53966c6-d0996f72-8c87-4416-9eb3-779ae47a2261/product/.capivara-next/workspaces/b8cf23461950-2d3e1797-c2df-41f7-b673-26cb1492398a/product\nProduct proposal: /tmp/capivara-rc2-python-strict-uY39JA/.capivara-next/workspaces/923fe53966c6-d0996f72-8c87-4416-9eb3-779ae47a2261/product\nCommand: 'python3' 'entry.py' '6'\nExit code: 0\nSTDOUT:\n12\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"12\""
         }
       ],
       "incidents": []
     },
     {
       "name": "tui-interaction",
-      "workspace": "/tmp/capivara-rc2-tui-interaction-3ns8Kx",
+      "workspace": "/tmp/capivara-rc2-tui-interaction-WbzCZi",
       "status": "complete",
       "jobs": 2,
       "metrics": {
-        "startedAt": "2026-10-28T17:47:02.533Z",
-        "elapsedMs": 347,
+        "startedAt": "2026-10-28T20:06:48.408Z",
+        "elapsedMs": 328,
         "maxConcurrency": 1,
         "active": 0,
         "callsByRole": {
@@ -413,16 +413,16 @@
         },
         "timeByStageMs": {
           "queueWait": 0,
-          "dependencies": 52,
-          "browserPreparation": 9,
+          "dependencies": 49,
+          "browserPreparation": 8,
           "isolation": 1,
           "agentInstrument": 2,
           "editor": 81,
-          "verificationIsolation": 2,
-          "verification": 138,
+          "verificationIsolation": 3,
+          "verification": 121,
           "reviewer": 0,
-          "cleanup": 3,
-          "integration": 12,
+          "cleanup": 4,
+          "integration": 13,
           "proofRevalidation": 3
         },
         "invalidations": [],
@@ -431,14 +431,14 @@
           {
             "taskId": "menu",
             "stage": "editor",
-            "start": 1793209622568,
-            "end": 1793209622649
+            "start": 1793218008440,
+            "end": 1793218008521
           },
           {
             "taskId": "menu",
             "stage": "reviewer",
-            "start": 1793209622854,
-            "end": 1793209622854
+            "start": 1793218008709,
+            "end": 1793218008709
           }
         ]
       },
@@ -450,7 +450,7 @@
           "kind": "tui",
           "level": "behavior",
           "terminal": true,
-          "output": "Verification workspace: /tmp/capivara-rc2-tui-interaction-3ns8Kx/.capivara-next/workspaces/398991009da1-b3d196ee-2c72-457c-b47d-b5eede745070/product/.capivara-next/workspaces/34b02a55b036-16bc5e57-7452-44ab-8971-e5ebc733c6f3/product\nProduct proposal: /tmp/capivara-rc2-tui-interaction-3ns8Kx/.capivara-next/workspaces/398991009da1-b3d196ee-2c72-457c-b47d-b5eede745070/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'menu.mjs'\nExit code: 0\nSTDOUT:\nREADY 1\r\nSELECTED 2\r\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"SELECTED 2\""
+          "output": "Verification workspace: /tmp/capivara-rc2-tui-interaction-WbzCZi/.capivara-next/workspaces/398991009da1-fe5b7e3e-08ba-4c31-82c3-67238341371f/product/.capivara-next/workspaces/34b02a55b036-1b3add7b-c7ae-4857-945a-06111c2f5090/product\nProduct proposal: /tmp/capivara-rc2-tui-interaction-WbzCZi/.capivara-next/workspaces/398991009da1-fe5b7e3e-08ba-4c31-82c3-67238341371f/product\nCommand: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'menu.mjs'\nExit code: 0\nSTDOUT:\nREADY 1\r\nSELECTED 2\r\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: output contains \"SELECTED 2\""
         }
       ],
       "incidents": []

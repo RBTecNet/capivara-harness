@@ -170,6 +170,13 @@ export async function resolveVerificationInputs(workspace:string,plan:Developmen
 
 export async function resolveInputDependencies(workspace:string,selectors:readonly string[]):Promise<string[]>{
   const root=resolve(workspace),result=new Set(selectors),queue=await sourceFiles(root,selectors),seen=new Set<string>();
+  // These inventories belong to one read-set traversal only. A later proof
+  // re-reads its current files and manifests, including previously missing ones.
+  const manifestFolders=new Set<string>(),queued=new Set(queue);
+  const importCache=new Map<string,Promise<string|undefined>>(),packageCache=new Map<string,Promise<string[]>>();
+  const enqueue=(path:string):void=>{if(!queued.has(path)){queued.add(path);queue.push(path);}};
+  const imported=(file:string,name:string):Promise<string|undefined>=>{const key=JSON.stringify([dirname(file),name]);let value=importCache.get(key);if(!value){value=resolveImport(root,file,name);importCache.set(key,value);}return value;};
+  const packaged=(file:string,name:string):Promise<string[]>=>{const key=JSON.stringify([dirname(file),name]);let value=packageCache.get(key);if(!value){value=resolvePackage(root,file,name);packageCache.set(key,value);}return value;};
   for(let index=0;index<queue.length;index++){
     const requested=queue[index]!,actual=await realpath(join(root,requested)).catch(()=>join(root,requested)),rel=relative(root,actual).replaceAll('\\','/');
     const file=rel==='..'||rel.startsWith('../')?requested:rel;
@@ -178,6 +185,9 @@ export async function resolveInputDependencies(workspace:string,selectors:readon
     if(language){
       let folder=dirname(join(root,file));
       for(;;){
+        const key=JSON.stringify([language,folder]);
+        if(manifestFolders.has(key))break;
+        manifestFolders.add(key);
         for(const manifest of DEPENDENCY_MANIFESTS[language]??[]){const candidate=join(folder,manifest);if(await exists(candidate))result.add(relative(root,candidate).replaceAll('\\','/'));}
         if(folder===root)break;const parent=dirname(folder);if(parent===folder||!parent.startsWith(root))break;folder=parent;
       }
@@ -194,7 +204,7 @@ export async function resolveInputDependencies(workspace:string,selectors:readon
       }
     }
     if(language==='rust')for(const match of text.matchAll(/\bmod\s+([a-zA-Z_]\w*)\s*;/g))imports.add(`./${match[1]}`);
-    for(const name of imports){const resolved=await resolveImport(root,file,name);if(resolved&&!seen.has(resolved))queue.push(resolved);else if(language==='javascript'&&!name.startsWith('.'))for(const dependency of await resolvePackage(root,file,name))if(!seen.has(dependency))queue.push(dependency);}
+    for(const name of imports){const resolved=await imported(file,name);if(resolved)enqueue(resolved);else if(language==='javascript'&&!name.startsWith('.'))for(const dependency of await packaged(file,name))enqueue(dependency);}
   }
   return [...result].sort();
 }

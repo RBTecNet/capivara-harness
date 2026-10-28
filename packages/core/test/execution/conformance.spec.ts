@@ -126,3 +126,27 @@ describe('runtime conformance through real package-manager descendants',()=>{
     }
   });
 });
+
+describe('native runtime identity behind a concrete consumer launcher',()=>{
+  for(const mode of ['product-import','echo-only','version-only'] as const)it.skipIf(process.platform==='win32')(`validates actual npm binding with ${mode}`,async()=>{
+    const root=await workspace(),product=brief();
+    const recipe:Verification={...runtimeCheck('npm',['run','verify']),inputs:['product-api.mjs','acceptance.mjs','package.json'],expected:mode==='version-only'?'The runtime version is visible.':'The product API returns its answer.',assertion:mode==='version-only'?{type:'regex',source:'stdout',pattern:'v\\d+\\.\\d+'}:{type:'contains',source:'stdout',value:'API_OK 42'},conformance:{...runtimeCheck().conformance!,productInputs:['product-api.mjs']}};
+    const proposal=plan(product,[recipe]);proposal.environment[0]!.check={command:'npm',args:['--version']};proposal.environment[0]!.provides={command:['npm'],aliases:['npm']};proposal.tasks[0]!.files=['product-api.mjs','acceptance.mjs','package.json'];
+    const outcome=await runBuild({workspace:root,brief:product,plan:proposal,signal:AbortSignal.timeout(10000),agent:async request=>{
+      if(request.role==='editor'){
+        await writeFile(join(request.workspace,'product-api.mjs'),'export const answer=()=>42;');await writeFile(join(request.workspace,'acceptance.mjs'),'import {answer} from "./product-api.mjs";if(answer()!==42)throw Error("product failed");console.log("API_OK 42")');
+        const script=mode==='product-import'?`"${process.execPath}" acceptance.mjs`:mode==='version-only'?`"${process.execPath}" --version`:`"${process.execPath}" -e "console.log('API_OK 42')"`;
+        await writeFile(join(request.workspace,'package.json'),JSON.stringify({name:'native-launcher-fixture',private:true,scripts:{verify:script}}));
+      }
+      return{status:'complete',text:request.role==='reviewer'?'{"approved":true,"findings":[]}':'Implemented.',commands:[],changedFiles:[]};
+    }});
+    const final=outcome.state.evidence.findLast(proof=>proof.taskId==='$acceptance'&&proof.checkId===recipe.id)!;expect(final.passed).toBe(true);expect(final.provenance?.runtimeObservation?.enabled).toBe(true);expect(final.provenance?.runtimeProvider?.launcher.shebang).toBe('#!/usr/bin/env node');expect(final.provenance?.runtimeProvider?.execPath).toBe(process.execPath);expect(final.provenance?.runtimeProvider?.bindingCommand[0]).not.toBe(process.execPath);
+    if(mode==='product-import'){
+      expect(outcome.status,JSON.stringify(outcome.incidents)).toBe('complete');expect(final.provenance?.runtimeWitnesses?.some(witness=>witness.inputs['product-api.mjs'])).toBe(true);
+      const provider=outcome.state.environment.provider!.operational as OperationalEnvironment;
+      const damaged=structuredClone(final);damaged.provenance!.runtimeProvider!.fingerprint='unrelated provider fingerprint';expect((await validateConformance(product,outcome.plan,provider,[damaged],root))[0]?.code).toBe('unproven-product-provider-usage');
+    }else{
+      expect(outcome.status).toBe('waiting');expect(final.provenance?.runtimeWitnesses??[]).toEqual([]);expect(outcome.incidents.some(issue=>issue.evidence.includes('unproven-product-provider-usage'))).toBe(true);
+    }
+  });
+});

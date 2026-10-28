@@ -12,13 +12,15 @@ import { emitEvent, emitGate, emitProgress, type BuildGateId, type BuildGateStat
 import { changedSince, digest, inputHash, inputSnapshot, inside, introducedServers, restoreFiles, snapshot, sourceFiles } from './files.js';
 import { declaredCheckInputs, resolveInputDependencies, verificationInputSelectors } from './dependencies.js';
 import { applyOperationalEnvironment, emptyOperationalEnvironment, environmentFingerprint, executionConstraints, mergeOperationalEnvironments, OperationalInvocationConflict, prepareEnvironmentNode, prepareProjectDependencies, projectDependencyScope, relocateOperationalEnvironment, selectOperationalEnvironment, type OperationalEnvironment, type PreparedEnvironment } from './environment.js';
-import { checkInputHash, derivedChecks, evaluateVerificationAssertion, normalizeVerificationAssertion, runVerification, selectVerifications, taskInputs, verificationAssertionStatus, verificationLevel, type VerificationOutcome } from './checks.js';
+import { checkInputHash, derivedChecks, evaluateRecordedObservation, evaluateVerificationAssertion, normalizeVerificationAssertion, runVerification, selectVerifications, taskInputs, verificationAssertionStatus, verificationIdentity, verificationLevel, type VerificationOutcome } from './checks.js';
 import { createTaskWorkspace, fileDigest, IntegrationConflict, pathScopesConflict, prepareIntegration, publishIntegration, SerialQueue } from './isolation.js';
 import { interpretReview, reviewFindingText } from './review.js';
 import { validateConformance } from './conformance.js';
 import { prepareInvocationInstrument } from './invocation-instrument.js';
 import { assembleTaskContext } from './task-context.js';
 import { substantiateSourceFinding } from './source-review.js';
+import { buildReviewEvidence } from './review-evidence.js';
+import { createInspectionIdentity, inspectionStillCurrent } from './inspection.js';
 import { recoverPlanLineage } from './plan-lineage.js';
 import { repositoryRecipeCandidate } from './recipe-candidates.js';
 import { prepareBrowserResources, type BrowserResourceResult } from '../runtime/browser-resources.js';
@@ -27,7 +29,7 @@ import type { ActionRecord, BuildIncident, BuildMetrics, BuildOptions, BuildOutc
 export { interpretReview } from './review.js';
 
 const now = (): string => new Date().toISOString();
-const executionProtocol = 'capivara-control/9';
+const executionProtocol = 'capivara-control/12';
 const external = (result: AgentResult): boolean => result.status === 'unavailable' && !result.issue || ['transport','authentication','rate-limit','capacity','configuration'].includes(result.issue?.kind ?? '');
 const definitionHash = (task: WorkUnit): string => digest(JSON.stringify(task));
 const exists = (path: string): Promise<boolean> => access(path).then(() => true, () => false);
@@ -62,10 +64,20 @@ function conflict(plan: DevelopmentPlan, left: WorkUnit, right: WorkUnit, state:
   return exclusiveEnvironment(left).some(id => exclusiveEnvironment(right).includes(id));
 }
 
+function retireObsoleteReplans(state:BuildState,plan:DevelopmentPlan):[string,BuildIncident][]{
+  const owners=new Set(plan.tasks.map(task=>task.id));
+  const retired=Object.entries(state.pendingReplans??{}).filter(([id])=>!owners.has(id));
+  for(const [id] of retired)delete state.pendingReplans![id];
+  return retired;
+}
+
 /** Explicit persisted transitions, isolated workers and one FIFO publication coordinator. No sleep/retry loop owns execution. */
 export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   let plan = reconcilePlan(options.brief,options.plan,options.plan);
   const state = options.state ?? createBuildState(plan);
+  // A historical proposal must not resurrect a recovery job whose delivery was
+  // retired by an already committed plan. Its incident remains in the journal.
+  const retiredReplans=retireObsoleteReplans(state,plan);
   const lineage=recoverPlanLineage(options.brief,plan,state,options.domainCalls);plan=lineage.plan;
   if(lineage.restored.length){state.planLineage??=[];state.planLineage.push(...lineage.restored);}
   state.controlVersion = 2; state.integrations ??= []; state.acceptance ??= [];
@@ -89,6 +101,12 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   const serial=async<T>(stage:string,operation:()=>Promise<T>):Promise<T>=>{const queued=Date.now();return publication.run(async()=>{metrics.timeByStageMs.queueWait=(metrics.timeByStageMs.queueWait??0)+Date.now()-queued;return measured(stage,operation);});};
   const event = (type: Parameters<NonNullable<BuildOptions['onEvent']>>[0]['type'], message: string, subject?: string, detail?: unknown): void => emitEvent(options.onEvent,{type,message,...(subject ? {subject} : {}),...(detail !== undefined ? {detail} : {})});
   const note = (problem: BuildIncident): void => { const index = state.incidents.findIndex(item => item.id === problem.id); if (index < 0) state.incidents.push(problem); else state.incidents[index] = problem; };
+  const recordRetiredReplans=(retired:[string,BuildIncident][]):void=>{for(const [id,problem] of retired){
+    replans.delete(id);note(problem);
+    const reason=`Recovery ${problem.id} belongs to retired task ${id}; the committed plan no longer contains its owner. The original incident is preserved; a new current failure must schedule its own recovery.`;
+    metrics.repetitions.push({taskId:id,action:'retire-replan',reason,at:now()});event('recovery','Reconciliação antiga aposentada com seu plano; causa histórica preservada.',id,{incidentId:problem.id,reason});
+  }};
+  recordRetiredReplans(retiredReplans);
   const scheduleReplan=(task:WorkUnit,problem:BuildIncident):void=>{const consumers=plan.tasks.filter(unit=>unit.requirementIds.some(id=>task.requirementIds.includes(id)));const owner=plan.tasks.find(unit=>unit.id===task.id)??consumers.find(unit=>!consumers.some(other=>other.dependsOn.includes(unit.id)))??consumers[0]??plan.tasks[0];if(!problem.repairScope)problem.repairScope=state.tasks[task.id]?.checkpoint?.phase==='checking'?'verification':'delivery';if(owner){replans.set(owner.id,problem);state.pendingReplans??={};state.pendingReplans[owner.id]=structuredClone(problem);}else note(problem);};
   const save = async (): Promise<void> => {
     state.planRevision = plan.revision; state.updatedAt = now(); metrics.elapsedMs = elapsedBefore + Date.now() - started;
@@ -116,16 +134,24 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   const prepareResources=async(task:WorkUnit,check:Verification,workspace:string,base:OperationalEnvironment):Promise<BrowserResourceResult>=>{
     const caches=[workspace,state.tasks[task.id]?.checkpoint?.directory,...state.tasks[task.id]?.proposals??[],options.workspace].filter((path):path is string=>!!path).map(path=>join(path,'.capivara-runtime','cache','ms-playwright'));
     const result=await measured('browserPreparation',()=>prepareBrowserResources(workspace,check,base,{resourceRoot:join(options.workspace,'.capivara-next','providers'),caches,...(options.signal?{signal:options.signal}:{}),execute:request=>command({...request,constraints:executionConstraints(options.brief,options.allowSystemInstall),onOutput:(message,stream)=>emitEvent(options.onEvent,{type:'output',message,detail:{stream}})})}));
-    if(!result.applicable){if(state.resourceBindings?.[task.id]?.[check.id]){delete state.resourceBindings[task.id]![check.id];await save();}return result;}
+    if(!result.applicable){
+      if(check.instrument?.provider==='playwright'){
+        if(check.instrument.declaredInputs)check.inputs=[...check.instrument.declaredInputs];
+        if(check.instrument.originalKind)check.kind=check.instrument.originalKind;
+        delete check.instrument;
+      }
+      if(state.resourceBindings?.[task.id]?.[check.id]){delete state.resourceBindings[task.id]![check.id];await save();}return result;
+    }
     const requestedWeb=options.brief.requirements.some(requirement=>check.requirementIds.includes(requirement.id)&&requiredRequirementInterface(requirement)==='web');
-    check.instrument={...check.instrument,provider:'playwright',output:'runner',...(check.instrument?.originalKind?{originalKind:check.instrument.originalKind}:check.kind!=='web'&&requestedWeb?{originalKind:check.kind}:{})};
+    const declaredInputs=check.instrument?.declaredInputs??declaredCheckInputs(plan,task,check);
+    check.instrument={...check.instrument,provider:'playwright',output:'runner',declaredInputs:[...declaredInputs],sourceInputs:[...result.inputs??[]],...(check.instrument?.originalKind?{originalKind:check.instrument.originalKind}:check.kind!=='web'&&requestedWeb?{originalKind:check.kind}:{})};
     if(result.ready&&result.invocation){
       check.instrument.transformations??=[];check.instrument.transformations.push(structuredClone(result.invocation.audit));
       check.command=result.invocation.command;check.args=result.invocation.args;check.cwd=result.invocation.cwd;
       metrics.repetitions.push({taskId:task.id,action:'normalize-browser-invocation',reason:JSON.stringify(result.invocation.audit),at:now()});
     }
     if(check.kind==='command'&&requestedWeb){check.kind='web';check.requiredCapabilities=[...new Set([...check.requiredCapabilities,'browser'])];}
-    if(result.inputs?.length)check.inputs=[...new Set([...declaredCheckInputs(plan,task,check),...result.inputs])];
+    check.inputs=[...new Set([...declaredInputs,...result.inputs??[]])];
     const key=`$resource:browser:${result.identity||digest(check.command??'')}`;
     const resource:OperationalEnvironment={root:options.workspace,env:result.environment,bindings:{browser:{capability:'browser',kind:'runtime',provider:'playwright-browser',relocation:'fixed',dependencyFamily:'browser',ready:result.ready,fingerprint:result.fingerprint??result.identity,env:result.environment,...(result.executable?{command:[result.executable]}:{})}},revision:''};
     state.environment[key]={ready:result.ready,inputHash:result.identity,fingerprint:result.fingerprint??result.identity,operational:mergeOperationalEnvironments(options.workspace,resource),preparedAt:now()};
@@ -133,11 +159,12 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     event('environment',result.ready?'Recurso de navegador utilizável no mesmo caminho por editor e verificador.':'O recurso de navegador ainda precisa de recuperação; o código não foi reprovado.',task.id,{identity:result.identity,ready:result.ready,changed:result.changed,details:result.details});
     await save();return result;
   };
-  const revision = async (task: WorkUnit, workspace: string, operational: OperationalEnvironment): Promise<string> => {
+  const revisionState = async (task: WorkUnit, workspace: string, operational: OperationalEnvironment): Promise<{hash:string;proofs:Record<string,string>}> => {
     const checks = state.tasks[task.id]?.checks ?? task.checks;
     const proofs = await Promise.all(checks.map(check=>proofHash(task,check,workspace,operational)));
-    return inputHash(workspace,taskInputs(plan,task),JSON.stringify({task,proofs,requirements:options.brief.requirements.filter(item => task.requirementIds.includes(item.id)),constraints:options.brief.constraints,contracts:plan.contracts.filter(item => task.contractIds.includes(item.id)),environment:operational.revision}));
+    return{hash:await inputHash(workspace,taskInputs(plan,task),JSON.stringify({task,proofs,requirements:options.brief.requirements.filter(item => task.requirementIds.includes(item.id)),constraints:options.brief.constraints,contracts:plan.contracts.filter(item => task.contractIds.includes(item.id)),environment:operational.revision})),proofs:Object.fromEntries(checks.map((check,index)=>[check.id,proofs[index]!]))};
   };
+  const revision = async(task:WorkUnit,workspace:string,operational:OperationalEnvironment):Promise<string>=>(await revisionState(task,workspace,operational)).hash;
   const suspensionFingerprint = async (task: WorkUnit, progress: TaskProgress): Promise<string> => digest(JSON.stringify({protocol:executionProtocol,canonical:await revision(task,options.workspace,canonicalOperational(task)),local:progress.checkpoint && await exists(progress.checkpoint.directory) ? await inputHash(progress.checkpoint.directory,taskInputs(plan,task)) : '',configuration:options.configurationRevision ?? '',checks:progress.checks,environment:closure(plan,task).map(node=>state.environment[node.id]?.fingerprint)}));
   const suspend = async (task: WorkUnit,kind: BuildIncident['kind'],reason: string,evidence = '',resource = false): Promise<void> => {
     const progress = state.tasks[task.id]!; note(incident(kind,task.id,reason,evidence,resource));
@@ -383,7 +410,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       }
       diagnostics=JSON.stringify({received:value,problem:'Every pending check needs a structurally valid assertion object bound by its exact checkId; prose cannot be executed.'});
     }
-    scheduleReplan(task,incident('planning',task.id,'The observed command has no executable assertion contract after independent interpretation. Reconcile only this proof; preserve implemented work.',JSON.stringify(observations)));
+    const problem=incident('planning',task.id,'The observed command has no executable assertion contract after independent interpretation. Reconcile only this proof; preserve implemented work.',JSON.stringify(observations));problem.repairScope='verification';scheduleReplan(task,problem);
     return false;
   };
   const triageAssertionFailure = async(task:WorkUnit,workspace:string,operational:OperationalEnvironment,failures:VerificationOutcome[]):Promise<boolean>=>{
@@ -400,7 +427,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     const value=jsonObject(diagnosis.text);
     if(value?.kind==='product')return false;
     if(value?.kind!=='instrument'||typeof value.cause!=='string'||!value.cause.trim()){
-      scheduleReplan(task,incident('planning',task.id,'The negative assertion needs a concrete product/instrument resolution before authorizing an edit.',diagnosis.text));return false;
+      const problem=incident('planning',task.id,'The negative assertion needs a concrete product/instrument resolution before authorizing an edit.',diagnosis.text);problem.repairScope='verification';scheduleReplan(task,problem);return false;
     }
     state.proofInterpretations??=[];
     for(const failure of candidates)state.proofInterpretations.push({evidenceId:failure.evidence.id,at:now(),originalClassification:failure.classification??'product',classification:'instrument',reason:JSON.stringify(value),...(state.tasks[task.id]!.actions?.at(-1)?.id?{actionId:state.tasks[task.id]!.actions!.at(-1)!.id}:{})});
@@ -434,23 +461,32 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     const local=relocateOperationalEnvironment(operational,workspace,area.directory);
     const results: VerificationOutcome[] = []; const groups = new Map<BuildGateId,BuildGateStatus[]>();
     for (const check of checks) {
+      const resource=await prepareResources(task,check,area.directory,local);
       const id: BuildGateId = ['web','tui','desktop'].includes(check.kind) ? 'G4' : 'G2';
       const completed = groups.get(id) ?? []; groups.set(id,completed); gate(task,id,'running','Executando a prova pertinente em área isolada gravável.');
-      const resource=await prepareResources(task,check,area.directory,local);
       const effective=checkOperational(task,check,area.directory,local);
-      const hash = await proofHash(task,check,area.directory,local);
+      const identity=await verificationIdentity(area.directory,plan,task,check,options.brief,effective),hash=identity.inputHash;
       const artifactState=await inputSnapshot(area.directory,declaredOutputs(check));
-      const cached = state.evidence.findLast(item=>item.taskId===task.id&&item.checkId===check.id&&item.inputHash===hash&&!item.observation?.cancelled&&(item.passed||item.classification==='product'||item.classification==='instrument')&&(!declaredOutputs(check).length||JSON.stringify(item.artifacts)===JSON.stringify(artifactState)));
+      const cached = state.evidence.findLast(item=>item.taskId===task.id&&item.checkId===check.id&&item.inputHash===hash&&item.kind===check.kind&&item.level===verificationLevel(check)&&!item.observation?.cancelled&&(item.passed||item.classification==='product'||item.classification==='instrument')&&(!declaredOutputs(check).length||JSON.stringify(item.artifacts)===JSON.stringify(artifactState)));
       if (cached&&resource.ready) results.push({evidence:{...cached,level:cached.level ?? verificationLevel(check),inputs:cached.inputs ?? []},result:null,classification:cached.passed?null:cached.classification??'product',needsInstrument:!cached.passed&&cached.classification==='instrument'});
       else {
+        const observed=state.evidence.findLast(item=>item.taskId===task.id&&item.checkId===check.id&&item.observationHash===identity.observationHash&&(!declaredOutputs(check).length||JSON.stringify(item.artifacts)===JSON.stringify(artifactState)));
+        const interpretation=observed?state.proofInterpretations?.findLast(item=>item.evidenceId===observed.id&&item.classification==='instrument'):undefined;
+        const reused=resource.ready&&observed?evaluateRecordedObservation(check,observed,identity,interpretation?{instrumentClassification:{reference:interpretation.actionId??interpretation.evidenceId,reason:interpretation.reason}}:{}):undefined;
+        if(reused){
+          state.evidence.push(reused.evidence);results.push(reused);
+          metrics.repetitions.push({taskId:task.id,action:'reuse-observation',reason:`Only the assertion changed. Evaluated the actual observation ${observed!.id} from ${observed!.observedAt??observed!.checkedAt}; source, invocation and environment remain identical.`,at:now()});
+          event('recovery','Asserção avaliada sobre a execução real preservada; nenhum comando ou edição foi repetido.',task.id,{originalEvidenceId:observed!.id,evidenceId:reused.evidence.id});await save();
+        }else{
         const env = await verificationEnvironment(area.directory);
         const execute = (request: CommandRequest) => command(applyOperationalEnvironment({...request,environment:{...env,...request.environment},executionPolicy:{purpose:'verification',writeScope:'isolated-workspace'}},effective));
         const pty = (request: TerminalRequest) => terminal(applyOperationalEnvironment({...request,environment:{...env,...request.environment},executionPolicy:{purpose:'verification',writeScope:'isolated-workspace'}},effective));
-        const start = Date.now(); const result = await runVerification(area.directory,options.brief,task,plan,check,execute,pty,{operational:effective,...(!resource.ready?{preparationFailure:resource.details}:{}),allowSystemInstall:options.allowSystemInstall === true,...(options.signal?{signal:options.signal}:{}),onEvent:detail=>emitEvent(options.onEvent,detail)});
+        const start = Date.now(); const result = await runVerification(area.directory,options.brief,task,plan,check,execute,pty,{operational:effective,identity,...(!resource.ready?{preparationFailure:resource.details}:{}),allowSystemInstall:options.allowSystemInstall === true,...(options.signal?{signal:options.signal}:{}),onEvent:detail=>emitEvent(options.onEvent,detail)});
         result.evidence.output=`Verification workspace: ${area.directory}\nProduct proposal: ${workspace}\n${result.evidence.output}`;
         if(declaredOutputs(check).length)result.evidence.artifacts=await inputSnapshot(area.directory,declaredOutputs(check));
         metrics.timeByStageMs.verification = (metrics.timeByStageMs.verification ?? 0) + Date.now() - start;
         state.evidence.push(result.evidence); results.push(result); await save();
+        }
       }
       const result = results.at(-1)!; completed.push(result.evidence.passed ? 'complete' : result.classification === 'transport' || result.classification === 'environment' ? 'waiting' : 'returned');
       gate(task,id,completed.includes('returned')?'returned':completed.includes('waiting')?'waiting':'complete',`${completed.filter(value=>value==='complete').length}/${completed.length} provas confirmadas.`);
@@ -468,6 +504,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       }
       if(owner){area.sourceHash=await inputHash(workspace,await resolveInputDependencies(workspace,selectors),operational.revision);await save();}
     }
+    if(owner&&results.length===checks.length)owner.verificationEvidence=results.map(result=>({checkId:result.evidence.checkId,evidenceId:result.evidence.id,inputHash:result.evidence.inputHash}));
     if (!checks.some(check=>!['web','tui','desktop'].includes(check.kind))) gate(task,'G2','neutral','Nenhuma verificação mecânica adicional é pertinente.');
     return results;
   };
@@ -476,7 +513,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   };
   const recoverAcceptance=async(failure:VerificationOutcome,check:Verification,work:WorkUnit,workspace:string,operational:OperationalEnvironment):Promise<boolean>=>{
     note(incident(failure.classification??'instrument',check.id,'Mandatory acceptance did not pass.',failure.evidence.output));
-    const fingerprint=digest(JSON.stringify({check,input:failure.evidence.inputHash,classification:failure.classification}));state.acceptanceRecovery??={};
+    const fingerprint=digest(JSON.stringify({protocol:executionProtocol,configuration:options.configurationRevision??'',check,input:failure.evidence.inputHash,classification:failure.classification}));state.acceptanceRecovery??={};
     const preceding=state.acceptanceRecovery[fingerprint];
     if(preceding&&!preceding.startsWith('running:')&&!preceding.startsWith('interrupted:'))return false;
     const classification=failure.classification??'instrument';
@@ -509,7 +546,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       progress.findings=[`Mandatory acceptance ${check.id} failed against the integrated product.\n${failure.evidence.output}`];progress.status='checking';progress.strategy='acceptance-repair';delete progress.checkpoint;delete progress.verificationCheckpoint;delete progress.suspension;attempted.delete(owner.id);
       metrics.repetitions.push({taskId:owner.id,action:'acceptance-repair',reason:`New negative final proof ${check.id} is owned by this delivery; independent accepted units are preserved.`,at:now()});await save();finished=true;return true;
     }
-    if(options.repairPlan){const anchor=owner??consumers[0]??plan.tasks[0];if(anchor){scheduleReplan(anchor,incident('planning',check.id,'Mandatory acceptance needs a reconciled owner, provider or verification contract.',failure.evidence.output));finished=true;return true;}}
+    if(options.repairPlan){const anchor=owner??consumers[0]??plan.tasks[0];if(anchor){const problem=incident('planning',check.id,'Mandatory acceptance needs a reconciled owner, provider or verification contract.',failure.evidence.output);problem.repairScope=failure.classification==='environment'?'environment':'verification';scheduleReplan(anchor,problem);finished=true;return true;}}
     note(incident('planning',check.id,'No executable acceptance-recovery path is available for this classified failure.',failure.evidence.output));finished=true;return false;
     }finally{
       const latest=state.tasks[recoveryId]?.actions?.at(-1);
@@ -639,15 +676,30 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         }
         if (progress.checkpoint.phase === 'reviewing') {
           await transition(task,'reviewing','Inspection is read-only; executable evidence was collected separately.');
-          const hash = await revision(task,workspace,operational);
-          const approved = progress.reviews.findLast(item=>item.inputHash===hash&&item.assessment.decision==='approved');
+          const current = await revisionState(task,workspace,operational),hash=current.hash;
+          const checks=progress.checks??task.checks;
+          const referencesCurrent=checks.every(check=>progress.verificationEvidence?.some(reference=>reference.checkId===check.id&&reference.inputHash===current.proofs[check.id]));
+          const proofPacket=buildReviewEvidence(state,plan,task,checks,{maxChars:Math.max(1000,Math.floor((progress.contextChars??options.contextChars??24000)*.2))});
+          if(!referencesCurrent||proofPacket.status==='needs-check'){
+            progress.checkpoint.phase='checking';progress.strategy='recover-review-evidence';
+            event('recovery','Referências de provas ausentes ou desatualizadas; reconciliando a verificação antes de solicitar um parecer.',task.id,{missing:proofPacket.missing,referencesCurrent});await save();continue;
+          }
+          let approved = progress.reviews.findLast(item=>item.inputHash===hash&&item.assessment.decision==='approved');
+          if(!approved){
+            for(const review of [...progress.reviews].reverse())if(review.assessment.decision==='approved'&&await inspectionStillCurrent(review.inspection,workspace,options.brief,plan,task)){approved=review;break;}
+          }
+          if(approved){
+            gate(task,'G3','complete','Inspeção independente preservada: fontes e critérios idênticos; provas atuais confirmadas.');
+            if(approved.inputHash!==hash){metrics.repetitions.push({taskId:task.id,action:'reuse-inspection',reason:`Independent approval ${approved.inputHash} remains bound to unchanged authority and source; every current verification receipt passed.`,at:now()});event('recovery','Provas revalidadas; o parecer de código válido foi preservado sem nova chamada ao auditor.',task.id);}
+          }
           if (!approved) {
             let accepted = false, inspectAgain = false;
             for (let clarification = 0; clarification < 2; clarification++) {
               gate(task,'G3','running',clarification?'Esclarecendo o parecer sem nova edição.':'Revisão independente das evidências e do código.');
               const previous = progress.reviews.filter(item=>item.inputHash===hash).at(-1);
-              const evidence = state.evidence.filter(item=>item.taskId===task.id).slice(-Math.max(1,progress.checks?.length ?? 1)).map(item=>item.output).join('\n');
-              const result = await invoke(task,workspace,'reviewer',clarification ? 'Clarify only the preceding review of these same files. Identify a material expected/observed defect linked to a supplied criterion, or explicitly approve. An instrument restriction, absent test quota or unreadable format is not grounds to edit correct code. Return one JSON {approved,findings:[{kind,file,observed,expected,evidence,fix,evidenceType,verification}]}.' : 'Inspect this work unit and its actual evidence without executing mutating verification commands. Return one JSON {approved:true,findings:[]} if its supplied criteria and mandatory stack are fulfilled, otherwise findings:[{kind,file,observed,expected,evidence,fix}]. Report only material product defects; classify instrument, environment and planning failures separately. A runtime claim must cite existing verification evidence or declare evidenceType:"inspection-command" with a concrete verification recipe for independent writable reproduction. Static source findings use evidenceType:"source" with location and expected/observed behavior.',`${evidence}${clarification&&previous?`\nPRECEDING REVIEW\n${previous.assessment.original}`:''}`,true,clarification?'clarify-review':'review',operational);
+              const previousLimit=Math.max(256,Math.floor((progress.contextChars??options.contextChars??24000)*.08));
+              const preceding=clarification&&previous?`\nPRECEDING REVIEW ${JSON.stringify({characters:previous.assessment.original.length,complete:previous.assessment.original.length<=previousLimit})}\n${previous.assessment.original.slice(0,previousLimit)}`:'';
+              const result = await invoke(task,workspace,'reviewer',clarification ? 'Clarify only the preceding review of these same files. Identify a material expected/observed defect linked to a supplied criterion, or explicitly approve. An instrument restriction, absent test quota or unreadable format is not grounds to edit correct code. Return one JSON {approved,findings:[{kind,file,observed,expected,evidence,fix,evidenceType,verification}]}.' : 'Inspect this work unit and its actual evidence without executing mutating verification commands. Return one JSON {approved:true,findings:[]} if its supplied criteria and mandatory stack are fulfilled, otherwise findings:[{kind,file,observed,expected,evidence,fix}]. Report only material product defects; classify instrument, environment and planning failures separately. A runtime claim must cite existing verification evidence or declare evidenceType:"inspection-command" with a concrete verification recipe for independent writable reproduction. Static source findings use evidenceType:"source" with location and expected/observed behavior.',`${proofPacket.text}${preceding}`,true,clarification?'clarify-review':'review',operational);
               if (result.status === 'cancelled' || options.signal?.aborted) { cancelled = true; return; }
               if (external(result)) { progress.strategy = 'resume-review'; await suspend(task,'transport','The reviewer is unavailable; no edit or confirmed proof will be replayed.',result.issue?.message ?? '',true); return; }
               const assessment = interpretReview(result.text);
@@ -686,7 +738,8 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
                 finding.text=reviewFindingText(finding);
               }
               assessment.actionableFindings=assessment.findings.filter(finding=>finding.disposition==='defect');assessment.advisories=assessment.findings.filter(finding=>finding.disposition==='advisory');
-              progress.reviews.push({inputHash:hash,at:now(),assessment}); event('review',`Review decision: ${assessment.decision}`,task.id,assessment); await save();
+              const inspection=assessment.decision==='approved'?await createInspectionIdentity(workspace,options.brief,plan,task,coverage):undefined;
+              progress.reviews.push({inputHash:hash,at:now(),assessment,...(inspection?{inspection}:{})}); event('review',`Review decision: ${assessment.decision}`,task.id,assessment); await save();
               if(progress.checkpoint.phase==='checking')break;
               if(replans.has(task.id)){const problem=replans.get(task.id)!;await suspend(task,'planning',problem.message,problem.evidence);return;}
               const observedProofs=state.evidence.filter(item=>item.taskId===task.id);
@@ -866,7 +919,11 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     }
     if(replans.size&&options.repairPlan){
       let changed=false;
-      for(const [id,problem] of [...replans]){const task=plan.tasks.find(item=>item.id===id)!;const progress=state.tasks[id]!;const key=digest(JSON.stringify({problem,input:await suspensionFingerprint(task,progress)}));
+      for(const [id,problem] of [...replans]){
+        if(replans.get(id)!==problem)continue;
+        const task=plan.tasks.find(item=>item.id===id);
+        if(!task){recordRetiredReplans(retireObsoleteReplans(state,plan));continue;}
+        const progress=state.tasks[id]!;const key=digest(JSON.stringify({problem,input:await suspensionFingerprint(task,progress)}));
         if(options.signal?.aborted||cancelled)break;
         if(replans.get(id)===problem)replans.delete(id);
         const consume=():void=>{if(JSON.stringify(state.pendingReplans?.[id])===JSON.stringify(problem))delete state.pendingReplans?.[id];};
@@ -896,6 +953,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
           const effectiveProofChanged=problem.repairScope==='verification'&&JSON.stringify(progress.checks??task.checks)!==JSON.stringify(reconciled.tasks.find(unit=>unit.id===task.id)?.checks??[]);
           if(!validatePlan(options.brief,reconciled).length&&(meaningful(reconciled)!==meaningful(plan)||effectiveProofChanged)){
             const preceding=plan;plan=reconciled;
+            recordRetiredReplans(retireObsoleteReplans(state,plan));
             for(const definition of plan.tasks){state.taskDefinitions??={};state.taskDefinitionHistory??={};state.taskDefinitions[definition.id]=structuredClone(definition);state.taskDefinitionHistory[definitionHash(definition)]=structuredClone(definition);}
             for(const unit of plan.tasks){
               const progress=state.tasks[unit.id]??=initialTask();const old=preceding.tasks.find(item=>item.id===unit.id);
@@ -1012,7 +1070,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     if(conformity.length){
       for(const issue of conformity)note(incident('planning',issue.requirementId,issue.message,issue.code));
       const fingerprint=digest(JSON.stringify({issues:conformity,proofs:currentProofs.map(proof=>proof.inputHash)}));state.acceptanceRecovery??={};
-      if(options.repairPlan&&!state.acceptanceRecovery[fingerprint]){state.acceptanceRecovery[fingerprint]='planning';const issue=conformity[0]!,owner=plan.tasks.find(task=>task.requirementIds.includes(issue.requirementId))??plan.tasks[0];if(owner){scheduleReplan(owner,incident('planning',issue.requirementId,'The mandatory provider is not consumed by the actual product; reconcile its plan and proof contract.',issue.message));await save();continue;}}
+      if(options.repairPlan&&!state.acceptanceRecovery[fingerprint]){state.acceptanceRecovery[fingerprint]='planning';const issue=conformity[0]!,owner=plan.tasks.find(task=>task.requirementIds.includes(issue.requirementId))??plan.tasks[0];if(owner){const problem=incident(issue.code==='provider-unavailable'?'environment':'instrument',issue.requirementId,'Mandatory provider usage is not yet proved; reconcile its actual provider and verification contract before changing any delivery.',issue.message);problem.repairScope=issue.code==='provider-unavailable'?'environment':'verification';scheduleReplan(owner,problem);await save();continue;}}
       return finish('waiting');
     }
     event('complete','Todos os fragmentos foram integrados e os requisitos obrigatórios possuem provas observadas.');return finish('complete');

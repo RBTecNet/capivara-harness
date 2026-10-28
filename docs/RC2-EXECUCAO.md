@@ -1,5 +1,7 @@
 # Controle de execução — 0.9.0-rc2
 
+Este documento registra a primeira entrega RC2. As correções posteriores, a validação atual e o desfecho da execução real estão em [Recuperação estrutural do motor RC2](RC2-RECUPERACAO-RUNTIME.md). Os artefatos originalmente vinculados abaixo permanecem como evidência histórica.
+
 O executor serial anterior foi substituído. Esta entrega trata planejamento, execução, revisão, recuperação, ambientes, provas e retomada como partes do mesmo problema de controle. Nenhuma aprovação é produzida por contagem de tentativas ou por ausência de achados depois de um filtro textual.
 
 ## Causas e invariantes

@@ -1,0 +1,31 @@
+{
+  "schema": "capivara/first-completion-evidence/1",
+  "capturedAt": "2026-10-28T20:02:50.539Z",
+  "preResumeCoordinatorRecord": {
+    "capturedAt": "2026-10-28T19:59:54.990Z",
+    "cli": "/home/bruno/.local/lib/node_modules/@capivara/core/dist/cli.js",
+    "cliSha256": "3bdebb16b39282aec8bac9f4b00fcaca672064dab99793bb8141f2f0e82b894c",
+    "before": {
+      "status": "complete",
+      "tasks": 10,
+      "complete": 10,
+      "evidence": 148,
+      "acceptance": 28,
+      "lastEventId": 12158
+    }
+  },
+  "completionEvent": {
+    "id": 12155,
+    "at": "2026-10-28T19:52:33.846Z",
+    "type": "complete",
+    "body": {
+      "type": "complete",
+      "message": "Todos os fragmentos foram integrados e os requisitos obrigatórios possuem provas observadas.",
+      "at": "2026-10-28T19:52:33.846Z"
+    }
+  },
+  "limits": [
+    "The coordinator record is the actual bounded pre-resume summary, not a reconstructed full project snapshot.",
+    "A later installed-CLI resume reopened retired work; this first completion does not establish a clean resume."
+  ]
+}

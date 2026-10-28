@@ -1,13 +1,14 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+import { randomUUID } from 'node:crypto';
 import type { DevelopmentPlan, ProductBrief, Verification, VerificationAssertion, WorkUnit } from '../domain/types.js';
 import { normalizeVerificationAssertion, verificationAssertionStatus } from '../domain/assertions.js';
 export { normalizeVerificationAssertion, verificationAssertionStatus } from '../domain/assertions.js';
 import { allowedCapabilities, inferredCapabilities } from '../domain/authority.js';
 import { taskReferences } from '../domain/material.js';
 import type { CommandRequest, CommandResult, TerminalRequest } from '../runtime/types.js';
-import { digest, inputHash } from './files.js';
+import { digest, inputSnapshot } from './files.js';
 import { applyOperationalEnvironment, recipeCwd, executionConstraints, type CommandExecutor, type OperationalEnvironment, verificationOperationalRevision } from './environment.js';
 import type { SelectedVerification, VerificationEvidence, VerificationObservation } from './types.js';
 import { beginConformanceObservation, finishConformanceObservation } from './conformance.js';
@@ -47,11 +48,22 @@ export async function derivedChecks(workspace: string, task: WorkUnit): Promise<
   return [];
 }
 export function taskInputs(plan:DevelopmentPlan,task:WorkUnit):string[]{return declaredTaskInputs(plan,task);}
-export async function checkInputHash(workspace:string,plan:DevelopmentPlan,task:WorkUnit,check:Verification,brief?:ProductBrief,operational?:OperationalEnvironment,resolvedInputs?:readonly string[]):Promise<string>{
+export interface VerificationIdentity { inputHash:string; observationHash:string; inputs:string[]; environmentRevision?:string; }
+/** One resolved graph and one content snapshot identify both execution and its
+ * interpretation. Predicates may change without manufacturing a new execution. */
+export async function verificationIdentity(workspace:string,plan:DevelopmentPlan,task:WorkUnit,check:Verification,brief?:ProductBrief,operational?:OperationalEnvironment,resolvedInputs?:readonly string[]):Promise<VerificationIdentity>{
   const inputs=resolvedInputs?[...resolvedInputs]:await resolveVerificationInputs(workspace,plan,task,check);
+  const snapshot=await inputSnapshot(workspace,inputs);
   const requirements=brief?.requirements.filter(requirement=>(check.requirementIds.length?check.requirementIds:task.requirementIds).includes(requirement.id));
   const contracts=plan.contracts.filter(contract=>task.contractIds.includes(contract.id));
-  return inputHash(workspace,inputs,JSON.stringify({verifier:verificationLevel(check)==='behavior'?'capivara-verification/5':'capivara-verification/4',providerObservation:check.conformance?.kind==='runtime'?'node-load-hook/1':undefined,check,requirements,contracts,constraints:brief?.constraints,environment:plan.environment.filter(node=>task.environmentIds.includes(node.id)),operational:operational?verificationOperationalRevision(operational,inputs,check):undefined,platform:process.platform,node:process.version,references:brief?taskReferences(brief,task):[]}));
+  const environmentRevision=operational?verificationOperationalRevision(operational,inputs,check):undefined;
+  const descriptor={verifier:verificationLevel(check)==='behavior'?'capivara-verification/5':'capivara-verification/4',providerObservation:check.conformance?.kind==='runtime'?'node-load-hook/2':undefined,assertionContract:verificationAssertionStatus(check).status==='invalid'?'strict-invalid/1':undefined,check,requirements,contracts,constraints:brief?.constraints,environment:plan.environment.filter(node=>task.environmentIds.includes(node.id)),operational:environmentRevision,platform:process.platform,node:process.version,references:brief?taskReferences(brief,task):[]};
+  const fingerprint=(description:unknown):string=>digest(JSON.stringify({description:JSON.stringify(description),inputs:snapshot}));
+  const {expected:_criterion,assertion:_assertion,assertionIssue:_assertionIssue,...execution}=check;
+  return{inputHash:fingerprint(descriptor),observationHash:fingerprint({...descriptor,assertionContract:undefined,check:execution}),inputs,...(environmentRevision?{environmentRevision}:{})};
+}
+export async function checkInputHash(workspace:string,plan:DevelopmentPlan,task:WorkUnit,check:Verification,brief?:ProductBrief,operational?:OperationalEnvironment,resolvedInputs?:readonly string[]):Promise<string>{
+  return(await verificationIdentity(workspace,plan,task,check,brief,operational,resolvedInputs)).inputHash;
 }
 export type VerificationFailureClass=ReviewFailureKind;
 function invocationArgs(check:Verification):{binary:string;args:string[]}|undefined{
@@ -172,7 +184,30 @@ export interface VerificationOutcome {
   assertionPending?:boolean;
   assertionStatus?:VerificationEvidence['assertionStatus'];
 }
-export async function runVerification(workspace:string,brief:ProductBrief,task:WorkUnit,plan:DevelopmentPlan,check:Verification,execute:CommandExecutor,terminal:(request:TerminalRequest)=>Promise<CommandResult>,options:{signal?:AbortSignal;allowSystemInstall?:boolean;onEvent?:(event:ProgressEvent)=>void;operational?:OperationalEnvironment;instrument?:ReviewFailureContext;preparationFailure?:string}={}):Promise<VerificationOutcome>{
+export interface RecordedObservationOptions { instrumentClassification?: { reference:string; reason:string }; }
+/** Reinterpret an unchanged successful execution, never a different command or
+ * an unclassified product failure. The original evidence and its transcript stay
+ * intact; a separate proof explicitly links to the recorded observation. */
+export function evaluateRecordedObservation(check:Verification,recorded:VerificationEvidence,identity:VerificationIdentity,options:RecordedObservationOptions={}):VerificationOutcome|undefined{
+  const observation=recorded.observation;
+  if(!observation||!recorded.observationHash||recorded.observationHash!==identity.observationHash||recorded.inputHash===identity.inputHash)return undefined;
+  if(observation.exitCode!==0||observation.issue||observation.cancelled||observation.timedOut)return undefined;
+  const independent=options.instrumentClassification??recorded.instrumentClassification;
+  const classified=independent&&independent.reference.trim()&&independent.reason.trim()?independent:undefined;
+  if(!recorded.passed&&recorded.classification!=='instrument'&&!classified)return undefined;
+  const assertion=evaluateVerificationAssertion(check,observation);
+  const expectedExit=check.expectedExitCode??(assertion.assertion?.type==='exit'?assertion.assertion.value:undefined)??0;
+  if(expectedExit!==0)return undefined;
+  if(check.kind==='tui'&&(!observation.terminal||!terminalInteraction(check)))return undefined;
+  const level=verificationLevel(check);
+  const passed=!assertion.instrument&&(level==='behavior'?assertion.passed===true:assertion.passed!==false)&&(check.kind!=='tui'||observation.terminal);
+  const classification:VerificationFailureClass|null=passed?null:assertion.instrument||assertion.passed===null?'instrument':'product';
+  const observedAt=recorded.observedAt??recorded.checkedAt;
+  const evidence:VerificationOutcome['evidence']={...structuredClone(recorded),id:randomUUID(),checkId:check.id,inputHash:identity.inputHash,observationHash:identity.observationHash,inputs:[...identity.inputs],kind:check.kind,target:check.target??hostTarget(),level,passed,checkedAt:new Date().toISOString(),observedAt,reinterpretedFrom:recorded.id,assertionStatus:assertion.status==='passed'?'ready':assertion.status,output:`${recorded.output}\nRecorded observation: ${recorded.id} at ${observedAt}. Command was not executed again.\nReinterpreted assertion: ${assertion.detail}`,...(identity.environmentRevision?{environmentRevision:identity.environmentRevision}:{}),...(classified?{instrumentClassification:structuredClone(classified)}:{})};
+  delete evidence.classification;if(classification)evidence.classification=classification;
+  return{evidence,result:null,classification,needsInstrument:classification!==null&&classification!=='product',assertionStatus:evidence.assertionStatus,...(classification==='instrument'&&(evidence.assertionStatus==='missing'||evidence.assertionStatus==='invalid')?{assertionPending:true}:{})};
+}
+export async function runVerification(workspace:string,brief:ProductBrief,task:WorkUnit,plan:DevelopmentPlan,check:Verification,execute:CommandExecutor,terminal:(request:TerminalRequest)=>Promise<CommandResult>,options:{signal?:AbortSignal;allowSystemInstall?:boolean;onEvent?:(event:ProgressEvent)=>void;operational?:OperationalEnvironment;instrument?:ReviewFailureContext;preparationFailure?:string;identity?:VerificationIdentity}={}):Promise<VerificationOutcome>{
   const progress={id:`verification:${task.id}:${check.id}`,label:`${task.id}: ${check.id}`,stage:'build'};
   const finish=(result:CommandResult|null,classification:VerificationFailureClass|null):VerificationOutcome=>{
     if(classification)evidence.classification=classification;
@@ -180,9 +215,9 @@ export async function runVerification(workspace:string,brief:ProductBrief,task:W
     return{evidence,result,classification,needsInstrument:classification!==null&&classification!=='product',...(evidence.assertionStatus?{assertionStatus:evidence.assertionStatus,assertionPending:classification==='instrument'&&(evidence.assertionStatus==='missing'||evidence.assertionStatus==='invalid')}:{})};
   };
   emitProgress(options.onEvent,{...progress,status:'running'});
-  const inputs=await resolveVerificationInputs(workspace,plan,task,check);
-  const hash=await checkInputHash(workspace,plan,task,check,brief,options.operational,inputs);
-  const evidence:VerificationOutcome['evidence']={id:digest(`${task.id}:${check.id}:${hash}`).slice(0,20),taskId:task.id,checkId:check.id,inputHash:hash,passed:false,command:check.command??'',output:'',terminal:false,checkedAt:new Date().toISOString(),kind:check.kind,target:check.target??hostTarget(),level:verificationLevel(check),inputs,...(options.operational?{environmentRevision:verificationOperationalRevision(options.operational,inputs,check)}:{})};
+  const identity=options.identity??await verificationIdentity(workspace,plan,task,check,brief,options.operational);
+  const {inputs,inputHash:hash}=identity;
+  const evidence:VerificationOutcome['evidence']={id:randomUUID(),taskId:task.id,checkId:check.id,inputHash:hash,observationHash:identity.observationHash,passed:false,command:check.command??'',output:'',terminal:false,checkedAt:new Date().toISOString(),kind:check.kind,target:check.target??hostTarget(),level:verificationLevel(check),inputs,...(identity.environmentRevision?{environmentRevision:identity.environmentRevision}:{})};
   if(options.preparationFailure){evidence.output=`The product command was not executed because its concrete runtime resource is unavailable.\n${options.preparationFailure}`;return finish(null,'environment');}
   if(task.requirementIds.length&&!inputs.length&&check.inputs===undefined&&task.inputs===undefined&&!task.files.length){
     evidence.output='The product proof has no declared read set. Declare its source/configuration/generated inputs, or explicitly declare an empty input set for a genuinely input-free operation. Unknown inputs cannot produce a reusable product proof.';
@@ -201,7 +236,12 @@ export async function runVerification(workspace:string,brief:ProductBrief,task:W
   finally{if(providerObservation){try{witnesses=await providerObservation.finish();}finally{await providerObservation.cleanup();}}}
   evidence.provenance=await finishConformanceObservation(observation,check,result);
   if(witnesses.length)evidence.provenance.runtimeWitnesses=witnesses;
+  if(providerObservation){
+    evidence.provenance.runtimeObservation={enabled:providerObservation.enabled,...(providerObservation.reason?{reason:providerObservation.reason}:{}),diagnostics:[...providerObservation.diagnostics]};
+    if(providerObservation.runtimeProvider)evidence.provenance.runtimeProvider=structuredClone(providerObservation.runtimeProvider);
+  }
   evidence.observation=verificationObservation(result);
+  evidence.observedAt=new Date().toISOString();
   evidence.command=result.command;evidence.terminal=result.terminal===true;
   evidence.output=`Command: ${result.command}\nExit code: ${result.exitCode}${result.timedOut?' (timed out)':''}${result.cancelled?' (cancelled)':''}\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`;
   if(result.issue)evidence.output+=`\nRuntime issue (${result.issue.kind}): ${result.issue.message}`;
@@ -211,7 +251,7 @@ export async function runVerification(workspace:string,brief:ProductBrief,task:W
   const terminalClosed=check.kind==='tui'&&result.terminal===true&&result.exitCode===130&&expectedExit===0&&assertion.passed===true;
   evidence.output+=`\nEvidence level: ${evidence.level}\nExpected exit code: ${expectedExit}\nAssertion: ${assertion.detail}`;
   const commandOkay=(result.exitCode===expectedExit||terminalClosed)&&!result.timedOut&&!result.cancelled&&!result.issue;
-  const observed=evidence.level==='behavior'?assertion.passed===true:assertion.passed!==false;
+  const observed=!assertion.instrument&&(evidence.level==='behavior'?assertion.passed===true:assertion.passed!==false);
   evidence.passed=commandOkay&&observed&&(check.kind!=='tui'||result.terminal===true);
   if(evidence.passed)return finish(result,null);
   if(!commandOkay)return finish(result,classifyVerificationFailure(result,options.instrument));

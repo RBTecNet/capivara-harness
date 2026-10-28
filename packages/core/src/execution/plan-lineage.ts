@@ -17,6 +17,8 @@ export interface CollectedTaskDefinition {
 export interface RestoredPlanLineage {
   previousTaskId: string;
   replacementTaskId: string;
+  /** Exact retired contract; task IDs alone do not identify later proposals. */
+  replacementDefinitionHash?: string;
   previousDefinitionHash: string;
   definitionHash: string;
   /** Effective task retains the original delivery and the replacement's proof configuration. */
@@ -32,6 +34,24 @@ const unique = (items: readonly string[]): string[] => [...new Set(items)];
 const sameRequirements = (left: WorkUnit, right: WorkUnit): boolean => JSON.stringify(unique(left.requirementIds).sort()) === JSON.stringify(unique(right.requirementIds).sort());
 const present = (path: string): boolean => { try { return statSync(path).isDirectory(); } catch { return false; } };
 const covers=(parent:WorkUnit,child:WorkUnit):boolean=>child.files.every(path=>parent.files.some(scope=>scope===path||!/[?*{[]/.test(scope)&&path.startsWith(`${scope.replace(/\/$/,'')}/`)||!/[?*{[]/.test(path)&&matchesGlob(path,scope)));
+
+function wasRetired(id: string, reference: string, progress: TaskProgress, definitions: readonly CollectedTaskDefinition[], state: BuildState): boolean {
+  const checkpoint = progress.checkpoint;
+  const usableProposal = checkpoint && ['checking', 'reviewing'].includes(checkpoint.phase) && present(checkpoint.directory);
+  // Retirement removes the old checkpoint. A new private proposal is real work,
+  // even if its delivery contract happens to have the same task identity.
+  const retired = (state.planLineage ?? []).filter(entry => entry.replacementTaskId === id);
+  const identities = unique(definitions.filter(item => item.definition.id === id).map(item => item.hash));
+  for (const entry of retired) {
+    const retiredHash = entry.replacementDefinitionHash ?? (identities.length === 1 ? identities[0] : undefined);
+    if (retiredHash !== reference) continue;
+    if (usableProposal && checkpoint.directory !== entry.replacementCheckpointDirectory) continue;
+    return true;
+  }
+  // Older snapshots did not record the retired hash. Their explicit retirement
+  // marker still identifies the saved, approved definition, never a new proposal.
+  return !usableProposal && progress.strategy === 'superseded-plan-lineage' && progress.definitionHash === reference;
+}
 
 /** Recover only exact definitions. Similar prose cannot establish a proposal's identity. */
 export function collectTaskDefinitions(brief: ProductBrief, plan: DevelopmentPlan, state: BuildState, domainCalls: PlanDomainCalls = {}): CollectedTaskDefinition[] {
@@ -70,6 +90,7 @@ export function recoverPlanLineage(brief: ProductBrief, current: DevelopmentPlan
     const approved=progress.status==='complete'&&!!progress.definitionHash;
     if(!approved&&(!checkpoint||!['checking','reviewing'].includes(checkpoint.phase)||!present(checkpoint.directory)))continue;
     const reference=approved?progress.definitionHash:checkpoint?.taskHash;
+    if (reference && wasRetired(id, reference, progress, definitions, state)) continue;
     const exact = definitions.filter(item => item.definition.id === id && item.hash === reference);
     if (exact.length !== 1) continue;
     const definition = exact[0]!;
@@ -111,7 +132,7 @@ export function recoverPlanLineage(brief: ProductBrief, current: DevelopmentPlan
     pair.progress.status = 'checking'; pair.progress.strategy = 'recover-plan-lineage'; pair.progress.checks = structuredClone(definition.checks);
     delete pair.progress.suspension; delete pair.progress.verificationCheckpoint;
     plan.tasks[plan.tasks.findIndex(task => task.id === replacement.id)] = definition;
-    restored.push({ previousTaskId: pair.previousTaskId, replacementTaskId: replacement.id, previousDefinitionHash: pair.definition.hash, definitionHash: hash(definition), definition: structuredClone(definition), previousDefinition: original, ...(pair.progress.checkpoint?{checkpointDirectory:pair.progress.checkpoint.directory}:{}), ...(proposal ? { replacementCheckpointDirectory: proposal } : {}), source: pair.definition.source, sourceId: pair.definition.sourceId });
+    restored.push({ previousTaskId: pair.previousTaskId, replacementTaskId: replacement.id, replacementDefinitionHash: hash(replacement), previousDefinitionHash: pair.definition.hash, definitionHash: hash(definition), definition: structuredClone(definition), previousDefinition: original, ...(pair.progress.checkpoint?{checkpointDirectory:pair.progress.checkpoint.directory}:{}), ...(proposal ? { replacementCheckpointDirectory: proposal } : {}), source: pair.definition.source, sourceId: pair.definition.sourceId });
   }
   for (const task of plan.tasks) task.dependsOn = unique(task.dependsOn.map(id => aliases.get(id) ?? id));
   if (restored.length) plan.revision++;

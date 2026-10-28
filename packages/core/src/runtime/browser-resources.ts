@@ -110,17 +110,28 @@ const input=JSON.parse(process.argv[1]),req=createRequire(input.packageJson),pkg
     const explicit=option('--browser');let targets,configFile;const sourceInputs=new Set();
     if(explicit)targets=(explicit==='all'?['chromium','firefox','webkit']:explicit.split(',')).map(browser=>({browser}));
     if(values[0]==='test'){
-      let loader;for(const name of ['playwright/lib/common','playwright/lib/common/configLoader']){try{const mod=req(name);loader=mod.configLoader||mod;if(typeof loader.loadConfigFromFile==='function')break;}catch{}}
+      let loader,common;for(const name of ['playwright/lib/common','playwright/lib/common/configLoader']){try{const mod=req(name);loader=mod.configLoader||mod;if(typeof loader.loadConfigFromFile==='function'){common=mod;break;}}catch{}}
       if(loader&&typeof loader.loadConfigFromFile==='function'){
-        const loaded=await loader.loadConfigFromFile(option('--config')||option('-c'),undefined,values.includes('--no-deps'));configFile=loaded.config?.configFile||loaded.configFile;
+        let testCommand;try{testCommand=req('playwright/lib/program').program?.commands?.find(command=>command.name()==='test');}catch{}
+        if(!testCommand||typeof testCommand.parseOptions!=='function')throw Error('The installed Playwright does not expose its non-executing test-option parser. File filters cannot be guessed from option values.');
+        testCommand.exitOverride?.();
+        const dash=values.indexOf('--'),parsed=testCommand.parseOptions(values.slice(1,dash<0?undefined:dash));
+        if(!Array.isArray(parsed.operands)||parsed.unknown?.length)throw Error('The installed Playwright cannot resolve this invocation into concrete test locations and options.');
+        const cli=testCommand.opts(),locations=parsed.operands;
+        let suiteUtils=common?.suiteUtils;if(!suiteUtils)try{suiteUtils=req('playwright/lib/common/suiteUtils');}catch{}
+        if(locations.length&&typeof suiteUtils?.createFiltersFromArguments!=='function')throw Error('The installed Playwright does not expose its file-location filter protocol. Opaque file selection cannot produce reusable proofs.');
+        const fileFilter=locations.length?suiteUtils.createFiltersFromArguments(locations).fileFilter:undefined;
+        const loaded=await loader.loadConfigFromFile(cli.config,undefined,cli.deps===false);configFile=loaded.config?.configFile||loaded.configFile;
         if(typeof configFile==='string')sourceInputs.add(configFile);
-        const patterns=values.flatMap((value,index)=>value==='--project'?[values[index+1]]:value.startsWith('--project=')?[value.slice(10)]:[]).filter(Boolean);
+        const patterns=Array.isArray(cli.project)?cli.project:typeof cli.project==='string'?[cli.project]:[];
         const projects=loaded.projects||loaded.config?.projects||[];
         let projectUtils;for(const name of ['playwright/lib/runner','playwright/lib/runner/projectUtils']){try{const mod=req(name),candidate=mod.projectUtils||mod;if(typeof candidate.collectFilesForProject==='function'){projectUtils=candidate;break;}}catch{}}
         if(!projectUtils)throw Error('The installed Playwright configuration exposes projects but not its non-executing test-source collector. Declare an explicit compatible source-discovery instrument; opaque configured tests cannot produce reusable proofs.');
         if(patterns.length&&typeof projectUtils.filterProjects!=='function')throw Error('The installed Playwright does not expose its configured project-selection protocol. Project filters cannot be guessed.');
         const selected=typeof projectUtils.filterProjects==='function'?projectUtils.filterProjects(projects,patterns.length?patterns:undefined):projects.filter(project=>project.default!==false);
-        const closure=typeof projectUtils.buildProjectsClosure==='function'?[...projectUtils.buildProjectsClosure(selected).keys()]:(()=>{const result=new Set(),visit=project=>{if(result.has(project))return;result.add(project);if(!values.includes('--no-deps')){for(const dependency of project.deps||[])visit(dependency);if(project.teardown)visit(project.teardown);}};for(const project of selected)visit(project);return[...result];})();
+        const projectClosure=typeof projectUtils.buildProjectsClosure==='function'?projectUtils.buildProjectsClosure(selected):(()=>{const result=new Map(),visit=(project,depth=0)=>{if(result.has(project)){if(depth)result.set(project,'dependency');return;}result.set(project,depth?'dependency':'top-level');if(cli.deps!==false){for(const dependency of project.deps||[])visit(dependency,depth+1);if(project.teardown)visit(project.teardown,depth+1);}};for(const project of selected)visit(project);return result;})();
+        const closure=[...projectClosure.keys()],sourceMapCache=new Map(),sourceMapInputs=new Map();
+        const sourceMapSources=file=>{if(!file.endsWith('.js'))return[file];if(sourceMapCache.has(file))return sourceMapCache.get(file);let sources=[file];try{const support=req('playwright-core/lib/utilsBundle').sourceMapSupport,map=support.retrieveSourceMap(file),data=typeof map?.map==='string'?JSON.parse(map.map):map?.map;if(data?.sources)sources=data.sources.map(source=>path.resolve(path.dirname(file),source));if(typeof map?.url==='string'&&!map.url.startsWith('data:')){const mapPath=map.url.startsWith('file:')?require('node:url').fileURLToPath(map.url):map.url;if(fs.existsSync(mapPath)&&fs.statSync(mapPath).isFile())sourceMapInputs.set(file,[path.resolve(mapPath)]);}}catch{}finally{sourceMapCache.set(file,sources);}return sources;};
         for(const project of closure){
           if(typeof project.project?.testDir!=='string')throw Error('The installed Playwright project has no concrete resolved testDir/source-discovery contract.');
           if(project.respectGitIgnore)sourceInputs.add(path.join(project.project.testDir,'.gitignore'));
@@ -128,9 +139,11 @@ const input=JSON.parse(process.argv[1]),req=createRequire(input.packageJson),pkg
           // testMatch/testIgnore RegExp/glob and gitignore rules without loading
           // or running test modules. grep filters titles only after those files
           // are loaded, so every configured matching source is a proof input.
-          const files=await projectUtils.collectFilesForProject(project);
-          if(!Array.isArray(files)||files.some(file=>typeof file!=='string'))throw Error('The installed Playwright returned an opaque configured test-source set.');
-          for(const file of files){const absolute=path.resolve(file),relative=path.relative(input.workspace,absolute);if(relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative))throw Error('A selected test source lies outside the isolated workspace and cannot be tracked by this proof: '+file);sourceInputs.add(absolute);if(project.respectGitIgnore){for(let directory=path.dirname(absolute);;directory=path.dirname(directory)){sourceInputs.add(path.join(directory,'.gitignore'));if(directory===path.resolve(project.project.testDir)||path.dirname(directory)===directory)break;}}}
+          const configured=await projectUtils.collectFilesForProject(project);
+          if(!Array.isArray(configured)||configured.some(file=>typeof file!=='string'))throw Error('The installed Playwright returned an opaque configured test-source set.');
+          const dependency=projectClosure.get(project)==='dependency'||!selected.includes(project);
+          const files=fileFilter&&!dependency?configured.filter(file=>sourceMapSources(file).some(fileFilter)):configured;
+          for(const file of files){const absolute=path.resolve(file),relative=path.relative(input.workspace,absolute);if(relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative))throw Error('A selected test source lies outside the isolated workspace and cannot be tracked by this proof: '+file);sourceInputs.add(absolute);for(const mapFile of sourceMapInputs.get(file)||[])sourceInputs.add(mapFile);if(project.respectGitIgnore){for(let directory=path.dirname(absolute);;directory=path.dirname(directory)){sourceInputs.add(path.join(directory,'.gitignore'));if(directory===path.resolve(project.project.testDir)||path.dirname(directory)===directory)break;}}}
         }
         if(!targets)targets=closure.map(value=>value.project||value).map(project=>{const use=project.use||{},launch=use.launchOptions||{};return{browser:use.browserName||'chromium',...(use.channel?{channel:use.channel}:{}),...(launch.executablePath?{executablePath:launch.executablePath}:{}),...(launch.args?{args:launch.args}:{})}});
       }else{

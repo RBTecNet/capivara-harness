@@ -42,7 +42,8 @@ const guidance = 'SOURCE DELIVERY: Each SOURCE header records the full-file hash
 export async function assembleTaskContext(brief: ProductBrief, plan: DevelopmentPlan, task: WorkUnit, workspace: string, limit: number, extra = '', focusPaths: string[] = []): Promise<AssembledTaskContext> {
   const capacity=Math.floor(limit);
   if(!Number.isFinite(capacity)||capacity<=0)throw new RangeError('Task context capacity must be positive.');
-  const focus=focusPaths.map(value=>focusAt(workspace,value));
+  const rejectedFocus:{reference:string;reason:string}[]=[];
+  const focus=focusPaths.flatMap(value=>{try{return[focusAt(workspace,value)];}catch(error){rejectedFocus.push({reference:value,reason:error instanceof Error?error.message:String(error)});return[];}});
   const selectors=[...new Set([...task.files,...focus.map(item=>item.path)])];
   const paths=new Set(await sourceFiles(workspace,selectors));
   // A named missing output is different from a file omitted by the delivery budget.
@@ -74,7 +75,7 @@ export async function assembleTaskContext(brief: ProductBrief, plan: Development
   const extraLimit=Math.max(0,Math.min(extra.length,Math.floor(capacity*.3)));
   const extraStart=extra.length-extraLimit;
   const note=extra ? `\nOPERATION DETAILS ${JSON.stringify({complete:extraStart===0,startCharacter:extraStart,endCharacter:extra.length,characters:extra.length})}\n${extra.slice(extraStart)}` : '';
-  const prefix=`${packet}\n\n${guidance}`;
+  const prefix=`${packet}\n\n${guidance}${rejectedFocus.length?`UNRESOLVED SOURCE REFERENCES ${JSON.stringify(rejectedFocus)}\n`:''}`;
   const blocks=sources.map(source=>block(source));
   const size=():number=>prefix.length+blocks.join('\n').length+note.length;
   // Even metadata must fit honestly; the planner must split an oversized unit

@@ -1,0 +1,97 @@
+{
+  "schema": "capivara/functional-verification-summary/1",
+  "capturedAt": "2026-10-28T20:18:32.852Z",
+  "status": "complete",
+  "stage": "build",
+  "currentTaskIds": [
+    "implement-visual-plan-shell",
+    "foundation-api-db",
+    "module-tasks-api",
+    "module-categories-api",
+    "module-notes-api",
+    "module-tasks-ui",
+    "module-categories-ui",
+    "module-notes-ui",
+    "web-shell",
+    "integrated-acceptance"
+  ],
+  "proofs": [
+    {
+      "checkId": "full-stack-build",
+      "evidenceId": "1f0f2112688d91668bee",
+      "inputHash": "b07ffb0bb48a7aca0d29b0f4c9f80a392812652afae7a5aaefcde2339a67ed05",
+      "passed": true,
+      "kind": "command",
+      "level": "build",
+      "observedAt": "2026-10-28T18:40:55.222Z",
+      "checkedAt": "2026-10-28T18:40:48.295Z",
+      "outputSummary": [
+        "✓ 38 modules transformed.",
+        "✓ built in 1.40s"
+      ]
+    },
+    {
+      "checkId": "all-module-tests",
+      "evidenceId": "30ec50e6f475b4e03bed",
+      "inputHash": "9a3c3bb45cdba949010228c1ba1d34f64e6494ce14ea58edeab66c3a04c1aa71",
+      "passed": true,
+      "kind": "command",
+      "level": "behavior",
+      "observedAt": "2026-10-28T18:41:06.027Z",
+      "checkedAt": "2026-10-28T18:41:01.582Z",
+      "outputSummary": [
+        " Test Files  6 passed (6)",
+        "      Tests  13 passed (13)",
+        "   Duration  1.55s (environment 43%, tests 29%, import 14%, transform 14%, worker 1%)"
+      ]
+    },
+    {
+      "checkId": "web-interface-e2e",
+      "evidenceId": "30b77c34d789d60eda54",
+      "inputHash": "5937f3eb641e97f8a4eeb0e211ff2497225c960f7fde41db10a7a11f5be5932d",
+      "passed": true,
+      "kind": "web",
+      "level": "behavior",
+      "observedAt": "2026-10-28T18:56:58.475Z",
+      "checkedAt": "2026-10-28T19:02:37.750Z",
+      "reinterpretedFrom": "6e3df046fc3caaad20dc",
+      "outputSummary": [
+        "Running 5 tests using 1 worker",
+        "  ✓  1 [chromium] › e2e/categories.spec.ts:25:1 › Categorias: validação, CRUD, confirmação e persistência após reiniciar a API (2.6s)",
+        "  ✓  2 [chromium] › e2e/notes.spec.ts:34:1 › Anotações: CRUD, confirmação e persistência após reiniciar a API (2.4s)",
+        "  ✓  3 [chromium] › e2e/notes.spec.ts:107:1 › cada módulo mantém seus registros independentes (1.5s)",
+        "  ✓  4 [chromium] › e2e/tasks.spec.ts:48:1 › cria, valida, edita, confirma exclusão e mantém a tarefa após reiniciar a API (2.0s)",
+        "  ✓  5 [chromium] › e2e/web-shell.spec.ts:14:1 › navegação entre páginas por URL (1.4s)",
+        "  5 passed (12.0s)"
+      ]
+    },
+    {
+      "checkId": "api-runtime-conformance",
+      "evidenceId": "dbdb7d29-b3cf-4ed3-8395-117ea4d712fa",
+      "inputHash": "9ef440f82d42f92e0c13f4e7a76409a1294287f6d07333dbffb9fb4a6996a326",
+      "passed": true,
+      "kind": "command",
+      "level": "behavior",
+      "observedAt": "2026-10-28T19:51:30.890Z",
+      "checkedAt": "2026-10-28T19:51:27.241Z",
+      "outputSummary": [
+        "> npm run acceptance:node-api",
+        "> parallel-lab@1.0.0 acceptance:node-api",
+        "> node --import tsx/esm server/src/acceptance.ts"
+      ],
+      "runtimeObservation": {
+        "enabled": true,
+        "diagnostics": []
+      },
+      "loadedProductInputs": [
+        "server/src/index.ts",
+        "server/src/db.ts"
+      ]
+    }
+  ],
+  "limits": [
+    "Summaries extracted from recorded observations; commands were not repeated to produce this report.",
+    "Observation time differs from predicate reinterpretation time when a proof reuses its original observation.",
+    "Current validity is corroborated by the successful completed-resume check."
+  ]
+}

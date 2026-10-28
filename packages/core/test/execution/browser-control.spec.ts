@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { createRequire } from 'node:module';
 import type { DevelopmentPlan, ProductBrief, WorkUnit } from '../../src/domain/types.js';
 import { createBuildState, runBuild } from '../../src/execution/build.js';
 import { createTaskWorkspace } from '../../src/execution/isolation.js';
@@ -112,4 +113,41 @@ describe('provas web embrulhadas em preparação redundante de navegador',()=>{
     expect(result.state.evidence.some(proof=>proof.kind==='web'&&proof.passed&&proof.level==='behavior')).toBe(true);expect(Object.keys(result.state.resourceBindings?.[f.task.id]??{})).toHaveLength(1);
     await expect(readFile(join(f.pkg,'unexpected-install'))).rejects.toMatchObject({code:'ENOENT'});
   });
+});
+
+it('replaces stale discovered browser inputs instead of invalidating a proof for an unselected source',async()=>{
+  const f=await fixture();
+  await seedCache(join(f.workspace,'.capivara-runtime','cache','ms-playwright'));
+  await writeFile(join(f.workspace,'beta.mjs'),'console.log("unrelated beta");\n');
+  await mkdir(join(f.pkg,'lib'),{recursive:true});
+  await writeFile(join(f.pkg,'lib/common.js'),`exports.configLoader={async loadConfigFromFile(){return require(require('node:path').join(process.cwd(),'playwright.config.cjs'))}};exports.suiteUtils={createFiltersFromArguments(args){return{fileFilter:file=>args.some(arg=>file.endsWith(arg))}}};`);
+  await writeFile(join(f.pkg,'lib/program.js'),`const {Command}=require(${JSON.stringify(createRequire(import.meta.url).resolve('commander'))});const test=new Command('test');test.action(()=>{throw Error('discovery cannot dispatch test actions')});exports.program={commands:[test]};`);
+  await writeFile(join(f.pkg,'lib/runner.js'),`const fs=require('node:fs'),path=require('node:path');exports.projectUtils={filterProjects(projects){return projects},buildProjectsClosure(projects){return new Map(projects.map(project=>[project,'top-level']))},async collectFilesForProject(project){return[path.join(project.project.testDir,project.project.testMatch)].filter(file=>fs.existsSync(file))}};`);
+  await writeFile(join(f.workspace,'playwright.config.cjs'),`module.exports={config:{configFile:__filename},projects:[{project:{name:'control',testDir:__dirname,testMatch:'alpha.mjs',testIgnore:[],use:{browserName:'chromium'}},default:true,deps:[]}]};`);
+  const baseline=[...f.task.checks[0]!.inputs!];
+  const stale={...structuredClone(f.task.checks[0]!),inputs:[...baseline,'beta.mjs'],instrument:{provider:'playwright',output:'runner' as const,declaredInputs:baseline,sourceInputs:['beta.mjs']}};
+  const state=createBuildState(f.plan);
+  state.tasks[f.task.id]={status:'pending',revision:'',attempts:0,changedFiles:[],findings:[],strategy:'implement',checks:[stale]};
+  let editors=0,reviewers=0,commands=0;
+  const options:BuildOptions={workspace:f.workspace,brief:f.brief,plan:f.plan,state,signal:AbortSignal.timeout(10000),executeCommand:async request=>{
+    if(request.executionPolicy?.purpose==='verification')commands++;
+    return executeCommand(request);
+  },agent:async request=>{
+    if(request.role==='reviewer'){reviewers++;return complete('{"approved":true,"findings":[]}');}
+    expect(request.role).toBe('editor');editors++;await writeFile(join(request.workspace,'alpha.mjs'),'console.log("alpha");\n');return complete();
+  }};
+  const first=await runBuild(options);
+  expect(first.status,JSON.stringify(first.incidents)).toBe('complete');
+  expect({editors,reviewers,commands}).toEqual({editors:1,reviewers:1,commands:1});
+  const current=first.state.tasks[f.task.id]!.checks![0]!;
+  expect(current.inputs).not.toContain('beta.mjs');
+  expect(current.instrument?.declaredInputs).toEqual(baseline);
+  expect(current.instrument?.sourceInputs).toContain('alpha.mjs');
+  expect(current.instrument?.sourceInputs).not.toContain('beta.mjs');
+  const evidence=first.state.evidence.length;
+  await writeFile(join(f.workspace,'beta.mjs'),'console.log("changed unselected beta");\n');
+  const resumed=await runBuild({...options,plan:first.plan,state:JSON.parse(JSON.stringify(first.state)),signal:AbortSignal.timeout(10000)});
+  expect(resumed.status,JSON.stringify(resumed.incidents)).toBe('complete');
+  expect({editors,reviewers,commands}).toEqual({editors:1,reviewers:1,commands:1});
+  expect(resumed.state.evidence).toHaveLength(evidence);
 });

@@ -2,6 +2,7 @@ import { afterEach, expect, it } from 'vitest';
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createRequire } from 'node:module';
 import { prepareBrowserResources } from '../../src/runtime/browser-resources.js';
 import { emptyOperationalEnvironment } from '../../src/execution/environment.js';
 import { checkInputHash } from '../../src/execution/checks.js';
@@ -80,10 +81,11 @@ it.skipIf(process.platform==='win32')('unwraps only proven Playwright bootstrap 
   const unsafe={...f.check,command:'/bin/bash',args:['-lc','npm install && npx playwright test alpha.mjs']};expect((await prepareBrowserResources(f.workspace,unsafe,f.operational,{resourceRoot:f.resources})).applicable).toBe(false);
 });
 
-it('tracks configured test sources and their imports without loading tests or invalidating unrelated documents',async()=>{
+async function configuredFixture(){
   const f=await fixture();
   await mkdir(join(f.pkg,'lib'),{recursive:true});
-  await writeFile(join(f.pkg,'lib/common.js'),`exports.configLoader={async loadConfigFromFile(){return require(require('node:path').join(process.cwd(),'playwright.config.cjs'))}};`);
+  await writeFile(join(f.pkg,'lib/common.js'),`exports.configLoader={async loadConfigFromFile(){return require(require('node:path').join(process.cwd(),'playwright.config.cjs'))}};exports.suiteUtils={createFiltersFromArguments(args){const patterns=args.map(value=>new RegExp(value.replace(/:\\d+(?::\\d+)?$/,'')));return{fileFilter:file=>patterns.some(pattern=>pattern.test(file))}}};`);
+  await writeFile(join(f.pkg,'lib/program.js'),`const {Command}=require(${JSON.stringify(createRequire(import.meta.url).resolve('commander'))});const test=new Command('test');test.option('--grep <pattern>').option('--project <name...>').option('-c, --config <file>').option('--no-deps');test.action(()=>{throw Error('discovery must never dispatch the test command action')});exports.program={commands:[test]};`);
   await writeFile(join(f.pkg,'lib/runner.js'),`const fs=require('node:fs'),path=require('node:path');const match=(patterns,file)=>(Array.isArray(patterns)?patterns:[patterns]).some(pattern=>pattern instanceof RegExp?(pattern.lastIndex=0,pattern.test(file)):path.matchesGlob(file,pattern.startsWith('**/')?pattern:'**/'+pattern));exports.projectUtils={filterProjects(projects,names){return names?projects.filter(item=>names.some(name=>path.matchesGlob(item.project.name,name))):projects},buildProjectsClosure(selected){const result=new Map(),visit=item=>{if(result.has(item))return;result.set(item,'selected');for(const dependency of item.deps||[])visit(dependency)};for(const item of selected)visit(item);return result},async collectFilesForProject(item){const project=item.project;return fs.readdirSync(project.testDir,{recursive:true}).map(file=>path.join(project.testDir,file)).filter(file=>fs.statSync(file).isFile()&&match(project.testMatch,file)&&!match(project.testIgnore,file))}};`);
   for(const folder of ['src','e2e','setup','unselected'])await mkdir(join(f.workspace,folder),{recursive:true});
   await writeFile(join(f.workspace,'playwright.config.cjs'),`const path=require('node:path');const setup={project:{name:'setup',testDir:path.join(__dirname,'setup'),testMatch:'**/*.setup.ts',testIgnore:[],use:{}},deps:[]};const browser={project:{name:'browser',testDir:path.join(__dirname,'e2e'),testMatch:[/\\.scenario\\.ts$/,'**/*.spec.ts'],testIgnore:/ignored/,use:{browserName:'chromium'}},respectGitIgnore:true,deps:[setup]};const unselected={project:{name:'unselected',testDir:path.join(__dirname,'unselected'),testMatch:'**/*.spec.ts',testIgnore:[],use:{}},deps:[]};module.exports={config:{configFile:__filename},projects:[browser,unselected,setup]};`);
@@ -95,6 +97,10 @@ it('tracks configured test sources and their imports without loading tests or in
   await writeFile(join(f.workspace,'setup/database.setup.ts'),"throw Error('discovery must not run setup tests');");
   await writeFile(join(f.workspace,'unselected/other.spec.ts'),'unselected project bytes');
   const check:Verification={...f.check,args:['run','e2e','--','--grep','navegação principal','--project','browser'],inputs:['src/app.ts']};
+  return{...f,check};
+}
+it('tracks configured test sources and their imports without loading tests or invalidating unrelated documents',async()=>{
+  const f=await configuredFixture(),check=f.check;
   const prepared=await prepareBrowserResources(f.workspace,check,f.operational,{resourceRoot:f.resources});
   expect(prepared.ready,prepared.details).toBe(true);
   expect(prepared.inputs).toEqual(expect.arrayContaining(['playwright.config.cjs','e2e/navigation.scenario.ts','e2e/form.spec.ts','e2e/.gitignore','setup/database.setup.ts']));
@@ -112,4 +118,26 @@ it('tracks configured test sources and their imports without loading tests or in
   const changedHelper=await checkInputHash(f.workspace,plan,task,bound,brief);expect(changedHelper).not.toBe(repaired);
   await writeFile(join(f.workspace,'e2e/.gitignore'),'# The collector reads this visibility contract.');
   expect(await checkInputHash(f.workspace,plan,task,bound,brief)).not.toBe(changedHelper);
+});
+
+it('filters explicit file locations before loading while preserving dependency projects and selected imports',async()=>{
+  const f=await configuredFixture();
+  const check:Verification={...f.check,args:['run','e2e','--','e2e/navigation.scenario.ts:12','--grep','navegação principal','--project','browser']};
+  const result=await prepareBrowserResources(f.workspace,check,f.operational,{resourceRoot:f.resources});
+  expect(result.ready,result.details).toBe(true);
+  expect(result.inputs).toEqual(expect.arrayContaining(['e2e/navigation.scenario.ts','setup/database.setup.ts','playwright.config.cjs']));
+  expect(result.inputs).not.toContain('e2e/form.spec.ts');expect(result.inputs).not.toContain('e2e/ignored.spec.ts');
+  const bound={...check,inputs:[...check.inputs??[],...result.inputs??[]]};
+  const brief:ProductBrief={schema:'capivara/product/1',id:'b',status:'ready',revision:1,name:'Selected browser source',summary:'Observe the selected source.',request:'Create a web app.',modes:['web'],targets:['browser'],requirements:[],constraints:[],decisions:[],gaps:[]};
+  const task:WorkUnit={id:'web',title:'Web',goal:'Observe the selected source.',instructions:'Preserve behavior.',requirementIds:[],dependsOn:[],environmentIds:[],contractIds:[],files:['src/app.ts'],criteria:['Observe the requested behavior.'],checks:[bound],risk:'normal',blockedBy:[]};
+  const plan:DevelopmentPlan={schema:'capivara/plan/1',status:'ready',revision:1,briefId:'b',briefRevision:1,environment:[],contracts:[],tasks:[task]};
+  const before=await checkInputHash(f.workspace,plan,task,bound,brief);
+  await writeFile(join(f.workspace,'e2e/form.spec.ts'),'Changed same-project test that is not selected by the actual file filter.');
+  expect(await checkInputHash(f.workspace,plan,task,bound,brief)).toBe(before);
+  await writeFile(join(f.workspace,'e2e/navigation.scenario.ts'),"import {helper} from './helper'; throw Error('selected source changed without evaluation');");
+  const selected=await checkInputHash(f.workspace,plan,task,bound,brief);expect(selected).not.toBe(before);
+  await writeFile(join(f.workspace,'e2e/helper.ts'),'export const helper = 3;');
+  const helper=await checkInputHash(f.workspace,plan,task,bound,brief);expect(helper).not.toBe(selected);
+  await writeFile(join(f.workspace,'setup/database.setup.ts'),'Changed setup project that still loads despite the main-project file filter.');
+  expect(await checkInputHash(f.workspace,plan,task,bound,brief)).not.toBe(helper);
 });

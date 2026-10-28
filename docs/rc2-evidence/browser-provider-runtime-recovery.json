@@ -1,0 +1,22 @@
+{
+  "generatedAt": "2026-10-28T18:56:55.995Z",
+  "applicable": true,
+  "ready": true,
+  "inputs": [
+    "e2e/web-shell.spec.ts",
+    "playwright.config.ts",
+    "package.json"
+  ],
+  "installs": 0,
+  "selectedCheck": {
+    "id": "check-d28b9830f1ff",
+    "command": "npm",
+    "args": [
+      "run",
+      "test:e2e",
+      "--",
+      "e2e/web-shell.spec.ts"
+    ]
+  },
+  "details": "Actual installed Playwright collector, CLI file filter and physical headless browser passed."
+}

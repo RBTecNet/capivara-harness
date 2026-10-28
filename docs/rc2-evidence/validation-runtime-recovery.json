@@ -1,0 +1,29 @@
+{
+  "schema": "capivara/runtime-recovery-validation/1",
+  "recordedAt": "2026-10-28T20:10:12.088Z",
+  "version": "0.9.0-rc2",
+  "platform": "linux",
+  "node": "v24.22.1",
+  "sourceSHA256": "4f0353c858f72daa070655f6c2f0f70d6d91f27b55c2bd1a9d694e02bcd1d8e3",
+  "check": {
+    "command": "npm run check",
+    "exitCode": 0,
+    "build": "passed",
+    "typecheck": "passed",
+    "testFiles": 44,
+    "tests": 296,
+    "testsPassed": 296,
+    "testDurationSeconds": 9.65
+  },
+  "installed": {
+    "path": "/home/bruno/.local/lib/node_modules/@capivara/core/dist/cli.js",
+    "sha256": "4236fd6bf646783af04068bfe0282a5c2b7c103b957b843fa36ed9b8f1ae0347",
+    "equalsTestedBuild": true
+  },
+  "reproduction": "runtime-recovery-before-after.json",
+  "pilots": "pilots-runtime-recovery.json",
+  "limits": [
+    "Local validation on Linux; no native Windows or macOS validation inferred.",
+    "Deterministic pilot agents execute real commands; their timings do not establish paid-model costs."
+  ]
+}

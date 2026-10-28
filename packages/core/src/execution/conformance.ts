@@ -5,7 +5,7 @@ import type { CommandResult } from '../runtime/types.js';
 import type { OperationalEnvironment } from './environment.js';
 import type { VerificationEvidence } from './types.js';
 import { digest, inside, sourceFiles } from './files.js';
-import type { ProviderWitness } from '../runtime/provider-observation.js';
+import { resolveNativeNode, type ProviderWitness, type RuntimeProviderReceipt } from '../runtime/provider-observation.js';
 
 export interface ObservedArtifact { hash: string; modified: string; changed: string; }
 export interface ConformanceProvenance {
@@ -19,6 +19,8 @@ export interface ConformanceProvenance {
   cancelled: boolean;
   timedOut: boolean;
   runtimeWitnesses?: ProviderWitness[];
+  runtimeProvider?: RuntimeProviderReceipt;
+  runtimeObservation?: { enabled:boolean; reason?:string; diagnostics:string[] };
 }
 export interface ConformanceObservation {
   workspace: string; command: string | string[]; cwd: string;
@@ -121,12 +123,26 @@ export async function validateConformance(brief:ProductBrief,plan:DevelopmentPla
       if(productFiles.some(path=>observed.inputs[path]!==canonical[path]?.hash)){reasons.push('Product inputs changed or were not captured before the provider invocation.');continue;}
       let runtimeWitness=false;
       if(binding.kind==='runtime'&&provider.command?.length){
+        const receipt=observed.runtimeProvider;
+        let receiptMatches=false;
+        if(receipt&&receipt.capability===provider.capability&&receipt.kind===provider.kind&&receipt.provider===provider.provider&&receipt.fingerprint===provider.fingerprint&&receipt.bindingCommand.length===provider.command.length&&matchingPrefix(receipt.bindingCommand,provider.command,observed.workspace,operational.root??workspace,observed.cwd)){
+          try{
+            const currentCwd=resolve(workspace,relative(observed.workspace,observed.cwd));
+            const current=await resolveNativeNode(currentCwd,provider.command,operational.env);
+            receiptMatches=Boolean(current&&current.nativeFingerprint===receipt.nativeFingerprint&&current.launcher.fingerprint===receipt.launcher.fingerprint&&matchingPrefix([receipt.execPath],[current.execPath],observed.workspace,operational.root??workspace,observed.cwd));
+          }catch{/* A missing or changed native binding is unproved, never a product failure. */}
+        }
         const selected=await realpath(provider.command[0]!).catch(()=>provider.command![0]!);
         for(const witness of observed.runtimeWitnesses??[]){
           if(witness.source!=='node-load-hook'||witness.execArgv.some(arg=>['--check','-c','--version','--help'].includes(arg)))continue;
           const executable=await realpath(witness.execPath).catch(()=>witness.execPath);
           const actual=[executable,...witness.execArgv,...witness.argv.slice(1)];
-          if(!matchingPrefix(actual,[selected,...provider.command.slice(1)],observed.workspace,operational.root??workspace,observed.cwd))continue;
+          if(receipt){
+            if(!receiptMatches||executable!==await realpath(receipt.execPath).catch(()=>receipt.execPath))continue;
+            // Native bindings retain fixed interpreter arguments. Launcher scripts
+            // instead identify their interpreter through the verified shebang.
+            if(!receipt.launcher.shebang&&selected===executable&&!matchingPrefix(actual,[executable,...provider.command.slice(1)],observed.workspace,operational.root??workspace,observed.cwd))continue;
+          }else if(!matchingPrefix(actual,[selected,...provider.command.slice(1)],observed.workspace,operational.root??workspace,observed.cwd))continue;
           if(productFiles.some(path=>witness.inputs[path]===canonical[path]?.hash)){runtimeWitness=true;break;}
         }
       }

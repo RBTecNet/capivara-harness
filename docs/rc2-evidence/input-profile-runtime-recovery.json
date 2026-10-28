@@ -1,0 +1,143 @@
+{
+  "schema": "capivara/input-profile/1",
+  "capturedAt": "2026-10-28T17:55:22.684Z",
+  "readOnlyProject": true,
+  "sourceCommit": "5c27692",
+  "taskId": "integrated-acceptance",
+  "checkId": "web-interface-e2e",
+  "command": "npm run e2e -- --project=chromium",
+  "workspace": "/home/bruno/Documentos/Projetos/testes_capivara/samba_admin/.capivara-next/workspaces/83c078ea39ca-a6a5a76f-9b0a-4c20-a3eb-759a46cbf005/product/.capivara-next/workspaces/2be95f3a42de-b3660557-553e-4871-bd9f-c1993aead4e6/product",
+  "selectors": [
+    "README.md",
+    "e2e/integration.spec.ts",
+    "package.json",
+    "server/src",
+    "src"
+  ],
+  "counts": {
+    "resolvedEntries": 3436,
+    "files": 3433,
+    "nodeModulesFiles": 3392,
+    "bytes": 36589677
+  },
+  "timings": {
+    "verificationInputSelectors": 0.84,
+    "resolveInputDependencies": 22293.61,
+    "inputSnapshot": 1325.44,
+    "checkInputHashWithResolvedInputs": 961.42
+  },
+  "largestPackageReadSets": [
+    {
+      "name": "jsdom",
+      "files": 692
+    },
+    {
+      "name": "caniuse-lite",
+      "files": 597
+    },
+    {
+      "name": "css-tree",
+      "files": 270
+    },
+    {
+      "name": "@babel/runtime",
+      "files": 247
+    },
+    {
+      "name": "aria-query",
+      "files": 150
+    },
+    {
+      "name": "undici",
+      "files": 118
+    },
+    {
+      "name": "@babel/types",
+      "files": 85
+    },
+    {
+      "name": "@exodus/bytes",
+      "files": 74
+    },
+    {
+      "name": "vitest",
+      "files": 69
+    },
+    {
+      "name": "@asamuzakjp/dom-selector",
+      "files": 58
+    },
+    {
+      "name": "@babel/core",
+      "files": 52
+    },
+    {
+      "name": "@asamuzakjp/css-color",
+      "files": 44
+    }
+  ],
+  "limits": [
+    "Read-only source APIs; command was not executed and the project was not changed.",
+    "Concurrent live verification may influence wall time.",
+    "Input hashes passed no operational environment; graph and content work match the actual check.",
+    "checkedAt is set after read-set resolution and hashing. commandAndFinalizationMs bounds the command plus provider observation/assertion work; no standalone command duration was persisted."
+  ],
+  "actualVerificationTimings": [
+    {
+      "checkId": "full-stack-build",
+      "checkedAt": "2026-10-28T17:46:41.838Z",
+      "inputs": 3434,
+      "exitCode": 0,
+      "startEventId": 7656,
+      "finishEventId": 7657,
+      "beforeCommandMs": 43459,
+      "commandAndFinalizationMs": 7661
+    },
+    {
+      "checkId": "all-module-tests",
+      "checkedAt": "2026-10-28T17:47:53.536Z",
+      "inputs": 3434,
+      "exitCode": 1,
+      "startEventId": 7663,
+      "finishEventId": 7664,
+      "beforeCommandMs": 42285,
+      "commandAndFinalizationMs": 4685
+    },
+    {
+      "checkId": "web-interface-e2e",
+      "checkedAt": "2026-10-28T17:49:00.895Z",
+      "inputs": 3436,
+      "exitCode": 1,
+      "startEventId": 7670,
+      "finishEventId": 7671,
+      "beforeCommandMs": 37449,
+      "commandAndFinalizationMs": 2678
+    },
+    {
+      "checkId": "api-runtime-conformance",
+      "checkedAt": "2026-10-28T17:50:17.526Z",
+      "inputs": 3346,
+      "exitCode": 0,
+      "startEventId": 7677,
+      "finishEventId": 7678,
+      "beforeCommandMs": 49450,
+      "commandAndFinalizationMs": 3963
+    },
+    {
+      "checkId": "api-runtime-conformance",
+      "checkedAt": "2026-10-28T17:53:38.854Z",
+      "inputs": 3346,
+      "exitCode": 0,
+      "startEventId": 7720,
+      "finishEventId": 7721,
+      "beforeCommandMs": 43883,
+      "commandAndFinalizationMs": 3290
+    }
+  ],
+  "findings": [
+    "The dominant measured stage is dependency graph expansion, not reading and hashing file contents.",
+    "verify calls checkInputHash for cache lookup; a cache miss then calls runVerification, which resolves the same graph again in the same verification workspace.",
+    "resolveInputDependencies probes every family manifest up every ancestor for each visited source, without traversal-local metadata memoization.",
+    "Explicit src inputs include test imports; this report does not recommend ignoring those dependencies or dropping acceptance checks."
+  ]
+}

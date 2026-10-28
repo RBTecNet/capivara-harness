@@ -21,6 +21,12 @@ export interface VerificationEvidence {
   taskId: string;
   checkId: string;
   inputHash: string;
+  /** Execution identity excludes only criterion and predicate interpretation fields. */
+  observationHash?: string;
+  /** Original observation timestamp, retained by predicate-only reinterpretation. */
+  observedAt?: string;
+  reinterpretedFrom?: string;
+  instrumentClassification?: { reference:string; reason:string };
   passed: boolean;
   command: string;
   output: string;
@@ -101,9 +107,11 @@ export interface TaskProgress {
   contextChars?: number;
   failureSignature?: string;
   actions?: ActionRecord[];
-  reviews?: { inputHash: string; at: string; assessment: ReviewAssessment }[];
+  reviews?: { inputHash: string; at: string; assessment: ReviewAssessment; inspection?: import('./inspection.js').InspectionIdentity }[];
   checkpoint?: WorkspaceCheckpoint;
   checks?: Verification[];
+  /** Exact records selected by the latest verification batch, including reused proofs. */
+  verificationEvidence?: { checkId:string; evidenceId:string; inputHash:string }[];
   suspension?: { fingerprint: string; reason: string; action: string };
   noProgress?: number;
   dependencyCache?: unknown;

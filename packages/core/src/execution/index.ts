@@ -6,4 +6,6 @@ export { installationAlternative, manifestRecipes, prepareEnvironmentNode, prepa
 export { selectVerifications, derivedChecks, checkInputHash, runVerification, normalizeVerificationAssertion, verificationAssertionStatus, evaluateVerificationAssertion, verificationObservation } from './checks.js';
 export { assembleTaskContext } from './task-context.js';
 export { repositoryRecipeCandidate } from './recipe-candidates.js';
+export { createInspectionIdentity, inspectionStillCurrent } from './inspection.js';
+export type { InspectionIdentity } from './inspection.js';
 export type { AssembledTaskContext, TaskSourceCoverage } from './task-context.js';

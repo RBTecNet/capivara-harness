@@ -51,6 +51,21 @@ it.each(['before-call','after-result'] as const)('resumes an interrupted reconci
   expect(resumed.state.pendingReplans).toEqual({});
 });
 
+it('retires queued owners removed by reconciliation instead of replaying a second obsolete plan',async()=>{
+  const root=await workspace();let planners=0,editors=0;
+  const original=plan(['alpha','beta'].map(id=>{const task=unit(id);task.checks=[{...task.checks[0]!,kind:'web',requiredCapabilities:['browser']}];return task;}));
+  const combined=unit('combined',['alpha.mjs','beta.mjs']);combined.requirementIds=['alpha','beta'];combined.criteria=['Both commands remain available.'];combined.checks=[{id:'both-cli',kind:'cli',command:process.execPath,args:['-e',"await import('./alpha.mjs');await import('./beta.mjs');"],assertion:{type:'all',assertions:[{type:'contains',value:'alpha'},{type:'contains',value:'beta'}]},inputs:['alpha.mjs','beta.mjs'],requirementIds:['alpha','beta'],requiredCapabilities:[]}];
+  const result=await runBuild({workspace:root,brief,plan:original,signal:AbortSignal.timeout(5000),repairPlan:async()=>{planners++;return plan([combined]);},agent:async request=>{
+    if(request.role==='reviewer')return complete('{"approved":true,"findings":[]}');
+    if(request.role==='repair')return complete('not a recipe');
+    editors++;const id=request.context!.match(/Work unit (\w+):/)![1]!;
+    for(const file of id==='combined'?['alpha','beta']:[id])await writeFile(join(request.workspace,`${file}.mjs`),`console.log('${file}');`);return complete();
+  }});
+  expect(result.status,JSON.stringify(result.incidents)).toBe('complete');expect(planners).toBe(1);expect(editors).toBe(3);
+  expect(result.plan.tasks.map(task=>task.id)).toEqual(['combined']);expect(result.state.pendingReplans).toEqual({});
+  expect(result.state.metrics?.repetitions?.filter(item=>item.action==='retire-replan')).toHaveLength(2);
+});
+
 it('overlaps independent editors, integrates both products, and never overlaps conflicting writes',async()=>{
   for(const conflict of [false,true]){
     const root=await workspace();let active=0,max=0;
@@ -330,4 +345,5 @@ it('resumes an interrupted verification state without replaying its editor or re
   expect(interrupted.status).toBe('cancelled');expect(interrupted.state.tasks.alpha?.pendingControlState).toBeTruthy();
   const resumed=await runBuild({...options,state:JSON.parse(JSON.stringify(interrupted.state)),signal:AbortSignal.timeout(4000),executeCommand:async request=>{probes++;return executeCommand(request);}});
   expect(resumed.status).toBe('complete');expect(probes).toBe(2);expect(editors).toBe(0);
+  expect(new Set(resumed.state.evidence.map(item=>item.id)).size).toBe(resumed.state.evidence.length);
 });

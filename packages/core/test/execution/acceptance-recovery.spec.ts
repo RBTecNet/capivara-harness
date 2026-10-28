@@ -15,6 +15,33 @@ const task:WorkUnit={id:'alpha',title:'Alpha',goal:'Print alpha.',instructions:'
 const plan:DevelopmentPlan={schema:'capivara/plan/1',status:'ready',revision:1,briefId:'b',briefRevision:1,environment:[],contracts:[],tasks:[task],acceptance:[{id:'final-alpha',kind:'cli',command:process.execPath,args:['alpha.mjs'],expected:'The final CLI observes alpha.',inputs:['alpha.mjs'],level:'behavior',requirementIds:['alpha'],requiredCapabilities:[]}]};
 
 describe('recuperação do aceite distingue tentativa interrompida de recurso esgotado',()=>{
+  it('aposenta uma reconciliação cujo dono saiu do plano sem reabrir entrega ou apagar a causa histórica',async()=>{
+    const root=await mkdtemp(join(tmpdir(),'capivara-retired-replan-'));roots.push(root);
+    const current={...structuredClone(plan),acceptance:[]};let calls=0,replans=0;
+    const agent:BuildOptions['agent']=async request=>{calls++;if(request.role==='reviewer')return complete('{"approved":true,"findings":[]}');await writeFile(join(request.workspace,'alpha.mjs'),'console.log("alpha");\n');return complete();};
+    const first=await runBuild({workspace:root,brief,plan:current,agent,signal:AbortSignal.timeout(4000)});
+    expect(first.status).toBe('complete');
+    const cause={id:'retired-cause',kind:'planning' as const,subject:'retired-alpha',message:'An older proof needs reconciliation.',evidence:'Original unproven invocation.',external:false,action:'Reconcile its proof.',repairScope:'verification' as const};
+    const state=structuredClone(first.state);state.pendingReplans={'retired-alpha':cause};state.incidents.push(cause);
+    const proofCount=state.evidence.length,beforeCalls=calls;
+    const resumed=await runBuild({workspace:root,brief,plan:first.plan,state,agent,repairPlan:async()=>{replans++;return null;},signal:AbortSignal.timeout(4000)});
+    expect(resumed.status).toBe('complete');expect(resumed.plan).toEqual(first.plan);
+    expect(calls).toBe(beforeCalls);expect(replans).toBe(0);expect(resumed.state.evidence).toHaveLength(proofCount);
+    expect(resumed.state.pendingReplans).toEqual({});expect(resumed.state.incidents).toContainEqual(cause);
+    expect(resumed.state.metrics?.repetitions).toContainEqual(expect.objectContaining({taskId:'retired-alpha',action:'retire-replan'}));
+  });
+
+  it('encaminha asserção final malformada para reconciliação da prova sem redefinir a entrega',async()=>{
+    const root=await mkdtemp(join(tmpdir(),'capivara-acceptance-scope-'));roots.push(root);let editors=0,replans=0;
+    const result=await runBuild({workspace:root,brief,plan:structuredClone(plan),signal:AbortSignal.timeout(4000),repairPlan:async(problem,owner)=>{replans++;expect(problem.repairScope).toBe('verification');expect(owner.id).toBe('alpha');return null;},agent:async request=>{
+      if(request.instruction.startsWith('Bind a mechanical assertion')||request.instruction.startsWith('Repair only the verification recipe'))return complete('{}');
+      if(request.role==='reviewer')return complete('{"approved":true,"findings":[]}');
+      expect(request.role).toBe('editor');editors++;await writeFile(join(request.workspace,'alpha.mjs'),'console.log("alpha");\n');return complete();
+    }});
+    expect(result.status).toBe('waiting');expect(editors).toBe(1);expect(replans).toBe(1);
+    expect(result.plan.tasks).toEqual(plan.tasks);expect(result.state.tasks.alpha?.status).toBe('complete');
+  });
+
   for(const point of ['durable-guard','assertion-action'] as const)it(`retoma após cancelamento em ${point} preservando entrega e tentativas não concluídas`,async()=>{
     const root=await mkdtemp(join(tmpdir(),'capivara-acceptance-recovery-'));roots.push(root);
     const controller=new AbortController();let state:BuildState|undefined,editors=0,reviewers=0,assertions=0,interrupted=false;

@@ -14,6 +14,13 @@ const plan=(task:WorkUnit):DevelopmentPlan=>({schema:'capivara/plan/1',status:'r
 async function root(){const directory=await mkdtemp(join(tmpdir(),'capivara-task-context-'));roots.push(directory);return directory;}
 
 describe('contexto de fonte completo ou cobertura explicitamente limitada',()=>{
+  it('registra uma referência de revisão fora do projeto e continua entregando a fonte válida',async()=>{
+    const directory=await root();await writeFile(join(directory,'app.ts'),'export const answer = 42;\n');const task=unit(['app.ts']);
+    const context=await assembleTaskContext(brief,plan(task),task,directory,5000,'Resolve the original source claim.',['../outside.ts:12','app.ts']);
+    expect(context.text).toContain('UNRESOLVED SOURCE REFERENCES');expect(context.text).toContain('../outside.ts:12');
+    expect(context.text).toContain('export const answer = 42;');expect(context.coverage).toEqual([expect.objectContaining({path:'app.ts',complete:true})]);
+  });
+
   it('entrega arquivos inteiros acima de 2400 caracteres quando cabem no orçamento global',async()=>{
     const directory=await root();
     const application=`${'const entry = true;\n'.repeat(250)}export const finalRoute = '/categories';\n`;

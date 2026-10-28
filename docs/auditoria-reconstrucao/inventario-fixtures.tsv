@@ -1,0 +1,52 @@
+arquivo	linhas	bytes	sha256	natureza
+capivara/packages/core/test/fixtures/ensaio-132/canonico-cardapio.txt	20	5684	6ade826a125c0a6e9ce9867f0a78d5eaf93040e57cb1153d47ebfd1d659a4a27	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/canonico-haiku.txt	3	561	7397764619ee28fd0bdc4fdab58cfd31fa868a72bc8f84ad5c2e520f6aacd963	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/canonico-luna.txt	3	550	1fa66d6921bc3e0b768ffc3cb89e10c93106a253946860f4a8c53d07ac18ce3c	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/canonico-minimax-inobservavel.txt	7	2237	fcf727c74359ee15714a98f20e7aef7e1d099b3e3380526d72d0b28438bac665	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/canonico-teste-agy.txt	7	1694	62d919e3848bc50d40963c06c6b427bbdf8b703976627fe89f1b668ec6d7a47a	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/canonico-teste-opencode.txt	3	1326	23c7660b7ae4a961c831a62fb1cfb365f6e78e7ae81e1315d0ed0abe64cee228	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/canonico-teste-opencode2.txt	20	3665	1afb889e31cff1fcab101eb8163862e4b651838b2d42007f52459c43c11e388a	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/canonico-teste-openrouter.txt	2	548	f6f19ea99f32c32815aaf97d15945ac44a08b96b24fdb7ff34f0a58ba2ae9d95	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/canonico-teste-paralelismo-inobservavel.txt	13	3396	d2711a9f605106a62a1f12a24ec0b0f6e6fb878ef93e7ae7f1c7b1f65f740665	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/codex-luna-p1-colchete-com-dois-pontos.txt	20	8746	f2aaa86251b24eedd5d3a20fdb9ec3228dabadaae8998415810f48b6b9d4f622	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/codex-luna-p5-crase.txt	20	9612	946125d3ccdc9cf824db0013192c868f7772744cb1fc3a05692bd43aa757eb92	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/mmax-p1-colchete-com-dois-pontos.txt	20	6455	841f6fe2dfc88872253bcdf3586360277f103ce73a85e43844910551365ac0d0	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/mmax-p2-eco-e-veredito.txt	40	13355	7a7a61639709cf2f26d85a55b07fa792b231f0996390c7b06d2d4c63c596673a	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/mmax-p2-texto-do-criterio.txt	13	7382	7ae0c3f500432622b460f2225a42c6af1b4f33cff91b7887bd5f0a26b8b7ff10	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/mmax-p3-sem-chave.txt	16	5312	a7105aec5ff3ad5d942cff6a0b0e4409101ebf31fb634358f985926bf5e5cfcb	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/mmax-p4-corretivo-renumerado.txt	18	4293	4a5d34082719d02a09ca04cb4fe572027c08087d2a6e39688be290004e6d3d5b	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/mmax-p4-sem-dois-pontos.txt	18	9197	a7414873de61f16a006f1cb309304dcdc408cb21ddeacaa3d177a55e0b0e18b1	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/teste-minimax-p1-sem-dois-pontos-inobservavel.txt	20	8560	9e6d91fc44bc8ddf6f1d57ce23f8cc03ae80e5ee27fb6c2eb61c7cf2a24f9bf0	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/teste-minimax-p4-texto-e-travessao.txt	20	10558	962276517e0c83be956941f09b6d668fffad4b348f6cad5ee7b807b801d4bdcf	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/ensaio-132/teste-minimax-p6-sem-dois-pontos.txt	8	3024	b2a60f3b03b6aedc029e685b065015029f71639f9a48aacbed5052c45566e279	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/haiku-124.project-phases.md	414	64470	099f3aac41eae014a8a0cfea7e03240ccfb9108070187ec56d6f6900d054122a	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/luna-127.architecture.json	552	21132	d121d77e34ec8fd57094899ae3b7c029b313045adf06818c4f51f424a461d1f2	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/luna-127.project-phases.md	292	31462	88bbf7941f2a6a31f8423edadd8c084ff858dc4b9473e462ac393db1618f3c8e	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/luna-127.skeleton.json	407	15999	af1e5e913c805777d6e4b387711299bff295e8b3cf524b444a63c9128458bf66	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/models/codex-debug-models.json	1	600522	da709e6f59bfbe3fd05bee9ba0ce0b7ac521f270b52acf194598bd8c196476ea	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/models/minimax-api.json	11	197	0c6b00a1f770164fe71d89351143bc58c90334615ace863fc9b947500fde9460	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/models/opencode-model-list.json	1	368073	98da2e0fe4afb5101525aecb402b10ba5cb3fb62af6fb5626f9cf8f751efd26e	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/parallel-lab-128.architecture-v5.json	482	18986	c0e0b0d967aec081786dd926f985a335c513886703da365f184f8c72ccfea89c	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/parallel-lab-128.architecture-v6.json	482	19222	ce62e3c16e9a1aeecab3d076f4b52a71c1e623fd5cad66d1b846ab47e0f99c98	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/parallel-lab-128.fases.json	16	52484	054c281cbdb30510152fd1c115f601667cf805e80dfb492776c15888a5bcbe08	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/parallel-lab-128.p1-emenda-rodada2.md	53	4983	1abcd68720b9cf10562bc34102e74fbc326f22359145331c3947e607fcb408eb	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/parallel-lab-128.pedido.md	146	4289	880c805bc258a70b887533f364fd00571fb08fab2d6136f716c704e90060e6f6	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/parallel-lab-128.skeleton.json	338	10673	8faf52e8e598d91038e146bdd46475bfd2adf6bce956c2cd26ee2b8f8d4b29b3	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/parallel-lab-129.architecture.json	593	23316	9887c0fbb600c1f312a9c0d6a6da8252e205e41f8fb4cec4749f938ce1ec19dc	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/parallel-lab-129.fases-r1.json	8	51963	c0162f54300fe10224ff2d2ca0ef0386a455dfd73f7780215eb8446e1ec8c0bc	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/parallel-lab-129.pedido.md	146	4289	880c805bc258a70b887533f364fd00571fb08fab2d6136f716c704e90060e6f6	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/parallel-lab-129.rodada2.json	10	14313	7f33ba4bf5a080c28445a1c2076aea5d6da4b05e91ee531076e264c5c5b90ea3	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/parallel-lab-129.skeleton.json	517	26431	ab527f026329bea9ba65270dc888da393a04ff73c2a4763b84cdfd604d8f3fbc	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/respostas-reais/LEIA-ME.md	9	479	12f2ffb4689eb98d56b125553a91c4046167fc3c113c1bce5aa2f1b76e6b4746	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/respostas-reais/audit-contradicao-com-citacoes.esperado.json	15	403	fe92f5e9c8e7c521adff927d1c9c2764b7672319605aefd9f9cdcc31cfe6c647	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/respostas-reais/audit-contradicao-com-citacoes.txt	3	1520	0a43388fc4044c963b608706674ce35e967bbad93c92a4fd81a2732eb846f4fb	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/respostas-reais/audit-rejected-sem-reason-coerencia.esperado.json	13	414	bfb90bf063a438e2a5adb042f446ff8c7653cde04b1cfb8c528822d8683400a5	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/respostas-reais/audit-rejected-sem-reason-coerencia.txt	5	4411	c2b6971a34969b0282ca4c8307fcac2cf22f1e72eea02b858e332d2b2366b121	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/respostas-reais/audit-rejected-sem-reason-fase.esperado.json	13	423	7b1423e28f3b03ffabff2a154311d330e56ba514bb86771eeb0a8dfa4c6a295f	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/respostas-reais/audit-rejected-sem-reason-fase.txt	10	7929	99707d9c8bf84680ef706ccf6e4e645542acad64434478be348c4ccfa195497c	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/respostas-reais/g3-prosa-antes-com-marcas.esperado.json	49	684	cbd0485e7351496a4e1101fa669412cab50716e0039b6da457c4160248d9b36e	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/respostas-reais/g3-prosa-antes-com-marcas.txt	16	1561	37c0fb43416f9867828948843b6c1d1e835a4a36e540eff8dbf7557ad4636d6f	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/respostas-reais/g3-prosa-antes-e-advisory-com-crases.esperado.json	65	850	8d5b63f0156f34b7677ca4c5d2497b4756b33ffb27a1a723cdcaed0c31f6f59f	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/respostas-reais/g3-prosa-antes-e-advisory-com-crases.txt	44	4967	477f7025650aa25196e2de459e214a4a1429338ec95f403693b0e2f03af2c6ae	texto de pedido/plano/resposta esperada; dado para parser
+capivara/packages/core/test/fixtures/respostas-reais/json-arquitetura-em-uma-linha.esperado.json	10	321	9d81dd7b37207883250fdf99fd69fc7cd5061d9c1ac951158769f58c329c2b64	dados JSON carregados por parser
+capivara/packages/core/test/fixtures/respostas-reais/json-arquitetura-em-uma-linha.txt	1	14157	7e53dac0511a8d5ddb357121df9298d137674804e094ba7941928a20f3b7d58d	texto de pedido/plano/resposta esperada; dado para parser

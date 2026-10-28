@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # Contrato `capivara-phases/v2`
 
 > Documento gerado por `npm run docs:contract` a partir de

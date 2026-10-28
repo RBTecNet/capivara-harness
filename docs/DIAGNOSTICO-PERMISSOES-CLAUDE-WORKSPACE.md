@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # Diagnóstico: o executor Claude que não pôde rodar `npm`
 
 Projeto experimental `teste_haiku_v2`, run `build-96756ca336b0`. O build é

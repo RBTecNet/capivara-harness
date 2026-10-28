@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # Diagnóstico — G4 bloqueou P03, P04 e P05 no build paralelo
 
 - Run: `build-96756ca336b0`, projeto `teste_haiku_v2`, três agentes claude/haiku em nível workspace.

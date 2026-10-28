@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # Diagnóstico da terceira retomada de teste_luna
 
 **A execução parou na P07, ciclo 3, no gate 3 de verificação independente.** A única pendência final foi a TASK 2: Tarefas e Anotações exibem mensagens nativas de erro de rede em inglês, contrariando o requisito de interface em português brasileiro. Os testes existentes verificam a presença do alerta, mas não seu conteúdo. O bloqueio é legítimo; a correção deve tratar o erro e ampliar a cobertura, preservando o gate.

@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # Plano de Execução — Capivara
 
 Ferramenta de terminal que transforma um prompt livre em documentação `RALPH READY`

@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # Proteção de segredos nos commits automáticos — relatório
 
 Data: 2026-10-15. Branch: `revisao/correcoes-paralelo-99`. Decisão registrada em `docs/PLANO.md` §100. Origem: o

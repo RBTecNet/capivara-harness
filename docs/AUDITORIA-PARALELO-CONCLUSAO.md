@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # Correções da auditoria do paralelo — relatório de conclusão
 
 Data: 2026-10-15. Escopo: os achados **B1, B2, M1, M2 e M3** de `docs/AUDITORIA-PARALELO.md`. A decisão está

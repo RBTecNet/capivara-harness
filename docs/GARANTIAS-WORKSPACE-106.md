@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # O nível workspace do executor: o que é garantido (§106)
 
 > **Substituído para o claude pelo §108.** O executor claude não usa mais o

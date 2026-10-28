@@ -1,6 +1,6 @@
 {
   "name": "capivara",
-  "version": "0.8.3",
+  "version": "0.9.0-RC1",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -11,9 +11,10 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "check": "npm run build && npm run typecheck && npm test",
-    "install:user": "npm install --global --prefix \"$HOME/.local\" ./packages/core"
+    "install:user": "node scripts/install-user.mjs"
   },
   "engines": {
-    "node": ">=22"
-  }
+    "node": ">=24"
+  },
+  "releaseVersion": "0.9.0_RC1"
 }

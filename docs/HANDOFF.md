@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # Handoff — onde o trabalho está
 
 Escrito em 2026-09-20 e atualizado no mesmo dia, depois do incidente `cron5`,

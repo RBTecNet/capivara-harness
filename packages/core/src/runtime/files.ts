@@ -1,0 +1,90 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import type { ExecutionConstraints } from './types.js';
+
+const IGNORED = new Set(['.git', 'node_modules', 'dist', 'target', '.venv', 'venv', '__pycache__', '.next', '.cache']);
+export const digest = (text: string | Uint8Array): string => createHash('sha256').update(text).digest('hex');
+const inside = (root: string, path: string): boolean => { const rel = relative(root, path); return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`)); };
+
+/** Resolves the real parent, so a symlink cannot turn a valid-looking project path into an outside write. */
+export async function projectPath(root: string, path: string, write = false, constraints?: ExecutionConstraints): Promise<string> {
+  if (path.includes('\0')) throw new Error('O caminho contém um byte nulo.');
+  const base = await realpath(resolve(root));
+  const candidate = resolve(base, path);
+  if (!inside(base, candidate)) throw new Error('O caminho deve permanecer dentro do projeto.');
+  const rel = relative(base, candidate);
+  const first = rel.split(sep)[0] ?? '';
+  if (first === '.git' || first.startsWith('.capivara')) throw new Error('Estado de controle do harness não é um arquivo do produto.');
+  if (write && (rel === '' || (constraints?.writablePaths && !constraints.writablePaths.some(p => inside(resolve(base, p), candidate))))) {
+    throw new Error('A escrita não está dentro dos arquivos autorizados para esta tarefa.');
+  }
+  let ancestor = candidate;
+  for (;;) {
+    try {
+      const actual = await realpath(ancestor);
+      if (!inside(base, actual)) throw new Error('O caminho atravessa um link para fora do projeto.');
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      const parent = dirname(ancestor);
+      if (parent === ancestor) throw error;
+      ancestor = parent;
+    }
+  }
+  return candidate;
+}
+
+export async function writeProductFile(root: string, path: string, contents: string, constraints?: ExecutionConstraints): Promise<void> {
+  const absolute = await projectPath(root, path, true, constraints);
+  await mkdir(dirname(absolute), { recursive: true });
+  // Resolve once more after mkdir to detect an existing symlink in a newly created path.
+  await projectPath(root, path, true, constraints);
+  const temporary = `${absolute}.capivara-edit-${randomUUID()}`;
+  try {
+    const previous = await lstat(absolute).catch(() => null);
+    await writeFile(temporary, contents, { flag: 'wx', ...(previous ? { mode: previous.mode & 0o777 } : {}) });
+    await rename(temporary, absolute);
+  } finally { await rm(temporary, { force: true }).catch(() => undefined); }
+}
+
+export async function snapshotWorkspace(root: string, paths?: readonly string[]): Promise<Map<string, string>> {
+  const base = resolve(root);
+  const entries = new Map<string, string>();
+  const visit = async (absolute: string): Promise<void> => {
+    const rel = relative(base, absolute);
+    const info = await lstat(absolute).catch(() => null);
+    if (!info) { if (paths) entries.set(rel, 'missing'); return; }
+    if (info.isSymbolicLink()) { entries.set(rel, `link:${await readlink(absolute)}`); return; }
+    if (info.isDirectory()) {
+      const names = await readdir(absolute);
+      names.sort();
+      for (const name of names) {
+        if (IGNORED.has(name) || name.startsWith('.capivara') || name.includes('.capivara-edit-')) continue;
+        await visit(resolve(absolute, name));
+      }
+    } else if (info.isFile()) {
+      entries.set(rel, digest(await readFile(absolute)));
+    }
+  };
+  if (paths) {
+    for (const path of paths) await visit(await projectPath(base, path));
+  } else await visit(base);
+  return entries;
+}
+
+export async function workspaceFingerprint(root: string, paths?: readonly string[]): Promise<string> {
+  return digest(JSON.stringify([...await snapshotWorkspace(root, paths)].sort(([a], [b]) => a.localeCompare(b))));
+}
+
+export function changedPaths(before: ReadonlyMap<string, string>, after: ReadonlyMap<string, string>): string[] {
+  return [...new Set([...before.keys(), ...after.keys()])].filter(path => before.get(path) !== after.get(path)).sort();
+}
+
+export function scrub(text: string, extraSecrets: readonly string[] = []): string {
+  const secrets = [...extraSecrets.filter(Boolean), ...Object.entries(process.env).filter(([key]) => /(?:TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY)/i.test(key)).map(([, value]) => value ?? '').filter(value => value.length >= 8)]
+    .sort((a, b) => b.length - a.length);
+  let output = text;
+  for (const secret of secrets) output = output.split(secret).join('[segredo oculto]');
+  return output;
+}

@@ -1,0 +1,18 @@
+[
+  {
+    "case": "pausa com duas chamadas concorrentes",
+    "resumed": [
+      "segundo"
+    ],
+    "firstStillPending": true
+  },
+  {
+    "case": "janela mkdir antes owner",
+    "secondAcquired": true,
+    "explanation": "reproduz estado intermediário; concorrência real inferida da janela"
+  },
+  {
+    "case": "eventos existentes snapshot ilegível",
+    "restored": null
+  }
+]

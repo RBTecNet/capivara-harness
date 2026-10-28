@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # O contrato da Capivara — INIT, PLAN e BUILD
 
 Versão **0.8.3** (com a execução progressiva das fases, §130, a preparação, o raciocínio e o catálogo de modelos do §131, o produto fora do navegador do §133, o percurso de terminal da §134, a adoção da preparação pelo contrato do PLAN da §135 e a redução da verificação da §138: o plan de uma passada, uma revisão por fase, os fluxos só na aceitação final e os estados da entrega; e a regra de 26/10/2026, só existe `aceito`). Este documento descreve, num lugar só, o que cada estágio da

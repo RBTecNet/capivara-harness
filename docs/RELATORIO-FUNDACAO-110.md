@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # Relatório da §110 — fundação do gate 4 e preservação de fases aprovadas
 
 - Branch: `correcao/fundacao-110`, derivada da `main` em `b3f1990`.

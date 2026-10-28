@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # OpenCode 2: cwd correto, PWD herdado
 
 O run `build-6b52f050649d`, em `teste_opencode2`, parou em 18/10/2026 às

@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # Diagnóstico — P05 bloqueada no G4 por um passo de reinício
 
 - Run: `build-96756ca336b0`, projeto `teste_haiku_v2`, retomado às 00:28Z de 2026-10-17 com a §108 instalada (`ca1e5da`). Três agentes claude/haiku com `--dangerously-skip-permissions`.

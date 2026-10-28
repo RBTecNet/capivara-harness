@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # Diagnóstico — `teste_luna`: P04 e P05 bloqueadas com codex/gpt-6-luna
 
 - Run: `build-6e34384deccd`, projeto `/home/bruno/Documentos/Projetos/laravel/teste_luna`, branch `master`, em 2026-10-17. A primeira execução foi das 10:17Z às 11:13Z, e a retomada das 11:18Z às 11:37Z.

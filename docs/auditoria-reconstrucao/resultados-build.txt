@@ -1,0 +1,58 @@
+{
+  "case": "TUI cobra Playwright antes do builder",
+  "commands": [
+    "npm install --prefix .capivara --no-save --package-lock=false --no-audit --no-fund @playwright/test"
+  ],
+  "modelCalls": 0,
+  "exitCode": 1,
+  "errors": [
+    "a preparação do ambiente falhou antes do desenvolvimento; nenhuma fase foi iniciada. Evidência: /tmp/audit-build-tui-QR8E8b/.capivara/runs/build-2633415ca006/logs/environment-preflight.log\n$ npm install --prefix .capivara --no-save --package-lock=false --no-audit --no-fund @playwright/test\nexit: 1\nrede indisponível para instalar Playwright"
+  ]
+}
+{
+  "case": "aceitação Go/Rust e .NET console",
+  "go": [
+    {
+      "id": "build",
+      "command": "go build ./...",
+      "service": false
+    }
+  ],
+  "rust": [
+    {
+      "id": "build",
+      "command": "cargo build --release",
+      "service": false
+    }
+  ],
+  "dotnetConsole": [],
+  "unknown": []
+}
+{
+  "case": "G3 exige repetir TASK aprovada",
+  "result": {
+    "done": [],
+    "reabertas": [],
+    "green": false,
+    "gate": "gate 3 — verificação independente",
+    "cause": "O verificador cobriu 1 de 2 tasks — cobertura incompleta. Linhas emitidas:\nTASK 2: DONE"
+  }
+}
+{
+  "case": "teto do contexto cresce com fixo",
+  "result": {
+    "partes": [
+      {
+        "indices": [
+          1,
+          2
+        ],
+        "criterios": 2,
+        "caracteres": 100200,
+        "excede": false
+      }
+    ],
+    "limite": 116000,
+    "fixo": 100000
+  }
+}

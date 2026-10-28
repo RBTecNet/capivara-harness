@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # Diagnóstico — o lockfile que a integração paralela sujou
 
 Primeiro piloto paralelo real, projeto experimental `teste_paralelismo`

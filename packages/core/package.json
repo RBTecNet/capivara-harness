@@ -1,7 +1,7 @@
 {
   "name": "@capivara/core",
-  "version": "0.8.3",
-  "description": "Harness documental e loop de execucao: do prompt a aplicacao final",
+  "version": "0.9.0-RC1",
+  "description": "Motores novos de desenvolvimento por fragmentos: init, plan e build",
   "type": "module",
   "bin": {
     "capivara": "dist/cli.js"
@@ -12,17 +12,10 @@
   "files": [
     "dist"
   ],
-  "//": {
-    "dependencies": "commander e a UNICA dependencia de runtime. Ver secao 21.3 de docs/PLANO.md; um teste de arquitetura da Phase 1 falha se uma segunda for adicionada.",
-    "@types/node": "A tag 'latest' de @types/node aponta para 22.x, quatro majors atras. A linha corrente sai pelas tags ts5.9/ts6.0 = 26.x. Nunca instalar via @latest.",
-    "typescript": "TypeScript 7 e o port nativo. O esbuild faz o bundle e o tsc so faz typecheck e .d.ts, entao a rota de fuga e cair para ~6 sem tocar no build."
-  },
   "scripts": {
     "build": "node ./scripts/build.mjs && tsc --emitDeclarationOnly --project tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
-    "docs:contract": "node ./scripts/generate-contract-doc.mjs"
+    "test": "vitest run"
   },
   "dependencies": {
     "commander": "^15.0.0"
@@ -34,6 +27,11 @@
     "vitest": "^5.0.1"
   },
   "engines": {
-    "node": ">=22"
-  }
+    "node": ">=24"
+  },
+  "releaseVersion": "0.9.0_RC1",
+  "optionalDependencies": {
+    "node-pty": "^1.1.0"
+  },
+  "types": "./dist/index.d.ts"
 }

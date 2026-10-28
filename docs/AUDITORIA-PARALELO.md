@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # Auditoria adversarial do build paralelo (§97, §97.1, §98)
 
 Data: 2026-10-15. Commits auditados: `5060543` (motor), `f823151` (wizard e CLI), `d4d30a3` (log por agente).

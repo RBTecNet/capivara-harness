@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # Diagnóstico — P04 verde no worktree e devolvida à fila por conflito de integração
 
 - Run: `build-96756ca336b0`, projeto `teste_haiku_v2`, retomado às 00:28Z de 2026-10-17 com a §108. Três agentes claude/haiku em paralelo: P03, P04 e P05.

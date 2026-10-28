@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 > **Os pilotos 1, 1b, 2 e 3 foram descartados em 19/09/2026.** Eles rodaram a cadeia de
 > quatro documentos em prosa, que §26 do plano removeu do produto: os artefatos que eles
 > deixaram não são reproduzíveis pela ferramenta atual, e mantê-los convidava a comparações

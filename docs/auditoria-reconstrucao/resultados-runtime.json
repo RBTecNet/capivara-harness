@@ -1,0 +1,40 @@
+[
+  {
+    "case": "skill-prefix-traversal",
+    "outsideSkillWritten": true
+  },
+  {
+    "case": "offline-corrupt-index",
+    "throws": true,
+    "error": "SyntaxError"
+  },
+  {
+    "case": "memory-after-failed-upload",
+    "collected": 1,
+    "upload": {
+      "registradas": 0,
+      "falhas": 1
+    },
+    "sourcePreserved": false
+  },
+  {
+    "case": "tui-interview",
+    "includesCssFramework": true,
+    "includesHover": true,
+    "promptLength": 14380
+  },
+  {
+    "case": "plan-retry-3-field",
+    "instructsThreeFields": true,
+    "parseAccepted": true,
+    "admission": {
+      "bloqueia": false,
+      "motivo": "o achado não declara classe"
+    }
+  },
+  {
+    "case": "preaborted-provider-signal",
+    "exitCode": 0,
+    "ran": true
+  }
+]

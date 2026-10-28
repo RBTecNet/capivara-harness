@@ -1,19 +1,8 @@
-import { createProgram } from "./cli-program.js";
-import { withVersionAlias } from "./cli-program.js";
-import { interruptActiveProviders } from "./provider/supervisor.js";
+import { createProgram } from './cli-program.js';
 
-const interrupt = (signal: "SIGINT" | "SIGTERM"): void => {
-  interruptActiveProviders();
-  if (process.stdin.isTTY && process.stdin.isRaw) process.stdin.setRawMode(false);
-  process.exit(signal === "SIGINT" ? 130 : 143);
-};
-const sigint = (): void => interrupt("SIGINT");
-const sigterm = (): void => interrupt("SIGTERM");
-process.on("SIGINT", sigint);
-process.on("SIGTERM", sigterm);
-try {
-  await createProgram().parseAsync(withVersionAlias(process.argv));
-} finally {
-  process.off("SIGINT", sigint);
-  process.off("SIGTERM", sigterm);
+process.stdout.on('error', error => { if ((error as NodeJS.ErrnoException).code !== 'EPIPE') process.stderr.write(`${error.message}\n`); });
+try { await createProgram().parseAsync(process.argv); }
+catch (error) {
+  process.stderr.write(`capivara: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
 }

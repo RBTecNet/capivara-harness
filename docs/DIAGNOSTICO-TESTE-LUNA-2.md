@@ -1,3 +1,5 @@
+> Registro histórico anterior à reconstrução 0.9.0_RC1. Não define comandos nem regras do motor atual. Consulte [README](../README.md) e [reconstrução](RECONSTRUCAO-0.9.0_RC1.md).
+
 # Diagnóstico — `teste_luna`, segunda retomada: P04 integrada, P05 bloqueada no G3
 
 - Run: `build-6e34384deccd`, retomado às 14:06Z de 2026-10-17 com a `main` em `7b6b519` (§107–§111) instalada.

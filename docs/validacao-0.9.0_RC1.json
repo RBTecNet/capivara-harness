@@ -1,0 +1,167 @@
+{
+  "version": "0.9.0_RC1",
+  "packageVersion": "0.9.0-RC1",
+  "date": "2026-10-28T05:08:49.199Z",
+  "platform": "linux",
+  "node": "v24.22.1",
+  "validation": {
+    "command": "npm run check",
+    "build": "passed",
+    "typecheck": "passed",
+    "testFiles": 5,
+    "tests": 22,
+    "paidProvidersInSuite": false
+  },
+  "installation": {
+    "prefix": "/home/bruno/.local",
+    "source": "npm tarball",
+    "displayVersion": "0.9.0_RC1"
+  },
+  "pilots": [
+    {
+      "name": "cli",
+      "request": "Crie uma CLI local Node.js em JavaScript, sem dependências externas, sem servidor HTTP e sem navegador. A aplicação se chama dobro. Execute com node cli.js <numero>. Para um número finito imprime seu dobro e termina com código 0. Para argumento ausente ou inválido imprime uma mensagem curta em stderr e termina com código 2. Entregue cli.js e README.md com instruções. Não precisa perguntar preferências: todos os comportamentos e a stack já estão definidos. Verifique apenas uma entrada válida e uma inválida usando o próprio comando, sem criar suíte de testes.\n",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "status": "complete",
+      "questions": 0,
+      "tasks": [
+        {
+          "id": "task-cli",
+          "status": "complete",
+          "editorAttempts": 8
+        },
+        {
+          "id": "task-readme",
+          "status": "complete",
+          "editorAttempts": 1
+        }
+      ],
+      "evidence": [
+        {
+          "id": "35426b6774190c1b11ca",
+          "taskId": "task-cli",
+          "checkId": "check-valid",
+          "inputHash": "c79a35f608e3901a5a0748195cd113049fddb69a565c0c6491fc0f329d7226d8",
+          "passed": true,
+          "command": "node cli.js 4",
+          "output": "Command: node cli.js 4\nExit code: 0\nSTDOUT:\n8\n\nSTDERR:\n\nExpected exit code: 0\nAssertion: Semantic assertion for the reviewer: stdout contém exatamente '8\\n'; stderr está vazio; código de saída 0. (requires semantic review)",
+          "terminal": false,
+          "checkedAt": "2026-10-28T04:48:14.955Z",
+          "kind": "cli",
+          "target": "linux"
+        },
+        {
+          "id": "64620a83f57c85487dd6",
+          "taskId": "task-cli",
+          "checkId": "check-invalid",
+          "inputHash": "acfd694949483701482b0f77ea173153a0aeb885bba858070db07f10e653692e",
+          "passed": true,
+          "command": "node cli.js invalido",
+          "output": "Command: node cli.js invalido\nExit code: 2\nSTDOUT:\n\nSTDERR:\ndobro: informe um número finito.\n\nExpected exit code: 2\nAssertion: Semantic assertion for the reviewer: stdout está vazio; stderr contém exatamente 'dobro: informe um número finito.\\n'; código de saída 2. (requires semantic review)",
+          "terminal": false,
+          "checkedAt": "2026-10-28T04:48:15.020Z",
+          "kind": "cli",
+          "target": "linux"
+        }
+      ],
+      "independentConfirmation": [
+        {
+          "args": [
+            "4"
+          ],
+          "exitCode": 0,
+          "stdout": "8\n",
+          "stderr": ""
+        },
+        {
+          "args": [
+            "invalido"
+          ],
+          "exitCode": 2,
+          "stdout": "",
+          "stderr": "dobro: informe um número finito.\n"
+        },
+        {
+          "args": [],
+          "exitCode": 2,
+          "stdout": "",
+          "stderr": "dobro: informe um número finito.\n"
+        },
+        {
+          "args": [
+            "Infinity"
+          ],
+          "exitCode": 2,
+          "stdout": "",
+          "stderr": "dobro: informe um número finito.\n"
+        }
+      ],
+      "observedCallsIncludingDevelopment": 16,
+      "observedUsageIncludingDevelopment": {
+        "inputTokens": 929377,
+        "outputTokens": 12476,
+        "cachedTokens": 776832,
+        "costUsd": null
+      },
+      "developmentNote": "Piloto usado durante desenvolvimento. Falhas do próprio motor exigiram atualização do processo e revisão do estado de teste; os totais incluem essas chamadas. Não representa execução contínua sem intervenção desde a primeira implementação."
+    },
+    {
+      "name": "tui",
+      "request": "Crie uma aplicação TUI local mínima chamada Contador, usando Node.js em JavaScript com apenas módulos nativos. Deve rodar com node contador.js em um terminal interativo real; manter tela com o texto Contador: 0 inicialmente; pressionar + incrementa e atualiza a tela para Contador: 1; pressionar q termina com código 0 e restaura raw mode. Entregue contador.js e README.md curto. Não criar servidor HTTP, navegador, HTML, CSS, banco, dependências externas nem suíte de testes. Todos os comportamentos, a stack e as teclas estão definidos; não há preferências para perguntar. Verifique o percurso mínimo com PTY real: aguardar Contador: 0, enviar +, observar Contador: 1 e enviar q. Faça o desenvolvimento como uma unidade pequena com os dois arquivos.\n",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "status": "complete",
+      "questions": 0,
+      "tasks": [
+        {
+          "id": "task-contador",
+          "status": "complete",
+          "editorAttempts": 1
+        }
+      ],
+      "evidence": [
+        {
+          "id": "a3f3092eb8ac7b410021",
+          "taskId": "task-contador",
+          "checkId": "task-contador-recovered-1",
+          "inputHash": "1bc2ca5f8f4aac6cdd472c0c2b306d20720fe6a199e55265687441c328c86d2f",
+          "passed": true,
+          "command": "'node' 'contador.js'",
+          "output": "Command: 'node' 'contador.js'\nExit code: 0\nSTDOUT:\n\r\u001b[2KContador: 0\r\u001b[2KContador: 1\r\n\nSTDERR:\n\nExpected exit code: 0\nAssertion: Semantic assertion for the reviewer: Em PTY real, exibe Contador: 0 inicialmente e Contador: 1 após +. Ao receber q, encerra com código 0 e os atributos do terminal coincidem com os registrados antes da execução. Percurso confirmado em PTY real. (requires semantic review)",
+          "terminal": true,
+          "checkedAt": "2026-10-28T05:04:40.326Z",
+          "kind": "tui",
+          "target": "linux"
+        }
+      ],
+      "independentConfirmation": {
+        "command": "node contador.js",
+        "realPty": true,
+        "initialObserved": "Contador: 0",
+        "input": "+",
+        "changedObserved": "Contador: 1",
+        "closeInput": "q",
+        "exitCode": 0,
+        "terminalAttributesRestored": true,
+        "output": "\r\u001b[2KContador: 0\r\u001b[2KContador: 1"
+      },
+      "observedCallsIncludingDevelopment": 18,
+      "observedUsageIncludingDevelopment": {
+        "inputTokens": 1325475,
+        "outputTokens": 26787,
+        "cachedTokens": 1140480,
+        "costUsd": null
+      },
+      "developmentNote": "Piloto usado durante desenvolvimento. Falhas do próprio motor exigiram atualização do processo e revisão do estado de teste; os totais incluem essas chamadas. Não representa execução contínua sem intervenção desde a primeira implementação."
+    }
+  ],
+  "limits": [
+    "Sem taxa estatística de recuperação de 99%.",
+    "Sem inferência autenticada em todos os provedores.",
+    "Sem execução nativa Windows/macOS ou automação GUI universal.",
+    "USD não informado pelo Codex; tokens observados não são estimativa financeira."
+  ]
+}

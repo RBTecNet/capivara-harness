@@ -1,3 +1,5 @@
+> Especificação histórica anterior à reconstrução integral. O funcionamento atual está em [README](README.md) e [CAPIVARA.md](CAPIVARA.md).
+
 # CAPIVARA HARNESS — BUILD vNext
 ## Especificação consolidada e plano de implementação
 

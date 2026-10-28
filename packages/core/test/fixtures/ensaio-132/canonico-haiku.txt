@@ -1,3 +1,0 @@
-CRITERION P2.T9.C1: OBSERVABLE — Ler `index.html` e verificar a declaração `lang="pt-BR"`, o título `Parallel Lab`, um elemento com `id="root"` e a tag `<script type="module" src="/src/web/main.tsx">`.
-CRITERION P2.T9.C2: OBSERVABLE — Ler `src/web/main.tsx` e verificar os dois imports do Bootstrap, a criação da raiz React sobre `#root` e a renderização de `BrowserRouter` envolvendo `App`.
-CRITERION P2.T9.C3: OBSERVABLE — Ler `src/web/App.tsx` e verificar a exportação de `App` e a ordem de aninhamento `FeedbackProvider` > `Layout` > `Rotas`.

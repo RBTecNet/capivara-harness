@@ -1,0 +1,85 @@
+{
+  "schema": "capivara/plan-reconciliation-comparison/1",
+  "generatedAt": "2026-10-28T22:27:45.558Z",
+  "input": {
+    "databaseSHA256": "9eca48cb8fb92e759048e5351f03f120169699c4ea43489f9cf8cfbd4d384164",
+    "eventCount": 110,
+    "status": "waiting",
+    "stage": "plan",
+    "hasExecution": false,
+    "recordedCalls": 5,
+    "completeCalls": 5,
+    "outlineResponses": 2,
+    "requirements": 11
+  },
+  "baseline": {
+    "commit": "fc5f1da323df2d6f517a686099bf5bf34b88034b",
+    "failure": {
+      "name": "PlanningFailure",
+      "code": "invalid-plan",
+      "message": "reconcile: O identificador tasks-module representa duas entregas diferentes: Users can create, inspect, edit, change status, and confirmed-delete persisted tasks through the module API.; Usuários criam, consultam, editam e excluem tarefas por API; entradas inválidas são rejeitadas e os dados persistem após reinício.."
+    }
+  },
+  "after": {
+    "sourceSHA256": "1a9630535cedfb050605646768065ff4f3520f482f0317ee00673050f06b0b2d",
+    "tasks": 7,
+    "taskIds": [
+      "foundation",
+      "tasks-module",
+      "categories-module",
+      "notes-module",
+      "web-shell",
+      "web-modules",
+      "integration-acceptance"
+    ],
+    "coveredRequirements": 11,
+    "apiProofs": [
+      {
+        "id": "tasks-module",
+        "checksBefore": 2,
+        "checksAfter": 1,
+        "criteriaAfter": 10,
+        "allCriteriaPreserved": true,
+        "allDescriptionsPreserved": true,
+        "effectivePredicatePreserved": true
+      },
+      {
+        "id": "categories-module",
+        "checksBefore": 2,
+        "checksAfter": 1,
+        "criteriaAfter": 8,
+        "allCriteriaPreserved": true,
+        "allDescriptionsPreserved": true,
+        "effectivePredicatePreserved": true
+      },
+      {
+        "id": "notes-module",
+        "checksBefore": 2,
+        "checksAfter": 1,
+        "criteriaAfter": 8,
+        "allCriteriaPreserved": true,
+        "allDescriptionsPreserved": true,
+        "effectivePredicatePreserved": true
+      }
+    ]
+  },
+  "resume": {
+    "cachedCalls": [
+      {
+        "operation": "outline",
+        "key": "94ff48a52b30dcc23f080b5588629537779931388e0dfdc44cc6470266ad1c6a"
+      }
+    ],
+    "uncachedCalls": 0,
+    "tasks": 7,
+    "environmentUnchanged": true,
+    "stoppedBeforeFurtherRepairs": true,
+    "ready": false
+  },
+  "safety": {
+    "paidInferenceCalls": 0,
+    "productCommands": 0,
+    "projectWrites": 0,
+    "databaseUnchanged": true
+  }
+}

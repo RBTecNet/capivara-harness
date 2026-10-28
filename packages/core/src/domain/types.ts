@@ -192,6 +192,21 @@ export interface DevelopmentPlan {
   tasks: WorkUnit[];
   /** Final proof recipes for mandatory outcomes, stack choices and constraints. */
   acceptance?: Verification[];
+  /** Durable construction checkpoints; pending prompts retain exact cached-call identity. Removed when ready. */
+  planning?: {
+    schema: "capivara/plan-progress/1";
+    briefRevision: number;
+    /** Preserve pre-checkpoint request identity until cached legacy slices are adopted. */
+    legacyRequestShape?: boolean;
+    groups: {
+      requirementIds: string[];
+      environmentComplete: boolean;
+      outlineComplete: boolean;
+      environmentScope: string[];
+      environmentPrompt?: string;
+      outlinePrompt?: string;
+    }[];
+  };
 }
 
 export interface DomainAgentRequest {
@@ -210,6 +225,8 @@ export interface DomainEvent {
 
 export interface DomainHooks {
   agent: DomainAgent;
+  /** Read-only lookup of an exact completed call; never authorizes another model invocation. */
+  hasCachedCall?: (request: DomainAgentRequest) => boolean;
   ask?: (question: Question) => Promise<string | null>;
   save?: (state: { brief?: ProductBrief; plan?: DevelopmentPlan }) => Promise<void>;
   onEvent?: (event: DomainEvent) => void;

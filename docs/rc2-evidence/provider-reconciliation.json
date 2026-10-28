@@ -1,0 +1,119 @@
+{
+  "schema": "capivara/provider-reconciliation-comparison/1",
+  "generatedAt": "2026-10-28T22:27:48.106Z",
+  "input": {
+    "databaseSHA256": "104254cb0791a2dde3c7a23c9603ad895554958b88bbc323a4474147767fd706",
+    "eventCount": 142,
+    "status": "waiting",
+    "stage": "plan",
+    "hasExecution": false,
+    "recordedCalls": 7,
+    "completedCalls": 7,
+    "tasks": 7,
+    "requirements": 11,
+    "environmentNodes": 4
+  },
+  "baseline": {
+    "commit": "fc5f1da323df2d6f517a686099bf5bf34b88034b",
+    "issues": [
+      {
+        "code": "unused-mandatory-provider",
+        "subject": "req-6b2fa633e624",
+        "message": "O provedor obrigatório Node.js não é consumido pelas entregas."
+      }
+    ],
+    "scope": "Validation of the saved plan; the baseline planner would re-extract the plan."
+  },
+  "after": {
+    "sourceSHA256": "561455ee32532f937e5802c485854d68a729817a996adfa166f686eb3762cf35",
+    "sources": [
+      {
+        "path": "packages/core/src/domain/plan.ts",
+        "sha256": "28be3b2a5da303dd2fc50cd369dd8cefd6e787435a6396d33f2aa9e6f4e5f1e4"
+      },
+      {
+        "path": "packages/core/src/domain/reconcile.ts",
+        "sha256": "1f450667c9cc86a8994671a37825ff984e989454992f859f450f2bf6c878cff9"
+      },
+      {
+        "path": "packages/core/src/domain/types.ts",
+        "sha256": "932e2f995473febc36ab4d4b1b35a1616af4f5878581c6b4612f24aae4b1e9ec"
+      },
+      {
+        "path": "packages/core/src/app/workflow.ts",
+        "sha256": "b1f8d740f3de00b56d1cf57e588d01163140f819b5ae71fafa4e54a6c32e77ce"
+      },
+      {
+        "path": "packages/core/src/app/store.ts",
+        "sha256": "64a808056c760930bb74245cea7dd188f230cb63e4e49423f45908458857106f"
+      }
+    ],
+    "status": "ready",
+    "taskIds": [
+      "foundation",
+      "tasks-module",
+      "categories-module",
+      "notes-module",
+      "web-shell",
+      "web-modules",
+      "integration-acceptance"
+    ],
+    "tasks": 7,
+    "coveredRequirements": 11,
+    "environmentNodes": 3,
+    "bindings": [
+      {
+        "requirementId": "req-6b2fa633e624",
+        "provider": "Node.js",
+        "stableId": "nodejs-runtime",
+        "previousDuplicateIds": [
+          "env-1a4350072bf0"
+        ],
+        "matchingProvidersAfter": 1,
+        "consumed": true
+      }
+    ],
+    "issues": [],
+    "productContractsPreserved": true,
+    "mandatoryAcceptanceIds": [
+      "nodejs-runtime-conformance"
+    ],
+    "mandatoryAcceptancePreserved": true,
+    "environmentReferencesValid": true,
+    "checkpoints": [
+      {
+        "status": "planning",
+        "tasks": 7,
+        "environment": 4
+      },
+      {
+        "status": "planning",
+        "tasks": 7,
+        "environment": 4
+      },
+      {
+        "status": "planning",
+        "tasks": 7,
+        "environment": 4
+      },
+      {
+        "status": "planning",
+        "tasks": 7,
+        "environment": 3
+      },
+      {
+        "status": "ready",
+        "tasks": 7,
+        "environment": 3
+      }
+    ]
+  },
+  "safety": {
+    "paidInferenceCalls": 0,
+    "agentRequests": 0,
+    "productCommands": 0,
+    "projectWrites": 0,
+    "databaseUnchanged": true,
+    "realExecutionResumed": false
+  }
+}

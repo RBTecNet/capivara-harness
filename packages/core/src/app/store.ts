@@ -17,7 +17,15 @@ export interface SavedProject {
   allowSystemInstall?: boolean;
   maxConcurrent?: number;
   lastFailure?: { kind: string; message: string; fingerprint: string; at: string } | null;
-  domainCalls?: Record<string, { operation: string; status: 'running' | 'complete' | 'failed'; at: string; result?: string; failure?: string }>;
+  domainCalls?: Record<string, {
+    operation: string;
+    status: 'running' | 'complete' | 'failed' | 'interrupted';
+    at: string;
+    result?: string;
+    failure?: string;
+    /** Correlates the durable call with calls/<id>.result.json before invocation begins. */
+    invocationId?: string;
+  }>;
   workflowMetrics?: { timeByStageMs: Record<string, number>; callsByRole: Record<string, number>; activeAgents: number; maxConcurrency: number };
   status?: 'working' | 'recovering' | 'waiting' | 'complete' | 'cancelled' | 'critical';
   stage?: string;

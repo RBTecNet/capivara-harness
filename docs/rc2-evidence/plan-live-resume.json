@@ -1,0 +1,52 @@
+{
+  "schema": "capivara/plan-live-resume/1",
+  "recordedAt": "2026-10-28T22:28:30.853Z",
+  "version": "0.9.0-rc2",
+  "project": "samba_admin",
+  "command": "capivara plan --project <project> --no-dashboard",
+  "exitCode": 0,
+  "before": {
+    "status": "waiting",
+    "stage": "plan",
+    "lastEvent": 142,
+    "tasks": 7,
+    "environment": 4,
+    "domainCalls": 7
+  },
+  "after": {
+    "status": "complete",
+    "stage": "plan",
+    "lastEvent": 153,
+    "planStatus": "ready",
+    "tasks": 7,
+    "requirements": 11,
+    "coveredRequirements": 11,
+    "environment": 3,
+    "domainCalls": 7,
+    "newDomainCalls": 0,
+    "newAgentStarts": 0,
+    "newAgentResults": 0,
+    "planIssues": [],
+    "hasExecution": false,
+    "lastFailure": null,
+    "activeAgents": 0,
+    "owner": []
+  },
+  "reconciliations": [
+    {
+      "id": 152,
+      "at": "2026-10-28T22:28:10.063Z",
+      "message": "Identidade do pré-requisito reconciliada: env-1a4350072bf0 → nodejs-runtime. Kind, invocação de prontidão, preparação, dependências, targets e exports têm contrato operacional idêntico e correspondência única; referências preservadas."
+    }
+  ],
+  "installation": {
+    "cliPath": "/home/bruno/.local/lib/node_modules/@capivara/core/dist/cli.js",
+    "cliSHA256": "d3f1ad69bce390cbe9687699bf4284a564138f703e16ed8ca57cd2249a836b1d",
+    "builtCliSHA256": "d3f1ad69bce390cbe9687699bf4284a564138f703e16ed8ca57cd2249a836b1d"
+  },
+  "limitations": [
+    "Only the plan stage was resumed; build was not executed.",
+    "The new project has no product verification evidence.",
+    "Earlier exploratory resume issued two repair calls; this final resume issued none."
+  ]
+}

@@ -13,6 +13,11 @@ const cleanId = (value: unknown, fallback: string): string => string(value).repl
 const unique = <T extends { id: string }>(items: T[]): T[] => [...new Map(items.map((item) => [item.id, item])).values()];
 const uniqueStrings = (items: string[]): string[] => [...new Set(items)];
 const argv = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+const stableJson=(value:unknown):string=>JSON.stringify(value,(_key,item:unknown)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.entries(item).sort(([left],[right])=>left.localeCompare(right))):item);
+function environmentOperation(node:EnvironmentNode):string{
+  const invocation=(command:CommandRecipe)=>({command:command.command,args:command.args??[],cwd:command.cwd??'.',system:command.system??false,timeoutMs:command.timeoutMs??null,capabilities:[...command.capabilities??[]].sort()});
+  return stableJson({kind:node.kind,dependsOn:[...node.dependsOn].sort(),targets:[...node.targets].sort(),check:invocation(node.check),prepare:node.prepare.map(invocation),provides:node.provides??null});
+}
 
 function recipe(value: unknown): CommandRecipe | null {
   if (typeof value === "string" && value.trim()) return { command: value.trim(), capabilities: inferredCapabilities(value) };
@@ -28,7 +33,7 @@ function recipe(value: unknown): CommandRecipe | null {
   return result;
 }
 
-export function normalizeEnvironment(value: unknown, brief: ProductBrief): EnvironmentNode[] {
+export function normalizeEnvironment(value: unknown, brief: ProductBrief, resolvedAliases?:Map<string,string>): EnvironmentNode[] {
   const result: EnvironmentNode[] = [];
   const incompatible = new Set<string>();
   for (const item of records(value)) {
@@ -61,8 +66,13 @@ export function normalizeEnvironment(value: unknown, brief: ProductBrief): Envir
   for (const node of result) {
     const key = normalize(node.identity ? `${node.identity.capability}:${node.identity.kind}:${node.identity.provider}` : `${node.kind}:${node.name}`);
     const earlier = byName.get(key);
+    if(earlier&&earlier.id!==node.id&&environmentOperation(earlier)!==environmentOperation(node)){
+      // A provider label cannot overwrite a different executable contract.
+      byName.set(`${key}:${node.id}`,node);continue;
+    }
     if (earlier) {
       aliases.set(node.id, earlier.id);
+      if(node.id!==earlier.id)resolvedAliases?.set(node.id,earlier.id);
       const id = earlier.id;
       const dependsOn = uniqueStrings([...earlier.dependsOn, ...node.dependsOn]);
       const requirementIds = uniqueStrings([...(earlier.requirementIds ?? []), ...(node.requirementIds ?? [])]);
@@ -74,6 +84,34 @@ export function normalizeEnvironment(value: unknown, brief: ProductBrief): Envir
   // A removed incompatible browser tool cannot remain a prerequisite of a terminal task.
   for (const node of nodes) node.dependsOn = uniqueStrings(node.dependsOn.map((id) => aliases.get(id) ?? id)).filter((id) => !incompatible.has(id));
   return nodes;
+}
+
+function remapEnvironmentReferences(plan:DevelopmentPlan,aliases:Map<string,string>):void{
+  const resolve=(id:string):string=>{const seen=new Set<string>();while(aliases.has(id)&&!seen.has(id)){seen.add(id);id=aliases.get(id)!;}return id;};
+  for(const node of plan.environment)node.dependsOn=uniqueStrings(node.dependsOn.map(resolve));
+  for(const task of plan.tasks)task.environmentIds=uniqueStrings(task.environmentIds.map(resolve));
+}
+
+/** An anonymous identity enrichment can retain a consumed prerequisite ID only
+ * when its full executable contract has exactly one bound/unbound match. */
+function reconcileOperationalProviders(plan:DevelopmentPlan,hooks:DomainHooks):boolean{
+  const aliases=new Map<string,string>();
+  for(const bound of plan.environment.filter(node=>node.identity)){
+    if(aliases.has(bound.id))continue;
+    const operation=environmentOperation(bound);
+    const candidates=plan.environment.filter(node=>!node.identity&&!aliases.has(node.id)&&environmentOperation(node)===operation);
+    const bindings=plan.environment.filter(node=>node.identity&&!aliases.has(node.id)&&environmentOperation(node)===operation);
+    if(candidates.length!==1||bindings.length!==1)continue;
+    const unbound=candidates[0]!,canonical=plan.environment.indexOf(unbound)<plan.environment.indexOf(bound)?unbound:bound;
+    const id=canonical.id,removed=canonical===unbound?bound:unbound;
+    const requirementIds=uniqueStrings([...(unbound.requirementIds??[]),...(bound.requirementIds??[])]);
+    Object.assign(canonical,unbound,bound,{id,...(requirementIds.length?{requirementIds}:{})});
+    aliases.set(removed.id,id);
+  }
+  if(!aliases.size)return false;
+  plan.environment=plan.environment.filter(node=>!aliases.has(node.id));remapEnvironmentReferences(plan,aliases);
+  for(const [from,to] of aliases)emitEvent(hooks.onEvent,{type:'replanned',subject:to,message:`Identidade do pré-requisito reconciliada: ${from} → ${to}. Kind, invocação de prontidão, preparação, dependências, targets e exports têm contrato operacional idêntico e correspondência única; referências preservadas.`});
+  return true;
 }
 
 function contractsFrom(value: unknown, requirements: Requirement[]): IntegrationContract[] {
@@ -373,6 +411,9 @@ async function repairPlanIssues(brief: ProductBrief, plan: DevelopmentPlan, hook
   for (;;) {
     const issues = validatePlan(brief, plan);
     if (!issues.length) return;
+    if(issues.some(issue=>['mandatory-provider-mismatch','unused-mandatory-provider'].includes(issue.code))&&reconcileOperationalProviders(plan,hooks)){
+      await hooks.save?.({brief,plan});continue;
+    }
     const issue = issues[0]!;
     recovery.requireChange({ issues, tasks: plan.tasks, environment: plan.environment, acceptance: plan.acceptance }, "O plano viola invariantes de cobertura, capacidade ou conformidade.", `${issue.code}:${issue.subject}`);
     const limit = hooks.contextChars ?? 24_000;
@@ -391,12 +432,22 @@ async function repairPlanIssues(brief: ProductBrief, plan: DevelopmentPlan, hook
     ].join("\n\n")});
     const nodes = await executableEnvironment(result.environment, brief, hooks);
     const changedEnvironment = new Set(nodes.map(node=>node.id));
-    plan.environment = normalizeEnvironment([...plan.environment.filter(node=>!changedEnvironment.has(node.id)), ...nodes], brief);
+    const environmentAliases=new Map<string,string>();
+    plan.environment = normalizeEnvironment([...plan.environment.filter(node=>!changedEnvironment.has(node.id)), ...nodes], brief,environmentAliases);
+    remapEnvironmentReferences(plan,environmentAliases);
     const changedContracts = contractsFrom(result.contracts, brief.requirements);
     plan.contracts = unique([...plan.contracts, ...changedContracts]);
     const tasks = normalizeTasks(result.tasks, brief, plan.environment, plan.contracts, []);
-    const changedTasks = new Set(tasks.map(unit=>unit.id));
-    plan.tasks = [...plan.tasks.filter(unit=>!changedTasks.has(unit.id)), ...tasks];
+    const environmentOnly=['mandatory-provider-mismatch','unused-mandatory-provider'].includes(issue.code);
+    if(environmentOnly){
+      // Fix capability references without replacing a product delivery merely
+      // because a model returned its complete definition in an environment fix.
+      for(const update of tasks){const existing=plan.tasks.find(task=>task.id===update.id);if(existing)existing.environmentIds=update.environmentIds.map(id=>environmentAliases.get(id)??id);}
+    }else{
+      const changedTasks = new Set(tasks.map(unit=>unit.id));
+      plan.tasks = [...plan.tasks.filter(unit=>!changedTasks.has(unit.id)), ...tasks];
+    }
+    reconcileOperationalProviders(plan,hooks);
     const acceptance = normalizeChecks(result.acceptance, brief);
     const changedChecks = new Set(acceptance.map(check=>check.id));
     plan.acceptance = reconcileChecks([...(plan.acceptance ?? []).filter(check=>!changedChecks.has(check.id)), ...acceptance]);
@@ -427,22 +478,37 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
     await repairPlanIssues(brief, plan, options);
     plan.briefRevision = brief.revision;
     plan.status = "ready";
+    delete plan.planning;
     await options.save?.({ brief, plan });
     emitEvent(options.onEvent, { type: "complete", message: "Plano existente reconciliado; entregas preservadas e somente lacunas afetadas reparadas.", subject: "plan" });
     return plan;
   }
   const limit = options.contextChars ?? 24_000;
   const facts = productFacts(brief, Math.floor(limit / 8));
-  const groups = requirementGroups(brief, Math.max(400, Math.floor(limit / 4)));
-  const environmentScopes: Set<string>[] = [];
-  const plan: DevelopmentPlan = { schema: "capivara/plan/1", status: "planning", revision: (options.existing?.revision ?? 0) + 1, briefId: brief.id, briefRevision: brief.revision, environment: [], contracts: [], tasks: [] };
+  const partial=options.existing?.status === "planning" && options.existing.briefId === brief.id && options.existing.tasks.every(task=>task.requirementIds.every(id=>brief.requirements.some(requirement=>requirement.id===id))) ? options.existing : undefined;
+  const plan: DevelopmentPlan = partial ? reconcilePlan(brief,partial,partial) : { schema: "capivara/plan/1", status: "planning", revision: (options.existing?.revision ?? 0) + 1, briefId: brief.id, briefRevision: brief.revision, environment: [], contracts: [], tasks: [] };
+  const checkpoint=plan.planning?.schema === "capivara/plan-progress/1" && plan.planning.briefRevision === brief.revision && plan.planning.groups.every(group=>group.requirementIds.every(id=>brief.requirements.some(requirement=>requirement.id===id))) ? plan.planning : undefined;
+  // Legacy drafts already persisted every environment slice before the first
+  // delivery. Keep their original outline request shape so a paid response in
+  // the durable call cache is adopted with the exact same identity.
+  const legacyPartial=!!partial&&!checkpoint;
+  const legacyRequestShape=checkpoint?.legacyRequestShape??legacyPartial;
+  const groups = checkpoint ? checkpoint.groups.map(group=>group.requirementIds.map(id=>brief.requirements.find(requirement=>requirement.id===id)!)) : requirementGroups(brief, Math.max(400, Math.floor(limit / 4)));
+  const covered=new Set(plan.tasks.flatMap(task=>task.requirementIds));
+  const construction:NonNullable<DevelopmentPlan["planning"]>=plan.planning=checkpoint??{schema:"capivara/plan-progress/1",briefRevision:brief.revision,...(legacyPartial?{legacyRequestShape:true}:{}),groups:groups.map(requirements=>({
+    requirementIds:requirements.map(requirement=>requirement.id),environmentComplete:legacyPartial&&plan.tasks.length>0,outlineComplete:legacyPartial&&requirements.every(requirement=>covered.has(requirement.id)),
+    environmentScope:plan.environment.filter(node=>node.requirementIds?.some(id=>requirements.some(requirement=>requirement.id===id))).map(node=>normalize(`${node.kind}:${node.name}`)),
+  }))};
   const environmentProgress = { id: "plan:environment", label: "Grupos de pré-requisitos", total: groups.length, stage: "plan", unit: "grupos" };
   const outlineProgress = { id: "plan:outline", label: "Grupos de tarefas", total: groups.length, stage: "plan", unit: "grupos" };
-  emitProgress(options.onEvent, { ...environmentProgress, completed: 0, status: groups.length ? "running" : "complete" });
+  await options.save?.({brief,plan});
+  emitProgress(options.onEvent, { ...environmentProgress, completed: construction.groups.filter(group=>group.environmentComplete).length, status: construction.groups.every(group=>group.environmentComplete) ? "complete" : "running" });
   // Environment is generated and persisted before requesting any construction tasks.
   for (const [groupIndex, requirements] of groups.entries()) {
     cancelled(options.signal);
-    const result = await requestObject({ ...options, operation: "environment", prompt: [
+    const group=construction.groups[groupIndex]!;
+    if(group.environmentComplete)continue;
+    const prompt=group.environmentPrompt??[
       "Plan executable technical prerequisites before implementation. Do not edit files. Return JSON.",
       'Shape: {"environment":[{"id":"stable-id","name":"runtime SDK tool package service or database","kind":"runtime|sdk|tool|package|service|database","dependsOn":[],"targets":[],"reason":"consumer and reason","check":{"command":"executable or shell command","args":[],"capabilities":[]},"prepare":[{"command":"preparation command","args":[],"system":false,"capabilities":[]}]}],"questions":[]}',
       "Include only prerequisites of these actual requirements. Selected reference metadata is supporting material, not required product outcomes; read applicable local paths before architectural choices. Runtime of the harness is not the product runtime. Browser tooling is appropriate only for a browser interface. Prefer local preparation over host mutation. A missing product fact may be asked with fact/question/reason/impact/category/modes/options/blocks; otherwise questions=[].",
@@ -450,26 +516,34 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
       `Product facts:\n${facts}`,
       `Requirements:\n${JSON.stringify(requirements)}`,
       options.repository ? `Repository facts:\n${options.repository.slice(0, Math.min(2_000, Math.floor(limit / 8)))}` : "",
-    ].filter(Boolean).join("\n\n") });
+    ].filter(Boolean).join("\n\n");
+    group.environmentPrompt=prompt;await options.save?.({brief,plan});
+    const result = await requestObject({ ...options, operation: "environment", prompt });
     await resolveQuestions(brief, records(result.questions), options);
     const additions = await executableEnvironment(result.environment, brief, options);
-    environmentScopes.push(new Set(additions.map((node) => normalize(`${node.kind}:${node.name}`))));
+    group.environmentScope=additions.map((node) => normalize(`${node.kind}:${node.name}`));
     plan.environment = normalizeEnvironment([...plan.environment, ...additions], brief);
+    construction.briefRevision=brief.revision;
+    group.environmentComplete=true;delete group.environmentPrompt;
     await options.save?.({ brief, plan });
-    emitProgress(options.onEvent, { ...environmentProgress, completed: groupIndex + 1, status: groupIndex + 1 === groups.length ? "complete" : "running" });
+    emitProgress(options.onEvent, { ...environmentProgress, completed: construction.groups.filter(group=>group.environmentComplete).length, status: construction.groups.every(group=>group.environmentComplete) ? "complete" : "running" });
   }
   await repairGraph(plan, brief, "environment", options);
   await options.save?.({ brief, plan });
   emitEvent(options.onEvent, { type: "environment", message: "Árvore de preparação registrada antes das tarefas.", subject: "plan" });
-  emitProgress(options.onEvent, { ...outlineProgress, completed: 0, status: groups.length ? "running" : "complete" });
+  emitProgress(options.onEvent, { ...outlineProgress, completed: construction.groups.filter(group=>group.outlineComplete).length, status: construction.groups.every(group=>group.outlineComplete) ? "complete" : "running" });
   for (const [index, requirements] of groups.entries()) {
-    const scopedIds = new Set(plan.environment.filter((node, nodeIndex) => environmentScopes[index]?.has(normalize(`${node.kind}:${node.name}`)) || nodeIndex < 2 && ["runtime", "sdk"].includes(node.kind)).map((node) => node.id));
+    cancelled(options.signal);
+    const group=construction.groups[index]!;
+    if(group.outlineComplete)continue;
+    const environmentScope=new Set(group.environmentScope);
+    const scopedIds = new Set(plan.environment.filter((node, nodeIndex) => environmentScope.has(normalize(`${node.kind}:${node.name}`)) || nodeIndex < 2 && ["runtime", "sdk"].includes(node.kind)).map((node) => node.id));
     for (;;) {
       const before = scopedIds.size;
       for (const node of plan.environment) if (scopedIds.has(node.id)) node.dependsOn.forEach((id) => scopedIds.add(id));
       if (before === scopedIds.size) break;
     }
-    const result = await requestObject({ ...options, operation: "outline", prompt: [
+    const outlinePrompt=(existingUnits:string):string=>[
       "Structure small executable work units and their integration contracts for these requirements. Return JSON; do not edit code.",
       'Shape: {"contracts":[{"id":"contract-id","name":"name","description":"precise behavior/interface","inputs":[],"outputs":[],"requirementIds":[]}],"tasks":[{"id":"task-id","title":"capability","goal":"observable outcome","instructions":"local implementation work","requirementIds":[],"dependsOn":[],"environmentIds":[],"contractIds":[],"files":[],"criteria":["necessary observable results"],"checks":[{"id":"check-id","kind":"command|cli|tui|web|desktop","command":"actual invocation with arguments when needed","expected":"human criterion","assertion":{"type":"contains","source":"stdout","value":"concrete scenario output"},"expectedExitCode":0,"requirementIds":[],"requiredCapabilities":[],"steps":[{"waitFor":"ready screen"},{"input":"key bytes","waitFor":"changed screen"}],"closeInput":"exit key"}],"risk":"low|normal|high","blockedBy":[]}],"questions":[]}',
       "There is no task, test or criterion quota. Each unit must fit one small context. Only relevant verification is useful. Define contracts before consumers. No server or browser for a terminal product unless explicitly required. TUI checks use synchronized steps: wait for readiness, send keys, wait for the observed state change, close input; pipes are not an interactive terminal. Omit steps for other kinds. CLI input[] contains literal bytes; include newline explicitly when needed. expectedExitCode is the actual successful outcome of that scenario, including a nonzero code when testing an expected rejection. Ask only a missing product fact with concrete impact; library and installer choices are engineering work.",
@@ -480,18 +554,31 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
       `Product facts:\n${productFacts(brief, Math.floor(limit / 8))}`,
       `Requirements of this slice:\n${JSON.stringify(requirements)}`,
       `Technical prerequisites available in this slice (the full tree is recorded separately):\n${metadataList(plan.environment.filter((node) => scopedIds.has(node.id)).map(({ id, name, kind }) => ({ id, name: name.slice(0, 180), kind })), Math.floor(limit / 8))}`,
-      plan.tasks.length ? `Earlier foundations and relevant unit identifiers:\n${metadataList(plan.tasks.filter((task, unitIndex) => unitIndex === 0 || task.requirementIds.some((id) => requirements.some((requirement) => requirement.id === id))).map(({ id, title }) => ({ id, title: title.slice(0, 120) })), Math.floor(limit / 12))}` : "",
+      existingUnits,
       plan.contracts.length ? `Relevant existing contract identifiers (details are stored in the plan):\n${metadataList(plan.contracts.filter((contract) => contract.requirementIds.some((id) => requirements.some((requirement) => requirement.id === id))).map(({ id, name }) => ({ id, name: name.slice(0, 120) })), Math.floor(limit / 12))}` : "",
-    ].filter(Boolean).join("\n\n") });
+    ].filter(Boolean).join("\n\n");
+    let prompt=group.outlinePrompt;
+    if(!prompt){
+      prompt=outlinePrompt(plan.tasks.length?`Existing delivery identities and owned paths (details are stored separately):\n${metadataList(plan.tasks.map(({id,files,contractIds})=>({id,files,contractIds})),Math.floor(limit / 12))}`:"");
+      if(legacyRequestShape){
+        const legacy=outlinePrompt(plan.tasks.length?`Earlier foundations and relevant unit identifiers:\n${metadataList(plan.tasks.filter((task,unitIndex)=>unitIndex===0||task.requirementIds.some(id=>requirements.some(requirement=>requirement.id===id))).map(({id,title})=>({id,title:title.slice(0,120)})),Math.floor(limit/12))}`:"");
+        if(options.hasCachedCall?.({operation:"outline",prompt:legacy,readOnly:true}))prompt=legacy;
+      }
+    }
+    group.outlinePrompt=prompt;await options.save?.({brief,plan});
+    const result = await requestObject({ ...options, operation: "outline", prompt });
     await resolveQuestions(brief, records(result.questions), options);
     const contracts = contractsFrom(result.contracts, brief.requirements);
     plan.contracts = unique([...plan.contracts, ...contracts]);
     const tasks = normalizeTasks(result.tasks, brief, plan.environment, plan.contracts, requirements);
     plan.tasks.push(...tasks);
     plan.acceptance = reconcileChecks([...(plan.acceptance ?? []), ...normalizeChecks(result.acceptance, brief)]);
+    construction.briefRevision=brief.revision;
+    group.outlineComplete=true;delete group.outlinePrompt;
     Object.assign(plan, reconcilePlan(brief, plan, options.existing));
+    plan.planning=construction;
     await options.save?.({ brief, plan });
-    emitProgress(options.onEvent, { ...outlineProgress, completed: index + 1, status: index + 1 === groups.length ? "complete" : "running" });
+    emitProgress(options.onEvent, { ...outlineProgress, completed: construction.groups.filter(group=>group.outlineComplete).length, status: construction.groups.every(group=>group.outlineComplete) ? "complete" : "running" });
   }
   await ensureCoverage(brief, plan, options);
   Object.assign(plan, reconcilePlan(brief, plan, options.existing));
@@ -516,6 +603,7 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
   await repairPlanIssues(brief, plan, options);
   assertValidPlan(brief, plan);
   plan.status = "ready";
+  delete plan.planning;
   await options.save?.({ brief, plan });
   emitEvent(options.onEvent, { type: "complete", message: "Dependências, contratos e fragmentos de desenvolvimento estão estruturados.", subject: "plan" });
   return plan;

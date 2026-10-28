@@ -185,7 +185,8 @@ export class DashboardModel {
                 : applicable.some(gate => gate.status === 'waiting') ? 'waiting' : 'pending';
         gates.push({ id, status, detail: 'Resumo das threads aplicáveis desta fase.' });
       }
-      phases.push({ id: `P${String(phases.length + 1).padStart(2, '0')}`, gates, threads });
+      const title = [...new Set(threads.map(thread => oneLine(thread.title).trim()).filter(Boolean))].join(' / ');
+      phases.push({ id: `P${String(phases.length + 1).padStart(2, '0')}`, title, gates, threads });
       for (const task of layer) remaining.delete(task.id);
     }
     return phases;
@@ -244,7 +245,7 @@ export class DashboardModel {
     const phases = this.phases(state);
     const gateSymbols = { pending: '○', waiting: '○', neutral: '○', running: '◐', complete: '●', returned: '⊗' };
     const gateText = (gates: readonly DashboardGate[]): string => gates.map(gate => `${gate.id}${gateSymbols[gate.status]}`).join(' ');
-    const progressLines = phases.flatMap(phase => [`${phase.id} ${gateText(phase.gates)}`, ...phase.threads.map(thread => `  ${thread.id} ${gateText(thread.gates)}`)]);
+    const progressLines = phases.flatMap(phase => [`${phase.id} ${phase.title} ${gateText(phase.gates)}`, ...phase.threads.map(thread => `  ${thread.id} ${oneLine(thread.title)} ${gateText(thread.gates)}`)]);
     const summary = [`Estado: ${label(this.saved.status, 'Aguardando execução')}`, `Etapa: ${this.saved.stage ?? 'Não iniciada'}`];
     add(summary, 'Diretório: ', this.workspace);
     add(summary, 'Última gravação: ', this.saved.updatedAt);

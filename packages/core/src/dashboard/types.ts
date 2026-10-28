@@ -16,6 +16,7 @@ export interface DashboardThread {
 }
 export interface DashboardPhase {
   id: string;
+  title: string;
   gates: DashboardGate[];
   threads: DashboardThread[];
 }

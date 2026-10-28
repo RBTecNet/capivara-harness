@@ -196,7 +196,7 @@ it('alinha gates à direita de fases e threads, preservando cores e a ordem da h
     { id: 'G0', status: 'complete' }, { id: 'G1', status: 'neutral' },
     { id: 'G2', status: 'running' }, { id: 'G3', status: 'returned', detail: 'Corrigir exportação truncada.' },
   ] as const;
-  panel.phases = [{ id: 'P01', gates: [...gates], threads: [{ id: 'T01', taskId: 'work', title: 'Fluxo principal', gates: [...gates] }] }];
+  panel.phases = [{ id: 'P01', title: 'API e interface', gates: [...gates], threads: [{ id: 'T01', taskId: 'work', title: 'Fluxo principal', gates: [...gates] }] }];
   const view = { ...createDashboardNavigation(), focusPanel: 'progress' as const, expandedPanel: 'progress' as const };
   const colored = renderDashboard(model, view, 120, 40, true);
   expect(colored).toContain('\u001b[1;32m●\u001b[0m');
@@ -206,6 +206,8 @@ it('alinha gates à direita de fases e threads, preservando cores e a ordem da h
   expect(plain(colored)).toContain('G0 G1 G2 G3');
   const rows = plain(colored).split('\n').filter(line => /P01|T01/.test(line));
   expect(rows).toHaveLength(2);
+  expect(rows[0]).toContain('P01 API e interface');
+  expect(rows[1]).toContain('T01 Fluxo principal');
   for (const symbol of ['●', '○', '◐', '⊗']) expect(rows[0]!.indexOf(symbol)).toBe(rows[1]!.indexOf(symbol));
   expect(plain(colored)).not.toContain('G4');
   expect(plain(colored)).not.toContain('progress linha');
@@ -218,7 +220,7 @@ it('alinha gates à direita de fases e threads, preservando cores e a ordem da h
   const waiting = renderDashboard(model, view, 120, 40, true);
   expect(plain(waiting)).toContain('G4');
   expect(waiting).toContain('\u001b[1;90m○\u001b[0m');
-  const done = { id: 'P00', gates: panel.phases[0]!.gates.map(gate => ({ ...gate, status: 'complete' as const })), threads: [] };
+  const done = { id: 'P00', title: 'Fundação', gates: panel.phases[0]!.gates.map(gate => ({ ...gate, status: 'complete' as const })), threads: [] };
   panel.phases.unshift(done);
   const order = panel.phases.map(phase => phase.id);
   const compact = plain(renderDashboard(model, { ...createDashboardNavigation(), focusPanel: 'progress' }, 80, 24, true));
@@ -236,7 +238,7 @@ it('conserva hierarquia, gates e rolagem em janelas estreitas sem executar contr
     { id: 'G0', status: 'complete' }, { id: 'G1', status: 'complete' },
     { id: 'G2', status: 'complete' }, { id: 'G3', status: 'running' }, { id: 'G4', status: 'pending' },
   ] as const;
-  panel.phases = Array.from({ length: 20 }, (_, i) => ({ id: `P${String(i + 1).padStart(2, '0')}`, gates: [...gates], threads: [{ id: 'T01', taskId: `work-${i}`, title: '\u001b[2JTítulo seguro', gates: [...gates] }] }));
+  panel.phases = Array.from({ length: 20 }, (_, i) => ({ id: `P${String(i + 1).padStart(2, '0')}`, title: 'Preparar API e interface com descrições extensas e 界', gates: [...gates], threads: [{ id: 'T01', taskId: `work-${i}`, title: '\u001b[2JTítulo seguro extenso que precisa caber ao lado dos gates', gates: [...gates] }] }));
   for (const width of [20, 40, 80, 120]) {
     for (const expanded of [false, true]) {
       const view = { ...createDashboardNavigation(), focusPanel: 'progress' as const, ...(expanded ? { expandedPanel: 'progress' as const } : {}) };

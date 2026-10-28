@@ -98,8 +98,8 @@ function segmentLines(segments: Segment[], width: number): ContentLine[] {
 
 function progressPhaseLines(phases: DashboardPhase[], width: number): ContentLine[] {
   const rows = phases.flatMap(phase => [
-    { label: phase.id, gates: phase.gates, tone: '1;36' },
-    ...phase.threads.map(thread => ({ label: `  ${thread.id}`, gates: thread.gates, tone: '36' })),
+    { label: phase.id, title: phase.title, gates: phase.gates, tone: '1;36' },
+    ...phase.threads.map(thread => ({ label: `  ${thread.id}`, title: thread.title, gates: thread.gates, tone: '36' })),
   ]);
   if (!rows.length) return [{ text: fit('Sem fases planejadas.', width, true), tone: '90' }];
   const columns = (['G0', 'G1', 'G2', 'G3', 'G4'] as const).filter(id => rows.some(row => row.gates.some(gate => gate.id === id)));
@@ -112,10 +112,14 @@ function progressPhaseLines(phases: DashboardPhase[], width: number): ContentLin
   const chunks = blockWidth <= width ? [columns] : Array.from({ length: Math.ceil(columns.length / perLine) }, (_, index) => columns.slice(index * perLine, (index + 1) * perLine));
   const content: ContentLine[] = chunks.map(ids => ({ text: `${' '.repeat(Math.max(0, width - ids.join(gap).length))}${ids.join(gap)}`, tone: '90' }));
   for (const row of rows) {
-    if (!inline) content.push({ text: fit(row.label, width, true), tone: row.tone });
+    const label = (available: number): string => {
+      const descriptionWidth = available - dashboardWidthOf(row.label) - 1;
+      return row.title && descriptionWidth > 1 ? `${row.label} ${fit(row.title, descriptionWidth, true)}` : fit(row.label, available, true);
+    };
+    if (!inline) content.push({ text: label(width), tone: row.tone });
     for (const ids of chunks) {
       const size = ids.length * 2 + Math.max(0, ids.length - 1) * gap.length;
-      const prefix = inline ? `${pad(row.label, width - size - 1)} ` : ' '.repeat(Math.max(0, width - size));
+      const prefix = inline ? `${pad(label(width - size - 1), width - size - 1)} ` : ' '.repeat(Math.max(0, width - size));
       const segments: Segment[] = [{ text: prefix, tone: row.tone }];
       ids.forEach((id, index) => {
         if (index) segments.push({ text: gap });

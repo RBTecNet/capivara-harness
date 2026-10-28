@@ -6,7 +6,8 @@ import { boundedReferences } from "./material.js";
 import type { CommandRecipe, DevelopmentPlan, DomainHooks, EnvironmentNode, IntegrationContract, PlanOptions, ProductBrief, Requirement, Verification, WorkUnit } from "./types.js";
 import { emitEvent, emitProgress } from "../telemetry/progress.js";
 import { PlanningFailure, PlanningProgress } from "./control.js";
-import { assertValidPlan, reconcileChecks, reconcilePlan, sameDelivery, validatePlan } from "./reconcile.js";
+import { assertValidPlan, reconcileChecks, reconcilePlan, sameDelivery, validatePlan, preferredProofOwner } from "./reconcile.js";
+import { normalizeVerificationAssertion } from "./assertions.js";
 
 const cleanId = (value: unknown, fallback: string): string => string(value).replace(/[^a-zA-Z0-9_.:-]+/g, "-") || fallback;
 const unique = <T extends { id: string }>(items: T[]): T[] => [...new Map(items.map((item) => [item.id, item])).values()];
@@ -46,6 +47,8 @@ export function normalizeEnvironment(value: unknown, brief: ProductBrief): Envir
     if (object(item.provides)) {
       const provided: NonNullable<EnvironmentNode["provides"]> = {};
       const command = argv(item.provides.command); if (command.length) provided.command = command;
+      if (Array.isArray(item.provides.aliases)) provided.aliases = strings(item.provides.aliases);
+      if (Array.isArray(item.provides.invocations)) provided.invocations = records(item.provides.invocations).map(invocation => ({ command: argv(invocation.command), ...(Array.isArray(invocation.aliases) ? { aliases: strings(invocation.aliases) } : {}) })).filter(invocation => invocation.command.length > 0);
       if (object(item.provides.env)) provided.env = Object.fromEntries(Object.entries(item.provides.env).filter((entry): entry is [string, string] => typeof entry[1] === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(entry[0])));
       if (Array.isArray(item.provides.paths)) provided.paths = strings(item.provides.paths);
       if (Array.isArray(item.provides.inputs)) provided.inputs = safePaths(item.provides.inputs);
@@ -99,6 +102,11 @@ export function normalizeChecks(value: unknown, brief: ProductBrief): Verificati
     if (args.length) check.args = args;
     const expected = string(item.expected);
     if (expected) check.expected = expected;
+    if (item.assertion !== undefined) {
+      const assertion = normalizeVerificationAssertion(item.assertion);
+      if (assertion) check.assertion = assertion;
+      else check.assertionIssue = "The proposed assertion is invalid. Use a typed contains/regex/exit/empty/json/all/any predicate with a concrete selector and value.";
+    }
     if (typeof item.expectedExitCode === "number" && Number.isInteger(item.expectedExitCode) && item.expectedExitCode >= 0 && item.expectedExitCode <= 255) check.expectedExitCode = item.expectedExitCode;
     if (Array.isArray(item.input)) check.input = item.input.filter((input): input is string => typeof input === "string");
     if (Array.isArray(item.steps)) check.steps = records(item.steps).map((step) => {
@@ -368,11 +376,12 @@ async function repairPlanIssues(brief: ProductBrief, plan: DevelopmentPlan, hook
     const issue = issues[0]!;
     recovery.requireChange({ issues, tasks: plan.tasks, environment: plan.environment, acceptance: plan.acceptance }, "O plano viola invariantes de cobertura, capacidade ou conformidade.", `${issue.code}:${issue.subject}`);
     const limit = hooks.contextChars ?? 24_000;
-    const task = plan.tasks.find(candidate => candidate.id === issue.subject || candidate.requirementIds.includes(issue.subject));
+    const task = issue.code === 'unproven-interface-behavior' ? preferredProofOwner(plan,issue.subject) : plan.tasks.find(candidate => candidate.id === issue.subject || candidate.requirementIds.includes(issue.subject));
     const requirementIds = new Set([issue.subject, ...(task?.requirementIds ?? [])]);
     const result = await requestObject({...hooks, operation: "repair", prompt: [
       "Repair the concrete structural defect below. Preserve mandatory user choices and all unaffected deliveries. A passing syntax check cannot replace production build or behavior proof. Return only changed complete definitions, not another parallel plan.",
       'Shape: {"tasks":[],"environment":[],"contracts":[],"acceptance":[],"reason":"causal correction"}. Definitions with existing IDs replace those definitions. Mandatory requirement.binding is matched by environment.identity={capability,kind,provider}; provide executable readiness and acceptance recipes with requirementIds and level=build|behavior. A driver does not satisfy a CLI capability.',
+      'Behavior recipes keep expected as a human criterion and declare assertion={"type":"contains","source":"stdout","value":"concrete scenario output"}; other typed predicates are regex{pattern,flags,source}, exit{value}, empty{source}, json{source,path:["key",0],equals:value} and all/any{assertions:[]}. expectedExitCode alone is not a behavioral assertion. Preserve actual interface and product inputs.',
       'A mandatory binding needs dedicated acceptance.conformance={requirementId,capability,kind,provider,productInputs:["actual product paths"],artifacts:[]}. Runtime conformance executes product source with that actual runtime and an observed behavior assertion. SDK build conformance records outputs/artifacts and another behavior check with dependsOn:["producer-check-id"] consumes that exact produced artifact. --version/help and labels are not product usage.',
       `Invariant: ${JSON.stringify(issue)}`,
       `Relevant mandatory requirements: ${metadataList(brief.requirements.filter(requirement=>requirementIds.has(requirement.id)), Math.floor(limit / 4))}`,
@@ -402,6 +411,26 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
   await resolveQuestions(brief, [], options);
   applyRepositoryConstraints(brief, options.repositoryConstraints);
   if (options.existing?.status === "ready" && options.existing.briefId === brief.id && options.existing.briefRevision === brief.revision && !validatePlan(brief, options.existing).length) return reconcilePlan(brief, options.existing, options.existing);
+  // The product is still the same: fix its missing proofs/constraints in place.
+  // Re-extracting the whole plan after a harness authority correction discards
+  // useful contracts and reopens independent deliveries unnecessarily.
+  if (options.existing?.status === "ready" && options.existing.briefId === brief.id && options.existing.tasks.every(task => task.requirementIds.every(id => brief.requirements.some(requirement => requirement.id === id)))) {
+    const plan = reconcilePlan(brief, options.existing, options.existing);
+    plan.status = "planning";
+    plan.revision += 1;
+    const constraints = new Set(brief.constraints.map(constraint => constraint.id));
+    for (const check of [...plan.acceptance ?? [], ...plan.tasks.flatMap(task => task.checks)]) if (check.constraintIds) check.constraintIds = check.constraintIds.filter(id => constraints.has(id));
+    await options.save?.({ brief, plan });
+    await ensureCoverage(brief, plan, options);
+    await repairGraph(plan, brief, "environment", options);
+    await repairGraph(plan, brief, "tasks", options);
+    await repairPlanIssues(brief, plan, options);
+    plan.briefRevision = brief.revision;
+    plan.status = "ready";
+    await options.save?.({ brief, plan });
+    emitEvent(options.onEvent, { type: "complete", message: "Plano existente reconciliado; entregas preservadas e somente lacunas afetadas reparadas.", subject: "plan" });
+    return plan;
+  }
   const limit = options.contextChars ?? 24_000;
   const facts = productFacts(brief, Math.floor(limit / 8));
   const groups = requirementGroups(brief, Math.max(400, Math.floor(limit / 4)));
@@ -442,9 +471,10 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
     }
     const result = await requestObject({ ...options, operation: "outline", prompt: [
       "Structure small executable work units and their integration contracts for these requirements. Return JSON; do not edit code.",
-      'Shape: {"contracts":[{"id":"contract-id","name":"name","description":"precise behavior/interface","inputs":[],"outputs":[],"requirementIds":[]}],"tasks":[{"id":"task-id","title":"capability","goal":"observable outcome","instructions":"local implementation work","requirementIds":[],"dependsOn":[],"environmentIds":[],"contractIds":[],"files":[],"criteria":["necessary observable results"],"checks":[{"id":"check-id","kind":"command|cli|tui|web|desktop","command":"actual invocation with arguments when needed","expected":"observable outcome","expectedExitCode":0,"requirementIds":[],"requiredCapabilities":[],"steps":[{"waitFor":"ready screen"},{"input":"key bytes","waitFor":"changed screen"}],"closeInput":"exit key"}],"risk":"low|normal|high","blockedBy":[]}],"questions":[]}',
+      'Shape: {"contracts":[{"id":"contract-id","name":"name","description":"precise behavior/interface","inputs":[],"outputs":[],"requirementIds":[]}],"tasks":[{"id":"task-id","title":"capability","goal":"observable outcome","instructions":"local implementation work","requirementIds":[],"dependsOn":[],"environmentIds":[],"contractIds":[],"files":[],"criteria":["necessary observable results"],"checks":[{"id":"check-id","kind":"command|cli|tui|web|desktop","command":"actual invocation with arguments when needed","expected":"human criterion","assertion":{"type":"contains","source":"stdout","value":"concrete scenario output"},"expectedExitCode":0,"requirementIds":[],"requiredCapabilities":[],"steps":[{"waitFor":"ready screen"},{"input":"key bytes","waitFor":"changed screen"}],"closeInput":"exit key"}],"risk":"low|normal|high","blockedBy":[]}],"questions":[]}',
       "There is no task, test or criterion quota. Each unit must fit one small context. Only relevant verification is useful. Define contracts before consumers. No server or browser for a terminal product unless explicitly required. TUI checks use synchronized steps: wait for readiness, send keys, wait for the observed state change, close input; pipes are not an interactive terminal. Omit steps for other kinds. CLI input[] contains literal bytes; include newline explicitly when needed. expectedExitCode is the actual successful outcome of that scenario, including a nonzero code when testing an expected rejection. Ask only a missing product fact with concrete impact; library and installer choices are engineering work.",
       'Declare task.inputs (read dependencies), files (owned outputs), resources (exclusive names), and exclusiveContracts when a unit changes a shared interface. Checks declare inputs, cwd, level=syntax|build|behavior and requirementIds. Final acceptance=[] contains the concrete mandatory stack/interface/behavior proof recipes; syntax does not prove a production build or interaction.',
+      'A behavior recipe declares assertion: contains{source,value}, regex{source,pattern,flags}, empty{source}, exit{value}, json{source,path:["key",0],equals:value} or all/any{assertions:[]}. source is stdout/stderr/output (JSON uses stdout/stderr). expected is human prose and never parsed as a machine predicate. expectedExitCode alone is not an assertion.',
       'For every mandatory requirement.binding, acceptance has a dedicated conformance={requirementId,capability,kind,provider,productInputs:["real product paths"],artifacts:[]}. The real bound runtime executes product source; a compiled SDK build must produce declared outputs and a dependent functional recipe (dependsOn:["producer-check-id"]) consumes those exact artifacts. A ready tool or version probe cannot establish product conformance.',
       "Selected references support implementation; do not turn their code or every line into tasks. Read applicable skills/examples and cite their local paths in the instructions of units that need them, including globally applicable guidance.",
       `Product facts:\n${productFacts(brief, Math.floor(limit / 8))}`,
@@ -497,6 +527,65 @@ export interface RepairPlanOptions extends DomainHooks {
   taskId: string;
   problem: string;
   finalize?: boolean;
+  /** Instrument and provider incidents cannot redefine the product delivery. */
+  repairScope?: "verification" | "environment" | "delivery";
+}
+
+async function repairRestrictedWorkPlan(options: RepairPlanOptions, task: WorkUnit, scope: "verification" | "environment"): Promise<DevelopmentPlan> {
+  const plan=structuredClone(options.plan),brief=options.brief;
+  const result=await requestObject({...options,operation:'repair',prompt:[
+    `Repair the ${scope} contract only. The executor locks the delivery identity, goal, instructions, product criteria, requirement IDs, owned files and task dependencies. Do not replace a product delivery with recording, reviewing or documenting verification work. Return JSON.`,
+    scope==='verification'
+      ? 'Shape: {"checks":[{"id":"existing proof id","kind":"command|cli|tui|web|desktop","command":"actual invocation","args":[],"expected":"human criterion","assertion":{"type":"contains","source":"stdout","value":"concrete observable value"},"expectedExitCode":0,"inputs":[],"requirementIds":[],"requiredCapabilities":[],"level":"behavior"}],"inputs":[],"environmentIds":[],"environment":[],"acceptance":[]}. Change only the affected technical recipes. Preserve original proof coverage and mandatory conformance. A mismatch in report spelling does not authorize changing the implementation or the delivery.'
+      : 'Shape: {"environment":[{"id":"existing or necessary provider id","name":"provider","kind":"runtime|sdk|tool|package|service|database","identity":{"capability":"consumed capability","kind":"cli|library|driver|service|runtime|sdk","provider":"provider"},"dependsOn":[],"check":{"command":"usable readiness probe","args":[]},"prepare":[],"provides":{"command":[],"paths":[],"env":{}}}],"environmentIds":[]}. Only provider definitions and references may change; do not modify delivery or verification contracts.',
+    `Locked delivery: ${JSON.stringify(task)}`,
+    `Available environment: ${JSON.stringify(plan.environment)}`,
+    `Incident: ${options.problem}`,
+  ].join('\n\n')});
+  const nodes=await executableEnvironment(result.environment,brief,options);
+  const changedNodes=new Set(nodes.map(node=>node.id));
+  plan.environment=normalizeEnvironment([...plan.environment.filter(node=>!changedNodes.has(node.id)),...nodes],brief);
+  const proposals=records(result.tasks);
+  const proposal=proposals.find(candidate=>candidate.id===task.id)??(proposals.length===1?proposals[0]:undefined);
+  const technical=proposal??(object(result.task)?result.task:result);
+  const target=plan.tasks.find(candidate=>candidate.id===task.id)!;
+  const environmentIds=technical.environmentIds??result.environmentIds;
+  if(Array.isArray(environmentIds))target.environmentIds=strings(environmentIds);
+  if(scope==='verification'){
+    const scopedChecks=(values:unknown,originals:Verification[]):Verification[]=>{
+      const raw=records(values);
+      const prepared=raw.map(candidate=>{
+        const original=originals.find(check=>check.id===candidate.id)??(originals.length===1&&raw.length===1?originals[0]:undefined);
+        return{...candidate,...(original?{id:original.id,requirementIds:original.requirementIds,...(original.expected?{expected:original.expected}:{}),...(original.conformance?{conformance:original.conformance}:{})}:{requirementIds:strings(candidate.requirementIds).filter(id=>task.requirementIds.includes(id))})};
+      });
+      const checks=normalizeChecks(prepared,brief);
+      const covered=new Set(checks.flatMap(check=>check.requirementIds));
+      const missing=uniqueStrings(originals.flatMap(check=>check.requirementIds)).filter(id=>!covered.has(id));
+      if(missing.length)throw new PlanningFailure('invalid-plan',[`A correção de verificação removeu cobertura obrigatória: ${missing.join(', ')}. A entrega original foi preservada.`],task.id);
+      return checks;
+    };
+    const checks=technical.checks??result.checks;
+    if(Array.isArray(checks))target.checks=scopedChecks(checks,task.checks);
+    const inputs=technical.inputs??result.inputs;
+    if(Array.isArray(inputs))target.inputs=safePaths(inputs);
+    if(Array.isArray(result.acceptance)){
+      for(const candidate of records(result.acceptance)){
+        const original=plan.acceptance?.find(check=>check.id===candidate.id);
+        if(original&&!original.requirementIds.some(id=>task.requirementIds.includes(id)))throw new PlanningFailure('invalid-plan',['A correção local tentou alterar uma prova de aceite sem relação com a entrega afetada.'],task.id);
+        const checks=scopedChecks([candidate],original?[original]:[]);
+        const ids=new Set(checks.map(check=>check.id));
+        plan.acceptance=[...(plan.acceptance??[]).filter(check=>!ids.has(check.id)),...checks];
+      }
+    }
+  }
+  if(JSON.stringify({environment:plan.environment,tasks:plan.tasks,acceptance:plan.acceptance})===JSON.stringify({environment:options.plan.environment,tasks:options.plan.tasks,acceptance:options.plan.acceptance}))throw new PlanningFailure('no-progress',[`O reparo ${scope} não alterou nenhuma receita ou capacidade executável. Mudanças de título ou objetivo não podem substituir a entrega.`],task.id);
+  await repairGraph(plan,brief,'environment',options);
+  assertValidPlan(brief,plan);
+  plan.revision+=1;plan.briefId=brief.id;plan.briefRevision=brief.revision;
+  plan.status=options.finalize===false?'planning':'ready';
+  await options.save?.({brief,plan});
+  emitEvent(options.onEvent,{type:'replanned',message:`Contrato técnico de ${scope} corrigido; identidade, critérios e código da entrega preservados.`,subject:task.id});
+  return plan;
 }
 
 /** Repair only the affected engineering unit; product restrictions retain their original authority. */
@@ -505,6 +594,7 @@ export async function repairWorkPlan(options: RepairPlanOptions): Promise<Develo
   plan.status = "planning";
   const task = plan.tasks.find((candidate) => candidate.id === options.taskId);
   if (!task) return options.plan;
+  if(options.repairScope==='verification'||options.repairScope==='environment')return repairRestrictedWorkPlan(options,task,options.repairScope);
   const progress = { id: `plan:repair:${task.id}`, label: `Revisão do plano: ${task.title}`, stage: "plan" };
   emitProgress(options.onEvent, { ...progress, status: "running" });
   const brief = options.brief;

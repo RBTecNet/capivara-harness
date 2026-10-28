@@ -1,13 +1,45 @@
-import { identity, normalize } from './authority.js';
+import { allowedCapabilities, identity, inferredCapabilities, normalize, requestedCapabilities } from './authority.js';
 import { ordered } from './context.js';
 import { PlanningFailure } from './control.js';
-import type { DevelopmentPlan, ProductBrief, Verification, WorkUnit } from './types.js';
+import type { DevelopmentPlan, ProductBrief, Requirement, Verification, WorkUnit } from './types.js';
 
 export interface PlanIssue { code: string; subject: string; message: string; }
 const canonical = (text: string): string => normalize(text).replace(/[^\p{L}\p{N}+#.]+/gu, ' ').trim().replace(/\s+/g,' ');
 const unique = (items: string[]): string[] => [...new Set(items)];
 const outcome = (task: WorkUnit): string => canonical(task.goal);
 const output = (path: string): string => path.replaceAll('\\','/').replace(/^\.\//,'').replace(/\/$/,'');
+type InteractionKind = 'cli' | 'tui' | 'web' | 'desktop';
+/** A global product outcome belongs to its consumers, rather than every layer
+ * sharing its requirement ID. Foundation code can be checked before a UI exists. */
+export function requiredRequirementInterface(requirement: Requirement): InteractionKind | undefined {
+  if (['cli','tui','web','desktop'].includes(requirement.mode)) return requirement.mode as InteractionKind;
+  return requestedCapabilities(requirement.source.text).includes('browser') && (requirement.kind === 'interface' || /\b(?:fluxos?|flows?|intera\w*|execut\w*|navega\w*|browser)\b/.test(normalize(requirement.statement))) ? 'web' : undefined;
+}
+function dependsOn(plan: DevelopmentPlan, task: WorkUnit, prerequisite: string, seen = new Set<string>()): boolean {
+  if (seen.has(task.id)) return false;
+  seen.add(task.id);
+  return task.dependsOn.some(id => id === prerequisite || !!plan.tasks.find(candidate => candidate.id === id && dependsOn(plan,candidate,prerequisite,seen)));
+}
+export function preferredProofOwner(plan: DevelopmentPlan, requirementId: string): WorkUnit | undefined {
+  const consumers = plan.tasks.filter(task => task.requirementIds.includes(requirementId));
+  return consumers.filter(task => !consumers.some(other => other.id !== task.id && dependsOn(plan,other,task.id))).sort((left,right) => {
+    const weight = (task: WorkUnit): number => consumers.filter(other => other.id !== task.id && dependsOn(plan,task,other.id)).length;
+    return weight(right)-weight(left) || plan.tasks.indexOf(right)-plan.tasks.indexOf(left);
+  })[0];
+}
+const provesInterface = (check: Verification, requirementId: string, kind: InteractionKind): boolean => check.requirementIds.includes(requirementId) && !!check.command && check.level === 'behavior' && (check.kind === kind || kind === 'web' && check.requiredCapabilities.includes('browser'));
+export function requiredTaskInterfaces(brief: ProductBrief, plan: DevelopmentPlan, task: WorkUnit): InteractionKind[] {
+  const result = new Set<InteractionKind>();
+  for (const requirement of brief.requirements.filter(candidate => task.requirementIds.includes(candidate.id))) {
+    const kind = requiredRequirementInterface(requirement);
+    if (!kind) continue;
+    if (task.checks.some(check => provesInterface(check,requirement.id,kind))) { result.add(kind); continue; }
+    if ((plan.acceptance ?? []).some(check => provesInterface(check,requirement.id,kind))) continue;
+    const consumers = plan.tasks.filter(candidate => candidate.requirementIds.includes(requirement.id));
+    if (!consumers.some(other => other.id !== task.id && dependsOn(plan,other,task.id))) result.add(kind);
+  }
+  return [...result];
+}
 /** Equal prose is insufficient: independent deliveries can have identical generic goals. */
 export function sameDelivery(left: WorkUnit, right: WorkUnit): boolean {
   if (outcome(left) !== outcome(right)) return false;
@@ -103,12 +135,18 @@ export function validatePlan(brief: ProductBrief, plan: DevelopmentPlan): PlanIs
     for (const check of task.checks) {
       for (const id of check.requirementIds) if (!required.has(id)) issue('unknown-proof-requirement',check.id,`A prova cita requisito inexistente: ${id}.`);
       for (const id of check.constraintIds ?? []) if (!constraints.has(id)) issue('unknown-proof-constraint',check.id,`A prova cita restrição inexistente: ${id}.`);
+      if (!allowedCapabilities(brief, [...check.requiredCapabilities, ...inferredCapabilities(`${check.command ?? ''} ${(check.args ?? []).join(' ')}`), ...(check.kind === 'web' ? ['browser'] : [])])) issue('forbidden-proof-capability',check.id,'A receita usa uma capacidade incompatível com a autoridade atual; corrija a receita sem remover o resultado obrigatório.');
     }
   }
   for (const task of plan.tasks) for (const id of task.dependsOn) if (!taskIds.has(id)) issue('missing-task-dependency',task.id,`Dependência inexistente: ${id}.`);
   if (ordered(plan.tasks).unresolved.length) issue('task-cycle','tasks','O grafo de entregas contém ciclo ou referência ausente.');
   for (const requirement of brief.requirements) {
     if (!plan.tasks.some(task => task.requirementIds.includes(requirement.id))) issue('uncovered-requirement',requirement.id,'Nenhuma entrega cobre este requisito obrigatório.');
+    const browserOutcome = requiredRequirementInterface(requirement) === 'web' && (requirement.kind === 'interface' || requestedCapabilities(requirement.source.text).includes('browser'));
+    if (browserOutcome) {
+      const proof = [...plan.acceptance ?? [], ...plan.tasks.flatMap(task => task.checks)].some(check => check.requirementIds.includes(requirement.id) && check.command && check.level === 'behavior' && (check.kind === 'web' || check.requiredCapabilities.includes('browser')));
+      if (!proof) issue('unproven-interface-behavior',requirement.id,'O resultado exige comportamento real no navegador. Inclua uma receita executável de nível behavior, kind=web ou requiredCapabilities=[browser], vinculada a este requisito. Build, API e sintaxe não comprovam interação no navegador.');
+    }
     if (!requirement.binding) continue;
     const binding = requirement.binding;
     const nodes = plan.environment.filter(node => node.identity && canonical(node.identity.capability) === canonical(binding.capability) && node.identity.kind === binding.kind);

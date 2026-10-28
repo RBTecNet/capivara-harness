@@ -94,7 +94,7 @@ async function runCliAgent(request: AgentRequest): Promise<AgentResult> {
     } else return { status: 'unavailable', text: '', changedFiles: [], commands: [], issue: { kind: 'configuration', recoverable: true, message: `Provedor ${config.provider} não configurado como API nem CLI conhecida.` } };
     const instruction = [
       `Task role: ${request.role}. Workspace: ${request.workspace}.`,
-      request.readOnly ? 'Read-only task. Return the requested answer without modifying product files.' : 'Implement the supplied task in this workspace. Report actual changes and observed verification results.',
+      request.readOnly ? 'Read-only task. Return the requested answer without modifying product files.' : request.purpose === 'environment-recovery' ? 'Prepare the supplied capability within its installation scope. Report its concrete invocation and observed readiness.' : 'Implement the supplied task in this workspace. Report actual changes and observed verification results.',
       request.constraints?.forbiddenCapabilities?.length ? `Excluded product capabilities: ${request.constraints.forbiddenCapabilities.join(', ')}. Use verification compatible with these constraints.` : '',
       request.constraints?.allowSystemInstall === true ? '' : 'Install necessary dependencies locally in this workspace or an isolated project environment; system package installation is not authorized.',
       request.instruction, request.context,

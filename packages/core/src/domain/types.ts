@@ -77,6 +77,8 @@ export interface ProductBrief {
   targets: TargetPlatform[];
   requirements: Requirement[];
   constraints: ProductConstraint[];
+  /** Original literal authority survives corrections to the harness interpretation. */
+  authorityCorrections?: { constraintId: string; source: Source; before: { forbiddenCapabilities: string[]; requiredCapabilities: string[] }; after: { forbiddenCapabilities: string[]; requiredCapabilities: string[] }; reason: string }[];
   decisions: Decision[];
   gaps: Gap[];
 }
@@ -103,7 +105,7 @@ export interface EnvironmentNode {
   identity?: CapabilityIdentity;
   requirementIds?: string[];
   /** Operational bindings made available to consumers after readiness is proven. */
-  provides?: { command?: string[]; env?: Record<string, string>; paths?: string[]; inputs?: string[] };
+  provides?: { command?: string[]; aliases?: string[]; invocations?: { command: string[]; aliases?: string[] }[]; env?: Record<string, string>; paths?: string[]; inputs?: string[] };
 }
 
 export interface IntegrationContract {
@@ -115,12 +117,26 @@ export interface IntegrationContract {
   requirementIds: string[];
 }
 
+export type AssertionJson = null | boolean | number | string | AssertionJson[] | { [key: string]: AssertionJson };
+export type VerificationAssertion =
+  | { type: "contains"; value: string; source?: "stdout" | "stderr" | "output" }
+  | { type: "regex"; pattern: string; flags?: string; source?: "stdout" | "stderr" | "output" }
+  | { type: "exit"; value: number }
+  | { type: "empty"; source?: "stdout" | "stderr" | "output" }
+  | { type: "json"; source?: "stdout" | "stderr"; path?: (string | number)[]; equals?: AssertionJson; exists?: boolean }
+  | { type: "all"; assertions: VerificationAssertion[] }
+  | { type: "any"; assertions: VerificationAssertion[] };
+
 export interface Verification {
   id: string;
   kind: "command" | "cli" | "tui" | "web" | "desktop";
   command?: string;
   args?: string[];
   expected?: string;
+  /** A human criterion is not a machine predicate. This is the explicit witness selector. */
+  assertion?: VerificationAssertion;
+  /** A malformed model proposal stays visibly invalid after normalization. */
+  assertionIssue?: string;
   expectedExitCode?: number;
   input?: string[];
   steps?: { input?: string; waitFor?: string; timeoutMs?: number }[];
@@ -135,6 +151,10 @@ export interface Verification {
   level?: "syntax" | "build" | "behavior";
   outputs?: string[];
   dependsOn?: string[];
+  /** A documented manifest adapter is a candidate invocation, never an approval. */
+  recipeCandidate?: { kind: "package-script"; manifest: string; manifestHash: string; script: string; expandedArgv: string[]; target: string; original: { command: string; args?: string[]; cwd?: string } };
+  /** Populated by a concrete runtime adapter, not accepted as a model assertion. */
+  instrument?: { provider: string; output: "runner"; originalKind?: Verification["kind"]; transformations?: { original: { command?: string; args?: string[]; cwd?: string }; removedPreparations: { command: string; args: string[]; cwd: string }[]; reason: string }[] };
   /** Dedicated proof that product inputs actually consume the mandatory provider. */
   conformance?: CapabilityIdentity & { requirementId: string; productInputs: string[]; providerCommand?: string[]; providerInputs?: string[]; artifacts?: string[] };
 }

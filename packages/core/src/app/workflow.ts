@@ -254,18 +254,26 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
       if (options.signal.aborted) throw new Cancelled();
       const state = store.read().execution as BuildState | undefined;
       const outcome = await timed('build', () => recoverOperation(() => runBuild({
-        workspace, brief: brief!, plan: plan!, agent: invoke, allowSystemInstall, maxConcurrent, retrySuspended: options.retrySuspended === true, configurationRevision: digest(JSON.stringify({ config, reviewer, allowSystemInstall })), signal: options.signal, contextChars: contextBudget(),
+        workspace, brief: brief!, plan: plan!, domainCalls, agent: invoke, allowSystemInstall, maxConcurrent, retrySuspended: options.retrySuspended === true, configurationRevision: digest(JSON.stringify({ config, reviewer, allowSystemInstall })), signal: options.signal, contextChars: contextBudget(),
         ...(state ? { state } : {}),
         onEvent: event,
-        onState: async next => { await persist({ execution: next }); },
+        onState: async (next,currentPlan) => { plan=currentPlan;await persist({ execution: next,plan:currentPlan }); },
         repairPlan: async (incident, task) => {
-          plan = await repairWorkPlan({ ...hooks, contextChars: incident.contextChars ?? contextBudget(), brief: brief!, plan: plan!, taskId: task.id, problem: `${incident.message}\n${incident.evidence}\n${incident.action}` });
-          await persist({ plan });
-          return plan;
+          const progress=(store.read().execution as BuildState|undefined)?.tasks[task.id];
+          const proposal=progress?.checkpoint?.directory;
+          const currentInventory=await inventory(proposal??workspace,documents.length>0);
+          const repairInput={...plan!,tasks:plan!.tasks.map(unit=>unit.id===task.id?{...unit,checks:task.checks}:unit)};
+          return repairWorkPlan({ ...hooks, save:async()=>{}, contextChars: incident.contextChars ?? contextBudget(), brief: brief!, plan: repairInput, taskId: task.id, ...(incident.repairScope?{repairScope:incident.repairScope}:{}), problem: `${incident.message}\n${incident.evidence}\n${incident.action}\n${proposal?`PRIVATE UNINTEGRATED PROPOSAL: ${proposal}. Successful local checks do not mean this work has been integrated.`:'CANONICAL PROJECT STATE'}\nCURRENT FILE INVENTORY\n${currentInventory}` });
         },
       }), { signal: options.signal, announce }));
       plan = outcome.plan;
-      await persist({ plan, execution: outcome.state, status: outcome.status === 'cancelled' ? 'cancelled' : outcome.status === 'complete' ? 'working' : 'waiting' });
+      const blockers = outcome.state.blockers ?? outcome.incidents.slice(-1);
+      const failure = outcome.status === 'waiting' ? {
+        kind: blockers[0]?.kind ?? 'controller',
+        message: blockers.map(item => `${item.subject}: ${item.message}${item.evidence ? `\n${item.evidence}` : ''}`).join('\n\n') || 'A execução não concluiu; o motor não forneceu uma causa de suspensão.',
+        fingerprint: digest(JSON.stringify(blockers)), at: new Date().toISOString(),
+      } : null;
+      await persist({ plan, execution: outcome.state, lastFailure: failure, status: outcome.status === 'cancelled' ? 'cancelled' : outcome.status === 'complete' ? 'working' : 'waiting' });
       if (answeredGaps()) {
         reopenChangedAnswers();
         brief = await timed('init', () => runInit({ ...hooks, request, documents, repository, repositoryConstraints, existing: brief! }));
@@ -276,7 +284,7 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
       if (outcome.status === 'complete' && !brief.gaps.some(gap => gap.status === 'pending')) { await persist({ status: 'complete' }); announce('Aplicação concluída com as verificações pertinentes registradas.'); return { status: 'complete', brief, plan }; }
       if (outcome.status === 'complete') await persist({ status: 'waiting' });
       if (outcome.status === 'cancelled') throw new Cancelled();
-      announce('Não há outra ação executável com os insumos e recursos atuais. Pendências e tentativas estão registradas; trabalho independente concluído foi preservado.');
+      announce(`Execução incompleta; entrega não validada. ${failure?.message ?? 'Há lacunas do pedido ainda pendentes.'}`);
       return { status: 'waiting', brief, plan };
     }
   } catch (error) {

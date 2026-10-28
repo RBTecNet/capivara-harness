@@ -90,3 +90,39 @@ describe('mandatory provider conformance uses product execution provenance',()=>
     expect(issues[0]?.message).toContain('behavior label');
   });
 });
+
+describe('runtime conformance through real package-manager descendants',()=>{
+  it('accepts npm → Node acceptance → imported product API with current load hashes',async()=>{
+    const {prepareEnvironmentNode}=await import('../../src/execution/environment.js');
+    const {inputSnapshot}=await import('../../src/execution/files.js');
+    const root=await workspace(),product=brief();
+    await writeFile(join(root,'product-api.mjs'),'export function answer(){return 42;}');
+    await writeFile(join(root,'acceptance.mjs'),'import {answer} from "./product-api.mjs";if(answer()!==42)throw Error("API failed");console.log("API_OK 42");');
+    await writeFile(join(root,'package.json'),JSON.stringify({scripts:{verify:`"${process.execPath}" acceptance.mjs`}}));
+    const check:Verification={...runtimeCheck('npm',['run','verify']),expected:'The integrated product API returns its actual answer.',assertion:{type:'contains',value:'API_OK 42',source:'stdout'},inputs:['product-api.mjs','acceptance.mjs','package.json'],conformance:{...runtimeCheck().conformance!,productInputs:['product-api.mjs']}};
+    const proposal=plan(product,[check]);
+    const prepared=await prepareEnvironmentNode(root,proposal.environment[0]!,product,executeCommand);expect(prepared.ready).toBe(true);
+    const result=await runVerification(root,product,{...unit([check]),id:'$acceptance'},proposal,check,executeCommand,runTerminal,{operational:prepared.operational});
+    expect(result.evidence.passed).toBe(true);expect(result.evidence.assertionStatus).toBe('ready');
+    expect(result.evidence.provenance?.command[0]).toBe('npm');
+    const witnesses=result.evidence.provenance?.runtimeWitnesses??[];expect(witnesses).toHaveLength(1);
+    const hash=(await inputSnapshot(root,['product-api.mjs']))['product-api.mjs'];
+    expect(witnesses[0]!.inputs).toEqual({'product-api.mjs':hash});expect(witnesses[0]!.argv[1]).toBe(join(root,'acceptance.mjs'));
+    expect(witnesses.every(witness=>!('acceptance.mjs' in witness.inputs))).toBe(true);
+    expect(await validateConformance(product,proposal,prepared.operational,[result.evidence],root)).toEqual([]);
+  });
+
+  it('rejects a different runtime and a version probe even when npm and the product-source snapshot are present',async()=>{
+    const {prepareEnvironmentNode}=await import('../../src/execution/environment.js');
+    for(const probe of [false,true]){
+      const root=await workspace(),product=brief();await writeFile(join(root,'product-api.mjs'),'export function answer(){return 42;}');
+      const script=probe?`"${process.execPath}" --version`:process.platform==='win32'?'cmd /c echo API_OK 42':'printf "API_OK 42"';
+      await writeFile(join(root,'package.json'),JSON.stringify({scripts:{verify:script}}));
+      const check:Verification={...runtimeCheck('npm',['run','verify']),expected:probe?'The runtime is available.':'The API returns its answer.',assertion:probe?{type:'regex',pattern:'v\\d+\\.\\d+',source:'stdout'}:{type:'contains',value:'API_OK 42',source:'stdout'},inputs:['product-api.mjs','package.json'],conformance:{...runtimeCheck().conformance!,productInputs:['product-api.mjs']}};
+      const proposal=plan(product,[check]);const prepared=await prepareEnvironmentNode(root,proposal.environment[0]!,product,executeCommand);expect(prepared.ready).toBe(true);
+      const result=await runVerification(root,product,{...unit([check]),id:'$acceptance'},proposal,check,executeCommand,runTerminal,{operational:prepared.operational});
+      expect(result.evidence.passed).toBe(true);expect(result.evidence.provenance?.inputs['product-api.mjs']).toBeDefined();expect(result.evidence.provenance?.runtimeWitnesses??[]).toEqual([]);
+      const issues=await validateConformance(product,proposal,prepared.operational,[result.evidence],root);expect(issues[0]?.code).toBe('unproven-product-provider-usage');
+    }
+  });
+});

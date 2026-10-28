@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rm, mkdir, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runBuild } from '../../src/execution/build.js';
@@ -16,6 +16,40 @@ const complete=(text=''):AgentResult=>({status:'complete',text,commands:[],chang
 const brief:ProductBrief={schema:'capivara/product/1',status:'ready',id:'b',revision:1,name:'Independent CLI commands',summary:'Commands',request:'Build independent alpha and beta CLI commands.',modes:['cli'],targets:['portable'],constraints:[],gaps:[],decisions:[],requirements:['alpha','beta'].map(id=>({id,statement:`${id} command prints ${id}`,mode:'cli',source:{kind:'request',reference:'request',text:`${id} command prints ${id}`}}))};
 function unit(id:string,files=[`${id}.mjs`],dependsOn:string[]=[]):WorkUnit{return{id,title:id,goal:`Print ${id}`,instructions:`Write ${files.join(', ')}`,requirementIds:[id],dependsOn,environmentIds:[],contractIds:[],files,criteria:[`Print ${id}`],checks:[{id:`check-${id}`,kind:'cli',command:process.execPath,args:files[0]!.endsWith('.json')?['-e',`console.log(require('./${files[0]}').join(','))`]:[files[0]!],expected:`contains:${id}`,requirementIds:[id],requiredCapabilities:[]}],blockedBy:[],risk:'normal'};}
 function plan(tasks:WorkUnit[]):DevelopmentPlan{return{schema:'capivara/plan/1',status:'ready',revision:1,briefId:'b',briefRevision:1,environment:[],contracts:[],tasks};}
+
+it('recovers a throwing scoped planner through an actual different proof recipe without reediting the product',async()=>{
+  const root=await workspace();const product={...brief,requirements:brief.requirements.slice(0,1)};
+  const task=unit('alpha');task.checks=[{...task.checks[0]!,kind:'web',requiredCapabilities:['browser']}];
+  let editors=0,recipes=0,plans=0;
+  const result=await runBuild({workspace:root,brief:product,plan:plan([task]),signal:AbortSignal.timeout(3000),repairPlan:async problem=>{plans++;expect(problem.repairScope).toBe('verification');throw new Error('The model returned an unchanged plan.');},agent:async request=>{
+    if(request.role==='editor'){editors++;await writeFile(join(request.workspace,'alpha.mjs'),'console.log("alpha");');return complete();}
+    if(request.role==='repair'){recipes++;return complete(recipes===1?'not a recipe':JSON.stringify({checks:[unit('alpha').checks[0]]}));}
+    return complete('{"approved":true,"findings":[]}');
+  }});
+  expect(result.status,JSON.stringify(result.incidents)).toBe('complete');
+  expect(editors).toBe(1);expect(plans).toBe(1);expect(recipes).toBe(2);
+  expect(result.state.tasks.alpha?.actions?.find(action=>action.action==='replan')).toMatchObject({outcome:'failed',failure:'The model returned an unchanged plan.'});
+  expect(result.state.evidence.some(proof=>proof.passed&&proof.kind==='cli')).toBe(true);
+});
+
+it.each(['before-call','after-result'] as const)('resumes an interrupted reconciliation %s without losing its recovery transition or replaying a completed planner',async point=>{
+  const root=await workspace();const product={...brief,requirements:brief.requirements.slice(0,1)};
+  const task=unit('alpha');task.checks=[{...task.checks[0]!,kind:'web',requiredCapabilities:['browser']}];
+  const controller=new AbortController();let durable:BuildState|undefined,editors=0,plans=0;
+  const agent:BuildOptions['agent']=async request=>{
+    if(request.role==='editor'){editors++;await writeFile(join(request.workspace,'alpha.mjs'),'console.log("alpha");');return complete();}
+    if(request.role==='repair')return complete('not a recipe');
+    return complete('{"approved":true,"findings":[]}');
+  };
+  const repairPlan:NonNullable<BuildOptions['repairPlan']>=async()=>{plans++;return plan([unit('alpha')]);};
+  const first=await runBuild({workspace:root,brief:product,plan:plan([task]),agent,repairPlan,signal:controller.signal,onState:async state=>{durable=structuredClone(state);if(state.tasks.alpha?.actions?.some(action=>action.action==='replan'&&action.outcome==='running'&&(point==='before-call'||action.planProposal)))controller.abort();}});
+  expect(first.status).toBe('cancelled');expect(plans).toBe(point==='before-call'?0:1);expect(editors).toBe(1);
+  expect(durable?.pendingReplans?.alpha).toBeDefined();
+  if(point==='after-result')expect(durable?.tasks.alpha?.actions?.find(action=>action.action==='replan')?.planProposal).toBeDefined();
+  const resumed=await runBuild({workspace:root,brief:product,plan:first.plan,state:JSON.parse(JSON.stringify(durable)),agent,repairPlan,signal:AbortSignal.timeout(3000)});
+  expect(resumed.status,JSON.stringify(resumed.incidents)).toBe('complete');expect(plans).toBe(1);expect(editors).toBe(1);
+  expect(resumed.state.pendingReplans).toEqual({});
+});
 
 it('overlaps independent editors, integrates both products, and never overlaps conflicting writes',async()=>{
   for(const conflict of [false,true]){
@@ -81,6 +115,22 @@ it('resumes recorded verification and review without reimplementing accepted sou
   const before=result.state.evidence.length;
   const again=await runBuild({workspace:root,brief:product,plan:result.plan,state:JSON.parse(JSON.stringify(result.state)),agent,signal:AbortSignal.timeout(3000)});
   expect(again.status).toBe('complete');expect(edits).toBe(1);expect(reviews).toBe(1);expect(again.state.evidence.length).toBe(before);
+});
+
+it('prioritizes the current review source over a stale focus file instead of repeating an incomplete inspection',async()=>{
+  const root=await workspace();await writeFile(join(root,'old-guide.md'),'old guidance '.repeat(750));await writeFile(join(root,'alpha.mjs'),'// '+ 'existing source '.repeat(350)+'\nconsole.log("alpha");');
+  const product={...brief,requirements:brief.requirements.slice(0,1)},task=unit('alpha');task.files.push('old-guide.md');
+  const original=plan([task]);const state:BuildState={schema:'capivara/build/1',planRevision:1,environment:{},evidence:[],incidents:[],updatedAt:new Date().toISOString(),tasks:{alpha:{status:'pending',revision:'',attempts:0,changedFiles:[],findings:[],strategy:'implement',contextFocus:['old-guide.md']}}};
+  let inspections=0,editors=0;
+  const result=await runBuild({workspace:root,brief:product,plan:original,state,contextChars:14000,signal:AbortSignal.timeout(3000),agent:async request=>{
+    if(request.role!=='reviewer'){editors++;return complete();}
+    inspections++;
+    const receipt=request.context?.split('\n').find(line=>line.startsWith('SOURCE ')&&line.includes('"path":"alpha.mjs"'));
+    expect(receipt).toBeDefined();
+    if(inspections===1){expect(JSON.parse(receipt!.slice(7)).complete).toBe(false);return complete('{"approved":false,"findings":[{"kind":"product","file":"alpha.mjs","observed":"The supplied excerpt is insufficient to establish the alpha branch.","expected":"The alpha command prints alpha.","evidenceType":"source"}]}');}
+    expect(JSON.parse(receipt!.slice(7)).complete).toBe(true);return complete('{"approved":true,"findings":[]}');
+  }});
+  expect(result.status,JSON.stringify(result.incidents)).toBe('complete');expect(inspections).toBe(2);expect(editors).toBe(0);
 });
 
 it('cannot declare completion while a mandatory acceptance proof fails',async()=>{
@@ -187,4 +237,97 @@ it('distinguishes unknown product inputs from an explicitly input-free verificat
   expect(unknown.evidence.passed).toBe(false);expect(unknown.classification).toBe('instrument');expect(unknown.result).toBeNull();
   const explicit=await runVerification(root,brief,delivery,plan([delivery]),{...check,inputs:[]},executeCommand,runTerminal);
   expect(explicit.evidence.passed).toBe(true);
+});
+
+
+it('continues an ineffective environment repair with diagnosis and isolated recovery instead of suspending executable work',async()=>{
+  const root=await workspace();let repairs=0,diagnoses=0,editors=0;
+  const product={...brief,requirements:brief.requirements.slice(0,1)};
+  const task=unit('alpha');task.environmentIds=['local-tool'];
+  const proposal=plan([task]);proposal.environment=[{id:'local-tool',name:'local tool',kind:'tool',dependsOn:[],targets:[],reason:'Required local capability',identity:{capability:'local-tool',kind:'cli',provider:'local-tool'},check:{command:'.tools/bin/tool',args:['--version'],capabilities:[]},prepare:[]}];
+  const result=await runBuild({workspace:root,brief:product,plan:proposal,signal:AbortSignal.timeout(10000),agent:async request=>{
+    if(request.purpose==='environment-recovery'){
+      expect(request.workspace).not.toBe(root);expect(request.context).not.toContain('Print alpha');
+      if(request.readOnly){diagnoses++;return complete(JSON.stringify({cause:'The first operation changed product source rather than installing its provider.',fix:'Create the executable local provider at .tools/bin/tool; preserve application source.'}));}
+      repairs++;
+      if(repairs===1)await writeFile(join(request.workspace,'unrelated-product.mjs'),"throw new Error('wrong operation');");
+      else{await mkdir(join(request.workspace,'.tools/bin'),{recursive:true});await writeFile(join(request.workspace,'.tools/bin/tool'),'#!/bin/sh\nprintf "local-tool 1\\n"\n');await chmod(join(request.workspace,'.tools/bin/tool'),0o755);}
+      return complete('{}');
+    }
+    if(request.role==='reviewer')return complete('{"approved":true}');
+    editors++;await writeFile(join(request.workspace,'alpha.mjs'),"console.log('alpha');");return complete();
+  }});
+  expect(result.status).toBe('complete');expect(repairs).toBe(2);expect(diagnoses).toBe(1);expect(editors).toBe(1);
+  expect(result.state.environment['local-tool']?.ready).toBe(true);
+  await expect(readFile(join(root,'unrelated-product.mjs'))).rejects.toMatchObject({code:'ENOENT'});
+  expect(result.incidents.some(item=>/out-of-scope/.test(item.message))).toBe(true);
+});
+
+it('validates existing partial source before asking another editor to implement it',async()=>{
+  const root=await workspace();await writeFile(join(root,'alpha.mjs'),"console.log('alpha');");let editors=0;
+  const result=await runBuild({workspace:root,brief:{...brief,requirements:brief.requirements.slice(0,1)},plan:plan([unit('alpha')]),signal:AbortSignal.timeout(3000),agent:async request=>{
+    if(request.role==='reviewer')return complete('{"approved":true}');editors++;return complete();
+  }});
+  expect(result.status).toBe('complete');expect(editors).toBe(0);expect(result.state.evidence.some(item=>item.passed)).toBe(true);
+});
+
+it('recovers a provider damaged after publication through the same active recovery path',async()=>{
+  const {writeFileSync}=await import('node:fs');
+  const root=await workspace();await mkdir(join(root,'.tools/bin'),{recursive:true});
+  const tool=join(root,'.tools/bin/tool');await writeFile(tool,'#!/bin/sh\nprintf "ready\\n"\n',{mode:0o755});
+  const product={...brief,requirements:brief.requirements.slice(0,1)};
+  const task=unit('alpha');task.environmentIds=['tool'];const proposed=plan([task]);
+  proposed.environment=[{id:'tool',name:'Tool',kind:'tool',dependsOn:[],targets:[],reason:'Local tool',identity:{capability:'tool',kind:'cli',provider:'local'},check:{command:'.tools/bin/tool',args:['--version']},prepare:[]}];
+  let damaged=false,repairs=0;
+  const outcome=await runBuild({workspace:root,brief:product,plan:proposed,signal:AbortSignal.timeout(10000),onEvent:event=>{
+    if(!damaged&&event.type==='transition'&&event.message.includes('→ complete')){damaged=true;writeFileSync(tool,'#!/bin/sh\nexit 7\n',{mode:0o755});}
+  },agent:async request=>{
+    if(request.purpose==='environment-recovery'){repairs++;await writeFile(join(request.workspace,'.tools/bin/tool'),'#!/bin/sh\nprintf "ready\\n"\n',{mode:0o755});return complete('{}');}
+    if(request.role==='reviewer')return complete('{"approved":true}');await writeFile(join(request.workspace,'alpha.mjs'),"console.log('alpha');");return complete();
+  }});
+  expect(damaged).toBe(true);expect(repairs).toBe(1);expect(outcome.status).toBe('complete');
+  expect(outcome.state.environment.tool?.ready).toBe(true);
+});
+
+it('repairs an assertion format through concrete observations and independent interpretation without reediting product code',async()=>{
+  const root=await workspace();let editors=0,assertionRepairs=0,assertionDiagnosis=0;
+  const task=unit('alpha');task.checks[0]!.expected='The command must demonstrate its requested alpha behavior.';
+  const outcome=await runBuild({workspace:root,brief:{...brief,requirements:brief.requirements.slice(0,1)},plan:plan([task]),signal:AbortSignal.timeout(5000),agent:async request=>{
+    if(request.instruction.startsWith('Bind a mechanical assertion')){
+      const payload=JSON.parse(request.context!);expect(payload.observations[0].observation.stdout).toContain('alpha');
+      if(request.role==='repair'){assertionRepairs++;return complete('{"assertions":[{"checkId":"check-alpha","assertion":"It prints alpha successfully."}]}');}
+      assertionDiagnosis++;return complete('{"assertions":[{"checkId":"check-alpha","assertion":{"type":"contains","source":"stdout","value":"alpha"}}]}');
+    }
+    if(request.role==='reviewer')return complete('{"approved":true}');
+    editors++;await writeFile(join(request.workspace,'alpha.mjs'),"console.log('alpha');");return complete();
+  }});
+  expect(outcome.status).toBe('complete');expect(editors).toBe(1);expect(assertionRepairs).toBe(1);expect(assertionDiagnosis).toBe(1);
+  expect(outcome.state.evidence.some(item=>item.assertionStatus==='missing'&&!item.passed)).toBe(true);
+  expect(outcome.state.tasks.alpha?.checks?.[0]?.expected).toBe('The command must demonstrate its requested alpha behavior.');
+  expect(outcome.state.tasks.alpha?.checks?.[0]?.assertion).toEqual({type:'contains',source:'stdout',value:'alpha'});
+});
+
+it.each([{kind:'command' as const,mode:'cli' as const},{kind:'cli' as const,mode:'api' as const}])('classifies a wrong generated $kind instrument assertion in a $mode product before editing successful code',async({kind,mode})=>{
+  const root=await workspace();let edits=0,diagnoses=0;
+  const task=unit('alpha');task.checks=[{...task.checks[0]!,kind,expected:'The product behavior test succeeds.',assertion:{type:'contains',value:'# pass 1'}}];
+  const original=plan([task]);
+  const outcome=await runBuild({workspace:root,brief:{...brief,modes:[mode],requirements:[{...brief.requirements[0]!,mode:'shared'}]},plan:original,signal:AbortSignal.timeout(5000),agent:async request=>{
+    if(request.instruction.startsWith('Classify a successful verification')){diagnoses++;return complete('{"kind":"instrument","cause":"The runner reports a successful result with a different presentation; its generated summary assertion is wrong.","fix":"Bind an assertion to the actually observed alpha output, preserving the behavior criterion."}');}
+    if(request.instruction.startsWith('Bind a mechanical assertion'))return complete('{"assertions":[{"checkId":"check-alpha","assertion":{"type":"contains","source":"stdout","value":"alpha"}}]}');
+    if(request.role==='reviewer')return complete('{"approved":true}');edits++;await writeFile(join(request.workspace,'alpha.mjs'),"console.log('alpha');");return complete();
+  }});
+  expect(outcome.status).toBe('complete');expect(edits).toBe(1);expect(diagnoses).toBe(1);
+  const negative=outcome.state.evidence.find(item=>!item.passed)!;expect(negative.classification).toBe('product');
+  expect(outcome.state.proofInterpretations?.some(item=>item.evidenceId===negative.id&&item.classification==='instrument')).toBe(true);
+  expect(outcome.state.evidence.some(item=>item.passed)).toBe(true);
+});
+
+it('resumes an interrupted verification state without replaying its editor or reusing a cancelled observation',async()=>{
+  const root=await workspace();await writeFile(join(root,'alpha.mjs'),"console.log('alpha');");
+  const controller=new AbortController();let probes=0,editors=0;
+  const options={workspace:root,brief:{...brief,requirements:brief.requirements.slice(0,1)},plan:plan([unit('alpha')]),agent:async(request:Parameters<BuildOptions['agent']>[0])=>{if(request.role==='reviewer')return complete('{"approved":true}');editors++;return complete();}};
+  const interrupted=await runBuild({...options,signal:controller.signal,executeCommand:async request=>{const result=await executeCommand(request);probes++;controller.abort();return {...result,cancelled:true,exitCode:null};}});
+  expect(interrupted.status).toBe('cancelled');expect(interrupted.state.tasks.alpha?.pendingControlState).toBeTruthy();
+  const resumed=await runBuild({...options,state:JSON.parse(JSON.stringify(interrupted.state)),signal:AbortSignal.timeout(4000),executeCommand:async request=>{probes++;return executeCommand(request);}});
+  expect(resumed.status).toBe('complete');expect(probes).toBe(2);expect(editors).toBe(0);
 });

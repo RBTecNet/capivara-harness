@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, writeFile, unlink, lstat, glob, stat, realpath } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readdir, readFile, writeFile, unlink, lstat, glob, stat, realpath, rename } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep, matchesGlob } from 'node:path';
 
 const GENERATED = new Set(['.git', '.capivara-next', '.project-inputs', 'node_modules', '.venv', 'venv', '__pycache__', 'target', 'dist', 'obj', '.next']);
@@ -72,10 +72,37 @@ export async function changedSince(workspace: string, before: SourceSnapshot): P
   return [...result];
 }
 export async function restoreFiles(workspace: string, before: SourceSnapshot, files: readonly string[]): Promise<void> {
+  let quarantine:string|undefined;
+  const preserveEntry=async(path:string):Promise<void>=>{
+    if(!quarantine){
+      const control=join(workspace,'.capivara-next');
+      const info=await lstat(control).catch(()=>null);
+      if(info&&!info.isDirectory())throw new Error('Source restoration cannot use a linked or non-directory harness control path. The inspected files remain preserved; do not follow that path.');
+      await mkdir(control,{recursive:true});
+      quarantine=join(control,`source-protection-${randomUUID()}`);await mkdir(quarantine);
+    }
+    await rename(path,join(quarantine,randomUUID()));
+  };
+  const safeParents=async(target:string):Promise<void>=>{
+    let current=resolve(workspace);
+    for(const part of relative(current,dirname(target)).split(sep).filter(Boolean)){
+      current=join(current,part);
+      const info=await lstat(current).catch(error=>{if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;});
+      if(info&&!info.isDirectory())await preserveEntry(current);
+      if(!info||!info.isDirectory())await mkdir(current);
+    }
+  };
   for (const name of files) {
     const target = inside(workspace,name), content = before.files.get(name);
+    await safeParents(target);
     if (content === undefined) await unlink(target).catch(()=>undefined);
-    else { await mkdir(dirname(target),{recursive:true}); await writeFile(target,content); }
+    else {
+      const info=await lstat(target).catch(error=>{if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;});
+      if(info&&!info.isFile())await preserveEntry(target);
+      const staged=join(dirname(target),`.capivara-restore-${randomUUID()}`);
+      try{await writeFile(staged,content,{flag:'wx',mode:info?.isFile()?info.mode&0o777:0o644});await rename(staged,target);}
+      finally{await unlink(staged).catch(()=>undefined);}
+    }
   }
 }
 export async function backup(workspace: string, task: string, before: SourceSnapshot): Promise<void> {

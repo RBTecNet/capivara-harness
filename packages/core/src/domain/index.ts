@@ -1,8 +1,9 @@
 export * from "./types.js";
+export { normalizeVerificationAssertion, verificationAssertionStatus } from './assertions.js';
 export { PlanningFailure, PlanningProgress } from "./control.js";
-export { assertValidPlan, reconcilePlan, reconcileChecks, sameDelivery, validatePlan } from "./reconcile.js";
+export { assertValidPlan, reconcilePlan, reconcileChecks, sameDelivery, validatePlan, requiredRequirementInterface, requiredTaskInterfaces, preferredProofOwner } from "./reconcile.js";
 export type { PlanIssue } from "./reconcile.js";
-export { runInit, resolveQuestions, applicableQuestion, splitText } from "./init.js";
+export { runInit, resolveQuestions, applicableQuestion, splitText, reconcileAuthority } from "./init.js";
 export { runPlan, repairWorkPlan, normalizeEnvironment, normalizeTasks, normalizeChecks } from "./plan.js";
 export type { RepairPlanOptions } from "./plan.js";
 export { contextForTask, packetText, ordered, ContextTooLarge } from "./context.js";

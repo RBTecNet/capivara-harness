@@ -1,10 +1,11 @@
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, stat, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { DevelopmentPlan, ProductBrief, Verification } from '../domain/types.js';
 import type { CommandResult } from '../runtime/types.js';
 import type { OperationalEnvironment } from './environment.js';
 import type { VerificationEvidence } from './types.js';
 import { digest, inside, sourceFiles } from './files.js';
+import type { ProviderWitness } from '../runtime/provider-observation.js';
 
 export interface ObservedArtifact { hash: string; modified: string; changed: string; }
 export interface ConformanceProvenance {
@@ -17,6 +18,7 @@ export interface ConformanceProvenance {
   exitCode: number | null;
   cancelled: boolean;
   timedOut: boolean;
+  runtimeWitnesses?: ProviderWitness[];
 }
 export interface ConformanceObservation {
   workspace: string; command: string | string[]; cwd: string;
@@ -113,14 +115,25 @@ export async function validateConformance(brief:ProductBrief,plan:DevelopmentPla
       if(binding.kind==='sdk'&&proof.level!=='build'){reasons.push('A mandatory SDK needs an observed build, a produced artifact and a dependent functional execution; a behavior label on its compiler output is insufficient.');continue;}
       if(['runtime','service'].includes(binding.kind)&&proof.level!=='behavior'){reasons.push('A mandatory runtime or service must execute the product behavior, rather than merely generate an artifact.');continue;}
       const args=invocationArguments(observed.command);
-      if(!args){reasons.push('The actual invocation is an ambiguous shell program. Declare separate ordered recipes.');continue;}
       const productFiles=await sourceFiles(workspace,claim.productInputs);
       if(!productFiles.length){reasons.push('No existing product inputs are bound to this proof.');continue;}
       const canonical=await observedFiles(workspace,claim.productInputs);
       if(productFiles.some(path=>observed.inputs[path]!==canonical[path]?.hash)){reasons.push('Product inputs changed or were not captured before the provider invocation.');continue;}
-      if(!productFiles.some(path=>consumes(observed,path,provider.command?.length??1))){reasons.push('The actual provider invocation does not consume a concrete product input. A version/help probe is not usage.');continue;}
+      let runtimeWitness=false;
+      if(binding.kind==='runtime'&&provider.command?.length){
+        const selected=await realpath(provider.command[0]!).catch(()=>provider.command![0]!);
+        for(const witness of observed.runtimeWitnesses??[]){
+          if(witness.source!=='node-load-hook'||witness.execArgv.some(arg=>['--check','-c','--version','--help'].includes(arg)))continue;
+          const executable=await realpath(witness.execPath).catch(()=>witness.execPath);
+          const actual=[executable,...witness.execArgv,...witness.argv.slice(1)];
+          if(!matchingPrefix(actual,[selected,...provider.command.slice(1)],observed.workspace,operational.root??workspace,observed.cwd))continue;
+          if(productFiles.some(path=>witness.inputs[path]===canonical[path]?.hash)){runtimeWitness=true;break;}
+        }
+      }
+      const directConsumption=Boolean(args&&productFiles.some(path=>consumes(observed,path,provider.command?.length??1)));
+      if(!directConsumption&&!runtimeWitness){reasons.push('Neither the actual invocation nor a concrete descendant runtime loaded a current product input. Readiness and instrument scripts are insufficient.');continue;}
       if(provider.command?.length){
-        if(!matchingPrefix(args,provider.command,observed.workspace,operational.root??workspace,observed.cwd)){reasons.push('The command that ran is not the mandatory operational provider.');continue;}
+        if(!runtimeWitness&&(!args||!matchingPrefix(args,provider.command,observed.workspace,operational.root??workspace,observed.cwd))){reasons.push('The command that ran is not the mandatory operational provider.');continue;}
         if(claim.providerCommand?.length&&!matchingPrefix(claim.providerCommand,provider.command,workspace,operational.root??workspace)){reasons.push('The declared provider invocation contradicts its operational binding.');continue;}
       }else{
         const providerInputs=claim.providerInputs??[];

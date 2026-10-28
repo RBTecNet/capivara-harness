@@ -79,7 +79,7 @@ function requestSystem(request: AgentRequest): string {
   return [
     `You are executing one small ${request.role} task in a software development process.`,
     'Use the supplied task and relevant files. Do not invent product requirements. A failed tool is information: diagnose it and choose an appropriate next action.',
-    request.readOnly ? 'This task is read-only. Return the requested information; no product edits or shell side effects are allowed.' : 'Use the supplied workspace tools to implement the requested fragment. Your final answer should report what was actually changed and checked.',
+    request.readOnly ? 'This task is read-only. Return the requested information; no product edits or shell side effects are allowed.' : request.purpose === 'environment-recovery' ? 'Use the supplied isolated workspace to prepare only the requested capability. Report the concrete invocation and observed readiness.' : 'Use the supplied workspace tools to implement the requested fragment. Your final answer should report what was actually changed and checked.',
     request.constraints?.forbiddenCapabilities?.length ? `The product explicitly excludes these capabilities: ${request.constraints.forbiddenCapabilities.join(', ')}. A verification tool cannot override this.` : '',
     request.constraints?.allowSystemInstall === true ? 'System installation is authorized when necessary for this product.' : 'Install dependencies locally in the project or isolated environment; do not install system packages.',
   ].filter(Boolean).join('\n');

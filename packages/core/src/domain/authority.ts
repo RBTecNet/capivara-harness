@@ -17,10 +17,13 @@ const MODES: [ApplicationMode, RegExp][] = [
 function isPositive(text: string, expression: RegExp): boolean {
   const lowered = normalize(text);
   for (const clause of lowered.split(/[\n.;]/)) {
-    const match = expression.exec(clause);
-    if (!match) continue;
-    const before = clause.slice(Math.max(0, match.index - 100), match.index);
-    if (!/(?:\bsem\b|\bno\b|\bnot\b(?!\s+only\b)|\bdon't\b|\bwithout\b|\bnao\b|\bproibid\w*\b|\bnever\b)[^:]*$/.test(before)) return true;
+    for (const match of clause.matchAll(new RegExp(expression.source, "g"))) {
+      const before = clause.slice(0, match.index);
+      const scoped = FORBIDDEN.some(([, pattern]) => [...clause.matchAll(new RegExp(pattern.source, "g"))].some(negative => negative.index <= match.index && negative.index + negative[0].length > match.index));
+      const direct = new RegExp(`\\b(?:sem|nao|not(?!\\s+only\\b)|don't|without|proibid\\w*|never)\\s+${ACTION}${ARTICLE}(?:suporte\\s+(?:a|para)\\s+)?$`).test(before);
+      const englishNo = /\bno\s+$/.test(before) && /^(?:browser|web|website|desktop|cli|tui|api|library|sdk|linux|windows|macos)\b/.test(match[0]);
+      if (!scoped && !direct && !englishNo) return true;
+    }
   }
   return false;
 }
@@ -47,13 +50,21 @@ export function requestedCapabilities(request: string): string[] {
   ])];
 }
 
-const FORBIDDEN: [string, RegExp][] = [
-  ["http-server", /\b(?:sem\b|nao\b.{0,25}(?:criar|usar|ter|subir|executar|iniciar)|no\b|do\s+not\b|don't\b|must\s+not\b|without\b|proibid\w*|never\b).{0,65}(?:servidor(?:es)?|servers?|servico permanente|permanent service)/],
-  ["browser", /\b(?:sem\b|nao\b.{0,25}(?:usar|ter)|no\b|do\s+not\b|don't\b|must\s+not\b|without\b|proibid\w*|never\b).{0,65}(?:navegador|browser|interface web|web interface|html)/],
-  ["database", /\b(?:sem\b|no\b|without\b|proibid\w*).{0,40}(?:banco de dados|banco proprio|database|sql)/],
-  ["external-package", /\b(?:sem\b|no\b|without\b|proibid\w*).{0,40}(?:dependencias externas|external dependenc|third.party dependenc)/],
-  ["network", /\b(?:sem\b|no\b|without\b|proibid\w*).{0,30}(?:acesso a internet|network access|internet access|acesso a rede)/],
+// Negation applies to its object, never to an arbitrary nearby noun. In
+// particular Portuguese "no navegador" (in the browser) is not English "no
+// browser". Keep the English determiner tied to English object spellings.
+const OBJECTS: [string, string, string][] = [
+  ["http-server", "servidor(?:es)?(?: http)?|servico permanente", "(?:http )?servers?|permanent service"],
+  ["browser", "navegador(?:es)?|interface web|html", "browsers?|web interface|html"],
+  ["database", "banco de dados|banco proprio|sql", "databases?|sql"],
+  ["external-package", "dependencias externas", "external dependenc\\w*|third.party dependenc\\w*"],
+  ["network", "acesso a internet|acesso a rede", "network access|internet access"],
 ];
+const ARTICLE = "(?:(?:um|uma|o|a|os|as|qualquer|nenhum|nenhuma|a|an|the|any)\\s+){0,2}";
+const ACTION = "(?:(?:deve|devera|pode|podera|e\\s+permitid[oa]|e\\s+autorizad[oa])\\s+)?(?:(?:criar|usar|utilizar|ter|subir|executar|iniciar|abrir|acessar|instalar|create|use|have|run|start|open|access|install)(?:\\s+de)?\\s+)?";
+const FORBIDDEN: [string, RegExp][] = OBJECTS.map(([capability, portuguese, english]) => [capability,
+  new RegExp(`\\b(?:(?:sem|nao|without|do\\s+not|don't|must\\s+not|never|proibid\\w*(?:\\s+(?:o|a))?)\\s+${ACTION}${ARTICLE}(?:${portuguese}|${english})|no\\s+${ARTICLE}(?:${english}))\\b${['http-server','database'].includes(capability) ? '(?!\\s+(?:http\\b|extern\\w*|external|remot\\w*|remote|terceir\\w*))' : ''}`),
+]);
 
 export function explicitConstraints(request: string, sourceKind: Source["kind"] = "request", reference = "request"): ProductConstraint[] {
   const result: ProductConstraint[] = [];

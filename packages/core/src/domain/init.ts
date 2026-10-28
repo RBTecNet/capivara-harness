@@ -81,8 +81,30 @@ function constraintsFrom(raw: string, values: unknown, origin: SourceOrigin = { 
   return [...new Map(constraints.map((constraint) => [constraint.id, constraint])).values()];
 }
 
+/** Reinterpret persisted machine decisions against their literal sources, without
+ * asking a model to rediscover the product or treating stale inference as law. */
+export function reconcileAuthority(brief: ProductBrief): void {
+  const before = JSON.stringify(brief.constraints);
+  const corrected: ProductConstraint[] = [];
+  for (const original of brief.constraints) {
+    const forbidden = new Set(explicitConstraints(original.source.text).flatMap(constraint => constraint.forbiddenCapabilities));
+    const required = new Set(requestedCapabilities(original.source.text));
+    const constraint = { ...original, forbiddenCapabilities: original.forbiddenCapabilities.filter(capability => forbidden.has(capability)), requiredCapabilities: original.requiredCapabilities.filter(capability => required.has(capability)) };
+    if (JSON.stringify([constraint.forbiddenCapabilities, constraint.requiredCapabilities]) !== JSON.stringify([original.forbiddenCapabilities, original.requiredCapabilities])) {
+      const correction = { constraintId: original.id, source: structuredClone(original.source), before: { forbiddenCapabilities: [...original.forbiddenCapabilities], requiredCapabilities: [...original.requiredCapabilities] }, after: { forbiddenCapabilities: [...constraint.forbiddenCapabilities], requiredCapabilities: [...constraint.requiredCapabilities] }, reason: "A interpretação de capacidade deve corresponder à negação e ao objeto na fonte literal; uma preposição ou uma negação de outra cláusula não cria proibição." };
+      brief.authorityCorrections ??= [];
+      if (!brief.authorityCorrections.some(existing => JSON.stringify(existing) === JSON.stringify(correction))) brief.authorityCorrections.push(correction);
+    }
+    if (constraint.forbiddenCapabilities.length || constraint.requiredCapabilities.length) corrected.push(constraint);
+  }
+  const direct = [...explicitConstraints(brief.request), ...brief.decisions.flatMap(decision => explicitConstraints(decision.answer, "answer", decision.questionId))];
+  brief.constraints = [...new Map([...corrected, ...direct].map(constraint => [constraint.id, constraint])).values()];
+  if (JSON.stringify(brief.constraints) !== before) brief.revision += 1;
+}
+
 /** Repository rules carry literal provenance separately from a technical file inventory. */
 export function applyRepositoryConstraints(brief: ProductBrief, sources?: { text: string; reference: string }[]): void {
+  reconcileAuthority(brief);
   const before = JSON.stringify(brief.constraints.filter((constraint) => constraint.source.kind === "repository"));
   const required = new Set(requestedCapabilities([brief.request, ...brief.decisions.map((decision) => decision.answer)].join("\n")));
   const direct = new Set(brief.constraints.filter(constraint => constraint.source.kind !== "repository").flatMap(constraint => constraint.forbiddenCapabilities));

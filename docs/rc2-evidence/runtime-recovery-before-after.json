@@ -1,0 +1,151 @@
+{
+  "schema": "capivara/runtime-recovery-comparison/1",
+  "generatedAt": "2026-10-28T17:28:32.105Z",
+  "baselineCommit": "0f193a3914c06307d60a48f17c1dc816da7e747d",
+  "host": {
+    "platform": "linux",
+    "node": "v24.22.1"
+  },
+  "paidInferenceCalls": 0,
+  "packageInstalls": 0,
+  "before": {
+    "sourceSHA256": "95c45ff22ec8c71c300f7f3357ce58deb18830a68612594d9612798d702e03e2",
+    "invocation": {
+      "ready": false,
+      "command": [
+        "/home/bruno/.nvm/versions/node/v24.22.1/bin/node",
+        "npm"
+      ],
+      "probes": [
+        {
+          "command": "'/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'npm' '--version'",
+          "exitCode": 1,
+          "output": "node:internal/modules/cjs/loader:1568\n  throw err;\n  ^\n\nError: Cannot find module '$WORKSPACE/npm'\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1564:15)\n    at wrapResolveFilename (node:internal/modules/cjs/loader:1118:27)\n    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1142:10)\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1169:12)\n    at Module._load (node:internal/modules/cjs/loader:1341:5)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47 {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: []\n}\n\nNode.js v24.22.1"
+        },
+        {
+          "command": "'/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'npm' '--version'",
+          "exitCode": 1,
+          "output": "node:internal/modules/cjs/loader:1568\n  throw err;\n  ^\n\nError: Cannot find module '$WORKSPACE/npm'\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1564:15)\n    at wrapResolveFilename (node:internal/modules/cjs/loader:1118:27)\n    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1142:10)\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1169:12)\n    at Module._load (node:internal/modules/cjs/loader:1341:5)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47 {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: []\n}\n\nNode.js v24.22.1"
+        }
+      ],
+      "transformations": [],
+      "incidents": [
+        {
+          "kind": "environment",
+          "message": "Environment Node.js did not provide the required runtime capability."
+        }
+      ]
+    },
+    "browser": {
+      "request": "Crie uma aplicação web.\n- Fluxos reais executados no navegador.",
+      "allowed": false,
+      "constraints": [
+        {
+          "statement": "- Fluxos reais executados no navegador.",
+          "forbiddenCapabilities": [
+            "browser"
+          ]
+        }
+      ],
+      "discoveryCalls": 1
+    },
+    "partialSource": {
+      "status": "complete",
+      "editorCalls": 1,
+      "reviewerCalls": 1,
+      "passedProofs": 1,
+      "sourcePreserved": true
+    },
+    "suspension": {
+      "status": "waiting",
+      "lastFailure": null,
+      "blockers": [],
+      "passedProofs": 1
+    }
+  },
+  "after": {
+    "sourceSHA256": "1321fa6bd9e4340273e457c69bae1c561f66a6024eb7629b17daffad9b28db97",
+    "invocation": {
+      "ready": true,
+      "command": [
+        "/home/bruno/.nvm/versions/node/v24.22.1/bin/node"
+      ],
+      "probes": [
+        {
+          "command": "'/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'npm' '--version'",
+          "exitCode": 1,
+          "output": "node:internal/modules/cjs/loader:1568\n  throw err;\n  ^\n\nError: Cannot find module '$WORKSPACE/npm'\n    at Module._resolveFilename (node:internal/modules/cjs/loader:1564:15)\n    at wrapResolveFilename (node:internal/modules/cjs/loader:1118:27)\n    at defaultResolveImplForCJSLoading (node:internal/modules/cjs/loader:1142:10)\n    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1169:12)\n    at Module._load (node:internal/modules/cjs/loader:1341:5)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47 {\n  code: 'MODULE_NOT_FOUND',\n  requireStack: []\n}\n\nNode.js v24.22.1"
+        },
+        {
+          "command": "'/home/bruno/.nvm/versions/node/v24.22.1/bin/node' '--version'",
+          "exitCode": 0,
+          "output": "v24.22.1"
+        }
+      ],
+      "transformations": [
+        {
+          "kind": "separated-executable-list",
+          "original": [
+            "node",
+            "npm"
+          ],
+          "selected": [
+            {
+              "command": [
+                "node"
+              ],
+              "aliases": [
+                "node"
+              ]
+            },
+            {
+              "command": [
+                "npm"
+              ],
+              "aliases": [
+                "npm"
+              ]
+            }
+          ],
+          "reason": "The published invocation was unusable ('/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'npm' '--version'; exit 1). Every alternative resolves to its own executable and the selected readiness probe succeeded ('/home/bruno/.nvm/versions/node/v24.22.1/bin/node' '--version'). Original declaration and both command results are preserved."
+        }
+      ],
+      "incidents": []
+    },
+    "browser": {
+      "request": "Crie uma aplicação web.\n- Fluxos reais executados no navegador.",
+      "allowed": true,
+      "constraints": [],
+      "discoveryCalls": 1
+    },
+    "partialSource": {
+      "status": "complete",
+      "editorCalls": 0,
+      "reviewerCalls": 1,
+      "passedProofs": 1,
+      "sourcePreserved": true
+    },
+    "suspension": {
+      "status": "waiting",
+      "lastFailure": {
+        "kind": "instrument",
+        "message": "alpha: Review remained unresolved after clarification; reconcile its evidence contract without silently approving or editing the product.\n{\"approved\":false,\"findings\":[]}",
+        "fingerprint": "8a503a00e414ec669ecf624483cfdb7ea6c5a44ddafaef1e9a12c6a77c3beecb",
+        "at": "2026-10-28T17:28:34.240Z"
+      },
+      "blockers": [
+        {
+          "id": "2fab56d68998d8712765",
+          "kind": "instrument",
+          "subject": "alpha",
+          "message": "Review remained unresolved after clarification; reconcile its evidence contract without silently approving or editing the product.",
+          "evidence": "{\"approved\":false,\"findings\":[]}",
+          "external": false,
+          "action": "Resolve the classified cause or change the relevant input/provider; confirmed source and proofs remain preserved.",
+          "repairScope": "verification"
+        }
+      ],
+      "passedProofs": 1
+    }
+  }
+}

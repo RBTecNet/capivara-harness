@@ -1,7 +1,7 @@
 import { readFile, stat, readdir, access } from 'node:fs/promises';
 import { join, resolve, relative, sep, delimiter, dirname, basename, isAbsolute, extname } from 'node:path';
 import type { CommandRecipe, EnvironmentNode, ProductBrief, Verification } from '../domain/types.js';
-import { allowedCapabilities } from '../domain/authority.js';
+import { allowedCapabilities, inferredCapabilities } from '../domain/authority.js';
 import type { CommandRequest, CommandResult, ExecutionConstraints, TerminalRequest } from '../runtime/types.js';
 import { runTerminal as realTerminal } from '../runtime/terminal.js';
 import type { BuildIncident } from './types.js';
@@ -11,6 +11,18 @@ import { emitProgress, type ProgressEvent } from '../telemetry/progress.js';
 
 export type CommandExecutor = (request: CommandRequest) => Promise<CommandResult>;
 export type CapabilityKind = 'cli' | 'library' | 'driver' | 'service' | 'runtime' | 'sdk';
+export interface CapabilityInvocation {
+  /** One executable and its fixed arguments. Never a list of executable names. */
+  command: string[];
+  /** Names that explicitly stand for the entire invocation. */
+  aliases?: string[];
+  /** Original argv prefix; replacing it must not duplicate its fixed arguments. */
+  match?: string[];
+}
+export class OperationalInvocationConflict extends Error {
+  readonly kind='instrument';
+  constructor(readonly alias:string,readonly invocations:string[][]){super(`Operational alias ${alias} resolves to different provider invocations: ${JSON.stringify(invocations)}. Reconcile the selected capability bindings before invoking its consumer.`);}
+}
 export interface CapabilityBinding {
   capability: string;
   kind: CapabilityKind;
@@ -18,10 +30,17 @@ export interface CapabilityBinding {
   ready?: boolean;
   fingerprint?: string;
   dependencyFamily?: string;
+  /** Shared providers keep their operational identity outside private task copies. */
+  relocation?: 'workspace' | 'fixed';
   binaryFingerprint?: string;
   derivedFrom?: { kind:'virtual-environment'; binaryFingerprint:string; fingerprint:string; baseFingerprint?:string; baseCapability?:string; baseProvider?:string };
   command?: string[];
   aliases?: string[];
+  match?: string[];
+  invocations?: CapabilityInvocation[];
+  invocationResolution?: { declaration: string; invocations: { command: string[]; aliases?: string[] }[] };
+  candidateInvocations?: CapabilityInvocation[];
+  transformations?: { kind: string; original: unknown; selected: unknown; reason: string }[];
   env?: Record<string, string>;
   paths?: string[];
   inputs?: string[];
@@ -51,12 +70,44 @@ function portable(value: unknown, root: string): unknown {
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b)).map(([key,item]) => [key,portable(item,root)]));
   return value;
 }
+function fixedScopes(bindings:Record<string,CapabilityBinding>):string[]{
+  return [...new Set(Object.values(bindings).filter(binding=>binding.relocation==='fixed').flatMap(binding=>[
+    ...(binding.paths??[]),...(binding.command??[]),...(binding.invocations??[]).flatMap(invocation=>invocation.command),...(binding.env?.PATH?.split(delimiter)??[]),
+  ]).filter(path=>isAbsolute(path)).map(path=>resolve(path)))];
+}
+function protectedRootReplace(value:string,from:string,to:string,scopes:readonly string[]):string{
+  const root=resolve(from);
+  return value.replaceAll(root,(_match,index:number)=>{
+    const tail=value.slice(index);
+    const fixed=scopes.some(scope=>tail===scope||tail.startsWith(`${scope}${sep}`)||tail.startsWith(`${scope}/`)||tail.startsWith(`${scope}\\`)||tail.startsWith(`${scope}${delimiter}`)||tail.startsWith(`${scope} `)||tail.startsWith(`${scope}'`)||tail.startsWith(`${scope}"`));
+    return fixed?root:to;
+  });
+}
+function portableProviderValue(value:unknown,root:string,scopes:readonly string[]):unknown{
+  if(typeof value==='string')return root?protectedRootReplace(value,root,'$WORKSPACE',scopes):value;
+  if(Array.isArray(value))return value.map(item=>portableProviderValue(item,root,scopes));
+  if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b)).map(([key,item])=>[key,portableProviderValue(item,root,scopes)]));
+  return value;
+}
+function operationalIdentity(root:string,env:Record<string,string>,bindings:Record<string,CapabilityBinding>):unknown{
+  const fixed=Object.values(bindings).filter(binding=>binding.relocation==='fixed');
+  // Preserve the previous protocol byte for byte when no shared provider exists.
+  if(!fixed.length)return portable({env,bindings},root);
+  const scopes=fixedScopes(bindings);
+  const variables=Object.fromEntries(Object.entries(env).map(([key,value])=>{
+    if(key==='PATH')return[key,value.split(delimiter).map(path=>portableProviderValue(path,root,scopes)).join(delimiter)];
+    const owned=fixed.some(binding=>binding.env?.[key]===value);
+    return[key,owned?value:portableProviderValue(value,root,scopes)];
+  }));
+  const providers=Object.fromEntries(Object.entries(bindings).map(([key,binding])=>[key,binding.relocation==='fixed'?portable(binding,''):portableProviderValue(binding,root,scopes)]));
+  return portable({env:variables,bindings:providers},'');
+}
 function operational(root: string, env: Record<string,string>, bindings: Record<string,CapabilityBinding>): OperationalEnvironment {
   const priority=(binding:CapabilityBinding):number=>binding.derivedFrom?0:binding.kind==='library'?1:2;
-  const providerPaths=Object.values(bindings).sort((a,b)=>priority(a)-priority(b)||a.capability.localeCompare(b.capability)).flatMap(binding=>binding.paths??[]);
+  const providerPaths=Object.values(bindings).filter(binding=>binding.relocation!=='fixed').sort((a,b)=>priority(a)-priority(b)||a.capability.localeCompare(b.capability)).flatMap(binding=>binding.paths??[]);
   const owned=new Set(providerPaths),normalized={...env};
   if(providerPaths.length){const ambient=(env.PATH??process.env.PATH??'').split(delimiter).filter(path=>!owned.has(path));normalized.PATH=[...new Set([...providerPaths,...ambient])].join(delimiter);}
-  return { root, env:normalized, bindings, revision: digest(JSON.stringify(portable({env:normalized,bindings}, root))) };
+  return { root, env:normalized, bindings, revision: digest(JSON.stringify(operationalIdentity(root,normalized,bindings))) };
 }
 
 export function emptyOperationalEnvironment(workspace = ''): OperationalEnvironment { return operational(workspace, {}, {}); }
@@ -80,22 +131,57 @@ export function mergeOperationalEnvironments(workspace: string, ...items: (Opera
   return operational(workspace,env,bindings);
 }
 export function relocateOperationalEnvironment(value: OperationalEnvironment, from: string, to: string): OperationalEnvironment {
+  const fixed=Object.values(value.bindings).filter(binding=>binding.relocation==='fixed');
+  if(fixed.length){
+    const scopes=fixedScopes(value.bindings);
+    const replace=(item:unknown):unknown=>typeof item==='string'?protectedRootReplace(item,from,resolve(to),scopes):Array.isArray(item)?item.map(replace):item&&typeof item==='object'?Object.fromEntries(Object.entries(item).map(([key,entry])=>[key,replace(entry)])):item;
+    const env=Object.fromEntries(Object.entries(value.env).map(([key,entry])=>{
+      if(key==='PATH')return[key,entry.split(delimiter).map(path=>replace(path) as string).join(delimiter)];
+      return[key,fixed.some(binding=>binding.env?.[key]===entry)?entry:replace(entry) as string];
+    }));
+    const bindings=Object.fromEntries(Object.entries(value.bindings).map(([key,binding])=>[key,binding.relocation==='fixed'?structuredClone(binding):replace(binding) as CapabilityBinding]));
+    return operational(resolve(to),env,bindings);
+  }
   const replace=(item:unknown):unknown=> typeof item==='string'?item.replaceAll(resolve(from),resolve(to)):Array.isArray(item)?item.map(replace):item&&typeof item==='object'?Object.fromEntries(Object.entries(item).map(([key,entry])=>[key,replace(entry)])):item;
   const relocated=replace(value) as OperationalEnvironment;
   return operational(resolve(to),relocated.env,relocated.bindings);
 }
 function quote(value:string):string { return process.platform==='win32'?`"${value.replaceAll('"','""')}"`:`'${value.replaceAll("'", "'\\''")}'`; }
 function firstToken(value:string):string { return value.trim().match(/^(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/)?.slice(1).find(Boolean) ?? ''; }
+/** A deliberately small argv lexer. Shell operators are not executable arguments. */
+function words(value:string):{value:string;end:number}[]{
+  const result:{value:string;end:number}[]=[];
+  const expression=/\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|'([^']*)'|([^\s;&|<>]+))/gy;
+  while(expression.lastIndex<value.length){const found=expression.exec(value);if(!found)break;result.push({value:found[1]?.replace(/\\(["\\])/g,'$1')??found[2]??found[3]??'',end:expression.lastIndex});}
+  return result;
+}
+/** Shared by command execution and agent wrapper publication. */
+export function operationalInvocations(value:OperationalEnvironment,options:{readyOnly?:boolean}={}):CapabilityInvocation[]{
+  const invocations=Object.values(value.bindings).filter(binding=>!options.readyOnly||binding.ready).flatMap(binding=>[
+    ...(binding.command?.length?[{command:binding.command,aliases:binding.aliases??[],...(binding.match?{match:binding.match}:{})}]:[]),
+    ...(binding.invocations??[]),
+  ]);
+  const aliases=new Map<string,string[]>();
+  for(const invocation of invocations)for(const alias of [...invocation.aliases??[],...(invocation.match?.length?[`argv:${JSON.stringify(invocation.match)}`]:[])]){
+    const previous=aliases.get(alias);
+    if(previous&&JSON.stringify(previous)!==JSON.stringify(invocation.command))throw new OperationalInvocationConflict(alias,[previous,invocation.command]);
+    aliases.set(alias,invocation.command);
+  }
+  return invocations;
+}
 export function applyOperationalEnvironment<T extends CommandRequest>(request:T, value?:OperationalEnvironment):T {
   if(!value) return request;
   let command=request.command;
-  const first=typeof command==='string'?firstToken(command):command[0];
-  const binding=Object.values(value.bindings).find(item=>item.command?.length&&item.aliases?.includes(first??''));
-  if(binding?.command){
-    if(typeof command==='string') {
-      const token=command.trimStart().match(/^(?:"[^"]+"|'[^']+'|[^\s;&|]+)/)?.[0]??'';
-      command=binding.command.map(quote).join(' ')+command.trimStart().slice(token.length);
-    } else command=[...binding.command,...command.slice(1)];
+  const tokens=typeof command==='string'?words(command):command.map((part,index)=>({value:part,end:index+1}));
+  const candidates=operationalInvocations(value).map(invocation=>{
+    const exact=invocation.match?.length&&invocation.match.every((part,index)=>tokens[index]?.value===part);
+    const count=exact?invocation.match!.length:invocation.aliases?.includes(tokens[0]?.value??'')?1:0;
+    return{invocation,count};
+  }).filter(item=>item.count).sort((a,b)=>b.count-a.count);
+  const selected=candidates[0];
+  if(selected){
+    if(typeof command==='string') command=selected.invocation.command.map(quote).join(' ')+command.slice(tokens[selected.count-1]!.end);
+    else command=[...selected.invocation.command,...command.slice(selected.count)];
   }
   return {...request,command,environment:{...value.env,...request.environment}};
 }
@@ -124,35 +210,100 @@ async function localExecutable(workspace:string,name:string):Promise<string|unde
     for(const entry of entries.sort((a,b)=>a.name.localeCompare(b.name))){
       const path=join(folder,entry.name);
       if(names.some(candidate=>process.platform==='win32'?candidate.toLowerCase()===entry.name.toLowerCase():candidate===entry.name)&&await executable(path))return path;
-      if(entry.isDirectory()&&depth<6&&!['.git','.capivara-next','.project-inputs','__pycache__'].includes(entry.name))queue.push([path,depth+1]);
+      if(entry.isDirectory()&&depth<6&&!['.git','.capivara-next','.capivara-runtime','.capivara-verification','.project-inputs','__pycache__'].includes(entry.name))queue.push([path,depth+1]);
     }
   }
   return undefined;
 }
-async function invocation(workspace:string,node:EnvironmentNode,base:OperationalEnvironment):Promise<CapabilityBinding>{
-  const chosen=node.provides?.command?.length?[...node.provides.command]:node.check.args?[node.check.command]:[firstToken(node.check.command)];
-  const original=chosen[0]??'';
-  const aliases=[...new Set([firstToken(node.check.command),original,basename(original)].filter(Boolean))];
-  const executableKind=['cli','runtime','sdk'].includes(defaultKind(node));
-  if(original&&executableKind){
-    const path=isAbsolute(original)?original:original.includes('/')||original.includes('\\')?resolve(workspace,original):undefined;
-    const explicitPaths=(node.provides?.paths??[]).map(folder=>resolve(workspace,folder));
-    const provided=Boolean(node.provides?.command?.length);
-    const available=await (async()=>{
-      for(const folder of explicitPaths)for(const name of executableNames(basename(original))){const candidate=join(folder,name);if(await executable(candidate))return candidate;}
-      if(!provided){const local=await localExecutable(workspace,basename(original));if(local)return local;}
-      if(path)return await executable(path)?path:undefined;
-      for(const folder of (base.env.PATH??process.env.PATH??'').split(delimiter))for(const name of executableNames(original)){const candidate=join(folder,name);if(await executable(candidate))return candidate;}
-      return provided?undefined:localExecutable(workspace,original);
-    })();
-    if(available)chosen[0]=available;
+/** Provider exports need a declared consumer. Product configuration belongs in the
+ * product's configuration contract, not in every process that happens to use Node. */
+export function unverifiedEnvironmentExports(node:EnvironmentNode):string[]{
+  const recipes=[node.check,...node.prepare].map(recipe=>[recipe.command,...recipe.args??[]].join(' ')).join('\n');
+  const providerSearch=new Set(['PATH','PATHEXT','LD_LIBRARY_PATH','DYLD_LIBRARY_PATH','PYTHONPATH','JAVA_HOME','VIRTUAL_ENV','NODE_PATH']);
+  return Object.keys(node.provides?.env??{}).filter(key=>{
+    if(providerSearch.has(key))return false;
+    const escaped=key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    const reference=new RegExp(`(?:\\$\\{?${escaped}\\b|%${escaped}%|(?:process\\.env|os\\.environ|environ|env)\\s*(?:\\.\\s*${escaped}\\b|\\[\\s*['"]${escaped}['"])|(?:getenv|env::var|environ\\.get)\\s*\\(\\s*['"]${escaped}['"])`);
+    return !reference.test(recipes);
+  });
+}
+async function resolveExecutable(workspace:string,original:string,node:EnvironmentNode,base:OperationalEnvironment,provided=true):Promise<string|undefined>{
+  const path=isAbsolute(original)?original:original.includes('/')||original.includes('\\')?resolve(workspace,original):undefined;
+  for(const folder of node.provides?.paths??[])for(const name of executableNames(basename(original))){const candidate=join(resolve(workspace,folder),name);if(await executable(candidate))return candidate;}
+  if(!provided){const local=await localExecutable(workspace,basename(original));if(local)return local;}
+  if(path)return await executable(path)?path:undefined;
+  for(const folder of (base.env.PATH??process.env.PATH??'').split(delimiter)){
+    const relativePath=relative(resolve(workspace),resolve(folder));
+    if(['.capivara-runtime','.capivara-verification','.capivara-next'].some(prefix=>relativePath===prefix||relativePath.startsWith(`${prefix}${sep}`)))continue;
+    for(const name of executableNames(original)){const candidate=join(folder,name);if(await executable(candidate))return candidate;}
   }
-  const paths=[...new Set([...(node.provides?.paths??[]).map(folder=>resolve(workspace,folder)),...(chosen[0]&&isAbsolute(chosen[0])?[dirname(chosen[0])]:[])])];
-  return {capability:node.identity?.capability??node.id,kind:defaultKind(node),provider:node.identity?.provider??node.id,...(executableKind?{command:chosen,aliases}:{}),...(node.provides?.env?{env:{...node.provides.env}}:{}),...(paths.length?{paths}:{}),...(node.provides?.inputs?{inputs:[...node.provides.inputs]}:{})};
+  return provided?undefined:localExecutable(workspace,original);
+}
+async function invocation(workspace:string,node:EnvironmentNode,base:OperationalEnvironment):Promise<CapabilityBinding>{
+  const executableKind=['cli','runtime','sdk'].includes(defaultKind(node));
+  const transformations:NonNullable<CapabilityBinding['transformations']>=[];
+  const declaration=JSON.stringify(node.provides??null);
+  const previous=base.bindings[node.identity?.capability??node.id];
+  const accepted=previous?.invocationResolution?.declaration===declaration?previous.invocationResolution:undefined;
+  if(accepted)transformations.push(...previous?.transformations?.filter(item=>item.kind==='separated-executable-list')??[]);
+  const declared=node.provides?.command?.length?[...node.provides.command]:node.provides?.invocations?.[0]?.command?.length?[...node.provides.invocations[0].command]:node.check.args?[node.check.command]:[firstToken(node.check.command)];
+  let definitions:{command:string[];aliases?:string[]}[]=[{command:declared,...(node.provides?.aliases?{aliases:node.provides.aliases}:{})},...(node.provides?.invocations??[]).filter(item=>JSON.stringify(item.command)!==JSON.stringify(declared))];
+  const provided=Boolean(node.provides?.command?.length||node.provides?.invocations?.length);
+  let candidateDefinitions:{command:string[];aliases?:string[]}[]|undefined;
+  if(executableKind&&provided&&!node.provides?.invocations?.length&&!node.provides?.aliases?.length&&declared.length>1){
+    const independent=await Promise.all(declared.map(async part=>{
+      const direct=await resolveExecutable(workspace,part,node,base);
+      if(direct)return[part];
+      const parsed=words(part);if(!parsed.length||parsed.at(-1)?.end!==part.length)return undefined;
+      const tokens=parsed.map(token=>token.value);return await resolveExecutable(workspace,tokens[0]!,node,base)?tokens:undefined;
+    }));
+    const matchingProbe=basename(firstToken(node.check.command))===basename(declared[0]!);
+    const explicitCommandStrings=declared.every(part=>words(part).length>1);
+    if(independent.every((item):item is string[]=>Boolean(item))&&(matchingProbe||explicitCommandStrings)){
+      candidateDefinitions=independent.map(command=>({command}));
+    }
+  }
+  if(accepted)definitions=accepted.invocations;
+  const resolveInvocations=async(items:typeof definitions):Promise<CapabilityInvocation[]>=>{
+  const resolved:CapabilityInvocation[]=[];
+  for(const definition of items){
+    const original=definition.command[0]??'';
+    const selected=[...definition.command];
+    if(original&&executableKind){const available=await resolveExecutable(workspace,original,node,base,provided);if(available)selected[0]=available;}
+    // A compound invocation must never replace its interpreter globally (node script.js != node).
+    const aliases=definition.aliases??(definition.command.length===1?[...new Set([original,basename(original)].filter(Boolean))]:[]);
+    resolved.push({command:selected,aliases,match:definition.command});
+  }return resolved;};
+  const invocations=await resolveInvocations(definitions),candidates=!accepted&&candidateDefinitions?await resolveInvocations(candidateDefinitions):undefined;
+  const selected=invocations[0]!;
+  const candidatePaths=[...new Set([...(node.provides?.paths??[]).map(folder=>resolve(workspace,folder)),...invocations.flatMap(item=>item.command[0]&&isAbsolute(item.command[0])?[dirname(item.command[0])]:[])])];
+  const paths:string[]=[];
+  for(const path of candidatePaths){
+    const info=await stat(path).catch(()=>null);
+    if(!info?.isDirectory()){
+      if(info)transformations.push({kind:'discarded-non-directory-path',original:path,selected:null,reason:'PATH entries must be executable directories; product source files belong in inputs.'});
+      continue;
+    }
+    const implicit=invocations.some(item=>item.command[0]&&isAbsolute(item.command[0])&&dirname(item.command[0])===path);
+    let usable=implicit;
+    if(!usable)for(const name of await readdir(path).catch(()=>[])){if(await executable(join(path,name))){usable=true;break;}}
+    if(usable)paths.push(path);
+    else if((node.provides?.paths??[]).some(folder=>resolve(workspace,folder)===path))transformations.push({kind:'discarded-non-executable-path',original:path,selected:null,reason:'This directory contains no executable provider entries. It is not an executable search path.'});
+  }
+  const unverified=new Set(unverifiedEnvironmentExports(node));
+  const exported=Object.fromEntries(Object.entries(node.provides?.env??{}).filter(([key])=>!unverified.has(key)));
+  for(const key of unverified)transformations.push({kind:'unverified-environment-export',original:{key,value:node.provides?.env?.[key]},selected:null,reason:'No provider readiness or preparation recipe declares this environment variable as an input. Do not inject an unverified application setting into unrelated tools.'});
+  return {capability:node.identity?.capability??node.id,kind:defaultKind(node),provider:node.identity?.provider??node.id,...(executableKind?{command:selected.command,aliases:selected.aliases,match:selected.match,...(invocations.length>1?{invocations:invocations.slice(1)}:{}),...(candidates?{candidateInvocations:candidates}:{}),...(accepted?{invocationResolution:accepted}:{})}:{}),...(node.provides?.env?{env:exported}:{}),...(paths.length?{paths}:{}),...(node.provides?.inputs?{inputs:[...node.provides.inputs]}:{}),...(transformations.length?{transformations}:{})};
 }
 async function bindNode(workspace:string,node:EnvironmentNode,base?:OperationalEnvironment):Promise<OperationalEnvironment>{
   const previous=base??emptyOperationalEnvironment(workspace), binding=await invocation(workspace,node,previous);
-  const env={...previous.env,...binding.env};
+  const env={...previous.env};
+  // A corrected binding replaces its former exports; deleting an invalid export must
+  // actually remove it from a resumed operational environment as well.
+  for(const key of new Set([...Object.keys(previous.bindings[binding.capability]?.env??{}),...Object.keys(node.provides?.env??{})]))delete env[key];
+  Object.assign(env,binding.env);
+  const oldPaths=new Set([...(previous.bindings[binding.capability]?.paths??[]),...(node.provides?.paths??[]).map(folder=>resolve(workspace,folder))]);
+  if(env.PATH)env.PATH=env.PATH.split(delimiter).filter(path=>!oldPaths.has(path)).join(delimiter);
   if(binding.paths?.length)env.PATH=[...new Set([...binding.paths,...(env.PATH??process.env.PATH??'').split(delimiter)])].join(delimiter);
   return operational(workspace,env,{...previous.bindings,[binding.capability]:binding});
 }
@@ -181,17 +332,19 @@ export function projectDependencyScope(inputs?:readonly string[],checks:readonly
 export function selectOperationalEnvironment(value:OperationalEnvironment,inputs:readonly string[],checks:readonly Verification[]=[]):OperationalEnvironment{
   const families=dependencyFamilies(inputs,checks);
   const commands=checks.map(check=>firstToken(check.command??''));
+  const browser=checks.some(check=>check.kind==='web'||check.requiredCapabilities.some(capability=>capability==='browser'||capability==='web-browser')||inferredCapabilities(`${check.command??''} ${(check.args??[]).join(' ')}`).includes('browser'));
   const selected=Object.fromEntries(Object.entries(value.bindings).filter(([key,binding])=>{
     if(key==='project-dependencies')return false; // Superseded by typed per-family inventories.
+    if(binding.dependencyFamily==='browser')return browser;
     if(!binding.dependencyFamily)return true;
     return families.includes(binding.dependencyFamily)||commands.some(command=>Boolean(binding.aliases?.includes(command)));
   }));
   const ownedKeys=new Set(Object.values(value.bindings).flatMap(binding=>Object.keys(binding.env??{})));
-  const ownedPaths=new Set(Object.values(value.bindings).flatMap(binding=>binding.paths??[]));
+  const ownedPaths=new Set(Object.values(value.bindings).flatMap(binding=>[...(binding.paths??[]),...(binding.relocation==='fixed'?binding.env?.PATH?.split(delimiter)??[]:[])]));
   const env=Object.fromEntries(Object.entries(value.env).filter(([key])=>key!=='PATH'&&!ownedKeys.has(key)));
   Object.assign(env,...Object.values(selected).map(binding=>binding.env??{}));
   const ambient=(value.env.PATH??'').split(delimiter).filter(path=>path&&!ownedPaths.has(path));
-  const paths=[...new Set([...Object.values(selected).flatMap(binding=>binding.paths??[]),...ambient])];
+  const paths=[...new Set([...Object.values(selected).filter(binding=>binding.relocation!=='fixed').flatMap(binding=>binding.paths??[]),...Object.values(selected).filter(binding=>binding.relocation==='fixed').flatMap(binding=>binding.env?.PATH?.split(delimiter)??[]),...ambient])];
   if(paths.length)env.PATH=paths.join(delimiter);
   return operational(value.root??'',env,selected);
 }
@@ -235,7 +388,7 @@ export function installationAlternative(command: string, output: string): string
 }
 export async function prepareEnvironmentNode(workspace:string,node:EnvironmentNode,brief:ProductBrief,execute:CommandExecutor,options:PreparationOptions={}):Promise<PreparationResult>{
   const results:CommandResult[]=[];
-  let current=await bindNode(workspace,node,options.operational);
+  let current=await bindNode(workspace,node,mergeOperationalEnvironments(workspace,options.previous?.operational,options.operational));
   const initialFingerprint=await environmentFingerprint(workspace,node,current);
   const finish=async(ready:boolean,incidents:BuildIncident[]=[],noProgress=false):Promise<PreparationResult>=>{
     current=await bindNode(workspace,node,current);
@@ -250,6 +403,8 @@ export async function prepareEnvironmentNode(workspace:string,node:EnvironmentNo
   };
   const invalid=validateEnvironmentNodeIdentity(node);
   if(invalid.length)return finish(false,[issue(node.id,'The dependency identity is not executable.',invalid.join('\n'))]);
+  const unverified=unverifiedEnvironmentExports(node);
+  if(unverified.length)return finish(false,[{...issue(node.id,'Provider environment exports have no declared consumer.',JSON.stringify({keys:unverified,exports:node.provides?.env,check:node.check,prepare:node.prepare})),kind:'planning',action:'Remove product configuration descriptions from the provider exports, or declare a real provider readiness operation consuming the concrete values. Then revalidate and continue.'}],true);
   const previous=options.previous;
   const unchangedPrevious=previous?.fingerprint===initialFingerprint;
   const dynamicProvider=['library','driver','service'].includes(defaultKind(node));
@@ -262,9 +417,36 @@ export async function prepareEnvironmentNode(workspace:string,node:EnvironmentNo
     current=await bindNode(workspace,node,current);
     const result=await runRecipe(workspace,recipe,brief,execute,{...options,operational:current});results.push(result);return result;
   };
-  const probe=await run(node.check);
-  if(okay(probe))return finish(true);
+  const binding=current.bindings[node.identity?.capability??node.id]!;
+  const checkArgs=node.check.args??words(node.check.command).slice(1).map(token=>token.value);
+  const checkExecutable=node.check.args?node.check.command:firstToken(node.check.command);
+  const compound=binding.command&&binding.command.length>1&&basename(binding.match?.[0]??binding.command[0]!)===basename(checkExecutable)&&!binding.match?.slice(1).every((part,index)=>checkArgs[index]===part);
+  // A readiness probe must exercise the published invocation. Otherwise `node --version`
+  // could approve an unusable `node npm` provider without executing it at all.
+  const probeRecipe=compound?{...node.check,command:binding.command![0]!,args:[...binding.command!.slice(1),...checkArgs]}:node.check;
+  const probe=await run(probeRecipe);
+  const primaryExecutable=binding.command?.[0]&&await executable(binding.command[0]);
+  if(binding.candidateInvocations?.length&&(!okay(probe)||!primaryExecutable)){
+    const [primary,...additional]=binding.candidateInvocations;
+    const candidate:CapabilityBinding={...binding,command:primary!.command,aliases:primary!.aliases??[],match:primary!.match??primary!.command,invocations:additional};
+    delete candidate.candidateInvocations;
+    const alternative=operational(workspace,current.env,{...current.bindings,[binding.capability]:candidate});
+    const readiness=await runRecipe(workspace,node.check,brief,execute,{...options,operational:alternative});results.push(readiness);
+    if(okay(readiness)){
+      const resolution={declaration:JSON.stringify(node.provides??null),invocations:[primary!,...additional].map(item=>({command:item.match??item.command,...(item.aliases?{aliases:item.aliases}:{})}))};
+      candidate.invocationResolution=resolution;
+      candidate.transformations=[...binding.transformations??[],{kind:'separated-executable-list',original:node.provides?.command,selected:resolution.invocations,reason:`The published invocation was unusable (${probe.command}; exit ${probe.exitCode}). Every alternative resolves to its own executable and the selected readiness probe succeeded (${readiness.command}). Original declaration and both command results are preserved.`}];
+      current=operational(workspace,alternative.env,{...alternative.bindings,[binding.capability]:candidate});
+      return finish(true);
+    }
+  }
+  if(okay(probe)&&primaryExecutable!==false)return finish(true);
   if(unchangedPrevious&&previous?.noProgress)return finish(false,[issue(node.id,'The readiness probe still fails after an ineffective preparation.',`${probe.command}\n${probe.stderr}\n${probe.stdout}`)],true);
+  if(!node.prepare.length)return finish(false,[issue(node.id,`Environment ${node.name} has no usable invocation and no preparation recipe.`,`${probe.command}\n${probe.stderr}\n${probe.stdout}\nPublished invocation: ${JSON.stringify(binding.command??null)}`)],true);
+  const readinessOkay=async(result:CommandResult):Promise<boolean>=>{
+    const published=current.bindings[node.identity?.capability??node.id]?.command?.[0];
+    return okay(result)&&(!published||await executable(published));
+  };
   for(const recipe of node.prepare){
     if(options.signal?.aborted)break;
     if(recipe.system&&!options.allowSystemInstall)return finish(false,[issue(node.id,'This provider needs unauthorized system access; select a usable local provider.',recipe.command,true)]);
@@ -272,13 +454,13 @@ export async function prepareEnvironmentNode(workspace:string,node:EnvironmentNo
     if(!okay(result)){
       const alternative=installationAlternative(result.command,`${result.stdout}\n${result.stderr}`);
       if(alternative){const {args:_args,...withoutArgs}=recipe;const replacement=await run({...withoutArgs,command:alternative});if(okay(replacement))continue;}
-      const readiness=await run(node.check);if(okay(readiness))return finish(true);
+      const readiness=await run(probeRecipe);if(await readinessOkay(readiness))return finish(true);
       const fingerprint=await environmentFingerprint(workspace,node,current);
       return finish(false,[issue(node.id,`Environment ${node.name} is not ready.`,`${result.command}\n${result.stderr}\n${result.stdout}`,Boolean(result.issue?.recoverable))],fingerprint===initialFingerprint);
     }
   }
-  const readiness=await run(node.check);
-  if(okay(readiness))return finish(true);
+  const readiness=await run(probeRecipe);
+  if(await readinessOkay(readiness))return finish(true);
   const unchanged=await environmentFingerprint(workspace,node,current)===initialFingerprint;
   return finish(false,[issue(node.id,`Environment ${node.name} did not provide the required ${defaultKind(node)} capability.`,`${readiness.command}\n${readiness.stderr}\n${readiness.stdout}`)],unchanged);
 }

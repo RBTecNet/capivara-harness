@@ -14,6 +14,7 @@ export interface BuildIncident {
   external: boolean;
   /** Reduced total context capacity discovered from the provider, for local task splitting. */
   contextChars?: number;
+  repairScope?: 'verification' | 'environment' | 'delivery';
 }
 export interface VerificationEvidence {
   id: string;
@@ -33,8 +34,23 @@ export interface VerificationEvidence {
   classification?: 'product' | 'instrument' | 'environment' | 'transport' | 'planning';
   provenance?: ConformanceProvenance;
   artifacts?: Record<string, string>;
+  observation?: VerificationObservation;
+  assertionStatus?: 'ready' | 'missing' | 'invalid' | 'failed';
+}
+/** Original runner observation, reusable when only its predicate needs repair. */
+export interface VerificationObservation {
+  command: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  cancelled: boolean;
+  timedOut: boolean;
+  terminal: boolean;
+  issue?: CommandResult['issue'];
 }
 export interface ActionRecord {
+  /** A completed reconciliation result awaiting atomic adoption with execution. */
+  planProposal?: DevelopmentPlan;
   id: string;
   action: string;
   input: string;
@@ -46,6 +62,8 @@ export interface ActionRecord {
   after?: string;
   failure?: string;
   result?: AgentResult;
+  sourceCoverage?: import('./task-context.js').TaskSourceCoverage[];
+  instrumentRepairs?: import('./invocation-instrument.js').InstrumentRepair[];
 }
 export interface WorkspaceCheckpoint {
   directory: string;
@@ -59,6 +77,8 @@ export interface IntegrationTransaction {
   workspace: string;
   files: { path: string; before: string | null; after: string | null; mode?: number }[];
   phase: 'prepared' | 'applying' | 'applied';
+  /** Durable staged provider directories, including executable links; resumed before their consumer. */
+  installations?: { path: string; staged: string; backup: string; before: string | null; after: string | null }[];
 }
 export interface BuildMetrics {
   startedAt: string;
@@ -93,16 +113,18 @@ export interface TaskProgress {
   definitionHash?: string;
   verificationCheckpoint?: { directory: string; sourceHash: string };
   controlStates?: string[];
+  pendingControlState?: string;
   revalidationFingerprint?: string;
   integrationConflict?: { path: string; before: string | null; current: string | null; proposed: string | null };
   integrationReconciliations?: string[];
   proposals?: string[];
+  contextFocus?: string[];
 }
 export interface BuildState {
   schema: 'capivara/build/1';
   planRevision: number;
   tasks: Record<string, TaskProgress>;
-  environment: Record<string, { inputHash: string; ready: boolean; fingerprint?: string; operational?: unknown; failedFingerprint?: string; actions?: ActionRecord[]; preparedAt?: string }>;
+  environment: Record<string, { inputHash: string; ready: boolean; fingerprint?: string; operational?: unknown; failedFingerprint?: string; actions?: ActionRecord[]; preparedAt?: string; recovery?: { fingerprint: string; configuration: string; protocol?: string; exhausted: boolean; reason: string } }>;
   evidence: VerificationEvidence[];
   incidents: BuildIncident[];
   updatedAt: string;
@@ -111,8 +133,20 @@ export interface BuildState {
   integrations?: IntegrationTransaction[];
   acceptance?: VerificationEvidence[];
   acceptanceRecovery?: Record<string, string>;
+  /** A queued reconciliation is executable work, including after interruption. */
+  pendingReplans?: Record<string, BuildIncident>;
   acceptanceChecks?: Verification[];
   acceptancePlanHash?: string;
+  /** Current blocking causes, separate from the append-only incident history. */
+  blockers?: BuildIncident[];
+  /** Recovered recipes are durable even before the build publishes its final plan. */
+  environmentDefinitions?: Record<string, { originalHash: string; definition: import('../domain/types.js').EnvironmentNode }>;
+  proofInterpretations?: { evidenceId: string; at: string; originalClassification: string; classification: string; reason: string; actionId?: string }[];
+  /** Exact effective definitions keep isolated proposals identifiable across replanning and restarts. */
+  taskDefinitions?: Record<string, WorkUnit>;
+  taskDefinitionHistory?: Record<string, WorkUnit>;
+  resourceBindings?: Record<string, Record<string, string>>;
+  planLineage?: import('./plan-lineage.js').RestoredPlanLineage[];
 }
 export interface BuildEvent {
   type: 'task' | 'environment' | 'verification' | 'recovery' | 'waiting' | 'complete' | 'progress' | 'gate' | 'scheduler' | 'transition' | 'review' | 'invalidation';
@@ -135,9 +169,10 @@ export interface BuildOptions {
   maxConcurrent?: number;
   retrySuspended?: boolean;
   configurationRevision?: string;
+  domainCalls?: import('./plan-lineage.js').PlanDomainCalls;
   executeCommand?: (request: CommandRequest) => Promise<CommandResult>;
   runTerminal?: (request: TerminalRequest) => Promise<CommandResult>;
-  onState?: (state: BuildState) => Promise<void>;
+  onState?: (state: BuildState, plan: DevelopmentPlan) => Promise<void>;
   onEvent?: (event: BuildEvent | RuntimeEvent) => void;
   repairPlan?: (incident: BuildIncident, task: WorkUnit) => Promise<DevelopmentPlan | null>;
 }

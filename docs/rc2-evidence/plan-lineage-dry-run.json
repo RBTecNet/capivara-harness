@@ -1,0 +1,47 @@
+{
+  "schema": "capivara/plan-lineage-dry-run/1",
+  "capturedAt": "2026-10-28T15:49:38.788Z",
+  "readOnlyProject": true,
+  "projectUpdatedAt": "2026-10-28T15:49:37.086Z",
+  "status": "working",
+  "restored": [
+    {
+      "previousTaskId": "module-categories-api",
+      "replacementTaskId": "categories-verification-review",
+      "previousDefinitionHash": "c836132ca215bf0c16d8763f2fd6236e4713ba8b51fdf1fb8b497a24e768236b",
+      "definitionHash": "8c76151391829adb4f6ab9ecb76a677fbd695046ffca169cd643cb4ff019370f",
+      "checkpointDirectory": "/home/bruno/Documentos/Projetos/testes_capivara/samba_admin/.capivara-next/workspaces/b2a3bc703ad0-ad3b7aeb-ba3f-448b-908a-6660502465b7/product",
+      "source": "domain-call",
+      "sourceId": "9c619455875627698f2c6d23f8b91b9e67a17fcae07ecd3642268f5020a3ed62",
+      "ownedFiles": [
+        "server/src/modules/categories/migration.ts",
+        "server/src/modules/categories/schema.ts",
+        "server/src/modules/categories/service.ts",
+        "server/src/modules/categories/routes.ts",
+        "server/src/modules/categories/routes.test.ts"
+      ],
+      "criteriaRestored": [
+        "POST válido cria e retorna categoria persistida.",
+        "Nome ausente ou vazio é rejeitado com 400 e erro legível.",
+        "GET lista e consulta por id, PUT atualiza e DELETE remove.",
+        "Testes verificam CRUD, validação e persistência após reabrir conexão SQLite.",
+        "O esquema não contém relação com Tarefas ou Anotações."
+      ],
+      "checkIds": [
+        "categories-api-tests"
+      ]
+    }
+  ],
+  "effectiveTaskIds": [
+    "foundation-stack",
+    "foundation-api-db",
+    "module-tasks-api",
+    "module-categories-api",
+    "module-notes-api",
+    "module-tasks-ui",
+    "module-categories-ui",
+    "module-notes-ui",
+    "web-shell",
+    "integrated-acceptance"
+  ]
+}

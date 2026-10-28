@@ -87,7 +87,7 @@ describe('build cooperativo por evidência',()=>{
   it('corrige o comportamento defeituoso com orientação concreta e preserva o restante',async()=>{
     const root=await workspace();await writeFile(join(root,'user.txt'),'preserve this');let edits=0,diagnoses=0;
     const gates:BuildGateMeasurement[]=[];
-    const productPlan=plan();productPlan.tasks[0]!.checks.push({id:'invalid-arguments',kind:'cli',command:process.execPath,args:['cli.mjs','--invalid'],expected:'stdout vazio; código de saída 2.',requirementIds:['r1'],requiredCapabilities:[]});
+    const productPlan=plan();productPlan.tasks[0]!.checks.push({id:'invalid-arguments',kind:'cli',command:process.execPath,args:['cli.mjs','--invalid'],expected:'stdout vazio; código de saída 2.',expectedExitCode:2,assertion:{type:'all',assertions:[{type:'empty',source:'stdout'},{type:'exit',value:2}]},requirementIds:['r1'],requiredCapabilities:[]});
     productPlan.tasks[0]!.checks.push({id:'greeting-exit',kind:'cli',command:process.execPath,args:['cli.mjs','--greet'],expectedExitCode:0,expected:'exit:0',requirementIds:['r1'],requiredCapabilities:[]},{id:'stdin-greeting',kind:'cli',command:process.execPath,args:['cli.mjs','--stdin'],input:['hello\n'],expected:'contains:hello',requirementIds:['r1'],requiredCapabilities:[]});
     const result=await runBuild({workspace:root,brief:brief(),plan:productPlan,onEvent:event=>{if('gate' in event&&event.gate)gates.push(event.gate);},agent:async request=>{
       if(request.role==='editor'||request.role==='repair'){
@@ -118,7 +118,7 @@ describe('build cooperativo por evidência',()=>{
       if(request.role==='repair'){recipeRepairs++;expect(request.readOnly).toBe(true);return complete(JSON.stringify({checks:[{kind:'cli',command:process.execPath,args:['cli.mjs','--greet'],expected:'contains:hello',requiredCapabilities:[]}]}));}
       return complete('{"approved":true}');
     }});
-    expect(result.status).toBe('complete');expect(edits).toBe(1);expect(recipeRepairs).toBe(1);
+    expect(result.status,JSON.stringify(result.incidents)).toBe('complete');expect(edits).toBe(1);expect(recipeRepairs).toBe(1);
     expect(result.state.tasks.greet?.checks?.[0]?.kind).toBe('cli');
   });
 

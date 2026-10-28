@@ -1,6 +1,6 @@
 import { readFile, stat, realpath } from 'node:fs/promises';
 import { createRequire, isBuiltin } from 'node:module';
-import { dirname, extname, join, relative, resolve, matchesGlob } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, matchesGlob } from 'node:path';
 import type { DevelopmentPlan, Verification, WorkUnit } from '../domain/types.js';
 import { inside, sourceFiles } from './files.js';
 
@@ -75,11 +75,99 @@ async function resolvePackage(workspace:string,file:string,name:string):Promise<
 export function declaredTaskInputs(_plan:DevelopmentPlan,task:WorkUnit):string[]{return [...new Set(task.inputs??task.files)];}
 export function declaredCheckInputs(plan:DevelopmentPlan,task:WorkUnit,check:Verification):string[]{
   const outputs=check.outputs??[];
-  const isOutput=(path:string):boolean=>outputs.some(output=>matchesGlob(path,output)||matchesGlob(path,`${output.replace(/\/$/,'')}/**`));
   const explicit=check.inputs??declaredTaskInputs(plan,task);
-  const argumentsWithPaths=(check.args??[]).filter(value=>!value.startsWith('-')&&!value.includes('\n')&&!isOutput(value)&&(/[/\\]/.test(value)||/\.(?:[cm]?[jt]sx?|py|rs|go|json|toml|ya?ml|csproj|fsproj|sln)$/.test(value)));
-  return [...new Set([...explicit,...argumentsWithPaths,...(check.inputs===undefined?outputs.map(output=>`!${output}`):[])])];
+  return [...new Set([...explicit,...(check.inputs===undefined?outputs.map(output=>`!${output}`):[])])];
 }
+/** Parse only literal argv. Compound shell programs require explicit read sets. */
+function inputArguments(check:Verification):string[]|undefined{
+  if(check.args)return[check.command??'',...check.args];
+  const result:string[]=[];let token='',quote='',escaped=false,started=false;
+  for(const character of check.command??''){
+    if(escaped){token+=character;escaped=false;started=true;continue;}
+    if(character==='\\'&&quote!=="'"){escaped=true;continue;}
+    if(quote){if(character===quote)quote='';else token+=character;started=true;continue;}
+    if(character==='"'||character==="'"){quote=character;started=true;continue;}
+    if(/[;&|<>`$\n\r]/.test(character))return undefined;
+    if(/\s/.test(character)){if(started){result.push(token);token='';started=false;}continue;}
+    token+=character;started=true;
+  }
+  if(quote||escaped)return undefined;if(started)result.push(token);return result.length?result:undefined;
+}
+interface PathArgument { value:string; missing:boolean; }
+const outputOptions=new Set(['-o','--output','--out','--out-dir','--outdir','--output-dir','--output-directory']);
+function readArguments(argv:readonly string[],depth=0):PathArgument[]{
+  if(!argv.length||depth>8)return[];
+  const binary=basename(argv[0]??'').replace(/\.(?:exe|cmd|bat)$/i,'').toLowerCase();
+  let args=argv.slice(1);
+  if(['npm','pnpm','yarn','bun'].includes(binary)){
+    while(args[0]&&['--silent','-s'].includes(args[0]))args=args.slice(1);
+    if(args[0]==='exec'||args[0]==='x')return readArguments(args.slice(1).filter((value,index)=>index!==0||value!=='--'),depth+1);
+    if(args[0]==='run'||args[0]==='run-script')args=args.slice(2);
+    else args=args.slice(1); // Package-manager operation/script identifiers are metadata.
+    if(args[0]==='--')args=args.slice(1);
+  }else if(['npx','pnpx','bunx'].includes(binary)){
+    while(args[0]&&['--','--yes','-y','--no-install','--no'].includes(args[0]))args=args.slice(1);
+    return readArguments(args,depth+1);
+  }
+  const reader=['rg','grep','egrep','fgrep'].includes(binary);
+  const allPaths=['cat','head','tail','wc','stat','less','more'].includes(binary);
+  const result:PathArgument[]=[];let pattern=reader&&!args.includes('--files'),positional=false;
+  const genericValues=new Set(['-e','--eval','-p','--print','-c','--command','-m','--module','--grep','--grep-invert','--reporter','--project','--target','--format','--name']);
+  const readerValues=new Set(['-g','--glob','--iglob','-t','--type','-T','--type-not','--type-add','--type-clear','-A','--after-context','-B','--before-context','-C','--context','--context-separator','-m','--max-count','--max-depth','--maxdepth','--max-filesize','--threads','-j','--encoding','--engine','-r','--replace','--sort','--sortr','--path-separator']);
+  const displayValues=new Set(['-n','--lines','-c','--bytes','--format','--printf']);
+  for(let index=0;index<args.length;index++){
+    const value=args[index]!;
+    if(!positional&&value==='--'){positional=true;continue;}
+    if(!positional&&value.startsWith('-')){
+      const equal=value.indexOf('='),option=equal>=0?value.slice(0,equal):value;
+      const next=():string|undefined=>equal>=0?value.slice(equal+1):args[++index];
+      if(outputOptions.has(option)){next();continue;}
+      if(reader&&(option==='-e'||option==='--regexp')){next();pattern=false;continue;}
+      if(reader&&(option==='-f'||option==='--file')){const file=next();if(file)result.push({value:file,missing:true});pattern=false;continue;}
+      if(reader&&value.startsWith('-e')&&!value.startsWith('--')&&value.length>2){pattern=false;continue;}
+      if(reader&&value.startsWith('-f')&&!value.startsWith('--')&&value.length>2){result.push({value:value.slice(2),missing:true});pattern=false;continue;}
+      if(reader&&readerValues.has(option)||allPaths&&displayValues.has(option)||!reader&&!allPaths&&genericValues.has(option)){next();continue;}
+      if(equal>=0)result.push({value:value.slice(equal+1),missing:false});
+      continue;
+    }
+    if(pattern){pattern=false;continue;}
+    result.push({value,missing:reader||allPaths});
+  }
+  return result;
+}
+async function localReadSelector(workspace:string,cwd:string,argument:PathArgument):Promise<string|undefined>{
+  const value=argument.value;if(!value||/[\0\n\r]/.test(value)||/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value))return undefined;
+  const root=resolve(workspace),absolute=resolve(cwd,value),path=relative(root,absolute).replaceAll('\\','/');
+  if(path==='..'||path.startsWith('../')||isAbsolute(path))return undefined;
+  const info=await stat(absolute).catch(()=>null);
+  const explicit=argument.missing||value==='.'||value==='..'||/[/\\]/.test(value)||/^\.?[^\s]+\.[A-Za-z0-9_-]+$/.test(value);
+  if(!info&&!explicit)return undefined;
+  if(info&&!info.isFile()&&!info.isDirectory())return undefined;
+  // A path below a symlink is still outside when that nearest existing ancestor
+  // resolves outside the workspace. Do not infer an external or control read set.
+  let ancestor=absolute;
+  for(;;){
+    const actual=await realpath(ancestor).catch(()=>undefined);
+    if(actual){const rel=relative(root,actual).replaceAll('\\','/');if(rel==='..'||rel.startsWith('../')||isAbsolute(rel))return undefined;break;}
+    const parent=dirname(ancestor);if(parent===ancestor)break;ancestor=parent;
+  }
+  const selected=path||'.';if(selected.split('/').some(part=>['.git','.capivara-next','.capivara-runtime','.capivara-verification'].includes(part)))return undefined;
+  return selected;
+}
+/** Declared selectors plus concrete CLI read operands. Bare directories and missing
+ * reader operands retain identity so creation can invalidate an earlier failure. */
+export async function verificationInputSelectors(workspace:string,plan:DevelopmentPlan,task:WorkUnit,check:Verification):Promise<string[]>{
+  const root=resolve(workspace),cwd=resolve(root,check.cwd??'.'),cwdRelative=relative(root,cwd).replaceAll('\\','/');
+  if(cwdRelative==='..'||cwdRelative.startsWith('../')||isAbsolute(cwdRelative))throw new Error(`Verification cwd escapes its workspace: ${check.cwd}`);
+  const outputs=check.outputs??[];
+  const isOutput=(path:string):boolean=>outputs.some(output=>matchesGlob(path,output)||matchesGlob(path,`${output.replace(/\/$/,'')}/**`));
+  const inferred=await Promise.all(readArguments(inputArguments(check)??[]).map(argument=>localReadSelector(root,cwd,argument)));
+  return [...new Set([...declaredCheckInputs(plan,task,check),...inferred.filter((path):path is string=>Boolean(path&&!isOutput(path)))])].sort();
+}
+export async function resolveVerificationInputs(workspace:string,plan:DevelopmentPlan,task:WorkUnit,check:Verification):Promise<string[]>{
+  return resolveInputDependencies(workspace,await verificationInputSelectors(workspace,plan,task,check));
+}
+
 export async function resolveInputDependencies(workspace:string,selectors:readonly string[]):Promise<string[]>{
   const root=resolve(workspace),result=new Set(selectors),queue=await sourceFiles(root,selectors),seen=new Set<string>();
   for(let index=0;index<queue.length;index++){

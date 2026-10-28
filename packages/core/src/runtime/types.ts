@@ -107,6 +107,7 @@ export interface AgentRequest {
   /** Operational bindings prepared by the coordinator; inherited by all process tools. */
   environment?: Record<string, string>;
   role: string;
+  purpose?: 'implementation' | 'environment-recovery' | 'inspection';
   /** Stable identity assigned by the coordinator's persisted action ledger, never a per-call random ID. */
   operationKey?: string;
   instruction: string;

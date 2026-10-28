@@ -1,8 +1,18 @@
 import type { Question } from '../domain/types.js';
-import type { ProgressMeasurement } from '../telemetry/progress.js';
+import type { ProgressMeasurement, BuildGateId, BuildGateStatus, BuildGateMeasurement } from '../telemetry/progress.js';
 
 export type DashboardPanelId = 'summary' | 'progress' | 'phases' | 'environment' | 'activity' | 'log' | 'incidents';
 export type DashboardProgress = ProgressMeasurement;
+export interface DashboardGate {
+  id: BuildGateId;
+  status: BuildGateStatus;
+  detail?: string;
+}
+export interface DashboardGateRow {
+  taskId: string;
+  title: string;
+  gates: DashboardGate[];
+}
 
 /** Each panel keeps its full text; viewports and overlays choose how much to render. */
 export interface DashboardPanel {
@@ -12,6 +22,7 @@ export interface DashboardPanel {
   /** Compact rows for the dashboard; expanded panels always use the complete lines. */
   previewLines?: string[];
   progress: DashboardProgress[];
+  gateRows?: DashboardGateRow[];
 }
 
 export interface DashboardUsage {
@@ -42,6 +53,7 @@ export interface DashboardEvent {
   subject?: string;
   detail?: unknown;
   progress?: DashboardProgress;
+  gate?: BuildGateMeasurement;
   at?: string;
   /** Stored event bodies may arrive directly from SQLite. */
   body?: unknown;

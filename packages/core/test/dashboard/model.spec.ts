@@ -26,6 +26,32 @@ function saved(): SavedProject {
 }
 
 describe('projeção do dashboard', () => {
+  it('mantém devoluções até a nova execução do mesmo passo e só inclui G4 quando há fluxo', () => {
+    const initial = structuredClone(saved());
+    initial.plan!.tasks[1]!.checks.push({ id: 'screen', kind: 'tui', requirementIds: [], requiredCapabilities: [] });
+    const model = new DashboardModel(initial);
+    const rows = () => model.panel('progress').gateRows!;
+    const gate = () => rows()[1]!.gates.find(item => item.id === 'G3')!;
+    expect(rows()[0]!.gates.map(item => item.id)).toEqual(['G0', 'G1', 'G2', 'G3']);
+    expect(rows()[0]!.gates.find(item => item.id === 'G2')?.status).toBe('complete');
+    expect(rows()[1]!.gates.find(item => item.id === 'G4')?.status).toBe('pending');
+    const measure = { taskId: 'two', gate: 'G3' as const, attempt: 2, planRevision: 1 };
+    model.observe({ type: 'gate', body: JSON.stringify({ gate: { ...measure, status: 'returned', detail: 'Corrigir a saída observada.' } }) });
+    model.observe({ type: 'gate', gate: { ...measure, status: 'pending' } });
+    expect(gate()).toMatchObject({ status: 'returned', detail: 'Corrigir a saída observada.' });
+    model.observe({ type: 'gate', gate: { ...measure, status: 'running' } });
+    expect(gate().status).toBe('running');
+    model.observe({ type: 'gate', gate: { ...measure, status: 'complete' } });
+    model.observe({ type: 'gate', gate: { ...measure, attempt: 1, status: 'returned' } });
+    expect(gate().status).toBe('complete');
+    (initial.execution as BuildState).tasks.two!.attempts = 3;
+    model.updateProject(initial);
+    expect(gate().status).toBe('pending');
+    model.updateProject({ ...initial, plan: { ...initial.plan!, revision: 2 } });
+    model.observe({ type: 'gate', gate: { ...measure, status: 'returned' } });
+    expect(gate().status).toBe('running');
+  });
+
   it('projeta contagens confirmadas e mantém o conteúdo integral dos painéis', () => {
     const model = new DashboardModel(saved());
     const view = model.snapshot();

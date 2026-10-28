@@ -11,7 +11,7 @@ import { ProjectStore } from './store.js';
 import { readSettings } from './settings.js';
 import { questionChannel } from './questions.js';
 import { Cancelled, recoverOperation, waitForRecovery } from './recovery.js';
-import { emitEvent, type ProgressMeasurement } from '../telemetry/progress.js';
+import { emitEvent, type ProgressMeasurement, type BuildGateMeasurement } from '../telemetry/progress.js';
 import type { SavedProject } from './store.js';
 
 export interface WorkflowEvent {
@@ -20,6 +20,7 @@ export interface WorkflowEvent {
   subject?: string;
   detail?: unknown;
   progress?: ProgressMeasurement;
+  gate?: BuildGateMeasurement;
   at?: string;
 }
 

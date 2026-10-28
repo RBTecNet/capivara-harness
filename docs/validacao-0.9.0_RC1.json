@@ -233,5 +233,35 @@
       "dashboardCommandAvailable": true,
       "installedCliMatchesBuiltCli": true
     }
+  },
+  "dashboardColorsUpdate": {
+    "verifiedAt": "2026-10-28T12:44:45.865287+00:00",
+    "reference": "origin/main packages/core/src/tui/build-phases.ts and loop/gates.ts",
+    "command": "npm run check",
+    "testFiles": 15,
+    "tests": 92,
+    "build": "passed",
+    "typecheck": "passed",
+    "paidInferenceCalls": 0,
+    "terminalPty": {
+      "realPty": true,
+      "greenGateObserved": true,
+      "yellowGateObserved": true,
+      "redGateObserved": true,
+      "grayWaitingGateObserved": true,
+      "conditionalG4Visible": true,
+      "expandedContentAccessible": true,
+      "panelColorsObserved": true,
+      "terminalRestored": true,
+      "exitCode": 0,
+      "paidInferenceCalls": 0
+    },
+    "behavior": {
+      "returnedChecksRecoverToRunningAndComplete": true,
+      "interactiveTuiGateRecoveredToComplete": true,
+      "observingFailuresDoNotChangeExecution": true,
+      "noMandatoryNewChecks": true,
+      "noLegacyEngineImported": true
+    }
   }
 }

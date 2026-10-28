@@ -1,4 +1,4 @@
-import type { DashboardPanel, DashboardPanelId, DashboardProgress, DashboardView } from './types.js';
+import type { DashboardGateRow, DashboardPanel, DashboardPanelId, DashboardProgress, DashboardView } from './types.js';
 import type { DashboardNavigationState } from './navigation.js';
 
 const ANSI = /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\|$))/g;
@@ -61,23 +61,92 @@ export function renderProgressBar(progress: DashboardProgress, width: number, fr
   return fit(`[${bar}] ${count}`, width);
 }
 
+interface ColorSpan { start: number; end: number; tone: string; }
+interface ContentLine { text: string; tone?: string; spans?: ColorSpan[]; }
+interface Segment { text: string; tone?: string; reserve?: number; }
 interface PanelPlacement { panel: DashboardPanel; x: number; y: number; width: number; height: number; }
-interface DashboardLayout { width: number; height: number; header: string[]; footer: string[]; placements: PanelPlacement[]; }
+interface DashboardLayout { width: number; height: number; header: ContentLine[]; footer: string[]; placements: PanelPlacement[]; }
 
-function progressLines(progress: DashboardProgress, width: number, expanded: boolean, frame: number): string[] {
+const progressTone = (status: DashboardProgress['status']): string => status === 'complete' ? '32' : status === 'running' ? '33' : '90';
+const statusTone = (status: string): string => ['complete', 'ready', 'resolved'].includes(status) ? '1;32' : ['critical', 'returned'].includes(status) ? '1;31' : ['working', 'running', 'recovering'].includes(status) ? '1;33' : '90';
+const panelTones: Record<DashboardPanelId, string> = { summary: '36', progress: '33', phases: '34', environment: '32', activity: '35', log: '36', incidents: '35' };
+const gateTone = { pending: '90', running: '33', complete: '32', returned: '31', neutral: '90', waiting: '90' };
+const gateLabel = { pending: 'aguardando', running: 'em execução', complete: 'executado/validado', returned: 'devolvido para correção', neutral: 'sem alteração necessária', waiting: 'aguardando recurso' };
+const gateName = { G0: 'Sessão do agente', G1: 'Escrita', G2: 'Verificações', G3: 'Revisão independente', G4: 'Fluxos na aplicação' };
+
+/** Color spans are created locally; terminal controls in external content are discarded first. */
+function segmentLines(segments: Segment[], width: number): ContentLine[] {
+  const result: ContentLine[] = [];
+  let text = ''; let used = 0; let spans: ColorSpan[] = [];
+  const flush = (): void => { result.push({ text, spans }); text = ''; used = 0; spans = []; };
+  for (const segment of segments) {
+    if (segment.reserve && used + segment.reserve > width && text) flush();
+    for (const char of safe(segment.text)) {
+      if (char === '\n') { flush(); continue; }
+      const size = cellWidth(char);
+      if (used + size > width && text) flush();
+      const start = text.length;
+      text += char; used += size;
+      if (segment.tone) {
+        const last = spans.at(-1);
+        if (last?.tone === segment.tone && last.end === start) last.end = text.length;
+        else spans.push({ start, end: text.length, tone: segment.tone });
+      }
+    }
+  }
+  if (text || !result.length) flush();
+  return result;
+}
+
+function gateLines(row: DashboardGateRow, width: number, expanded: boolean): ContentLine[] {
+  const gateWidth = row.gates.length * 4 - 1;
+  const taskId = fit(row.taskId, Math.max(1, width - gateWidth - 1), true);
+  const segments: Segment[] = expanded ? [] : [{ text: `${taskId} `, tone: '1;36' }];
+  row.gates.forEach((gate, index) => {
+    if (index) segments.push({ text: ' ' });
+    segments.push({ text: gate.id, tone: '90', reserve: 3 }, { text: ['pending', 'waiting'].includes(gate.status) ? '○' : '●', tone: `1;${gateTone[gate.status]}` });
+  });
+  const cells = segmentLines(segments, width);
+  if (!expanded) return cells;
+  return [
+    ...wrap(`${row.taskId} · ${row.title}`, width).map(text => ({ text, tone: '1;36' })),
+    ...cells,
+    ...row.gates.flatMap(gate => wrap(`${gate.id} ${gateName[gate.id]}: ${gateLabel[gate.status]}${gate.detail ? ` · ${gate.detail}` : ''}`, width).map(text => ({ text, tone: gateTone[gate.status] }))),
+    { text: '' },
+  ];
+}
+
+function progressLines(progress: DashboardProgress, width: number, expanded: boolean, frame: number): ContentLine[] {
   const label = `${progress.label}${progress.stage ? ` · ${progress.stage}` : ''}`;
   const count = progressCount(progress);
   const fullCount = expanded && dashboardWidthOf(count) > width - 4 ? wrap(count, width) : [];
-  return [...(expanded ? wrap(label, width) : [fit(label, width, true)]), renderProgressBar(progress, width, frame), ...fullCount];
+  return [...(expanded ? wrap(label, width) : [fit(label, width, true)]).map(text => ({ text, tone: '1' })), { text: renderProgressBar(progress, width, frame), tone: progressTone(progress.status) }, ...fullCount.map(text => ({ text, tone: progressTone(progress.status) }))];
 }
 
-function panelLines(panel: DashboardPanel, width: number, expanded: boolean, frame = 0): string[] {
+function panelLines(panel: DashboardPanel, width: number, expanded: boolean, frame = 0): ContentLine[] {
   const measurements = !expanded && panel.previewLines && panel.id !== 'progress' ? [] : panel.progress;
   const progress = measurements.flatMap(item => progressLines(item, width, expanded, frame));
   const source = expanded ? panel.lines : panel.previewLines ?? panel.lines;
-  const lines = source.flatMap(line => expanded ? wrap(line, width) : safe(line).split(/\r?\n/).map(part => fit(part, width, true)));
-  const content = panel.id === 'progress' ? [...progress, ...lines] : [...lines, ...progress];
-  return content.length ? content : ['Sem registros.'];
+  const lines = source.flatMap(line => expanded ? wrap(line, width) : safe(line).split(/\r?\n/).map(part => fit(part, width, true))).map(text => ({ text }));
+  const gatePriority = (row: DashboardGateRow): number => Math.min(...row.gates.map(gate => gate.status === 'running' ? 0 : gate.status === 'returned' ? 1 : ['pending', 'waiting'].includes(gate.status) ? 2 : 3), 3);
+  const gateRows = expanded ? panel.gateRows ?? [] : [...panel.gateRows ?? []].sort((a, b) => gatePriority(a) - gatePriority(b));
+  const gates = gateRows.flatMap(row => gateLines(row, width, expanded));
+  const legend = gates.length ? wrap('● execução (amarelo) · ● validado (verde) · ● devolvido (vermelho) · ○ aguardando · ● neutro', width).map(text => ({ text, tone: '90' })) : [];
+  const content = panel.id === 'progress' ? [...gates, ...legend, ...progress, ...lines] : [...lines, ...progress];
+  return content.length ? content : [{ text: 'Sem registros.', tone: '90' }];
+}
+
+function paintContent(line: ContentLine, width: number, paint: (text: string, tone: string) => string): string {
+  const text = fit(line.text, width);
+  if (!line.spans?.length) return paint(text, line.tone ?? '39');
+  let output = ''; let at = 0;
+  for (const span of line.spans) {
+    if (span.start >= text.length) break;
+    if (span.start > at) output += paint(text.slice(at, span.start), line.tone ?? '39');
+    const end = Math.min(text.length, span.end);
+    output += paint(text.slice(span.start, end), span.tone); at = end;
+  }
+  return output + paint(text.slice(at), line.tone ?? '39');
 }
 
 const splitHeights = (available: number, count: number): number[] => Array.from({ length: count }, (_, index) => Math.floor(available / count) + (index < available % count ? 1 : 0));
@@ -90,11 +159,11 @@ function layoutDashboard(model: DashboardView, view: DashboardNavigationState, w
   const current = model.progress.findLast(item => item.status === 'running' && !aggregateProgress.has(item.id))
     ?? model.progress.find(item => item.status === 'running') ?? model.progress.find(item => item.status !== 'complete') ?? model.progress.at(-1);
   const status = ({ working: 'Em andamento', running: 'Em andamento', waiting: 'Aguardando', recovering: 'Em recuperação', complete: 'Concluído', cancelled: 'Interrompido', critical: 'Incidente crítico' } as Record<string, string>)[model.status] ?? model.status;
-  const header = [fit(`${view.expandedPanel ? 'PAINEL' : 'EXECUÇÃO'} · ${safe(status)} · ${safe(model.stage)}`, w, true)];
+  const header: ContentLine[] = [{ text: fit(`${view.expandedPanel ? 'PAINEL' : 'EXECUÇÃO'} · ${safe(status)} · ${safe(model.stage)}`, w, true), tone: statusTone(model.status) }];
   if (current) {
     const barWidth = Math.min(w, Math.max(16, Math.floor(w * 0.48)));
     const labelWidth = w - barWidth - 1;
-    header.push(labelWidth >= 8 ? `${pad(fit(current.label, labelWidth, true), labelWidth)} ${renderProgressBar(current, barWidth, frame)}` : renderProgressBar(current, w, frame));
+    header.push({ text: labelWidth >= 8 ? `${pad(fit(current.label, labelWidth, true), labelWidth)} ${renderProgressBar(current, barWidth, frame)}` : renderProgressBar(current, w, frame), tone: progressTone(current.status) });
   }
   const index = focused ? model.panels.indexOf(focused) + 1 : 0;
   const selector = `Área ${index}/${model.panels.length}: ${focused?.title ?? 'sem conteúdo'} · Tab/←→`;
@@ -165,7 +234,7 @@ export function renderDashboard(model: DashboardView, view: DashboardNavigationS
   for (const placement of layout.placements) {
     const { panel, width: panelWidth, height: panelHeight } = placement;
     const active = panel.id === (view.expandedPanel ?? view.focusPanel);
-    const tone = active ? '1;36' : '90';
+    const tone = `${active ? '1;' : ''}${panelTones[panel.id]}`;
     const inner = Math.max(0, panelWidth - 2);
     const contentWidth = Math.max(1, inner - 2);
     const lines = panelLines(panel, contentWidth, view.expandedPanel === panel.id, frame);
@@ -176,7 +245,11 @@ export function renderDashboard(model: DashboardView, view: DashboardNavigationS
     const top = paint(`┌${label}${'─'.repeat(Math.max(0, inner - dashboardWidthOf(label)))}┐`, tone);
     const range = fit(` linhas ${offset + 1}–${Math.min(lines.length, offset + pageSize)}/${lines.length}${view.followPanels?.[panel.id] ? ' · ao vivo' : ''} `, inner);
     const bottom = paint(`└${range}${'─'.repeat(Math.max(0, inner - dashboardWidthOf(range)))}┘`, tone);
-    const body = Array.from({ length: Math.max(0, panelHeight - 2) }, (_, row) => `${paint('│', tone)} ${pad(fit(lines[offset + row] ?? '', contentWidth), contentWidth)} ${paint('│', tone)}`);
+    const body = Array.from({ length: Math.max(0, panelHeight - 2) }, (_, row) => {
+      const line = lines[offset + row] ?? { text: '' };
+      const content = paintContent(line, contentWidth, paint);
+      return `${paint('│', tone)} ${pad(content, contentWidth)} ${paint('│', tone)}`;
+    });
     rendered.push({ placement, rows: panelHeight >= 2 ? [top, ...body, bottom].slice(0, panelHeight) : [paint(fit(`▸ ${panel.title}`, panelWidth), tone)] });
   }
   // Each column is joined as already bounded strings so ANSI styles never affect cell positions.
@@ -189,5 +262,5 @@ export function renderDashboard(model: DashboardView, view: DashboardNavigationS
     }
     rows[row] = text + ' '.repeat(Math.max(0, layout.width - used));
   }
-  return [...layout.header.map(line => paint(line, '1')), ...rows, ...layout.footer.map(line => paint(line, '90'))].slice(0, layout.height).join('\n');
+  return [...layout.header.map(line => paintContent(line, layout.width, paint)), ...rows, ...layout.footer.map((line, index) => paint(line, index === 0 ? '36' : '90'))].slice(0, layout.height).join('\n');
 }

@@ -10,5 +10,5 @@ export * from './data-center/index.js';
 export { runWizard, createTerminalWizardIO } from './wizard/index.js';
 export type { WizardDeps, WizardIO, WizardResult } from './wizard/index.js';
 export * from './dashboard/index.js';
-export type { ProgressMeasurement, ProgressEvent } from './telemetry/progress.js';
+export type { ProgressMeasurement, ProgressEvent, BuildGateId, BuildGateStatus, BuildGateMeasurement, BuildGateEvent } from './telemetry/progress.js';
 export type { WorkflowEvent } from './app/workflow.js';

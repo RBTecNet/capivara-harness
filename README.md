@@ -58,6 +58,8 @@ Editor e revisor recebem o fragmento, contratos relevantes, restrições e evid�
 
 Em um terminal interativo, `init`, `plan`, `build` e `run` abrem automaticamente o dashboard, sem mascote ou nome da aplicação. Ele reúne resumo, progresso, fases, ambiente, atividade, log e pendências. As barras usam contagens observadas; operações sem total conhecido mostram movimento sem inventar uma porcentagem. Para usar saída por linhas, acrescente `--no-dashboard`.
 
+Os painéis têm cores próprias. Na área Progresso, cada unidade mostra `G0● G1● G2○ G3○`, com G4 quando houver fluxo na aplicação: amarelo em execução, verde executado/validado, vermelho devolvido para correção e cinza aguardando ou neutro. G0 acompanha a sessão do agente; G1, a escrita; G2, verificações pertinentes; G3, revisão; G4, interação com a aplicação. Os indicadores observam o motor sem criar etapas obrigatórias. Enter mostra o significado e os detalhes de cada bolinha. `NO_COLOR` e terminais sem suporte continuam oferecendo leitura sem cores.
+
 Para acompanhar um projeto em outro terminal ou consultar uma execução concluída:
 
 ```sh

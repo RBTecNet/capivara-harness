@@ -7,6 +7,7 @@ import type { AgentResult, CommandRequest, CommandResult } from '../../src/runti
 import { executeCommand, runTerminal } from '../../src/runtime/index.js';
 import { interpretReview, runBuild } from '../../src/execution/build.js';
 import { prepareEnvironmentNode } from '../../src/execution/environment.js';
+import type { BuildGateMeasurement } from '../../src/telemetry/progress.js';
 
 const temporary:string[]=[];
 afterEach(async()=>{await Promise.all(temporary.splice(0).map(path=>rm(path,{recursive:true,force:true})));});
@@ -57,9 +58,10 @@ describe('build cooperativo por evidência',()=>{
 
   it('corrige o comportamento defeituoso com orientação concreta e preserva o restante',async()=>{
     const root=await workspace();await writeFile(join(root,'user.txt'),'preserve this');let edits=0,diagnoses=0;
+    const gates:BuildGateMeasurement[]=[];
     const productPlan=plan();productPlan.tasks[0]!.checks.push({id:'invalid-arguments',kind:'cli',command:process.execPath,args:['cli.mjs','--invalid'],expected:'stdout vazio; código de saída 2.',requirementIds:['r1'],requiredCapabilities:[]});
     productPlan.tasks[0]!.checks.push({id:'greeting-exit',kind:'cli',command:process.execPath,args:['cli.mjs','--greet'],expectedExitCode:0,expected:'exit:0',requirementIds:['r1'],requiredCapabilities:[]},{id:'stdin-greeting',kind:'cli',command:process.execPath,args:['cli.mjs','--stdin'],input:['hello\n'],expected:'contains:hello',requirementIds:['r1'],requiredCapabilities:[]});
-    const result=await runBuild({workspace:root,brief:brief(),plan:productPlan,agent:async request=>{
+    const result=await runBuild({workspace:root,brief:brief(),plan:productPlan,onEvent:event=>{if('gate' in event&&event.gate)gates.push(event.gate);},agent:async request=>{
       if(request.role==='editor'||request.role==='repair'){
         edits++;if(edits===2)expect(request.instruction).toContain('hello');
         if(edits===2)return complete();
@@ -70,6 +72,11 @@ describe('build cooperativo por evidência',()=>{
       return complete('{"approved":true,"findings":[]}');
     }});
     expect(result.status).toBe('complete');expect(edits).toBe(4);expect(diagnoses).toBe(1);
+    const checks=gates.filter(gate=>gate.gate==='G2');
+    const returned=checks.findIndex(gate=>gate.status==='returned');
+    expect(returned).toBeGreaterThanOrEqual(0);
+    expect(checks.slice(returned+1).some(gate=>gate.status==='running')).toBe(true);
+    expect(checks.at(-1)?.status).toBe('complete');
     expect(result.state.evidence.some(value=>value.checkId==='greeting-exit'&&value.passed)).toBe(true);expect(result.state.evidence.some(value=>value.checkId==='stdin-greeting'&&value.passed)).toBe(true);
     expect(await readFile(join(root,'user.txt'),'utf8')).toBe('preserve this');
     expect(await readFile(join(root,'repair-note.txt'),'utf8')).toBe('preserve unrelated repair work');
@@ -102,11 +109,14 @@ describe('build cooperativo por evidência',()=>{
     const root=await workspace();const product=brief();product.modes=['tui'];product.requirements[0]!.mode='tui';product.request='Create a TUI menu: j selects next; q quits.';
     const unit=task();unit.files=['menu.mjs'];unit.instructions='Create the interactive menu.';unit.checks=[{id:'syntax',kind:'command',command:process.execPath,args:['--check','menu.mjs'],requirementIds:['r1'],requiredCapabilities:[]}];
     let edits=0,recipeRepairs=0;const productPlan=plan(unit);unit.environmentIds=['pty'];productPlan.environment=[{id:'pty',name:'Interactive terminal',kind:'tool',dependsOn:[],targets:['portable'],reason:'Native terminal input is required.',check:{command:process.execPath,args:['-e','if(!process.stdin.isTTY)process.exit(3)'],capabilities:['pty']},prepare:[]}];
-    const result=await runBuild({workspace:root,brief:product,plan:productPlan,runTerminal,repairPlan:async()=>{throw new Error('An instrument failure cannot replan the product.');},agent:async request=>{
+    const gates:BuildGateMeasurement[]=[];
+    const result=await runBuild({workspace:root,brief:product,plan:productPlan,runTerminal,onEvent:event=>{if('gate' in event&&event.gate)gates.push(event.gate);},repairPlan:async()=>{throw new Error('An instrument failure cannot replan the product.');},agent:async request=>{
       if(request.role==='editor'){edits++;await writeFile(join(root,'menu.mjs'),"process.stdin.setRawMode(true);process.stdin.resume();console.log('READY');process.stdin.on('data', b=>{if(b.toString()==='j')console.log('SELECTED 2');if(b.toString()==='q')process.exit(0);});");return complete();}
       if(request.role==='repair'){recipeRepairs++;expect(request.readOnly).toBe(true);if(recipeRepairs>1){expect(request.context).toContain('STDOUT:');expect(request.context).toContain('READY');expect(request.context).toContain('Runtime issue');}return complete(JSON.stringify({checks:[{kind:'tui',command:process.execPath,args:['menu.mjs'],steps:[{waitFor:recipeRepairs===1?'READY visível no terminal':'READY',timeoutMs:150},{input:'j',waitFor:'SELECTED 2'}],closeInput:'q',expected:'contains:SELECTED 2',requiredCapabilities:[]}]}));}
       return complete('{"approved":true}');
     }});
     expect(result.status).toBe('complete');expect(edits).toBe(1);expect(recipeRepairs).toBe(2);expect(result.plan.tasks).toHaveLength(1);expect(result.state.evidence.find(value=>value.kind==='tui')?.terminal).toBe(true);expect(result.state.evidence.find(value=>value.kind==='tui')?.output).toContain('SELECTED 2');
+    expect(gates.some(gate=>gate.gate==='G4'&&gate.status==='returned')).toBe(true);
+    expect(gates.filter(gate=>gate.gate==='G4').at(-1)?.status).toBe('complete');
   },10000);
 });

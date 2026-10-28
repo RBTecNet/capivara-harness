@@ -10,7 +10,7 @@ import { backup, changedSince, digest, inputHash, inside, introducedServers, res
 import { executionConstraints, prepareEnvironmentNode, prepareProjectDependencies, type CommandExecutor } from './environment.js';
 import { checkInputHash, derivedChecks, hostTarget, nativeTargetAvailable, runVerification, selectVerifications, taskInputs } from './checks.js';
 import type { BuildIncident, BuildOptions, BuildOutcome, BuildState, TaskProgress } from './types.js';
-import { emitEvent, emitProgress } from '../telemetry/progress.js';
+import { emitEvent, emitGate, emitProgress, type BuildGateId, type BuildGateStatus } from '../telemetry/progress.js';
 
 export function createBuildState(plan: DevelopmentPlan): BuildState {
   return {schema:'capivara/build/1',planRevision:plan.revision,tasks:{},environment:{},evidence:[],incidents:[],updatedAt:new Date().toISOString()};
@@ -169,6 +169,16 @@ export async function runBuild(options:BuildOptions):Promise<BuildOutcome>{
   let dependenciesPrepared='';
   const attemptedThisPass=new Set<string>();
   const observedStages=new Map<string,Set<'edit'|'check'|'review'>>();
+  const observedGates=new Map<string,BuildGateStatus>();
+  const gate=(task:WorkUnit,id:BuildGateId,status:BuildGateStatus,detail:string):void=>{
+    observedGates.set(`${task.id}:${id}`,status);
+    emitGate(options.onEvent,{taskId:task.id,gate:id,status,attempt:state.tasks[task.id]?.attempts??0,planRevision:plan.revision,detail});
+  };
+  const invalidateProofs=(task:WorkUnit):void=>{
+    gate(task,'G2','pending','Verificações aguardam reavaliação após alterações nos arquivos.');
+    gate(task,'G3','pending','A revisão anterior precisa considerar os arquivos alterados.');
+    if(task.checks.some(check=>['web','tui','desktop'].includes(check.kind))||observedGates.has(`${task.id}:G4`))gate(task,'G4','pending','Os fluxos aguardam reavaliação após alterações nos arquivos.');
+  };
   const taskStages=(task:WorkUnit,status:'running'|'complete'|'waiting'='running'):void=>{
     emitProgress(options.onEvent,{id:`task:${task.id}:stages`,label:`${task.id}: edição, verificações e revisão`,completed:observedStages.get(task.id)?.size??0,total:3,status,stage:'build',unit:'etapas'});
   };
@@ -196,7 +206,7 @@ export async function runBuild(options:BuildOptions):Promise<BuildOutcome>{
       state.planRevision=plan.revision;
       for(const task of plan.tasks){
         const progress=state.tasks[task.id];
-        if(progress?.status==='complete'&&progress.revision!==await taskRevision(options,plan,task)){progress.status='checking';progress.strategy='revalidate-only';}
+        if(progress?.status==='complete'&&progress.revision!==await taskRevision(options,plan,task)){progress.status='checking';progress.strategy='revalidate-only';invalidateProofs(task);}
       }
       buildProgress(options,state,plan);
       if(plan.tasks.every(task=>state.tasks[task.id]?.status==='complete')){
@@ -279,6 +289,8 @@ export async function runBuild(options:BuildOptions):Promise<BuildOutcome>{
       progress.status='editing';progress.attempts+=1;await save(options,state,plan);
       observedStages.set(task.id,new Set());taskStages(task);
       observer(options,'task',`${task.id}: ${progress.findings.length?'corrigindo pendência concreta':'construindo'} ${task.title}.`,task.id);
+      gate(task,'G0','running','Sessão do editor em execução.');
+      gate(task,'G1','running','O editor está trabalhando nos arquivos da unidade.');
       const strategy=progress.attempts>2?'Use a different, smaller implementation strategy. Diagnose the cause from the current files and previous evidence; do not repeat an unchanged failed action.':'';
       const edited=await call(options,progress.findings.length?'repair':'editor',[
         'Implement the small work unit in this workspace. Follow only its requested behavior and the original constraints. Read the necessary files with tools. Preserve existing user work and all unrelated code.',
@@ -286,8 +298,11 @@ export async function runBuild(options:BuildOptions):Promise<BuildOutcome>{
         strategy,
         progress.findings.length?`Resolve these observations with the smallest correct change:\n${progress.findings.join('\n')}`:'',
       ].filter(Boolean).join('\n\n'),context,false);
-      if(edited.status==='cancelled')return finish('cancelled');
+      if(edited.status==='cancelled'){gate(task,'G0','waiting','Sessão interrompida pelo cancelamento solicitado.');gate(task,'G1','waiting','Edição interrompida pelo cancelamento solicitado.');return finish('cancelled');}
       const changes=await changedSince(options.workspace,before);progress.changedFiles=[...new Set([...progress.changedFiles,...changes])];
+      gate(task,'G0',isExternal(edited)?'waiting':edited.status==='complete'&&!edited.issue?'complete':'returned',isExternal(edited)?'A sessão aguarda a recuperação do transporte ou de um recurso externo.':edited.status==='complete'&&!edited.issue?'A sessão do editor concluiu com resultado utilizável.':'A sessão do editor precisa recuperar seu resultado antes de concluir.');
+      gate(task,'G1',changes.length?'complete':'neutral',changes.length?`${changes.length} arquivo(s) alterado(s) nesta edição.`:'A sessão não alterou arquivos; ausência de escrita não é reprovação.');
+      if(changes.length)invalidateProofs(task);
       if(isExternal(edited)&&edited.issue?.kind!=='context'&&changes.length===0){note(state,incident('transport',task.id,edited.issue?.message??'The editor is temporarily unavailable.',edited.text,true));progress.status='waiting';attemptedThisPass.add(task.id);await save(options,state,plan);continue;}
       if(edited.issue?.kind==='constraint'&&edited.issue.message.startsWith('Restored forbidden HTTP effect')){
         progress.findings=[edited.issue.message];progress.status='pending';progress.strategy='constraint-repair';
@@ -327,20 +342,34 @@ export async function runBuild(options:BuildOptions):Promise<BuildOutcome>{
       for(const replaced of selected.filter(item=>item.replaced))observer(options,'recovery',replaced.replaced??'',task.id);
       if(checks.length===0||selected.some(item=>item.replaced))checks=[...checks,...await derivedChecks(options.workspace,task)];
       checks=[...new Map(checks.map(check=>{const{id:_id,...contract}=check;return[JSON.stringify(contract),check];})).values()];
+      const checkGates=new Map(checks.map(check=>[check.id,['web','tui','desktop'].includes(check.kind)?'G4' as const:'G2' as const]));
+      const checkStates=new Map(checks.map(check=>[check.id,'pending' as BuildGateStatus]));
+      const reportCheckGate=(id:'G2'|'G4'):void=>{
+        const results=[...checkStates].filter(([checkId])=>checkGates.get(checkId)===id).map(([,status])=>status);
+        if(!results.length){if(id==='G2')gate(task,id,'neutral','Nenhuma verificação mecânica adicional é pertinente a esta unidade.');return;}
+        const status=results.includes('returned')?'returned':results.every(value=>value==='complete')?'complete':results.includes('running')?'running':results.includes('waiting')?'waiting':'running';
+        const description=id==='G4'?'Fluxos na aplicação':'Verificações mecânicas';
+        gate(task,id,status,`${description}: ${results.filter(value=>value==='complete').length}/${results.length} validados${status==='returned'?'; há resultado devolvido para correção.':status==='waiting'?'; aguardando recurso disponível.':status==='complete'?'.':'; avaliação em andamento.'}`);
+      };
+      if(!checks.some(check=>checkGates.get(check.id)==='G2'))reportCheckGate('G2');
       const failures:string[]=[],proof:string[]=[];
       let missingInstrument=false;
       let completedChecks=0;
       const checkProgress=(status:'running'|'complete'|'waiting'='running'):void=>emitProgress(options.onEvent,{id:'verification',label:`${task.id}: verificações avaliadas`,completed:completedChecks,total:checks.length,status,stage:'build',unit:'verificações'});
       checkProgress(checks.length?'running':'complete');
       for(const check of checks){
+        const checkGate=checkGates.get(check.id)!;
         if(check.kind==='desktop'&&!nativeTargetAvailable(check)){
+          checkStates.set(check.id,'waiting');reportCheckGate(checkGate);
           note(state,incident('environment',`target-${check.target}`,`The ${check.target} native proof needs a compatible runner. Local and independent work continues.`,check.command??'',true));continue;
         }
         const hash=await checkInputHash(options.workspace,plan,task,check,options.brief);
         const previous=state.evidence.find(value=>value.taskId===task.id&&value.checkId===check.id&&value.inputHash===hash&&value.passed);
-        if(previous){proof.push(`${check.id}: previous observed proof still valid.\n${previous.output}`);completedChecks+=1;checkProgress(completedChecks===checks.length?'complete':'running');continue;}
+        if(previous){checkStates.set(check.id,'complete');reportCheckGate(checkGate);proof.push(`${check.id}: previous observed proof still valid.\n${previous.output}`);completedChecks+=1;checkProgress(completedChecks===checks.length?'complete':'running');continue;}
+        checkStates.set(check.id,'running');reportCheckGate(checkGate);
         observer(options,'verification',`${task.id}: verificando ${check.kind}.`,check.id);
         const verification=await runVerification(options.workspace,options.brief,task,plan,check,execute,terminal,{...(options.onEvent?{onEvent:options.onEvent}:{}),...(options.allowSystemInstall!==undefined?{allowSystemInstall:options.allowSystemInstall}:{}),...(options.signal?{signal:options.signal}:{})});
+        checkStates.set(check.id,verification.evidence.passed?'complete':verification.result?.cancelled||options.signal?.aborted?'waiting':'returned');reportCheckGate(checkGate);
         state.evidence=state.evidence.filter(value=>!(value.taskId===task.id&&value.checkId===check.id));state.evidence.push(verification.evidence);await save(options,state,plan);
         completedChecks+=1;checkProgress(completedChecks===checks.length?'complete':'running');
         proof.push(`${check.id}: ${verification.evidence.passed?'passed':'needs correction'}\n${verification.evidence.output}`);
@@ -393,12 +422,14 @@ export async function runBuild(options:BuildOptions):Promise<BuildOutcome>{
       let preceding='';
       let clarifications=0;
       for(;;){
+        gate(task,'G3','running',preceding?'Esclarecendo o parecer sem solicitar nova edição.':'Revisor parceiro avaliando o código e as evidências da unidade.');
         const review=await call(options,'reviewer',preceding
           ?'Clarify only the preceding conclusion about this same code. Identify a concrete remaining defect or confirm that the unit meets its criteria. A formatting issue is not a product defect. For a verification request, demonstrate the behavioral failure or cite the original user requirement mandating that test; missing tests alone is not a code defect. Do not ask the editor to rewrite correct code and do not review unrelated work. A compact JSON object {approved:true,findings:[]} is sufficient when no material defect remains.'
           :'Help the editor finish this work unit. Read its relevant code and actual evidence. Report only material defects against the supplied requirements or introduced regressions, with location, expected/observed behavior and a useful next repair. Do not invent new product requirements to fit a tool; fix the instrument instead. Do not require tests by count, style changes, a different installer, or document formatting. Return a compact JSON object {approved:true,findings:[]} when the unit fulfills its criteria. Otherwise use findings:[{file,expected,observed,evidence,fix}]. Partial field information is acceptable; substantive evidence matters.',
           preceding?`${reviewContext.slice(0,Math.floor(reviewBudget*0.8))}\nPRECEDING REVIEW\n${preceding.slice(-Math.floor(reviewBudget*0.15))}`:reviewContext,true);
-        if(review.status==='cancelled')return finish('cancelled');
+        if(review.status==='cancelled'){gate(task,'G3','waiting','Revisão interrompida pelo cancelamento solicitado.');return finish('cancelled');}
         if(review.issue?.kind==='context'){
+          gate(task,'G3','waiting','Recuperando o contexto necessário para a revisão.');
           const reduced=Math.floor(reviewBudget/2);progress.contextChars=reduced;
           const problem={...incident('integration',task.id,'The reviewer exhausted its context. Preserve confirmed source and split only the affected work unit to the smaller capacity.',review.issue.message),contextChars:reduced};note(state,problem);
           if(!reducedReview){
@@ -411,20 +442,25 @@ export async function runBuild(options:BuildOptions):Promise<BuildOutcome>{
           await save(options,state,plan);break;
         }
         if(isExternal(review)){
+          gate(task,'G3','waiting','A revisão aguarda a recuperação do transporte ou de um recurso externo.');
           note(state,incident('transport',task.id,review.issue?.message??'Reviewer temporarily unavailable.',review.text,true));progress.status='waiting';progress.strategy='resume-review';attemptedThisPass.add(task.id);await save(options,state,plan);break;
         }
         if(review.issue?.kind==='constraint'||review.changedFiles.length>0){
+          gate(task,'G3','waiting','Recuperando o instrumento de revisão antes de aceitar um novo parecer.');
+          if(review.changedFiles.length)invalidateProofs(task);
           progress.status='checking';progress.strategy='revalidate-only';progress.findings=[];
           note(state,incident('instrument',task.id,'The reviewer changed code or violated its read-only role. Revalidate affected evidence before another conclusion.',review.issue?.message??review.changedFiles.join(', ')));await save(options,state,plan);break;
         }
         const judgment=interpretReview(review.text);
         judgment.findings=judgment.findings.filter(finding=>!unsupportedTestingDemand(finding,options.brief,task));
         if(judgment.approved){
+          gate(task,'G3','complete','O revisor confirmou a unidade sem pendência material.');
           // Acceptance confirms the implementation and review; remote checks may still need a runner.
           completedStage(task,'edit');completedStage(task,'review');taskStages(task,observedStages.get(task.id)?.size===3?'complete':'waiting');
           progress.status='complete';progress.findings=[];progress.strategy='verified';progress.revision=await taskRevision(options,plan,task);clearIncidents(state,task.id);observer(options,'task',`${task.id}: comportamento conferido.`,task.id);await save(options,state,plan);break;
         }
         if(judgment.findings.length){
+          gate(task,'G3','returned','O revisor identificou uma pendência material e orientou a correção.');
           progress.status='pending';progress.findings=judgment.findings;progress.strategy='partner-guidance';note(state,incident('product',task.id,'Reviewer identified a material pendency.',judgment.findings.join('\n')));await save(options,state,plan);break;
         }
         // This loop has no editor edge: an unreadable review cannot cause a rewrite of correct code.

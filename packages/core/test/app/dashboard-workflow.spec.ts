@@ -58,6 +58,10 @@ it('conclui e publica progresso observado mesmo quando todos os observers do das
     expect(events.some(event => event.progress?.id === id && event.progress.completed === 1 && event.progress.total === 1)).toBe(true);
   }
   expect(events.some(event => event.progress?.id === 'task:greet:stages' && event.progress.completed === 3 && event.progress.status === 'complete')).toBe(true);
+  for (const gate of ['G0', 'G1', 'G2', 'G3']) {
+    expect(events.some(event => event.gate?.taskId === 'greet' && event.gate.gate === gate && event.gate.status === 'complete')).toBe(true);
+  }
+  expect(events.some(event => event.gate?.gate === 'G4')).toBe(false);
   const modelProgress = events.filter(event => event.progress?.id.startsWith('agent:'));
   expect(modelProgress.length).toBeGreaterThan(0);
   expect(modelProgress.every(event => event.progress?.completed === undefined && event.progress?.total === undefined)).toBe(true);

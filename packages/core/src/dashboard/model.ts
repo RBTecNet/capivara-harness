@@ -1,7 +1,8 @@
 import type { SavedProject } from '../app/store.js';
 import type { BuildState, TaskProgress } from '../execution/types.js';
 import type { AgentConfig } from '../runtime/types.js';
-import type { DashboardEvent, DashboardPanel, DashboardPanelId, DashboardProgress, DashboardUsage, DashboardView } from './types.js';
+import type { DashboardEvent, DashboardGate, DashboardGateRow, DashboardPanel, DashboardPanelId, DashboardProgress, DashboardUsage, DashboardView } from './types.js';
+import type { BuildGateMeasurement } from '../telemetry/progress.js';
 
 const statusLabels: Record<string, string> = {
   working: 'Em andamento', recovering: 'Em recuperação', waiting: 'Aguardando', complete: 'Concluído', cancelled: 'Interrompido', critical: 'Incidente crítico',
@@ -50,6 +51,7 @@ export class DashboardModel {
   private saved: SavedProject;
   private readonly workspace: string | undefined;
   private readonly measurements = new Map<string, DashboardProgress>();
+  private readonly gateMeasurements = new Map<string, Map<string, BuildGateMeasurement>>();
   private readonly logLines: string[] = [];
   private readonly activityLines: string[] = [];
   private readonly eventResults = new Set<string>();
@@ -71,6 +73,7 @@ export class DashboardModel {
       for (const id of ['environment', 'tasks']) this.measurements.delete(id);
     }
     if (saved.plan?.revision !== this.saved.plan?.revision) {
+      this.gateMeasurements.clear();
       this.measurements.delete('verification');
       const taskIds = saved.plan?.tasks.map(task => task.id) ?? [];
       for (const id of this.measurements.keys()) {
@@ -90,13 +93,15 @@ export class DashboardModel {
     this.logLines.push(...lines(`${prefix}${event.message ? ` ${event.message}` : ''}`));
     if (event.detail !== undefined) this.logLines.push(...lines(json(event.detail)));
     if (event.progress !== undefined) this.logLines.push(...lines(json(event.progress)));
-    else if (body !== undefined && !stored) this.logLines.push(...lines(typeof body === 'string' ? body : json(body)));
+    if (event.gate !== undefined) this.logLines.push(...lines(json(event.gate)));
+    if (!event.progress && !event.gate && body !== undefined && !stored) this.logLines.push(...lines(typeof body === 'string' ? body : json(body)));
     if (stored) {
-      const remaining = Object.fromEntries(Object.entries(stored).filter(([key]) => !['type', 'message', 'subject', 'detail', 'progress', 'at'].includes(key)));
+      const remaining = Object.fromEntries(Object.entries(stored).filter(([key]) => !['type', 'message', 'subject', 'detail', 'progress', 'gate', 'at'].includes(key)));
       if (Object.keys(remaining).length) this.logLines.push(...lines(json(remaining)));
     }
     if (event.progress) this.observeProgress(event.progress);
-    if (['agent', 'agent.start', 'agent.result', 'command', 'tool', 'recovery', 'waiting', 'complete'].includes(event.type)) {
+    if (event.gate) this.observeGate(event.gate);
+    if (['agent', 'agent.start', 'agent.result', 'command', 'tool', 'gate', 'recovery', 'waiting', 'complete'].includes(event.type)) {
       const detail = record(event.detail) ?? stored;
       this.latestActivity = oneLine([event.type, typeof detail?.role === 'string' ? detail.role : undefined, typeof detail?.status === 'string' ? label(detail.status) : undefined, event.message].filter(Boolean).join(' · '));
       this.activityLines.push(...lines(`${prefix}${event.message ? ` ${event.message}` : ''}`));
@@ -105,6 +110,55 @@ export class DashboardModel {
     }
     if (event.type === 'recovery') this.latestRecovery = event.message;
     if (event.type === 'agent.result') this.observeUsage(record(event.detail) ?? stored);
+  }
+
+  private observeGate(gate: BuildGateMeasurement): void {
+    if (!gate.taskId || !['G0', 'G1', 'G2', 'G3', 'G4'].includes(gate.gate) || !['pending', 'running', 'complete', 'returned', 'neutral', 'waiting'].includes(gate.status) || !number(gate.attempt) || !number(gate.planRevision)) return;
+    if (this.saved.plan && gate.planRevision !== this.saved.plan.revision) return;
+    const current = this.gateMeasurements.get(gate.taskId) ?? new Map<string, BuildGateMeasurement>();
+    const previous = current.get(gate.gate);
+    if (previous && gate.attempt < previous.attempt) return;
+    // A return stays visible until this very step is retried or otherwise resolved.
+    if (previous?.status === 'returned' && gate.status === 'pending') return;
+    current.set(gate.gate, { ...gate });
+    this.gateMeasurements.set(gate.taskId, current);
+  }
+
+  private gateRows(state: BuildState | undefined): DashboardGateRow[] {
+    return (this.saved.plan?.tasks ?? []).map(task => {
+      const current = state?.tasks[task.id];
+      const observed = this.gateMeasurements.get(task.id);
+      const evidence = state?.evidence.filter(item => item.taskId === task.id) ?? [];
+      const interactive = (kind: string | undefined): boolean => ['web', 'tui', 'desktop'].includes(kind ?? '');
+      const gates: DashboardGate[] = [
+        { id: 'G0', status: current?.status === 'editing' ? 'running' : 'pending', detail: 'Sessão do agente.' },
+        { id: 'G1', status: current?.status === 'editing' ? 'running' : current?.changedFiles.length ? 'complete' : current?.status === 'complete' ? 'neutral' : 'pending', detail: 'Escrita observada; ausência de alteração não reprova a unidade.' },
+        { id: 'G2', status: 'pending', detail: 'Verificações mecânicas pertinentes.' },
+        { id: 'G3', status: current?.status === 'reviewing' ? 'running' : current?.status === 'complete' ? 'complete' : 'pending', detail: 'Revisão independente do comportamento e das evidências.' },
+      ];
+      if (task.checks.some(check => interactive(check.kind)) || evidence.some(item => interactive(item.kind)) || observed?.has('G4')) gates.push({ id: 'G4', status: 'pending', detail: 'Fluxos exercitados na aplicação.' });
+      for (const gate of gates) {
+        if (gate.id === 'G2' || gate.id === 'G4') {
+          const flow = gate.id === 'G4';
+          const checks = task.checks.filter(check => interactive(check.kind) === flow);
+          const proofs = evidence.filter(item => interactive(item.kind ?? task.checks.find(check => check.id === item.checkId)?.kind) === flow);
+          // The UI reads recorded evidence. It never schedules a check to fill a dot.
+          if (!checks.length && !proofs.length) gate.status = 'neutral';
+          else if (current?.status !== 'editing' && !(current?.status === 'pending' && current.findings.length)) {
+            const latest = [...new Map(proofs.map(proof => [proof.checkId, proof])).values()];
+            if (latest.some(proof => !proof.passed)) gate.status = 'returned';
+            else if (latest.length && checks.every(check => latest.some(proof => proof.checkId === check.id && proof.passed))) gate.status = 'complete';
+          }
+        }
+        const measured = observed?.get(gate.id);
+        if (measured) {
+          const outdated = current && measured.attempt < current.attempts;
+          gate.status = outdated && measured.status !== 'returned' ? 'pending' : measured.status;
+          if (measured.detail) gate.detail = measured.detail;
+        }
+      }
+      return { taskId: task.id, title: task.title, gates };
+    });
   }
 
   private observeProgress(progress: DashboardProgress): void {
@@ -211,7 +265,7 @@ export class DashboardModel {
     const panel = (id: DashboardPanelId, title: string, content: string[], bars: DashboardProgress[] = [], previewLines?: string[]): DashboardPanel => ({ id, title, lines: content, progress: bars, ...(previewLines ? { previewLines } : {}) });
     const panels = [
       panel('summary', 'Resumo', summary, [], summaryPreview),
-      panel('progress', 'Progresso', progressLines, progress),
+      { ...panel('progress', 'Progresso', progressLines, progress), gateRows: this.gateRows(state) },
       panel('phases', 'Fases e unidades', phaseLines, progress.filter(item => ['brief', 'plan', 'tasks', 'verification', 'gaps'].includes(item.id) || item.id.startsWith('task:') || item.stage === 'plan' || item.stage === 'init'), phasePreview),
       panel('environment', 'Ambiente', environmentLines, progress.filter(item => item.id === 'environment' || item.id.startsWith('environment:')), environmentPreview.length ? environmentPreview : [...environmentLines]),
       panel('activity', 'Agentes e atividade', activity, progress.filter(item => item.id.startsWith('agent:')), activityPreview),

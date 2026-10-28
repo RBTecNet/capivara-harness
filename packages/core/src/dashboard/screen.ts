@@ -1,4 +1,4 @@
-import type { DashboardGateRow, DashboardPanel, DashboardPanelId, DashboardProgress, DashboardView } from './types.js';
+import type { DashboardGate, DashboardPhase, DashboardPanel, DashboardPanelId, DashboardProgress, DashboardView } from './types.js';
 import type { DashboardNavigationState } from './navigation.js';
 
 const ANSI = /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\|$))/g;
@@ -71,8 +71,6 @@ const progressTone = (status: DashboardProgress['status']): string => status ===
 const statusTone = (status: string): string => ['complete', 'ready', 'resolved'].includes(status) ? '1;32' : ['critical', 'returned'].includes(status) ? '1;31' : ['working', 'running', 'recovering'].includes(status) ? '1;33' : '90';
 const panelTones: Record<DashboardPanelId, string> = { summary: '36', progress: '33', phases: '34', environment: '32', activity: '35', log: '36', incidents: '35' };
 const gateTone = { pending: '90', running: '33', complete: '32', returned: '31', neutral: '90', waiting: '90' };
-const gateLabel = { pending: 'aguardando', running: 'em execução', complete: 'executado/validado', returned: 'devolvido para correção', neutral: 'sem alteração necessária', waiting: 'aguardando recurso' };
-const gateName = { G0: 'Sessão do agente', G1: 'Escrita', G2: 'Verificações', G3: 'Revisão independente', G4: 'Fluxos na aplicação' };
 
 /** Color spans are created locally; terminal controls in external content are discarded first. */
 function segmentLines(segments: Segment[], width: number): ContentLine[] {
@@ -98,22 +96,37 @@ function segmentLines(segments: Segment[], width: number): ContentLine[] {
   return result;
 }
 
-function gateLines(row: DashboardGateRow, width: number, expanded: boolean): ContentLine[] {
-  const gateWidth = row.gates.length * 4 - 1;
-  const taskId = fit(row.taskId, Math.max(1, width - gateWidth - 1), true);
-  const segments: Segment[] = expanded ? [] : [{ text: `${taskId} `, tone: '1;36' }];
-  row.gates.forEach((gate, index) => {
-    if (index) segments.push({ text: ' ' });
-    segments.push({ text: gate.id, tone: '90', reserve: 3 }, { text: ['pending', 'waiting'].includes(gate.status) ? '○' : '●', tone: `1;${gateTone[gate.status]}` });
-  });
-  const cells = segmentLines(segments, width);
-  if (!expanded) return cells;
-  return [
-    ...wrap(`${row.taskId} · ${row.title}`, width).map(text => ({ text, tone: '1;36' })),
-    ...cells,
-    ...row.gates.flatMap(gate => wrap(`${gate.id} ${gateName[gate.id]}: ${gateLabel[gate.status]}${gate.detail ? ` · ${gate.detail}` : ''}`, width).map(text => ({ text, tone: gateTone[gate.status] }))),
-    { text: '' },
-  ];
+function progressPhaseLines(phases: DashboardPhase[], width: number): ContentLine[] {
+  const rows = phases.flatMap(phase => [
+    { label: phase.id, gates: phase.gates, tone: '1;36' },
+    ...phase.threads.map(thread => ({ label: `  ${thread.id}`, gates: thread.gates, tone: '36' })),
+  ]);
+  if (!rows.length) return [{ text: fit('Sem fases planejadas.', width, true), tone: '90' }];
+  const columns = (['G0', 'G1', 'G2', 'G3', 'G4'] as const).filter(id => rows.some(row => row.gates.some(gate => gate.id === id)));
+  const labelWidth = Math.max(...rows.map(row => dashboardWidthOf(row.label)));
+  const gap = width >= labelWidth + 1 + columns.length * 3 - 1 ? ' ' : '';
+  const blockWidth = columns.length * 2 + Math.max(0, columns.length - 1) * gap.length;
+  const inline = width >= labelWidth + 1 + blockWidth;
+  // Even very narrow terminals keep every gate reachable without clipping it.
+  const perLine = Math.max(1, Math.floor(width / 2));
+  const chunks = blockWidth <= width ? [columns] : Array.from({ length: Math.ceil(columns.length / perLine) }, (_, index) => columns.slice(index * perLine, (index + 1) * perLine));
+  const content: ContentLine[] = chunks.map(ids => ({ text: `${' '.repeat(Math.max(0, width - ids.join(gap).length))}${ids.join(gap)}`, tone: '90' }));
+  for (const row of rows) {
+    if (!inline) content.push({ text: fit(row.label, width, true), tone: row.tone });
+    for (const ids of chunks) {
+      const size = ids.length * 2 + Math.max(0, ids.length - 1) * gap.length;
+      const prefix = inline ? `${pad(row.label, width - size - 1)} ` : ' '.repeat(Math.max(0, width - size));
+      const segments: Segment[] = [{ text: prefix, tone: row.tone }];
+      ids.forEach((id, index) => {
+        if (index) segments.push({ text: gap });
+        const gate: DashboardGate | undefined = row.gates.find(gate => gate.id === id);
+        segments.push({ text: ' ' });
+        segments.push(gate ? { text: gate.status === 'running' ? '◐' : gate.status === 'returned' ? '⊗' : gate.status === 'complete' ? '●' : '○', tone: `1;${gateTone[gate.status]}` } : { text: ' ' });
+      });
+      content.push(...segmentLines(segments, width));
+    }
+  }
+  return content;
 }
 
 function progressLines(progress: DashboardProgress, width: number, expanded: boolean, frame: number): ContentLine[] {
@@ -124,15 +137,12 @@ function progressLines(progress: DashboardProgress, width: number, expanded: boo
 }
 
 function panelLines(panel: DashboardPanel, width: number, expanded: boolean, frame = 0): ContentLine[] {
-  const measurements = !expanded && panel.previewLines && panel.id !== 'progress' ? [] : panel.progress;
+  if (panel.id === 'progress') return progressPhaseLines(panel.phases ?? [], width);
+  const measurements = !expanded && panel.previewLines ? [] : panel.progress;
   const progress = measurements.flatMap(item => progressLines(item, width, expanded, frame));
   const source = expanded ? panel.lines : panel.previewLines ?? panel.lines;
   const lines = source.flatMap(line => expanded ? wrap(line, width) : safe(line).split(/\r?\n/).map(part => fit(part, width, true))).map(text => ({ text }));
-  const gatePriority = (row: DashboardGateRow): number => Math.min(...row.gates.map(gate => gate.status === 'running' ? 0 : gate.status === 'returned' ? 1 : ['pending', 'waiting'].includes(gate.status) ? 2 : 3), 3);
-  const gateRows = expanded ? panel.gateRows ?? [] : [...panel.gateRows ?? []].sort((a, b) => gatePriority(a) - gatePriority(b));
-  const gates = gateRows.flatMap(row => gateLines(row, width, expanded));
-  const legend = gates.length ? wrap('● execução (amarelo) · ● validado (verde) · ● devolvido (vermelho) · ○ aguardando · ● neutro', width).map(text => ({ text, tone: '90' })) : [];
-  const content = panel.id === 'progress' ? [...gates, ...legend, ...progress, ...lines] : [...lines, ...progress];
+  const content = [...lines, ...progress];
   return content.length ? content : [{ text: 'Sem registros.', tone: '90' }];
 }
 
@@ -187,7 +197,7 @@ function layoutDashboard(model: DashboardView, view: DashboardNavigationState, w
     visible.forEach((panel, i) => { const panelHeight = sizes[i]!; placements.push({ panel, x: 0, y, width: w, height: panelHeight }); y += panelHeight; });
   } else {
     const groups: DashboardPanelId[][] = w >= 110 && bodyHeight >= 18
-      ? [['summary', 'environment', 'incidents'], ['progress', 'phases'], ['activity', 'log']]
+      ? [['summary', 'environment', 'incidents'], ['progress'], ['activity', 'phases', 'log']]
       : [['progress', 'phases', 'log'], ['summary', 'environment', 'activity', 'incidents']];
     const columnWidths = splitHeights(w - groups.length + 1, groups.length);
     let x = 0;

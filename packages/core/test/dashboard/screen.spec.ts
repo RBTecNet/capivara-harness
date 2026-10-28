@@ -130,11 +130,11 @@ it('conserva fatos de progresso entre frames e expõe unidades extensas sem cort
   const model = sample();
   const unit = 'caracteres de documentos recuperados e lidos durante a investigação';
   const source = { id: 'source', label: 'Lendo fonte', completed: 800, status: 'running' as const, unit };
-  const progress = model.panels.find(panel => panel.id === 'progress')!;
+  const progress = model.panels.find(panel => panel.id === 'activity')!;
   progress.progress = [source]; progress.lines = [];
   model.progress = [source];
   const before = structuredClone(model);
-  const view = { ...createDashboardNavigation(), focusPanel: 'progress' as const, expandedPanel: 'progress' as const };
+  const view = { ...createDashboardNavigation(), focusPanel: 'activity' as const, expandedPanel: 'activity' as const };
   const output = renderDashboard(model, view, 80, 24, false, 0);
   const nextFrame = renderDashboard(model, view, 80, 24, false, 1);
   expect(output).toContain('800');
@@ -152,7 +152,7 @@ it('mantém a operação corrente no cabeçalho enquanto o agregado continua em 
   const output = renderDashboard(model, view, 80, 24);
   expect(output.split('\n')[1]).toContain('work-8: edição e revisão');
   expect(output.split('\n')[1]).toContain('1/3');
-  expect(output).toContain('3/20');
+  expect(output.split('\n').slice(2).join('\n')).not.toContain('3/20');
   current.status = 'complete';
   expect(renderDashboard(model, view, 80, 24).split('\n')[1]).toContain('3/20');
 });
@@ -180,8 +180,8 @@ it('mantém quebras recebidas em metadados dentro dos limites e conserva os deta
   const model = sample();
   const label = 'Operação longa\ncom duas linhas';
   model.progress[0]!.label = label;
-  model.panels.find(panel => panel.id === 'progress')!.progress[0]!.label = label;
-  const view = { ...createDashboardNavigation(), focusPanel: 'progress' as const, expandedPanel: 'progress' as const };
+  model.panels.find(panel => panel.id === 'activity')!.progress = [{ ...model.progress[0]!, label }];
+  const view = { ...createDashboardNavigation(), focusPanel: 'activity' as const, expandedPanel: 'activity' as const };
   const output = renderDashboard(model, view, 40, 12);
   expect(output.split('\n')).toHaveLength(12);
   expect(output).toContain('Operação longa');
@@ -189,54 +189,62 @@ it('mantém quebras recebidas em metadados dentro dos limites e conserva os deta
   expect(output.split('\n').every(line => dashboardWidthOf(line) <= 40)).toBe(true);
 });
 
-it('colore os gates observados e as barras, com legenda textual e G4 apenas onde existe', () => {
+it('alinha gates à direita de fases e threads, preservando cores e a ordem da hierarquia', () => {
   const model = sample();
   const panel = model.panels.find(item => item.id === 'progress')!;
-  panel.gateRows = [{ taskId: 'P01', title: 'Fluxo principal', gates: [
+  const gates = [
     { id: 'G0', status: 'complete' }, { id: 'G1', status: 'neutral' },
     { id: 'G2', status: 'running' }, { id: 'G3', status: 'returned', detail: 'Corrigir exportação truncada.' },
-  ] }];
+  ] as const;
+  panel.phases = [{ id: 'P01', gates: [...gates], threads: [{ id: 'T01', taskId: 'work', title: 'Fluxo principal', gates: [...gates] }] }];
   const view = { ...createDashboardNavigation(), focusPanel: 'progress' as const, expandedPanel: 'progress' as const };
   const colored = renderDashboard(model, view, 120, 40, true);
   expect(colored).toContain('\u001b[1;32m●\u001b[0m');
-  expect(colored).toContain('\u001b[1;33m●\u001b[0m');
-  expect(colored).toContain('\u001b[1;31m●\u001b[0m');
-  expect(colored).toContain('\u001b[1;90m●\u001b[0m');
-  expect(plain(colored)).toContain('G0● G1● G2● G3●');
-  expect(plain(colored)).toContain('G3 Revisão independente: devolvido para correção · Corrigir exportação truncada.');
+  expect(colored).toContain('\u001b[1;33m◐\u001b[0m');
+  expect(colored).toContain('\u001b[1;31m⊗\u001b[0m');
+  expect(colored).toContain('\u001b[1;90m○\u001b[0m');
+  expect(plain(colored)).toContain('G0 G1 G2 G3');
+  const rows = plain(colored).split('\n').filter(line => /P01|T01/.test(line));
+  expect(rows).toHaveLength(2);
+  for (const symbol of ['●', '○', '◐', '⊗']) expect(rows[0]!.indexOf(symbol)).toBe(rows[1]!.indexOf(symbol));
   expect(plain(colored)).not.toContain('G4');
-  expect(plain(colored)).toContain('execução (amarelo)');
+  expect(plain(colored)).not.toContain('progress linha');
+  expect(plain(colored).split('\n').slice(2).join('\n')).not.toContain('Unidades de trabalho');
   const monochrome = renderDashboard(model, view, 120, 40, false);
   expect(monochrome).not.toContain('\u001b');
   expect(monochrome).toBe(plain(colored));
-  panel.gateRows[0]!.gates.push({ id: 'G4', status: 'waiting' });
+  panel.phases[0]!.gates.push({ id: 'G4', status: 'waiting' });
+  panel.phases[0]!.threads[0]!.gates.push({ id: 'G4', status: 'waiting' });
   const waiting = renderDashboard(model, view, 120, 40, true);
-  expect(plain(waiting)).toContain('G4○');
-  expect(plain(waiting)).toContain('G4 Fluxos na aplicação: aguardando recurso');
+  expect(plain(waiting)).toContain('G4');
   expect(waiting).toContain('\u001b[1;90m○\u001b[0m');
-  const done = { taskId: 'P00', title: 'Unidade concluída', gates: panel.gateRows[0]!.gates.map(gate => ({ ...gate, status: 'complete' as const })) };
-  panel.gateRows.unshift(done);
-  const order = panel.gateRows.map(row => row.taskId);
+  const done = { id: 'P00', gates: panel.phases[0]!.gates.map(gate => ({ ...gate, status: 'complete' as const })), threads: [] };
+  panel.phases.unshift(done);
+  const order = panel.phases.map(phase => phase.id);
   const compact = plain(renderDashboard(model, { ...createDashboardNavigation(), focusPanel: 'progress' }, 80, 24, true));
-  expect(compact.indexOf('P01')).toBeLessThan(compact.indexOf('P00'));
-  expect(panel.gateRows.map(row => row.taskId)).toEqual(order);
+  expect(compact.indexOf('P00')).toBeLessThan(compact.indexOf('P01'));
+  expect(panel.phases.map(phase => phase.id)).toEqual(order);
+  const compactView = { ...createDashboardNavigation(), focusPanel: 'progress' as const };
+  expect(hitTestPanel(model, compactView, 120, 40, 42, 36)).toBe('progress');
+  expect(hitTestPanel(model, compactView, 120, 40, 83, 17)).toBe('phases');
 });
 
-it('conserva gates, detalhes e limites em janelas estreitas sem executar controles dos dados', () => {
+it('conserva hierarquia, gates e rolagem em janelas estreitas sem executar controles dos dados', () => {
   const model = sample();
   const panel = model.panels.find(item => item.id === 'progress')!;
-  const detail = 'Detalhe completo com acentuação e 界 até a conclusão final.';
-  panel.gateRows = [{ taskId: 'unidade-com-identificação-extensa', title: '\u001b[2JTítulo seguro', gates: [
+  const gates = [
     { id: 'G0', status: 'complete' }, { id: 'G1', status: 'complete' },
-    { id: 'G2', status: 'complete' }, { id: 'G3', status: 'running', detail }, { id: 'G4', status: 'pending' },
-  ] }];
+    { id: 'G2', status: 'complete' }, { id: 'G3', status: 'running' }, { id: 'G4', status: 'pending' },
+  ] as const;
+  panel.phases = Array.from({ length: 20 }, (_, i) => ({ id: `P${String(i + 1).padStart(2, '0')}`, gates: [...gates], threads: [{ id: 'T01', taskId: `work-${i}`, title: '\u001b[2JTítulo seguro', gates: [...gates] }] }));
   for (const width of [20, 40, 80, 120]) {
     for (const expanded of [false, true]) {
       const view = { ...createDashboardNavigation(), focusPanel: 'progress' as const, ...(expanded ? { expandedPanel: 'progress' as const } : {}) };
       const output = renderDashboard(model, view, width, 24, true);
       expect(output.split('\n').every(line => dashboardWidthOf(line) <= width)).toBe(true);
       expect(output).not.toContain('\u001b[2J');
-      expect(plain(output)).toContain('G0●');
+      expect(plain(output)).toContain('G0');
+      expect(plain(output)).toContain('P01');
     }
   }
   const view = { ...createDashboardNavigation(), focusPanel: 'progress' as const, expandedPanel: 'progress' as const };
@@ -246,5 +254,6 @@ it('conserva gates, detalhes e limites em janelas estreitas sem executar control
     const output = plain(renderDashboard(model, { ...view, scrollByPanel: { progress: offset } }, 40, 12, true));
     seen.push(...output.split('\n').filter(line => line.startsWith('│')).map(line => line.slice(2, -2).trimEnd()));
   }
-  expect(seen.join('').replace(/\s/g, '')).toContain(detail.replace(/\s/g, ''));
+  expect(seen.join('\n')).toContain('P20');
+  expect(seen.join('\n')).toContain('T01');
 });

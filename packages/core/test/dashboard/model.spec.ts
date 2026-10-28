@@ -30,7 +30,7 @@ describe('projeção do dashboard', () => {
     const initial = structuredClone(saved());
     initial.plan!.tasks[1]!.checks.push({ id: 'screen', kind: 'tui', requirementIds: [], requiredCapabilities: [] });
     const model = new DashboardModel(initial);
-    const rows = () => model.panel('progress').gateRows!;
+    const rows = () => model.panel('progress').phases!.flatMap(phase => phase.threads);
     const gate = () => rows()[1]!.gates.find(item => item.id === 'G3')!;
     expect(rows()[0]!.gates.map(item => item.id)).toEqual(['G0', 'G1', 'G2', 'G3']);
     expect(rows()[0]!.gates.find(item => item.id === 'G2')?.status).toBe('complete');

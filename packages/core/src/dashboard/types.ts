@@ -8,10 +8,16 @@ export interface DashboardGate {
   status: BuildGateStatus;
   detail?: string;
 }
-export interface DashboardGateRow {
+export interface DashboardThread {
+  id: string;
   taskId: string;
   title: string;
   gates: DashboardGate[];
+}
+export interface DashboardPhase {
+  id: string;
+  gates: DashboardGate[];
+  threads: DashboardThread[];
 }
 
 /** Each panel keeps its full text; viewports and overlays choose how much to render. */
@@ -22,7 +28,7 @@ export interface DashboardPanel {
   /** Compact rows for the dashboard; expanded panels always use the complete lines. */
   previewLines?: string[];
   progress: DashboardProgress[];
-  gateRows?: DashboardGateRow[];
+  phases?: DashboardPhase[];
 }
 
 export interface DashboardUsage {

@@ -1,4 +1,4 @@
-# Dashboard da execução — 0.9.0_RC1
+# Dashboard da execução — 0.9.0-rc2
 
 O dashboard foi implementado sobre os motores novos. O wizard de início continua separado. O dashboard não exibe mascote nem nome da aplicação.
 
@@ -6,9 +6,11 @@ O dashboard foi implementado sobre os motores novos. O wizard de início continu
 
 Sete áreas apresentam resumo, progresso, fases, ambiente, atividade, log e pendências. Terminais menores usam prévias compactas. Tab/Shift+Tab, setas horizontais, números de 1 a 7 ou clique selecionam uma área; Enter abre seu conteúdo integral sobre o dashboard. Esc restaura a posição anterior da visão compacta. Todas as áreas aceitam rolagem por setas verticais, PgUp/PgDn e Home/End. A roda do mouse percorre a área sob o ponteiro.
 
-Cada painel tem cor própria, com barras amarelas durante a execução e verdes quando concluídas. O painel Progresso apresenta por unidade as bolinhas do dashboard da main: G0 (sessão), G1 (escrita), G2 (verificações pertinentes), G3 (revisão) e G4 (fluxos na aplicação), quando aplicável. `●` amarelo significa execução; verde, executado/validado; vermelho, devolvido para correção. `○` cinza aguarda execução ou recurso e `●` cinza representa um resultado neutro. Uma sessão sem escrita ou uma unidade sem verificação mecânica pertinente não reprova. O modo sem cor conserva legenda e detalhes textuais.
+Na visão com três colunas, Resumo, Ambiente e Incidentes ficam à esquerda; Progresso ocupa toda a coluna central; Agentes e atividade, Fases e unidades e Log completo ficam à direita, nessa ordem. Terminais menores conservam a navegação responsiva.
 
-O compacto prioriza unidades em execução e devolvidas. A ampliação mantém a ordem completa do plano e informa o estado e a evidência de cada indicador. Uma devolução permanece visível até esse mesmo passo voltar a executar ou ser resolvido. Alterações invalidam indicadores de provas anteriores. A aprovação do revisor não pinta de verde uma interação nativa ainda pendente. Os eventos incluem unidade, tentativa e revisão do plano para distinguir passagens diferentes; são registros de apresentação, sem novos gates de controle, testes obrigatórios ou chamadas de modelo.
+Progresso mostra somente fases P01, P02… e suas threads T01, T02… As fases agrupam visualmente as camadas de dependências do plano; cada thread corresponde a uma unidade de trabalho, na ordem do plano. Esse agrupamento não altera o scheduler. As bolinhas de G0 (sessão), G1 (escrita), G2 (verificações), G3 (revisão) e G4 (fluxos na aplicação, quando aplicável) ficam em colunas fixas alinhadas à direita. `○` cinza indica vazio/aguardando ou não necessário; `◐` amarelo, execução; `●` verde, concluído; `⊗` vermelho, devolvido com erro. Os símbolos também distinguem esses estados sem cores. Uma sessão sem escrita ou uma unidade sem verificação pertinente não reprova.
+
+A hierarquia mantém a mesma ordem nas visões compacta e ampliada, com rolagem para todas as fases e threads. O indicador da fase resume os gates aplicáveis de suas threads: erro prevalece, seguido de execução; concluído exige que todas as threads aplicáveis tenham concluído aquele gate. Os detalhes das unidades continuam em Fases e unidades. Uma devolução permanece visível até esse mesmo passo voltar a executar ou ser resolvido. Alterações invalidam indicadores de provas anteriores. A aprovação do revisor não pinta de verde uma interação nativa ainda pendente. Os eventos incluem unidade, tentativa e revisão do plano para distinguir passagens diferentes; são registros de apresentação, sem novos gates de controle, testes obrigatórios ou chamadas de modelo.
 
 Logs e atividade acompanham novas entradas até o usuário percorrer o histórico. End retoma esse acompanhamento. A área ampliada continua recebendo atualizações. Perguntas reais podem ser respondidas no próprio painel; `a` reabre uma decisão pendente e Esc permite prosseguir com trabalho independente.
 
@@ -22,7 +24,7 @@ O modelo da interface mantém o conteúdo integral separado das prévias. O diá
 
 `q` oculta a interface da execução, que continua em saída por linhas. Ctrl+C é o cancelamento explícito. No acompanhamento independente, ambos fecham somente o painel. Falhas nos observadores não provocam nova edição, nova chamada de modelo ou encerramento do motor. O terminal restaura cursor, modo de entrada, mouse e tela anterior ao fechar.
 
-## Evidência desta alteração
+## Histórico de validação
 
 Os cenários locais cobrem navegação, redimensionamento, conteúdo integral, barras com total conhecido e desconhecido, perguntas, restauração do terminal e tolerância a observadores que lançam exceções durante um fluxo completo com agente simulado. Não são verificações de frases de prompt nem metas sobre quantidade de testes.
 

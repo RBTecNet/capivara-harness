@@ -1,7 +1,7 @@
 import type { SavedProject } from '../app/store.js';
 import type { BuildState, TaskProgress } from '../execution/types.js';
 import type { AgentConfig } from '../runtime/types.js';
-import type { DashboardEvent, DashboardGate, DashboardGateRow, DashboardPanel, DashboardPanelId, DashboardProgress, DashboardUsage, DashboardView } from './types.js';
+import type { DashboardEvent, DashboardGate, DashboardPanel, DashboardPanelId, DashboardPhase, DashboardProgress, DashboardThread, DashboardUsage, DashboardView } from './types.js';
 import type { BuildGateMeasurement } from '../telemetry/progress.js';
 
 const statusLabels: Record<string, string> = {
@@ -125,7 +125,7 @@ export class DashboardModel {
     this.gateMeasurements.set(gate.taskId, current);
   }
 
-  private gateRows(state: BuildState | undefined): DashboardGateRow[] {
+  private gateRows(state: BuildState | undefined): Omit<DashboardThread, 'id'>[] {
     return (this.saved.plan?.tasks ?? []).map(task => {
       const current = state?.tasks[task.id];
       const observed = this.gateMeasurements.get(task.id);
@@ -160,6 +160,35 @@ export class DashboardModel {
       }
       return { taskId: task.id, title: task.title, gates };
     });
+  }
+
+  private phases(state: BuildState | undefined): DashboardPhase[] {
+    const tasks = this.saved.plan?.tasks ?? [];
+    const rows = new Map(this.gateRows(state).map(row => [row.taskId, row]));
+    const remaining = new Set(tasks.map(task => task.id));
+    const phases: DashboardPhase[] = [];
+    while (remaining.size) {
+      const ready = tasks.filter(task => remaining.has(task.id) && task.dependsOn.every(id => !remaining.has(id)));
+      // An incomplete or invalid saved plan must remain visible. Group its
+      // unresolved remainder without changing or trying to repair the engine.
+      const layer = ready.length ? ready : tasks.filter(task => remaining.has(task.id));
+      const threads = layer.map((task, index): DashboardThread => ({ id: `T${String(index + 1).padStart(2, '0')}`, ...rows.get(task.id)! }));
+      const gates: DashboardGate[] = [];
+      for (const id of ['G0', 'G1', 'G2', 'G3', 'G4'] as const) {
+        const observed = threads.flatMap(thread => thread.gates.filter(gate => gate.id === id));
+        if (!observed.length) continue;
+        const applicable = observed.filter(gate => gate.status !== 'neutral');
+        const status: DashboardGate['status'] = !applicable.length ? 'neutral'
+          : applicable.some(gate => gate.status === 'returned') ? 'returned'
+            : applicable.some(gate => gate.status === 'running') ? 'running'
+              : applicable.every(gate => gate.status === 'complete') ? 'complete'
+                : applicable.some(gate => gate.status === 'waiting') ? 'waiting' : 'pending';
+        gates.push({ id, status, detail: 'Resumo das threads aplicáveis desta fase.' });
+      }
+      phases.push({ id: `P${String(phases.length + 1).padStart(2, '0')}`, gates, threads });
+      for (const task of layer) remaining.delete(task.id);
+    }
+    return phases;
   }
 
   private observeProgress(progress: DashboardProgress): void {
@@ -212,6 +241,10 @@ export class DashboardModel {
     const { brief, plan, pendingQuestion } = this.saved;
     const state = execution(this.saved);
     const progress = this.progress(state);
+    const phases = this.phases(state);
+    const gateSymbols = { pending: '○', waiting: '○', neutral: '○', running: '◐', complete: '●', returned: '⊗' };
+    const gateText = (gates: readonly DashboardGate[]): string => gates.map(gate => `${gate.id}${gateSymbols[gate.status]}`).join(' ');
+    const progressLines = phases.flatMap(phase => [`${phase.id} ${gateText(phase.gates)}`, ...phase.threads.map(thread => `  ${thread.id} ${gateText(thread.gates)}`)]);
     const summary = [`Estado: ${label(this.saved.status, 'Aguardando execução')}`, `Etapa: ${this.saved.stage ?? 'Não iniciada'}`];
     add(summary, 'Diretório: ', this.workspace);
     add(summary, 'Última gravação: ', this.saved.updatedAt);
@@ -227,7 +260,6 @@ export class DashboardModel {
     if (pendingQuestion) summary.push('Pergunta aguardando resposta:', ...lines(pendingQuestion.question), ...lines(`Motivo: ${pendingQuestion.reason}`), ...lines(`Impacto: ${pendingQuestion.impact}`), ...pendingQuestion.options.flatMap(option => lines(`• ${option}`)));
     const pendingDecisions = brief?.gaps.filter(gap => gap.status === 'pending').length ?? (pendingQuestion ? 1 : 0);
     const summaryPreview = [`Estado: ${label(this.saved.status, 'Aguardando execução')}`, `Etapa: ${this.saved.stage ?? 'Não iniciada'}`, ...(this.workspace ? [`Diretório: ${oneLine(this.workspace)}`] : []), `Requisitos: ${brief?.requirements.length ?? 0} · Decisões pendentes: ${pendingDecisions}`, ...(brief ? [`Modalidades: ${brief.modes.join(', ')} · Plataformas: ${brief.targets.join(', ')}`] : [])];
-    const progressLines = progress.map(item => `${item.label}: ${label(item.status)}${item.unit ? ` · ${item.unit}` : ''}`);
     const phaseLines = [`Descoberta: ${label(brief?.status, 'Não iniciada')}`, `Planejamento: ${label(plan?.status, 'Não iniciado')}`];
     const phasePreview = plan?.tasks.length ? plan.tasks.map(task => `${task.id} · ${oneLine(task.title)} · ${label(state?.tasks[task.id]?.status, 'Pendente')} · ${task.criteria.length} critério(s)`) : [...phaseLines];
     if (plan) {
@@ -271,7 +303,7 @@ export class DashboardModel {
     const panel = (id: DashboardPanelId, title: string, content: string[], bars: DashboardProgress[] = [], previewLines?: string[]): DashboardPanel => ({ id, title, lines: content, progress: bars, ...(previewLines ? { previewLines } : {}) });
     const panels = [
       panel('summary', 'Resumo', summary, [], summaryPreview),
-      { ...panel('progress', 'Progresso', progressLines, progress), gateRows: this.gateRows(state) },
+      { ...panel('progress', 'Progresso', progressLines), phases },
       panel('phases', 'Fases e unidades', phaseLines, progress.filter(item => ['brief', 'plan', 'tasks', 'verification', 'gaps'].includes(item.id) || item.id.startsWith('task:') || item.stage === 'plan' || item.stage === 'init'), phasePreview),
       panel('environment', 'Ambiente', environmentLines, progress.filter(item => item.id === 'environment' || item.id.startsWith('environment:')), environmentPreview.length ? environmentPreview : [...environmentLines]),
       panel('activity', 'Agentes e atividade', activity, progress.filter(item => item.id.startsWith('agent:')), activityPreview),

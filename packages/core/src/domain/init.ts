@@ -1,9 +1,10 @@
 import { allowedCapabilities, explicitConstraints, explicitModes, explicitTargets, identity, inferredCapabilities, normalize, requestedCapabilities } from "./authority.js";
 import { cancelled, object, records, requestObject, string, strings } from "./json.js";
 import { documentaryAuthority, materialReferences, materialRevision, selectedMaterial } from "./material.js";
-import type { ApplicationMode, Gap, InitOptions, ProductBrief, ProductConstraint, Question, Requirement, Source, TargetPlatform } from "./types.js";
+import type { ApplicationMode, CapabilityIdentity, Gap, InitOptions, ProductBrief, ProductConstraint, Question, Requirement, Source, TargetPlatform } from "./types.js";
 import { emitEvent, emitProgress } from "../telemetry/progress.js";
-import { PlanningFailure } from "./control.js";
+import { PlanningFailure, PlanningProgress } from "./control.js";
+import { resolveLiteralExcerpt } from "./literal-source.js";
 
 const MODES = new Set<ApplicationMode>(["web", "desktop", "tui", "cli", "api", "service", "library", "other"]);
 const TARGETS = new Set<TargetPlatform>(["linux", "windows", "macos", "browser", "portable"]);
@@ -30,33 +31,144 @@ type SourceOrigin = Pick<Source, "kind" | "reference" | "localPath">;
 function excerpt(raw: string, record: Record<string, unknown>, origin: SourceOrigin): Source | null {
   const nested = object(record.source) ? record.source : {};
   const quote = string(record.quote, string(nested.text));
-  if (quote && raw.includes(quote)) return { ...origin, text: quote };
+  const resolved = quote ? resolveLiteralExcerpt(raw, quote) : undefined;
+  if (resolved) return { ...origin, text: resolved };
   const statement = string(record.statement);
   if (statement && raw.includes(statement)) return { ...origin, text: statement };
   return null;
 }
 
-function requirementsFrom(raw: string, values: unknown, modes: ApplicationMode[], sourceLimit = 1_400, origin: SourceOrigin = { kind: "request", reference: "request" }): Requirement[] {
+const BINDING_KINDS = new Set(["cli", "library", "driver", "service", "runtime", "sdk"]);
+const bindingChoice = (binding: Pick<CapabilityIdentity, "kind" | "provider">): string => `${binding.kind}:${binding.provider.normalize("NFC").toLowerCase()}`;
+function providerMention(text: string, provider: string): RegExpMatchArray | null {
+  const escaped = provider.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Technology names are complete literal tokens, including punctuation in
+  // names such as C++, .NET and dotted package/runtime identifiers.
+  return text.match(new RegExp(`(?<![\\p{L}\\p{N}_+#./-])${escaped}(?![\\p{L}\\p{N}_+#/-]|\\.(?=[\\p{L}\\p{N}_]))`, "iu"));
+}
+function technicalChoices(text: string): string[] {
+  return text.split(/\r?\n|;|,\s*|\s+(?:and|e)\s+|\s+\+\s+/iu).map(part => part.trim().replace(/^(?:[-*+]\s+|\d+[.)]\s+)/, "")).filter(Boolean);
+}
+function bindingsFrom(value: unknown, source: Source, choices: string[]): { bindings: CapabilityIdentity[]; issues: string[] } {
+  const entries = records(value), bindings: CapabilityIdentity[] = [], issues: string[] = [];
+  for (const item of entries) {
+    const capability = string(item.capability), kind = string(item.kind), provider = string(item.provider);
+    const mention = provider ? providerMention(source.text, provider) : null;
+    if (!capability || !BINDING_KINDS.has(kind) || !mention) {
+      issues.push(`Binding sem capacidade/tipo/provedor literal válido: ${JSON.stringify(item)}`); continue;
+    }
+    const binding = { capability, kind: kind as CapabilityIdentity["kind"], provider: mention[0] };
+    if (!bindings.some(existing => bindingChoice(existing) === bindingChoice(binding))) bindings.push(binding);
+  }
+  if (!bindings.length) issues.push("Nenhuma identidade de capacidade/provedor literal foi declarada para a escolha técnica.");
+  const uncovered = choices.filter(choice => !bindings.some(binding => providerMention(choice, binding.provider)));
+  if (uncovered.length) issues.push(`Escolhas técnicas literais ainda sem capacidade/provedor: ${JSON.stringify(uncovered)}`);
+  return { bindings, issues };
+}
+
+async function requirementsFrom(raw: string, values: unknown, modes: ApplicationMode[], sourceLimit: number, origin: SourceOrigin, hooks: Pick<InitOptions, "agent" | "contextChars" | "signal" | "onEvent">): Promise<Requirement[]> {
   const result: Requirement[] = [];
-  for (const item of records(values)) {
+  const candidates = records(values), metadata = new Map<number, Record<string, unknown>>();
+  const recovery = new PlanningProgress("init-requirement-metadata");
+  const inspect = (item: Record<string, unknown>, index: number) => {
+    const revised = metadata.get(index), candidate = revised ? { ...item, ...revised } : item;
+    const originalSource = excerpt(raw, item, origin);
+    const source = originalSource ?? excerpt(raw, candidate, origin);
+    const stack = item.kind === "stack" || object(item.binding);
+    // Metadata may repair a citation, never narrow the original stack contract.
+    const choices = originalSource ? technicalChoices(originalSource.text) : [...new Set([...technicalChoices(string(item.statement)), ...technicalChoices(source?.text ?? "")])];
+    const resolved = source && stack ? bindingsFrom(Array.isArray(candidate.bindings) ? candidate.bindings : object(candidate.binding) ? [candidate.binding] : [], source, choices) : { bindings: [], issues: [] };
+    const issues = [...(!source ? ["A citação não corresponde a uma origem literal inequívoca."] : []), ...resolved.issues];
+    return { source, stack, bindings: resolved.bindings, issues, candidate };
+  };
+  for (;;) {
+    const pending = candidates.flatMap((item, index) => {
+      if (!string(item.statement)) return [];
+      const inspected = inspect(item, index);
+      if (!inspected.issues.length || inspected.candidate.unsupported === true && !inspected.source && string(inspected.candidate.reason)) return [];
+      return [{ index, statement: string(item.statement), quote: string(inspected.candidate.quote, object(inspected.candidate.source) ? string(inspected.candidate.source.text) : ""), kind: string(item.kind), bindings: inspected.bindings, issues: inspected.issues, ...(inspected.source ? { literalSource: inspected.source.text } : {}) }];
+    });
+    if (!pending.length) break;
+    recovery.requireChange(pending, "A origem ou a identidade das escolhas técnicas ainda não foi recuperada; nenhum requisito será descartado nem aprovado incompleto.");
+    cancelled(hooks.signal);
+    emitEvent(hooks.onEvent, { type: "recovering", message: "Recuperando somente origens e capacidades técnicas da resposta já recebida, sem refazer a descoberta ou entrevistar o usuário.", subject: origin.reference });
+    emitProgress(hooks.onEvent, { id: "init:metadata", label: "Origens e escolhas técnicas", completed: candidates.length - pending.length, total: candidates.length, status: "running", stage: "init" });
+    const repaired = await requestObject({ ...hooks, operation: "repair", prompt: [
+      "Operation: init-requirement-metadata. Repair only metadata of the already extracted requirements below. Do not rediscover or change their statements, product scope or interfaces. Do not implement code or ask the user an already answered fact.",
+      'Return {"requirements":[{"index":0,"quote":"exact words from the source","bindings":[{"capability":"concrete technical capability","kind":"cli|library|driver|service|runtime|sdk","provider":"complete literal technology name"}]}]}. Preserve the original index. Stack bindings must cover EVERY explicit technology in the quoted list, one identity per capability; a runtime does not cover a UI library, compiler, build tool or database. Do not invent technology choices. For a genuinely unsupported extraction only, return {index,unsupported:true,reason:"why the source does not establish it"}.',
+      `Unresolved requirements: ${JSON.stringify(pending)}`,
+      `Literal source (${origin.reference}):\n${pending.every(item => item.literalSource) ? [...new Set(pending.map(item => item.literalSource))].join("\n\n") : raw}`,
+    ].join("\n\n") });
+    cancelled(hooks.signal);
+    for (const update of records(repaired.requirements)) {
+      const index = typeof update.index === "number" && Number.isInteger(update.index) ? update.index : pending.length === 1 ? pending[0]!.index : -1;
+      if (!pending.some(item => item.index === index)) continue;
+      const patch: Record<string, unknown> = {};
+      if (typeof update.quote === "string") patch.quote = update.quote;
+      if (Array.isArray(update.bindings)) patch.bindings = update.bindings;
+      else if (object(update.binding)) patch.bindings = [update.binding];
+      if (update.unsupported === true && string(update.reason)) { patch.unsupported = true; patch.reason = string(update.reason); }
+      metadata.set(index, { ...metadata.get(index), ...patch });
+    }
+  }
+  for (const [index, item] of candidates.entries()) {
+    cancelled(hooks.signal);
     const statement = string(item.statement);
-    const source = excerpt(raw, item, origin);
-    if (!statement || !source) continue;
+    if (!statement) continue;
+    const inspected = inspect(item, index), source = inspected.source;
+    if (!source) {
+      emitEvent(hooks.onEvent, { type: "requirement-rejected", message: `Extração sem sustentação literal rejeitada explicitamente: ${statement}. ${string(inspected.candidate.reason)}`, subject: origin.reference });
+      continue;
+    }
     const modeValue = string(item.mode);
     const mode = MODES.has(modeValue as ApplicationMode) && modes.includes(modeValue as ApplicationMode) ? modeValue as ApplicationMode : "shared";
     if (statement.length > sourceLimit) throw new PlanningFailure("context-capacity", ["A extração devolveu uma descrição maior que uma unidade semântica. Divida os resultados observáveis, preservando a fonte original."], "init");
     const requirement: Requirement = { id: identity("req", `${origin.reference}:${normalize(statement)}`), statement, source: { ...source, text: source.text.slice(0, sourceLimit) }, mode };
     if (["behavior", "stack", "interface", "constraint"].includes(string(item.kind))) requirement.kind = string(item.kind) as NonNullable<Requirement["kind"]>;
-    if (object(item.binding) && ["cli", "library", "driver", "service", "runtime", "sdk"].includes(string(item.binding.kind)) && string(item.binding.capability) && string(item.binding.provider) && normalize(source.text).includes(normalize(string(item.binding.provider)))) {
-      requirement.binding = { capability: string(item.binding.capability), kind: string(item.binding.kind) as NonNullable<Requirement["binding"]>["kind"], provider: string(item.binding.provider) };
-      requirement.kind = "stack";
+    if (inspected.stack) {
+      const bindings = [...inspected.bindings].sort((left, right) => (providerMention(source.text, left.provider)?.index ?? 0) - (providerMention(source.text, right.provider)?.index ?? 0));
+      requirement.binding = bindings[0]!; requirement.kind = "stack";
+      const proposed = records(Array.isArray(inspected.candidate.bindings) ? inspected.candidate.bindings : [inspected.candidate.binding]);
+      for (const binding of bindings) {
+        const labels = [...new Set(proposed.filter(item => string(item.kind) === binding.kind && bindingChoice({ kind: binding.kind, provider: string(item.provider) }) === bindingChoice(binding)).map(item => string(item.capability)).filter(Boolean))];
+        if (labels.length > 1) emitEvent(hooks.onEvent, { type: "binding-reconciled", message: `Uma única escolha literal ${binding.provider} (${binding.kind}) conserva os papéis técnicos ${JSON.stringify(labels)}; rótulos de papel não criam escolhas adicionais.`, subject: requirement.id });
+      }
+      for (const binding of bindings.slice(1)) {
+        const choice = technicalChoices(source.text).find(part => providerMention(part, binding.provider))!;
+        const literal = resolveLiteralExcerpt(source.text, choice) ?? source.text;
+        result.push({ id: identity("req", `${origin.reference}:${normalize(statement)}:${JSON.stringify(binding)}`), statement: `${binding.provider}: ${binding.capability} (${binding.kind}).`, source: { ...source, text: literal }, mode, kind: "stack", binding });
+      }
     }
-    if (requirement.kind === "stack" && !requirement.binding) throw new PlanningFailure("invalid-plan", [`A escolha técnica obrigatória ${statement} não tem uma identidade de capacidade/provedor sustentada pela fonte literal.`], "init-conformity");
     result.push(requirement);
   }
+  if (metadata.size) emitProgress(hooks.onEvent, { id: "init:metadata", label: "Origens e escolhas técnicas", completed: candidates.length, total: candidates.length, status: "complete", stage: "init" });
   // The complete source remains on the brief/material. Unquoted prose and context
   // are not requirements, and splitting transport packets never creates work.
   return result;
+}
+
+/** Retire only children proven to have been generated from this exact parent.
+ * Independent product requirements sharing a provider remain independent. */
+function reconcileGeneratedBindings(brief: ProductBrief, hooks: Pick<InitOptions, "onEvent">): void {
+  const retired = new Set<string>();
+  for (const parent of brief.requirements) {
+    if (!parent.binding || parent.kind !== "stack" || parent.id !== identity("req", `${parent.source.reference}:${normalize(parent.statement)}`)) continue;
+    const children = brief.requirements.filter(child => child !== parent && !!child.binding && child.kind === "stack"
+      && child.id === identity("req", `${parent.source.reference}:${normalize(parent.statement)}:${JSON.stringify(child.binding)}`)
+      && child.statement === `${child.binding.provider}: ${child.binding.capability} (${child.binding.kind}).`
+      && child.source.kind === parent.source.kind && child.source.reference === parent.source.reference && child.source.localPath === parent.source.localPath
+      && !!child.source.text.trim() && parent.source.text.includes(child.source.text) && !!providerMention(parent.source.text, child.binding.provider));
+    const choices = new Map<string, Requirement>([[bindingChoice(parent.binding), parent]]);
+    for (const child of children) {
+      const key = bindingChoice(child.binding!), pivot = choices.get(key);
+      if (!pivot) { choices.set(key, child); continue; }
+      retired.add(child.id);
+      brief.requirementAliases ??= {};
+      brief.requirementAliases[child.id] = pivot.id;
+      emitEvent(hooks.onEvent, { type: "requirement-reconciled", message: `Escolha técnica gerada duplicada ${child.id} → ${pivot.id}: ${child.binding!.provider} (${child.binding!.kind}); papel ${JSON.stringify(child.binding!.capability)} preservado na resposta original e na origem composta.`, subject: parent.id });
+    }
+  }
+  if (retired.size) { brief.requirements = brief.requirements.filter(requirement => !retired.has(requirement.id)); brief.revision++; }
 }
 
 function constraintsFrom(raw: string, values: unknown, origin: SourceOrigin = { kind: "request", reference: "request" }): ProductConstraint[] {
@@ -202,6 +314,7 @@ export async function runInit(options: InitOptions): Promise<ProductBrief> {
     const existing = structuredClone(previous);
     existing.materialRevision = revision;
     existing.references = materialReferences(documents);
+    reconcileGeneratedBindings(existing, options);
     applyRepositoryConstraints(existing, options.repositoryConstraints);
     await resolveQuestions(existing, [], options);
     applyRepositoryConstraints(existing, options.repositoryConstraints);
@@ -268,7 +381,9 @@ export async function runInit(options: InitOptions): Promise<ProductBrief> {
       if (!brief.summary) brief.summary = string(result.summary, chunk.slice(0, 800)).slice(0, 1_600);
       if (modes.length === 0 && modeDecisions.length === 0) brief.modes = [...new Set([...brief.modes, ...strings(result.modes).filter((mode): mode is ApplicationMode => MODES.has(mode as ApplicationMode))])];
       if (brief.targets.length === 0) brief.targets = strings(result.targets).filter((target): target is TargetPlatform => TARGETS.has(target as TargetPlatform));
-      brief.requirements.push(...requirementsFrom(chunk, result.requirements, brief.modes, Math.max(200, Math.min(1_400, Math.floor(capacity / 8))), source.origin).filter(requirement => source.origin.kind !== "repository" || allowedCapabilities(brief, inferredCapabilities(`${requirement.statement}\n${requirement.source.text}`))));
+      await options.save?.({ brief });
+      const extracted = await requirementsFrom(chunk, result.requirements, brief.modes, Math.max(200, Math.min(1_400, Math.floor(capacity / 8))), source.origin, options);
+      brief.requirements.push(...extracted.filter(requirement => source.origin.kind !== "repository" || allowedCapabilities(brief, inferredCapabilities(`${requirement.statement}\n${requirement.source.text}`))));
       brief.constraints.push(...constraintsFrom(chunk, result.constraints, source.origin));
       candidates.push(...records(result.questions));
       brief.requirements = [...new Map(brief.requirements.map((requirement) => [requirement.id, requirement])).values()];

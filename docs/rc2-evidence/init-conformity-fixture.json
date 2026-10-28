@@ -1,0 +1,124 @@
+{
+  "schema": "capivara/init-conformity-comparison/1",
+  "generatedAt": "2026-10-28T22:55:56.873Z",
+  "mode": "synthetic metadata fixture; no claim of zero-call live recovery",
+  "input": {
+    "databaseSHA256": "4f3e71c78db92e51afb1a071262fa470593f3cf537e3e5e32c7e07bb119187e1",
+    "eventCount": 32,
+    "status": "waiting",
+    "stage": "init",
+    "recordedCalls": 1,
+    "completeCalls": 1,
+    "rawRequirements": 11,
+    "rawLiteralQuotes": 3,
+    "rawStackHasBinding": false,
+    "pendingQuestions": 0
+  },
+  "observedCost": {
+    "start": "2026-10-28T22:34:43.593Z",
+    "end": "2026-10-28T22:34:53.815Z",
+    "elapsedMs": 10222,
+    "inputTokens": 18184,
+    "outputTokens": 1090,
+    "cachedInputTokens": 11520,
+    "financialCostReported": false
+  },
+  "baseline": {
+    "commit": "6f6a7282975aa94993b8a690337b83735185ee73",
+    "status": "waiting",
+    "failure": "init-conformity: A escolha técnica obrigatória Usar Node.js, TypeScript, React, Vite e SQLite em arquivo. não tem uma identidade de capacidade/provedor sustentada pela fonte literal.",
+    "newModelRequests": 0,
+    "reusedCallKey": "e3c285faa1481e10927a22b28168d266cbb2ee352c32a20b26e5ae299ca9253c"
+  },
+  "after": {
+    "sourceSHA256": "7c01367d4a5d3d9795ab1ac501df78b09e112528efcebc55b86ed2b7e16d7364",
+    "sources": [
+      {
+        "path": "packages/core/src/domain/init.ts",
+        "sha256": "7f2e3adc777caaa4f79cb67174433edc3a739134a81c0ae849c36c7e2f84dce0"
+      },
+      {
+        "path": "packages/core/src/domain/literal-source.ts",
+        "sha256": "11b623b02a47a87a806f0056ab79658598c6a2b216e77684b13390609fae5ce1"
+      },
+      {
+        "path": "packages/core/src/domain/authority.ts",
+        "sha256": "818e7ca546a9c441878dc8226b231bbe33572713c3cd203a01129f071815026d"
+      },
+      {
+        "path": "packages/core/src/domain/types.ts",
+        "sha256": "2cb0eb82586659484474367908fe76b4f0e3ebf86d01068cd5889b370953fe8c"
+      },
+      {
+        "path": "packages/core/src/domain/plan.ts",
+        "sha256": "6fce0c55027ed5bcc95e6f5f2c6d762cf6d68ef3aef987e57b138177034da48a"
+      },
+      {
+        "path": "packages/core/src/domain/reconcile.ts",
+        "sha256": "f57472b720271997602ac63c2659ae6aa3575575cf2a9414732fba6e43c6d7cc"
+      },
+      {
+        "path": "packages/core/src/app/workflow.ts",
+        "sha256": "b1f8d740f3de00b56d1cf57e588d01163140f819b5ae71fafa4e54a6c32e77ce"
+      },
+      {
+        "path": "packages/core/src/app/store.ts",
+        "sha256": "64a808056c760930bb74245cea7dd188f230cb63e4e49423f45908458857106f"
+      }
+    ],
+    "status": "complete",
+    "briefStatus": "ready",
+    "requirements": 15,
+    "originalOutcomesPreserved": 11,
+    "semanticOutcomesPreserved": 10,
+    "literalSourcesVerified": true,
+    "bindings": [
+      {
+        "requirementId": "req-5c37484af7c9",
+        "capability": "compiler",
+        "kind": "sdk",
+        "provider": "TypeScript"
+      },
+      {
+        "requirementId": "req-7d100f6c8077",
+        "capability": "ui-library",
+        "kind": "library",
+        "provider": "React"
+      },
+      {
+        "requirementId": "req-804cb286ca07",
+        "capability": "build-tool",
+        "kind": "sdk",
+        "provider": "Vite"
+      },
+      {
+        "requirementId": "req-807c11f8e009",
+        "capability": "database",
+        "kind": "library",
+        "provider": "SQLite"
+      },
+      {
+        "requirementId": "req-5b6ef9c0373d",
+        "capability": "runtime",
+        "kind": "runtime",
+        "provider": "Node.js"
+      }
+    ],
+    "modelAdapterRequests": 1,
+    "syntheticRepairRequests": 1,
+    "interviewRequests": 0,
+    "reusedCalls": [
+      "e3c285faa1481e10927a22b28168d266cbb2ee352c32a20b26e5ae299ca9253c"
+    ],
+    "hasExecution": false
+  },
+  "safety": {
+    "reproductionPaidInferenceCalls": 0,
+    "productCommands": 0,
+    "realProjectWrites": 0,
+    "databaseUnchanged": true,
+    "writesRestrictedToTemporaryWorkspacesAndReport": true,
+    "planOrBuildExecuted": false,
+    "liveRecoveryDemonstrated": false
+  }
+}

@@ -76,6 +76,8 @@ export interface ProductBrief {
   modes: ApplicationMode[];
   targets: TargetPlatform[];
   requirements: Requirement[];
+  /** Retired generated obligations map to active requirement identities; evidence remains immutable. */
+  requirementAliases?: Record<string,string>;
   constraints: ProductConstraint[];
   /** Original literal authority survives corrections to the harness interpretation. */
   authorityCorrections?: { constraintId: string; source: Source; before: { forbiddenCapabilities: string[]; requiredCapabilities: string[] }; after: { forbiddenCapabilities: string[]; requiredCapabilities: string[] }; reason: string }[];

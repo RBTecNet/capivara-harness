@@ -6,7 +6,7 @@ import { boundedReferences } from "./material.js";
 import type { CommandRecipe, DevelopmentPlan, DomainHooks, EnvironmentNode, IntegrationContract, PlanOptions, ProductBrief, Requirement, Verification, WorkUnit } from "./types.js";
 import { emitEvent, emitProgress } from "../telemetry/progress.js";
 import { PlanningFailure, PlanningProgress } from "./control.js";
-import { assertValidPlan, reconcileChecks, reconcilePlan, sameDelivery, validatePlan, preferredProofOwner } from "./reconcile.js";
+import { assertValidPlan, reconcileChecks, reconcilePlan, sameDelivery, validatePlan, preferredProofOwner, resolveRequirementAlias } from "./reconcile.js";
 import { normalizeVerificationAssertion } from "./assertions.js";
 
 const cleanId = (value: unknown, fallback: string): string => string(value).replace(/[^a-zA-Z0-9_.:-]+/g, "-") || fallback;
@@ -182,7 +182,7 @@ export function normalizeTasks(value: unknown, brief: ProductBrief, environment:
   return records(value).map((item): WorkUnit => {
     const title = string(item.title, string(item.goal));
     const goal = string(item.goal, title);
-    const requirementIds = strings(item.requirementIds).filter((id) => available.has(id));
+    const requirementIds = uniqueStrings(strings(item.requirementIds).map(id=>resolveRequirementAlias(brief,id))).filter((id) => available.has(id));
     const criteria = strings(item.criteria);
     return {
       id: cleanId(item.id, identity("task", `${goal}:${requirementIds.join(",")}`)), title, goal,
@@ -461,12 +461,13 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
   applyRepositoryConstraints(brief, options.repositoryConstraints);
   await resolveQuestions(brief, [], options);
   applyRepositoryConstraints(brief, options.repositoryConstraints);
-  if (options.existing?.status === "ready" && options.existing.briefId === brief.id && options.existing.briefRevision === brief.revision && !validatePlan(brief, options.existing).length) return reconcilePlan(brief, options.existing, options.existing);
+  const existing=options.existing?.briefId===brief.id?reconcilePlan(brief,options.existing,options.existing):options.existing;
+  if (existing?.status === "ready" && existing.briefId === brief.id && options.existing?.briefRevision === brief.revision && !validatePlan(brief, existing).length) return existing;
   // The product is still the same: fix its missing proofs/constraints in place.
   // Re-extracting the whole plan after a harness authority correction discards
   // useful contracts and reopens independent deliveries unnecessarily.
-  if (options.existing?.status === "ready" && options.existing.briefId === brief.id && options.existing.tasks.every(task => task.requirementIds.every(id => brief.requirements.some(requirement => requirement.id === id)))) {
-    const plan = reconcilePlan(brief, options.existing, options.existing);
+  if (existing?.status === "ready" && existing.briefId === brief.id && existing.tasks.every(task => task.requirementIds.every(id => brief.requirements.some(requirement => requirement.id === id)))) {
+    const plan = reconcilePlan(brief, existing, existing);
     plan.status = "planning";
     plan.revision += 1;
     const constraints = new Set(brief.constraints.map(constraint => constraint.id));
@@ -485,7 +486,7 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
   }
   const limit = options.contextChars ?? 24_000;
   const facts = productFacts(brief, Math.floor(limit / 8));
-  const partial=options.existing?.status === "planning" && options.existing.briefId === brief.id && options.existing.tasks.every(task=>task.requirementIds.every(id=>brief.requirements.some(requirement=>requirement.id===id))) ? options.existing : undefined;
+  const partial=existing?.status === "planning" && existing.briefId === brief.id && existing.tasks.every(task=>task.requirementIds.every(id=>brief.requirements.some(requirement=>requirement.id===id))) ? existing : undefined;
   const plan: DevelopmentPlan = partial ? reconcilePlan(brief,partial,partial) : { schema: "capivara/plan/1", status: "planning", revision: (options.existing?.revision ?? 0) + 1, briefId: brief.id, briefRevision: brief.revision, environment: [], contracts: [], tasks: [] };
   const checkpoint=plan.planning?.schema === "capivara/plan-progress/1" && plan.planning.briefRevision === brief.revision && plan.planning.groups.every(group=>group.requirementIds.every(id=>brief.requirements.some(requirement=>requirement.id===id))) ? plan.planning : undefined;
   // Legacy drafts already persisted every environment slice before the first

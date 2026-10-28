@@ -1,0 +1,99 @@
+{
+  "schema": "capivara/init-live-resume/1",
+  "recordedAt": "2026-10-28T22:55:59.876Z",
+  "version": "0.9.0-rc2",
+  "project": "samba_admin",
+  "command": "capivara init --project <project> --no-dashboard",
+  "exitCode": 0,
+  "before": {
+    "status": "waiting",
+    "stage": "init",
+    "lastFailure": "init-conformity: A escolha técnica obrigatória Usar Node.js, TypeScript, React, Vite e SQLite em arquivo. não tem uma identidade de capacidade/provedor sustentada pela fonte literal.",
+    "events": 32,
+    "calls": 1,
+    "hasBrief": false
+  },
+  "observedTechnicalRepair": {
+    "newAgentCalls": 1,
+    "provider": "codex",
+    "model": "gpt-6-luna",
+    "elapsedMs": 5402,
+    "usage": {
+      "inputTokens": 17248,
+      "outputTokens": 140,
+      "cachedInputTokens": 11520
+    },
+    "discoveryReused": true,
+    "initialNormalizedRequirements": 16
+  },
+  "after": {
+    "status": "complete",
+    "stage": "init",
+    "briefStatus": "ready",
+    "requirements": 15,
+    "originalStatementsPreserved": 11,
+    "literalSourcesVerified": true,
+    "bindings": [
+      {
+        "requirementId": "req-5a9ce2085429",
+        "capability": "Programming language",
+        "kind": "runtime",
+        "provider": "TypeScript"
+      },
+      {
+        "requirementId": "req-1aced15c616f",
+        "capability": "UI library",
+        "kind": "library",
+        "provider": "React"
+      },
+      {
+        "requirementId": "req-d051bfbbd6e9",
+        "capability": "Frontend build tool",
+        "kind": "cli",
+        "provider": "Vite"
+      },
+      {
+        "requirementId": "req-3bcf5b261aac",
+        "capability": "File-based database",
+        "kind": "driver",
+        "provider": "SQLite"
+      },
+      {
+        "requirementId": "req-5b6ef9c0373d",
+        "capability": "JavaScript runtime",
+        "kind": "runtime",
+        "provider": "Node.js"
+      }
+    ],
+    "requirementAliases": {
+      "req-3c1a7d686e84": "req-5b6ef9c0373d"
+    },
+    "pendingGaps": 0,
+    "calls": 2,
+    "finalResumeNewCalls": 0,
+    "lastEvent": 68,
+    "lastFailure": null,
+    "hasPlan": false,
+    "hasExecution": false,
+    "owner": []
+  },
+  "reconciliations": [
+    {
+      "id": 68,
+      "at": "2026-10-28T22:55:30.037Z",
+      "message": "Escolha técnica gerada duplicada req-3c1a7d686e84 → req-5b6ef9c0373d: Node.js (runtime); papel \"Backend runtime with REST API\" preservado na resposta original e na origem composta."
+    }
+  ],
+  "validation": {
+    "check": "npm run check",
+    "testsPassed": 348,
+    "testFilesPassed": 52,
+    "cliSHA256": "2e8c443b3fb3d17a4771b3adc4da633d92dfa11bf3e14d87a6b2bc4c67a97d1b",
+    "builtCliSHA256": "2e8c443b3fb3d17a4771b3adc4da633d92dfa11bf3e14d87a6b2bc4c67a97d1b"
+  },
+  "limitations": [
+    "This run validates INIT only; no plan, build or product acceptance was executed.",
+    "The metadata classification is not proof of actual provider usage; plan/build must demonstrate it.",
+    "One real technical repair call was used; only the final normalization resume used zero new inference."
+  ]
+}

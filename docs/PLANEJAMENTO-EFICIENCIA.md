@@ -160,3 +160,91 @@ As reproduções e a retomada real demonstram o planejamento corrigido. **O buil
 desta nova execução não foi iniciado**, e não há provas de produto aprovadas.
 `complete/plan` significa conclusão dessa etapa; não significa entrega do
 aplicativo nem demonstra concorrência ou aceite funcional desse novo projeto.
+
+## Novo reset: conformidade na extração inicial
+
+Uma execução posterior reiniciou novamente o banco. A cópia
+`/tmp/capivara-init-before-20261028/project.sqlite` contém 32 eventos, uma resposta
+`discover` completa e nenhum brief, plano ou estado de construção. Ela não é a
+cópia de 110 ou 142 eventos usada nas comparações anteriores.
+
+A primeira tentativa ocorreu às 22:34:42. O analista terminou às 22:34:53,
+devolvendo 11 requisitos e nenhuma pergunta. Um requisito composto exigia
+Node.js, TypeScript, React, Vite e SQLite, sem fornecer um binding de capacidade,
+tipo e provedor. A origem dessa lista era literal e válida; a ausência de
+metadados técnicos foi convertida imediatamente em `init-conformity`, sem brief
+persistido. A tentativa das 22:35:28 reaproveitou a mesma resposta e parou pela
+mesma causa, sem nova inferência.
+
+A chamada consumiu **10,22 segundos**, **18.184 tokens de entrada**, dos quais
+**11.520 em cache**, e **1.090 de saída**. O custo financeiro não foi informado.
+Oito das 11 citações devolvidas também não eram substrings literais do pedido:
+quatro abreviavam trechos com `[...]`; outras uniam linhas ou itens de lista.
+Simplesmente liberar o binding ausente descartaria silenciosamente esses oito
+resultados no extrator anterior. A recuperação precisa conservar os resultados
+do produto e suas origens, além de resolver a classificação técnica da stack.
+
+O reprodutor deste caso distingue dois experimentos:
+
+```sh
+# Metadados técnicos sintéticos: verifica o motor, sem demonstrar recuperação real.
+node scripts/reproduce-init-conformity.mjs --synthetic-repair
+
+# Após existir resposta técnica real preservada: nenhum novo pedido ao modelo.
+node scripts/reproduce-init-conformity.mjs --cache-db /caminho/do/backup-recuperado/project.sqlite
+```
+
+Cada comparação usa a fonte `6f6a728` como baseline e cópias de trabalho
+temporárias. O pedido ao usuário permanece proibido na fixture sem lacunas.
+O primeiro modo permite uma única resposta técnica determinística, identificada
+como sintética no artefato; não afirma que a resposta original continha esses
+metadados nem que a recuperação real custa zero chamadas. O segundo permite
+somente respostas completas já registradas em cache e falha se o adaptador de
+modelo for acionado. Ambos exigem preservar os 11 resultados originais, as
+tecnologias obrigatórias e fontes efetivamente contidas no pedido. Não executam
+planejamento ou build.
+
+A [fixture sintética](rc2-evidence/init-conformity-fixture.json) passou: o
+baseline parou por `init-conformity`; a fonte corrigida concluiu somente o
+`init`, com 15 requisitos — os 11 enunciados originais preservados e quatro
+desdobramentos da stack. As cinco tecnologias receberam bindings separados, e
+todas as origens verificadas são substrings do pedido original. A descoberta
+`e3c285faa…` foi reaproveitada, uma resposta técnica foi **injetada pela fixture**
+e nenhuma entrevista foi aberta. Esse resultado não é uma medição de recuperação
+real sem chamadas; a comparação com a resposta técnica real é registrada a
+seguir, separadamente.
+
+Na pasta real foi necessária **uma chamada técnica**, das 22:47:49 às 22:47:55:
+**5,402 segundos**, **17.248 tokens de entrada**, dos quais **11.520 em cache**,
+e **140 de saída**. A descoberta anterior foi reaproveitada. O retorno trouxe
+seis bindings: dois nomeavam Node.js como runtime, com os papéis
+`JavaScript runtime` e `Backend runtime with REST API`. A primeira normalização
+gerou 16 requisitos. A revisão desse resultado identificou a duplicação antes
+de considerar o trabalho encerrado.
+
+A normalização agora reúne a mesma escolha por provedor e tipo, preservando o
+enunciado composto, a resposta original e um alias entre os requisitos. Não
+atribui funções a tecnologias por catálogo; a classificação técnica continua
+sendo metadado a comprovar operacionalmente nas etapas posteriores. No caso
+real, `req-3c1a7d686e84` passou a apontar para `req-5b6ef9c0373d`, sem perder o
+papel declarado no retorno.
+
+O [reprodutor com as respostas reais em cache](rc2-evidence/init-conformity.json)
+também passou: baseline `waiting`, fonte corrigida `complete/init`, 15 requisitos,
+11 enunciados originais e cinco bindings. Ele reaproveitou exatamente as respostas
+`e3c285faa…` e `0cfe73c0…`, com **zero solicitações ao adaptador de modelo**, zero
+entrevistas e banco de entrada inalterado. O artefato preserva a contagem de seis
+bindings no retorno original e os dois papéis de Node; não reescreve essa
+evidência para esconder a duplicação.
+
+A [retomada instalada na pasta real](rc2-evidence/init-live-resume.json) terminou
+com código zero. O evento 68, às **22:55:30 UTC**, registrou a reconciliação. O
+estado final é `complete/init`, brief `ready`, 15 requisitos, os 11 enunciados
+originais preservados, cinco bindings, nenhuma lacuna e `lastFailure=null`.
+O ledger tem duas chamadas — descoberta e reparo técnico —, e a última retomada
+não iniciou nenhuma chamada nova. `npm run check` passou com **348 testes em
+52 arquivos**; o binário instalado tem o mesmo SHA-256 do build testado.
+
+Neste último reset, **não foram executados plan, build ou aceite de produto**.
+Concluir o init comprova a recuperação do entendimento e de seus metadados; não
+comprova dependências instaladas, uso real dos provedores ou aplicativo pronto.

@@ -1,0 +1,157 @@
+{
+  "schema": "capivara/init-conformity-comparison/1",
+  "generatedAt": "2026-10-28T22:55:56.885Z",
+  "mode": "only previously recorded model responses; all new inference forbidden",
+  "input": {
+    "databaseSHA256": "4f3e71c78db92e51afb1a071262fa470593f3cf537e3e5e32c7e07bb119187e1",
+    "eventCount": 32,
+    "status": "waiting",
+    "stage": "init",
+    "recordedCalls": 1,
+    "completeCalls": 1,
+    "rawRequirements": 11,
+    "rawLiteralQuotes": 3,
+    "rawStackHasBinding": false,
+    "pendingQuestions": 0
+  },
+  "observedCost": {
+    "start": "2026-10-28T22:34:43.593Z",
+    "end": "2026-10-28T22:34:53.815Z",
+    "elapsedMs": 10222,
+    "inputTokens": 18184,
+    "outputTokens": 1090,
+    "cachedInputTokens": 11520,
+    "financialCostReported": false
+  },
+  "baseline": {
+    "commit": "6f6a7282975aa94993b8a690337b83735185ee73",
+    "status": "waiting",
+    "failure": "init-conformity: A escolha técnica obrigatória Usar Node.js, TypeScript, React, Vite e SQLite em arquivo. não tem uma identidade de capacidade/provedor sustentada pela fonte literal.",
+    "newModelRequests": 0,
+    "reusedCallKey": "e3c285faa1481e10927a22b28168d266cbb2ee352c32a20b26e5ae299ca9253c"
+  },
+  "after": {
+    "sourceSHA256": "7c01367d4a5d3d9795ab1ac501df78b09e112528efcebc55b86ed2b7e16d7364",
+    "sources": [
+      {
+        "path": "packages/core/src/domain/init.ts",
+        "sha256": "7f2e3adc777caaa4f79cb67174433edc3a739134a81c0ae849c36c7e2f84dce0"
+      },
+      {
+        "path": "packages/core/src/domain/literal-source.ts",
+        "sha256": "11b623b02a47a87a806f0056ab79658598c6a2b216e77684b13390609fae5ce1"
+      },
+      {
+        "path": "packages/core/src/domain/authority.ts",
+        "sha256": "818e7ca546a9c441878dc8226b231bbe33572713c3cd203a01129f071815026d"
+      },
+      {
+        "path": "packages/core/src/domain/types.ts",
+        "sha256": "2cb0eb82586659484474367908fe76b4f0e3ebf86d01068cd5889b370953fe8c"
+      },
+      {
+        "path": "packages/core/src/domain/plan.ts",
+        "sha256": "6fce0c55027ed5bcc95e6f5f2c6d762cf6d68ef3aef987e57b138177034da48a"
+      },
+      {
+        "path": "packages/core/src/domain/reconcile.ts",
+        "sha256": "f57472b720271997602ac63c2659ae6aa3575575cf2a9414732fba6e43c6d7cc"
+      },
+      {
+        "path": "packages/core/src/app/workflow.ts",
+        "sha256": "b1f8d740f3de00b56d1cf57e588d01163140f819b5ae71fafa4e54a6c32e77ce"
+      },
+      {
+        "path": "packages/core/src/app/store.ts",
+        "sha256": "64a808056c760930bb74245cea7dd188f230cb63e4e49423f45908458857106f"
+      }
+    ],
+    "status": "complete",
+    "briefStatus": "ready",
+    "requirements": 15,
+    "originalOutcomesPreserved": 11,
+    "semanticOutcomesPreserved": 10,
+    "literalSourcesVerified": true,
+    "bindings": [
+      {
+        "requirementId": "req-5a9ce2085429",
+        "capability": "Programming language",
+        "kind": "runtime",
+        "provider": "TypeScript"
+      },
+      {
+        "requirementId": "req-1aced15c616f",
+        "capability": "UI library",
+        "kind": "library",
+        "provider": "React"
+      },
+      {
+        "requirementId": "req-d051bfbbd6e9",
+        "capability": "Frontend build tool",
+        "kind": "cli",
+        "provider": "Vite"
+      },
+      {
+        "requirementId": "req-3bcf5b261aac",
+        "capability": "File-based database",
+        "kind": "driver",
+        "provider": "SQLite"
+      },
+      {
+        "requirementId": "req-5b6ef9c0373d",
+        "capability": "JavaScript runtime",
+        "kind": "runtime",
+        "provider": "Node.js"
+      }
+    ],
+    "modelAdapterRequests": 0,
+    "syntheticRepairRequests": 0,
+    "interviewRequests": 0,
+    "reusedCalls": [
+      "e3c285faa1481e10927a22b28168d266cbb2ee352c32a20b26e5ae299ca9253c",
+      "0cfe73c0dd958eb3be1ef0d6c0e2e9e3083f0ee16ed7d7bf4686907b1624aeba"
+    ],
+    "hasExecution": false
+  },
+  "recordedRepairCache": {
+    "databaseSHA256": "31cb30b9caf8feb806c1cb09a3a539fb71b8c22b9bcb52466091da690ee0aea9",
+    "snapshotRequirements": 16,
+    "completeRepairResponses": 1,
+    "responses": [
+      {
+        "key": "0cfe73c0dd958eb3be1ef0d6c0e2e9e3083f0ee16ed7d7bf4686907b1624aeba",
+        "resultSHA256": "67f84d17c03ee961186d3548f58218aeebb7c13a635ada0a776e1d967b348a28",
+        "rawBindingCount": 6,
+        "providerKindCount": 5,
+        "duplicateProviderKinds": [
+          {
+            "provider": "Node.js",
+            "kind": "runtime",
+            "capabilityLabels": [
+              "JavaScript runtime",
+              "Backend runtime with REST API"
+            ]
+          }
+        ],
+        "observedCost": {
+          "start": "2026-10-28T22:47:49.633Z",
+          "end": "2026-10-28T22:47:55.035Z",
+          "elapsedMs": 5402,
+          "inputTokens": 17248,
+          "outputTokens": 140,
+          "cachedInputTokens": 11520,
+          "financialCostReported": false
+        }
+      }
+    ]
+  },
+  "safety": {
+    "reproductionPaidInferenceCalls": 0,
+    "productCommands": 0,
+    "realProjectWrites": 0,
+    "databaseUnchanged": true,
+    "writesRestrictedToTemporaryWorkspacesAndReport": true,
+    "planOrBuildExecuted": false,
+    "liveRecoveryDemonstrated": false
+  }
+}

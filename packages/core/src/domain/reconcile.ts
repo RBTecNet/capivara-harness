@@ -8,6 +8,32 @@ import type { DevelopmentPlan, ProductBrief, Requirement, Verification, Verifica
 export interface PlanIssue { code: string; subject: string; message: string; environmentIds?: string[]; taskIds?: string[]; }
 const canonical = (text: string): string => normalize(text).replace(/[^\p{L}\p{N}+#.]+/gu, ' ').trim().replace(/\s+/g,' ');
 const unique = (items: string[]): string[] => [...new Set(items)];
+/** Only a retired identity with an acyclic path to an active requirement can
+ * be remapped. Invalid aliases retain their original, diagnosable reference. */
+export function resolveRequirementAlias(brief:ProductBrief,id:string):string{
+  const active=new Set(brief.requirements.map(requirement=>requirement.id));
+  if(active.has(id))return id;
+  const seen=new Set<string>();let current=id;
+  while(!active.has(current)){
+    if(seen.has(current))return id;seen.add(current);
+    const next=brief.requirementAliases?.[current];
+    if(typeof next!=='string'||!next)return id;
+    current=next;
+  }
+  return current;
+}
+function remapRequirements(brief:ProductBrief,plan:DevelopmentPlan):void{
+  const ids=(values:string[]):string[]=>unique(values.map(id=>resolveRequirementAlias(brief,id)));
+  const check=(proof:Verification):void=>{
+    proof.requirementIds=ids(proof.requirementIds);
+    if(proof.conformance)proof.conformance.requirementId=resolveRequirementAlias(brief,proof.conformance.requirementId);
+  };
+  for(const task of plan.tasks){task.requirementIds=ids(task.requirementIds);task.checks.forEach(check);}
+  plan.acceptance?.forEach(check);
+  for(const contract of plan.contracts)contract.requirementIds=ids(contract.requirementIds);
+  for(const node of plan.environment)if(node.requirementIds)node.requirementIds=ids(node.requirementIds);
+  for(const group of plan.planning?.groups??[])group.requirementIds=ids(group.requirementIds);
+}
 const outcome = (task: WorkUnit): string => canonical(task.goal);
 const output = (path: string): string => path.replaceAll('\\','/').replace(/^\.\//,'').replace(/\/$/,'');
 const sameValues = (left: string[], right: string[]): boolean => JSON.stringify(unique(left).sort()) === JSON.stringify(unique(right).sort());
@@ -119,6 +145,7 @@ export function reconcileChecks(checks: Verification[]): Verification[] {
 /** Reconcile deliveries, not source fragments. Omitted old deliveries are retired on full replanning. */
 export function reconcilePlan(brief: ProductBrief, proposal: DevelopmentPlan, previous?: DevelopmentPlan): DevelopmentPlan {
   const plan = structuredClone(proposal);
+  remapRequirements(brief,plan);
   const byId = new Map<string, WorkUnit>();
   const aliases = new Map<string, string>();
   const tasks: WorkUnit[] = [];
@@ -161,6 +188,7 @@ export function validatePlan(brief: ProductBrief, plan: DevelopmentPlan): PlanIs
   const issues: PlanIssue[] = [];
   const issue = (code: string, subject: string, message: string, references: Pick<PlanIssue, 'environmentIds' | 'taskIds'> = {}): void => { issues.push({code,subject,message,...references}); };
   const required = new Set(brief.requirements.map(requirement => requirement.id));
+  for(const id of Object.keys(brief.requirementAliases??{}))if(required.has(id)||resolveRequirementAlias(brief,id)===id)issue('invalid-requirement-alias',id,'O alias precisa aposentar somente uma identidade inativa e alcançar um requisito ativo sem ciclos.');
   const constraints = new Set(brief.constraints.map(constraint => constraint.id));
   const taskIds = new Set<string>();
   const environment = new Set<string>();

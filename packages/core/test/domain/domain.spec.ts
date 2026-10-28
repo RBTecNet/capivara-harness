@@ -37,6 +37,7 @@ describe("o pedido governa entrevista e instrumentos", () => {
     const agent = async (call: DomainAgentRequest): Promise<string> => {
       calls.push(call);
       if (call.operation === "discover") return call.prompt.includes("Selected document fragment") ? JSON.stringify({ requirements: [{ statement: "Recusar CPF duplicado ao importar clientes CSV", quote, mode: "cli" }, { statement: "Permitir CPF duplicado", quote: "Esta frase não existe na fonte" }], questions: [] }) : discovered();
+      if (call.operation === "repair" && call.prompt.includes("Operation: init-requirement-metadata")) return JSON.stringify({ requirements: [{ index: 1, unsupported: true, reason: "A fonte exige recusar CPF duplicado, não permiti-lo." }] });
       if (call.operation === "environment") return JSON.stringify({ environment: [] });
       const requirements = JSON.parse(call.prompt.split("Requirements of this slice:\n")[1]?.split("\n\n")[0] ?? "[]") as Requirement[];
       return JSON.stringify({ tasks: requirements.map(requirement => ({ id: `task-${requirement.id}`, title: requirement.statement, goal: requirement.statement, requirementIds: [requirement.id], dependsOn: [], criteria: [requirement.statement] })) });

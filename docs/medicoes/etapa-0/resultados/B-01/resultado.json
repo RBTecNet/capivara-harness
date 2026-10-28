@@ -1,0 +1,179 @@
+{
+  "schema": "capivara-etapa0/v1",
+  "arm": "B",
+  "engineCommit": "c9f01504fbbd50fb151080c29fee4c53c7ca87d4",
+  "engineVersion": "0.8.3",
+  "engineDiff": "",
+  "model": "gpt-6.1-sol",
+  "effort": "high",
+  "provider": "codex",
+  "cli": "codex-cli 0.164.0",
+  "node": "v24.22.1",
+  "platform": "linux",
+  "arch": "x64",
+  "requestSha256": "40dac0a21b30705f966ec7915396f9dd7169587ce0570df862d8c18a7d9aa0ec",
+  "sample": 1,
+  "startedAt": "2026-10-28T01:57:34.524Z",
+  "project": "/home/bruno/Documentos/Projetos/NovoHarness/medicoes-capivara/etapa-0/resultados/B-01/produto",
+  "limits": {
+    "firstOutputSeconds": 1200,
+    "idleSeconds": 600,
+    "wallSeconds": 3600,
+    "maxOutputBytes": 8388608
+  },
+  "counting": "sessões externas de agente; requisições internas ao provider não observáveis",
+  "costUsd": null,
+  "finishedAt": "2026-10-28T02:13:56.160Z",
+  "durationMs": 972253,
+  "stages": [
+    {
+      "stage": "init",
+      "durationMs": 193625
+    },
+    {
+      "stage": "plan",
+      "durationMs": 234369
+    },
+    {
+      "stage": "build",
+      "durationMs": 544056
+    }
+  ],
+  "agentSessions": 18,
+  "providerApiRequests": null,
+  "byRole": {
+    "writer": 6,
+    "auditor": 2,
+    "builder": 4,
+    "verifier": 6
+  },
+  "implementationSessionMs": 392761,
+  "planningSessionMs": 470462,
+  "independentReviewSessionMs": 127453,
+  "tokenReportingCalls": 17,
+  "inputTokens": 1509262,
+  "outputTokens": 40705,
+  "cachedInputTokens": 1208704,
+  "repairSessions": 0,
+  "interruptedCalls": 1,
+  "questions": [
+    {
+      "id": "banco-de-dados",
+      "decision": "De onde vem o banco desta aplicação?",
+      "recommended": "Ainda não existe: o projeto cria o dele, embutido em arquivo"
+    }
+  ],
+  "error": null,
+  "outcome": {
+    "runId": "build-c961a7898413",
+    "exitCode": 0,
+    "estado": "aceito",
+    "phases": [
+      {
+        "id": "P01",
+        "title": "Persistência e operações sobre tarefas",
+        "outcome": {
+          "status": "complete",
+          "committed": true,
+          "message": "feat(phase-1): Persistência e operações sobre tarefas",
+          "cycles": 1
+        }
+      },
+      {
+        "id": "P02",
+        "title": "Comandos públicos e instruções de uso",
+        "outcome": {
+          "status": "complete",
+          "committed": true,
+          "message": "feat(phase-2): Comandos públicos e instruções de uso",
+          "cycles": 1
+        }
+      }
+    ],
+    "warnings": [
+      {
+        "code": "sem-suite",
+        "message": "nenhum comando de teste foi resolvido: o gate 2 será pulado e o verificador independente segura sozinho. Use --test-cmd quando a suíte existir sob outro comando"
+      },
+      {
+        "code": "sem-runner-de-fluxos",
+        "message": "o gate 4 abre a aplicação com `@playwright/test`, e ele não está instalado neste projeto.\n\nO harness prepara o runner e verifica Chromium antes do desenvolvimento, sem gastar ciclo da fase.\nUse `--no-flows` se não quiser que a aplicação seja aberta."
+      }
+    ],
+    "errors": [],
+    "acceptance": {
+      "accepted": true,
+      "steps": [
+        {
+          "id": "install",
+          "command": "npm install --no-audit --no-fund",
+          "exitCode": 0,
+          "output": "\nup to date in 239ms\n"
+        },
+        {
+          "id": "start",
+          "command": "npm start",
+          "exitCode": 0,
+          "output": "\n> tarefas-locais@1.0.0 start\n> node src/cli.js\n\n[]\n"
+        }
+      ],
+      "skipped": ""
+    }
+  },
+  "proof": {
+    "method": "processos Node reais; mesmas 12 verificações externas; sem feedback aos agentes",
+    "tests": [
+      {
+        "name": "listagem vazia sem criar arquivo",
+        "passed": true
+      },
+      {
+        "name": "criação, título aparado e persistência entre processos",
+        "passed": true
+      },
+      {
+        "name": "duas tarefas com IDs únicos e ordenação",
+        "passed": true
+      },
+      {
+        "name": "conclusão persistente e idempotente",
+        "passed": true
+      },
+      {
+        "name": "remoção e IDs nunca reutilizados, inclusive com lista vazia",
+        "passed": true
+      },
+      {
+        "name": "título vazio recusado sem alterar dados",
+        "passed": true
+      },
+      {
+        "name": "IDs inválidos e inexistentes recusados sem alterar dados",
+        "passed": true
+      },
+      {
+        "name": "comando desconhecido recusado sem alterar dados",
+        "passed": true
+      },
+      {
+        "name": "arquivos independentes, diretórios pais e espaços no caminho",
+        "passed": true
+      },
+      {
+        "name": "caminho padrão relativo ao diretório de trabalho",
+        "passed": true
+      },
+      {
+        "name": "manifesto sem dependências e documentação mínima",
+        "passed": true
+      },
+      {
+        "name": "suíte do próprio produto executa com sucesso",
+        "passed": true
+      }
+    ],
+    "passed": 12,
+    "total": 12,
+    "durationMs": 9381
+  }
+}

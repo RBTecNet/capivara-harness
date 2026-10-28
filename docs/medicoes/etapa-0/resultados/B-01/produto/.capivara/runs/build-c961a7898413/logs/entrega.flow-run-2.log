@@ -1,0 +1,15 @@
+[WebServer] 
+[WebServer] > tarefas-locais@1.0.0 start
+[WebServer] > node src/cli.js
+[WebServer] 
+[WebServer] Servidor disponível em http://127.0.0.1:47533
+
+Running 1 test using 1 worker
+
+  ✓  1 [workflow-1] › workflow-1.spec.ts:10:1 › workflow 1 — Gerenciar tarefas em processos separados (737ms)
+
+  1 passed (1.9s)
+[WebServer] (node:957735) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+(node:957749) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)

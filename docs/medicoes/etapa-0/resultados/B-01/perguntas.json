@@ -1,0 +1,7 @@
+[
+  {
+    "id": "banco-de-dados",
+    "decision": "De onde vem o banco desta aplicação?",
+    "recommended": "Ainda não existe: o projeto cria o dele, embutido em arquivo"
+  }
+]

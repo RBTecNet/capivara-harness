@@ -1,0 +1,49 @@
+{
+  "contract": "capivara-handoff/v1",
+  "runId": "init-73b6e67ac6e2",
+  "language": "pt-BR",
+  "document": "skeleton",
+  "round": 1,
+  "questions": [
+    {
+      "id": "banco-de-dados",
+      "topic": "Banco de dados",
+      "evidence": "Esta é a única decisão que o executor não consegue tomar sozinho: ele não pode adivinhar uma conexão, e não pode instalar um servidor sem você saber.",
+      "decision": "De onde vem o banco desta aplicação?",
+      "why": "Ela muda o que o projeto entrega e contra o que os testes rodam. Quando houver banco próprio, a conexão fica no seu .env (nunca versionado), o projeto entrega um .env.example sem credencial e um comando de migração que cria o esquema do zero — e os testes do harness rodam sempre contra um banco descartável, nunca contra o seu. Se o pedido já disser qual banco usar, a resposta precisa ser a que combina com ele.",
+      "options": [
+        {
+          "label": "Ainda não existe: o projeto cria o dele, embutido em arquivo",
+          "consequence": "O projeto carrega o próprio banco em arquivo (SQLite ou equivalente da stack), criado por ele na primeira execução. Nada a instalar, nada a configurar, e os testes rodam contra uma cópia descartável."
+        },
+        {
+          "label": "Já existe um servidor: eu informo a conexão no .env",
+          "consequence": "O projeto lê host, porta, usuário, senha e base de variáveis de ambiente, e você preenche o .env quando quiser apontá-lo para o seu servidor. Nenhuma credencial entra em código, documento ou log, e o comando de migração cria o esquema lá quando você mandar."
+        },
+        {
+          "label": "Instale um servidor nesta máquina durante o build",
+          "consequence": "O executor instala e sobe o servidor nesta máquina durante o build. Se a instalação não for permitida aqui, o harness pára dizendo o que falta, em vez de contornar com outro banco."
+        },
+        {
+          "label": "A aplicação não precisa de banco próprio",
+          "consequence": "Não criar banco, esquema, migração ou .env só para o harness. Os dados podem continuar sob responsabilidade dos sistemas ou arquivos que o produto administra."
+        }
+      ],
+      "recommended": "Ainda não existe: o projeto cria o dele, embutido em arquivo",
+      "recommendationBasis": "Um banco embutido é o único que roda igual na sua máquina, na do colega e no gate — e ele não impede trocar por um servidor depois, porque a conexão já vem do .env desde o primeiro dia."
+    }
+  ],
+  "answers": [
+    {
+      "questionId": "banco-de-dados",
+      "raw": "4",
+      "disposition": "ACCEPTED",
+      "decision": "A aplicação não precisa de banco próprio",
+      "open": "",
+      "round": 1,
+      "answeredAt": "2026-10-28T01:58:28.193Z"
+    }
+  ],
+  "assumptions": [],
+  "updatedAt": "2026-10-28T01:58:28.193Z"
+}

@@ -1,0 +1,22 @@
+[
+  {
+    "id": "001",
+    "label": "direct.builder.direct",
+    "stage": "direct",
+    "role": "builder",
+    "repair": false,
+    "purpose": null,
+    "durationMs": 129035,
+    "timestamp": "2026-10-28T01:54:02.516Z",
+    "exitCode": 0,
+    "timedOut": null,
+    "resultRead": true,
+    "providerFailure": null,
+    "usage": {
+      "inputTokens": 151438,
+      "cachedInputTokens": 134784,
+      "outputTokens": 6496,
+      "costUsd": null
+    }
+  }
+]

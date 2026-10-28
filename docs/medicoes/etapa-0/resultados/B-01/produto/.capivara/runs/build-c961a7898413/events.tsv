@@ -1,0 +1,8 @@
+2026-10-28T02:04:44.678Z	implement	P01	1	started	implementação
+2026-10-28T02:06:35.817Z	implement	P01	1	retry	revisão a mais: a sessão da revisão não concluiu (o engine codex terminou sem emitir um resultado. Últimas linhas:)
+2026-10-28T02:06:52.825Z	implement	P01	1	complete	feat(phase-1): Persistência e operações sobre tarefas · aceito
+2026-10-28T02:06:52.898Z	implement	P02	1	started	implementação
+2026-10-28T02:08:54.358Z	implement	P02	1	complete	feat(phase-2): Comandos públicos e instruções de uso · aceito
+2026-10-28T02:08:54.965Z	validate	aceitação	1	retry	A aceitação operacional falhou no passo "start" (npm start), numa cópia limpa do projeto — código 1. Saída:
+2026-10-28T02:10:30.405Z	validate	aceitação	2	retry	a aplicação NÃO SUBIU, e por isso nenhum fluxo chegou a ser percorrido — isto não é defeito dos fluxos.
+2026-10-28T02:13:46.752Z	complete	-	1	complete	2 fase(s) · aceito

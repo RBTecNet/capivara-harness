@@ -1,0 +1,281 @@
+{
+  "stage": 0,
+  "simplifiedArm": "C pendente de aprovação das etapas seguintes",
+  "rows": [
+    {
+      "sample": "A-01",
+      "arm": "A",
+      "commit": "c9f01504fbbd50fb151080c29fee4c53c7ca87d4",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "requestSha256": "40dac0a21b30705f966ec7915396f9dd7169587ce0570df862d8c18a7d9aa0ec",
+      "totalSeconds": 129.058,
+      "stages": [
+        {
+          "stage": "direct",
+          "durationMs": 129036
+        }
+      ],
+      "agentSessions": 1,
+      "byRole": {
+        "builder": 1
+      },
+      "inputTokensReported": 151438,
+      "cachedInputTokensReported": 134784,
+      "outputTokensReported": 6496,
+      "sessionsWithUsage": 1,
+      "providerApiRequests": null,
+      "costUsd": null,
+      "implementationAndRepairSessionSeconds": 129.035,
+      "planningSessionSeconds": 0,
+      "independentReviewSessionSeconds": 0,
+      "sessionsByStage": {
+        "direct": 1
+      },
+      "codeRepairSessions": 0,
+      "acceptanceRepairSessions": 0,
+      "initStructuralRewrites": 0,
+      "unreadReviewRetries": 0,
+      "interruptedCalls": 0,
+      "providerErrors": [],
+      "questions": [],
+      "externalChecks": {
+        "passed": 12,
+        "total": 12,
+        "durationMs": 10368
+      },
+      "terminalRestrictionChecks": {
+        "method": "Prova suplementar da restrição original sem servidor, aplicada igualmente aos braços e ao commit antes do reparo. PORT=0 usa porta efêmera; resposta sem argumento não é prescrita.",
+        "tests": [
+          {
+            "name": "list continua sendo comando com PORT definida",
+            "args": [
+              "list"
+            ],
+            "passed": true,
+            "durationMs": 55,
+            "status": 0,
+            "signal": null,
+            "stdout": "[]",
+            "stderr": "",
+            "error": null
+          },
+          {
+            "name": "entrada sem comando não cria serviço HTTP",
+            "args": [],
+            "passed": true,
+            "durationMs": 47,
+            "status": 1,
+            "signal": null,
+            "stdout": "",
+            "stderr": "Erro: Comando desconhecido. Use: list, add TITULO, done ID ou remove ID.",
+            "error": null
+          }
+        ],
+        "passed": 2,
+        "total": 2
+      },
+      "beforeAcceptanceChecks": null,
+      "beforeAcceptanceTerminalChecks": null,
+      "commandToolCompletions": 8,
+      "nonzeroCommandToolExits": 0,
+      "error": null,
+      "engineExitCode": 0,
+      "engineAccepted": null,
+      "engineAcceptanceNotes": [],
+      "caveat": "Tempos por sessão incluem planejamento/testes internos; sessões paralelas somam mais que o tempo de parede. Contagem não revela requisições internas ao provider. codeRepairSessions inclui reparos da aceitação identificados no registro do Core."
+    },
+    {
+      "sample": "B-01",
+      "arm": "B",
+      "commit": "c9f01504fbbd50fb151080c29fee4c53c7ca87d4",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "requestSha256": "40dac0a21b30705f966ec7915396f9dd7169587ce0570df862d8c18a7d9aa0ec",
+      "totalSeconds": 972.253,
+      "stages": [
+        {
+          "stage": "init",
+          "durationMs": 193625
+        },
+        {
+          "stage": "plan",
+          "durationMs": 234369
+        },
+        {
+          "stage": "build",
+          "durationMs": 544056
+        }
+      ],
+      "agentSessions": 18,
+      "byRole": {
+        "writer": 6,
+        "auditor": 2,
+        "builder": 4,
+        "verifier": 6
+      },
+      "inputTokensReported": 1509262,
+      "cachedInputTokensReported": 1208704,
+      "outputTokensReported": 40705,
+      "sessionsWithUsage": 17,
+      "providerApiRequests": null,
+      "costUsd": null,
+      "implementationAndRepairSessionSeconds": 392.761,
+      "planningSessionSeconds": 470.462,
+      "independentReviewSessionSeconds": 127.453,
+      "sessionsByStage": {
+        "init": 3,
+        "plan": 5,
+        "build": 10
+      },
+      "codeRepairSessions": 2,
+      "acceptanceRepairSessions": 2,
+      "initStructuralRewrites": 1,
+      "unreadReviewRetries": 1,
+      "interruptedCalls": 1,
+      "providerErrors": [
+        {
+          "file": "010.build.verifier.implement.jsonl",
+          "message": "Selected model is at capacity. Please try a different model."
+        }
+      ],
+      "questions": [
+        {
+          "id": "banco-de-dados",
+          "decision": "De onde vem o banco desta aplicação?",
+          "recommended": "Ainda não existe: o projeto cria o dele, embutido em arquivo"
+        }
+      ],
+      "externalChecks": {
+        "passed": 12,
+        "total": 12,
+        "durationMs": 9381
+      },
+      "terminalRestrictionChecks": {
+        "method": "Prova suplementar da restrição original sem servidor, aplicada igualmente aos braços e ao commit antes do reparo. PORT=0 usa porta efêmera; resposta sem argumento não é prescrita.",
+        "tests": [
+          {
+            "name": "list continua sendo comando com PORT definida",
+            "args": [
+              "list"
+            ],
+            "passed": true,
+            "durationMs": 136,
+            "status": 0,
+            "signal": null,
+            "stdout": "[]",
+            "stderr": "",
+            "error": null
+          },
+          {
+            "name": "entrada sem comando não cria serviço HTTP",
+            "args": [],
+            "passed": false,
+            "durationMs": 5014,
+            "status": 0,
+            "signal": null,
+            "stdout": "Servidor disponível em http://127.0.0.1:35655",
+            "stderr": "",
+            "error": "spawnSync /home/bruno/.nvm/versions/node/v24.22.1/bin/node ETIMEDOUT"
+          }
+        ],
+        "passed": 1,
+        "total": 2
+      },
+      "beforeAcceptanceChecks": {
+        "method": "processos Node reais; mesmas 12 verificações externas; sem feedback aos agentes",
+        "tests": [
+          {
+            "name": "listagem vazia sem criar arquivo",
+            "passed": true
+          },
+          {
+            "name": "criação, título aparado e persistência entre processos",
+            "passed": true
+          },
+          {
+            "name": "duas tarefas com IDs únicos e ordenação",
+            "passed": true
+          },
+          {
+            "name": "conclusão persistente e idempotente",
+            "passed": true
+          },
+          {
+            "name": "remoção e IDs nunca reutilizados, inclusive com lista vazia",
+            "passed": true
+          },
+          {
+            "name": "título vazio recusado sem alterar dados",
+            "passed": true
+          },
+          {
+            "name": "IDs inválidos e inexistentes recusados sem alterar dados",
+            "passed": true
+          },
+          {
+            "name": "comando desconhecido recusado sem alterar dados",
+            "passed": true
+          },
+          {
+            "name": "arquivos independentes, diretórios pais e espaços no caminho",
+            "passed": true
+          },
+          {
+            "name": "caminho padrão relativo ao diretório de trabalho",
+            "passed": true
+          },
+          {
+            "name": "manifesto sem dependências e documentação mínima",
+            "passed": true
+          },
+          {
+            "name": "suíte do próprio produto executa com sucesso",
+            "passed": true
+          }
+        ],
+        "passed": 12,
+        "total": 12,
+        "durationMs": 5310
+      },
+      "beforeAcceptanceTerminalChecks": {
+        "method": "Prova suplementar da restrição original sem servidor, aplicada igualmente aos braços e ao commit antes do reparo. PORT=0 usa porta efêmera; resposta sem argumento não é prescrita.",
+        "tests": [
+          {
+            "name": "list continua sendo comando com PORT definida",
+            "args": [
+              "list"
+            ],
+            "passed": true,
+            "durationMs": 44,
+            "status": 0,
+            "signal": null,
+            "stdout": "[]",
+            "stderr": "",
+            "error": null
+          },
+          {
+            "name": "entrada sem comando não cria serviço HTTP",
+            "args": [],
+            "passed": true,
+            "durationMs": 52,
+            "status": 1,
+            "signal": null,
+            "stdout": "",
+            "stderr": "Comando desconhecido. Use list, add, done ou remove.",
+            "error": null
+          }
+        ],
+        "passed": 2,
+        "total": 2
+      },
+      "commandToolCompletions": 58,
+      "nonzeroCommandToolExits": 2,
+      "error": null,
+      "engineExitCode": 0,
+      "engineAccepted": true,
+      "engineAcceptanceNotes": [],
+      "caveat": "Tempos por sessão incluem planejamento/testes internos; sessões paralelas somam mais que o tempo de parede. Contagem não revela requisições internas ao provider. codeRepairSessions inclui reparos da aceitação identificados no registro do Core."
+    }
+  ]
+}

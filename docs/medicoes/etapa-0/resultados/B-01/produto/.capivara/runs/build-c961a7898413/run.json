@@ -1,0 +1,56 @@
+{
+  "contract": "capivara-run/v1",
+  "runId": "build-c961a7898413",
+  "command": "build",
+  "language": "pt-BR",
+  "stage": "complete",
+  "status": "complete",
+  "subject": "-",
+  "attempt": 1,
+  "createdAt": "2026-10-28T02:04:42.911Z",
+  "updatedAt": "2026-10-28T02:13:46.756Z",
+  "roles": {
+    "writer": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "credential": "",
+      "command": ""
+    },
+    "auditor": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "credential": "",
+      "command": ""
+    },
+    "builder": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "credential": "",
+      "command": ""
+    },
+    "verifier": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "effort": "high",
+      "credential": "",
+      "command": ""
+    }
+  },
+  "sources": [
+    {
+      "name": "project-phases.md",
+      "sha12": "c8a70c40dd2c"
+    }
+  ],
+  "budgets": {
+    "cycles": 3,
+    "repairsPerCycle": 6,
+    "repairsPerGate": 2,
+    "repairsPerDefect": 3,
+    "verifierRepairs": 1,
+    "verifierResume": "desligada"
+  }
+}

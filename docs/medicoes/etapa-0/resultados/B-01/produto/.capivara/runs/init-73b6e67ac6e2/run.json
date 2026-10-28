@@ -1,0 +1,14 @@
+{
+  "contract": "capivara-run/v1",
+  "runId": "init-73b6e67ac6e2",
+  "command": "plan",
+  "language": "pt-BR",
+  "stage": "ready",
+  "status": "complete",
+  "subject": "-",
+  "attempt": 0,
+  "createdAt": "2026-10-28T02:00:48.260Z",
+  "updatedAt": "2026-10-28T02:04:42.613Z",
+  "roles": {},
+  "sources": []
+}

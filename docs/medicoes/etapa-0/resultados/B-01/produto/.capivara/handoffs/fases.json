@@ -1,0 +1,20 @@
+[
+  {
+    "id": "P01",
+    "title": "Persistência e operações sobre tarefas",
+    "sha": "6ef9f9830601",
+    "runId": "build-c961a7898413",
+    "closedAt": "2026-10-28T02:06:52.831Z",
+    "sliceSha12": "b24dcdf15e75",
+    "head": "68ff4ccdec91d5f08556030a078614a7b2290bf5"
+  },
+  {
+    "id": "P02",
+    "title": "Comandos públicos e instruções de uso",
+    "sha": "e355e02c091c",
+    "runId": "build-c961a7898413",
+    "closedAt": "2026-10-28T02:08:54.362Z",
+    "sliceSha12": "ed9f599e09ea",
+    "head": "535c9de6e6cb53e02c45a1e52844bb114b9c0e6f"
+  }
+]

@@ -1,0 +1,144 @@
+{
+  "contract": "capivara-build-report/v1",
+  "runId": "build-c961a7898413",
+  "geradoEm": "2026-10-28T02:13:46.764Z",
+  "status": "complete",
+  "budgets": {
+    "cycles": 3,
+    "repairsPerCycle": 6,
+    "repairsPerGate": 2,
+    "repairsPerDefect": 3,
+    "verifierRepairs": 1,
+    "verifierResume": "desligada"
+  },
+  "fases": [
+    {
+      "id": "P01",
+      "status": "complete",
+      "detalhe": "feat(phase-1): Persistência e operações sobre tarefas · aceito",
+      "ciclo": 1,
+      "defeitos": [],
+      "evidencias": [
+        {
+          "checkId": "sessao-1",
+          "gate": "G0",
+          "resultado": "PASS",
+          "validade": "VALID",
+          "motivo": "registrada"
+        },
+        {
+          "checkId": "entrega-1",
+          "gate": "G1",
+          "resultado": "PASS",
+          "validade": "VALID",
+          "motivo": "registrada"
+        },
+        {
+          "checkId": "suite",
+          "gate": "G2",
+          "resultado": "PASS",
+          "validade": "VALID",
+          "motivo": "registrada"
+        },
+        {
+          "checkId": "task-1",
+          "gate": "G3",
+          "resultado": "PASS",
+          "validade": "VALID",
+          "motivo": "registrada"
+        },
+        {
+          "checkId": "task-2",
+          "gate": "G3",
+          "resultado": "PASS",
+          "validade": "VALID",
+          "motivo": "registrada"
+        },
+        {
+          "checkId": "task-3",
+          "gate": "G3",
+          "resultado": "PASS",
+          "validade": "VALID",
+          "motivo": "registrada"
+        },
+        {
+          "checkId": "task-4",
+          "gate": "G3",
+          "resultado": "PASS",
+          "validade": "VALID",
+          "motivo": "registrada"
+        },
+        {
+          "checkId": "task-5",
+          "gate": "G3",
+          "resultado": "PASS",
+          "validade": "VALID",
+          "motivo": "registrada"
+        }
+      ],
+      "transicoes": []
+    },
+    {
+      "id": "P02",
+      "status": "complete",
+      "detalhe": "feat(phase-2): Comandos públicos e instruções de uso · aceito",
+      "ciclo": 1,
+      "defeitos": [],
+      "evidencias": [
+        {
+          "checkId": "sessao-1",
+          "gate": "G0",
+          "resultado": "PASS",
+          "validade": "VALID",
+          "motivo": "registrada"
+        },
+        {
+          "checkId": "entrega-1",
+          "gate": "G1",
+          "resultado": "PASS",
+          "validade": "VALID",
+          "motivo": "registrada"
+        },
+        {
+          "checkId": "suite",
+          "gate": "G2",
+          "resultado": "PASS",
+          "validade": "VALID",
+          "motivo": "registrada"
+        },
+        {
+          "checkId": "task-1",
+          "gate": "G3",
+          "resultado": "PASS",
+          "validade": "VALID",
+          "motivo": "registrada"
+        },
+        {
+          "checkId": "task-2",
+          "gate": "G3",
+          "resultado": "PASS",
+          "validade": "VALID",
+          "motivo": "registrada"
+        },
+        {
+          "checkId": "task-3",
+          "gate": "G3",
+          "resultado": "PASS",
+          "validade": "VALID",
+          "motivo": "registrada"
+        },
+        {
+          "checkId": "task-4",
+          "gate": "G3",
+          "resultado": "PASS",
+          "validade": "VALID",
+          "motivo": "registrada"
+        }
+      ],
+      "transicoes": []
+    }
+  ],
+  "chamadas": null,
+  "alertas": [],
+  "porDecisao": []
+}

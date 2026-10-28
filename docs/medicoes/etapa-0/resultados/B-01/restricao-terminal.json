@@ -1,0 +1,31 @@
+{
+  "method": "Prova suplementar da restrição original sem servidor, aplicada igualmente aos braços e ao commit antes do reparo. PORT=0 usa porta efêmera; resposta sem argumento não é prescrita.",
+  "tests": [
+    {
+      "name": "list continua sendo comando com PORT definida",
+      "args": [
+        "list"
+      ],
+      "passed": true,
+      "durationMs": 136,
+      "status": 0,
+      "signal": null,
+      "stdout": "[]",
+      "stderr": "",
+      "error": null
+    },
+    {
+      "name": "entrada sem comando não cria serviço HTTP",
+      "args": [],
+      "passed": false,
+      "durationMs": 5014,
+      "status": 0,
+      "signal": null,
+      "stdout": "Servidor disponível em http://127.0.0.1:35655",
+      "stderr": "",
+      "error": "spawnSync /home/bruno/.nvm/versions/node/v24.22.1/bin/node ETIMEDOUT"
+    }
+  ],
+  "passed": 1,
+  "total": 2
+}

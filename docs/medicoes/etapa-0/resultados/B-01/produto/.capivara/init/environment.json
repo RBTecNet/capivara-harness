@@ -1,0 +1,116 @@
+{
+  "contract": "capivara-environment/v3",
+  "planningContract": "capivara-planning/v3",
+  "harnessVersion": "0.8.3",
+  "skeletonSha12": "ddb9f64c361e",
+  "planSha12": "c8a70c40dd2c",
+  "architectureSha12": "1f6c96585afc",
+  "requirements": [
+    {
+      "technology": "Node.js >=22",
+      "binary": "node",
+      "systemLevel": false,
+      "checkArgs": [
+        "--eval",
+        "if (Number(process.versions.node.split('.')[0]) < 22) { console.error('É necessário Node.js 22 ou superior.'); process.exit(1); }"
+      ],
+      "installHint": "Utilizar o Node.js 24.22.1 já disponível na máquina; nenhuma instalação é necessária."
+    },
+    {
+      "technology": "Recursos embutidos do Node.js",
+      "binary": "node",
+      "systemLevel": false,
+      "checkArgs": [
+        "--input-type=module",
+        "--eval",
+        "await Promise.all(['node:fs/promises', 'node:path', 'node:process', 'node:test'].map(nome => import(nome)));"
+      ],
+      "installHint": "Os módulos declarados acompanham o Node.js disponível; nenhuma instalação de pacote ou serviço é necessária."
+    }
+  ],
+  "infrastructure": {
+    "runtimes": [
+      {
+        "name": "Node.js",
+        "version": "24.22.1",
+        "purpose": "Executar diretamente os módulos JavaScript ESM e disponibilizar os recursos embutidos necessários.",
+        "basis": "Pedido original e stack do skeleton exigem Node.js >=22; o inventário informa Node.js 24.22.1 disponível."
+      }
+    ],
+    "tools": [],
+    "packageManagers": [
+      {
+        "name": "npm",
+        "version": "11.19.1",
+        "purpose": "Executar os scripts declarados em package.json, sem instalação de pacotes.",
+        "basis": "O pedido exige scripts em package.json e o inventário informa npm 11.19.1 disponível."
+      }
+    ],
+    "dependencies": [
+      {
+        "name": "node:fs/promises",
+        "version": "",
+        "purpose": "Ler e gravar JSON, criar diretórios e renomear o arquivo temporário.",
+        "basis": "Persistência em arquivo JSON e uso exclusivo dos recursos embutidos do Node.js.",
+        "kind": "app"
+      },
+      {
+        "name": "node:path",
+        "version": "",
+        "purpose": "Resolver o arquivo selecionado e identificar seu diretório pai.",
+        "basis": "TASKS_FILE aceita a seleção do arquivo e o caminho padrão é relativo ao diretório de trabalho.",
+        "kind": "app"
+      },
+      {
+        "name": "node:process",
+        "version": "",
+        "purpose": "Acessar argumentos, ambiente, diretório de trabalho, saídas e código de encerramento.",
+        "basis": "Contrato público por comandos de terminal, configuração por TASKS_FILE e recusas por stderr e código diferente de zero.",
+        "kind": "app"
+      },
+      {
+        "name": "node:test",
+        "version": "",
+        "purpose": "Disponibilizar o executor embutido node --test, sem pacote externo.",
+        "basis": "O pedido original exige testes automatizados com o executor embutido do Node.js.",
+        "kind": "dev"
+      }
+    ],
+    "services": [],
+    "databases": [],
+    "compatibility": [
+      "JavaScript ESM executado diretamente em Node.js >=22, sem transpilação.",
+      "Utilizar o Node.js 24.22.1 e o npm 11.19.1 presentes no ambiente Linux informado.",
+      "Execução exclusivamente pelo terminal, sem interface web, servidor ou serviço permanente.",
+      "Todas as dependências declaradas são embutidas no Node.js; nenhuma instalação de pacote é necessária."
+    ],
+    "preconditions": [
+      "Executar as sondas de prontidão uma vez antes da primeira fase, utilizando o ambiente já disponível.",
+      "O diretório do projeto deve permitir a criação dos arquivos da aplicação.",
+      "Para comandos que gravam, o processo deve ter permissão para criar os diretórios necessários e gravar no destino selecionado."
+    ],
+    "requirements": [
+      {
+        "technology": "Node.js >=22",
+        "binary": "node",
+        "systemLevel": false,
+        "checkArgs": [
+          "--eval",
+          "if (Number(process.versions.node.split('.')[0]) < 22) { console.error('É necessário Node.js 22 ou superior.'); process.exit(1); }"
+        ],
+        "installHint": "Utilizar o Node.js 24.22.1 já disponível na máquina; nenhuma instalação é necessária."
+      },
+      {
+        "technology": "Recursos embutidos do Node.js",
+        "binary": "node",
+        "systemLevel": false,
+        "checkArgs": [
+          "--input-type=module",
+          "--eval",
+          "await Promise.all(['node:fs/promises', 'node:path', 'node:process', 'node:test'].map(nome => import(nome)));"
+        ],
+        "installHint": "Os módulos declarados acompanham o Node.js disponível; nenhuma instalação de pacote ou serviço é necessária."
+      }
+    ]
+  }
+}

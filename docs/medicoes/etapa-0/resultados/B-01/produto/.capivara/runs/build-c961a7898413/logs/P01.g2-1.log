@@ -1,0 +1,22 @@
+$ npm test
+
+> tarefas-locais@1.0.0 test
+> node --test
+
+✔ test/apoio.js (45.235963ms)
+✔ lista sem criar o arquivo e ordena numericamente sem alterar o documento (11.626892ms)
+✔ recusa títulos vazios, identificadores inválidos e tarefas inexistentes sem alterar dados (4.544163ms)
+✔ repetir a conclusão retorna a tarefa sem regravar o documento (2.117887ms)
+✔ preserva operações e sequência entre processos e mantém arquivos independentes (591.213837ms)
+✔ resolve o arquivo padrão, caminhos relativos e caminhos absolutos (1.424263ms)
+✔ retorna o estado inicial sem criar diretórios e propaga erros de leitura e JSON (10.514529ms)
+✔ grava o documento completo, restringe os campos e mantém arquivos independentes (4.64034ms)
+✔ uma substituição recusada preserva o destino e limpa o arquivo temporário (2.507449ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 704.047906

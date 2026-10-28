@@ -1,0 +1,37 @@
+
+> capivara@0.8.3 check
+> npm run build && npm run typecheck && npm test
+
+
+> capivara@0.8.3 build
+> npm run build --workspaces --if-present
+
+
+> @capivara/core@0.8.3 build
+> node ./scripts/build.mjs && tsc --emitDeclarationOnly --project tsconfig.build.json
+
+
+> capivara@0.8.3 typecheck
+> npm run typecheck --workspaces --if-present
+
+
+> @capivara/core@0.8.3 typecheck
+> tsc --noEmit
+
+
+> capivara@0.8.3 test
+> npm run test --workspaces --if-present
+
+
+> @capivara/core@0.8.3 test
+> vitest run
+
+
+ RUN  v5.0.1 /home/bruno/Documentos/Projetos/NovoHarness/capivara/packages/core
+
+
+ Test Files  188 passed (188)
+      Tests  3153 passed (3153)
+   Start at  23:04:54
+   Duration  86.91s (tests 82%, transform 11%, import 7%)
+

@@ -1,0 +1,31 @@
+{
+  "method": "Prova suplementar da restrição original sem servidor, aplicada igualmente aos braços e ao commit antes do reparo. PORT=0 usa porta efêmera; resposta sem argumento não é prescrita.",
+  "tests": [
+    {
+      "name": "list continua sendo comando com PORT definida",
+      "args": [
+        "list"
+      ],
+      "passed": true,
+      "durationMs": 55,
+      "status": 0,
+      "signal": null,
+      "stdout": "[]",
+      "stderr": "",
+      "error": null
+    },
+    {
+      "name": "entrada sem comando não cria serviço HTTP",
+      "args": [],
+      "passed": true,
+      "durationMs": 47,
+      "status": 1,
+      "signal": null,
+      "stdout": "",
+      "stderr": "Erro: Comando desconhecido. Use: list, add TITULO, done ID ou remove ID.",
+      "error": null
+    }
+  ],
+  "passed": 2,
+  "total": 2
+}

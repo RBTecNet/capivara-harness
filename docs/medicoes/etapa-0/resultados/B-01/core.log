@@ -1,0 +1,42 @@
+2026-10-28T01:57:34.682Z Inventário: 1 arquivo(s).
+2026-10-28T01:59:47.493Z   o esqueleto veio com 1 defeito(s), 1 dele(s) por fixar mecanismo de implementação que é do plano (I-17); pedindo de novo com eles nomeados
+2026-10-28T02:00:48.132Z   esqueleto: 2 fases, 1 entidades, 16 regra(s) transversal(is)
+2026-10-28T02:00:48.267Z Inventário: 1 arquivo(s).
+2026-10-28T02:00:48.269Z   1 decisão(ões) do init carregada(s); não vou perguntar de novo
+2026-10-28T02:00:48.270Z — esqueleto lido: 2 fases, 16 regra(s) transversal(is)
+2026-10-28T02:03:35.577Z   arquitetura aprovada
+2026-10-28T02:03:35.596Z   arquitetura: 3 componente(s), 2 fase(s), 2 sonda(s) de prontidão
+2026-10-28T02:03:35.596Z   a arquitetura reorganizou as fases: 2 do init → 2
+2026-10-28T02:04:18.821Z   fase 1 pronta
+2026-10-28T02:04:22.183Z     fase 2: traduziu de volta a referência de workflow nos Traces
+2026-10-28T02:04:22.184Z   fase 2 pronta
+2026-10-28T02:04:42.585Z   auditoria do plano: 0 bloqueio(s); 0 observação(ões) para o relatório
+2026-10-28T02:04:42.902Z aviso: nenhum comando de teste foi resolvido: o gate 2 será pulado e o verificador independente segura sozinho. Use --test-cmd quando a suíte existir sob outro comando
+2026-10-28T02:04:42.903Z aviso: o gate 4 abre a aplicação com `@playwright/test`, e ele não está instalado neste projeto.
+
+O harness prepara o runner e verifica Chromium antes do desenvolvimento, sem gastar ciclo da fase.
+Use `--no-flows` se não quiser que a aplicação seja aberta.
+2026-10-28T02:04:42.903Z arquitetura do plan vinculada: 2 de 2 fase(s) recebem a fatia com componentes e contratos
+2026-10-28T02:04:42.903Z autoridade Git: codex em workspace-write: o sandbox deixa o .git somente leitura e corta a rede — git commit e git push falham; o Core confere as referências de qualquer forma
+2026-10-28T02:04:42.919Z preparando ferramenta do G4 antes do desenvolvimento, fora do manifesto do produto
+2026-10-28T02:04:44.033Z verificando Chromium headless uma vez, antes do desenvolvimento
+2026-10-28T02:04:44.625Z ambiente aprovado; iniciando desenvolvimento sem repetir as sondas de prontidão nas fases
+2026-10-28T02:04:44.681Z [P01] Persistência e operações sobre tarefas
+2026-10-28T02:06:32.151Z [P01] comando de teste detectado: npm test (package.json scripts.test)
+2026-10-28T02:06:35.817Z [P01] a sessão da revisão não concluiu (o engine codex terminou sem emitir um resultado. Últimas linhas:); uma revisão a mais, com o protocolo repetido
+2026-10-28T02:06:52.830Z [P01] COMPLETA — feat(phase-1): Persistência e operações sobre tarefas
+2026-10-28T02:06:52.902Z [P02] Comandos públicos e instruções de uso
+2026-10-28T02:08:33.167Z [P02] comando de teste detectado: npm test (package.json scripts.test)
+2026-10-28T02:08:54.362Z [P02] COMPLETA — feat(phase-2): Comandos públicos e instruções de uso
+2026-10-28T02:08:54.393Z aceitação operacional: copiando o projeto para uma pasta limpa
+2026-10-28T02:08:54.965Z aceitação reprovou em "start"; ciclo de correção 1
+2026-10-28T02:10:03.044Z aceitação · roteiro do workflow 1 (Gerenciar tarefas em processos separados)
+2026-10-28T02:10:29.414Z aceitação · passagem isolada: diretório pessoal descartável
+2026-10-28T02:10:30.405Z aceitação reprovou em "fluxos"; ciclo de correção 2
+2026-10-28T02:12:38.049Z aceitação · roteiro do workflow 1 (Gerenciar tarefas em processos separados)
+2026-10-28T02:13:07.703Z aceitação · passagem isolada: diretório pessoal descartável
+2026-10-28T02:13:09.746Z aceitação · o roteiro falhou por conta própria (seletor ambíguo ou erro de escrita); reescrevendo
+2026-10-28T02:13:46.740Z aceitação: fix(entrega): preparação operacional (aceitação, tentativa 2)
+2026-10-28T02:13:46.740Z aceitação operacional: o produto sobe a partir de uma cópia limpa
+2026-10-28T02:13:46.752Z entrega: instruções e limitações em /home/bruno/Documentos/Projetos/NovoHarness/medicoes-capivara/etapa-0/resultados/B-01/produto/.capivara/runs/build-c961a7898413/entrega.md
+2026-10-28T02:13:46.755Z aplicação aceita: todas as fases verdes e a aceitação limpa

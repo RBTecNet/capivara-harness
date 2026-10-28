@@ -1,0 +1,5 @@
+Fase 2 implementada: quatro comandos com respostas JSON, recusas em português, configuração por TASKS_FILE, script start e README.md.
+
+Verificações aprovadas: `node --test test/cli.test.js` (5 testes), `npm start -- list` com dados temporários e `git diff --check`.
+
+CAPIVARA_BUILDER_STATUS: COMPLETE

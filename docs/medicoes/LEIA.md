@@ -1,5 +1,12 @@
 # Medições — a cadeia em prosa contra o ciclo em três estágios
 
+A linha de base real da simplificação estrutural está em
+[`etapa-0/RELATORIO.txt`](etapa-0/RELATORIO.txt): mesmo pedido e modelo pelo agente
+direto e pelo Core 0.8.3, com scripts, transcrições, produtos e provas funcionais.
+São 129,058 s e uma sessão no direto contra 972,253 s e 18 sessões no harness;
+o produto aceito pelo harness viola a restrição de não ter servidor. É uma
+amostra por braço; a versão simplificada ainda não foi executada.
+
 O mesmo pedido, `pedido.md`, rodado pelos dois caminhos. É a evidência bruta por trás da
 tabela de `docs/PLANO.md` §26.1, guardada aqui porque os diretórios dos pilotos foram
 descartados e uma afirmação sem evidência em disco não é falsificável.

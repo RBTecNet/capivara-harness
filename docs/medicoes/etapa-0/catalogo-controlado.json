@@ -1,0 +1,221 @@
+{
+  "commit": "c9f01504fbbd",
+  "versao": "0.8.3",
+  "numeros": {
+    "app-pequeno": {
+      "chamadas": {
+        "init": {
+          "escrita": 2,
+          "auditoria": 0,
+          "verificação": 0,
+          "reparo": 0,
+          "roteirista": 0,
+          "triagem": 0,
+          "formato": 0,
+          "repetição": 0,
+          "aceitação": 0,
+          "outra": 0
+        },
+        "plan": {
+          "escrita": 5,
+          "auditoria": 2,
+          "verificação": 0,
+          "reparo": 0,
+          "roteirista": 0,
+          "triagem": 0,
+          "formato": 0,
+          "repetição": 0,
+          "aceitação": 0,
+          "outra": 0
+        },
+        "build": {
+          "escrita": 4,
+          "auditoria": 0,
+          "verificação": 4,
+          "reparo": 0,
+          "roteirista": 0,
+          "triagem": 0,
+          "formato": 0,
+          "repetição": 0,
+          "aceitação": 2,
+          "outra": 0
+        }
+      },
+      "execucoes": {
+        "suite": 4,
+        "g3": 4,
+        "g4": 0,
+        "fumaca": 1,
+        "aceitacao": 1,
+        "reparosDaAceitacao": 0
+      },
+      "plano": {
+        "fases": 4,
+        "tasks": 5,
+        "criterios": 7,
+        "devolucoes": 0,
+        "reescritas": 0
+      },
+      "tempo": {
+        "init": 197,
+        "plan": 89,
+        "build": 990
+      },
+      "build": {
+        "exitCode": 0,
+        "estado": "aceito",
+        "fases": "P01:complete,P02:complete,P03:complete,P04:complete"
+      }
+    },
+    "reparo": {
+      "chamadas": {
+        "init": {
+          "escrita": 2,
+          "auditoria": 0,
+          "verificação": 0,
+          "reparo": 0,
+          "roteirista": 0,
+          "triagem": 0,
+          "formato": 0,
+          "repetição": 0,
+          "aceitação": 0,
+          "outra": 0
+        },
+        "plan": {
+          "escrita": 5,
+          "auditoria": 2,
+          "verificação": 0,
+          "reparo": 0,
+          "roteirista": 0,
+          "triagem": 0,
+          "formato": 0,
+          "repetição": 0,
+          "aceitação": 0,
+          "outra": 0
+        },
+        "build": {
+          "escrita": 4,
+          "auditoria": 0,
+          "verificação": 4,
+          "reparo": 1,
+          "roteirista": 0,
+          "triagem": 0,
+          "formato": 0,
+          "repetição": 0,
+          "aceitação": 2,
+          "outra": 0
+        }
+      },
+      "execucoes": {
+        "suite": 5,
+        "g3": 4,
+        "g4": 0,
+        "fumaca": 1,
+        "aceitacao": 1,
+        "reparosDaAceitacao": 0
+      },
+      "plano": {
+        "fases": 4,
+        "tasks": 5,
+        "criterios": 7,
+        "devolucoes": 0,
+        "reescritas": 0
+      },
+      "tempo": {
+        "init": 18,
+        "plan": 57,
+        "build": 1181
+      },
+      "build": {
+        "exitCode": 0,
+        "estado": "aceito",
+        "fases": "P01:complete,P02:complete,P03:complete,P04:complete"
+      }
+    },
+    "orcamento-esgotado": {
+      "chamadas": {
+        "init": {
+          "escrita": 2,
+          "auditoria": 0,
+          "verificação": 0,
+          "reparo": 0,
+          "roteirista": 0,
+          "triagem": 0,
+          "formato": 0,
+          "repetição": 0,
+          "aceitação": 0,
+          "outra": 0
+        },
+        "plan": {
+          "escrita": 5,
+          "auditoria": 2,
+          "verificação": 0,
+          "reparo": 0,
+          "roteirista": 0,
+          "triagem": 0,
+          "formato": 0,
+          "repetição": 0,
+          "aceitação": 0,
+          "outra": 0
+        },
+        "build": {
+          "escrita": 3,
+          "auditoria": 0,
+          "verificação": 2,
+          "reparo": 2,
+          "roteirista": 0,
+          "triagem": 0,
+          "formato": 0,
+          "repetição": 0,
+          "aceitação": 0,
+          "outra": 0
+        }
+      },
+      "execucoes": {
+        "suite": 5,
+        "g3": 2,
+        "g4": 0,
+        "fumaca": 0,
+        "aceitacao": 0,
+        "reparosDaAceitacao": 0
+      },
+      "plano": {
+        "fases": 4,
+        "tasks": 5,
+        "criterios": 7,
+        "devolucoes": 0,
+        "reescritas": 0
+      },
+      "tempo": {
+        "init": 18,
+        "plan": 61,
+        "build": 776
+      },
+      "build": {
+        "exitCode": 2,
+        "estado": "falhou",
+        "fases": "P01:complete,P02:complete,P03:failed"
+      }
+    },
+    "testes": {
+      "porCriterio": 0,
+      "modoDeFalha": false,
+      "desconfiancaDaSuite": false
+    },
+    "criterios": {
+      "tetoPorTask": 2
+    },
+    "garantias": {
+      "G-1": "pega: G3, verificação da fase (P01.verify-1.log)",
+      "G-2": "pega: aceitação final, fluxo percorrido na cópia limpa (entrega.flow-run-1.log)",
+      "G-3": "pega: auditoria do plano inteiro (audit.project-phases.md.auditor.1-1.….log)",
+      "G-4": "pega: G3, verificação da fase (P01.verify-1.log)"
+    },
+    "linhas": {
+      "verificacao": 10938,
+      "construcao": 13016,
+      "misto": 7723,
+      "fora": 18693
+    }
+  }
+}

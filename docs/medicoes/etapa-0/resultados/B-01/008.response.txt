@@ -1,0 +1,2 @@
+CAPIVARA_AUDIT_STATUS: APPROVED
+CAPIVARA_REASON: As duas fases respeitam os contratos de persistência, identificadores, comandos e recusas, consomem interfaces previamente fornecidas e utilizam somente as dependências declaradas na arquitetura.

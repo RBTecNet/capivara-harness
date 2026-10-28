@@ -1,0 +1,6 @@
+{
+  "contract": "capivara-questions/v1",
+  "assumptions": [],
+  "omissions": [],
+  "questions": []
+}

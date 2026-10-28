@@ -1,0 +1,6 @@
+node_modules/
+data/
+.capivara/runs/
+.capivara/handoffs/
+.capivara/worktrees/
+.capivara/node_modules/

@@ -1,0 +1,120 @@
+{
+  "schema": "capivara-etapa0/v1",
+  "arm": "A",
+  "engineCommit": "c9f01504fbbd50fb151080c29fee4c53c7ca87d4",
+  "engineVersion": "0.8.3",
+  "engineDiff": "",
+  "model": "gpt-6.1-sol",
+  "effort": "high",
+  "provider": "codex",
+  "cli": "codex-cli 0.164.0",
+  "node": "v24.22.1",
+  "platform": "linux",
+  "arch": "x64",
+  "requestSha256": "40dac0a21b30705f966ec7915396f9dd7169587ce0570df862d8c18a7d9aa0ec",
+  "sample": 1,
+  "startedAt": "2026-10-28T01:54:02.492Z",
+  "project": "/home/bruno/Documentos/Projetos/NovoHarness/medicoes-capivara/etapa-0/resultados/A-01/produto",
+  "limits": {
+    "firstOutputSeconds": 1200,
+    "idleSeconds": 600,
+    "wallSeconds": 3600,
+    "maxOutputBytes": 8388608
+  },
+  "counting": "sessões externas de agente; requisições internas ao provider não observáveis",
+  "costUsd": null,
+  "finishedAt": "2026-10-28T01:56:21.920Z",
+  "durationMs": 129058,
+  "stages": [
+    {
+      "stage": "direct",
+      "durationMs": 129036
+    }
+  ],
+  "agentSessions": 1,
+  "providerApiRequests": null,
+  "byRole": {
+    "builder": 1
+  },
+  "implementationSessionMs": 129035,
+  "planningSessionMs": 0,
+  "independentReviewSessionMs": 0,
+  "tokenReportingCalls": 1,
+  "inputTokens": 151438,
+  "outputTokens": 6496,
+  "cachedInputTokens": 134784,
+  "repairSessions": 0,
+  "interruptedCalls": 0,
+  "questions": [],
+  "error": null,
+  "outcome": {
+    "exitCode": 0,
+    "stdout": "Implementado em JavaScript ESM, sem dependências externas, com os quatro comandos, persistência JSON, IDs não reutilizados e validação que preserva os dados.\n\nO README inclui configuração e exemplos.\n\nVerificado no Node.js v24:\n- `npm test`: 13 testes passaram, usando processos separados.\n- `npm start -- list`: retornou `[]`.\n- Verificações de sintaxe passaram.",
+    "stderr": "",
+    "timedOut": null,
+    "usage": {
+      "inputTokens": 151438,
+      "cachedInputTokens": 134784,
+      "outputTokens": 6496,
+      "reasoningTokens": 1010
+    },
+    "resultRead": true,
+    "sessionId": "01a18036-e139-7ab1-bf92-7eb52132b2cf"
+  },
+  "proof": {
+    "method": "processos Node reais; mesmas 12 verificações externas; sem feedback aos agentes",
+    "tests": [
+      {
+        "name": "listagem vazia sem criar arquivo",
+        "passed": true
+      },
+      {
+        "name": "criação, título aparado e persistência entre processos",
+        "passed": true
+      },
+      {
+        "name": "duas tarefas com IDs únicos e ordenação",
+        "passed": true
+      },
+      {
+        "name": "conclusão persistente e idempotente",
+        "passed": true
+      },
+      {
+        "name": "remoção e IDs nunca reutilizados, inclusive com lista vazia",
+        "passed": true
+      },
+      {
+        "name": "título vazio recusado sem alterar dados",
+        "passed": true
+      },
+      {
+        "name": "IDs inválidos e inexistentes recusados sem alterar dados",
+        "passed": true
+      },
+      {
+        "name": "comando desconhecido recusado sem alterar dados",
+        "passed": true
+      },
+      {
+        "name": "arquivos independentes, diretórios pais e espaços no caminho",
+        "passed": true
+      },
+      {
+        "name": "caminho padrão relativo ao diretório de trabalho",
+        "passed": true
+      },
+      {
+        "name": "manifesto sem dependências e documentação mínima",
+        "passed": true
+      },
+      {
+        "name": "suíte do próprio produto executa com sucesso",
+        "passed": true
+      }
+    ],
+    "passed": 12,
+    "total": 12,
+    "durationMs": 10368
+  }
+}

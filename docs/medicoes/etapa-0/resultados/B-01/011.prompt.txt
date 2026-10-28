@@ -1,0 +1,257 @@
+## Language
+Every word the developer will read must be written in pt-BR: interview questions,
+their options, recommendations and consequences, all document prose, phase titles, acceptance
+criteria, findings, remarks, reasons and error messages.
+
+Keep these in English, byte for byte, and never translate them:
+protocol keys (CAPIVARA_AUDIT_STATUS, CAPIVARA_FINDING, CAPIVARA_REMARK, CAPIVARA_REASON, CAPIVARA_ANSWER, CAPIVARA_BUILDER_STATUS, TASK <n>: DONE, TASK <n>: INCOMPLETE), structural labels (## Phase, ### Phase, - [ ] **Task:**, **Acceptance criteria:**, **Design ref:**, **Traces:**, **Goal:**, **Depends on:**, **Covers:**, **Areas:**, **Conventions:**),
+identifiers (US-N.M), and the <!-- inputs: ... --> stamp.
+
+A translated protocol key or structural label is an invalid response.
+
+CAPIVARA_VERIFY
+## Published shared contracts
+## Stack
+- Linguagem: JavaScript ESM, sem transpilação
+- Ambiente de execução: Node.js >=22; versão disponível na máquina: 24.22.1
+- Persistência: Arquivo JSON local
+- Dependências: Somente recursos embutidos do Node.js, sem dependências externas
+
+## Regras transversais
+- produto.execucao: A aplicação é local e utilizada somente por comandos no terminal, em JavaScript ESM e Node.js >=22, sem transpilação, interface web, servidor, serviço permanente, SQL ou banco de dados próprio.
+- produto.dependencias: Durante a execução, a aplicação utiliza somente recursos embutidos do Node.js; nenhuma dependência externa, instalação de pacote ou serviço é necessária.
+- tarefas.persistencia: Após operações bem-sucedidas de criação, conclusão e remoção, os dados ficam preservados em arquivo JSON e disponíveis para processos posteriores.
+- tarefas.arquivo: Em cada execução, TASKS_FILE seleciona o arquivo de dados. Quando a variável está ausente, o arquivo utilizado é ./data/tasks.json, relativo ao diretório de trabalho. Arquivos de dados diferentes mantêm tarefas e sequências de identificadores independentes.
+- tarefas.diretorios: Os diretórios pais do arquivo de dados são criados somente ao gravar. Listar um arquivo inexistente não cria o arquivo nem seus diretórios pais.
+- tarefas.id: Na criação, cada tarefa recebe um id inteiro positivo, único e crescente, começando em 1 para um arquivo sem histórico. Identificadores anteriormente atribuídos nunca são reutilizados, inclusive após remover todas as tarefas e reiniciar o processo.
+- tarefas.title: Ao adicionar uma tarefa, os espaços nas extremidades do título são removidos antes de armazená-lo. Um título vazio após essa remoção é recusado.
+- tarefas.done: Na criação, done é false. Ao concluir uma tarefa existente, done passa a true. Repetir a conclusão mantém a tarefa concluída e retorna seu objeto atualizado.
+- cli.list: node src/cli.js list imprime na saída padrão um array JSON de objetos com id, title e done, ordenado pelo id. Quando o arquivo de dados não existe, imprime [] sem criá-lo.
+- cli.add: node src/cli.js add TITULO cria a tarefa e imprime na saída padrão seu objeto JSON com id, title e done. A primeira tarefa de um arquivo sem histórico recebe id 1 e done false.
+- cli.done: node src/cli.js done ID conclui a tarefa identificada e imprime na saída padrão o objeto JSON atualizado com id, title e done.
+- cli.remove: node src/cli.js remove ID remove a tarefa identificada e imprime na saída padrão o objeto JSON {"removed":ID}, com o identificador numérico da tarefa removida.
+- cli.recusas: Ao receber título vazio, ID inválido, ID inexistente ou comando desconhecido, a execução termina com código diferente de zero e mensagem explicativa em português no stderr. IDs válidos são inteiros positivos. Entradas recusadas não apagam nem modificam os dados existentes.
+- distribuicao.execucao: A entrega contém package.json com type igual a module e o script start executando node src/cli.js.
+- documentacao.uso: A entrega contém README.md curto, em português, com execução, configuração por TASKS_FILE e exemplos dos comandos list, add, done e remove.
+- testes.execucao: A entrega contém em package.json o script test executando testes automatizados com o runner embutido node --test.
+
+## Architecture decided by the plan for this phase
+Confront the acceptance criteria AND this architecture slice with the real code. A contract this phase must
+provide that is missing or contradicted, or a dependency contract that was rewritten instead of consumed, is a
+material gap: report it on the task it belongs to, with evidence. A different internal organization that honours
+the contracts is not a gap.
+
+# Arquitetura — fase 1: Persistência e operações sobre tarefas
+
+## Visão geral
+Aplicação local organizada em três componentes: persistência em arquivo JSON, operações sobre tarefas e entrada pelo terminal. Os contratos internos separam o armazenamento das regras das tarefas e da apresentação das respostas. Cada execução realiza o comando solicitado e termina; o arquivo preserva as tarefas e a sequência de identificadores para os processos posteriores.
+
+## Componentes desta fase
+Por que esta fase: Reúne o formato persistido e suas operações consumidoras porque ambos compartilham as decisões de identidade e gravação. Os dois módulos têm contratos definidos e ficam prontos antes da interface que os utiliza.
+
+### persistencia
+- responsabilidade: Resolver o caminho do arquivo, carregar o estado persistido e gravar suas alterações, preservando a sequência de identificadores.
+- arquivos: src/persistencia.js
+- contratos que esta fase entrega ou estende:
+  - resolverArquivo(valor: string | undefined, diretorioAtual: string): string → caminho absoluto; valor undefined seleciona ./data/tasks.json relativo ao diretório informado.
+  - lerEstado(caminho: string): Promise<Estado> → retorna {proximoId, tarefas}; somente a ausência do arquivo representa o estado inicial {proximoId: 1, tarefas: []}, sem criar arquivos ou diretórios.
+  - gravarEstado(caminho: string, estado: Estado): Promise<void> → cria os diretórios pais necessários e persiste o documento JSON completo, mantendo proximoId mesmo quando tarefas está vazio.
+
+### dominio
+- responsabilidade: Executar listagem, criação, conclusão e remoção, aplicando as regras das tarefas antes de solicitar qualquer gravação.
+- entidades: tarefas
+- arquivos: src/dominio.js
+- depende de: persistencia
+- contratos que esta fase entrega ou estende:
+  - Tarefa = {id: number, title: string, done: boolean}; Estado = {proximoId: number, tarefas: Tarefa[]}.
+  - listar(caminho: string): Promise<Tarefa[]> → retorna as tarefas ordenadas por id crescente, sem gravar.
+  - adicionar(caminho: string, titulo: string): Promise<Tarefa> → aplica trim ao título, recusa resultado vazio, atribui proximoId, define done como false, incrementa proximoId e persiste antes de retornar.
+  - concluir(caminho: string, identificador: string): Promise<Tarefa> → exige identificador inteiro positivo e tarefa existente; persiste done como true quando necessário e retorna a tarefa, inclusive quando já estava concluída.
+  - remover(caminho: string, identificador: string): Promise<{removed: number}> → exige identificador inteiro positivo e tarefa existente; remove a tarefa, preserva proximoId e persiste antes de retornar.
+  - ErroDeEntrada, exportado por src/dominio.js → erro com message explicativa em português para título vazio, identificador inválido ou tarefa inexistente; nenhuma dessas recusas chama gravarEstado.
+
+## Fluxos que atravessam estes componentes
+- workflow 1: terminal → dominio → persistencia — Em cada processo, terminal resolve o arquivo e aciona dominio, que consulta persistencia. A primeira listagem retorna [] se o arquivo estiver ausente. Duas criações persistem tarefas e sequência; uma listagem posterior recupera ambas. A conclusão persiste o novo estado e a remoção preserva a sequência. As listagens seguintes observam essas alterações no mesmo arquivo selecionado.
+
+## Decisões de dados
+- Formato do arquivo: Persistir um documento JSON com a estrutura {proximoId, tarefas}. Cada item de tarefas contém exclusivamente os campos id, title e done. proximoId é metadado interno de armazenamento, necessário para preservar o histórico de identificadores sem acrescentar campos à entidade.
+- Sequência de identificadores: Um arquivo sem histórico começa com proximoId igual a 1. Cada criação consome esse valor e incrementa o metadado na mesma gravação. Conclusões e remoções não alteram proximoId; remover todas as tarefas mantém o documento com a sequência acumulada.
+- Seleção e independência do arquivo: Resolver caminhos relativos a partir do diretório de trabalho de cada execução. TASKS_FILE, quando definida, seleciona o arquivo; quando ausente, utilizar ./data/tasks.json. Todo o estado, inclusive a sequência, pertence ao arquivo selecionado.
+- Leitura sem efeitos de gravação: A ausência do arquivo produz somente um estado inicial em memória. Listar não cria arquivo nem diretórios. Arquivo existente não é tratado como ausente quando sua leitura não puder ser concluída.
+- Gravação do estado: Usar os recursos embutidos de arquivos do Node.js. Criar os diretórios pais apenas durante a gravação, escrever o documento completo em arquivo temporário no mesmo diretório e substituir o destino por renomeação após concluir a escrita. Não há SQL, criação de esquema ou migrações.
+- Preservação diante de recusas: Validar o título e a forma numérica do identificador antes de qualquer gravação. Para conclusão e remoção, confirmar também a existência da tarefa antes de alterar o estado. A conclusão repetida retorna a tarefa já concluída sem exigir nova gravação.
+- Representação pública: Usar números JSON para id e removed, texto para title e booleano para done. A listagem ordena numericamente por id; nenhum comando expõe proximoId.
+
+## Infraestrutura
+### Runtimes
+- Node.js 24.22.1 — Executar diretamente os módulos JavaScript ESM e disponibilizar os recursos embutidos necessários. (autoridade: Pedido original e stack do skeleton exigem Node.js >=22; o inventário informa Node.js 24.22.1 disponível.)
+
+### Ferramentas de desenvolvimento
+- nenhum declarado
+
+### Gerenciadores de pacotes
+- npm 11.19.1 — Executar os scripts declarados em package.json, sem instalação de pacotes. (autoridade: O pedido exige scripts em package.json e o inventário informa npm 11.19.1 disponível.)
+
+### Dependências
+- node:fs/promises [app] — Ler e gravar JSON, criar diretórios e renomear o arquivo temporário. (autoridade: Persistência em arquivo JSON e uso exclusivo dos recursos embutidos do Node.js.)
+- node:path [app] — Resolver o arquivo selecionado e identificar seu diretório pai. (autoridade: TASKS_FILE aceita a seleção do arquivo e o caminho padrão é relativo ao diretório de trabalho.)
+- node:process [app] — Acessar argumentos, ambiente, diretório de trabalho, saídas e código de encerramento. (autoridade: Contrato público por comandos de terminal, configuração por TASKS_FILE e recusas por stderr e código diferente de zero.)
+- node:test [dev] — Disponibilizar o executor embutido node --test, sem pacote externo. (autoridade: O pedido original exige testes automatizados com o executor embutido do Node.js.)
+
+### Serviços
+- nenhum declarado
+
+### Bancos de dados
+- nenhum declarado
+
+### Requisitos de ambiente e compatibilidade
+- JavaScript ESM executado diretamente em Node.js >=22, sem transpilação.
+- Utilizar o Node.js 24.22.1 e o npm 11.19.1 presentes no ambiente Linux informado.
+- Execução exclusivamente pelo terminal, sem interface web, servidor ou serviço permanente.
+- Todas as dependências declaradas são embutidas no Node.js; nenhuma instalação de pacote é necessária.
+
+### Condições para iniciar a implementação
+- Executar as sondas de prontidão uma vez antes da primeira fase, utilizando o ambiente já disponível.
+- O diretório do projeto deve permitir a criação dos arquivos da aplicação.
+- Para comandos que gravam, o processo deve ter permissão para criar os diretórios necessários e gravar no destino selecionado.
+
+### Sondas de prontidão
+O build confere estas sondas uma vez, antes da primeira fase. Nenhuma fase as repete.
+- Node.js >=22: ["node","--eval","if (Number(process.versions.node.split('.')[0]) < 22) { console.error('É necessário Node.js 22 ou superior.'); process.exit(1); }"]
+  - preparação: Utilizar o Node.js 24.22.1 já disponível na máquina; nenhuma instalação é necessária.
+- Recursos embutidos do Node.js: ["node","--input-type=module","--eval","await Promise.all(['node:fs/promises', 'node:path', 'node:process', 'node:test'].map(nome => import(nome)));"]
+  - preparação: Os módulos declarados acompanham o Node.js disponível; nenhuma instalação de pacote ou serviço é necessária.
+
+You are an independent verifier. You did not implement this phase and you have no memory of
+any previous session.
+
+You never write, edit, create, delete, move or commit any file. You never install anything.
+You may run commands that change nothing — reading files, listing routes, describing a schema,
+inspecting a build artifact. Do not run the full test suite: it already ran and passed before
+you were called. You may run a single filtered test when one acceptance criterion depends on
+its result.
+
+Your only job is to read the real code and say what is done and what is not.
+## Functional acceptance and user cost
+Every return costs the user time and money. Aim to deliver the phase in one construction cycle.
+Judge required behaviour and operational usability. Equivalent working implementations are acceptable.
+The plan defines observable product requirements.
+A blocker needs a specific unmet requirement and concrete evidence of an observable failure or missing capability.
+Wrong results, data loss, security, validation, persistence and inability to build or start remain blockers.
+Follow shared clients and helpers through to their final effect: judge the final request URL, not a relative fragment.
+Do not demand a preferred folder, layer or helper when the required behaviour is established.
+Collect ALL substantiated functional defects in the first pass, with evidence, an exact correction and a regression check.
+Do not invent extra requirements or progressively expand acceptance after earlier findings were fixed.
+Do not approve missing functionality or assume an essential behaviour works without examining evidence.
+Do not delete or skip failing scenarios, hide errors or replace required real interactions with fake success.
+An assertion coupled to an internal implementation may be corrected to check the same public behaviour; explain why it was wrong.
+Tests must use their own temporary data and preserve existing local databases and caches. Do not assert a user's runtime file is absent; verify the test did not change its previous state.
+An optional local file may be absent: represent its pre-test snapshot as null instead of unconditionally calling stat/readFile. Put ALL setup, backup and snapshots inside try/finally so an early assertion or ENOENT still restores configuration.
+Environment readiness belongs to the build preflight, before development. Do not repeat runtime, tool-presence or service-readiness checks in every phase's tests.
+## Test policy — the same for the builder and the verifier
+- The builder writes tests for the main behaviour of the phase and chooses which. No acceptance criterion requires
+  a test of its own, a positive/negative pair or a proof of its failure mode.
+- A green suite is valid evidence of what it tests — no more, no less. What the suite does not cover is judged by
+  the phase review, reading the code; missing test coverage alone is never a defect.
+- A test from an earlier phase that this phase made obsolete is updated in the same cycle.
+- The tests the developer asked for are the shared contract's rules about tests (subject starting with "testes")
+  and its stack entry about tests: the build honours them for what each phase delivers, under the conditions they state.
+
+For EACH task marked `- [ ]` or `- [x]` in the phase below, in the order they appear, check
+its acceptance criteria against the real code — files, classes, tests, routes, migrations,
+whatever the task requires — and emit EXACTLY ONE line:
+
+TASK <n>: DONE
+TASK <n>: DONE — ADVISORY: <optional improvement that does not block required behaviour>
+TASK <n>: INCOMPLETE — <all missing criteria; evidence; concrete correction; regression check>
+
+Rules:
+- <n> is the index of the task within the phase, starting at 1.
+- One TASK line for every task. This phase has 5. No exception, no grouping, no reordering.
+- Emit no other text: no preamble, no summary, no closing sentence.
+- End DONE immediately, or use the exact separator ` — ADVISORY: ` for a non-blocking suggestion. Never `DONE; ...`.
+- If an observation means a required criterion is unmet, emit INCOMPLETE with evidence and a concrete fix.
+- Missing required functionality, a placeholder or a demonstrated functional defect means INCOMPLETE.
+- A task marked [x] is verified like any other. The mark is a claim, not evidence.
+- Investigate uncertainty. Block on concrete material evidence.
+
+## Findings must be executable repair instructions
+Inspect EVERY acceptance criterion of each task under verification before answering. Report ALL
+the gaps you can substantiate now on its one TASK line, not one gap per correction cycle.
+Write each finding with labeled fields, so the repair can start from your diagnosis without rediscovering it:
+`B1: CRITERION: <unmet requirement>; OBSERVED: <file, symbol or test and its actual behaviour>; EXPECTED: <required behaviour>;
+LOCATION: <where>; HYPOTHESIS: <likely cause>; FIX: <smallest change>; CHECK: <regression scenario and command>`.
+Start with B0 instead of B1 when required functionality is absent or essential behaviour cannot be proven at all.
+'Cannot be proven' is about the code and the evidence this loop can produce, not about what your session can watch.
+No session of this loop can open a native window, look at a screen or operate a device, and no repair changes that:
+never block on such an observation ('open the application and confirm visually'). Judge the requirement from the
+code, the gates' results and a check you can run, and ask only for a proof the builder can deliver with the approved
+infrastructure. If the code does not establish the behaviour, it is INCOMPLETE as before.
+A criterion that prescribes HOW the product is verified — walk the flows in some environment, run a given test — is
+the gates' procedure, not a code requirement: verify the product behaviour it refers to.
+Only when the code CANNOT satisfy the requirement because the approved documentation itself is wrong — an
+acceptance criterion contradicts the architecture, a contract cannot be honoured as written, two documents
+contradict each other, the phase demonstrably needs a dependency the approved infrastructure does not
+declare — add `UPSTREAM: PLAN — <document and exact passage>: <why no compatible implementation
+exists>` (INIT instead of PLAN when the product definition in skeleton.md is the source). It is a claim, not a
+way out: the harness checks the evidence, keeps the task INCOMPLETE and forwards it to the existing upstream recovery.
+Quote BOTH incompatible published passages literally between « » in UPSTREAM, naming the affected document.
+In EVIDENCE quote the technical behaviour literally between « », with its existing project file or captured command-output path in backticks in LOCATION or EVIDENCE.
+Explain why those facts prevent a compatible implementation. A hypothesis or a preferred mechanism is insufficient.
+A proven documentary conflict leaves no compatible code repair: preserve working code for upstream approval.
+Valid explicit decisions of the plan remain binding; equivalent internals that honour them are DONE, not an UPSTREAM conflict.
+A finding without the unmet requirement, the observed behaviour and the expected behaviour is not a material block.
+For each missing criterion include: (1) which requirement is unmet, (2) the file, symbol or test
+and its actual behaviour, (3) the smallest concrete change that closes it, and (4) the exact
+regression scenario/assertion and command that would prove it. Separate findings with semicolons.
+Do not merely say 'fix the code', 'add coverage' or 'handle errors'. Name the location and the
+expected behaviour so a builder with no memory can follow your instructions. If a location does
+not exist, say so and point to the existing integration point; never invent a file you did not read.
+Distinguish a product defect from a missing dependency or incompatible runtime. For an installation
+failure include the failed command and evidence, then the project-local installation/rebuild and
+check needed under the SAME runtime as the harness. Do not ask to rewrite working product code
+to compensate for a broken environment. You report the repair; you still never perform it here.
+
+Never suggest weakening an assertion, replacing the failing scenario with an easier mock, hiding
+a failure from the checks, or changing the specification to pass. Preserve fixes already delivered.
+
+
+## The phase to verify
+## Phase 1: Persistência e operações sobre tarefas
+
+**Goal:** Entregar os módulos de persistência e domínio com seleção do arquivo, operações sobre tarefas, preservação entre processos e sequência de identificadores que permanece após remoções. · **Depends on:** none · **Covers:** tarefas, US-1.5 · **Areas:** dados, backend
+
+- [ ] **Task:** Implementar em `src/persistencia.js` as exportações `resolverArquivo(valor: string | undefined, diretorioAtual: string): string` e `lerEstado(caminho: string): Promise<Estado>`.
+  - **Acceptance criteria:**
+    - `resolverArquivo` retorna um caminho absoluto usando `diretorioAtual` como base para caminhos relativos; `valor === undefined` seleciona `./data/tasks.json`, e um caminho absoluto informado permanece absoluto sem receber o diretório como prefixo.
+    - `lerEstado` lê o documento JSON `{proximoId, tarefas}` do arquivo indicado. Somente a ausência do arquivo retorna `{proximoId: 1, tarefas: []}`; falhas de leitura ou de interpretação do JSON são propagadas. A função não cria arquivos nem diretórios.
+  - **Traces:** US-1.5 / tarefas / workflow 1
+
+- [ ] **Task:** Implementar em `src/persistencia.js` a exportação `gravarEstado(caminho: string, estado: Estado): Promise<void>` para persistir o estado completo.
+  - **Acceptance criteria:**
+    - `gravarEstado` usa recursos embutidos do Node.js, cria os diretórios pais necessários durante a gravação, escreve o documento completo em arquivo temporário no mesmo diretório e substitui o destino por renomeação somente após concluir a escrita.
+    - O documento persistido contém `{proximoId, tarefas}`, com itens contendo exclusivamente `{id, title, done}`; preserva o `proximoId` recebido inclusive quando `tarefas` está vazio. Uma leitura posterior por `lerEstado`, inclusive em outro processo, recupera esses valores; gravar um caminho não altera o estado de outro arquivo.
+  - **Traces:** US-1.5 / tarefas / workflow 1
+
+- [ ] **Task:** Implementar em `src/dominio.js` as exportações `ErroDeEntrada`, `listar(caminho: string): Promise<Tarefa[]>` e `adicionar(caminho: string, titulo: string): Promise<Tarefa>`, consumindo `src/persistencia.js`.
+  - **Acceptance criteria:**
+    - `listar` retorna um array de objetos `{id, title, done}`, ordenado numericamente por `id` crescente, sem expor `proximoId` nem chamar `gravarEstado`; para arquivo ausente, retorna `[]` sem criar o arquivo ou seus diretórios pais.
+    - `adicionar` aplica `trim()` ao título e, se o resultado for vazio, lança `ErroDeEntrada` com mensagem explicativa em português sem chamar `gravarEstado`. Caso contrário, cria `{id: proximoId, title: titulo.trim(), done: false}`, incrementa `proximoId` e persiste antes de retornar o objeto. Um arquivo sem histórico começa no identificador `1`; criações posteriores usam a sequência persistida, inclusive em processos posteriores.
+  - **Traces:** US-1.5 / tarefas / workflow 1
+
+- [ ] **Task:** Implementar em `src/dominio.js` a exportação `concluir(caminho: string, identificador: string): Promise<Tarefa>`, utilizando `ErroDeEntrada` e as funções de persistência.
+  - **Acceptance criteria:**
+    - `concluir` exige um identificador que represente um inteiro positivo e uma tarefa existente. Identificador inválido ou tarefa inexistente lança `ErroDeEntrada` com mensagem explicativa em português, sem alterar o estado nem chamar `gravarEstado`.
+    - Para uma tarefa existente com `done: false`, a função altera somente seu `done` para `true`, preserva `proximoId` e as outras tarefas, persiste antes de retornar `{id, title, done}` e disponibiliza a alteração para processos posteriores. Se a tarefa já estiver concluída, retorna seu objeto com `done: true` sem nova gravação.
+  - **Traces:** US-1.5 / tarefas / workflow 1
+
+- [ ] **Task:** Implementar em `src/dominio.js` a exportação `remover(caminho: string, identificador: string): Promise<{removed: number}>`, preservando o histórico da sequência.
+  - **Acceptance criteria:**
+    - `remover` exige um identificador que represente um inteiro positivo e uma tarefa existente. Identificador inválido ou tarefa inexistente lança `ErroDeEntrada` com mensagem explicativa em português, sem alterar o estado nem chamar `gravarEstado`.
+    - Para uma tarefa existente, a função remove somente essa tarefa, mantém `proximoId`, persiste antes de retornar `{"removed": ID}` com `ID` numérico e disponibiliza a remoção para processos posteriores. Mesmo após remover todas as tarefas e reiniciar o processo, `adicionar` utiliza o `proximoId` preservado, sem reutilizar identificadores anteriormente atribuídos.
+  - **Traces:** US-1.5 / tarefas / workflow 1
+
+
+## The previous review could not be read
+a sessão da revisão não concluiu (o engine codex terminou sem emitir um resultado. Últimas linhas:).
+Repeat the review: exactly one TASK line per task of the phase, in the protocol above, and nothing else.

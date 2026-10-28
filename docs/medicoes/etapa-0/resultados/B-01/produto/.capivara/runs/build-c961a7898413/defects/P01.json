@@ -1,0 +1,13 @@
+{
+  "contract": "capivara-defects/v1",
+  "runId": "build-c961a7898413",
+  "phaseId": "P01",
+  "implementation": "done",
+  "cycle": 1,
+  "builderSessions": 1,
+  "actions": 0,
+  "seq": 0,
+  "defects": [],
+  "updatedAt": "2026-10-28T02:06:52.692Z",
+  "inicio": "42f43234438c424439f7812470161824f4dca826"
+}

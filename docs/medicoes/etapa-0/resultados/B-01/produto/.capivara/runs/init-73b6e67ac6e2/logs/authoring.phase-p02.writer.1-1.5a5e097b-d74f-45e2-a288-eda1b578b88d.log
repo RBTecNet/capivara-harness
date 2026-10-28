@@ -1,0 +1,23 @@
+- [ ] **Task:** Implementar em src/cli.js a seleção do arquivo e os comandos `list` e `add`, consumindo `resolverArquivo` de src/persistencia.js e `listar` e `adicionar` de src/dominio.js. Ler o comando de `process.argv[2]` e o título de `process.argv[3]`, usando `""` quando o título estiver ausente.
+  - **Acceptance criteria:**
+    - src/cli.js obtém `caminho` por `resolverArquivo(process.env.TASKS_FILE, process.cwd())` e utiliza esse caminho nas chamadas ao domínio. `node src/cli.js list` chama `listar(caminho)`, termina com código 0 e imprime uma única linha contendo um array JSON de objetos `{id, title, done}`, ordenado numericamente por id, sem expor `proximoId`. Para arquivo inexistente, imprime `[]` sem criar arquivo ou diretórios. Sem TASKS_FILE, utiliza `./data/tasks.json` relativo ao diretório de trabalho.
+    - `node src/cli.js add TITULO` chama `adicionar(caminho, titulo)`, termina com código 0 e imprime uma única linha contendo somente o objeto JSON `{id, title, done}` retornado. O título armazenado e impresso tem os espaços das extremidades removidos; a primeira criação em arquivo sem histórico retorna id 1 e done false. Duas criações em processos separados aparecem em uma listagem posterior do mesmo arquivo; arquivos selecionados por TASKS_FILE mantêm tarefas e sequências independentes.
+  - **Traces:** US-1.1, US-1.2, US-1.5 / tarefa / fluxo 1
+
+- [ ] **Task:** Implementar em src/cli.js os comandos `done` e `remove`, consumindo `concluir` e `remover` de src/dominio.js. Encaminhar `process.argv[3]` como identificador textual, usando `""` quando ausente, e utilizar o caminho obtido por `resolverArquivo(process.env.TASKS_FILE, process.cwd())`.
+  - **Acceptance criteria:**
+    - `node src/cli.js done ID` chama `concluir(caminho, identificador)`, termina com código 0 e imprime uma única linha contendo somente o objeto JSON `{id, title, done}` atualizado, com id numérico e done true. A conclusão fica disponível em processos posteriores; repetir o comando para a mesma tarefa retorna o mesmo objeto concluído.
+    - `node src/cli.js remove ID` chama `remover(caminho, identificador)`, termina com código 0 e imprime uma única linha contendo somente `{"removed":ID}`, com ID numérico. Após criar duas tarefas, concluir uma e remover a outra em processos separados, uma listagem posterior contém somente a tarefa concluída. Remover todas as tarefas e criar outra em novo processo produz um id superior aos anteriormente atribuídos.
+  - **Traces:** US-1.3, US-1.4, US-1.5 / tarefa / fluxo 1
+
+- [ ] **Task:** Implementar em src/cli.js o tratamento das recusas dos comandos, capturando `ErroDeEntrada` exportado por src/dominio.js e apresentando sua mensagem em português. Recusar comando desconhecido antes de chamar `listar`, `adicionar`, `concluir` ou `remover`.
+  - **Acceptance criteria:**
+    - Comando desconhecido termina com código 1, mensagem explicativa em português no stderr e saída padrão vazia; o despacho em src/cli.js não chama operações do domínio nesse caso.
+    - `add` com título ausente ou vazio após remoção dos espaços das extremidades, e `done` ou `remove` com identificador ausente, diferente de inteiro positivo ou inexistente, terminam com código 1, apresentam a mensagem de `ErroDeEntrada` no stderr e deixam a saída padrão vazia. Essas recusas preservam o conteúdo do arquivo existente e não criam arquivo ou diretórios quando ausentes.
+  - **Traces:** US-1.2, US-1.3, US-1.4, US-1.6 / tarefa
+
+- [ ] **Task:** Entregar package.json para execução dos módulos ESM e README.md curto, em português, com instruções de uso da aplicação pelo terminal.
+  - **Acceptance criteria:**
+    - package.json contém `"type": "module"` e o comando `"start": "node src/cli.js"` em `scripts`, permitindo executar a entrada implementada em src/cli.js.
+    - README.md informa Node.js >=22, execução direta sem instalação de pacotes, uso de `npm start -- list`, configuração por TASKS_FILE e caminho padrão `./data/tasks.json` relativo ao diretório de trabalho. Inclui exemplos de `node src/cli.js list`, `node src/cli.js add "Comprar pão"`, `node src/cli.js done 1` e `node src/cli.js remove 2`, além de uma sequência de comandos que cria duas tarefas, lista, conclui uma, remove a outra e lista o resultado em processos separados.
+  - **Traces:** US-1.7 / terminal / fluxo 1

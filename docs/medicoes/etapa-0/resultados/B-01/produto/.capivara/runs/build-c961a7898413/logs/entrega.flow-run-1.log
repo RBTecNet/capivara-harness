@@ -1,0 +1,7 @@
+[WebServer] 
+[WebServer] > tarefas-locais@1.0.0 start
+[WebServer] > node src/cli.js
+[WebServer] 
+[WebServer] []
+Error: Process from config.webServer exited early.
+

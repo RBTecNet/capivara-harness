@@ -1,0 +1,358 @@
+medir-verificacao · capivara 0.8.3 · commit c9f01504fbbd · node v24.22.1
+orçamentos do build: --max-cycles 3, --max-verifier-repairs 1 (os padrões do CLI); aceitação e fluxos ligados
+
+## Cenários
+
+### app-pequeno
+
+chamadas de modelo  init  plan  build  total
+escrita                2     5      4     11
+auditoria              0     2      0      2
+verificação            0     0      4      4
+reparo                 0     0      0      0
+roteirista             0     0      0      0
+triagem                0     0      0      0
+formato                0     0      0      0
+repetição              0     0      0      0
+aceitação              0     0      2      2
+outra                  0     0      0      0
+total                  2     7     10     19
+
+por papel: auditor (plan) 2 · writer (plan) 5 · writer (init) 2 · builder (build) 4 · verifier (build) 6
+conferência com os falsos: init+plan confere; build confere
+
+execuções                              registro  disparadas
+suíte (G2 e entrega)                          4           4
+G3 (sessões do verificador)                   4           -
+G4 por fase (passagens de fluxo)              0           -
+fluxos na aceitação final (passagens)         1           -
+passagens de fluxo, todas                     1           1
+aceitação operacional                         -           1
+reparos da aceitação                          0           -
+
+plano: 4 fase(s), 5 task(s), 7 critério(s); 0 devolução(ões) da auditoria; 0 reescrita(s) do escritor
+tempo (ms): init 197 · plan 89 · build 990
+build: código 0 (aceito); P01 complete, P02 complete, P03 complete, P04 complete; relatório: complete
+
+### reparo
+
+chamadas de modelo  init  plan  build  total
+escrita                2     5      4     11
+auditoria              0     2      0      2
+verificação            0     0      4      4
+reparo                 0     0      1      1
+roteirista             0     0      0      0
+triagem                0     0      0      0
+formato                0     0      0      0
+repetição              0     0      0      0
+aceitação              0     0      2      2
+outra                  0     0      0      0
+total                  2     7     11     20
+
+por papel: auditor (plan) 2 · writer (plan) 5 · writer (init) 2 · builder (build) 4 · verifier (build) 7
+conferência com os falsos: init+plan confere; build confere
+
+execuções                              registro  disparadas
+suíte (G2 e entrega)                          5           5
+G3 (sessões do verificador)                   4           -
+G4 por fase (passagens de fluxo)              0           -
+fluxos na aceitação final (passagens)         1           -
+passagens de fluxo, todas                     1           1
+aceitação operacional                         -           1
+reparos da aceitação                          0           -
+
+plano: 4 fase(s), 5 task(s), 7 critério(s); 0 devolução(ões) da auditoria; 0 reescrita(s) do escritor
+tempo (ms): init 18 · plan 57 · build 1181
+build: código 0 (aceito); P01 complete, P02 complete, P03 complete, P04 complete; relatório: complete
+
+### orcamento-esgotado
+
+chamadas de modelo  init  plan  build  total
+escrita                2     5      3     10
+auditoria              0     2      0      2
+verificação            0     0      2      2
+reparo                 0     0      2      2
+roteirista             0     0      0      0
+triagem                0     0      0      0
+formato                0     0      0      0
+repetição              0     0      0      0
+aceitação              0     0      0      0
+outra                  0     0      0      0
+total                  2     7      7     16
+
+por papel: auditor (plan) 2 · writer (plan) 5 · writer (init) 2 · builder (build) 4 · verifier (build) 3
+conferência com os falsos: init+plan confere; build confere
+
+execuções                              registro  disparadas
+suíte (G2 e entrega)                          5           5
+G3 (sessões do verificador)                   2           -
+G4 por fase (passagens de fluxo)              0           -
+fluxos na aceitação final (passagens)         0           -
+passagens de fluxo, todas                     0           0
+aceitação operacional                         -           0
+reparos da aceitação                          0           -
+
+plano: 4 fase(s), 5 task(s), 7 critério(s); 0 devolução(ões) da auditoria; 0 reescrita(s) do escritor
+tempo (ms): init 18 · plan 61 · build 776
+build: código 2 (falhou); P01 complete, P02 complete, P03 failed (gate 2 — suíte do projeto); relatório: paused
+
+## Testes exigidos nos prompts do executor
+
+lidos de: P01.cycle-1.txt e P01.verify-1.txt (cenário app-pequeno)
+testes exigidos por critério: 0
+prova obrigatória do modo de falha: não
+o verificador é instruído a desconfiar da suíte verde: não
+teto de critérios por task no prompt do escritor de fase: 2 — «- One or two acceptance criteria per task, 2 at the very most. A task needing more is»
+linhas do prompt do executor que falam de teste e de critério (1):
+  «- The builder writes tests for the main behaviour of the phase and chooses which. No acceptance criterion requires»
+
+## Quando o orçamento esgota (cenário orcamento-esgotado)
+
+build: código 2 (falhou); relatório: paused
+fases: P01 complete, P02 complete, P03 failed (gate 2 — suíte do projeto); não iniciadas: 1
+aceitação operacional: não rodou
+o que acontece: o build para na fase que esgotou; as seguintes não rodam
+
+## Garantias
+
+garantia  pega                                                                        por  chamadas                                                                               detalhe
+G-1        sim                                 G3, verificação da fase (P01.verify-1.log)        10                    achado registrado em P01.verify-1.log; build terminou com código 0
+G-2        sim  aceitação final, fluxo percorrido na cópia limpa (entrega.flow-run-1.log)        10     fluxo reprovado registrado em entrega.flow-run-1.log; build terminou com código 0
+G-3        sim     auditoria do plano inteiro (audit.project-phases.md.auditor.1-1.….log)        11                            o plan parou (bloqueio) e a parada cita a fase e a decisão
+G-4        sim                                 G3, verificação da fase (P01.verify-1.log)        11  o build terminou falhou (código 2; P01: failed), com a recuperação de senha na causa
+
+## Linhas de código
+
+verificação: 10938 linhas em 45 arquivos
+    120 src/audit/authority.ts
+    469 src/audit/cycle.ts
+    148 src/audit/envelope.ts
+      8 src/audit/index.ts
+    369 src/audit/protocol.ts
+    128 src/audit/sem-teste.ts
+     58 src/audit/tasks.ts
+    165 src/prompts/auditor.ts
+    414 src/prompts/verifier.ts
+    283 src/prompts/flows.ts
+     51 src/prompts/repair.ts
+    104 src/prompts/acceptance-policy.ts
+     21 src/prompts/test-policy.ts
+    113 src/contract/coverage.ts
+    430 src/contract/disponibilidade.ts
+    308 src/contract/drift.ts
+    175 src/contract/invariants.ts
+    134 src/contract/mechanism-prescription.ts
+    540 src/contract/ownership.ts
+     58 src/contract/phase-references.ts
+    383 src/contract/test-prescription.ts
+     98 src/contract/protocolo.ts
+    213 src/contract/upstream.ts
+    191 src/init/readiness.ts
+    123 src/init/plan-readiness.ts
+    171 src/init/plan-cache.ts
+    372 src/loop/gates.ts
+   1371 src/loop/flows.ts
+     83 src/loop/flow-network.ts
+    363 src/loop/passagem.ts
+    516 src/loop/acceptance.ts
+    245 src/loop/evidencias.ts
+    716 src/loop/defeitos.ts
+    227 src/loop/veredictos.ts
+     79 src/loop/impacto.ts
+    193 src/loop/handoff.ts
+    261 src/loop/testcmd.ts
+     34 src/loop/test-databases.ts
+    284 src/loop/upstream.ts
+    227 src/loop/relatorio.ts
+     84 src/loop/entrega.ts
+    372 src/loop/parada.ts
+    130 src/loop/narrador.ts
+    100 src/loop/ledger.ts
+      6 src/provider/flow-review.ts
+construção: 13016 linhas em 67 arquivos
+    322 src/interview/banco.ts
+    130 src/interview/classify.ts
+     35 src/interview/handoff.ts
+     42 src/interview/index.ts
+    179 src/interview/insistencia.ts
+    110 src/interview/levantamento.ts
+     47 src/interview/omissions.ts
+    276 src/interview/protocol.ts
+    118 src/interview/rounds.ts
+    109 src/interview/types.ts
+     14 src/authoring/index.ts
+     43 src/authoring/ledger.ts
+     30 src/authoring/parts.ts
+    199 src/authoring/repair.ts
+     71 src/authoring/staging.ts
+    336 src/prompts/writer.ts
+    428 src/prompts/skeleton.ts
+    479 src/prompts/architecture.ts
+    155 src/prompts/amend.ts
+    603 src/prompts/builder.ts
+     37 src/prompts/language.ts
+     51 src/prompts/planning-scope.ts
+     24 src/prompts/index.ts
+    687 src/contract/skeleton.ts
+    475 src/contract/phases.ts
+    858 src/contract/architecture.ts
+    483 src/contract/phase-part.ts
+    176 src/contract/templates.ts
+    102 src/contract/doc.ts
+     95 src/contract/stamps.ts
+     41 src/contract/environment.ts
+    152 src/contract/resposta.ts
+    122 src/contract/index.ts
+     48 src/init/architecture-state.ts
+     21 src/init/index.ts
+    151 src/init/inventory.ts
+     19 src/init/plan.ts
+     24 src/init/progress.ts
+    117 src/init/report.ts
+     76 src/init/request-state.ts
+     94 src/init/request.ts
+     41 src/init/skeleton-state.ts
+     72 src/loop/split.ts
+    117 src/loop/partes.ts
+    133 src/loop/arquitetura.ts
+    900 src/loop/worktree.ts
+    927 src/loop/paralelo.ts
+    211 src/loop/escalonador.ts
+     20 src/loop/escolha.ts
+    523 src/loop/git.ts
+    347 src/loop/admissao.ts
+    125 src/loop/autoridade.ts
+    100 src/loop/isolamento.ts
+    163 src/loop/ambiente.ts
+    124 src/loop/environment-plan.ts
+     68 src/loop/environment-prepare.ts
+    313 src/loop/prerequisites.ts
+    185 src/loop/prerequisite-workspace.ts
+    353 src/loop/prepared-dependencies.ts
+    139 src/loop/dependencias.ts
+    126 src/loop/instalacao-node.ts
+    206 src/loop/preflight.ts
+     18 src/loop/ports.ts
+     16 src/loop/readiness-probe.ts
+     93 src/loop/ratelimit.ts
+     62 src/loop/progress.ts
+     55 src/loop/index.ts
+misto (orquestradores): 7723 linhas em 3 arquivos
+   3844 src/init/orchestrator.ts
+   2334 src/loop/runner.ts
+   1545 src/loop/build.ts
+fora dos dois (providers, estado, interface, comandos): 18693 linhas em 103 arquivos
+     13 src/aptidao/index.ts
+    374 src/aptidao/prova.ts
+     82 src/audit/admissibilidade.ts
+      2 src/change/index.ts
+    397 src/change/orchestrator.ts
+   2516 src/cli-program.ts
+     19 src/cli.ts
+    232 src/commands/agent.ts
+    124 src/commands/api-login.ts
+    123 src/commands/build-controls.ts
+    129 src/commands/config.ts
+    178 src/commands/doctor.ts
+     64 src/commands/escolhas-sem-painel.ts
+    186 src/commands/execucao.ts
+    107 src/commands/gate-environment.ts
+    476 src/commands/key-io.ts
+    128 src/commands/line-io.ts
+    119 src/commands/options.ts
+    122 src/commands/paradas.ts
+     34 src/commands/private-input.ts
+     72 src/commands/providers.ts
+   1107 src/commands/wizard.ts
+    477 src/config/execucao.ts
+    246 src/config/global.ts
+    276 src/contract/change.ts
+    161 src/contract/survey-render.ts
+    331 src/contract/survey.ts
+     24 src/index.ts
+    112 src/interview/plataforma.ts
+     72 src/loop/fora-do-projeto.ts
+    373 src/mcp/client.ts
+     67 src/mcp/endpoint.ts
+     30 src/mcp/index.ts
+     75 src/mcp/levantamento.ts
+    256 src/mcp/library.ts
+    177 src/mcp/memoria.ts
+    257 src/mcp/skills.ts
+    208 src/prompt-engineer/engine.ts
+      3 src/prompt-engineer/index.ts
+    117 src/prompt-engineer/prompts.ts
+     98 src/prompt-engineer/protocol.ts
+     78 src/prompt-engineer/types.ts
+    130 src/prompts/change.ts
+    215 src/prompts/survey.ts
+    209 src/provider/adapters.ts
+     78 src/provider/cli/agy.ts
+     79 src/provider/cli/claude.ts
+     65 src/provider/cli/codex.ts
+     84 src/provider/cli/cursor.ts
+     28 src/provider/cli/custom.ts
+     45 src/provider/cli/index.ts
+    129 src/provider/cli/opencode-limits.ts
+     72 src/provider/cli/opencode.ts
+    130 src/provider/cli/types.ts
+    122 src/provider/credentials.ts
+    184 src/provider/direct-api.ts
+     52 src/provider/index.ts
+    300 src/provider/models.ts
+     31 src/provider/openrouter-key.ts
+     30 src/provider/redact.ts
+    169 src/provider/registry.ts
+    113 src/provider/roles.ts
+      8 src/provider/runtime-env.ts
+    229 src/provider/supervisor.ts
+    529 src/provider/transcript.ts
+     61 src/state/artifact-tree.ts
+     82 src/state/atomic.ts
+     91 src/state/events.ts
+     26 src/state/index.ts
+    179 src/state/lock.ts
+     82 src/state/paths.ts
+     97 src/state/resume.ts
+    142 src/state/run-store.ts
+      2 src/survey/index.ts
+    348 src/survey/orchestrator.ts
+    133 src/tui/ansi.ts
+     95 src/tui/apresentacao.ts
+     39 src/tui/blockfont.ts
+    247 src/tui/build-phases.ts
+    103 src/tui/build-progress.ts
+    109 src/tui/build-workers.ts
+     75 src/tui/capybara.ts
+    622 src/tui/dashboard.ts
+    420 src/tui/harness-progress.ts
+     35 src/tui/index.ts
+    317 src/tui/interview.ts
+    164 src/tui/keys.ts
+     14 src/tui/labels.ts
+     38 src/tui/language.ts
+    131 src/tui/live.ts
+     29 src/tui/mascots-data.ts
+    398 src/tui/modal.ts
+    218 src/tui/parada.ts
+    135 src/tui/plan-progress.ts
+     44 src/tui/sanitize.ts
+    164 src/tui/select.ts
+     45 src/tui/splash.ts
+     95 src/tui/text-field.ts
+    133 src/tui/wizard-screen.ts
+    240 src/tui/wizard.ts
+    257 src/tui/worker-log-panel.ts
+    205 src/tui/worker-logs.ts
+      5 src/version.ts
+
+(medido em 5072 ms)
+
+pastas dos cenários:
+/tmp/capivara-medida-app-pequeno-vGC6MU
+/tmp/capivara-medida-reparo-M1zUqk
+/tmp/capivara-medida-orcamento-esgotado-vOOFQz
+/tmp/capivara-medida-g1-MVNt3r
+/tmp/capivara-medida-g2-DBUrUW
+/tmp/capivara-medida-g3-Wp6kwy
+/tmp/capivara-medida-g4-ShlvNn

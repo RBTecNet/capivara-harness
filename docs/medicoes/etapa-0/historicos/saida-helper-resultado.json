@@ -1,0 +1,7 @@
+{
+  "method": "Ajudante real gerado pelo Core; Node emite aviso no stderr quando NO_COLOR e FORCE_COLOR coexistem. O filho continua com código 0.",
+  "codigo": 0,
+  "saida": "[]\n(node:960615) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.\n(Use `node --trace-warnings ...` to show where the warning was created)\n",
+  "parsed": null,
+  "error": "Unexpected non-whitespace character after JSON at position 3 (line 2 column 1)"
+}

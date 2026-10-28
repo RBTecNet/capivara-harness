@@ -1,0 +1,56 @@
+{
+  "method": "processos Node reais; mesmas 12 verificações externas; sem feedback aos agentes",
+  "tests": [
+    {
+      "name": "listagem vazia sem criar arquivo",
+      "passed": true
+    },
+    {
+      "name": "criação, título aparado e persistência entre processos",
+      "passed": true
+    },
+    {
+      "name": "duas tarefas com IDs únicos e ordenação",
+      "passed": true
+    },
+    {
+      "name": "conclusão persistente e idempotente",
+      "passed": true
+    },
+    {
+      "name": "remoção e IDs nunca reutilizados, inclusive com lista vazia",
+      "passed": true
+    },
+    {
+      "name": "título vazio recusado sem alterar dados",
+      "passed": true
+    },
+    {
+      "name": "IDs inválidos e inexistentes recusados sem alterar dados",
+      "passed": true
+    },
+    {
+      "name": "comando desconhecido recusado sem alterar dados",
+      "passed": true
+    },
+    {
+      "name": "arquivos independentes, diretórios pais e espaços no caminho",
+      "passed": true
+    },
+    {
+      "name": "caminho padrão relativo ao diretório de trabalho",
+      "passed": true
+    },
+    {
+      "name": "manifesto sem dependências e documentação mínima",
+      "passed": true
+    },
+    {
+      "name": "suíte do próprio produto executa com sucesso",
+      "passed": true
+    }
+  ],
+  "passed": 12,
+  "total": 12,
+  "durationMs": 5310
+}

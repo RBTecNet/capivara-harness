@@ -1,0 +1,326 @@
+Etapa 0 — linha de base, antes de reestruturar
+
+Checkout observado: refactor/core-exige-menos, c9f01504fbbd50fb151080c29fee4c53c7ca87d4,
+versão 0.8.3. Árvore limpa no início e ao terminar. Este estado já contém as
+correções ba19abf (conflitos PLAN × BUILD) e c9f0150 (cobertura na recuperação do
+INIT). A referência 0.8.2 fornecida anteriormente não foi restaurada.
+
+Nenhuma alteração no Core, nos prompts, adapters, limites ou versão nesta etapa.
+Nenhum mecanismo removido. A medição foi produzida fora do repositório e depois arquivada em
+docs/medicoes/etapa-0 por autorização de commit e push. Os scripts foram
+ajustados para localizar o checkout a partir desse novo diretório e gravar novas
+amostras fora dele, sem herdar instruções do repositório do harness.
+Os registros brutos mantêm os caminhos e valores originais da execução.
+Etapas 1 a 5 não foram executadas: dependem da aprovação entre etapas solicitada
+pelo desenvolvedor. Não existe resultado C nem melhoria demonstrada do motor.
+
+RESULTADO REAL COM O MESMO PEDIDO
+
+Pedido: gerenciador local de tarefas por CLI, quatro operações, persistência
+JSON, ids nunca reutilizados, erros sem modificar dados, README e testes Node.
+JavaScript ESM, Node >=22, sem dependências externas, SQL, web ou servidor.
+O pedido declara fechadas as decisões de produto. Texto integral: pedido.txt.
+SHA-256: 40dac0a21b30705f966ec7915396f9dd7169587ce0570df862d8c18a7d9aa0ec.
+
+Ambos: Codex CLI 0.164.0 autenticado por ChatGPT; modelo solicitado gpt-6.1-sol,
+reasoning high; Node v24.22.1; Linux x64; mesma máquina; diretórios Git novos e
+independentes, mesma semente. Não foi instalado software de sistema.
+
+                                      A: direto             B: Core atual
+Tempo de parede                       129,058 s             972,253 s
+Sessões externas de agente            1                     18
+INIT / PLAN / BUILD                    —                     3 / 5 / 10
+Tokens de entrada reportados          151.438               1.509.262
+Entrada em cache, incluída acima      134.784               1.208.704
+Tokens de saída reportados            6.496                 40.705
+Sessões que reportaram usage           1/1                   17/18
+Reparos de código solicitados Core    0                     2, na aceitação
+Reescritas estruturais do INIT        0                     1
+Sessões interrompidas pelo provider   0                     1, recuperada
+Provas externas dos comandos          12/12                 12/12
+Provas da restrição sem servidor      2/2                   1/2
+Total de verificações externas        14/14                 13/14
+Custo financeiro                      indisponível          indisponível
+
+B levou 7,53 vezes o tempo de A nesta amostra e foi declarado aceito pelo Core,
+mas entregou um servidor HTTP proibido pelo pedido. Os quatro comandos
+funcionaram nos dois produtos. Há um defeito de escopo observado em B e nenhum
+defeito observado nas verificações de A. Isso não prova ausência de outros
+defeitos nem permite generalizar uma taxa de sucesso a outros produtos.
+
+C: pendente, sem execução. Não existe comparação antes/depois da simplificação.
+
+Chamadas por papel:
+A: builder 1.
+B: writer 6 (entrevista 1, skeleton 2, arquitetura 1, fases 2), auditor 2
+(arquitetura e plano inteiro), builder 4 (implementação 2, reparo da aceitação 2),
+verifier 6 (revisão 3, incluindo uma chamada recusada; roteirista final 3).
+
+Tempo por etapa, de parede, B:
+INIT 193,625 s; PLAN 234,369 s; BUILD 544,056 s.
+Tempo de sessões por atividade:
+A: builder 129,035 s; seu planejamento e testes internos não são separáveis.
+B: planejamento 470,462 s; implementação e reparos 392,761 s; verificação e
+roteiros 127,453 s. Duas fases foram escritas em paralelo no PLAN; somar tempos
+de sessões não equivale ao tempo de parede. Os dois builders de implementação
+somam 207,425 s; os dois reparos da aceitação somam 185,336 s.
+Esses intervalos incluem leitura, raciocínio e testes internos de cada agente.
+Não é possível medir exatamente tempo de digitação/construção separado disso.
+
+Os 12 testes externos iniciais levaram 10,368 s em A e 9,381 s em B, após a
+medição do fluxo; esses tempos não estão incluídos no tempo de parede acima.
+Foram executados os programas reais e npm test, sem devolver resultados aos
+agentes. As duas provas suplementares verificam a restrição original de não
+ter servidor; não prescrevem uma resposta particular para CLI sem argumentos.
+Foram acrescentadas após observar a contaminação e aplicadas igualmente a A,
+B e ao commit de B anterior aos reparos. O script e todos os resultados estão
+preservados; a distinção evita disfarçar uma ampliação posterior do instrumento.
+
+O QUE A EXECUÇÃO MOSTROU
+
+1. INIT: a entrevista não encontrou decisão material, mas o Core perguntou
+"De onde vem o banco desta aplicação?", recomendando criar banco embutido.
+O driver respondeu opção 4, sem banco próprio, conforme o pedido original.
+Não houve espera humana nem nova decisão inventada. Depois o I-17 recusou
+"npm disponível" na stack como mecanismo sem autoridade; pediu outro skeleton.
+Essa reescrita custou uma sessão de 60,590 s. Origem do diagnóstico e resposta:
+resultados/B-01/core.log, 003.prompt.txt e registros do INIT dentro do produto.
+Não classificamos essa resposta semanticamente legível como falha de provider.
+
+2. PLAN: arquitetura, auditoria da arquitetura, dois autores de fase em
+paralelo e auditoria do plano completo. Os dois auditores aprovaram; nenhum
+defeito foi encontrado por eles nesta amostra. Custaram 45,347 s somados, além
+dos autores. Isso mede custo, não demonstra que auditoria nunca seja útil.
+
+3. Preparação do BUILD: instalou @playwright/test no espaço do harness e sondou
+Chromium para o produto sem web. Não alterou o manifesto do produto para isso.
+Em loop/build.ts:runBuild, a preparação browser depende de haver workflows,
+skipFlows e runner injetado; não depende da interface contratada. A origem é
+o BUILD, não uma decisão deste PLAN para instalar navegador no aplicativo.
+
+4. P01: builder, suíte real, revisão independente. A primeira revisão recebeu
+"Selected model is at capacity" e terminou com código 1, sem usage. O Core a
+tratou como sessão não concluída e repetiu a revisão; a fase passou. São uma
+falha externa e uma recuperação, não um defeito funcional nem reparo de código.
+
+5. P02: builder, suíte real e revisão independente passaram. O commit
+535c9de6e6cb53e02c45a1e52844bb114b9c0e6f foi preservado em antes-aceitacao.
+Ele passou nos 12 testes iniciais e nas 2 provas sem servidor. Logo, já havia
+software funcional para os comportamentos medidos antes dos reparos finais.
+
+6. Aceitação: loop/acceptance.ts:nodeSteps deriva "npm start" sem argumentos
+do manifesto. O contrato só exige comandos como list e add; a CLI recusava
+falta de comando. O Core enviou isso como falha do produto para reparo.
+O primeiro builder acrescentou listagem padrão sem argumentos: 64,119 s.
+O runner aceita uma CLI que encerra com 0; não exige permanência neste passo.
+A inadequação aqui é exigir sucesso sem um argumento que o produto requer.
+
+7. Fluxos: o roteiro usava só comandoDoProjeto, mas o gate exigiu HTTP/PORT.
+loop/build.ts passa stackDoSkeleton(skeletonMd) como contratoCertificado;
+prompts/acceptance-policy.ts:stackDoSkeleton extrai somente "## Stack".
+A stack dizia linguagem, runtime, persistência e dependências. A interface de
+terminal e a proibição de servidor estavam nas regras transversais, preservadas
+no documento e ignoradas nessa decisão. loop/flows.ts:stackDeTerminal retorna
+false nessa fatia; percorrerFluxos presume servidor e renderiza webServer.
+O erro enviado ao executor foi: "O entrypoint precisa escutar na porta que vem
+em PORT e servir alguma resposta ali." Não houve defeito HTTP no produto: o
+produto não contratou HTTP. O segundo reparo custou 121,217 s e acrescentou
+createServer, modo PORT e documentação HTTP, contrariando o contrato.
+acceptancePrompt (prompts/builder.ts), invocado por runBuild, envia a falha
+como defeito do produto sem o contrato compartilhado no contexto da chamada.
+O agente leu o contrato no disco e ainda priorizou a exigência do gate.
+Prova final: PORT=0 node src/cli.js inicia um servidor em porta efêmera e não
+encerra; a prova interrompe o processo após 5 segundos. Em A e no commit anterior
+de B, encerra normalmente. Consulte restricao-terminal.json de cada amostra.
+
+8. Roteirista: houve nova geração na passagem seguinte e outra chamada após
+um erro de JSON. O helper real comandoDoProjeto concatena stdout e stderr.
+Com NO_COLOR e FORCE_COLOR coexistindo no runner, Node imprime um aviso em
+stderr; a saída JSON fica seguida pelo aviso. O programa retorna código 0,
+mas JSON.parse(saida) falha. A reescrita passou a extrair a linha JSON.
+reproduzir-saida-helper.mjs reproduz isso com o ajudante real. É trabalho gerado
+pelo instrumento de verificação. O motivo exato da regeneração do roteiro entre
+as duas passagens não foi isolado; ela foi contada, sem atribuição causal extra.
+
+9. Resultado: fases completas e aceitação accepted:true, código 0. O Core não
+detectou que sua própria recuperação introduziu o servidor proibido. O produto
+foi testado separadamente após a aceitação; a suíte interna verde não foi usada
+como prova suficiente de correção do pedido.
+
+MAPA DO CAMINHO ATUAL E DAS RECUPERAÇÕES
+
+INIT: entrevista writer; resposta/decisão aceita persistida; classificação local
+de opções, auditor LLM só se a classificação de texto livre não resolver;
+skeleton writer; parser, cobertura e requisitos determinísticos. Recuperação
+estrutural usa até writer/writer/auditor; c9 preserva um candidato completo em
+vez de publicar uma substituta pior. Não há auditoria obrigatória adicional do
+skeleton válido. Lacunas materiais podem gerar perguntas.
+
+PLAN: writer de arquitetura; auditor independente de arquitetura; N autores de
+fase, podendo escrever em paralelo; auditor do plano completo. Normalização,
+interfaces, cobertura e dependências também são verificadas em código. Falhas
+de formato podem repetir chamadas e trocar escritor; rejeições materiais podem
+reescrever, reorganizar uma vez a arquitetura, reauditar e pedir decisão.
+Há limites de progresso/tentativas e publicação condicionada à prontidão.
+
+BUILD: preflight de contrato, Git e infraestrutura; preparação do ambiente;
+builder por fase; G0 supervisiona conclusão da sessão; G1 observa arquivos;
+G2 executa a suíte; G3 faz revisão independente das tasks sem prova válida.
+Defeitos têm identidade, diagnóstico persistido e tentativas limitadas.
+A escada normal para suite/task tenta verificador reparador antes do executor
+(loop/defeitos.ts:escadaDe). Após alteração, suite/provas afetadas são revalidadas
+e a revisão independente precisa aprovar; comentários antigos dizendo "sem
+segunda revisão" não representam o caminho atual de runner.ts.
+Conflito PLAN comprovado pode publicar UPSTREAM_REPAIR_REQUIRED antes de tentar
+outro reparo de código. Inversões sem prova nova podem parar como inconclusivas.
+Finalmente há aceitação em cópia limpa e roteirista por workflow essencial,
+com geração/reescrita se necessário. Defeito de produto na aceitação retorna ao
+builder e repete suite/aceitação. Erro de ferramenta reconhecido fica inconclusivo.
+
+No caminho feliz observado, com N fases e W workflows, sem reescritas, são
+2 sessões INIT + (N+3) PLAN + (2N+W) BUILD = 3N+W+5 sessões externas.
+Para N=2 e W=1, seriam 12. B fez 18: +1 skeleton, +1 provider/revisão,
++2 reparos da aceitação e +2 chamadas adicionais ao roteirista.
+Não é uma previsão de pior caso: recuperações dependem das falhas e dos limites.
+
+Ensaios do PLAN, auditoria por fase documental, triagem LLM de materialidade e
+G4 por fase já não estão no caminho padrão. A medição controlada os confirma com
+zero chamadas. Não atribuir ganho futuro a remover de novo o que já foi retirado.
+Não há obrigação atual de teste positivo e negativo por critério na linha medida.
+
+O livro de evidências registra prova, entradas/artefatos e invalidação; impacto e
+aprovações decidem deterministicamente o que ainda precisa de revisão. Isso não
+é outra sessão LLM nem um selecionador de testes unitários. Preservar trabalho,
+retomada e isolamento Git não deve ser confundido com preservar cada estado ou
+arquivo desses mecanismos. A matriz mecanismos.csv detalha custos e evidências.
+
+CASOS HISTÓRICOS E LIMITES DA EVIDÊNCIA
+
+Samba, decisão entre fases: reproduzido com documentos reais e a função atual
+admitir. A decisão Q-92 foi aceita; redefinirSenha saiu da Phase 2 e está na
+Phase 5. Mesmo assim contradicoesQuePersistem chama admitir, que confere apenas
+se as duas citações ainda existem em qualquer lugar, sem conservar o vínculo à
+fase originalmente contraditória. Retorna bloqueia:true porque a implementação
+está na Phase 5 e a reserva da Phase 5 está na arquitetura — agora compatíveis.
+O evento final registra bloqueio 13,388 s depois da decisão. Esse é um bloqueio
+do Core comprovado, não falta de decisão do usuário. Fixture, hashes das fontes,
+decisão e evento: historicos/contradicao-fases*.json. O script reproduz a função
+determinística implicada; não é replay integral da execução histórica do PLAN.
+
+Samba, cobertura: o checkout já tem a proteção c9 e suas regressões de Core
+em test/init/recuperacao-cobertura.spec.ts. Os artefatos atuais de
+init-19468373438e são de reexecução posterior: eventos começam às 21:45 UTC e
+publicam PLAN READY com 7 fases às 21:47. Não foram apresentados como sendo os
+arquivos originais do incidente que terminou NOT READY. O diagnóstico original
+e a correção estão no histórico Git; as regressões atuais passaram no check.
+
+Samba, passwd × useradd: ba19abf já contém encaminhamento com evidências e
+preservação do reparo; test/loop/contradicao-plan-build.spec.ts exercita conflito
+comprovado, inversão sem prova, regressão real, preferência e decisão válida.
+O run build-59a4b34aa18d original não está disponível aqui para medir tokens/tempo.
+O upstream publica e valida o pacote, mas conferirReparosNaEntrada não edita
+automaticamente o documento e a rota INIT ainda não está habilitada no runner.
+Continuidade automática após esse encaminhamento não deve ser anunciada como
+capacidade concluída. Isso deverá ser tratado sem trocar decisões materiais.
+
+Avalonia/Astra: histórico descrito em docs/HANDOFF.md e regressões de desktop,
+cooperacao-133 e recursos de leitura. O Core atual tem aceitação desktop e
+roteirista autorizado a ler código por comandos; não reproduzir essas correções.
+Não estão disponíveis as execuções originais para comparação controlada com A.
+O novo B demonstra contaminação web real ainda existente para CLI por outro
+caminho, independentemente do nome do modelo ou projeto.
+
+CATÁLOGO CONTROLADO COMPLEMENTAR, NÃO MEDIDA DE QUALIDADE DO PRODUTO
+
+O script existente medir-verificacao.mjs rodou sete cenários com agentes e
+runners falsos. Happy path de 4 fases/2 workflows: 19 sessões; reparo: 20;
+orçamento esgotado: 16, falha em P03 sem iniciar P04. Os quatro cenários de
+garantia semântica, percurso final, contradição e defeito persistente foram
+detectados. catalogo-controlado.json/log preservam os números e contagem cruzada.
+O script completo levou cerca de 5 s; isso é tempo do ensaio falso, não tempo
+de modelo nem estimativa de economia. Os runners falsos aprovam testes/start;
+essa aprovação não comprova uma aplicação executável. Para qualidade foram
+usados o produto real e as provas externas acima.
+
+REGRESSÕES E INTEGRIDADE
+
+npm run check executado no checkout atual: build, typecheck e 188 arquivos de
+teste passaram; 3.153 testes, 86,91 s na execução do Vitest. check.log contém a
+saída integral. Nenhum teste ou prompt de produção foi alterado nesta etapa.
+O teste externo suplementar de B falhou intencionalmente como evidência de
+defeito existente; isso não é contradição com a suíte interna ter passado.
+
+LIMITAÇÕES METODOLÓGICAS
+
+- Uma amostra por braço, A antes de B. Não há significância estatística nem
+  garantia de igualdade de carga, cache ou latência do provider. npm run check
+  foi executado na máquina durante parte de B; não há isolamento de CPU total.
+  A falha de capacidade em B está contabilizada, não atribuída à arquitetura.
+- O mesmo modelo/effort foi solicitado em todas as funções; não se observa o
+  roteamento interno do provider. Não foram comparados modelos diferentes.
+- A usa a ponte de produção somente como transporte de codex exec, com apenas
+  pedido.txt como prompt; não chama INIT, PLAN, auditor ou controlador de reparo.
+  B usa runInit, runPlan e runBuild reais pela API pública compilada, os runners
+  reais e os limites padrão. É uma comparação do Core, não da interface TUI.
+  O driver responde automaticamente só a pergunta de banco já resolvida pelo
+  pedido; outras decisões causariam parada registrada. Commits da especificação
+  usam commitSpecification. Produtos ficam em pastas descartáveis separadas.
+- Sessão externa não equivale a uma única requisição interna de inferência.
+  Codex faz seu próprio ciclo de ferramentas. O total dessas requisições não é
+  exposto. Tokens são usage reportado pela CLI, inclusive cache, não novos
+  tokens faturados. Falta usage na chamada de capacidade de B. Não há preço
+  confiável/custo reportado para estas sessões; custo é null, nunca zero.
+- A primeira versão do coletor repetiu o identificador 006 nas duas chamadas
+  paralelas de fases. Transcrições têm nomes distintos e as 18 chamadas/eventos
+  foram preservadas; os atalhos 006.prompt/response foram sobrescritos entre si.
+  Prompts e respostas completos das duas fases estão nos registros nativos do
+  Core, produto/.capivara/runs/init-73b6e67ac6e2/{prompts,logs}. O coletor foi
+  corrigido para reservar o número antes de aguardar a sessão; nenhuma medição
+  de tempo, tokens ou contagem depende desses atalhos.
+- resultado.json guarda métricas primitivas, incluindo repairSessions com flags
+  explícitas do adapter. O BUILD não sinaliza reparo da aceitação nessa flag.
+  resumo.json/consolidar.mjs contam corretamente as duas sessões usando os
+  eventos nativos de aceitação e timestamps. Não confundir zero flags com zero
+  reparos. Todos os dados primitivos foram mantidos.
+
+COMO REPRODUZIR
+
+No repositório capivara:
+  npm run build
+  npm run check
+  node packages/core/scripts/medir-verificacao.mjs --json /tmp/catalogo-novo.json --manter
+
+Neste diretório (requer a mesma CLI autenticada; saídas precisam ser novas e
+fora do repositório do harness para não herdar suas instruções):
+  node medir.mjs --arm A --model gpt-6.1-sol --effort high --out /tmp/capivara-medida-A-repeticao
+  node medir.mjs --arm B --model gpt-6.1-sol --effort high --out /tmp/capivara-medida-B-repeticao
+  node provar-produto.mjs /tmp/capivara-medida-A-repeticao/produto
+  node provar-produto.mjs /tmp/capivara-medida-B-repeticao/produto
+  node provar-restricao-terminal.mjs /tmp/capivara-medida-A-repeticao/produto
+  node provar-restricao-terminal.mjs /tmp/capivara-medida-B-repeticao/produto
+  node consolidar.mjs
+  node reproduzir-contradicao.mjs
+  node reproduzir-saida-helper.mjs
+
+Sem --out, medir.mjs cria a nova amostra em um caminho exclusivo de /tmp.
+consolidar.mjs resume as amostras arquivadas em resultados; novas execuções
+mantêm suas métricas e proveniência na pasta --out escolhida.
+
+As provas retornam código diferente de zero quando encontram falha; o esperado
+no produto B-01 é código 2 na prova sem servidor. A reexecução com modelo real
+não garante a mesma sequência de respostas; a linha de base observada permanece
+em A-01/B-01. Não reutilize essas pastas como saída nem altere seus artefatos.
+resumo.json reúne números; chamadas.json e eventos.jsonl permitem conferir
+cada sessão; manifests-sha256.json permite verificar integridade dos arquivos arquivados.
+manifests-originais-sha256.json preserva o manifesto anterior ao arquivamento.
+node_modules, metadados .git internos e .env não fazem parte do arquivo; as
+dependências podem ser instaladas pelos manifestos. O commit anterior à
+aceitação está representado pelo snapshot e SHA originais, sem o banco Git.
+
+CONDIÇÃO PARA AVANÇAR
+
+A Etapa 0 cumpriu a medição e identificou custos e defeitos reais. A prioridade
+para discussão na Etapa 1 é reduzir retornos internos que já pioram um produto
+funcional, com o contrato completo preservado. A decisão sobre o fluxo mínimo
+e cortes efetivos ainda não foi tomada. Aguardar aprovação do desenvolvedor
+para essa próxima etapa; não há nova arquitetura paralela ou alteração oculta.

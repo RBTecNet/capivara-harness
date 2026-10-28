@@ -1,0 +1,229 @@
+{
+  "contract": "capivara-skeleton/v2",
+  "projectName": "Tarefas locais pelo terminal",
+  "stack": [
+    {
+      "component": "Linguagem",
+      "decision": "JavaScript ESM, sem transpilação, usando somente recursos embutidos do Node.js."
+    },
+    {
+      "component": "Execução",
+      "decision": "Node.js >=22; versão disponível no ambiente: 24.22.1."
+    },
+    {
+      "component": "Gerenciador de pacotes",
+      "decision": "npm disponível no ambiente: 11.19.1; nenhuma instalação de pacote é necessária."
+    },
+    {
+      "component": "Persistência",
+      "decision": "Arquivo JSON local, sem SQL, banco de dados próprio ou dependências externas."
+    },
+    {
+      "component": "Interface",
+      "decision": "CLI local, sem interface web, servidor ou serviço permanente."
+    }
+  ],
+  "environment": [
+    {
+      "technology": "Node.js >=22, disponível na versão 24.22.1",
+      "binary": "node",
+      "systemLevel": false,
+      "checkArgs": [
+        "-e",
+        "process.exit(Number(process.versions.node.split('.')[0]) >= 22 ? 0 : 1)"
+      ],
+      "installHint": "Usar o Node.js 24.22.1 já disponível no ambiente."
+    },
+    {
+      "technology": "npm disponível na versão 11.19.1",
+      "binary": "npm",
+      "systemLevel": false,
+      "checkArgs": [
+        "--version"
+      ],
+      "installHint": "Usar o npm 11.19.1 já disponível no ambiente, sem instalar pacotes."
+    }
+  ],
+  "entities": [
+    {
+      "name": "tarefas",
+      "fields": [
+        {
+          "name": "id",
+          "type": "inteiro positivo, único, crescente e nunca reutilizado"
+        },
+        {
+          "name": "title",
+          "type": "texto obrigatório, sem espaços nas extremidades ao criar"
+        },
+        {
+          "name": "done",
+          "type": "booleano, inicialmente false"
+        }
+      ],
+      "relations": []
+    }
+  ],
+  "stories": [
+    {
+      "id": "US-1.1",
+      "statement": "Como usuário do terminal, quero listar as tarefas em ordem de id e receber um array JSON."
+    },
+    {
+      "id": "US-1.2",
+      "statement": "Como usuário do terminal, quero criar tarefas com título e receber cada tarefa criada em JSON."
+    },
+    {
+      "id": "US-1.3",
+      "statement": "Como usuário do terminal, quero concluir uma tarefa pelo id e receber seu estado atualizado, podendo repetir a conclusão."
+    },
+    {
+      "id": "US-1.4",
+      "statement": "Como usuário do terminal, quero remover uma tarefa pelo id e receber a confirmação em JSON."
+    },
+    {
+      "id": "US-1.5",
+      "statement": "Como usuário do terminal, quero selecionar arquivos de dados independentes e preservar minhas tarefas entre processos."
+    },
+    {
+      "id": "US-1.6",
+      "statement": "Como usuário do terminal, quero receber mensagens explicativas para entradas recusadas, mantendo os dados existentes."
+    },
+    {
+      "id": "US-1.7",
+      "statement": "Como usuário do terminal, quero instruções curtas de execução, configuração e exemplos dos comandos."
+    }
+  ],
+  "workflows": [
+    {
+      "number": "1",
+      "name": "Gerenciar tarefas entre processos",
+      "steps": [
+        "Executar node src/cli.js list; quando o arquivo selecionado não existir, observar [] sem criação do arquivo.",
+        "Executar node src/cli.js add \"Primeira tarefa\" e node src/cli.js add \"Segunda tarefa\" em processos separados, observando os objetos criados com ids distintos e done=false.",
+        "Executar node src/cli.js list em outro processo e conferir as duas tarefas persistidas, ordenadas pelo id.",
+        "Executar node src/cli.js done ID para uma das tarefas e conferir o objeto retornado com done=true e esse estado em uma listagem posterior.",
+        "Executar node src/cli.js remove ID para a outra tarefa, observar a confirmação e conferir que a listagem posterior contém somente a tarefa concluída."
+      ]
+    },
+    {
+      "number": "2",
+      "name": "Selecionar dados independentes",
+      "steps": [
+        "Selecionar um arquivo de dados por TASKS_FILE e criar uma tarefa.",
+        "Selecionar outro arquivo por TASKS_FILE e observar seu conjunto independente de tarefas e sua sequência independente de ids.",
+        "Voltar ao primeiro arquivo em outro processo e observar os dados anteriormente gravados."
+      ]
+    },
+    {
+      "number": "3",
+      "name": "Recusar entradas sem alterar dados",
+      "steps": [
+        "Com dados existentes, fornecer título vazio, ID inválido, ID inexistente ou comando desconhecido.",
+        "Observar código de saída diferente de zero e mensagem explicativa em português no stderr.",
+        "Listar novamente as tarefas em outro processo e observar os dados preservados."
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "subject": "interface.comandos",
+      "statement": "O produto é usado somente por comandos no terminal. Os comandos públicos são node src/cli.js list, node src/cli.js add TITULO, node src/cli.js done ID e node src/cli.js remove ID."
+    },
+    {
+      "subject": "interface.saidas",
+      "statement": "Em operações bem-sucedidas, list imprime um array JSON de tarefas; add e done imprimem um objeto JSON com id, title e done; remove imprime um objeto JSON com removed contendo o ID removido."
+    },
+    {
+      "subject": "tarefas.listagem",
+      "statement": "Ao executar list, as tarefas são apresentadas em ordem crescente de id. Se o arquivo selecionado não existir, a saída é [] e a operação não cria o arquivo nem seus diretórios pais."
+    },
+    {
+      "subject": "tarefas.title",
+      "statement": "Ao executar add, os espaços nas extremidades do título são removidos antes da gravação e da resposta. Se o resultado for vazio, a entrada é recusada."
+    },
+    {
+      "subject": "tarefas.criacao",
+      "statement": "Ao executar add com título válido, uma tarefa é persistida com id atribuído, title tratado e done=false. Em um arquivo sem atribuições anteriores, a primeira tarefa recebe id=1."
+    },
+    {
+      "subject": "tarefas.id",
+      "statement": "Na criação, os ids atribuídos são inteiros positivos, únicos e crescentes dentro do arquivo selecionado. Um id já atribuído nunca é reutilizado, inclusive após remoção de todas as tarefas e reinicialização do processo. A informação necessária para preservar essa sequência permanece persistida no arquivo JSON."
+    },
+    {
+      "subject": "tarefas.conclusao",
+      "statement": "Ao executar done com ID válido e existente, a tarefa passa a done=true, preservando id e title, e o objeto atualizado é impresso. Repetir done para a mesma tarefa concluída mantém seu estado e retorna o objeto atualizado."
+    },
+    {
+      "subject": "tarefas.remocao",
+      "statement": "Ao executar remove com ID válido e existente, a tarefa é removida da persistência e a saída contém removed com o id numérico removido. A remoção preserva as demais tarefas e o histórico necessário para impedir reutilização de ids."
+    },
+    {
+      "subject": "dados.selecao",
+      "statement": "Em cada execução, TASKS_FILE seleciona o arquivo de dados. Quando ausente, o caminho é ./data/tasks.json, relativo ao diretório de trabalho."
+    },
+    {
+      "subject": "dados.persistencia",
+      "statement": "As tarefas e a continuidade da atribuição de ids são preservadas em arquivo JSON entre processos separados. Arquivos selecionados diferentes mantêm dados e sequências de ids independentes."
+    },
+    {
+      "subject": "dados.diretorios",
+      "statement": "Diretórios pais necessários para o arquivo selecionado são criados somente ao gravar dados."
+    },
+    {
+      "subject": "entradas.recusa",
+      "statement": "Título vazio após remoção dos espaços nas extremidades, ID que não representa inteiro positivo, ID inexistente em done ou remove e comando desconhecido são recusados com código de saída diferente de zero e mensagem explicativa em português no stderr. A recusa não apaga nem modifica os dados existentes, incluindo a continuidade da atribuição de ids."
+    },
+    {
+      "subject": "distribuicao.package",
+      "statement": "Entregar package.json com type=module e a entrada start executando src/cli.js."
+    },
+    {
+      "subject": "documentacao.uso",
+      "statement": "Entregar README.md curto, em português, com execução, configuração por TASKS_FILE, caminho padrão e exemplos dos comandos list, add, done e remove."
+    },
+    {
+      "subject": "testes.requisito",
+      "statement": "Entregar package.json com a entrada test executando testes automatizados com o runner embutido node --test."
+    }
+  ],
+  "phases": [
+    {
+      "number": 1,
+      "title": "Persistência local e continuidade dos identificadores",
+      "goal": "Preservar tarefas e a sequência de ids entre processos, com seleção de arquivos independentes e criação de diretórios somente ao gravar.",
+      "dependsOn": "none",
+      "covers": [
+        "tarefas",
+        "US-1.5",
+        "workflow 2"
+      ],
+      "areas": [
+        "dados",
+        "backend"
+      ],
+      "taskCount": 4
+    },
+    {
+      "number": 2,
+      "title": "Gestão completa de tarefas pelo terminal",
+      "goal": "Permitir listar, criar, concluir e remover tarefas pelo contrato público, recusar entradas inválidas preservando os dados e fornecer instruções curtas de uso.",
+      "dependsOn": "Phase 1",
+      "covers": [
+        "US-1.1",
+        "US-1.2",
+        "US-1.3",
+        "US-1.4",
+        "US-1.6",
+        "US-1.7",
+        "workflow 1",
+        "workflow 3"
+      ],
+      "areas": [
+        "backend"
+      ],
+      "taskCount": 8
+    }
+  ],
+  "mvpCutPhase": 2
+}

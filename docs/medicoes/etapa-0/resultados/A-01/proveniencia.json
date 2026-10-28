@@ -1,0 +1,26 @@
+{
+  "schema": "capivara-etapa0/v1",
+  "arm": "A",
+  "engineCommit": "c9f01504fbbd50fb151080c29fee4c53c7ca87d4",
+  "engineVersion": "0.8.3",
+  "engineDiff": "",
+  "model": "gpt-6.1-sol",
+  "effort": "high",
+  "provider": "codex",
+  "cli": "codex-cli 0.164.0",
+  "node": "v24.22.1",
+  "platform": "linux",
+  "arch": "x64",
+  "requestSha256": "40dac0a21b30705f966ec7915396f9dd7169587ce0570df862d8c18a7d9aa0ec",
+  "sample": 1,
+  "startedAt": "2026-10-28T01:54:02.492Z",
+  "project": "/home/bruno/Documentos/Projetos/NovoHarness/medicoes-capivara/etapa-0/resultados/A-01/produto",
+  "limits": {
+    "firstOutputSeconds": 1200,
+    "idleSeconds": 600,
+    "wallSeconds": 3600,
+    "maxOutputBytes": 8388608
+  },
+  "counting": "sessões externas de agente; requisições internas ao provider não observáveis",
+  "costUsd": null
+}

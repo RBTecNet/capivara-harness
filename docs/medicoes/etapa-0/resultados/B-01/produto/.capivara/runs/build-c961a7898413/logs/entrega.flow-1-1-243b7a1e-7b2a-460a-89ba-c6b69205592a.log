@@ -1,0 +1,39 @@
+```ts
+import { expect, test } from '@playwright/test';
+import { comandoDoProjeto } from './capivara-comando';
+
+test('workflow 1 — Gerenciar tarefas em processos separados', async () => {
+  const primeira = { id: 1, title: 'Comprar pão', done: false };
+  const segunda = { id: 2, title: 'Estudar JavaScript', done: false };
+  const concluida = { ...primeira, done: true };
+
+  async function executar(...argumentos: string[]) {
+    const resultado = await comandoDoProjeto('node', ['src/cli.js', ...argumentos]);
+    expect(
+      resultado.codigo,
+      `O comando ${argumentos[0]} deve terminar com sucesso. Saída: ${resultado.saida}`,
+    ).toBe(0);
+    return JSON.parse(resultado.saida);
+  }
+
+  await test.step('passo 1: Executar node src/cli.js list e criar duas tarefas com node src/cli.js add TITULO.', async () => {
+    expect(await executar('list')).toEqual([]);
+    expect(await executar('add', primeira.title)).toEqual(primeira);
+    expect(await executar('add', segunda.title)).toEqual(segunda);
+  });
+
+  await test.step('passo 2: Executar node src/cli.js list em outro processo e conferir as duas tarefas persistidas.', async () => {
+    expect(await executar('list')).toEqual([primeira, segunda]);
+  });
+
+  await test.step('passo 3: Executar node src/cli.js done ID para uma tarefa e conferir seu novo estado em uma listagem posterior.', async () => {
+    expect(await executar('done', String(primeira.id))).toEqual(concluida);
+    expect(await executar('list')).toEqual([concluida, segunda]);
+  });
+
+  await test.step('passo 4: Executar node src/cli.js remove ID para a outra tarefa e conferir a listagem resultante em outro processo.', async () => {
+    expect(await executar('remove', String(segunda.id))).toEqual({ removed: segunda.id });
+    expect(await executar('list')).toEqual([concluida]);
+  });
+});
+```

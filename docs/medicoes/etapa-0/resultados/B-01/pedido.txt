@@ -1,0 +1,34 @@
+Construa uma aplicação CLI local de tarefas, em JavaScript ESM, Node.js >=22,
+sem transpilação e sem dependências externas. Não há interface web, servidor,
+serviço permanente, SQL ou banco de dados próprio. Os dados ficam em arquivo JSON.
+
+Contrato público, que deve funcionar em processos separados:
+- `node src/cli.js list`: imprime um array JSON de tarefas, ordenado pelo id.
+  Se o arquivo de dados não existe, imprime [] sem criá-lo.
+- `node src/cli.js add TITULO`: remove espaços nas extremidades, cria uma tarefa
+  e imprime o objeto JSON {"id":1,"title":"TITULO","done":false}.
+- `node src/cli.js done ID`: marca como concluída e imprime o objeto atualizado.
+  Repetir a conclusão é idempotente.
+- `node src/cli.js remove ID`: remove a tarefa e imprime {"removed":ID}.
+- IDs são inteiros positivos, crescentes, únicos e nunca reutilizados, inclusive
+  após remoção e reinicialização do processo.
+- A variável TASKS_FILE seleciona o arquivo de dados; quando ausente, o caminho
+  é ./data/tasks.json, relativo ao diretório de trabalho. Criar diretórios pais
+  somente ao gravar. Arquivos de dados diferentes são independentes.
+- Título vazio, ID inválido, ID inexistente ou comando desconhecido: código de
+  saída diferente de zero, mensagem explicativa no stderr e dados inalterados.
+- Dados válidos são preservados entre processos. Entradas recusadas não apagam
+  nem modificam os dados existentes.
+
+Entregue package.json com type=module, `start` executando src/cli.js e `test`
+executando testes automatizados com o runner embutido `node --test`.
+Entregue README.md curto, com execução, configuração e exemplos dos comandos.
+O produto é usado somente por comandos no terminal. Seu fluxo essencial é:
+1. Listar tarefas e criar duas tarefas.
+2. Listar e conferir as duas tarefas persistidas.
+3. Concluir uma tarefa e conferir seu novo estado.
+4. Remover a outra tarefa e conferir a listagem resultante.
+
+Use somente os recursos embutidos do Node.js; nenhuma instalação de pacote ou
+serviço é necessária. As decisões acima estão fechadas. Planeje, implemente,
+execute as verificações úteis e corrija os defeitos que encontrar.

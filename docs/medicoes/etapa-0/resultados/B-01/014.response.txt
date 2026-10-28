@@ -1,0 +1,5 @@
+Corrigido: `npm start` sem argumentos agora lista as tarefas e encerra com código 0. Documentação e teste atualizados; comandos desconhecidos continuam recusados.
+
+Validação: `npm test` passou com 15 testes, sem falhas ou testes ignorados. Numa cópia limpa dos arquivos rastreados, validei inicialização e operações com persistência entre processos.
+
+CAPIVARA_BUILDER_STATUS: COMPLETE

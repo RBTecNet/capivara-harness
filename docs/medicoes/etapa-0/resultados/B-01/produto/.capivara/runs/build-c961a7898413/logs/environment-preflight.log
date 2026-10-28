@@ -1,0 +1,43 @@
+[
+  {
+    "technology": "Node.js >=22",
+    "binary": "node",
+    "systemLevel": false,
+    "checkArgs": [
+      "--eval",
+      "if (Number(process.versions.node.split('.')[0]) < 22) { console.error('É necessário Node.js 22 ou superior.'); process.exit(1); }"
+    ],
+    "installHint": "Utilizar o Node.js 24.22.1 já disponível na máquina; nenhuma instalação é necessária.",
+    "path": "/home/bruno/.nvm/versions/node/v24.22.1/bin/node",
+    "present": true,
+    "cwd": "/home/bruno/Documentos/Projetos/NovoHarness/medicoes-capivara/etapa-0/resultados/B-01/produto",
+    "evidence": "cwd: /home/bruno/Documentos/Projetos/NovoHarness/medicoes-capivara/etapa-0/resultados/B-01/produto\n"
+  },
+  {
+    "technology": "Recursos embutidos do Node.js",
+    "binary": "node",
+    "systemLevel": false,
+    "checkArgs": [
+      "--input-type=module",
+      "--eval",
+      "await Promise.all(['node:fs/promises', 'node:path', 'node:process', 'node:test'].map(nome => import(nome)));"
+    ],
+    "installHint": "Os módulos declarados acompanham o Node.js disponível; nenhuma instalação de pacote ou serviço é necessária.",
+    "path": "/home/bruno/.nvm/versions/node/v24.22.1/bin/node",
+    "present": true,
+    "cwd": "/home/bruno/Documentos/Projetos/NovoHarness/medicoes-capivara/etapa-0/resultados/B-01/produto",
+    "evidence": "cwd: /home/bruno/Documentos/Projetos/NovoHarness/medicoes-capivara/etapa-0/resultados/B-01/produto\n"
+  }
+]
+
+$ npm install --prefix .capivara --no-save --package-lock=false --no-audit --no-fund @playwright/test
+exit: 0
+
+added 3 packages in 1s
+
+
+$ PLAYWRIGHT_BROWSERS_PATH='/home/bruno/.cache/ms-playwright' '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' -e 'const {chromium}=require(process.argv[1]);chromium.launch({headless:true,timeout:15000}).then(b=>b.close()).catch(e=>{console.error(e.message);process.exitCode=1})' '/home/bruno/Documentos/Projetos/NovoHarness/medicoes-capivara/etapa-0/resultados/B-01/produto/.capivara/node_modules/@playwright/test'
+exit: 0
+
+
+Ambiente aprovado antes do desenvolvimento. Sondas de prontidão não serão repetidas nas fases.

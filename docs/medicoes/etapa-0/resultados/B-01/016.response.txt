@@ -1,0 +1,5 @@
+Corrigido: `npm start` com `PORT` definida mantém o servidor ativo e responde com a listagem JSON em `http://127.0.0.1:PORT/`.
+
+Verificações concluídas: `npm test` com 18 testes aprovados e execução em cópia limpa, incluindo reinicialização e recuperação dos dados. Todos os processos de verificação foram encerrados.
+
+CAPIVARA_BUILDER_STATUS: COMPLETE

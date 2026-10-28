@@ -1,0 +1,110 @@
+[
+  {
+    "phase": "P01",
+    "index": 1,
+    "sha": "764b1bb53ac0",
+    "title": "Implementar em `src/persistencia.js` as exportações `resolverArquivo(valor: string | undefined, diretorioAtual: string): string` e `lerEstado(caminho: string): Promise<Estado>`.",
+    "runId": "build-c961a7898413",
+    "cycle": 1,
+    "at": "2026-10-28T02:06:52.652Z",
+    "sliceSha12": "b24dcdf15e75",
+    "tree": "8e38cfc96759aca1551a65e56e22ccbf3b7bbec6",
+    "contratoSha": "10fa69e43f43"
+  },
+  {
+    "phase": "P01",
+    "index": 2,
+    "sha": "f7640b2e8fba",
+    "title": "Implementar em `src/persistencia.js` a exportação `gravarEstado(caminho: string, estado: Estado): Promise<void>` para persistir o estado completo.",
+    "runId": "build-c961a7898413",
+    "cycle": 1,
+    "at": "2026-10-28T02:06:52.652Z",
+    "sliceSha12": "b24dcdf15e75",
+    "tree": "8e38cfc96759aca1551a65e56e22ccbf3b7bbec6",
+    "contratoSha": "10fa69e43f43"
+  },
+  {
+    "phase": "P01",
+    "index": 3,
+    "sha": "a2689d8932f7",
+    "title": "Implementar em `src/dominio.js` as exportações `ErroDeEntrada`, `listar(caminho: string): Promise<Tarefa[]>` e `adicionar(caminho: string, titulo: string): Promise<Tarefa>`, consumindo `src/persistencia.js`.",
+    "runId": "build-c961a7898413",
+    "cycle": 1,
+    "at": "2026-10-28T02:06:52.652Z",
+    "sliceSha12": "b24dcdf15e75",
+    "tree": "8e38cfc96759aca1551a65e56e22ccbf3b7bbec6",
+    "contratoSha": "10fa69e43f43"
+  },
+  {
+    "phase": "P01",
+    "index": 4,
+    "sha": "71a6146e11b2",
+    "title": "Implementar em `src/dominio.js` a exportação `concluir(caminho: string, identificador: string): Promise<Tarefa>`, utilizando `ErroDeEntrada` e as funções de persistência.",
+    "runId": "build-c961a7898413",
+    "cycle": 1,
+    "at": "2026-10-28T02:06:52.652Z",
+    "sliceSha12": "b24dcdf15e75",
+    "tree": "8e38cfc96759aca1551a65e56e22ccbf3b7bbec6",
+    "contratoSha": "10fa69e43f43"
+  },
+  {
+    "phase": "P01",
+    "index": 5,
+    "sha": "1a9afc8cd81f",
+    "title": "Implementar em `src/dominio.js` a exportação `remover(caminho: string, identificador: string): Promise<{removed: number}>`, preservando o histórico da sequência.",
+    "runId": "build-c961a7898413",
+    "cycle": 1,
+    "at": "2026-10-28T02:06:52.652Z",
+    "sliceSha12": "b24dcdf15e75",
+    "tree": "8e38cfc96759aca1551a65e56e22ccbf3b7bbec6",
+    "contratoSha": "10fa69e43f43"
+  },
+  {
+    "phase": "P02",
+    "index": 1,
+    "sha": "ad1b48795f49",
+    "title": "Implementar em src/cli.js a seleção do arquivo e os comandos `list` e `add`, consumindo `resolverArquivo` de src/persistencia.js e `listar` e `adicionar` de src/dominio.js. Ler o comando de `process.argv[2]` e o título de `process.argv[3]`, usando `\"\"` quando o título estiver ausente.",
+    "runId": "build-c961a7898413",
+    "cycle": 1,
+    "at": "2026-10-28T02:08:54.213Z",
+    "sliceSha12": "ed9f599e09ea",
+    "tree": "b35808c9db2fecb846dd1786208379de041fdde2",
+    "contratoSha": "10fa69e43f43"
+  },
+  {
+    "phase": "P02",
+    "index": 2,
+    "sha": "8dbe47c80591",
+    "title": "Implementar em src/cli.js os comandos `done` e `remove`, consumindo `concluir` e `remover` de src/dominio.js. Encaminhar `process.argv[3]` como identificador textual, usando `\"\"` quando ausente, e utilizar o caminho obtido por `resolverArquivo(process.env.TASKS_FILE, process.cwd())`.",
+    "runId": "build-c961a7898413",
+    "cycle": 1,
+    "at": "2026-10-28T02:08:54.213Z",
+    "sliceSha12": "ed9f599e09ea",
+    "tree": "b35808c9db2fecb846dd1786208379de041fdde2",
+    "contratoSha": "10fa69e43f43"
+  },
+  {
+    "phase": "P02",
+    "index": 3,
+    "sha": "9131feecc928",
+    "title": "Implementar em src/cli.js o tratamento das recusas dos comandos, capturando `ErroDeEntrada` exportado por src/dominio.js e apresentando sua mensagem em português. Recusar comando desconhecido antes de chamar `listar`, `adicionar`, `concluir` ou `remover`.",
+    "runId": "build-c961a7898413",
+    "cycle": 1,
+    "at": "2026-10-28T02:08:54.213Z",
+    "sliceSha12": "ed9f599e09ea",
+    "tree": "b35808c9db2fecb846dd1786208379de041fdde2",
+    "contratoSha": "10fa69e43f43"
+  },
+  {
+    "phase": "P02",
+    "index": 4,
+    "sha": "208fa6671c68",
+    "title": "Entregar package.json para execução dos módulos ESM e README.md curto, em português, com instruções de uso da aplicação pelo terminal.",
+    "runId": "build-c961a7898413",
+    "cycle": 1,
+    "at": "2026-10-28T02:08:54.213Z",
+    "sliceSha12": "ed9f599e09ea",
+    "tree": "b35808c9db2fecb846dd1786208379de041fdde2",
+    "contratoSha": "10fa69e43f43"
+  }
+]

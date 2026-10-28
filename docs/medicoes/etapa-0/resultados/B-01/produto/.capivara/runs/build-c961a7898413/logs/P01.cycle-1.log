@@ -1,0 +1,5 @@
+Implementados os módulos de persistência e domínio, com gravação por renomeação, validação de entradas e preservação dos identificadores entre processos.
+
+Verificação: `node --test test/persistencia.test.js test/dominio.test.js` — 8 testes aprovados, usando arquivos temporários isolados.
+
+CAPIVARA_BUILDER_STATUS: COMPLETE

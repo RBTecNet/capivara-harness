@@ -1,0 +1,8 @@
+Implementado em JavaScript ESM, sem dependências externas, com os quatro comandos, persistência JSON, IDs não reutilizados e validação que preserva os dados.
+
+O README inclui configuração e exemplos.
+
+Verificado no Node.js v24:
+- `npm test`: 13 testes passaram, usando processos separados.
+- `npm start -- list`: retornou `[]`.
+- Verificações de sintaxe passaram.

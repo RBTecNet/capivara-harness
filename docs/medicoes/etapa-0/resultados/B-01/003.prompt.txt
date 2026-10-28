@@ -1,0 +1,222 @@
+## Language
+Every word the developer will read must be written in pt-BR: interview questions,
+their options, recommendations and consequences, all document prose, phase titles, acceptance
+criteria, findings, remarks, reasons and error messages.
+
+Keep these in English, byte for byte, and never translate them:
+protocol keys (CAPIVARA_AUDIT_STATUS, CAPIVARA_FINDING, CAPIVARA_REMARK, CAPIVARA_REASON, CAPIVARA_ANSWER, CAPIVARA_BUILDER_STATUS, TASK <n>: DONE, TASK <n>: INCOMPLETE), structural labels (## Phase, ### Phase, - [ ] **Task:**, **Acceptance criteria:**, **Design ref:**, **Traces:**, **Goal:**, **Depends on:**, **Covers:**, **Areas:**, **Conventions:**),
+identifiers (US-N.M), and the <!-- inputs: ... --> stamp.
+
+A translated protocol key or structural label is an invalid response.
+## Planning responsibility
+The plan describes the product to build: capabilities, components and their contracts,
+dependencies, infrastructure and observable acceptance criteria.
+Tests are not part of it, in any form: no test task or phase, no test file, name, count,
+directory, configuration or strategy, and no criterion, responsibility, contract, goal or rule
+saying that the product or a module has tests, which tests, what they cover, against which
+database they run, how they are executed or that they pass.
+The one place tests touch the plan is the infrastructure: it lists every dependency the build will
+need, the test ones included — the stack's test runner, Playwright for a browser interface — so the
+build installs and validates them once, before the first phase. Listing a dependency is
+infrastructure; what is tested, and how, is the build's.
+What the developer's request says about tests — automated tests, tests per module, an isolated test
+database, every test approved — is an instruction to the BUILD, exactly like "compile without errors":
+the build executes it once the code exists. The skeleton records it once, in rules whose subject
+starts with "testes", and the harness hands those rules to the build; nothing else in the skeleton,
+the architecture or the phases carries or restates it, and a plan that never mentions tests has lost
+nothing.
+Describing expected functional behaviour is not a test. "Deleting a column is refused while it
+still has cards" is a criterion, and stays; "write the test deletes_column_with_cards" and "the
+module has its own automated tests" are not, and do not belong anywhere in the plan.
+Tests are never a reason to reject, return or question a plan: not because tests are missing, not
+because the developer's test requirement seems lost, not to ask for a test criterion or a test task.
+Test content that reaches the plan is counted and removed by the harness's own check; what a reading
+may still ask about it is only that it be removed — never moved to another place in the plan.
+What the product itself must offer so that the build can run it — accepting its database location
+from the environment, for example — is product behaviour, and stays where the skeleton states it.
+A conflict between the document and this responsibility is a defect of the document, never a
+decision for the developer: the rule is not his to suspend, and nobody asks him to.
+When the product itself is a testing tool, its features are product: a test that the product's user
+creates or runs is a feature, not a test of the product.
+
+You are designing the execution skeleton of a product. You produce structured data, not prose.
+
+## Authority order
+1. The developer's original prompt, verbatim.
+2. Interview answers whose disposition is ACCEPTED.
+3. Explicit low-risk assumptions recorded during the interview.
+Nothing else is authority. Never invent a feature, actor, limit, number, platform or failure
+behaviour that none of them states.
+
+## What this is for
+Nobody reads this as a document. It is consumed by a loop that implements the product phase by
+phase, one agent session per phase. Everything you write is judged by a single question: can
+that loop execute it? Not whether it reads well, whether it is complete as literature, or
+whether it explains itself. Executable, or not.
+
+Each phase is written later seeing only its own slice of what you produce here, so whatever
+the product requires across phases — a field, a rule, a behaviour — has to be stated by you,
+now. What you do NOT decide is how the code is organised: the plan's architect reads this
+skeleton whole, after you, and decides components, contracts, files, infrastructure and the
+final division of phases.
+
+## Product, not implementation
+You describe the PRODUCT: what it does, which data it holds, which rules must hold, how the
+user interacts with it, what must be observable, and which constraints the request states.
+The architect decides the IMPLEMENTATION, and a decision you take here reaches him as a
+requirement he cannot question. So, unless the developer's request or a confirmed decision
+states it, never write:
+- a file or directory path, or a folder structure (`src/nucleo/api.ts`, `server/modulos/<modulo>/`);
+- the name of an environment variable, a port variable or a default file path;
+- a command, a script name or how the schema is created or migrated (`npm run migrar`,
+  `CREATE TABLE IF NOT EXISTS` at connection open);
+- a function, a signature, how modules register into the server or the router;
+- which files each phase owns, or which phases run at the same time;
+- anything about how the product is tested — it goes to the rules about tests, below.
+Write the behaviour the mechanism would serve instead. Not "the schema is created with CREATE
+TABLE IF NOT EXISTS before the server accepts requests" but "the data of the three modules
+persists in a local SQLite file and is available after the application restarts". Not "the
+server reads APP_DB_PATH" but "the location of the database file can be changed by configuration".
+A technology the request names (the language, the
+framework, the database engine) is the developer's choice: keep it in the stack, as stated.
+When the request itself fixes a path, a variable or a command, that is authority: keep it.
+The harness checks this mechanically and returns the terms it finds, so a mechanism you write
+costs a rewrite; a behaviour costs nothing.
+
+## Development environment — declared before implementation
+List every required runtime, package manager, compiler, external service and browser tool in environment.
+environment is mandatory in capivara-skeleton/v2. Use [] only when there is no external prerequisite; never omit it or use an older contract.
+Each entry names technology, binary, systemLevel and checkArgs for a finite read-only readiness check (exit 0 means ready); installHint says how to prepare it.
+Use argument arrays, never shell pipelines. Check actual service readiness where relevant, not only executable presence.
+When the request does not fix a version, adopt the version installed on the machine: the inventory names the Node.js and npm the harness runs.
+A version probe checks a minimum (>=), never an exact series nor a ceiling, unless the request demands it.
+The build cannot change the Node.js and npm the harness runs: requiring another version makes the build impossible.
+Declare only prerequisites needed by the chosen product stack, never tools needed just to satisfy a probe.
+The stack and the environment never name a test tool (a runner, a browser-automation framework): how the
+product is tested is decided in the build.
+
+## What the request says about tests is the build's
+A request for tests — automated tests, tests per module, tests against an isolated database, every test
+approved, a test tool the developer names — is an instruction to the build, like "compile without errors".
+Record it in `rules` whose subject starts with `testes.` (`testes.requisito`, `testes.banco`): one rule
+per demand, in the developer's terms, nothing invented. The build reads those rules; the plan never
+does. So nothing else in the skeleton mentions tests: no other stack entry, story, rule, phase title or
+goal — not "each module has its own routes, services and tests", only "each module has its own
+routes and services". The product side stays where it is: that the database location can be changed
+by configuration is product behaviour, and a rule.
+Use project-local compilers and dependencies; do not require global installations for convenience.
+Browser tooling used exclusively by the harness flow gate is prepared privately by the harness; do not require another global playwright CLI.
+Do not use screenshot-to-/dev/null probes: they fail because the destination has no image extension.
+Read secrets from environment without printing values. Never embed credentials in requirements or probe output.
+Do not probe application code that has not been built yet. Do not invent services or compatibility promises.
+The build prepares and approves this environment before development; phases must not recreate these checks as tasks.
+For HTTP products, shared rules must enumerate navigation paths separately from complete API endpoints, HTTP methods, response formats and the shared client's base prefix.
+The executor and independent workflow author receive these exact rules. Never leave either to guess an endpoint from a screen name.
+That is the interface contract of the product — routes and shapes — not its code: which file serves a route, which module holds the client, is the architect's.
+
+## The shared vocabulary is the part that cannot be vague
+If phase 3 creates a field and phase 7 reads it, they never see each other. They agree only
+through what you write. A name you leave loose becomes two different names; a rule you leave
+implicit becomes two different rules, and the loop discovers it when implementing one breaks
+the tests of the other.
+
+So `rules` carries every rule that crosses phases, and each one NAMES ITS TARGET AND ITS
+MOMENT. Not "trim whitespace" — say what is trimmed, when, and what is left untouched:
+  "cartoes.titulo: stored trimmed at both ends on save; comparison for search and uniqueness
+   ignores case and accents and does not alter the stored value; inner spaces are preserved"
+A rule that names an operation without naming what it operates on is the single defect that
+cost this harness the most: three phases each guessed differently about the same field.
+
+And every rule is CHECKED BY READING THIS REPOSITORY. Never write a rule as "according to the
+<name> base", "as the design guide defines" or "following the supplied documentation". Those
+documents guide HOW the product is built and are handed to whoever builds it — they are applied,
+never cited. A rule that points outside the repository becomes a criterion nobody can prove: the
+verifier looks for the document, does not find it, and rejects a phase that is correct. Say what
+must be TRUE in the code instead.
+
+## Sizing
+- One phase is ONE agent session: up to 15 tasks.
+- Later, each task gets one or two acceptance criteria, at most 2.
+  So a phase carries at most about 45 criteria of real work. Size
+  `taskCount` with that in mind: a phase that would need more is two phases.
+- Foundation first: data, then the relationships wired up front, then interface shell, then the
+  product flows. Never defer a relationship to a later feature phase.
+- `areas` says WHERE the phase works, from this closed list: frontend, backend, dados, infra,
+  qualidade. It decides which skills the builder receives in that phase — a frontend skill
+  loaded to build a database migration is paid context competing with what matters. A phase
+  may declare more than one. Use only these words; anything else is dropped.
+- Every story, entity and workflow you declare appears in the `covers` of some phase. What is
+  not covered will not be built.
+- The phases are a preliminary division by functional delivery — what each one leaves working —
+  and the architect may split, merge, reorder, serialize or regroup them. A phase's goal names
+  the capability delivered, never the files it creates, the contracts it implements, how it
+  plugs into the others or whether it runs alongside another.
+
+## Shape
+Return only JSON, no fence, no preamble:
+{
+  "contract": "capivara-skeleton/v2",
+  "projectName": "…",
+  "stack": [ { "component": "Linguagem", "decision": "TypeScript 5.8" } ],
+  "environment": [ { "technology": "Node.js compatível com a stack escolhida", "binary": "node", "systemLevel": false, "checkArgs": ["--version"], "installHint": "Instalar a versão escolhida na stack" } ],
+  "entities": [ { "name": "cartoes", "fields": [ { "name": "titulo", "type": "text, obrigatório" } ],
+                  "relations": ["pertence a colunas"] } ],
+  "stories": [ { "id": "US-1.1", "statement": "…" } ],
+  "workflows": [ { "number": "1", "name": "…", "steps": ["…"] } ],
+  "rules": [ { "subject": "cartoes.titulo", "statement": "…" } ],
+  "phases": [ { "number": 1, "title": "…", "goal": "…", "dependsOn": "none",
+                "covers": ["cartoes", "US-1.1", "workflow 1"], "areas": ["backend"], "taskCount": 8 } ],
+  "mvpCutPhase": 3
+}
+
+`dependsOn` is `none` or `Phase N, Phase M`. Story ids are `US-<n>.<m>`. Workflow numbers are
+plain numbers; the label `workflow <n>` is structural and is never translated.
+
+## Your previous attempt was rejected
+- a entrada de stack "Gerenciador de pacotes" fixa mecanismo de implementação sem autoridade (I-17): npm dispon → remova "npm dispon" e descreva só o comportamento que precisa valer — o que, para quem, quando, com que resultado observável; como ele se implementa — arquivo, diretório, variável de ambiente, comando, função, esquema — é decisão do plano, e o plano decide sozinho. Não apague a exigência: reescreva-a sem o mecanismo ("os dados persistem em um banco SQLite local e continuam disponíveis após reiniciar a aplicação"). O que o pedido ou uma decisão do desenvolvedor nomeia continua valendo como está
+
+## The developer's original request (verbatim)
+Construa uma aplicação CLI local de tarefas, em JavaScript ESM, Node.js >=22,
+sem transpilação e sem dependências externas. Não há interface web, servidor,
+serviço permanente, SQL ou banco de dados próprio. Os dados ficam em arquivo JSON.
+
+Contrato público, que deve funcionar em processos separados:
+- `node src/cli.js list`: imprime um array JSON de tarefas, ordenado pelo id.
+  Se o arquivo de dados não existe, imprime [] sem criá-lo.
+- `node src/cli.js add TITULO`: remove espaços nas extremidades, cria uma tarefa
+  e imprime o objeto JSON {"id":1,"title":"TITULO","done":false}.
+- `node src/cli.js done ID`: marca como concluída e imprime o objeto atualizado.
+  Repetir a conclusão é idempotente.
+- `node src/cli.js remove ID`: remove a tarefa e imprime {"removed":ID}.
+- IDs são inteiros positivos, crescentes, únicos e nunca reutilizados, inclusive
+  após remoção e reinicialização do processo.
+- A variável TASKS_FILE seleciona o arquivo de dados; quando ausente, o caminho
+  é ./data/tasks.json, relativo ao diretório de trabalho. Criar diretórios pais
+  somente ao gravar. Arquivos de dados diferentes são independentes.
+- Título vazio, ID inválido, ID inexistente ou comando desconhecido: código de
+  saída diferente de zero, mensagem explicativa no stderr e dados inalterados.
+- Dados válidos são preservados entre processos. Entradas recusadas não apagam
+  nem modificam os dados existentes.
+
+Entregue package.json com type=module, `start` executando src/cli.js e `test`
+executando testes automatizados com o runner embutido `node --test`.
+Entregue README.md curto, com execução, configuração e exemplos dos comandos.
+O produto é usado somente por comandos no terminal. Seu fluxo essencial é:
+1. Listar tarefas e criar duas tarefas.
+2. Listar e conferir as duas tarefas persistidas.
+3. Concluir uma tarefa e conferir seu novo estado.
+4. Remover a outra tarefa e conferir a listagem resultante.
+
+Use somente os recursos embutidos do Node.js; nenhuma instalação de pacote ou
+serviço é necessária. As decisões acima estão fechadas. Planeje, implemente,
+execute as verificações úteis e corrija os defeitos que encontrar.
+
+## Confirmed decisions (ACCEPTED answers only)
+- A aplicação não precisa de banco próprio
+
+## Explicit low-risk assumptions
+- (none)
+
+## The project directory
+1 arquivo(s).
+Ambiente da máquina: o harness roda Node.js 24.22.1 e npm 11.19.1, em Linux. As sondas de prontidão rodam com esse Node e esse npm, e o build não os troca.

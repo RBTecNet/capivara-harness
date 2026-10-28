@@ -7,6 +7,7 @@ import type { BuildGateMeasurement } from '../telemetry/progress.js';
 const statusLabels: Record<string, string> = {
   working: 'Em andamento', recovering: 'Em recuperação', waiting: 'Aguardando', complete: 'Concluído', cancelled: 'Interrompido', critical: 'Incidente crítico',
   discovering: 'Em descoberta', ready: 'Pronto', planning: 'Em planejamento', pending: 'Pendente', resolved: 'Resolvido', editing: 'Em implementação', checking: 'Em verificação', reviewing: 'Em revisão', running: 'Em andamento',
+  preparing: 'Preparando ambiente', integrating: 'Integrando alterações',
 };
 
 function label(value: string | undefined, fallback = 'Não informado'): string { return value ? statusLabels[value] ?? value : fallback; }
@@ -257,6 +258,11 @@ export class DashboardModel {
     const activity = [...configLines('Agente', this.saved.config), ...configLines('Revisor', this.saved.reviewer), `Instalação de sistema: ${this.saved.allowSystemInstall === undefined ? 'Não informada' : this.saved.allowSystemInstall ? 'Permitida' : 'Desativada'}`, `Chamadas reportadas: ${this.usage.calls}`, `Tokens da última chamada: ${this.usage.currentTokens ?? 'Não reportados'}`, `Tokens de entrada: ${this.usage.inputTokens ?? 'Não reportados'}`, `Tokens de saída: ${this.usage.outputTokens ?? 'Não reportados'}`, `Tokens em cache: ${this.usage.cachedInputTokens ?? 'Não reportados'}`, `Custo reportado (USD): ${this.usage.costUsd ?? 'Não reportado'}`, ...this.activityLines];
     const agentPreview = (title: string, config: AgentConfig | undefined): string => `${title}: ${config ? [config.provider, config.model, config.effort].filter((value): value is string => Boolean(value)).map(oneLine).join(' · ') : 'Não configurado'}`;
     const activityPreview = [agentPreview('Agente', this.saved.config), agentPreview('Revisor', this.saved.reviewer), `Atual: ${this.latestActivity ?? 'Nenhuma chamada observada'}`, `Chamadas: ${this.usage.calls} · Tokens da última: ${this.usage.currentTokens ?? 'Não reportados'}`, `Entrada: ${this.usage.inputTokens ?? 'Não reportada'} · Saída: ${this.usage.outputTokens ?? 'Não reportada'}`, `Custo reportado (USD): ${this.usage.costUsd ?? 'Não reportado'}`];
+    if (state?.metrics) {
+      const metrics = state.metrics;
+      activityPreview.push(`Concorrência: ${metrics.active} ativa(s) · máximo observado: ${metrics.maxConcurrency}`);
+      activity.push(`Concorrência atual: ${metrics.active} · máximo: ${metrics.maxConcurrency}`, `Tempo observado: ${metrics.elapsedMs} ms`, `Chamadas por papel: ${json(metrics.callsByRole)}`, `Tempo por etapa: ${json(metrics.timeByStageMs)}`, `Invalidações: ${metrics.invalidations.length}`, `Repetições justificadas/suspensões: ${metrics.repetitions.length}`);
+    }
     const incidents: string[] = [];
     if (this.latestRecovery) incidents.push(...lines(`Recuperação: ${this.latestRecovery}`));
     for (const incident of state?.incidents ?? []) incidents.push(...lines(`${incident.id} · ${incident.kind} · ${incident.subject}`), ...lines(incident.message), ...lines(`Evidência: ${incident.evidence}`), ...lines(`Ação: ${incident.action}`), `Recurso externo: ${incident.external ? 'Sim' : 'Não'}`, ...(incident.contextChars === undefined ? [] : [`Contexto disponível: ${incident.contextChars} caracteres`]), '');

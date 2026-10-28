@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { ProjectStore } from '../../src/app/store.js';
-import { recoverOperation } from '../../src/app/recovery.js';
+import { recoverOperation, RecoverySuspended } from '../../src/app/recovery.js';
 
 describe('estado e continuidade novos', () => {
   it('persiste resposta imediatamente e mantém posse exclusiva sem outro dono liberar', () => {
@@ -25,9 +25,15 @@ describe('estado e continuidade novos', () => {
   });
   it('incidente transitório é recuperado sem reiniciar trabalho concluído', async () => {
     const completed = ['primeiro fragmento']; let calls = 0;
-    const result = await recoverOperation(async () => { if (++calls < 3) throw new Error('dependência indisponível'); completed.push('segundo fragmento'); return 'pronto'; }, { announce: () => {}, wait: async () => {} });
+    let resource = 0;
+    const result = await recoverOperation(async () => { if (++calls < 3) throw new Error('dependência indisponível'); completed.push('segundo fragmento'); return 'pronto'; }, { announce: () => {}, recover: async()=>{resource++;}, progressKey:()=>String(resource), wait: async () => {} });
     expect(result).toBe('pronto');
     expect(completed).toEqual(['primeiro fragmento', 'segundo fragmento']);
+  });
+  it('não repete uma operação sem alteração do estado necessário à recuperação',async()=>{
+    let calls=0;
+    await expect(recoverOperation(async()=>{calls++;throw new Error('same failure');},{announce:()=>{},wait:async()=>{}})).rejects.toBeInstanceOf(RecoverySuspended);
+    expect(calls).toBe(1);
   });
   it('não confunde bloqueio SQLite com corrupção nem divide o estado de uma execução ativa', () => {
     const dir = mkdtempSync(join(tmpdir(), 'capivara-active-state-'));

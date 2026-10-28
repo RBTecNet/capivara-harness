@@ -1,0 +1,14 @@
+{
+  "sourceCommit": "77a1178",
+  "status": "complete",
+  "elapsedMs": 57,
+  "agentCalls": [
+    "editor",
+    "reviewer"
+  ],
+  "paidInferenceCalls": 0,
+  "correctMandatoryProviderReady": true,
+  "applicationExecutedWith": "/bin/sh",
+  "requiredRuntime": "/home/bruno/.nvm/versions/node/v24.22.1/bin/node",
+  "incidents": []
+}

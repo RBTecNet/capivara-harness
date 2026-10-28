@@ -2,6 +2,7 @@ import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { join, resolve, relative, isAbsolute, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { runInit, runPlan, repairWorkPlan } from '../domain/index.js';
+import { validatePlan } from '../domain/reconcile.js';
 import type { ProductBrief, DomainAgentRequest, DevelopmentPlan, SelectedDocument, Question } from '../domain/types.js';
 import { runAgent } from '../runtime/index.js';
 import type { AgentConfig, AgentRequest, AgentResult } from '../runtime/types.js';
@@ -10,7 +11,8 @@ import type { BuildState } from '../execution/types.js';
 import { ProjectStore } from './store.js';
 import { readSettings } from './settings.js';
 import { questionChannel } from './questions.js';
-import { Cancelled, recoverOperation, waitForRecovery } from './recovery.js';
+import { Cancelled, RecoverySuspended, recoverOperation, waitForRecovery } from './recovery.js';
+import { digest } from '../execution/files.js';
 import { emitEvent, type ProgressMeasurement, type BuildGateMeasurement } from '../telemetry/progress.js';
 import type { SavedProject } from './store.js';
 
@@ -32,6 +34,8 @@ export interface WorkflowOptions {
   config?: AgentConfig;
   reviewer?: AgentConfig;
   allowSystemInstall?: boolean;
+  maxConcurrent?: number;
+  retrySuspended?: boolean;
   signal: AbortSignal;
   announce?: (message: string) => void;
   onEvent?: (event: WorkflowEvent) => void;
@@ -91,7 +95,8 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
     try { options.announce?.(message); } catch { /* Observer cannot end execution. */ }
   };
   const persist = async (patch: Parameters<ProjectStore['update']>[0]): Promise<void> => {
-    await recoverOperation(async () => { const state = store.update(patch); emitEvent(options.onState, state); }, { signal: options.signal, announce });
+    // Cancellation stops agent work, not the final durable commit of its effects and checkpoint.
+    const state = store.update(patch); emitEvent(options.onState, state);
   };
   try {
     while (!store.claim()) {
@@ -100,6 +105,13 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
     }
     const settings = await readSettings();
     const saved = store.read();
+    const workflowMetrics = saved.workflowMetrics ?? { timeByStageMs: {}, callsByRole: {}, activeAgents: 0, maxConcurrency: 0 };
+    workflowMetrics.activeAgents = 0;
+    const timed = async <T>(stage: string, operation: () => Promise<T>): Promise<T> => {
+      const start = Date.now();
+      try { return await operation(); }
+      finally { workflowMetrics.timeByStageMs[stage] = (workflowMetrics.timeByStageMs[stage] ?? 0) + Date.now() - start; await persist({ workflowMetrics }); }
+    };
     let config = options.config ?? saved.config ?? settings.agent;
     if (!config?.provider) throw new Error('Escolha o agente com --provider ou capivara config --provider. Nenhuma chamada de modelo foi feita.');
     let reviewer = options.reviewer ?? saved.reviewer ?? settings.reviewer ?? config;
@@ -124,7 +136,8 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
       if (changed.allowSystemInstall !== undefined) allowSystemInstall = changed.allowSystemInstall;
       await persist({ config: config!, reviewer, allowSystemInstall });
     };
-    await persist({ config, reviewer, allowSystemInstall, status: 'working', stage: options.stage });
+    const maxConcurrent = options.maxConcurrent ?? saved.maxConcurrent ?? settings.maxConcurrent ?? 2;
+    await persist({ config, reviewer, allowSystemInstall, maxConcurrent, lastFailure: null, status: 'working', stage: options.stage });
     const ask = questionChannel(store, options.signal, announce, options.ask);
     const agent = options.agent ?? runAgent;
     const event = (detail: WorkflowEvent): void => {
@@ -145,8 +158,13 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
       const progress = { id: `agent:${id}`, label: `${request.role} · ${selected.provider}${selected.model ? ` / ${selected.model}` : ''}`, stage: store.read().stage ?? options.stage };
       event({ type: 'agent.start', message: `Agente ${request.role} em execução.`, detail: { id, role: request.role, provider: selected.provider, model: selected.model } });
       event({ type: 'progress', progress: { ...progress, status: 'running' } });
+      const started = Date.now();
+      workflowMetrics.activeAgents++; workflowMetrics.maxConcurrency = Math.max(workflowMetrics.maxConcurrency, workflowMetrics.activeAgents);
+      workflowMetrics.callsByRole[request.role] = (workflowMetrics.callsByRole[request.role] ?? 0) + 1;
+      await persist({ workflowMetrics });
       try {
-        const result = await agent({ ...request, config: selected, signal: options.signal, onEvent: event });
+        const operationKey = request.operationKey ?? digest(JSON.stringify({ role: request.role, instruction: request.instruction, context: request.context, config: selected }));
+        const result = await agent({ ...request, operationKey, config: selected, signal: options.signal, onEvent: event });
         event({ type: 'agent.result', detail: { id, role: request.role, status: result.status, usage: result.usage, issue: result.issue } });
         event({ type: 'progress', progress: { ...progress, status: result.status === 'complete' ? 'complete' : 'waiting' } });
         await writeFile(join(callDirectory, `${id}.result.json`), JSON.stringify(result, null, 2), { mode: 0o600 }).catch(() => undefined);
@@ -154,22 +172,45 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
       } catch (error) {
         event({ type: 'progress', progress: { ...progress, status: 'waiting' } });
         throw error;
+      } finally {
+        workflowMetrics.activeAgents--;
+        workflowMetrics.timeByStageMs[`agent:${request.role}`] = (workflowMetrics.timeByStageMs[`agent:${request.role}`] ?? 0) + Date.now() - started;
+        await persist({ workflowMetrics });
       }
     };
+    const domainCalls = { ...saved.domainCalls };
+    const retriedDomain = new Set<string>();
     const domainAgent = async (request: DomainAgentRequest): Promise<string> => recoverOperation(async () => {
+      const key = digest(JSON.stringify({ operation: request.operation, prompt: request.prompt, config }));
+      const previous = domainCalls[key];
+      if (previous?.status === 'complete' && previous.result !== undefined) {
+        event({ type: 'reuse', message: `Resultado de ${request.operation} reaproveitado: entrada, configuração e resposta persistidas.`, detail: { key } });
+        return previous.result;
+      }
+      if (previous && !(options.retrySuspended && previous.status === 'failed' && !retriedDomain.has(key))) throw new RecoverySuspended(`A operação ${request.operation} já foi suspensa com a mesma entrada. Corrija o recurso ou a configuração; --retry-suspended permite uma nova sondagem explícita de transporte.`, 1, previous.failure ?? 'The preceding call has no durable result.');
+      if (previous) retriedDomain.add(key);
+      domainCalls[key] = { operation: request.operation, status: 'running', at: new Date().toISOString() };
+      await persist({ domainCalls });
       const result = await invoke({ workspace, role: request.operation === 'discover' ? 'analyst' : 'planner', instruction: request.prompt, readOnly: true, constraints: { allowSystemInstall: false } });
       if (result.status === 'cancelled') throw new Cancelled();
-      if (result.issue?.kind === 'constraint') throw new Error(result.issue.message);
-      if ((result.status === 'complete' || result.status === 'partial') && result.text.trim()) return result.text;
-      throw new Error(result.issue?.message || 'O agente não entregou conteúdo; preservando o trabalho e recuperando o transporte.');
+      if ((result.status === 'complete' || result.status === 'partial') && !result.issue && result.text.trim()) {
+        domainCalls[key] = { operation: request.operation, status: 'complete', result: result.text, at: new Date().toISOString() };
+        await persist({ domainCalls }); return result.text;
+      }
+      const failure = result.issue?.message || 'O agente não entregou conteúdo utilizável.';
+      domainCalls[key] = { operation: request.operation, status: 'failed', failure, at: new Date().toISOString() };
+      await persist({ domainCalls }); throw new Error(failure);
     }, {
       signal: options.signal,
       announce,
       recover: async () => {
+        const before = settingsRevision;
         await persist({ status: 'recovering' });
         // An explicit configuration update in another terminal can recover authentication/routing.
         await refreshSettings();
+        return before !== settingsRevision;
       },
+      progressKey: () => settingsRevision,
     });
     const hooks = {
       get contextChars(): number { return contextBudget(); },
@@ -198,22 +239,22 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
     };
     reopenChangedAnswers();
     // Reconcile answers and local rules without a model call when discovery is already ready.
-    brief = await runInit({ ...hooks, request, documents, repository, repositoryConstraints, ...(brief ? { existing: brief } : {}) });
+    brief = await timed('init', () => runInit({ ...hooks, request, documents, repository, repositoryConstraints, ...(brief ? { existing: brief } : {}) }));
     await persist({ brief });
     if (options.stage === 'init') { await persist({ status: brief.gaps.some(g => g.status === 'pending') ? 'waiting' : 'complete' }); return { status: store.read().status!, brief }; }
     const productChanged = saved.brief !== undefined && saved.brief.id !== brief.id || saved.plan !== undefined && saved.plan.briefId !== brief.id;
     let plan = productChanged ? undefined : saved.plan;
     if (productChanged) await persist({ execution: null, pendingQuestion: null });
-    if (!plan || plan.status !== 'ready' || plan.briefId !== brief.id || plan.briefRevision !== brief.revision) {
-      plan = await runPlan({ ...hooks, brief, repository, repositoryConstraints, ...(plan ? { existing: plan } : {}) });
+    if (!plan || plan.status !== 'ready' || plan.briefId !== brief.id || plan.briefRevision !== brief.revision || validatePlan(brief, plan).length) {
+      plan = await timed('plan', () => runPlan({ ...hooks, brief: brief!, repository, repositoryConstraints, ...(plan ? { existing: plan } : {}) }));
       await persist({ plan });
     }
     if (options.stage === 'plan') { await persist({ status: 'complete' }); return { status: 'complete', brief, plan }; }
     for (;;) {
       if (options.signal.aborted) throw new Cancelled();
       const state = store.read().execution as BuildState | undefined;
-      const outcome = await recoverOperation(() => runBuild({
-        workspace, brief: brief!, plan: plan!, agent: invoke, allowSystemInstall, signal: options.signal, contextChars: contextBudget(),
+      const outcome = await timed('build', () => recoverOperation(() => runBuild({
+        workspace, brief: brief!, plan: plan!, agent: invoke, allowSystemInstall, maxConcurrent, retrySuspended: options.retrySuspended === true, configurationRevision: digest(JSON.stringify({ config, reviewer, allowSystemInstall })), signal: options.signal, contextChars: contextBudget(),
         ...(state ? { state } : {}),
         onEvent: event,
         onState: async next => { await persist({ execution: next }); },
@@ -222,22 +263,21 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
           await persist({ plan });
           return plan;
         },
-      }), { signal: options.signal, announce });
+      }), { signal: options.signal, announce }));
       plan = outcome.plan;
-      await persist({ plan, execution: outcome.state, status: outcome.status === 'complete' ? 'complete' : outcome.status === 'cancelled' ? 'cancelled' : 'waiting' });
+      await persist({ plan, execution: outcome.state, status: outcome.status === 'cancelled' ? 'cancelled' : outcome.status === 'complete' ? 'working' : 'waiting' });
       if (answeredGaps()) {
         reopenChangedAnswers();
-        brief = await runInit({ ...hooks, request, documents, repository, repositoryConstraints, existing: brief });
-        plan = await runPlan({ ...hooks, brief, repository, repositoryConstraints, existing: plan });
+        brief = await timed('init', () => runInit({ ...hooks, request, documents, repository, repositoryConstraints, existing: brief! }));
+        plan = await timed('plan', () => runPlan({ ...hooks, brief: brief!, repository, repositoryConstraints, existing: plan! }));
         await persist({ brief, plan, status: 'working' });
         continue;
       }
-      if (outcome.status === 'complete' && !brief.gaps.some(gap => gap.status === 'pending')) { announce('Aplicação concluída com as verificações pertinentes registradas.'); return { status: 'complete', brief, plan }; }
+      if (outcome.status === 'complete' && !brief.gaps.some(gap => gap.status === 'pending')) { await persist({ status: 'complete' }); announce('Aplicação concluída com as verificações pertinentes registradas.'); return { status: 'complete', brief, plan }; }
       if (outcome.status === 'complete') await persist({ status: 'waiting' });
       if (outcome.status === 'cancelled') throw new Cancelled();
-      announce('Execução preservada e ativa: recuperando as pendências, enquanto aguarda recursos externos quando necessário.');
-      await refreshSettings();
-      await waitForRecovery(10_000, options.signal);
+      announce('Não há outra ação executável com os insumos e recursos atuais. Pendências e tentativas estão registradas; trabalho independente concluído foi preservado.');
+      return { status: 'waiting', brief, plan };
     }
   } catch (error) {
     if (options.signal.aborted || error instanceof Cancelled) {
@@ -249,15 +289,23 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
   } finally { if (!options.store) store.close(); }
 }
 
-/** Recovery belongs to the coordinator, including unexpected failures between module boundaries. */
+/** Module failures become explicit durable suspensions, never a replay of the entire workflow. */
 export async function runWorkflow(options: WorkflowOptions): Promise<{ status: string; brief?: ProductBrief; plan?: DevelopmentPlan }> {
   try {
-    return await recoverOperation(() => workflowAttempt(options), {
-      signal: options.signal,
-      announce: message => { try { options.announce?.(message); } catch { /* Observation never owns the execution. */ } },
-    });
+    return await workflowAttempt(options);
   } catch (error) {
     if (options.signal.aborted || error instanceof Cancelled) return { status: 'cancelled' };
-    throw error;
+    const metadata = error !== null && typeof error === 'object' ? error as { kind?: string; fingerprint?: string } : {};
+    const kind = error instanceof RecoverySuspended ? 'no-progress' : metadata.kind ?? 'controller';
+    const message = error instanceof Error ? error.message : String(error);
+    const fingerprint = metadata.fingerprint ?? digest(`${kind}:${message}`);
+    const store = options.store ?? new ProjectStore(resolve(options.workspace));
+    try {
+      const state = store.update({ status: 'waiting', lastFailure: { kind, message, fingerprint, at: new Date().toISOString() } });
+      store.event('suspended', { kind, message, fingerprint }); emitEvent(options.onState, state);
+      emitEvent(options.onEvent, { type: 'waiting', message, detail: { kind, fingerprint } });
+      try { options.announce?.(message); } catch { /* Observer only. */ }
+      return { status: 'waiting', ...(state.brief ? { brief: state.brief } : {}), ...(state.plan ? { plan: state.plan } : {}) };
+    } finally { if (!options.store) store.close(); }
   }
 }

@@ -31,7 +31,7 @@ it('constrói um novo pedido no mesmo workspace quando ambos os briefs têm revi
     if (call.role === 'editor') {
       const greeting = call.context?.includes('beta') ? 'beta' : 'alpha';
       edits.push(greeting);
-      await writeFile(join(workspace, 'cli.mjs'), `if (process.argv.includes('--greet')) console.log('${greeting}'); else process.exitCode = 2;\n`);
+      await writeFile(join(call.workspace, 'cli.mjs'), `if (process.argv.includes('--greet')) console.log('${greeting}'); else process.exitCode = 2;\n`);
       return { ...complete('Implementado.'), changedFiles: ['cli.mjs'] };
     }
     if (call.role === 'reviewer') return complete({ approved: true, findings: [] });

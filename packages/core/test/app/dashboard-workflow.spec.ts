@@ -33,7 +33,7 @@ it('conclui e publica progresso observado mesmo quando todos os observers do das
     }
     if (call.role === 'editor') {
       editorCalls += 1;
-      await writeFile(join(workspace, 'cli.mjs'), "if (process.argv.includes('--greet')) console.log('hello'); else process.exitCode = 2;\n");
+      await writeFile(join(call.workspace, 'cli.mjs'), "if (process.argv.includes('--greet')) console.log('hello'); else process.exitCode = 2;\n");
       return { ...complete('Implementado.'), changedFiles: ['cli.mjs'] };
     }
     if (call.role === 'reviewer') return complete({ approved: true, findings: [] });

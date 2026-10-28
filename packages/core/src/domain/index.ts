@@ -1,4 +1,7 @@
 export * from "./types.js";
+export { PlanningFailure, PlanningProgress } from "./control.js";
+export { assertValidPlan, reconcilePlan, reconcileChecks, sameDelivery, validatePlan } from "./reconcile.js";
+export type { PlanIssue } from "./reconcile.js";
 export { runInit, resolveQuestions, applicableQuestion, splitText } from "./init.js";
 export { runPlan, repairWorkPlan, normalizeEnvironment, normalizeTasks, normalizeChecks } from "./plan.js";
 export type { RepairPlanOptions } from "./plan.js";

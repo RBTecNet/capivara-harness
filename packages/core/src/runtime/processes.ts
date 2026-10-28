@@ -5,7 +5,7 @@ import { scrub } from './files.js';
 import { isolatedInvocation } from './isolation.js';
 import type { CommandRequest } from './types.js';
 
-interface ManagedProcess { process: ChildProcessWithoutNullStreams; stdout: string; stderr: string; exitCode: number | null; exited: boolean; started: number }
+interface ManagedProcess { process: ChildProcessWithoutNullStreams; stdout: string; stderr: string; exitCode: number | null; exited: boolean; started: number; secrets: string[] }
 const processes = new Map<string, ManagedProcess>();
 
 export async function startProcess(request: CommandRequest): Promise<{ id?: string; error?: string }> {
@@ -16,7 +16,8 @@ export async function startProcess(request: CommandRequest): Promise<{ id?: stri
   if (request.signal?.aborted) return { error: 'A execução foi cancelada antes de iniciar.' };
   const child = spawn(invocation.binary, invocation.args, { cwd: request.cwd, env: { ...process.env, ...invocation.environment }, stdio: ['pipe', 'pipe', 'pipe'], shell: false, detached: process.platform !== 'win32', windowsHide: true });
   const id = randomUUID();
-  const entry: ManagedProcess = { process: child, stdout: '', stderr: '', exitCode: null, exited: false, started: Date.now() };
+  const secrets = Object.entries(request.environment ?? {}).filter(([key]) => /TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY/i.test(key)).map(([, value]) => value);
+  const entry: ManagedProcess = { process: child, stdout: '', stderr: '', exitCode: null, exited: false, started: Date.now(), secrets };
   child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
   child.stdout.on('data', (data: string) => { entry.stdout = (entry.stdout + data).slice(-128_000); });
   child.stderr.on('data', (data: string) => { entry.stderr = (entry.stderr + data).slice(-128_000); });
@@ -34,7 +35,7 @@ export function readProcess(id: string, input?: string): object {
   const entry = processes.get(id);
   if (!entry) return { error: 'Processo desconhecido nesta sessão.' };
   if (input !== undefined && !entry.exited) entry.process.stdin.write(input);
-  return { id, running: !entry.exited, exitCode: entry.exitCode, stdout: scrub(entry.stdout), stderr: scrub(entry.stderr), durationMs: Date.now() - entry.started };
+  return { id, running: !entry.exited, exitCode: entry.exitCode, stdout: scrub(entry.stdout, entry.secrets), stderr: scrub(entry.stderr, entry.secrets), durationMs: Date.now() - entry.started };
 }
 
 export function stopProcess(id: string): object {

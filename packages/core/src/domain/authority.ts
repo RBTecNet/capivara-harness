@@ -7,11 +7,11 @@ export const identity = (prefix: string, text: string): string => `${prefix}-${c
 const MODES: [ApplicationMode, RegExp][] = [
   ["tui", /\btui\b|(?:interface|interactive|interativa).{0,30}(?:terminal|console)/],
   ["cli", /\bcli\b|linha de comando|command.line|(?:script|comando).{0,25}(?:terminal|console)/],
-  ["desktop", /\bdesktop\b|aplicativo nativo|native app|winforms|wpf|winui|appkit|swiftui|avalonia/],
-  ["web", /\bweb\b|website|site\b|pagina|browser|navegador|react|vue|svelte|html/],
-  ["api", /\bapi\b|\brest\b|graphql/],
+  ["desktop", /\bdesktop\b|aplicativo nativo|native app/],
+  ["web", /\bweb\b|website|site\b|pagina|browser|navegador/],
+  ["api", /^(?:(?:uma?|an?|the)\s+)?api\b|\b(?:crie|criar|desenvolva|desenvolver|create|develop|build|implemente?|implement)\s+(?:(?:um|uma|a|an|the|novo|nova|new)\s+)?api\b|\b(?:api|backend|servidor|server)\s+(?:rest|graphql)\b/],
   ["service", /\bdaemon\b|servico de fundo|background service/],
-  ["library", /\bbiblioteca\b|\blibrary\b|\bsdk\b/],
+  ["library", /^(?:(?:uma?|an?|the)\s+)?(?:biblioteca|library|sdk)\b|\b(?:crie|criar|desenvolva|desenvolver|create|develop|build|implemente?|implement)\s+(?:(?:um|uma|a|an|the|novo|nova|new|reusable|reutilizavel)\s+){0,3}(?:biblioteca|library|sdk)\b/],
 ];
 
 function isPositive(text: string, expression: RegExp): boolean {

@@ -195,7 +195,10 @@ describe("planejamento executável", () => {
     const sizes: number[] = [];
     const agent = async (call: DomainAgentRequest): Promise<string> => {
       sizes.push(call.prompt.length);
-      if (call.operation === "discover") return discovered();
+      if (call.operation === "discover") {
+        const fragment = call.prompt.split("Request fragment:\n")[1] ?? "";
+        return JSON.stringify({ name: "Tarefas", summary: "Gerenciar operações locais na TUI", requirements: [...fragment.matchAll(/Funcionalidade \d+: permite registrar e consultar dados locais com uma operação própria e resultado observável/g)].map(match => ({ statement: match[0], quote: match[0], mode: "tui" })), questions: [] });
+      }
       if (call.operation === "environment") return JSON.stringify({ environment: [] });
       const section = call.prompt.split("Requirements of this slice:\n")[1]?.split("\n\n")[0] ?? "[]";
       const requirements = JSON.parse(section) as Requirement[];

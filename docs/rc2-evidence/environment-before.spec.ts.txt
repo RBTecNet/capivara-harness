@@ -1,0 +1,62 @@
+import { afterEach, expect, it } from 'vitest';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import type { DevelopmentPlan, EnvironmentNode, ProductBrief, WorkUnit } from '../../src/domain/types.js';
+import { executeCommand, runTerminal } from '../../src/runtime/index.js';
+import { inputHash } from '../../src/execution/files.js';
+import { checkInputHash, derivedChecks, runVerification } from '../../src/execution/checks.js';
+import { prepareEnvironmentNode, prepareProjectDependencies } from '../../src/execution/environment.js';
+const temporary:string[]=[];
+afterEach(async()=>{await Promise.all(temporary.splice(0).map(path=>rm(path,{recursive:true,force:true})));});
+async function workspace():Promise<string>{const root=await mkdtemp(join(tmpdir(),'capivara-env-proof-'));temporary.push(root);return root;}
+const brief:ProductBrief={schema:'capivara/product/1',status:'ready',id:'b',revision:1,name:'fixture',summary:'fixture',request:'CLI prints ok',modes:['cli'],targets:['portable'],requirements:[],constraints:[],decisions:[],gaps:[]};
+const task:WorkUnit={id:'cli',title:'CLI',goal:'Print ok',instructions:'Print ok',requirementIds:[],dependsOn:[],environmentIds:[],contractIds:[],files:[],criteria:['Print ok'],checks:[],risk:'normal',blockedBy:[]};
+const plan:DevelopmentPlan={schema:'capivara/plan/1',status:'ready',revision:1,briefId:'b',briefRevision:1,environment:[],contracts:[],tasks:[task]};
+it('fingerprints explicit globs, new matching files and explicitly declared generated inputs',async()=>{
+  const root=await workspace();await mkdir(join(root,'src'));await mkdir(join(root,'dist'));
+  await writeFile(join(root,'src','one.ts'),'export const value=1;');await writeFile(join(root,'dist','client.js'),'first');
+  const before=await inputHash(root,['src/**/*.ts','dist/client.js']);await writeFile(join(root,'src','two.ts'),'export const second=2;');
+  const added=await inputHash(root,['src/**/*.ts','dist/client.js']);expect(added).not.toBe(before);
+  await writeFile(join(root,'dist','client.js'),'second');expect(await inputHash(root,['src/**/*.ts','dist/client.js'])).not.toBe(added);
+});
+it('does not invalidate a declared proof after unrelated documentation changes and detects its source changes',async()=>{
+  const root=await workspace();await mkdir(join(root,'src'));await writeFile(join(root,'src','cli.mjs'),'console.log("ok")');await writeFile(join(root,'README.md'),'old');
+  const check={id:'behavior',kind:'cli' as const,command:process.execPath,args:['src/cli.mjs'],inputs:['src/cli.mjs'],expected:'contains:ok',requirementIds:[],requiredCapabilities:[]};
+  const before=await checkInputHash(root,plan,task,check,brief);await writeFile(join(root,'README.md'),'new');expect(await checkInputHash(root,plan,task,check,brief)).toBe(before);
+  await writeFile(join(root,'src','cli.mjs'),'console.log("changed")');expect(await checkInputHash(root,plan,task,check,brief)).not.toBe(before);
+});
+it('recognizes a locally prepared executable and returns invocation usable by the consumer',async()=>{
+  if(process.platform==='win32')return;const root=await workspace();
+  const node:EnvironmentNode={id:'fixture-cli',name:'Fixture CLI',kind:'tool',dependsOn:[],targets:['portable'],reason:'Needed CLI',identity:{capability:'fixture-query',kind:'cli',provider:'fixture'},check:{command:'fixture_query_cli',args:['--version']},prepare:[{command:process.execPath,args:['-e',"require('fs').mkdirSync('.tools/bin',{recursive:true});require('fs').writeFileSync('.tools/bin/fixture_query_cli','#!/bin/sh\\nprintf fixture-version\\n',{mode:0o755});"]}]};
+  const result=await prepareEnvironmentNode(root,node,brief,executeCommand);expect(result.ready).toBe(true);
+
+});
+it('attributes a write restriction to the instrument instead of the product',async()=>{
+  const root=await workspace();const check={id:'restricted',kind:'cli' as const,command:process.execPath,args:['cli.mjs'],expected:'contains:ok',requirementIds:[],requiredCapabilities:[]};
+  const execute:typeof executeCommand=async request=>({command:String(request.command),cwd:root,exitCode:1,stdout:'',stderr:'EROFS: read-only file system, mkdir /tmp/test-run',durationMs:1,timedOut:false,cancelled:false,signal:null,fingerprint:'sandbox'});
+  const failure=await runVerification(root,brief,task,plan,check,execute,runTerminal,{instrument:{purpose:'verification',writeScope:'read-only',sandboxApplied:true}});
+  expect(failure.needsInstrument).toBe(true);expect(failure.evidence.passed).toBe(false);
+});
+it('does not pass a functional assertion from an exit code alone',async()=>{
+  const root=await workspace();const check={id:'behavior',kind:'cli' as const,command:process.execPath,args:['-e','console.log("placeholder")'],expected:'The selected record is saved and can be reopened.',requirementIds:[],requiredCapabilities:[]};
+  const result=await runVerification(root,brief,task,plan,check,executeCommand,runTerminal);expect(result.evidence.passed).toBe(false);expect(result.needsInstrument).toBe(true);
+});
+it('keeps production build evidence distinct from a successful syntax/type check',async()=>{
+  const root=await workspace();await writeFile(join(root,'package.json'),JSON.stringify({scripts:{typecheck:'tsc --noEmit',build:'vite build'}}));
+  const checks=await derivedChecks(root,task);expect(checks.some(check=>check.command==='npm run build')).toBe(true);
+});
+
+it('scopes preparation and installed provider observations to the consumer in a mixed-stack project',async()=>{
+  const root=await workspace();await mkdir(join(root,'src'));await writeFile(join(root,'src','main.mjs'),'console.log("ok")');await writeFile(join(root,'package.json'),'{"name":"node-consumer"}');await writeFile(join(root,'Cargo.toml'),'[package]\nname="rust-consumer"\nversion="0.1.0"');
+  const check={id:'behavior',kind:'cli' as const,command:process.execPath,args:['src/main.mjs'],expected:'contains:ok',requirementIds:[],requiredCapabilities:[]};
+  const commands:string[]=[];const execute:typeof executeCommand=async request=>{commands.push(String(request.command));return{command:String(request.command),cwd:root,exitCode:0,stdout:'',stderr:'',durationMs:0,timedOut:false,cancelled:false,signal:null,fingerprint:'fixture'};};
+  const first=await prepareProjectDependencies(root,brief,execute,{inputs:['src/main.mjs'],checks:[check]});expect(first.ready).toBe(true);expect(commands.some(command=>command.includes('cargo'))).toBe(false);
+  const ownTask={...task,files:['src/main.mjs']};const ownPlan={...plan,tasks:[ownTask]};
+  const before=await checkInputHash(root,ownPlan,ownTask,check,brief,first.operational);
+  await writeFile(join(root,'Cargo.toml'),'[package]\nname="rust-consumer"\nversion="0.2.0"');
+  const unrelated=await prepareProjectDependencies(root,brief,execute,{inputs:['src/main.mjs'],checks:[check],previous:JSON.parse(JSON.stringify(first.cache))});
+  expect(await checkInputHash(root,ownPlan,ownTask,check,brief,unrelated.operational)).toBe(before);expect(commands).toHaveLength(0);
+  await mkdir(join(root,'node_modules'),{recursive:true});await writeFile(join(root,'node_modules','.package-lock.json'),'{"packages":{"node_modules/required-provider":{"version":"2.0.0"}}}');
+  const changed=await prepareProjectDependencies(root,brief,execute,{inputs:['src/main.mjs'],checks:[check],previous:unrelated.cache});expect(await checkInputHash(root,ownPlan,ownTask,check,brief,changed.operational)).not.toBe(before);
+});

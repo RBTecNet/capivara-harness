@@ -99,8 +99,7 @@ it('preserva seleção e anexos completos, rejeita material parcial e retoma pel
   expect(announces.some(message => message.includes('materiais completos da mesma seleção'))).toBe(true);
   expect(announces.join('\n')).not.toContain('sensitive diagnostic');
 
-  const cancelled = new AbortController();
-  await expect(loadProjectInput({ workspace, selection: { ...selection, project: 'other' }, cached: persisted, signal: cancelled.signal, announce: message => { if (message.startsWith('Aguardando')) cancelled.abort(); } })).rejects.toThrow(/interrompida/);
+  await expect(loadProjectInput({ workspace, selection: { ...selection, project: 'other' }, cached: persisted, signal: AbortSignal.timeout(2_000), announce })).rejects.toMatchObject({ name: 'RecoverySuspended', attempts: 1 });
 
   mode = 'online';
   const prompt = await loadProjectInput({ workspace, selection: { url: selection.url, prompt: 'landing' }, cached: persisted, signal: AbortSignal.timeout(5_000), announce });

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { resolve, basename } from 'node:path';
 import { digest, scrub, workspaceFingerprint } from './files.js';
-import { isolatedInvocation } from './isolation.js';
+import { executionRestriction, isolatedInvocation } from './isolation.js';
 import type { CommandRequest, CommandResult, ExecutionConstraints, RuntimeIssue } from './types.js';
 
 export function commandText(command: string | readonly string[]): string {
@@ -69,6 +69,7 @@ export function emptyCommandResult(request: CommandRequest, fingerprint = ''): C
 /** Shell-free spawn; string commands explicitly select the host shell. All failures return evidence to recovery. */
 export async function executeCommand(request: CommandRequest): Promise<CommandResult> {
   const start = Date.now();
+  const secrets = Object.entries(request.environment ?? {}).filter(([key]) => /TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY/i.test(key)).map(([, value]) => value);
   const result = emptyCommandResult(request);
   if (request.signal?.aborted) return { ...result, cancelled: true };
   const issue = incompatibleOperation(request.command, request.constraints, request.capabilities);
@@ -76,7 +77,7 @@ export async function executeCommand(request: CommandRequest): Promise<CommandRe
   try { result.fingerprint = await commandIdentity(request); }
   catch (error) { return { ...result, durationMs: Date.now() - start, issue: { kind: 'tool', recoverable: true, message: String(error) }, stderr: String(error) }; }
   if (request.signal?.aborted) return { ...result, cancelled: true, durationMs: Date.now() - start };
-  let invocation: { binary: string; args: string[]; environment: Record<string, string> };
+  let invocation: { binary: string; args: string[]; environment: Record<string, string>; isolated: boolean };
   try { invocation = await isolatedInvocation(request, commandInvocation(request.command)); }
   catch (error) { return { ...result, stderr: String(error), issue: { kind: 'tool', recoverable: true, message: String(error) } }; }
   return new Promise<CommandResult>(resolveResult => {
@@ -94,7 +95,7 @@ export async function executeCommand(request: CommandRequest): Promise<CommandRe
       bytes += Buffer.byteLength(text);
       result[stream] += text;
       if (Buffer.byteLength(result[stream]) > maximum) { result[stream] = result[stream].slice(-Math.max(1, Math.floor(maximum / 2))); truncated = true; }
-      try { request.onOutput?.(scrub(text), stream); } catch { /* observing cannot terminate the command */ }
+      try { request.onOutput?.(scrub(text, secrets), stream); } catch { /* observing cannot terminate the command */ }
     };
     child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
     child.stdout.on('data', (buffer: string) => append(buffer, 'stdout'));
@@ -107,8 +108,10 @@ export async function executeCommand(request: CommandRequest): Promise<CommandRe
       if (killTimer) clearTimeout(killTimer);
       request.signal?.removeEventListener('abort', cancel);
       result.durationMs = Date.now() - start;
-      result.stdout = scrub(result.stdout);
-      result.stderr = scrub(result.stderr);
+      result.stdout = scrub(result.stdout, secrets);
+      result.stderr = scrub(result.stderr, secrets);
+      const restriction = executionRestriction(request, result, invocation.isolated);
+      if (!result.issue && restriction) result.issue = restriction;
       if (truncated) {
         result.stderr += `\nSaída extensa: guardada a cauda; ${bytes} bytes recebidos.`;
         result.issue ??= { kind: 'output-limit', recoverable: true, message: 'A saída da ferramenta excedeu o buffer; use uma consulta focada para o trecho necessário.' };

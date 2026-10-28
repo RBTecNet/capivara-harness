@@ -1,6 +1,6 @@
 # Motor novo: mapa operacional
 
-Versão pública `0.9.0_RC1`; pacote `0.9.0-RC1`. Node.js >=24. Os motores anteriores foram removidos, com histórico preservado no Git. Não importar rotinas antigas nem seus arquivos de estado.
+Versão pública e pacote `0.9.0-rc2`. Node.js >=24. Os motores anteriores foram removidos, com histórico preservado no Git. Não importar rotinas antigas nem seus arquivos de estado.
 
 ## Código
 
@@ -27,6 +27,8 @@ Dependências técnicas são definidas no início do plan. Os agentes recebem pa
 O editor constrói e corrige; o revisor ajuda a identificar defeitos materiais. Erro de formato do parecer não causa reedição do código. Teste e validação existem para demonstrar comportamento relevante ou proteger risco real, nunca para satisfazer contagem ou frase.
 
 Falha recuperável é dado para a próxima ação. Corrigir ambiente, transporte, instrumento ou produto na origem; preservar trabalho e provas não afetados. Esperar recurso externo não significa encerrar a execução. Não usar retomada por checkpoint como substituto de recuperação ativa. Cancelamento explícito do usuário continua sendo respeitado.
+
+O controle RC2 exige uma mudança concreta para repetir uma ação. Sem caminho executável, persistir a causa e suspender honestamente; não esconder repetição em sleeps ou novas mensagens ao mesmo agente. Tarefas rodam em áreas privadas; integração e preparação compartilhada usam coordenação serial. Provas têm identidade de inputs e ambiente consumido, e pareceres conservam original e transformações. A disponibilidade de um provider não comprova seu uso pelo produto. As invariantes e a reprodução estão em [RC2-EXECUCAO.md](docs/RC2-EXECUCAO.md).
 
 ## Verificação de alterações
 

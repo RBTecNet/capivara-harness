@@ -1,0 +1,9 @@
+import {expect,it} from 'vitest';
+import {interpretReview} from '../../src/execution/ENTRY.js';
+it('retains a material runtime defect despite an advisory label',()=>{
+ const text=JSON.stringify({approved:false,findings:[{material:false,severity:'style',file:'app.ts',expected:'Export persists data',observed:'Export fails with EROFS',evidence:'The actual export command returned EROFS',fix:'Use the writable destination required by the original request'}]});
+ const result=interpretReview(text);expect(result.findings).toHaveLength(1);expect(result.approved).toBe(false);expect(result.original).toBe(text);
+});
+it('represents rejection without findings as unresolved and preserves the original',()=>{
+ const text='{"approved":false,"findings":[]}';const result=interpretReview(text);expect(result.decision).toBe('unresolved');expect(result.original).toBe(text);
+});

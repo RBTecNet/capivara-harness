@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, writeFile, unlink, lstat } from 'node:fs/promises';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { mkdir, readdir, readFile, writeFile, unlink, lstat, glob, stat, realpath } from 'node:fs/promises';
+import { dirname, join, relative, resolve, sep, matchesGlob } from 'node:path';
 
 const GENERATED = new Set(['.git', '.capivara-next', '.project-inputs', 'node_modules', '.venv', 'venv', '__pycache__', 'target', 'dist', 'obj', '.next']);
 export const digest = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex');
@@ -9,24 +9,55 @@ export function inside(workspace: string, name: string): string {
   if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`)) throw new Error(`Path outside workspace: ${name}`);
   return path;
 }
+/** Undefined means source discovery; an explicit empty read-set means no file inputs. */
 export async function sourceFiles(workspace: string, paths?: readonly string[]): Promise<string[]> {
-  const found = new Set<string>();
-  const visit = async (path: string): Promise<void> => {
-    const info = await lstat(path).catch(() => null);
-    if (!info || info.isSymbolicLink()) return;
+  const root = resolve(workspace), found = new Set<string>(), activeDirectories = new Set<string>();
+  const exclusions = (paths ?? []).filter(path => path.startsWith('!')).map(path => path.slice(1).replaceAll('\\', '/'));
+  const visit = async (path: string, explicit: boolean): Promise<void> => {
+    const name = relative(root, path).replaceAll('\\', '/');
+    if (name.split('/').some(part => ['.git','.capivara-next','.capivara-runtime','.capivara-verification'].includes(part)) || exclusions.some(pattern => matchesGlob(name, pattern)||matchesGlob(name, `${pattern.replace(/\/$/,'')}/**`))) return;
+    let info = await lstat(path).catch(() => null);
+    if (!info) return;
+    if (info.isSymbolicLink()) {
+      if (!explicit) return;
+      info=await stat(path).catch(()=>null);if(!info)return;
+      if(info.isDirectory()){const target=await realpath(path);const rel=relative(root,target);if(rel==='..'||rel.startsWith(`..${sep}`)||target===root)throw new Error(`Input directory symlink escapes or recursively re-enters the workspace: ${name}`);}
+    }
     if (info.isDirectory()) {
-      const entries = await readdir(path, { withFileTypes: true });
-      for (const entry of entries.sort((a,b)=>a.name.localeCompare(b.name))) if (!GENERATED.has(entry.name)) await visit(join(path,entry.name));
-    } else if (info.isFile()) found.add(relative(resolve(workspace),path));
+      const actual=await realpath(path);if(activeDirectories.has(actual))throw new Error(`Recursive input directory: ${name}`);activeDirectories.add(actual);
+      try {
+        const entries = await readdir(path, { withFileTypes: true });
+        for (const entry of entries.sort((a,b)=>a.name.localeCompare(b.name))) if (explicit || !GENERATED.has(entry.name)) await visit(join(path,entry.name), explicit);
+      } finally {activeDirectories.delete(actual);}
+    } else if (info.isFile()) found.add(name);
   };
-  if (paths?.length) for (const path of paths) await visit(inside(workspace,path));
-  else await visit(resolve(workspace));
+  if (paths === undefined) await visit(root, false);
+  else for (const selector of paths) {
+    if (selector.startsWith('!')) continue;
+    const normalized = selector.replaceAll('\\', '/');
+    if (normalized === '.' || normalized === './') { await visit(root, true); continue; }
+    // Validate even an unmatched selector: globs must not escape the project.
+    inside(root, normalized);
+    if (/[*?{}[\]]/.test(normalized)) {
+      for await (const path of glob(normalized, { cwd: root, exclude: path => path.replaceAll('\\','/').split('/').some(part => ['.git','.capivara-next','.capivara-runtime','.capivara-verification'].includes(part)) })) await visit(inside(root, path), true);
+    } else await visit(inside(root, normalized), true);
+  }
   return [...found].sort();
 }
+
+export async function inputSnapshot(workspace: string, paths: readonly string[]): Promise<Record<string, string>> {
+  const result: Record<string, string> = {};
+  // Recording selectors makes absence, creation, deletion and directory membership explicit.
+  for (const path of [...new Set(paths)].sort()) result[`selector:${path.replaceAll('\\', '/')}`] = 'declared';
+  for (const path of await sourceFiles(workspace, paths)) {
+    const absolute=join(workspace,path), info=await stat(absolute);
+    result[path]=digest(JSON.stringify({mode:info.mode&0o777,content:digest(await readFile(absolute))}));
+  }
+  return result;
+}
+
 export async function inputHash(workspace: string, paths: readonly string[] = [], description = ''): Promise<string> {
-  const hash = createHash('sha256').update(description);
-  for (const path of await sourceFiles(workspace, paths)) hash.update(path).update(await readFile(join(workspace,path)));
-  return hash.digest('hex');
+  return digest(JSON.stringify({ description, inputs: await inputSnapshot(workspace, paths) }));
 }
 export interface SourceSnapshot { files: Map<string, Buffer>; }
 export async function snapshot(workspace: string): Promise<SourceSnapshot> {

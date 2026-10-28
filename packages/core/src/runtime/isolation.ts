@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import type { CommandRequest } from './types.js';
+import type { CommandRequest, CommandResult, RuntimeIssue } from './types.js';
 
 let sandboxProbe: Promise<boolean> | undefined;
 async function available(): Promise<boolean> {
@@ -29,3 +29,11 @@ export async function isolatedInvocation(request: CommandRequest, invocation: { 
 }
 
 export async function workspaceIsolationAvailable(): Promise<boolean> { return available(); }
+
+/** Filesystem denial is an instrument failure only when a real isolation policy explains it. */
+export function executionRestriction(request: Pick<CommandRequest, 'executionPolicy'>, result: Pick<CommandResult, 'exitCode' | 'stdout' | 'stderr'>, sandboxApplied: boolean): RuntimeIssue | undefined {
+  if (result.exitCode === 0) return undefined;
+  const denied = /\b(?:EROFS|EACCES|EPERM)\b|read.only file system|permission denied|operation not permitted/i.test(`${result.stderr}\n${result.stdout}`);
+  if (!denied || (!sandboxApplied && request.executionPolicy?.writeScope !== 'read-only')) return undefined;
+  return { kind: 'instrument', recoverable: true, message: 'A operação falhou sob uma política de isolamento que restringe escrita. Execute a prova em uma cópia isolada gravável; esta observação não demonstra um defeito do produto.' };
+}

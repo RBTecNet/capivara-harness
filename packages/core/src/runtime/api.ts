@@ -1,3 +1,4 @@
+import { ApiProgressGuard } from './api-progress.js';
 import { AgentTools } from './tools.js';
 import { scrub } from './files.js';
 import type { AgentConfig, AgentRequest, AgentResult, RuntimeIssue, Usage } from './types.js';
@@ -140,9 +141,16 @@ export async function runApiAgent(request: AgentRequest): Promise<AgentResult> {
     : [{ role: 'system', content: requestSystem(request) }, { role: 'user', content: [request.instruction, request.context].filter(Boolean).join('\n\n') }];
   const initialMessages = history.length;
   const budgetChars = Math.max(4096, (request.config.contextTokens ?? 24_000) * 3 - (request.config.maxOutputTokens ?? 4096) * 3);
-  const seenTools = new Map<string, { signature: string; result: object }>();
+  const seenTools = new Map<string, { signature: string; state: string; result: object }>();
+  const progress=new ApiProgressGuard(request);
+  baseResult.diagnostics=progress.diagnostics;
+  const requestedRounds=request.config.maxToolRounds;
+  const maxToolRounds=requestedRounds!==undefined&&Number.isFinite(requestedRounds)&&requestedRounds>0?Math.floor(requestedRounds):64;
+  const stopped=():AgentResult=>({...baseResult,status:'partial',text:lastText,...(observedUsage?{usage}:{}),issue:{kind:'instrument',recoverable:false,message:progress.diagnostics.stoppedBecause==='round-limit'?'A unidade atingiu o limite de rodadas de ferramentas com efeitos preservados. Divida o trabalho ou forneça uma estratégia executável distinta; isso não é aprovação nem defeito fictício do produto.':'As mesmas ações retornaram os mesmos fatos sem alterar o trabalho. A repetição foi suspensa, com os arquivos e resultados preservados. É necessária uma mudança concreta de estado ou estratégia antes de repetir.'}});
   try {
+    if(!await progress.start())return stopped();
     for (;;) {
+      if(!await progress.beginRound(maxToolRounds))return stopped();
       if (controller.signal.aborted) return { ...baseResult, status: request.signal?.aborted ? 'cancelled' : 'partial', text: lastText, ...(observedUsage ? { usage } : {}), issue: { kind: 'transport', recoverable: true, message: 'A operação foi interrompida; reconcilie seus efeitos e continue a pendência.' } };
       history = compact(history, budgetChars, initialMessages);
       if (JSON.stringify(history).length > budgetChars) return { ...baseResult, status: 'partial', text: lastText, ...(observedUsage ? { usage } : {}), issue: { kind: 'context', recoverable: true, message: 'O contexto desta unidade excede o espaço reservado. Divida a tarefa ou reduza os trechos relevantes; os arquivos e resultados já produzidos foram preservados.' } };
@@ -190,10 +198,16 @@ export async function runApiAgent(request: AgentRequest): Promise<AgentResult> {
       for (const call of calls) {
         let input: unknown = call.input;
         let result: object;
-        const signature = JSON.stringify([call.name, input]);
-        try { if (typeof input === 'string') input = JSON.parse(input); const previous = seenTools.get(call.id); result = previous?.signature === signature ? previous.result : await tools.execute(call.name, input); }
-        catch { result = { error: 'Argumentos da ferramenta incompletos. Reenvie somente esta chamada com objeto JSON válido.', recoverable: true }; }
-        if (call.id) seenTools.set(call.id, { signature, result });
+        let valid=definitions.some(definition=>definition.name===call.name);
+        try {if(typeof input==='string')input=JSON.parse(input);}catch{valid=false;}
+        const signature=JSON.stringify([call.name,input]);
+        const before=await progress.before(call.name,input);
+        try { const previous=seenTools.get(call.id); const replay=previous?.signature===signature&&(definitions.find(definition=>definition.name===call.name)?.writes===true||previous.state===before); result=replay?previous.result:valid?await tools.execute(call.name,input):{error:'Argumentos ou ferramenta inválidos; informe uma ação válida.',recoverable:true}; }
+        catch { result={error:'A ferramenta falhou antes de produzir um resultado utilizável.',recoverable:true};valid=false; }
+        if(call.id)seenTools.set(call.id,{signature,state:before,result});
+        const observed=await progress.observe(before,call.name,input,result,valid);
+        baseResult.changedFiles=observed.changedFiles;
+        if(observed.stop)return stopped();
         const output = toolOutput(result, resultBudget, key);
         if (anthropic) results.push({ type: 'tool_result', tool_use_id: call.id, content: output });
         else history.push({ role: 'tool', tool_call_id: call.id, name: call.name, content: output });
@@ -202,5 +216,5 @@ export async function runApiAgent(request: AgentRequest): Promise<AgentResult> {
     }
   } catch (error) {
     return { ...baseResult, status: request.signal?.aborted ? 'cancelled' : lastText || commands.length ? 'partial' : 'unavailable', text: lastText, ...(observedUsage ? { usage } : {}), issue: { kind: 'transport', recoverable: true, message: scrub(error instanceof Error ? error.message : String(error), [key]) } };
-  } finally { clearTimeout(timeout); request.signal?.removeEventListener('abort', abort); tools.close(); }
+  } finally { await progress.finish(); clearTimeout(timeout); request.signal?.removeEventListener('abort', abort); tools.close(); }
 }

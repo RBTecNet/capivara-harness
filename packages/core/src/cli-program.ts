@@ -20,6 +20,8 @@ interface Flags {
   modelDefault?: boolean; effortDefault?: boolean; reviewerModelDefault?: boolean; reviewerEffortDefault?: boolean;
   mcp?: string; mcpProject?: string; mcpPrompt?: string; mcpTokenEnv?: string;
   dashboard?: boolean;
+  jobs?: string;
+  retrySuspended?: boolean;
 }
 const PROVIDERS = ['codex', 'claude', 'opencode', 'openai', 'anthropic', 'gemini', 'openrouter', 'deepseek', 'minimax', 'custom'];
 const hideSecrets = (key: string, value: unknown): unknown => !/Env$/.test(key) && /api.?key|token|secret|password|access.?key|authorization|cookie/i.test(key) && typeof value === 'string' ? '[credencial ocultada]' : value;
@@ -46,6 +48,8 @@ function common(command: Command): Command {
     .option('--context-tokens <n>', 'Capacidade de contexto do modelo')
     .option('--max-output-tokens <n>', 'Reserva de saída por chamada')
     .option('--system-install', 'Permitir preparação com instalação no sistema')
+    .option('--jobs <n>', 'Máximo de unidades independentes simultâneas (padrão: 2)')
+    .option('--retry-suspended', 'Sondar novamente um recurso externo suspenso, preservando trabalho e provas')
     .option('--file <path>', 'Arquivo contendo o pedido')
     .option('--mcp <url>', 'Endereço da base documental MCP/data-center')
     .option('--mcp-project <slug>', 'Usar pedido e documentos selecionados desse projeto')
@@ -57,6 +61,7 @@ function common(command: Command): Command {
 }
 
 function agentFlags(flags: Flags, base?: AgentConfig): AgentConfig | undefined {
+  if (flags.jobs !== undefined && (!Number.isSafeInteger(Number(flags.jobs)) || Number(flags.jobs) < 1 || Number(flags.jobs) > 64)) throw new Error('--jobs precisa ser um inteiro entre 1 e 64.');
   for (const value of [flags.contextTokens, flags.maxOutputTokens]) {
     if (value !== undefined && (!Number.isSafeInteger(Number(value)) || Number(value) <= 0)) throw new Error('Os limites de tokens precisam ser inteiros positivos.');
   }
@@ -186,6 +191,8 @@ export function createProgram(): Command {
         documents: input?.documents ?? [],
         ...(reviewer ? { reviewer } : {}),
         ...(flags.systemInstall === true ? { allowSystemInstall: true } : {}),
+        ...(flags.jobs !== undefined ? { maxConcurrent: Number(flags.jobs) } : {}),
+        ...(flags.retrySuspended ? { retrySuspended: true } : {}),
         signal: controller.signal, announce,
         onEvent: event => dashboard?.observe(event),
         onState: state => dashboard?.updateProject(state),
@@ -195,8 +202,13 @@ export function createProgram(): Command {
       if (flags.json) stdout.write(`${JSON.stringify(result, null, 2)}\n`);
       else stdout.write(`\n${stage}: ${result.status}. Estado: ${workspace}/.capivara-next\n`);
       if (result.status === 'cancelled') process.exitCode = 130;
+      else if (result.status !== 'complete') process.exitCode = 2;
     } catch (error) {
-      if (!controller.signal.aborted) throw error;
+      if (!controller.signal.aborted) {
+        const message = error instanceof Error ? error.message : String(error);
+        try { executionStore?.update({ status: 'waiting', lastFailure: { kind: 'input-or-controller', message, fingerprint: message, at: new Date().toISOString() } }); } catch { /* Preserve the last authoritative state. */ }
+        throw error;
+      }
       stdout.write('Interrupção solicitada; materiais e trabalho preservados.\n'); process.exitCode = 130;
     } finally { finishing = true; dashboard?.close(); process.off('SIGINT', interrupt); process.off('SIGTERM', interrupt); executionStore?.close(); }
   };
@@ -217,8 +229,9 @@ export function createProgram(): Command {
           dataCenter = validateDataCenterEndpoint({ url: dataCenter.url, headers: { ...dataCenter.headers, authorization: `Bearer ${token.trim()}` } });
         }
       }
-      if (!flags.provider && !flags.model && !flags.effort && !flags.modelDefault && !flags.effortDefault && !flags.baseUrl && !flags.apiKeyEnv && !flags.reviewerProvider && !flags.reviewerModel && !flags.reviewerEffort && !flags.reviewerModelDefault && !flags.reviewerEffortDefault && !flags.mcp && !flags.mcpTokenEnv && flags.systemInstall !== true) { stdout.write(`${JSON.stringify(settings, hideSecrets, 2)}\n`); return; }
+      if (!flags.provider && !flags.model && !flags.effort && !flags.modelDefault && !flags.effortDefault && !flags.baseUrl && !flags.apiKeyEnv && !flags.reviewerProvider && !flags.reviewerModel && !flags.reviewerEffort && !flags.reviewerModelDefault && !flags.reviewerEffortDefault && !flags.mcp && !flags.mcpTokenEnv && flags.systemInstall !== true && flags.jobs === undefined) { stdout.write(`${JSON.stringify(settings, hideSecrets, 2)}\n`); return; }
       await saveSettings({ ...settings, ...(config ? { agent: config } : {}), ...(dataCenter ? { dataCenter } : {}), ...(flags.systemInstall === true ? { allowSystemInstall: true } : {}),
+        ...(flags.jobs !== undefined ? { maxConcurrent: Number(flags.jobs) } : {}),
         ...(config && (flags.reviewerProvider || flags.reviewerModel || flags.reviewerEffort || flags.reviewerModelDefault || flags.reviewerEffortDefault) ? { reviewer: reviewerFlags(flags, config) } : {}),
       });
       stdout.write(`Configuração salva em ${settingsPath()}\n`);
@@ -229,7 +242,7 @@ export function createProgram(): Command {
       const { ProjectStore } = await import('./app/store.js'); const store = new ProjectStore(flags.project);
       try {
         const state = store.read();
-        stdout.write(flags.json ? `${JSON.stringify(state, hideSecrets, 2)}\n` : `${state.stage ?? 'sem execução'}: ${state.status ?? 'novo'}\n${state.pendingQuestion ? `${state.pendingQuestion.id}: ${state.pendingQuestion.question}\n` : ''}`);
+        stdout.write(flags.json ? `${JSON.stringify(state, hideSecrets, 2)}\n` : `${state.stage ?? 'sem execução'}: ${state.status ?? 'novo'}\n${state.lastFailure ? `${state.lastFailure.kind}: ${state.lastFailure.message}\n` : ''}${state.pendingQuestion ? `${state.pendingQuestion.id}: ${state.pendingQuestion.question}\n` : ''}`);
       } finally { store.close(); }
     });
   program.command('dashboard').description('Acompanha o projeto com painéis, rolagem e áreas ampliadas')

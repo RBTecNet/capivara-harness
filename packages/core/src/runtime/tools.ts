@@ -44,6 +44,7 @@ export class AgentTools {
       if (!definition) throw new Error('Ferramenta não disponível para este papel.');
       this.emit('tool', `${name}`);
       const { workspace, constraints, signal } = this.request;
+      const environment = { ...this.request.config.environment, ...this.request.environment };
       if (name === 'list_files') {
         const path = optionalString(args, 'path') ?? '.';
         const absolute = await projectPath(workspace, path);
@@ -67,7 +68,7 @@ export class AgentTools {
         return { edited: path };
       }
       if (name === 'run_command' || name === 'run_terminal') {
-        const common = { cwd: workspace, command: field(args, 'command'), ...(constraints ? { constraints } : {}), ...(signal ? { signal } : {}), ...(optionalNumber(args, 'timeoutMs') !== undefined ? { timeoutMs: Math.max(1, optionalNumber(args, 'timeoutMs')!) } : {}), ...(optionalString(args, 'input') !== undefined ? { input: optionalString(args, 'input')! } : {}), isolateWorkspace: constraints?.allowSystemInstall !== true, onOutput: (text: string) => this.emit('output', text) };
+        const common = { cwd: workspace, command: field(args, 'command'), environment, ...(constraints ? { constraints } : {}), ...(signal ? { signal } : {}), ...(optionalNumber(args, 'timeoutMs') !== undefined ? { timeoutMs: Math.max(1, optionalNumber(args, 'timeoutMs')!) } : {}), ...(optionalString(args, 'input') !== undefined ? { input: optionalString(args, 'input')! } : {}), isolateWorkspace: constraints?.allowSystemInstall !== true, onOutput: (text: string) => this.emit('output', text) };
         let result: CommandResult;
         if (name === 'run_terminal') {
           const steps: TerminalStep[] = Array.isArray(args.steps) ? args.steps.map((step: unknown) => {
@@ -83,7 +84,7 @@ export class AgentTools {
         return { ...result, stdout: result.stdout.slice(-32_000), stderr: result.stderr.slice(-12_000) };
       }
       if (name === 'start_process') {
-        const process = await startProcess({ cwd: workspace, command: field(args, 'command'), capabilities: [field(args, 'capability')], isolateWorkspace: constraints?.allowSystemInstall !== true, ...(constraints ? { constraints } : {}), ...(signal ? { signal } : {}) });
+        const process = await startProcess({ cwd: workspace, command: field(args, 'command'), environment, capabilities: [field(args, 'capability')], isolateWorkspace: constraints?.allowSystemInstall !== true, ...(constraints ? { constraints } : {}), ...(signal ? { signal } : {}) });
         if (process.id) this.owned.add(process.id);
         return process;
       }

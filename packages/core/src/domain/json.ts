@@ -1,5 +1,6 @@
 import type { DomainAgent, DomainAgentRequest, DomainEvent } from "./types.js";
 import { emitEvent } from "../telemetry/progress.js";
+import { PlanningProgress } from "./control.js";
 
 export const object = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 export const string = (value: unknown, fallback = ""): string => typeof value === "string" ? value.trim() : fallback;
@@ -62,17 +63,14 @@ export async function requestObject(options: {
   contextChars?: number;
 }): Promise<Record<string, unknown>> {
   let instruction = options.prompt;
-  let previous = "";
-  let repeated = 0;
+  const progress = new PlanningProgress(`envelope:${options.operation}`);
   for (;;) {
     cancelled(options.signal);
     const response = await options.agent({ operation: options.operation, prompt: instruction, readOnly: true });
     const parsed = jsonObject(response);
     if (parsed) return parsed;
-    repeated = response === previous ? repeated + 1 : 0;
-    previous = response;
+    progress.requireChange(response, "O agente não forneceu um objeto legível para a mesma operação.");
     emitEvent(options.onEvent, { type: "recovering", message: "A resposta não contém objeto legível; recuperando sua estrutura sem reabrir o produto.", subject: options.operation });
-    if (repeated > 0) await pause(Math.min(30_000, repeated * 2_000), options.signal);
     const prefix = "Return one valid JSON object. Repair the preceding undecodable answer without changing the product facts:\n";
     const remaining = (options.contextChars ?? 24_000) - options.prompt.length - prefix.length - 4;
     // A formatting failure must not turn a correctly scoped request into a larger prompt.

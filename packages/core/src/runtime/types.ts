@@ -12,6 +12,8 @@ export interface AgentConfig {
   args?: string[];
   contextTokens?: number;
   maxOutputTokens?: number;
+  /** Complementary bound; repeated no-progress tool actions are stopped earlier. */
+  maxToolRounds?: number;
   environment?: Record<string, string>;
 }
 
@@ -31,7 +33,7 @@ export interface RuntimeEvent {
 }
 
 export interface RuntimeIssue {
-  kind: 'transport' | 'authentication' | 'rate-limit' | 'capacity' | 'configuration' | 'context' | 'output-limit' | 'tool' | 'constraint';
+  kind: 'transport' | 'authentication' | 'rate-limit' | 'capacity' | 'configuration' | 'context' | 'output-limit' | 'tool' | 'constraint' | 'instrument';
   message: string;
   retryAfterMs?: number;
   recoverable: boolean;
@@ -61,6 +63,11 @@ export interface CommandRequest {
   capabilities?: readonly string[];
   /** Request host workspace isolation for model shell tools when the host can supply it. */
   isolateWorkspace?: boolean;
+  /** The coordinator or transport adapter supplies actual execution policy, never the model's claim. */
+  executionPolicy?: {
+    purpose: 'inspection' | 'verification' | 'implementation';
+    writeScope: 'read-only' | 'workspace' | 'isolated-workspace';
+  };
 }
 
 export interface CommandResult {
@@ -97,7 +104,11 @@ export interface TerminalRequest extends CommandRequest {
 export interface AgentRequest {
   workspace: string;
   config: AgentConfig;
+  /** Operational bindings prepared by the coordinator; inherited by all process tools. */
+  environment?: Record<string, string>;
   role: string;
+  /** Stable identity assigned by the coordinator's persisted action ledger, never a per-call random ID. */
+  operationKey?: string;
   instruction: string;
   context?: string;
   readOnly?: boolean;
@@ -105,6 +116,20 @@ export interface AgentRequest {
   onEvent?: (event: RuntimeEvent) => void;
   timeoutMs?: number;
   constraints?: ExecutionConstraints;
+}
+
+export interface ApiProgressDiagnostics {
+  kind: 'api-progress';
+  stateFingerprint: string;
+  toolRounds: number;
+  toolActions: number;
+  informationalObservations: number;
+  mutations: number;
+  stagnantActions: number;
+  stoppedBecause?: 'no-progress' | 'round-limit';
+  repeatedAction?: string;
+  replayedStop?: boolean;
+  persistence?: 'written' | 'unavailable';
 }
 
 export interface AgentResult {
@@ -115,4 +140,5 @@ export interface AgentResult {
   commands: CommandResult[];
   changedFiles: string[];
   sessionId?: string;
+  diagnostics?: ApiProgressDiagnostics;
 }

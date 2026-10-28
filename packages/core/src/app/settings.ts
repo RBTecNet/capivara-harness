@@ -9,6 +9,7 @@ export interface Settings {
   agent?: AgentConfig;
   reviewer?: AgentConfig;
   allowSystemInstall?: boolean;
+  maxConcurrent?: number;
   credentials?: Record<string, { apiKey: string; apiKeyEnv?: string; baseUrl?: string }>;
   dataCenter?: DataCenterEndpoint;
 }

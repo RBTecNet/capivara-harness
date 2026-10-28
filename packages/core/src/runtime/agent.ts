@@ -65,7 +65,7 @@ async function runCliAgent(request: AgentRequest): Promise<AgentResult> {
   try {
     let binary = config.command ?? config.provider;
     let args: string[];
-    const environment = { ...config.environment };
+    const environment = { ...config.environment, ...request.environment };
     if (config.provider === 'codex') {
       binary = config.command ?? process.env.CAPIVARA_CODEX_BIN ?? 'codex';
       args = ['exec', '--json', '--color', 'never', '--skip-git-repo-check', '--ephemeral', '--cd', request.workspace, '--output-last-message', answer];
@@ -102,6 +102,7 @@ async function runCliAgent(request: AgentRequest): Promise<AgentResult> {
     emit(request, `Executando ${config.provider}${config.model ? ` / ${config.model}` : ''} em ${request.workspace}.`);
     const result = await executeCommand({
       cwd: request.workspace, command: [binary, ...args], input: instruction, environment,
+      executionPolicy: { purpose: request.readOnly ? 'inspection' : 'implementation', writeScope: request.readOnly ? 'read-only' : 'workspace' },
       timeoutMs: request.timeoutMs ?? 600_000, maxOutputBytes: 8 * 1024 * 1024,
       ...(request.signal ? { signal: request.signal } : {}),
       onOutput: (output, stream) => { try { request.onEvent?.({ type: 'output', message: output, detail: { stream } }); } catch { /* observer isolation */ } },
@@ -110,14 +111,14 @@ async function runCliAgent(request: AgentRequest): Promise<AgentResult> {
     let output = decoded.text;
     if (config.provider === 'codex') { try { output = (await readFile(answer, 'utf8')).trim() || output; } catch { /* A CLI failure may still leave useful JSON events. */ } }
     else if (config.command && !['claude', 'opencode'].includes(config.provider)) output = result.stdout.trim();
-    const secret = config.apiKey ? [config.apiKey] : [];
+    const secret = [...(config.apiKey ? [config.apiKey] : []), ...Object.entries(environment).filter(([key]) => /TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY/i.test(key)).map(([, value]) => value)];
     output = scrub(output, secret);
     const problem = (result.timedOut ? 'A operação excedeu o prazo; seus arquivos e a resposta parcial foram preservados.' : '') || decoded.failure || (result.exitCode !== 0 ? result.stderr.trim() || `A CLI terminou com código ${result.exitCode ?? result.signal ?? 'desconhecido'}.` : '') || (!output.trim() ? 'A CLI não devolveu uma resposta; saída vazia não confirma execução concluída.' : '');
     return {
       status: result.cancelled ? 'cancelled' : problem || result.issue ? (output ? 'partial' : 'unavailable') : 'complete',
       text: output, changedFiles: [], commands: [],
       ...(decoded.usage ? { usage: decoded.usage } : {}), ...(decoded.sessionId ? { sessionId: decoded.sessionId } : {}),
-      ...(problem ? { issue: cliIssue(scrub(problem, secret)) } : result.issue ? { issue: result.issue } : {}),
+      ...(result.issue?.kind === 'instrument' ? { issue: result.issue } : problem ? { issue: cliIssue(scrub(problem, secret)) } : result.issue ? { issue: result.issue } : {}),
     };
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
@@ -130,7 +131,8 @@ export async function runAgent(request: AgentRequest): Promise<AgentResult> {
   let result = empty;
   try {
     before = await snapshotWorkspace(request.workspace);
-    result = await (isApiProvider(request.config) ? runApiAgent(request) : runCliAgent(request));
+    const effective = { ...request, config: { ...request.config, environment: { ...request.config.environment, ...request.environment } } };
+    result = await (isApiProvider(effective.config) ? runApiAgent(effective) : runCliAgent(effective));
   } catch (error) { result = { ...result, issue: { kind: 'tool', recoverable: true, message: scrub(error instanceof Error ? error.message : String(error), request.config.apiKey ? [request.config.apiKey] : []) } }; }
   try {
     if (before) result.changedFiles = changedPaths(before, await snapshotWorkspace(request.workspace));

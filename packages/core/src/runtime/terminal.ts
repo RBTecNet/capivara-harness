@@ -2,10 +2,11 @@ import { spawn } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { commandIdentity, commandInvocation, emptyCommandResult, incompatibleOperation, quoteArgument, terminateProcess } from './command.js';
 import { scrub } from './files.js';
-import { isolatedInvocation } from './isolation.js';
+import { executionRestriction, isolatedInvocation } from './isolation.js';
 import type { CommandResult, TerminalRequest } from './types.js';
 
 interface TerminalHandle {
+  isolated: boolean;
   write(text: string): void;
   close(): void;
   onData(handler: (text: string) => void): void;
@@ -29,6 +30,7 @@ async function openTerminal(request: TerminalRequest): Promise<TerminalHandle> {
     const pty = await import(moduleName) as unknown as PtyModule;
     const child = pty.spawn(command.binary, command.args, { cwd: request.cwd, env, name: env.TERM ?? 'xterm-256color', cols, rows });
     return {
+      isolated: command.isolated,
       write: text => child.write(text), close: () => { try { child.kill(); } catch { /* closed */ } },
       onData: handler => { child.onData(handler); },
       onExit: handler => { child.onExit(event => handler(event.exitCode, event.signal ? String(event.signal) : null)); },
@@ -51,6 +53,7 @@ async function openTerminal(request: TerminalRequest): Promise<TerminalHandle> {
   child.on('error', cause => { error = cause; });
   child.on('close', (code, signal) => { ended = true; exit = { code, signal }; for (const listener of listeners) listener(code, signal); });
   return {
+    isolated: command.isolated,
     write: text => { if (!ended) child.stdin.write(text); },
     close: () => { child.stdin.end(); if (!ended) terminateProcess(child.pid, 'SIGKILL'); },
     onData: handler => { child.stdout.on('data', (data: string) => handler(data)); child.stderr.on('data', (data: string) => handler(data)); },
@@ -61,6 +64,7 @@ async function openTerminal(request: TerminalRequest): Promise<TerminalHandle> {
 /** Runs an actual PTY and checks each expected screen/output transition before accepting its result. */
 export async function runTerminal(request: TerminalRequest): Promise<CommandResult> {
   const start = Date.now();
+  const secrets = Object.entries(request.environment ?? {}).filter(([key]) => /TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY/i.test(key)).map(([, value]) => value);
   const result = emptyCommandResult(request);
   if (request.signal?.aborted) return { ...result, cancelled: true };
   const conflict = incompatibleOperation(request.command, request.constraints, request.capabilities);
@@ -78,7 +82,7 @@ export async function runTerminal(request: TerminalRequest): Promise<CommandResu
   const exited = new Promise<void>(resolve => { complete = resolve; });
   terminal.onData(text => {
     result.stdout = (result.stdout + text).slice(-limit);
-    try { request.onOutput?.(scrub(text), 'stdout'); } catch { /* observer isolation */ }
+    try { request.onOutput?.(scrub(text, secrets), 'stdout'); } catch { /* observer isolation */ }
   });
   terminal.onExit((code, signal) => { result.exitCode = code; result.signal = signal; finished = true; complete(); });
   const cancel = (): void => { result.cancelled = true; terminal.close(); complete(); };
@@ -119,7 +123,9 @@ export async function runTerminal(request: TerminalRequest): Promise<CommandResu
     clearTimeout(wall);
     request.signal?.removeEventListener('abort', cancel);
     terminal.close();
-    result.stdout = scrub(result.stdout);
+    result.stdout = scrub(result.stdout, secrets);
+    const restriction = executionRestriction(request, result, terminal.isolated);
+    if (restriction && (!result.issue || result.issue.kind === 'tool')) result.issue = { ...restriction, message: `${restriction.message}${result.issue ? ` Observação original: ${result.issue.message}` : ''}` };
     result.durationMs = Date.now() - start;
   }
   return result;

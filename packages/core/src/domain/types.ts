@@ -4,6 +4,11 @@ import type { ProgressMeasurement } from '../telemetry/progress.js';
 export type ApplicationMode = "web" | "desktop" | "tui" | "cli" | "api" | "service" | "library" | "other";
 export type TargetPlatform = "linux" | "windows" | "macos" | "browser" | "portable";
 export type Risk = "low" | "normal" | "high";
+export interface CapabilityIdentity {
+  capability: string;
+  kind: "cli" | "library" | "driver" | "service" | "runtime" | "sdk";
+  provider: string;
+}
 
 export interface Source {
   kind: "request" | "answer" | "repository";
@@ -18,6 +23,9 @@ export interface Requirement {
   statement: string;
   source: Source;
   mode: ApplicationMode | "shared";
+  kind?: "behavior" | "stack" | "interface" | "constraint";
+  /** Literal mandatory technology choice, checked against the operational provider. */
+  binding?: CapabilityIdentity;
 }
 
 export interface ProductConstraint {
@@ -91,6 +99,11 @@ export interface EnvironmentNode {
   reason: string;
   check: CommandRecipe;
   prepare: CommandRecipe[];
+  /** Required capability and its actual provider, independent of display names. */
+  identity?: CapabilityIdentity;
+  requirementIds?: string[];
+  /** Operational bindings made available to consumers after readiness is proven. */
+  provides?: { command?: string[]; env?: Record<string, string>; paths?: string[]; inputs?: string[] };
 }
 
 export interface IntegrationContract {
@@ -114,8 +127,16 @@ export interface Verification {
   closeInput?: string;
   requirementIds: string[];
   requiredCapabilities: string[];
+  constraintIds?: string[];
   timeoutMs?: number;
   target?: TargetPlatform;
+  inputs?: string[];
+  cwd?: string;
+  level?: "syntax" | "build" | "behavior";
+  outputs?: string[];
+  dependsOn?: string[];
+  /** Dedicated proof that product inputs actually consume the mandatory provider. */
+  conformance?: CapabilityIdentity & { requirementId: string; productInputs: string[]; providerCommand?: string[]; providerInputs?: string[]; artifacts?: string[] };
 }
 
 export interface WorkUnit {
@@ -128,6 +149,11 @@ export interface WorkUnit {
   environmentIds: string[];
   contractIds: string[];
   files: string[];
+  /** Explicit read dependencies. files are owned outputs, not the entire project. */
+  inputs?: string[];
+  /** Exclusive named resources (ports, generated state or external services). */
+  resources?: string[];
+  exclusiveContracts?: string[];
   criteria: string[];
   checks: Verification[];
   risk: Risk;
@@ -144,6 +170,8 @@ export interface DevelopmentPlan {
   environment: EnvironmentNode[];
   contracts: IntegrationContract[];
   tasks: WorkUnit[];
+  /** Final proof recipes for mandatory outcomes, stack choices and constraints. */
+  acceptance?: Verification[];
 }
 
 export interface DomainAgentRequest {

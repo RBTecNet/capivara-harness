@@ -1,0 +1,149 @@
+{
+  "version": "0.9.0-rc2",
+  "verifiedAt": "2026-10-28T14:24:34.338305+00:00",
+  "branch": "rewrite/motores-0.9.0-rc2",
+  "baselineCommit": "77a1178",
+  "check": {
+    "command": "npm run check",
+    "exitCode": 0,
+    "build": "passed",
+    "typecheck": "passed",
+    "testFiles": 24,
+    "tests": 157,
+    "log": "rc2-evidence/check.log"
+  },
+  "sourceDigestSha256": "0dae941990af2d3eaa2c35ff50e46a2b7778fe918383e152a1e3fa1017e0b1bb",
+  "builtCliSha256": "9b9fac56090b98c77116f565747a3204bc4ae6b3a2b66f8e1bf5a00034052094",
+  "installation": {
+    "version": "0.9.0-rc2",
+    "installedCliMatchesBuiltCli": true,
+    "jobsOptionAvailable": true,
+    "explicitResourceRetryAvailable": true,
+    "installedPublicApiMatchesBuild": true
+  },
+  "pilots": [
+    {
+      "name": "node-serial-control",
+      "status": "complete",
+      "jobs": 1,
+      "overlaps": [],
+      "elapsedMs": 891,
+      "maxConcurrency": 1,
+      "callsByRole": {
+        "editor": 3,
+        "reviewer": 3
+      }
+    },
+    {
+      "name": "node-parallel",
+      "status": "complete",
+      "jobs": 2,
+      "overlaps": [
+        [
+          "alpha",
+          "beta"
+        ]
+      ],
+      "elapsedMs": 536,
+      "maxConcurrency": 2,
+      "callsByRole": {
+        "editor": 3,
+        "reviewer": 3
+      }
+    },
+    {
+      "name": "required-node-runtime",
+      "status": "complete",
+      "jobs": 2,
+      "overlaps": [
+        [
+          "alpha",
+          "beta"
+        ]
+      ],
+      "elapsedMs": 1142,
+      "maxConcurrency": 2,
+      "callsByRole": {
+        "editor": 3,
+        "reviewer": 3
+      }
+    },
+    {
+      "name": "python-strict",
+      "status": "complete",
+      "jobs": 3,
+      "overlaps": [],
+      "elapsedMs": 481,
+      "maxConcurrency": 1,
+      "callsByRole": {
+        "editor": 2,
+        "reviewer": 2
+      }
+    },
+    {
+      "name": "tui-interaction",
+      "status": "complete",
+      "jobs": 2,
+      "overlaps": [],
+      "elapsedMs": 305,
+      "maxConcurrency": 1,
+      "callsByRole": {
+        "editor": 1,
+        "reviewer": 1
+      }
+    }
+  ],
+  "beforeAfter": {
+    "planning": {
+      "beforeFailed": 4,
+      "beforePassed": 0,
+      "afterFailed": 0,
+      "afterPassed": 16
+    },
+    "environment": {
+      "beforeFailed": 7,
+      "beforePassed": 0,
+      "afterFailed": 0,
+      "afterPassed": 14
+    },
+    "api-loop": {
+      "beforeFailed": 2,
+      "beforePassed": 0,
+      "afterFailed": 0,
+      "afterPassed": 4
+    },
+    "review": {
+      "beforeFailed": 2,
+      "beforePassed": 0,
+      "afterFailed": 0,
+      "afterPassed": 2
+    },
+    "wrongProvider": {
+      "beforeStatus": "complete",
+      "afterStatus": "waiting",
+      "correctProviderReady": true,
+      "actualApplicationProvider": "/bin/sh",
+      "mandatoryProvider": "Node.js",
+      "afterReason": "The command that ran is not the mandatory operational provider."
+    },
+    "control": {
+      "baselineLog": "rc2-evidence/control-before.txt",
+      "beforeObservedConcurrency": 1,
+      "beforeNoProgressResult": "cancelled only by the test deadline",
+      "afterObservedConcurrency": 2,
+      "afterRepeatedFailureResult": "waiting with persisted cause and no repeated calls on unchanged restart"
+    }
+  },
+  "paidHarnessInferenceCalls": 0,
+  "originalReportedRun": {
+    "reproduced": false,
+    "reason": "O pedido não incluiu o caminho do projeto ou diário original; ele foi solicitado durante o trabalho. Os números relatados não são uma medição de custo desta entrega."
+  },
+  "limitations": [
+    "Validação executada em Linux, sem interação nativa Windows/macOS.",
+    "Agentes dos pilotos são determinísticos; arquivos, comandos, runtimes e PTY são reais.",
+    "Inputs dinâmicos e recursos externos precisam de contratos declarados; não há rastreamento universal de syscalls.",
+    "Biblioteca, driver ou serviço sem prova de uso observável não recebem conformidade por disponibilidade ou metadata.",
+    "Isolamento por cópia não substitui contenção do sistema operacional para comandos arbitrários com caminhos absolutos."
+  ]
+}

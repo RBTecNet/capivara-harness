@@ -8,7 +8,7 @@ import type { SelectedDocument } from '../domain/types.js';
 import { projectPath, writeProductFile } from '../runtime/files.js';
 import { ProjectStore } from './store.js';
 import { readSettings } from './settings.js';
-import { waitForRecovery } from './recovery.js';
+import { RecoverySuspended } from './recovery.js';
 import { emitEvent, type ProgressMeasurement } from '../telemetry/progress.js';
 
 export interface DataCenterSelection { url: string; project?: string; prompt?: string; }
@@ -184,8 +184,7 @@ export async function loadProjectInput(options: {
     } catch { /* A cache from another or malformed selection cannot supply this request. */ }
   }
   const announce = (message: string): void => { try { options.announce(message); } catch { /* Observation cannot discard preserved input. */ } };
-  let attempt = 0;
-  for (;;) {
+  {
     if (options.signal.aborted) throw options.signal.reason;
     emitEvent(options.onProgress, { id: 'inputs.source', label: 'Leitura da base documental', status: 'running', stage: 'init' });
     try {
@@ -219,8 +218,9 @@ export async function loadProjectInput(options: {
           return cached;
         } catch { announce('A cópia dos insumos também precisa ser recuperada; aguardando a base sem substituir o material preservado.'); }
       }
-      announce(`Aguardando a base documental: ${error instanceof Error ? error.message : String(error)}. A conexão será recuperada sem descartar o pedido.`);
-      await waitForRecovery(Math.min(30_000, 2_000 * 2 ** Math.min(attempt++, 4)), options.signal);
+      const message = `Base documental indisponível e sem cópia completa utilizável: ${error instanceof Error ? error.message : String(error)}. Corrija a conexão ou disponibilize os insumos; nada foi substituído.`;
+      announce(message);
+      throw new RecoverySuspended(message, 1, error);
     }
   }
 }

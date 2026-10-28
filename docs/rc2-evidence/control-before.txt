@@ -1,0 +1,61 @@
+
+> @capivara/core@0.9.0-RC1 test
+> vitest run --run test/execution/control.spec.ts
+
+
+ RUN  v5.0.1 /home/bruno/Documentos/Projetos/NovoHarness/capivara/packages/core
+
+ ❯ test/execution/control.spec.ts (2 tests | 2 failed) 1354ms
+   × overlaps independent editors, integrates both products, and never overlaps conflicting writes 324ms
+   × suspends a repeated unchanged failure durably instead of replaying repairs on restart 1027ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/execution/control.spec.ts > overlaps independent editors, integrates both products, and never overlaps conflicting writes
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ test/execution/control.spec.ts:31:57
+     29|     }};
+     30|     const outcome=await runBuild(options);
+     31|     expect(outcome.status).toBe('complete');expect(max).toBe(conflict?…
+       |                                                         ^
+     32|     if(conflict)expect(JSON.parse(await readFile(join(root,'shared.jso…
+     33|     else for(const id of ['alpha','beta'])expect(await readFile(join(r…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  test/execution/control.spec.ts > suspends a repeated unchanged failure durably instead of replaying repairs on restart
+AssertionError: expected 'cancelled' to be 'waiting' // Object.is equality
+
+Expected: "waiting"
+Received: "cancelled"
+
+ ❯ test/execution/control.spec.ts:45:24
+     43|   }};
+     44|   const first=await runBuild(options);
+     45|   expect(first.status).toBe('waiting');expect(edits).toBeLessThanOrEqu…
+       |                        ^
+     46|   expect(first.incidents.some(item=>item.kind==='integration'&&/progre…
+     47|   const before=edits;
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  2 failed (2)
+   Start at  09:55:38
+   Duration  1.93s (tests 75%, transform 20%, import 5%)
+
+npm error Lifecycle script `test` failed with error:
+npm error code 1
+npm error path /home/bruno/Documentos/Projetos/NovoHarness/capivara/packages/core
+npm error workspace @capivara/core@0.9.0-RC1
+npm error location /home/bruno/Documentos/Projetos/NovoHarness/capivara/packages/core
+npm error command failed
+npm error command sh -c vitest run --run test/execution/control.spec.ts

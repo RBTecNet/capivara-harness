@@ -1,0 +1,40 @@
+
+> capivara@0.9.0-rc2 check
+> npm run build && npm run typecheck && npm test
+
+
+> capivara@0.9.0-rc2 build
+> npm run build --workspaces --if-present
+
+
+> @capivara/core@0.9.0-rc2 build
+> node ./scripts/build.mjs && tsc --emitDeclarationOnly --project tsconfig.build.json
+
+
+> capivara@0.9.0-rc2 typecheck
+> npm run typecheck --workspaces --if-present
+
+
+> @capivara/core@0.9.0-rc2 typecheck
+> tsc --noEmit
+
+
+> capivara@0.9.0-rc2 test
+> npm run test --workspaces --if-present
+
+
+> @capivara/core@0.9.0-rc2 test
+> vitest run
+
+
+ RUN  v5.0.1 /home/bruno/Documentos/Projetos/NovoHarness/capivara/packages/core
+
+
+ Test Files  24 passed (24)
+      Tests  157 passed (157)
+   Start at  11:21:53
+   Duration  5.62s (tests 58%, transform 35%, import 6%, worker 1%)
+
+  Transform  transforming modules took 11.79s · 35% of tracked time, re-done on every run
+             persist transforms across runs with fsModuleCache: true
+             learn more: https://vitest.dev/guide/improving-performance#caching-between-reruns

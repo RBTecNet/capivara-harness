@@ -1,0 +1,448 @@
+{
+  "generatedAt": "2026-10-28T14:23:25.973Z",
+  "source": "scripted agents with real generated products and native commands",
+  "paidInferenceCalls": 0,
+  "reports": [
+    {
+      "name": "node-serial-control",
+      "workspace": "/tmp/capivara-rc2-node-serial-control-dlfObc",
+      "status": "complete",
+      "jobs": 1,
+      "metrics": {
+        "startedAt": "2026-10-28T14:23:22.611Z",
+        "elapsedMs": 891,
+        "maxConcurrency": 1,
+        "active": 0,
+        "callsByRole": {
+          "editor": 3,
+          "reviewer": 3
+        },
+        "timeByStageMs": {
+          "queueWait": 1,
+          "dependencies": 162,
+          "isolation": 8,
+          "editor": 260,
+          "verificationIsolation": 17,
+          "verification": 204,
+          "reviewer": 8,
+          "cleanup": 6,
+          "integration": 42,
+          "proofRevalidation": 14
+        },
+        "invalidations": [],
+        "repetitions": [],
+        "timeline": [
+          {
+            "taskId": "alpha",
+            "stage": "editor",
+            "start": 1793197402659,
+            "end": 1793197402746
+          },
+          {
+            "taskId": "alpha",
+            "stage": "reviewer",
+            "start": 1793197402853,
+            "end": 1793197402855
+          },
+          {
+            "taskId": "beta",
+            "stage": "editor",
+            "start": 1793197402885,
+            "end": 1793197402974
+          },
+          {
+            "taskId": "beta",
+            "stage": "reviewer",
+            "start": 1793197403106,
+            "end": 1793197403111
+          },
+          {
+            "taskId": "cli",
+            "stage": "editor",
+            "start": 1793197403173,
+            "end": 1793197403260
+          },
+          {
+            "taskId": "cli",
+            "stage": "reviewer",
+            "start": 1793197403433,
+            "end": 1793197403437
+          }
+        ]
+      },
+      "overlaps": [],
+      "passedProofs": [
+        {
+          "task": "alpha",
+          "check": "alpha",
+          "kind": "cli",
+          "level": "behavior",
+          "terminal": false,
+          "output": "Command: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'alpha.mjs'\nExit code: 0\nSTDOUT:\n3\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: contains:3"
+        },
+        {
+          "task": "beta",
+          "check": "beta",
+          "kind": "cli",
+          "level": "behavior",
+          "terminal": false,
+          "output": "Command: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'beta.mjs'\nExit code: 0\nSTDOUT:\n4\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: contains:4"
+        },
+        {
+          "task": "cli",
+          "check": "sum",
+          "kind": "cli",
+          "level": "behavior",
+          "terminal": false,
+          "output": "Command: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'cli.mjs'\nExit code: 0\nSTDOUT:\n3\n4\n7\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: contains:7"
+        }
+      ],
+      "incidents": []
+    },
+    {
+      "name": "node-parallel",
+      "workspace": "/tmp/capivara-rc2-node-parallel-3jPUBv",
+      "status": "complete",
+      "jobs": 2,
+      "metrics": {
+        "startedAt": "2026-10-28T14:23:23.504Z",
+        "elapsedMs": 536,
+        "maxConcurrency": 2,
+        "active": 0,
+        "callsByRole": {
+          "editor": 3,
+          "reviewer": 3
+        },
+        "timeByStageMs": {
+          "queueWait": 49,
+          "dependencies": 124,
+          "isolation": 6,
+          "editor": 254,
+          "verificationIsolation": 10,
+          "verification": 171,
+          "reviewer": 4,
+          "cleanup": 4,
+          "integration": 29,
+          "proofRevalidation": 7
+        },
+        "invalidations": [],
+        "repetitions": [],
+        "timeline": [
+          {
+            "taskId": "alpha",
+            "stage": "editor",
+            "start": 1793197403549,
+            "end": 1793197403634
+          },
+          {
+            "taskId": "beta",
+            "stage": "editor",
+            "start": 1793197403552,
+            "end": 1793197403635
+          },
+          {
+            "taskId": "alpha",
+            "stage": "reviewer",
+            "start": 1793197403728,
+            "end": 1793197403730
+          },
+          {
+            "taskId": "beta",
+            "stage": "reviewer",
+            "start": 1793197403728,
+            "end": 1793197403732
+          },
+          {
+            "taskId": "cli",
+            "stage": "editor",
+            "start": 1793197403776,
+            "end": 1793197403863
+          },
+          {
+            "taskId": "cli",
+            "stage": "reviewer",
+            "start": 1793197404003,
+            "end": 1793197404005
+          }
+        ]
+      },
+      "overlaps": [
+        [
+          "alpha",
+          "beta"
+        ]
+      ],
+      "passedProofs": [
+        {
+          "task": "alpha",
+          "check": "alpha",
+          "kind": "cli",
+          "level": "behavior",
+          "terminal": false,
+          "output": "Command: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'alpha.mjs'\nExit code: 0\nSTDOUT:\n3\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: contains:3"
+        },
+        {
+          "task": "beta",
+          "check": "beta",
+          "kind": "cli",
+          "level": "behavior",
+          "terminal": false,
+          "output": "Command: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'beta.mjs'\nExit code: 0\nSTDOUT:\n4\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: contains:4"
+        },
+        {
+          "task": "cli",
+          "check": "sum",
+          "kind": "cli",
+          "level": "behavior",
+          "terminal": false,
+          "output": "Command: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'cli.mjs'\nExit code: 0\nSTDOUT:\n3\n4\n7\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: contains:7"
+        }
+      ],
+      "incidents": []
+    },
+    {
+      "name": "required-node-runtime",
+      "workspace": "/tmp/capivara-rc2-required-node-runtime-43zkzo",
+      "status": "complete",
+      "jobs": 2,
+      "metrics": {
+        "startedAt": "2026-10-28T14:23:24.041Z",
+        "elapsedMs": 1142,
+        "maxConcurrency": 2,
+        "active": 0,
+        "callsByRole": {
+          "editor": 3,
+          "reviewer": 3
+        },
+        "timeByStageMs": {
+          "queueWait": 22,
+          "dependencies": 107,
+          "isolation": 7,
+          "editor": 252,
+          "verificationIsolation": 13,
+          "verification": 275,
+          "reviewer": 4,
+          "cleanup": 4,
+          "integration": 26,
+          "environmentPreparation": 19,
+          "environmentRevalidation": 20,
+          "proofRevalidation": 12,
+          "acceptance": 93
+        },
+        "invalidations": [],
+        "repetitions": [],
+        "timeline": [
+          {
+            "taskId": "alpha",
+            "stage": "editor",
+            "start": 1793197404066,
+            "end": 1793197404150
+          },
+          {
+            "taskId": "beta",
+            "stage": "editor",
+            "start": 1793197404067,
+            "end": 1793197404150
+          },
+          {
+            "taskId": "alpha",
+            "stage": "reviewer",
+            "start": 1793197404247,
+            "end": 1793197404249
+          },
+          {
+            "taskId": "beta",
+            "stage": "reviewer",
+            "start": 1793197404278,
+            "end": 1793197404279
+          },
+          {
+            "taskId": "cli",
+            "stage": "editor",
+            "start": 1793197404792,
+            "end": 1793197404878
+          },
+          {
+            "taskId": "cli",
+            "stage": "reviewer",
+            "start": 1793197405007,
+            "end": 1793197405010
+          }
+        ]
+      },
+      "overlaps": [
+        [
+          "alpha",
+          "beta"
+        ]
+      ],
+      "passedProofs": [
+        {
+          "task": "alpha",
+          "check": "alpha",
+          "kind": "cli",
+          "level": "behavior",
+          "terminal": false,
+          "output": "Command: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'alpha.mjs'\nExit code: 0\nSTDOUT:\n3\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: contains:3"
+        },
+        {
+          "task": "beta",
+          "check": "beta",
+          "kind": "cli",
+          "level": "behavior",
+          "terminal": false,
+          "output": "Command: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'beta.mjs'\nExit code: 0\nSTDOUT:\n4\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: contains:4"
+        },
+        {
+          "task": "cli",
+          "check": "sum",
+          "kind": "cli",
+          "level": "behavior",
+          "terminal": false,
+          "output": "Command: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'cli.mjs'\nExit code: 0\nSTDOUT:\n3\n4\n7\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: contains:7"
+        },
+        {
+          "task": "$acceptance",
+          "check": "node-product-usage",
+          "kind": "cli",
+          "level": "behavior",
+          "terminal": false,
+          "output": "Command: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'cli.mjs'\nExit code: 0\nSTDOUT:\n3\n4\n7\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: contains:7"
+        }
+      ],
+      "incidents": []
+    },
+    {
+      "name": "python-strict",
+      "workspace": "/tmp/capivara-rc2-python-strict-gKztQQ",
+      "status": "complete",
+      "jobs": 3,
+      "metrics": {
+        "startedAt": "2026-10-28T14:23:25.185Z",
+        "elapsedMs": 481,
+        "maxConcurrency": 1,
+        "active": 0,
+        "callsByRole": {
+          "editor": 2,
+          "reviewer": 2
+        },
+        "timeByStageMs": {
+          "queueWait": 0,
+          "dependencies": 88,
+          "isolation": 3,
+          "editor": 168,
+          "verificationIsolation": 6,
+          "verification": 85,
+          "reviewer": 4,
+          "cleanup": 4,
+          "integration": 24,
+          "proofRevalidation": 9
+        },
+        "invalidations": [],
+        "repetitions": [],
+        "timeline": [
+          {
+            "taskId": "core",
+            "stage": "editor",
+            "start": 1793197405205,
+            "end": 1793197405288
+          },
+          {
+            "taskId": "core",
+            "stage": "reviewer",
+            "start": 1793197405365,
+            "end": 1793197405367
+          },
+          {
+            "taskId": "entry",
+            "stage": "editor",
+            "start": 1793197405411,
+            "end": 1793197405497
+          },
+          {
+            "taskId": "entry",
+            "stage": "reviewer",
+            "start": 1793197405619,
+            "end": 1793197405622
+          }
+        ]
+      },
+      "overlaps": [],
+      "passedProofs": [
+        {
+          "task": "core",
+          "check": "double",
+          "kind": "command",
+          "level": "behavior",
+          "terminal": false,
+          "output": "Command: 'python3' '-c' 'from core import double; assert double(6)==12; print(\"double verified\")'\nExit code: 0\nSTDOUT:\ndouble verified\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: contains:double verified"
+        },
+        {
+          "task": "entry",
+          "check": "python-cli",
+          "kind": "cli",
+          "level": "behavior",
+          "terminal": false,
+          "output": "Command: 'python3' 'entry.py' '6'\nExit code: 0\nSTDOUT:\n12\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: contains:12"
+        }
+      ],
+      "incidents": []
+    },
+    {
+      "name": "tui-interaction",
+      "workspace": "/tmp/capivara-rc2-tui-interaction-l3zwTR",
+      "status": "complete",
+      "jobs": 2,
+      "metrics": {
+        "startedAt": "2026-10-28T14:23:25.667Z",
+        "elapsedMs": 305,
+        "maxConcurrency": 1,
+        "active": 0,
+        "callsByRole": {
+          "editor": 1,
+          "reviewer": 1
+        },
+        "timeByStageMs": {
+          "queueWait": 0,
+          "dependencies": 46,
+          "isolation": 1,
+          "editor": 85,
+          "verificationIsolation": 3,
+          "verification": 123,
+          "reviewer": 2,
+          "cleanup": 3,
+          "integration": 11,
+          "proofRevalidation": 3
+        },
+        "invalidations": [],
+        "repetitions": [],
+        "timeline": [
+          {
+            "taskId": "menu",
+            "stage": "editor",
+            "start": 1793197405688,
+            "end": 1793197405774
+          },
+          {
+            "taskId": "menu",
+            "stage": "reviewer",
+            "start": 1793197405947,
+            "end": 1793197405950
+          }
+        ]
+      },
+      "overlaps": [],
+      "passedProofs": [
+        {
+          "task": "menu",
+          "check": "interactive",
+          "kind": "tui",
+          "level": "behavior",
+          "terminal": true,
+          "output": "Command: '/home/bruno/.nvm/versions/node/v24.22.1/bin/node' 'menu.mjs'\nExit code: 0\nSTDOUT:\nREADY 1\r\nSELECTED 2\r\n\nSTDERR:\n\nEvidence level: behavior\nExpected exit code: 0\nAssertion: contains:SELECTED 2"
+        }
+      ],
+      "incidents": []
+    }
+  ]
+}

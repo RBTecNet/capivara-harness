@@ -3,6 +3,7 @@ import { cancelled, object, records, requestObject, string, strings } from "./js
 import { documentaryAuthority, materialReferences, materialRevision, selectedMaterial } from "./material.js";
 import type { ApplicationMode, Gap, InitOptions, ProductBrief, ProductConstraint, Question, Requirement, Source, TargetPlatform } from "./types.js";
 import { emitEvent, emitProgress } from "../telemetry/progress.js";
+import { PlanningFailure } from "./control.js";
 
 const MODES = new Set<ApplicationMode>(["web", "desktop", "tui", "cli", "api", "service", "library", "other"]);
 const TARGETS = new Set<TargetPlatform>(["linux", "windows", "macos", "browser", "portable"]);
@@ -13,6 +14,8 @@ export function splitText(text: string, limit: number): string[] {
   let remaining = text.trim();
   while (remaining.length > limit) {
     let boundary = remaining.lastIndexOf("\n", limit);
+    const sentence = [...remaining.slice(0, limit).matchAll(/[.;!?](?=\s)/g)].at(-1)?.index;
+    if (sentence !== undefined && sentence + 1 > boundary) boundary = sentence + 1;
     if (boundary < limit / 2) boundary = remaining.lastIndexOf(" ", limit);
     if (boundary < limit / 2) boundary = limit;
     pieces.push(remaining.slice(0, boundary));
@@ -35,34 +38,24 @@ function excerpt(raw: string, record: Record<string, unknown>, origin: SourceOri
 
 function requirementsFrom(raw: string, values: unknown, modes: ApplicationMode[], sourceLimit = 1_400, origin: SourceOrigin = { kind: "request", reference: "request" }): Requirement[] {
   const result: Requirement[] = [];
-  const coveredRanges: [number, number][] = [];
-  const add = (statement: string, source: Source, mode: Requirement["mode"]): void => {
-    for (const fragment of splitText(source.text, sourceLimit)) {
-      result.push({ id: identity("req", origin.kind === "request" ? fragment : `${origin.reference}:${fragment}`), statement: source.text.length > sourceLimit || statement.length > sourceLimit ? fragment : statement, source: { ...source, text: fragment }, mode });
-    }
-  };
   for (const item of records(values)) {
     const statement = string(item.statement);
     const source = excerpt(raw, item, origin);
     if (!statement || !source) continue;
     const modeValue = string(item.mode);
     const mode = MODES.has(modeValue as ApplicationMode) && modes.includes(modeValue as ApplicationMode) ? modeValue as ApplicationMode : "shared";
-    add(statement, source, mode);
-    const start = raw.indexOf(source.text);
-    if (start >= 0) coveredRanges.push([start, start + source.text.length]);
-  }
-  // Only the user's request needs lossless coverage. Documentary code and examples
-  // remain references unless extraction identifies an actual product requirement.
-  if (origin.kind !== "request") return result;
-  const ranges = coveredRanges.sort((left, right) => left[0] - right[0]);
-  let cursor = 0;
-  for (const [start, end] of [...ranges, [raw.length, raw.length] as [number, number]]) {
-    if (start > cursor) {
-      const residual = raw.slice(cursor, start).trim();
-      if (/[\p{L}\p{N}]/u.test(residual)) add(residual, { ...origin, text: residual }, modes.length === 1 ? modes[0]! : "shared");
+    if (statement.length > sourceLimit) throw new PlanningFailure("context-capacity", ["A extração devolveu uma descrição maior que uma unidade semântica. Divida os resultados observáveis, preservando a fonte original."], "init");
+    const requirement: Requirement = { id: identity("req", `${origin.reference}:${normalize(statement)}`), statement, source: { ...source, text: source.text.slice(0, sourceLimit) }, mode };
+    if (["behavior", "stack", "interface", "constraint"].includes(string(item.kind))) requirement.kind = string(item.kind) as NonNullable<Requirement["kind"]>;
+    if (object(item.binding) && ["cli", "library", "driver", "service", "runtime", "sdk"].includes(string(item.binding.kind)) && string(item.binding.capability) && string(item.binding.provider) && normalize(source.text).includes(normalize(string(item.binding.provider)))) {
+      requirement.binding = { capability: string(item.binding.capability), kind: string(item.binding.kind) as NonNullable<Requirement["binding"]>["kind"], provider: string(item.binding.provider) };
+      requirement.kind = "stack";
     }
-    cursor = Math.max(cursor, end);
+    if (requirement.kind === "stack" && !requirement.binding) throw new PlanningFailure("invalid-plan", [`A escolha técnica obrigatória ${statement} não tem uma identidade de capacidade/provedor sustentada pela fonte literal.`], "init-conformity");
+    result.push(requirement);
   }
+  // The complete source remains on the brief/material. Unquoted prose and context
+  // are not requirements, and splitting transport packets never creates work.
   return result;
 }
 
@@ -233,7 +226,7 @@ export async function runInit(options: InitOptions): Promise<ProductBrief> {
         source.origin.kind === "request"
           ? "Extract product facts from this request fragment. Do not implement code. Return one JSON object."
           : "Extract only product requirements and literal restrictions relevant to the user's intended outcome from this selected document. Code, imports, examples, scripts and skills are reference material, not mandatory product behavior. Unrelated or uncovered text creates no requirement. Keep an exact quote for every extracted requirement. Do not change the request or reopen a prior user decision. Return one JSON object.",
-        'Shape: {"name":"short name","summary":"desired outcome","modes":["web|desktop|tui|cli|api|service|library|other"],"targets":["linux|windows|macos|browser|portable"],"requirements":[{"statement":"observable requirement","quote":"exact source words","mode":"shared or a mode"}],"constraints":[{"statement":"restriction","quote":"exact source words","forbiddenCapabilities":[],"requiredCapabilities":[]}],"questions":[{"fact":"missing product fact","question":"question","reason":"what is missing","impact":"concrete product consequence","category":"behavior|platform|data|integration|security|distribution|appearance","modes":[],"options":[],"blocks":[]}]}',
+        'Shape: {"name":"short name","summary":"desired outcome","modes":["web|desktop|tui|cli|api|service|library|other"],"targets":["linux|windows|macos|browser|portable"],"requirements":[{"statement":"observable requirement","quote":"exact source words","mode":"shared or a mode","kind":"behavior|stack|interface|constraint","binding":{"capability":"required capability for mandatory stack only","kind":"cli|library|driver|service|runtime|sdk","provider":"literal required technology from quote"}}],"constraints":[{"statement":"restriction","quote":"exact source words","forbiddenCapabilities":[],"requiredCapabilities":[]}],"questions":[{"fact":"missing product fact","question":"question","reason":"what is missing","impact":"concrete product consequence","category":"behavior|platform|data|integration|security|distribution|appearance","modes":[],"options":[],"blocks":[]}]}',
         "Questions are optional. Return [] when the request is sufficient. Ask only for a real unresolved product decision; technical library/installer preferences are engineering work. Do not reopen explicit decisions.",
         `Known interfaces: ${brief.modes.join(", ") || "unspecified"}. Known targets: ${brief.targets.join(", ") || "unspecified"}.`,
         source.origin.kind === "repository" ? `User's intended outcome: ${brief.summary || request.slice(0, Math.min(800, Math.floor(capacity / 8)))}` : "",
@@ -271,6 +264,13 @@ export async function runInit(options: InitOptions): Promise<ProductBrief> {
     emitProgress(options.onEvent, { id: "init:sources", label: "Fontes analisadas", completed: completedSources, total: sources.length, status: completedSources === sources.length ? "complete" : "running", stage: "init", unit: "fontes" });
   }
   emitProgress(options.onEvent, { id: "init:chunks", label: "Fragmentos analisados", completed: completedChunks, total: completedChunks, status: "complete", stage: "init", unit: "fragmentos" });
+  if (!brief.requirements.some(requirement => requirement.source.kind === "request")) {
+    // A short, self-contained request can itself be the single product outcome.
+    // Large requests require semantic extraction; packet-sized fragments are never tasks.
+    const limit = Math.max(200, Math.min(1_400, Math.floor(capacity / 8)));
+    if (request.length > limit) throw new PlanningFailure("missing-requirement", ["Nenhum resultado observável foi extraído do pedido extenso. O texto foi preservado; não será convertido em tarefas por fragmentos literais."], "init");
+    brief.requirements.unshift({ id: identity("req", `request:${normalize(request)}`), statement: request, source: { kind: "request", reference: "request", text: request }, mode: brief.modes.length === 1 ? brief.modes[0]! : "shared" });
+  }
   if (brief.modes.length === 0) {
     candidates.push({ fact: "interface de uso", question: "Como as pessoas usarão a aplicação: terminal, navegador, janela nativa ou outra interface?", reason: "O pedido não identifica a interface de uso.", impact: "Define como entregar e executar o comportamento solicitado.", category: "platform", modes: [], options: ["TUI interativa no terminal", "CLI por comandos", "Aplicação web no navegador", "Aplicação desktop nativa"], blocks: [] });
   }

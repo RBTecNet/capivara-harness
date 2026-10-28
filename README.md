@@ -1,4 +1,4 @@
-# Capivara 0.9.0_RC1
+# Capivara 0.9.0-rc2
 
 Constrói aplicativos web, desktop, TUI, CLI, APIs e bibliotecas por unidades pequenas de trabalho. Os motores de init, plan e build foram reconstruídos integralmente, sem compatibilidade com os motores ou arquivos de controle anteriores.
 
@@ -15,7 +15,7 @@ npm run install:user
 capivara --version
 ```
 
-A saída de versão é `0.9.0_RC1`. O pacote npm usa `0.9.0-RC1`, equivalente válido em SemVer. Garanta que `~/.local/bin` esteja no PATH.
+A saída de versão e o pacote npm usam `0.9.0-rc2`. Garanta que `~/.local/bin` esteja no PATH.
 
 ## Uso
 
@@ -49,6 +49,8 @@ capivara answer ID_DA_LACUNA 'Resposta' --project ./app
 ```
 
 `run` percorre as três etapas. `build` também completa init/plan se necessário. A entrevista pode ter zero perguntas. Cada pergunta precisa de fato ausente, motivo, consequência e pertinência ao produto. Respostas são persistidas imediatamente. Sem terminal interativo, tarefas independentes prosseguem enquanto lacunas pendentes podem ser respondidas por outro terminal.
+
+O scheduler executa até duas unidades independentes em áreas privadas por padrão. `--jobs 4` altera a capacidade; arquivos, recursos e contratos com escritor exclusivo impedem concorrência insegura. A publicação é serial, com precondições e transações recuperáveis. Alterações relevantes revalidam as provas afetadas, preservando a implementação correta. Veja [controle, invariantes e resultados reproduzíveis da RC2](docs/RC2-EXECUCAO.md).
 
 O plan registra primeiro a árvore técnica de preparação: runtimes, SDKs, ferramentas, pacotes e serviços com dependências, sondas de prontidão e receitas. Em seguida define contratos e tarefas com arquivos, requisitos, dependências e verificações pertinentes. O build provisiona dependências locais; `--system-install` autoriza preparação no sistema quando necessária. Um lockfile inconsistente pode ser reconciliado por instalação; preferência entre instaladores não vira defeito do aplicativo.
 
@@ -90,13 +92,15 @@ A pasta de insumos é ignorada no Git do aplicativo. O editor deve copiar para o
 
 O estado novo fica em `.capivara-next/`: SQLite transacional, respostas, eventos, cópia de recuperação e transcritos das chamadas. Inclua essa pasta no `.gitignore` de seus aplicativos. O estado guarda o pedido e dados do projeto; trate-o como informação privada.
 
-Uma falha transitória mantém a execução ativa. Instalação, instrumentos e produto têm reparos distintos. Uma receita web inadequada para terminal é corrigida no instrumento; um servidor indevido introduzido pelo editor é removido dos arquivos afetados, preservando o restante do trabalho. Checkpoint serve à preservação, não como justificativa para interromper.
+Instalação, instrumentos e produto têm reparos distintos. A execução usa estratégias concretas de recuperação enquanto há um caminho executável. Uma receita web inadequada para terminal é corrigida no instrumento; um servidor indevido introduzido pelo editor é removido dos arquivos afetados, preservando o restante do trabalho. Checkpoint serve à preservação. Uma repetição com os mesmos insumos e a mesma falha não é uma estratégia de recuperação.
 
 Cancelamento explícito por Ctrl+C é respeitado. Falta de credencial, rede, resposta humana ou runner nativo mantém pendência explícita; não é sucesso nem defeito fictício do código. A configuração pode ser atualizada por `capivara config` em outro terminal. Nunca se declara prova nativa de Windows/macOS a partir de uma compilação Linux.
 
+Quando não existe outra ação executável, o comando termina com `waiting` e código de saída 2, preservando causas, tentativas e trabalho parcial. Uma retomada reusa resultados e provas ainda válidos. Depois de recuperar um recurso externo, `capivara build --project ./app --retry-suspended` solicita uma nova sondagem explícita. Isso não apaga provas nem reinicia tarefas concluídas. Métricas de tempo por etapa, concorrência, chamadas por papel, invalidações e motivos de repetição ficam em `capivara status --json`.
+
 ## Limites desta RC
 
-O piloto real desta entrega usa Codex no Linux. APIs têm testes de protocolo e ferramentas locais, sem inferência paga em todos os provedores. A disponibilidade dos outros transportes depende da instalação e autenticação do usuário. Receitas web e desktop usam ferramentas do projeto ou da CLI selecionada; não há um navegador ou controlador gráfico universal embutido. Alvos nativos exigem runner compatível para evidência de comportamento.
+O histórico da RC1 inclui um piloto com Codex no Linux. A RC2 valida o motor com agentes determinísticos e execução real de produtos Node.js, Python e TUI; não mede qualidade ou custo de inferência em todos os modelos. APIs têm testes de protocolo e ferramentas locais. A disponibilidade dos transportes depende da instalação e autenticação do usuário. Receitas web e desktop usam ferramentas do projeto ou da CLI selecionada; não há um navegador ou controlador gráfico universal embutido. Alvos nativos exigem runner compatível para evidência de comportamento.
 
 A superfície contém `wizard`, `init`, `plan`, `build`, `run`, `dashboard`, `config`, `status`, `answer` e `providers`. O wizard e o acesso à base MCP foram recriados sobre os motores novos; `change`, `survey`, `prompt-engineer` e construtores paralelos antigos continuam fora desta RC. Os documentos antigos em `docs` estão marcados como históricos. Não há camada de compatibilidade com a versão 0.8.x.
 
@@ -106,11 +110,12 @@ A superfície contém `wizard`, `init`, `plan`, `build`, `run`, `dashboard`, `co
 npm run check
 ```
 
-A suíte nova exercita riscos de comportamento: autoridade do pedido, contexto limitado, persistência, recuperação cooperativa, instalação, cancelamento, ferramentas e PTY real. Ela não testa frases de prompts nem exige uma quantidade de testes.
+A suíte exercita riscos de comportamento: concorrência e conflitos, publicação interrompida, invalidação, conformidade, contexto limitado, persistência, recuperação cooperativa, instalação, cancelamento, ferramentas e PTY real. Ela não testa frases de prompts nem exige uma quantidade de testes.
 
 - [Auditoria integral do código anterior](docs/AUDITORIA-RECONSTRUCAO-MOTORES.md)
 - [Plano de reconstrução](docs/PLANO-RECONSTRUCAO-MOTORES.md)
 - [Implementação e validação da RC](docs/RECONSTRUCAO-0.9.0_RC1.md)
 - [Mapa operacional do código novo](CAPIVARA.md)
+- [Reconstrução do controle na RC2 e validação reproduzível](docs/RC2-EXECUCAO.md)
 
 Detalhes da restauração do wizard e da base: [WIZARD-BASE-DOCUMENTAL.md](docs/WIZARD-BASE-DOCUMENTAL.md). A rota Gemini usa a [compatibilidade OpenAI oficial do Google](https://ai.google.dev/gemini-api/docs/openai).

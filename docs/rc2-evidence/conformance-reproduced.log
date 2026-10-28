@@ -1,0 +1,20 @@
+{
+  "sourceCommit": null,
+  "status": "waiting",
+  "elapsedMs": 713,
+  "agentCalls": [
+    "editor",
+    "reviewer"
+  ],
+  "paidInferenceCalls": 0,
+  "correctMandatoryProviderReady": true,
+  "applicationExecutedWith": "/bin/sh",
+  "requiredRuntime": "/home/bruno/.nvm/versions/node/v24.22.1/bin/node",
+  "incidents": [
+    {
+      "kind": "planning",
+      "message": "The command that ran is not the mandatory operational provider.",
+      "evidence": "unproven-product-provider-usage"
+    }
+  ]
+}

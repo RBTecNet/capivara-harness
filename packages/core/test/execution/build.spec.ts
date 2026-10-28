@@ -19,13 +19,41 @@ function plan(unit=task()):DevelopmentPlan{return{schema:'capivara/plan/1',statu
 const goodCode="if(process.argv.includes('--greet')) console.log('hello'); else if(process.argv.includes('--stdin')){let input='';process.stdin.setEncoding('utf8');process.stdin.on('data', chunk=>input+=chunk);process.stdin.on('end',()=>console.log(input.trim()));}else process.exitCode=2;";
 
 describe('build cooperativo por evidência',()=>{
-  it('esclarece uma exigência de testes sem defeito e um contexto excedido sem reeditar',async()=>{
+  it('encaminha defeito material do aceite final à entrega responsável e preserva a independente',async()=>{
+    const root=await workspace();const product=brief();product.requirements[0]!.statement='Print hello normally and extra with --extra.';product.requirements[0]!.source.text=product.requirements[0]!.statement;
+    product.requirements.push({id:'r2',statement:'Print stable independently.',mode:'cli',source:{kind:'request',reference:'request',text:'Print stable independently.'}});
+    const second:WorkUnit={...task(),id:'secondary',title:'Stable command',goal:'Print stable independently',requirementIds:['r2'],files:['stable.mjs'],checks:[{id:'stable',kind:'cli',command:process.execPath,args:['stable.mjs'],expected:'contains:stable',requirementIds:['r2'],requiredCapabilities:[]}]};
+    const productPlan=plan();productPlan.tasks.push(second);productPlan.acceptance=[{id:'mandatory-extra',kind:'cli',command:process.execPath,args:['cli.mjs','--extra'],expected:'contains:extra',requirementIds:['r1'],requiredCapabilities:[]}];
+    const edits:Record<string,number>={greet:0,secondary:0};
+    const result=await runBuild({workspace:root,brief:product,plan:productPlan,agent:async request=>{
+      if(request.role==='reviewer')return complete('{"approved":true}');
+      const id=request.context!.match(/Work unit (\w+):/)![1]!;edits[id]=(edits[id]??0)+1;
+      await writeFile(join(request.workspace,id==='secondary'?'stable.mjs':'cli.mjs'),id==='secondary'?"console.log('stable');":edits.greet===1?"console.log('hello');":"console.log(process.argv.includes('--extra')?'extra':'hello');");return complete();
+    }});
+    expect(result.status).toBe('complete');expect(edits).toEqual({greet:2,secondary:1});expect(result.state.acceptance?.some(proof=>proof.checkId==='mandatory-extra'&&proof.passed)).toBe(true);
+  });
+
+  it('reproduz uma alegação de comando somente leitura em área gravável antes de autorizar qualquer reparo',async()=>{
+    const root=await workspace();let edits=0,reviews=0;
+    const result=await runBuild({workspace:root,brief:brief(),plan:plan(),agent:async request=>{
+      if(request.role==='editor'){edits++;await writeFile(join(request.workspace,'cli.mjs'),"import fs from 'node:fs';fs.writeFileSync('scratch.db','temporary verification state');console.log('hello');");return complete();}
+      if(request.role==='repair'){edits++;throw new Error('An inspection restriction must not authorize a product rewrite.');}
+      reviews++;
+      return complete(reviews===1?JSON.stringify({approved:false,findings:[{kind:'product',evidenceType:'inspection-command',file:'cli.mjs',observed:'The inspection command could not create its scratch database.',expected:'The documented command works in a writable execution area.',evidence:'EROFS from the read-only inspection environment.',fix:'Rewrite the storage implementation.',verification:{kind:'cli',command:process.execPath,args:['cli.mjs','--greet'],expected:'contains:hello',requiredCapabilities:[]}}]}):JSON.stringify({approved:true,findings:[]}));
+    }});
+    expect(result.status).toBe('complete');expect(edits).toBe(1);expect(reviews).toBe(2);
+    const assessment=result.state.tasks.greet!.reviews![0]!.assessment;
+    expect(assessment.original).toContain('EROFS');expect(assessment.findings[0]?.kind).toBe('instrument');expect(assessment.transformations.some(change=>change.reason.includes('not reproduced'))).toBe(true);
+    await expect(readFile(join(root,'scratch.db'))).rejects.toThrow();
+  });
+
+  it('limita o esclarecimento de parecer sem defeito e preserva código quando o instrumento permanece indisponível',async()=>{
     expect(interpretReview('Complete input validation is missing; malformed input crashes.').approved).toBe(false);
     expect(interpretReview('Approved.').approved).toBe(true);
     const root=await workspace();let editorCalls=0,reviewCalls=0;
     const result=await runBuild({workspace:root,brief:brief(),plan:plan(),contextChars:12000,agent:async request=>{
       expect(request.context?.length??0).toBeLessThanOrEqual(12000);
-      if(request.role==='editor'){editorCalls++;await writeFile(join(root,'cli.mjs'),goodCode);return complete();}
+      if(request.role==='editor'){editorCalls++;await writeFile(join(request.workspace,'cli.mjs'),goodCode);return complete();}
       if(request.role==='reviewer'){
         reviewCalls++;
         if(reviewCalls===2)return{status:'unavailable',text:'',commands:[],changedFiles:[],issue:{kind:'context',message:'The provider rejected the context.',recoverable:true}};
@@ -33,27 +61,27 @@ describe('build cooperativo por evidência',()=>{
       }
       throw new Error(`Unexpected role ${request.role}`);
     }});
-    expect(result.status).toBe('complete');expect(editorCalls).toBe(1);expect(reviewCalls).toBe(3);
+    expect(result.status).toBe('waiting');expect(editorCalls).toBe(1);expect(reviewCalls).toBe(2);expect(result.incidents.some(item=>item.kind==='instrument')).toBe(true);
     expect(result.state.evidence[0]?.output).toContain('hello');
   });
 
   it('retoma um parecer indisponível sem repetir edição ou verificação confirmada',async()=>{
     const root=await workspace();let edits=0,checks=0,unavailable=true,mutateReview=true;
     const agent=async(request:Parameters<Parameters<typeof runBuild>[0]['agent']>[0]):Promise<AgentResult>=>{
-      if(request.role==='editor'){edits++;await writeFile(join(root,'cli.mjs'),goodCode);return complete();}
+      if(request.role==='editor'){edits++;await writeFile(join(request.workspace,'cli.mjs'),goodCode);return complete();}
       if(unavailable)return{status:'unavailable',text:'',commands:[],changedFiles:[],issue:{kind:'rate-limit',message:'retry later',recoverable:true}};
-      if(mutateReview){mutateReview=false;await writeFile(join(root,'cli.mjs'),`${goodCode}\n// reviewer changed this file`);return{...complete('{"approved":true}'),changedFiles:['cli.mjs']};}
+      if(mutateReview){mutateReview=false;await writeFile(join(request.workspace,'cli.mjs'),`${goodCode}\n// reviewer changed this file`);return{...complete('{"approved":true}'),changedFiles:['cli.mjs']};}
       return complete('{"approved":true}');
     };
     const execute=async(request:CommandRequest):Promise<CommandResult>=>{checks++;return executeCommand(request);};
     const first=await runBuild({workspace:root,brief:brief(),plan:plan(),agent,executeCommand:execute});
     expect(first.status).toBe('waiting');expect(first.state.tasks.greet?.strategy).toBe('resume-review');
     unavailable=false;
-    const second=await runBuild({workspace:root,brief:brief(),plan:first.plan,state:first.state,agent,executeCommand:execute});
-    expect(second.status).toBe('complete');expect(edits).toBe(1);expect(checks).toBe(2);
+    const second=await runBuild({workspace:root,brief:brief(),plan:first.plan,state:first.state,configurationRevision:'transport-ready',agent,executeCommand:execute});
+    expect(second.status).toBe('complete');expect(edits).toBe(1);expect(checks).toBe(1);
     await writeFile(join(root,'package.json'),'{"name":"greeting","version":"1.0.0"}');
     const third=await runBuild({workspace:root,brief:brief(),plan:second.plan,state:second.state,agent,executeCommand:execute});
-    expect(third.status).toBe('complete');expect(edits).toBe(1);expect(checks).toBe(3);
+    expect(third.status).toBe('complete');expect(edits).toBe(1);expect(checks).toBe(2);
   });
 
   it('corrige o comportamento defeituoso com orientação concreta e preserva o restante',async()=>{
@@ -63,10 +91,10 @@ describe('build cooperativo por evidência',()=>{
     productPlan.tasks[0]!.checks.push({id:'greeting-exit',kind:'cli',command:process.execPath,args:['cli.mjs','--greet'],expectedExitCode:0,expected:'exit:0',requirementIds:['r1'],requiredCapabilities:[]},{id:'stdin-greeting',kind:'cli',command:process.execPath,args:['cli.mjs','--stdin'],input:['hello\n'],expected:'contains:hello',requirementIds:['r1'],requiredCapabilities:[]});
     const result=await runBuild({workspace:root,brief:brief(),plan:productPlan,onEvent:event=>{if('gate' in event&&event.gate)gates.push(event.gate);},agent:async request=>{
       if(request.role==='editor'||request.role==='repair'){
-        edits++;if(edits===2)expect(request.instruction).toContain('hello');
+        edits++;if(edits===2)expect(`${request.instruction}\n${request.context}`).toContain('hello');
         if(edits===2)return complete();
-        if(edits===3){await writeFile(join(root,'cli.mjs'),"import http from 'node:http'; http.createServer((req,res)=>res.end('hello')).listen(8080);");await writeFile(join(root,'repair-note.txt'),'preserve unrelated repair work');return complete();}
-        await writeFile(join(root,'cli.mjs'),edits===1?"console.log('wrong')":goodCode);return complete();
+        if(edits===3){await writeFile(join(request.workspace,'cli.mjs'),"import http from 'node:http'; http.createServer((req,res)=>res.end('hello')).listen(8080);");await writeFile(join(request.workspace,'repair-note.txt'),'preserve unrelated repair work');return complete();}
+        await writeFile(join(request.workspace,'cli.mjs'),edits===1?"console.log('wrong')":goodCode);return complete();
       }
       if(request.instruction.startsWith('Diagnose this repeated failure')){diagnoses++;expect(request.readOnly).toBe(true);return complete(JSON.stringify({kind:'product',cause:'The greeting still prints wrong and invalid arguments still exit 0.',fix:'Implement the --greet branch returning hello, accept stdin only with --stdin, and reject all other arguments with exit code 2.'}));}
       return complete('{"approved":true,"findings":[]}');
@@ -86,12 +114,12 @@ describe('build cooperativo por evidência',()=>{
     const root=await workspace();let edits=0,recipeRepairs=0;
     const unit=task();unit.checks=[{id:'wrong-browser',kind:'web',command:'npx playwright test',requirementIds:['r1'],requiredCapabilities:['browser']}];
     const result=await runBuild({workspace:root,brief:brief(),plan:plan(unit),agent:async request=>{
-      if(request.role==='editor'){edits++;await writeFile(join(root,'cli.mjs'),goodCode);return complete();}
+      if(request.role==='editor'){edits++;await writeFile(join(request.workspace,'cli.mjs'),goodCode);return complete();}
       if(request.role==='repair'){recipeRepairs++;expect(request.readOnly).toBe(true);return complete(JSON.stringify({checks:[{kind:'cli',command:process.execPath,args:['cli.mjs','--greet'],expected:'contains:hello',requiredCapabilities:[]}]}));}
       return complete('{"approved":true}');
     }});
     expect(result.status).toBe('complete');expect(edits).toBe(1);expect(recipeRepairs).toBe(1);
-    expect(result.plan.tasks[0]?.checks[0]?.kind).toBe('cli');
+    expect(result.state.tasks.greet?.checks?.[0]?.kind).toBe('cli');
   });
 
   it('reconcilia lockfile incompatível durante o preparo sem transformar preferência em falha',async()=>{
@@ -111,7 +139,7 @@ describe('build cooperativo por evidência',()=>{
     let edits=0,recipeRepairs=0;const productPlan=plan(unit);unit.environmentIds=['pty'];productPlan.environment=[{id:'pty',name:'Interactive terminal',kind:'tool',dependsOn:[],targets:['portable'],reason:'Native terminal input is required.',check:{command:process.execPath,args:['-e','if(!process.stdin.isTTY)process.exit(3)'],capabilities:['pty']},prepare:[]}];
     const gates:BuildGateMeasurement[]=[];
     const result=await runBuild({workspace:root,brief:product,plan:productPlan,runTerminal,onEvent:event=>{if('gate' in event&&event.gate)gates.push(event.gate);},repairPlan:async()=>{throw new Error('An instrument failure cannot replan the product.');},agent:async request=>{
-      if(request.role==='editor'){edits++;await writeFile(join(root,'menu.mjs'),"process.stdin.setRawMode(true);process.stdin.resume();console.log('READY');process.stdin.on('data', b=>{if(b.toString()==='j')console.log('SELECTED 2');if(b.toString()==='q')process.exit(0);});");return complete();}
+      if(request.role==='editor'){edits++;await writeFile(join(request.workspace,'menu.mjs'),"process.stdin.setRawMode(true);process.stdin.resume();console.log('READY');process.stdin.on('data', b=>{if(b.toString()==='j')console.log('SELECTED 2');if(b.toString()==='q')process.exit(0);});");return complete();}
       if(request.role==='repair'){recipeRepairs++;expect(request.readOnly).toBe(true);if(recipeRepairs>1){expect(request.context).toContain('STDOUT:');expect(request.context).toContain('READY');expect(request.context).toContain('Runtime issue');}return complete(JSON.stringify({checks:[{kind:'tui',command:process.execPath,args:['menu.mjs'],steps:[{waitFor:recipeRepairs===1?'READY visível no terminal':'READY',timeoutMs:150},{input:'j',waitFor:'SELECTED 2'}],closeInput:'q',expected:'contains:SELECTED 2',requiredCapabilities:[]}]}));}
       return complete('{"approved":true}');
     }});

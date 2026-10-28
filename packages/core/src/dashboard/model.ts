@@ -8,6 +8,7 @@ const statusLabels: Record<string, string> = {
   working: 'Em andamento', recovering: 'Em recuperação', waiting: 'Aguardando', complete: 'Concluído', cancelled: 'Interrompido', critical: 'Incidente crítico',
   discovering: 'Em descoberta', ready: 'Pronto', planning: 'Em planejamento', pending: 'Pendente', resolved: 'Resolvido', editing: 'Em implementação', checking: 'Em verificação', reviewing: 'Em revisão', running: 'Em andamento',
   preparing: 'Preparando ambiente', integrating: 'Integrando alterações',
+  inactive: 'Sem execução ativa',
 };
 
 function label(value: string | undefined, fallback = 'Não informado'): string { return value ? statusLabels[value] ?? value : fallback; }
@@ -60,6 +61,7 @@ export class DashboardModel {
   private latestRecovery: string | undefined;
   private latestActivity: string | undefined;
   private executionRevision: unknown;
+  private runtime: DashboardView['runtime'];
 
   constructor(saved: SavedProject = {}, options: { workspace?: string } = {}) {
     this.saved = saved;
@@ -85,6 +87,8 @@ export class DashboardModel {
     this.saved = saved;
   }
 
+  updateRuntime(runtime: NonNullable<DashboardView['runtime']>): void { this.runtime = { ...runtime }; }
+
   observe(input: DashboardEvent): void {
     let body = input.body;
     if (typeof body === 'string') { try { body = JSON.parse(body) as unknown; } catch { /* A literal body remains available in the log. */ } }
@@ -101,6 +105,7 @@ export class DashboardModel {
       if (Object.keys(remaining).length) this.logLines.push(...lines(json(remaining)));
     }
     if (event.progress) this.observeProgress(event.progress);
+    if (event.type === 'execution.start') this.measurements.clear();
     if (event.gate) this.observeGate(event.gate);
     if (['agent', 'agent.start', 'agent.result', 'command', 'tool', 'gate', 'recovery', 'waiting', 'complete'].includes(event.type)) {
       const detail = record(event.detail) ?? stored;
@@ -129,7 +134,8 @@ export class DashboardModel {
     return (this.saved.plan?.tasks ?? []).map(task => {
       const current = state?.tasks[task.id];
       const observed = this.gateMeasurements.get(task.id);
-      const evidence = state?.evidence.filter(item => item.taskId === task.id) ?? [];
+      const checks = current?.checks ?? task.checks;
+      const evidence = this.taskEvidence(state, task.id);
       const interactive = (kind: string | undefined): boolean => ['web', 'tui', 'desktop'].includes(kind ?? '');
       const gates: DashboardGate[] = [
         { id: 'G0', status: current?.status === 'editing' ? 'running' : 'pending', detail: 'Sessão do agente.' },
@@ -137,18 +143,18 @@ export class DashboardModel {
         { id: 'G2', status: 'pending', detail: 'Verificações mecânicas pertinentes.' },
         { id: 'G3', status: current?.status === 'reviewing' ? 'running' : current?.status === 'complete' ? 'complete' : 'pending', detail: 'Revisão independente do comportamento e das evidências.' },
       ];
-      if (task.checks.some(check => interactive(check.kind)) || evidence.some(item => interactive(item.kind)) || observed?.has('G4')) gates.push({ id: 'G4', status: 'pending', detail: 'Fluxos exercitados na aplicação.' });
+      if (checks.some(check => interactive(check.kind)) || evidence.some(item => interactive(item.kind)) || observed?.has('G4')) gates.push({ id: 'G4', status: 'pending', detail: 'Fluxos exercitados na aplicação.' });
       for (const gate of gates) {
         if (gate.id === 'G2' || gate.id === 'G4') {
           const flow = gate.id === 'G4';
-          const checks = task.checks.filter(check => interactive(check.kind) === flow);
-          const proofs = evidence.filter(item => interactive(item.kind ?? task.checks.find(check => check.id === item.checkId)?.kind) === flow);
+          const selectedChecks = checks.filter(check => interactive(check.kind) === flow);
+          const proofs = evidence.filter(item => interactive(item.kind ?? checks.find(check => check.id === item.checkId)?.kind) === flow);
           // The UI reads recorded evidence. It never schedules a check to fill a dot.
-          if (!checks.length && !proofs.length) gate.status = 'neutral';
+          if (!selectedChecks.length && !proofs.length) gate.status = 'neutral';
           else if (current?.status !== 'editing' && !(current?.status === 'pending' && current.findings.length)) {
             const latest = [...new Map(proofs.map(proof => [proof.checkId, proof])).values()];
             if (latest.some(proof => !proof.passed)) gate.status = 'returned';
-            else if (latest.length && checks.every(check => latest.some(proof => proof.checkId === check.id && proof.passed))) gate.status = 'complete';
+            else if (latest.length && selectedChecks.every(check => latest.some(proof => proof.checkId === check.id && proof.passed))) gate.status = 'complete';
           }
         }
         const measured = observed?.get(gate.id);
@@ -160,6 +166,12 @@ export class DashboardModel {
       }
       return { taskId: task.id, title: task.title, gates };
     });
+  }
+
+  private taskEvidence(state: BuildState | undefined, taskId: string) {
+    const proofs = state?.evidence.filter(item => item.taskId === taskId) ?? [];
+    const references = state?.tasks[taskId]?.verificationEvidence;
+    return references ? references.flatMap(reference => proofs.filter(proof => proof.id === reference.evidenceId && proof.checkId === reference.checkId && proof.inputHash === reference.inputHash)) : proofs;
   }
 
   private phases(state: BuildState | undefined): DashboardPhase[] {
@@ -199,6 +211,8 @@ export class DashboardModel {
     if (number(progress.total)) next.total = progress.total;
     if (progress.stage) next.stage = progress.stage;
     if (progress.unit) next.unit = progress.unit;
+    if (typeof progress.startedAt === 'string' && Number.isFinite(Date.parse(progress.startedAt))) next.startedAt = progress.startedAt;
+    if ((progress.id.startsWith('operation:') || progress.id === 'dashboard:history') && progress.status !== 'running') { this.measurements.delete(progress.id); return; }
     this.measurements.set(next.id, next);
   }
 
@@ -230,8 +244,8 @@ export class DashboardModel {
     if (plan) {
       result.set('environment', countProgress('environment', 'Ambiente', plan.environment.filter(node => state?.environment[node.id]?.ready).length, plan.environment.length, buildWaiting, 'build', 'dependências'));
       result.set('tasks', countProgress('tasks', 'Unidades de trabalho', plan.tasks.filter(task => state?.tasks[task.id]?.status === 'complete').length, plan.tasks.length, buildWaiting, 'build', 'unidades'));
-      const checks = plan.tasks.flatMap(task => task.checks.map(check => ({ taskId: task.id, checkId: check.id })));
-      const passed = checks.filter(check => state?.evidence.findLast(item => item.taskId === check.taskId && item.checkId === check.checkId)?.passed).length;
+      const checks = plan.tasks.flatMap(task => (state?.tasks[task.id]?.checks ?? task.checks).map(check => ({ taskId: task.id, checkId: check.id })));
+      const passed = checks.filter(check => this.taskEvidence(state, check.taskId).findLast(item => item.checkId === check.checkId)?.passed).length;
       result.set('verification', countProgress('verification', 'Verificações', passed, checks.length, buildWaiting, 'build', 'verificações'));
     }
     for (const [id, measurement] of this.measurements) result.set(id, { ...measurement });
@@ -241,12 +255,14 @@ export class DashboardModel {
   snapshot(): DashboardView {
     const { brief, plan, pendingQuestion } = this.saved;
     const state = execution(this.saved);
+    const displayStatus = this.runtime?.alive === false && this.saved.status === 'working' ? 'inactive' : this.saved.status;
     const progress = this.progress(state);
+    const loadingHistory = progress.find(item => item.id === 'dashboard:history' && item.status === 'running');
     const phases = this.phases(state);
     const gateSymbols = { pending: '○', waiting: '○', neutral: '○', running: '◐', complete: '●', returned: '⊗' };
     const gateText = (gates: readonly DashboardGate[]): string => gates.map(gate => `${gate.id}${gateSymbols[gate.status]}`).join(' ');
     const progressLines = phases.flatMap(phase => [`${phase.id} ${phase.title} ${gateText(phase.gates)}`, ...phase.threads.map(thread => `  ${thread.id} ${oneLine(thread.title)} ${gateText(thread.gates)}`)]);
-    const summary = [`Estado: ${label(this.saved.status, 'Aguardando execução')}`, `Etapa: ${this.saved.stage ?? 'Não iniciada'}`];
+    const summary = [`Estado: ${label(displayStatus, 'Aguardando execução')}`, `Etapa: ${this.saved.stage ?? 'Não iniciada'}`];
     add(summary, 'Diretório: ', this.workspace);
     add(summary, 'Última gravação: ', this.saved.updatedAt);
     add(summary, 'Pedido: ', this.saved.request ?? brief?.request);
@@ -260,7 +276,7 @@ export class DashboardModel {
     }
     if (pendingQuestion) summary.push('Pergunta aguardando resposta:', ...lines(pendingQuestion.question), ...lines(`Motivo: ${pendingQuestion.reason}`), ...lines(`Impacto: ${pendingQuestion.impact}`), ...pendingQuestion.options.flatMap(option => lines(`• ${option}`)));
     const pendingDecisions = brief?.gaps.filter(gap => gap.status === 'pending').length ?? (pendingQuestion ? 1 : 0);
-    const summaryPreview = [`Estado: ${label(this.saved.status, 'Aguardando execução')}`, `Etapa: ${this.saved.stage ?? 'Não iniciada'}`, ...(this.workspace ? [`Diretório: ${oneLine(this.workspace)}`] : []), `Requisitos: ${brief?.requirements.length ?? 0} · Decisões pendentes: ${pendingDecisions}`, ...(brief ? [`Modalidades: ${brief.modes.join(', ')} · Plataformas: ${brief.targets.join(', ')}`] : [])];
+    const summaryPreview = [`Estado: ${label(displayStatus, 'Aguardando execução')}`, `Etapa: ${this.saved.stage ?? 'Não iniciada'}`, ...(this.workspace ? [`Diretório: ${oneLine(this.workspace)}`] : []), `Requisitos: ${brief?.requirements.length ?? 0} · Decisões pendentes: ${pendingDecisions}`, ...(brief ? [`Modalidades: ${brief.modes.join(', ')} · Plataformas: ${brief.targets.join(', ')}`] : [])];
     const phaseLines = [`Descoberta: ${label(brief?.status, 'Não iniciada')}`, `Planejamento: ${label(plan?.status, 'Não iniciado')}`];
     const phasePreview = plan?.tasks.length ? plan.tasks.map(task => `${task.id} · ${oneLine(task.title)} · ${label(state?.tasks[task.id]?.status, 'Pendente')} · ${task.criteria.length} critério(s)`) : [...phaseLines];
     if (plan) {
@@ -308,10 +324,10 @@ export class DashboardModel {
       panel('phases', 'Fases e unidades', phaseLines, progress.filter(item => ['brief', 'plan', 'tasks', 'verification', 'gaps'].includes(item.id) || item.id.startsWith('task:') || item.stage === 'plan' || item.stage === 'init'), phasePreview),
       panel('environment', 'Ambiente', environmentLines, progress.filter(item => item.id === 'environment' || item.id.startsWith('environment:')), environmentPreview.length ? environmentPreview : [...environmentLines]),
       panel('activity', 'Agentes e atividade', activity, progress.filter(item => item.id.startsWith('agent:')), activityPreview),
-      panel('log', 'Log completo', [...this.logLines]),
+      panel('log', 'Log completo', [...this.logLines, ...(this.runtime ? [`Processo: ${this.runtime.pid ?? 'não registrado'} · ${this.runtime.alive ? 'ativo' : 'sem execução ativa'}`, ...(this.runtime.lastEventAt ? [`Último evento: ${this.runtime.lastEventAt}`] : [])] : [])], loadingHistory ? [loadingHistory] : this.runtime?.alive === false ? [] : progress.filter(item => item.status === 'running' && (item.id.startsWith('operation:') || item.id.startsWith('agent:') || item.id.startsWith('inputs.'))).slice(-3)),
       panel('incidents', 'Incidentes e evidências', incidents),
     ];
-    return { status: this.saved.status ?? 'waiting', stage: this.saved.stage ?? 'idle', panels, progress, usage: { ...this.usage }, pendingDecisions, ...(pendingQuestion ? { pendingQuestion } : {}), ...(this.saved.updatedAt ? { updatedAt: this.saved.updatedAt } : {}) };
+    return { status: displayStatus ?? 'waiting', stage: this.saved.stage ?? 'idle', panels, progress, usage: { ...this.usage }, pendingDecisions, ...(pendingQuestion ? { pendingQuestion } : {}), ...(this.saved.updatedAt ? { updatedAt: this.saved.updatedAt } : {}), ...(this.runtime ? { runtime: { ...this.runtime } } : {}) };
   }
 
   panel(id: DashboardPanelId): DashboardPanel { return this.snapshot().panels.find(item => item.id === id)!; }

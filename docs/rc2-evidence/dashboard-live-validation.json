@@ -1,0 +1,127 @@
+{
+  "schema": "capivara/dashboard-live-validation/1",
+  "capturedAt": "2026-10-28T21:38:50.351Z",
+  "version": "0.9.0-rc2",
+  "before": {
+    "at": "2026-10-28T21:26:27.974Z",
+    "status": "working",
+    "updatedAt": "2026-10-28T21:02:59.054Z",
+    "ownerPid": 2254508,
+    "ownerAlive": false,
+    "complete": 10,
+    "total": 10,
+    "eventId": 12868,
+    "evidence": 151,
+    "acceptance": 36
+  },
+  "after": {
+    "status": "complete",
+    "stage": "build",
+    "updatedAt": "2026-10-28T21:29:27.788Z",
+    "complete": 10,
+    "total": 10,
+    "blockers": [],
+    "pendingReplans": [],
+    "lastFailure": null,
+    "evidence": 151,
+    "acceptance": 40,
+    "lastEvent": 13010
+  },
+  "resume": {
+    "startedAt": "2026-10-28T21:26:34.249Z",
+    "modelCalls": 0,
+    "proofRecordsAdded": 0,
+    "operations": {
+      "Revalidando ambiente": {
+        "count": 5,
+        "totalMs": 4036,
+        "maxMs": 1676
+      },
+      "Preparando recursos do navegador": {
+        "count": 7,
+        "totalMs": 5361,
+        "maxMs": 1401
+      },
+      "Resolvendo entradas e hashes das provas": {
+        "count": 15,
+        "totalMs": 55547,
+        "maxMs": 8527
+      },
+      "Revalidando provas": {
+        "count": 10,
+        "totalMs": 26009,
+        "maxMs": 7395
+      },
+      "Isolando área de trabalho": {
+        "count": 1,
+        "totalMs": 6570,
+        "maxMs": 6570
+      },
+      "Isolando verificações": {
+        "count": 1,
+        "totalMs": 6519,
+        "maxMs": 6519
+      },
+      "Executando aceite final": {
+        "count": 1,
+        "totalMs": 57208,
+        "maxMs": 57208
+      }
+    },
+    "unfinishedOperations": 0
+  },
+  "realPty": {
+    "processes": [
+      {
+        "pid": 2294129,
+        "parent": 546317,
+        "nice": 0,
+        "role": "engine",
+        "args": [
+          "node",
+          "/home/bruno/.local/bin/capivara",
+          "init",
+          "--project",
+          "/tmp/capivara-ui-isolation-hSe4Dd"
+        ]
+      },
+      {
+        "pid": 2294199,
+        "parent": 2294129,
+        "nice": 10,
+        "role": "dashboard",
+        "args": [
+          "/home/bruno/.nvm/versions/node/v24.22.1/bin/node",
+          "/home/bruno/.local/bin/capivara",
+          "dashboard",
+          "--project",
+          "/tmp/capivara-ui-isolation-hSe4Dd"
+        ]
+      }
+    ],
+    "questionAnswered": true,
+    "finalStatus": "complete",
+    "cliModelCalls": 0,
+    "preparation": "One injected analyst created a real pending question in a temporary project; no paid provider was available.",
+    "stateTransitions": {
+      "workingWithOwner": "Em andamento",
+      "completeCommit": "Concluído",
+      "workingWithoutOwner": "Sem execução ativa",
+      "method": "Installed CLI under a real PTY and a temporary SQLite writer; verified separately."
+    }
+  },
+  "validation": {
+    "build": "passed",
+    "types": "passed",
+    "testFiles": 45,
+    "tests": 306,
+    "installedMatchesBuilt": true,
+    "installedSHA256": "cce229b7766d2d5157da7bb4c9daa8ad06fc0b1df60e6cfab0dd8f8540e76033"
+  },
+  "limits": [
+    "Real project resumed using its preserved source and proofs; no product source was changed for the fix.",
+    "Per-operation times include nested operations and must not be summed as wall time.",
+    "The stale original executor disappeared before any signal was sent; its exit cause was not established.",
+    "PTY and performance measurements ran on Linux."
+  ]
+}

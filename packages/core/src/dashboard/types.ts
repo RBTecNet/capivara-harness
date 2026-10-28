@@ -51,6 +51,7 @@ export interface DashboardView {
   pendingDecisions: number;
   pendingQuestion?: Question;
   updatedAt?: string;
+  runtime?: { pid?: number; alive: boolean; lastEventAt?: string };
 }
 
 /** Domain, runtime, execution and stored events share this observational boundary. */

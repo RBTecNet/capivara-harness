@@ -26,6 +26,24 @@ function saved(): SavedProject {
 }
 
 describe('projeção do dashboard', () => {
+  it('mostra trabalho interno real no log e distingue checkpoint de processo ativo', () => {
+    const initial = saved(), model = new DashboardModel(initial);
+    model.updateRuntime({ pid: 123, alive: false, lastEventAt: '2026-10-28T10:00:00Z' });
+    expect(model.snapshot().status).toBe('inactive');
+    expect(model.panel('summary').lines[0]).toContain('Sem execução ativa');
+    expect(initial.status).toBe('working');
+    model.updateRuntime({ pid: 456, alive: true });
+    const operation = { id: 'operation:run:1', label: 'Conferindo fontes e hashes', status: 'running' as const, startedAt: '2026-10-28T10:01:00Z', stage: 'build' };
+    model.observe({ type: 'progress', progress: operation });
+    expect(model.snapshot().status).toBe('working');
+    expect(model.panel('log').progress).toContainEqual(operation);
+    model.observe({ type: 'progress', progress: { ...operation, status: 'complete' } });
+    expect(model.panel('log').progress).toHaveLength(0);
+    model.observe({ type: 'progress', progress: operation });
+    model.observe({ type: 'execution.start' });
+    expect(model.panel('log').progress).toHaveLength(0);
+  });
+
   it('mantém devoluções até a nova execução do mesmo passo e só inclui G4 quando há fluxo', () => {
     const initial = structuredClone(saved());
     initial.plan!.tasks[1]!.checks.push({ id: 'screen', kind: 'tui', requirementIds: [], requiredCapabilities: [] });

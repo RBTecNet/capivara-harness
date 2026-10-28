@@ -40,6 +40,8 @@ A documentação histórica não impõe gates nem regras ao motor novo. A [audit
 
 O dashboard observa o motor; fechar uma área ou ocultar o painel não cancela a construção. Barras mostram contagens reais quando existem e atividade indeterminada quando não existe total conhecido. Não criar metas, verificações ou chamadas de agente para alimentar a interface. Dados financeiros ausentes permanecem ausentes.
 
+Na CLI, a apresentação roda em processo próprio e lê o diário e as revisões do SQLite. Não montar, renderizar ou transportar o modelo/histórico do dashboard no event loop do executor. IPC leva somente decisões e controle explícito. A UI materializa as linhas visíveis e não pode impor espera, cancelamento ou reedição ao motor por falha de apresentação.
+
 O conteúdo integral dos painéis é separado da prévia compacta. A ampliação e a rolagem não descartam fases ou linhas antigas. O acompanhamento independente lê o estado e o diário sem reivindicar a execução. Somente uma resposta explícita pode ser gravada por essa janela. Detalhes: [dashboard da execução](docs/DASHBOARD-EXECUCAO.md).
 
 

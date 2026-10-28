@@ -39,10 +39,12 @@ const wrap = (text: string, width: number): string[] => {
 const hasCount = (value: number | undefined): value is number => value !== undefined && Number.isFinite(value) && value >= 0;
 function progressCount(progress: DashboardProgress): string {
   const state = progress.status === 'complete' ? 'concluído' : progress.status === 'waiting' ? 'aguardando' : 'em curso';
+  const began = progress.startedAt ? Date.parse(progress.startedAt) : NaN;
+  const age = progress.status === 'running' && Number.isFinite(began) ? ` · ${Math.floor(Math.max(0, Date.now() - began) / 1000)}s` : '';
   const completed = hasCount(progress.completed), total = hasCount(progress.total);
-  if (!completed && !total) return state;
+  if (!completed && !total) return state + age;
   const value = completed && total ? `${progress.completed}/${progress.total}` : completed ? `${progress.completed}` : `?/${progress.total}`;
-  return `${value}${progress.unit ? ` ${safe(progress.unit)}` : ''}${completed && total ? '' : ` · ${state}`}`;
+  return `${value}${progress.unit ? ` ${safe(progress.unit)}` : ''}${completed && total ? '' : ` · ${state}`}${age}`;
 }
 
 /** A bar is determinate only when the engine supplied a real denominator. */
@@ -63,6 +65,10 @@ export function renderProgressBar(progress: DashboardProgress, width: number, fr
 
 interface ColorSpan { start: number; end: number; tone: string; }
 interface ContentLine { text: string; tone?: string; spans?: ColorSpan[]; }
+interface ContentRows { length: number; at(index: number): ContentLine | undefined; }
+interface IndexedTextBlock { text: string; count: number; wrapped?: string[]; }
+interface IndexedTextRows extends ContentRows { original: string[]; }
+const textIndexes = new WeakMap<string[], Map<string, IndexedTextRows>>();
 interface Segment { text: string; tone?: string; reserve?: number; }
 interface PanelPlacement { panel: DashboardPanel; x: number; y: number; width: number; height: number; }
 interface DashboardLayout { width: number; height: number; header: ContentLine[]; footer: string[]; placements: PanelPlacement[]; }
@@ -140,14 +146,61 @@ function progressLines(progress: DashboardProgress, width: number, expanded: boo
   return [...(expanded ? wrap(label, width) : [fit(label, width, true)]).map(text => ({ text, tone: '1' })), { text: renderProgressBar(progress, width, frame), tone: progressTone(progress.status) }, ...fullCount.map(text => ({ text, tone: progressTone(progress.status) }))];
 }
 
-function panelLines(panel: DashboardPanel, width: number, expanded: boolean, frame = 0): ContentLine[] {
-  if (panel.id === 'progress') return progressPhaseLines(panel.phases ?? [], width);
+/** Only visible rows become rendered strings; the full source remains available. */
+function textRows(source: string[], width: number, expanded: boolean): IndexedTextRows {
+  const key = `${expanded ? 'wrapped' : 'compact'}:${width}`;
+  let indexes = textIndexes.get(source);
+  const previous = indexes?.get(key);
+  // Public callers may mutate arrays in place. String comparisons are cheap and
+  // avoid rescanning or allocating every character of the journal each frame.
+  if (previous && previous.original.length === source.length && previous.original.every((line, index) => line === source[index])) return previous;
+  const blocks: IndexedTextBlock[] = [], ends: number[] = [];
+  let count = 0;
+  for (const line of source) {
+    const parts = /[\r\n]/.test(line) ? safe(line).split('\n') : [line];
+    for (const part of parts) {
+      if (!expanded) {
+        blocks.push({ text: part, count: 1 }); count++;
+      } else {
+        const text = safe(part);
+        // Latin text occupies one terminal cell per code unit. Other scripts,
+        // combining marks and emoji retain the existing exact wrapping rules.
+        const simple = /^[\x20-\x7e\u00a0-\u02ff]*$/.test(text);
+        const wrapped = simple ? undefined : wrap(text, width);
+        const rows = wrapped?.length ?? Math.max(1, Math.ceil(text.length / width));
+        blocks.push({ text, count: rows, ...(wrapped ? { wrapped } : {}) }); count += rows;
+      }
+      ends.push(count);
+    }
+  }
+  const indexed: IndexedTextRows = {
+    original: source.slice(), length: count,
+    at(index) {
+      if (index < 0 || index >= count) return undefined;
+      let low = 0, high = ends.length - 1;
+      while (low < high) { const middle = (low + high) >>> 1; if (ends[middle]! <= index) low = middle + 1; else high = middle; }
+      const block = blocks[low]!, row = index - (low ? ends[low - 1]! : 0);
+      return { text: expanded ? block.wrapped?.[row] ?? block.text.slice(row * width, (row + 1) * width) : fit(block.text, width, true) };
+    },
+  };
+  if (!indexes) { indexes = new Map(); textIndexes.set(source, indexes); }
+  if (indexes.size >= 4) indexes.delete(indexes.keys().next().value!);
+  indexes.set(key, indexed);
+  return indexed;
+}
+
+function panelLines(panel: DashboardPanel, width: number, expanded: boolean, frame = 0): ContentRows {
+  if (panel.id === 'progress') {
+    const rows = progressPhaseLines(panel.phases ?? [], width);
+    return { length: rows.length, at: index => rows[index] };
+  }
   const measurements = !expanded && panel.previewLines ? [] : panel.progress;
   const progress = measurements.flatMap(item => progressLines(item, width, expanded, frame));
   const source = expanded ? panel.lines : panel.previewLines ?? panel.lines;
-  const lines = source.flatMap(line => expanded ? wrap(line, width) : safe(line).split(/\r?\n/).map(part => fit(part, width, true))).map(text => ({ text }));
-  const content = [...lines, ...progress];
-  return content.length ? content : [{ text: 'Sem registros.', tone: '90' }];
+  const rows = textRows(source, width, expanded);
+  const length = rows.length + progress.length;
+  return length ? { length, at: index => index < rows.length ? rows.at(index) : progress[index - rows.length] }
+    : { length: 1, at: index => index === 0 ? { text: 'Sem registros.', tone: '90' } : undefined };
 }
 
 function paintContent(line: ContentLine, width: number, paint: (text: string, tone: string) => string): string {
@@ -170,9 +223,9 @@ function layoutDashboard(model: DashboardView, view: DashboardNavigationState, w
   const w = Math.max(4, Number.isFinite(width) ? Math.floor(width) : 80);
   const h = Math.max(3, Number.isFinite(height) ? Math.floor(height) : 24);
   const focused = model.panels.find(panel => panel.id === (view.expandedPanel ?? view.focusPanel)) ?? model.panels[0];
-  const current = model.progress.findLast(item => item.status === 'running' && !aggregateProgress.has(item.id))
+  const current = model.status === 'inactive' ? undefined : model.progress.find(item => item.id === 'dashboard:history' && item.status === 'running') ?? model.progress.findLast(item => item.status === 'running' && !aggregateProgress.has(item.id))
     ?? model.progress.find(item => item.status === 'running') ?? model.progress.find(item => item.status !== 'complete') ?? model.progress.at(-1);
-  const status = ({ working: 'Em andamento', running: 'Em andamento', waiting: 'Aguardando', recovering: 'Em recuperação', complete: 'Concluído', cancelled: 'Interrompido', critical: 'Incidente crítico' } as Record<string, string>)[model.status] ?? model.status;
+  const status = ({ working: 'Em andamento', running: 'Em andamento', waiting: 'Aguardando', recovering: 'Em recuperação', complete: 'Concluído', cancelled: 'Interrompido', critical: 'Incidente crítico', inactive: 'Sem execução ativa' } as Record<string, string>)[model.status] ?? model.status;
   const header: ContentLine[] = [{ text: fit(`${view.expandedPanel ? 'PAINEL' : 'EXECUÇÃO'} · ${safe(status)} · ${safe(model.stage)}`, w, true), tone: statusTone(model.status) }];
   if (current) {
     const barWidth = Math.min(w, Math.max(16, Math.floor(w * 0.48)));
@@ -260,7 +313,7 @@ export function renderDashboard(model: DashboardView, view: DashboardNavigationS
     const range = fit(` linhas ${offset + 1}–${Math.min(lines.length, offset + pageSize)}/${lines.length}${view.followPanels?.[panel.id] ? ' · ao vivo' : ''} `, inner);
     const bottom = paint(`└${range}${'─'.repeat(Math.max(0, inner - dashboardWidthOf(range)))}┘`, tone);
     const body = Array.from({ length: Math.max(0, panelHeight - 2) }, (_, row) => {
-      const line = lines[offset + row] ?? { text: '' };
+      const line = lines.at(offset + row) ?? { text: '' };
       const content = paintContent(line, contentWidth, paint);
       return `${paint('│', tone)} ${pad(content, contentWidth)} ${paint('│', tone)}`;
     });

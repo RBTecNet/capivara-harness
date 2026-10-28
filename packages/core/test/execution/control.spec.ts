@@ -8,6 +8,7 @@ import { executeCommand, runTerminal } from '../../src/runtime/index.js';
 import type { BuildOptions, BuildState } from '../../src/execution/types.js';
 import type { DevelopmentPlan, ProductBrief, WorkUnit } from '../../src/domain/types.js';
 import type { AgentResult } from '../../src/runtime/types.js';
+import type { ProgressMeasurement } from '../../src/telemetry/progress.js';
 
 const temporary:string[]=[];
 afterEach(async()=>{await Promise.all(temporary.splice(0).map(path=>rm(path,{recursive:true,force:true})));});
@@ -16,6 +17,46 @@ const complete=(text=''):AgentResult=>({status:'complete',text,commands:[],chang
 const brief:ProductBrief={schema:'capivara/product/1',status:'ready',id:'b',revision:1,name:'Independent CLI commands',summary:'Commands',request:'Build independent alpha and beta CLI commands.',modes:['cli'],targets:['portable'],constraints:[],gaps:[],decisions:[],requirements:['alpha','beta'].map(id=>({id,statement:`${id} command prints ${id}`,mode:'cli',source:{kind:'request',reference:'request',text:`${id} command prints ${id}`}}))};
 function unit(id:string,files=[`${id}.mjs`],dependsOn:string[]=[]):WorkUnit{return{id,title:id,goal:`Print ${id}`,instructions:`Write ${files.join(', ')}`,requirementIds:[id],dependsOn,environmentIds:[],contractIds:[],files,criteria:[`Print ${id}`],checks:[{id:`check-${id}`,kind:'cli',command:process.execPath,args:files[0]!.endsWith('.json')?['-e',`console.log(require('./${files[0]}').join(','))`]:[files[0]!],expected:`contains:${id}`,requirementIds:[id],requiredCapabilities:[]}],blockedBy:[],risk:'normal'};}
 function plan(tasks:WorkUnit[]):DevelopmentPlan{return{schema:'capivara/plan/1',status:'ready',revision:1,briefId:'b',briefRevision:1,environment:[],contracts:[],tasks};}
+
+it('reports real internal operations while resuming with no agents and closes each observation without invented totals',async()=>{
+  const root=await workspace(),product={...brief,requirements:brief.requirements.slice(0,1)};
+  const observations:ProgressMeasurement[]=[];let calls=0;
+  const first=await runBuild({workspace:root,brief:product,plan:plan([unit('alpha')]),signal:AbortSignal.timeout(3000),onEvent:event=>{
+    if(event.type==='progress'&&event.progress?.id.startsWith('operation:'))observations.push(event.progress);
+  },agent:async request=>{
+    calls++;if(request.role==='reviewer')return complete('{"approved":true}');
+    expect(observations.some(item=>item.label==='Preparando instrumentos do agente'&&item.status==='complete')).toBe(true);
+    await writeFile(join(request.workspace,'alpha.mjs'),'console.log("alpha");');return complete();
+  }});
+  expect(first.status,JSON.stringify(first.incidents)).toBe('complete');
+  const firstIds=new Set(observations.map(item=>item.id));observations.length=0;const before=calls;
+  const resumed=await runBuild({workspace:root,brief:product,plan:first.plan,state:structuredClone(first.state),signal:AbortSignal.timeout(3000),agent:async()=>{calls++;throw new Error('Completed source must not replay an agent.');},onEvent:event=>{
+    if(event.type==='progress'&&event.progress?.id.startsWith('operation:'))observations.push(event.progress);
+  }});
+  expect(resumed.status,JSON.stringify(resumed.incidents)).toBe('complete');expect(calls).toBe(before);
+  expect(observations.some(item=>item.label==='Revalidando provas'&&item.status==='running')).toBe(true);
+  expect(observations.some(item=>item.label==='Resolvendo entradas e hashes das provas'&&item.status==='running')).toBe(true);
+  for(const id of new Set(observations.map(item=>item.id))){
+    const pair=observations.filter(item=>item.id===id);
+    expect(firstIds.has(id)).toBe(false);expect(pair.map(item=>item.status)).toEqual(['running','complete']);
+    expect(Number.isFinite(Date.parse(pair[0]!.startedAt!))).toBe(true);expect(pair[1]!.startedAt).toBe(pair[0]!.startedAt);
+    expect(pair.every(item=>item.total===undefined&&item.completed===undefined)).toBe(true);
+  }
+  expect(resumed.state.metrics?.active).toBe(0);
+});
+
+it('closes an internal operation in finally while preserving its real filesystem failure',async()=>{
+  const root=await workspace();await writeFile(join(root,'.capivara-next'),'existing obstruction');
+  const observations:ProgressMeasurement[]=[];let calls=0;
+  const result=await runBuild({workspace:root,brief:{...brief,requirements:brief.requirements.slice(0,1)},plan:plan([unit('alpha')]),signal:AbortSignal.timeout(3000),agent:async()=>{calls++;return complete();},onEvent:event=>{
+    if(event.type==='progress'&&event.progress?.id.startsWith('operation:'))observations.push(event.progress);
+  }});
+  expect(result.status).toBe('waiting');expect(calls).toBe(0);
+  expect(result.incidents.some(problem=>problem.kind==='instrument'&&problem.message.includes('ENOTDIR'))).toBe(true);
+  const failed=observations.find(item=>item.label==='Isolando área de trabalho'&&item.status==='waiting');expect(failed).toBeDefined();
+  expect(observations.filter(item=>item.id===failed!.id).map(item=>item.status)).toEqual(['running','waiting']);
+  expect(await readFile(join(root,'.capivara-next'),'utf8')).toBe('existing obstruction');
+});
 
 it('recovers a throwing scoped planner through an actual different proof recipe without reediting the product',async()=>{
   const root=await workspace();const product={...brief,requirements:brief.requirements.slice(0,1)};

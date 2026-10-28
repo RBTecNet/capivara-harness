@@ -5,6 +5,8 @@ export interface ProgressMeasurement {
   completed?: number;
   total?: number;
   status: 'running' | 'complete' | 'waiting';
+  /** Start of the observed operation, preserved on its terminal measurement. */
+  startedAt?: string;
   stage?: string;
   unit?: string;
 }

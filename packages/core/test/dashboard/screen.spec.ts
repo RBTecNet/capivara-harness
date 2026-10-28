@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { createDashboardNavigation, navigateDashboard } from '../../src/dashboard/navigation.js';
 import { dashboardWidthOf, getPanelPageSize, getPanelScrollLimit, hitTestPanel, renderDashboard, renderProgressBar } from '../../src/dashboard/screen.js';
 import type { DashboardPanelId, DashboardProgress, DashboardView } from '../../src/dashboard/types.js';
@@ -13,6 +13,31 @@ function sample(): DashboardView {
   };
 }
 const plain = (value: string): string => value.replace(/\u001b\[[0-9;]*m/g, '');
+
+it('materializa somente o viewport de um histórico extenso e conserva rolagem e alterações', () => {
+  const model = sample(), panel = model.panels.find(item => item.id === 'log')!;
+  panel.lines = Array.from({ length: 5000 }, (_, index) => `history-row-${index}: ${'registro preservado '.repeat(8)}`);
+  const view = { ...createDashboardNavigation(), focusPanel: 'log' as const };
+  const seen = new Set<string>();
+  const iterator = String.prototype[Symbol.iterator];
+  const spy = vi.spyOn(String.prototype, Symbol.iterator).mockImplementation(function (this: string) {
+    const value = String(this);
+    if (value.startsWith('history-row-')) seen.add(value.split(':', 1)[0]!);
+    return iterator.call(value);
+  });
+  try {
+    const output = renderDashboard(model, view, 120, 40);
+    expect(output).toContain('history-row-4999');
+    expect(seen.size).toBeLessThanOrEqual(getPanelPageSize(model, view, 'log', 120, 40));
+    expect(getPanelScrollLimit(model, view, 'log', 120, 40)).toBe(5000 - getPanelPageSize(model, view, 'log', 120, 40));
+    panel.lines[4999] = 'Última linha alterada sem substituir o array';
+    expect(renderDashboard(model, view, 120, 40)).toContain('Última linha alterada');
+    panel.lines.push('Novo registro preservado');
+    expect(renderDashboard(model, view, 120, 40)).toContain('Novo registro preservado');
+    const start = { ...view, expandedPanel: 'log' as const, followPanels: { log: false }, scrollByPanel: { log: 0 } };
+    expect(renderDashboard(model, start, 120, 40)).toContain('history-row-0:');
+  } finally { spy.mockRestore(); }
+});
 
 it.each([[40, 12], [80, 24], [120, 40]])('mantém dashboard e todos os overlays dentro de %sx%s', (width, height) => {
   const model = sample();

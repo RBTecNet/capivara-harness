@@ -1,4 +1,5 @@
 import { access, cp, mkdir, readFile, writeFile, unlink, rm } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { join, relative, dirname } from 'node:path';
 import { ContextTooLarge, ordered } from '../domain/context.js';
 import { allowedCapabilities } from '../domain/authority.js';
@@ -97,7 +98,24 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   const capacity = Math.max(1, Math.min(64, Math.floor(options.maxConcurrent ?? 2)));
   const command = options.executeCommand ?? executeCommand, terminal = options.runTerminal ?? runTerminal;
   let cancelled = false, persistenceFailed = false, integrationBlocked = false;
-  const measured=async<T>(stage:string,operation:()=>Promise<T>):Promise<T>=>{const start=Date.now();try{return await operation();}finally{metrics.timeByStageMs[stage]=(metrics.timeByStageMs[stage]??0)+Date.now()-start;}};
+  const operationRun=randomUUID();let operationSequence=0;
+  const operationLabels:Record<string,string>={
+    browserPreparation:'Preparando recursos do navegador',agentInstrument:'Preparando instrumentos do agente',providerPublication:'Publicando provedor de ambiente',
+    dependencies:'Preparando dependências',verificationIsolation:'Isolando verificações',environmentPreparation:'Preparando ambiente',isolation:'Isolando área de trabalho',
+    integration:'Integrando alterações verificadas',integrationRecovery:'Recuperando integração',integrationReconciliation:'Preparando reconciliação de alterações',cleanup:'Limpando área integrada',
+    environmentRevalidation:'Revalidando ambiente',proofRevalidation:'Revalidando provas',proofInputs:'Resolvendo entradas e hashes das provas',acceptance:'Executando aceite final',acceptanceIntegration:'Integrando artefatos do aceite',
+    conformance:'Conferindo conformidade dos requisitos e provedores',
+  };
+  const measured=async<T>(stage:string,operation:()=>Promise<T>):Promise<T>=>{
+    const start=Date.now(),startedAt=new Date(start).toISOString(),id=`operation:${operationRun}:${++operationSequence}`,label=operationLabels[stage]??stage;
+    let completed=false;
+    emitProgress(options.onEvent,{id,label,startedAt,status:'running',stage:'build'});
+    try{const result=await operation();completed=true;return result;}
+    finally{
+      metrics.timeByStageMs[stage]=(metrics.timeByStageMs[stage]??0)+Date.now()-start;
+      emitProgress(options.onEvent,{id,label,startedAt,status:completed?'complete':'waiting',stage:'build'});
+    }
+  };
   const serial=async<T>(stage:string,operation:()=>Promise<T>):Promise<T>=>{const queued=Date.now();return publication.run(async()=>{metrics.timeByStageMs.queueWait=(metrics.timeByStageMs.queueWait??0)+Date.now()-queued;return measured(stage,operation);});};
   const event = (type: Parameters<NonNullable<BuildOptions['onEvent']>>[0]['type'], message: string, subject?: string, detail?: unknown): void => emitEvent(options.onEvent,{type,message,...(subject ? {subject} : {}),...(detail !== undefined ? {detail} : {})});
   const note = (problem: BuildIncident): void => { const index = state.incidents.findIndex(item => item.id === problem.id); if (index < 0) state.incidents.push(problem); else state.incidents[index] = problem; };
@@ -159,11 +177,11 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     event('environment',result.ready?'Recurso de navegador utilizável no mesmo caminho por editor e verificador.':'O recurso de navegador ainda precisa de recuperação; o código não foi reprovado.',task.id,{identity:result.identity,ready:result.ready,changed:result.changed,details:result.details});
     await save();return result;
   };
-  const revisionState = async (task: WorkUnit, workspace: string, operational: OperationalEnvironment): Promise<{hash:string;proofs:Record<string,string>}> => {
+  const revisionState = async (task: WorkUnit, workspace: string, operational: OperationalEnvironment): Promise<{hash:string;proofs:Record<string,string>}> => measured('proofInputs',async()=>{
     const checks = state.tasks[task.id]?.checks ?? task.checks;
     const proofs = await Promise.all(checks.map(check=>proofHash(task,check,workspace,operational)));
     return{hash:await inputHash(workspace,taskInputs(plan,task),JSON.stringify({task,proofs,requirements:options.brief.requirements.filter(item => task.requirementIds.includes(item.id)),constraints:options.brief.constraints,contracts:plan.contracts.filter(item => task.contractIds.includes(item.id)),environment:operational.revision})),proofs:Object.fromEntries(checks.map((check,index)=>[check.id,proofs[index]!]))};
-  };
+  });
   const revision = async(task:WorkUnit,workspace:string,operational:OperationalEnvironment):Promise<string>=>(await revisionState(task,workspace,operational)).hash;
   const suspensionFingerprint = async (task: WorkUnit, progress: TaskProgress): Promise<string> => digest(JSON.stringify({protocol:executionProtocol,canonical:await revision(task,options.workspace,canonicalOperational(task)),local:progress.checkpoint && await exists(progress.checkpoint.directory) ? await inputHash(progress.checkpoint.directory,taskInputs(plan,task)) : '',configuration:options.configurationRevision ?? '',checks:progress.checks,environment:closure(plan,task).map(node=>state.environment[node.id]?.fingerprint)}));
   const suspend = async (task: WorkUnit,kind: BuildIncident['kind'],reason: string,evidence = '',resource = false): Promise<void> => {
@@ -451,8 +469,10 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     if(order.unresolved.length)throw new WorkPlanningError(`Verification dependencies are cyclic or missing: ${order.unresolved.map(check=>check.id).join(', ')}.`);
     checks=order.ready.map(item=>checks.find(check=>check.id===item.id)!);
     const owner=state.tasks[task.id];
-    const selectors=[...new Set([...(await Promise.all(checks.map(check=>verificationInputSelectors(workspace,plan,task,check)))).flat(),...checks.flatMap(declaredOutputs)])];
-    const sourceHash=await inputHash(workspace,await resolveInputDependencies(workspace,selectors),operational.revision);
+    const {selectors,sourceHash}=await measured('proofInputs',async()=>{
+      const selectors=[...new Set([...(await Promise.all(checks.map(check=>verificationInputSelectors(workspace,plan,task,check)))).flat(),...checks.flatMap(declaredOutputs)])];
+      return{selectors,sourceHash:await inputHash(workspace,await resolveInputDependencies(workspace,selectors),operational.revision)};
+    });
     let area=owner?.verificationCheckpoint;
     if(!area||area.sourceHash!==sourceHash||!await exists(area.directory)){
       const copied=await measured('verificationIsolation',()=>createTaskWorkspace(workspace,`${task.id}:proofs`,definitionHash(task),[...task.files,...checks.flatMap(declaredOutputs)]));
@@ -463,9 +483,9 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     for (const check of checks) {
       const resource=await prepareResources(task,check,area.directory,local);
       const id: BuildGateId = ['web','tui','desktop'].includes(check.kind) ? 'G4' : 'G2';
-      const completed = groups.get(id) ?? []; groups.set(id,completed); gate(task,id,'running','Executando a prova pertinente em área isolada gravável.');
+      const completed = groups.get(id) ?? []; groups.set(id,completed); gate(task,id,'running','Conferindo a prova pertinente em área isolada gravável.');
       const effective=checkOperational(task,check,area.directory,local);
-      const identity=await verificationIdentity(area.directory,plan,task,check,options.brief,effective),hash=identity.inputHash;
+      const identity=await measured('proofInputs',()=>verificationIdentity(area.directory,plan,task,check,options.brief,effective)),hash=identity.inputHash;
       const artifactState=await inputSnapshot(area.directory,declaredOutputs(check));
       const cached = state.evidence.findLast(item=>item.taskId===task.id&&item.checkId===check.id&&item.inputHash===hash&&item.kind===check.kind&&item.level===verificationLevel(check)&&!item.observation?.cancelled&&(item.passed||item.classification==='product'||item.classification==='instrument')&&(!declaredOutputs(check).length||JSON.stringify(item.artifacts)===JSON.stringify(artifactState)));
       if (cached&&resource.ready) results.push({evidence:{...cached,level:cached.level ?? verificationLevel(check),inputs:cached.inputs ?? []},result:null,classification:cached.passed?null:cached.classification??'product',needsInstrument:!cached.passed&&cached.classification==='instrument'});
@@ -502,7 +522,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         const current=await proofHash(task,checks[index]!,workspace,operational);
         if(current!==results[index]!.evidence.inputHash)throw new WorkPlanningError(`Proof ${checks[index]!.id} consumes a generated or mutated input without an owned declared output. Declare its producer outputs and verification dependency instead of replaying the proof.`);
       }
-      if(owner){area.sourceHash=await inputHash(workspace,await resolveInputDependencies(workspace,selectors),operational.revision);await save();}
+      if(owner){area.sourceHash=await measured('proofInputs',async()=>inputHash(workspace,await resolveInputDependencies(workspace,selectors),operational.revision));await save();}
     }
     if(owner&&results.length===checks.length)owner.verificationEvidence=results.map(result=>({checkId:result.evidence.checkId,evidenceId:result.evidence.id,inputHash:result.evidence.inputHash}));
     if (!checks.some(check=>!['web','tui','desktop'].includes(check.kind))) gate(task,'G2','neutral','Nenhuma verificação mecânica adicional é pertinente.');
@@ -1066,7 +1086,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         return finish('waiting');
       }
     }
-    const conformity=await validateConformance(options.brief,plan,operational,currentProofs,options.workspace);
+    const conformity=await measured('conformance',()=>validateConformance(options.brief,plan,operational,currentProofs,options.workspace));
     if(conformity.length){
       for(const issue of conformity)note(incident('planning',issue.requirementId,issue.message,issue.code));
       const fingerprint=digest(JSON.stringify({issues:conformity,proofs:currentProofs.map(proof=>proof.inputHash)}));state.acceptanceRecovery??={};

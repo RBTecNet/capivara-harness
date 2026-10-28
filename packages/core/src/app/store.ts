@@ -81,7 +81,11 @@ export class ProjectStore {
     db.exec(`PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, at TEXT NOT NULL, type TEXT NOT NULL, body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS answers (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS owner (id INTEGER PRIMARY KEY CHECK(id=1), token TEXT NOT NULL, pid INTEGER NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS owner (id INTEGER PRIMARY KEY CHECK(id=1), token TEXT NOT NULL, pid INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS project_revision (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL);
+      INSERT OR IGNORE INTO project_revision VALUES(1,0);
+      CREATE TRIGGER IF NOT EXISTS project_revision_insert AFTER INSERT ON project BEGIN UPDATE project_revision SET revision=revision+1 WHERE id=1; END;
+      CREATE TRIGGER IF NOT EXISTS project_revision_update AFTER UPDATE ON project BEGIN UPDATE project_revision SET revision=revision+1 WHERE id=1; END;`);
   }
 
   read(): SavedProject {
@@ -131,9 +135,14 @@ export class ProjectStore {
     try {
       // Serialize publication with other writers, so an older observer cannot replace a newer answer snapshot.
       this.db.exec('BEGIN IMMEDIATE'); locked = true;
-      const snapshot: RecoverySnapshot = { schema: 'capivara/recovery/1', project: this.read(), answers: this.db.prepare('SELECT id,body FROM answers ORDER BY id').all() as RecoverySnapshot['answers'] };
+      const project = this.db.prepare("SELECT body,CASE WHEN json_valid(body) THEN json_type(body) END AS type FROM project WHERE id=1").get() as { body: string; type: string | null } | undefined;
+      if (project && project.type !== 'object') throw new Error('O estado persistido do projeto não é um objeto JSON válido.');
+      const answers = this.db.prepare('SELECT id,body FROM answers ORDER BY id').all() as RecoverySnapshot['answers'];
+      // The committed JSON is already serialized. Preserve its exact contents
+      // without allocating another parsed project or formatting its full tree.
+      const snapshot = `{"schema":"capivara/recovery/1","project":${project?.body ?? '{}'},"answers":${JSON.stringify(answers)}}\n`;
       const temp = join(this.directory, `.snapshot-${this.owner}`);
-      writeFileSync(temp, JSON.stringify(snapshot, null, 2), { mode: 0o600, flush: true });
+      writeFileSync(temp, snapshot, { mode: 0o600, flush: true });
       renameSync(temp, join(this.directory, 'project.snapshot.json'));
       this.db.exec('COMMIT'); locked = false;
     } catch {

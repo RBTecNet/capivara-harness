@@ -1,0 +1,166 @@
+{
+  "schema": "capivara/dashboard-performance/1",
+  "capturedAt": "2026-10-28T21:38:00.112Z",
+  "baselineRendererCommit": "064d610",
+  "projectReadOnly": true,
+  "projectCommandsExecuted": false,
+  "modelsConstructed": 1,
+  "snapshotsConstructed": 1,
+  "sameReadTransaction": true,
+  "node": "v24.22.1",
+  "dimensions": {
+    "columns": 120,
+    "rows": 40
+  },
+  "framesPerMode": 3,
+  "warmSamplesPerMode": 2,
+  "source": {
+    "projectBodyChars": 20671557,
+    "projectBodySHA256": "82d2f1c011d8e92c0a23c8a38c95e75674b9cc74e2a4c7a707bf8a307e117b3f",
+    "events": 13010,
+    "lastEventId": 13010,
+    "eventBodyChars": 9180999
+  },
+  "renderers": {
+    "beforeSHA256": "0d069e0bd65146bff173c52f22c79ca40b637bffa10819bd72bb6b297b329491",
+    "afterSHA256": "2fb9dfdb414baab5cf55414d78f0b089486903746dc0219f94ff49340401a03d"
+  },
+  "setup": {
+    "databaseReadMs": 145.479,
+    "modelHydrationMs": 223.977,
+    "snapshotMs": 6.393
+  },
+  "panels": [
+    {
+      "id": "summary",
+      "sourceLines": 194,
+      "sourceCharacters": 6556
+    },
+    {
+      "id": "progress",
+      "sourceLines": 16,
+      "sourceCharacters": 1162
+    },
+    {
+      "id": "phases",
+      "sourceLines": 612,
+      "sourceCharacters": 30286
+    },
+    {
+      "id": "environment",
+      "sourceLines": 43,
+      "sourceCharacters": 2117
+    },
+    {
+      "id": "activity",
+      "sourceLines": 8811,
+      "sourceCharacters": 323654
+    },
+    {
+      "id": "log",
+      "sourceLines": 108201,
+      "sourceCharacters": 8625026
+    },
+    {
+      "id": "incidents",
+      "sourceLines": 4563,
+      "sourceCharacters": 208430
+    }
+  ],
+  "comparisons": {
+    "compact": {
+      "before": {
+        "framesMs": [
+          666.186,
+          615.457,
+          628.529
+        ],
+        "firstMs": 666.186,
+        "warmMedianMs": 621.993,
+        "warmP95Ms": 628.529
+      },
+      "after": {
+        "framesMs": [
+          23.897,
+          3.611,
+          2.722
+        ],
+        "firstMs": 23.897,
+        "warmMedianMs": 3.167,
+        "warmP95Ms": 3.611
+      },
+      "equalTextWithoutAnsi": true,
+      "equalCellCounts": true,
+      "frames": [
+        {
+          "sha256": "dddffd4607e7cadff29af414861a76dbc1929604d0509a1598b1624698236e84",
+          "rows": 40,
+          "cells": 4445,
+          "bounded": true
+        },
+        {
+          "sha256": "dddffd4607e7cadff29af414861a76dbc1929604d0509a1598b1624698236e84",
+          "rows": 40,
+          "cells": 4445,
+          "bounded": true
+        },
+        {
+          "sha256": "dddffd4607e7cadff29af414861a76dbc1929604d0509a1598b1624698236e84",
+          "rows": 40,
+          "cells": 4445,
+          "bounded": true
+        }
+      ]
+    },
+    "expandedLog": {
+      "before": {
+        "framesMs": [
+          919.072,
+          834.724,
+          818.105
+        ],
+        "firstMs": 919.072,
+        "warmMedianMs": 826.415,
+        "warmP95Ms": 834.724
+      },
+      "after": {
+        "framesMs": [
+          421.404,
+          2.735,
+          1.556
+        ],
+        "firstMs": 421.404,
+        "warmMedianMs": 2.146,
+        "warmP95Ms": 2.735
+      },
+      "equalTextWithoutAnsi": true,
+      "equalCellCounts": true,
+      "frames": [
+        {
+          "sha256": "35b2e7c75b4dbb07d19d4c2d3ed788abd5434a55ef292a5e7531cff47fa2e843",
+          "rows": 40,
+          "cells": 4456,
+          "bounded": true
+        },
+        {
+          "sha256": "35b2e7c75b4dbb07d19d4c2d3ed788abd5434a55ef292a5e7531cff47fa2e843",
+          "rows": 40,
+          "cells": 4456,
+          "bounded": true
+        },
+        {
+          "sha256": "35b2e7c75b4dbb07d19d4c2d3ed788abd5434a55ef292a5e7531cff47fa2e843",
+          "rows": 40,
+          "cells": 4456,
+          "bounded": true
+        }
+      ]
+    }
+  },
+  "limits": [
+    "Three frames provide two warm samples; p95 is their maximum, not a throughput/load-test percentile.",
+    "The first overlay at a new width still indexes the complete wrapped history.",
+    "This measures the renderer and frozen model only, not CLI/PTY process isolation or project completion.",
+    "Elapsed times depend on host load; no prompts, configuration, project source or raw log content are exported."
+  ]
+}

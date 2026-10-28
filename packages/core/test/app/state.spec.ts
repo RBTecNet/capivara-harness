@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +7,37 @@ import { ProjectStore } from '../../src/app/store.js';
 import { recoverOperation, RecoverySuspended } from '../../src/app/recovery.js';
 
 describe('estado e continuidade novos', () => {
+  it('publica o JSON autoritativo sem reinterpretar seus valores e inclui respostas atuais', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'capivara-raw-snapshot-'));
+    const store = new ProjectStore(dir), directory = join(dir, '.capivara-next');
+    const writer = new DatabaseSync(join(directory, 'project.sqlite'));
+    try {
+      store.answer('early', 'Resposta antes do projeto');
+      expect(JSON.parse(readFileSync(join(directory, 'project.snapshot.json'), 'utf8')).project).toEqual({});
+      const body = '{"request":"ação \\n \\"citada\\"","counter":9007199254740993,"nested":{"raw":"\\u0061"}}';
+      writer.prepare('INSERT INTO project VALUES(1,?)').run(body);
+      store.answer('quoted', 'Resposta "atual"\ncom quebra');
+      const snapshot = readFileSync(join(directory, 'project.snapshot.json'), 'utf8');
+      expect(snapshot).toContain('"counter":9007199254740993');
+      expect(snapshot).toContain('"raw":"\\u0061"');
+      expect(JSON.parse(snapshot)).toEqual({ schema: 'capivara/recovery/1', project: JSON.parse(body), answers: [{ id: 'early', body: 'Resposta antes do projeto' }, { id: 'quoted', body: 'Resposta "atual"\ncom quebra' }] });
+    } finally { writer.close(); store.close(); rmSync(dir, { recursive: true, force: true }); }
+  });
+  it('conserva a última cópia válida quando o corpo autoritativo deixa de ser um objeto JSON', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'capivara-invalid-snapshot-'));
+    const store = new ProjectStore(dir), directory = join(dir, '.capivara-next');
+    store.update({ request: 'Projeto preservado' });
+    const valid = readFileSync(join(directory, 'project.snapshot.json'), 'utf8');
+    const writer = new DatabaseSync(join(directory, 'project.sqlite'));
+    try {
+      for (const body of ['[]', 'null', 'false', '42', '"literal"', '{"broken"']) {
+        writer.prepare('UPDATE project SET body=? WHERE id=1').run(body);
+        store.answer('durable-answer', body);
+        expect(store.getAnswer('durable-answer')).toBe(body);
+        expect(readFileSync(join(directory, 'project.snapshot.json'), 'utf8')).toBe(valid);
+      }
+    } finally { writer.close(); store.close(); rmSync(dir, { recursive: true, force: true }); }
+  });
   it('persiste resposta imediatamente e mantém posse exclusiva sem outro dono liberar', () => {
     const dir = mkdtempSync(join(tmpdir(), 'capivara-state-'));
     const first = new ProjectStore(dir), second = new ProjectStore(dir);

@@ -83,6 +83,9 @@ export class DashboardTerminal {
   updateProject(state: SavedProject): void {
     try { this.model.updateProject(state); this.dirty = true; } catch (error) { this.fail(error); }
   }
+  updateRuntime(runtime: NonNullable<DashboardView['runtime']>): void {
+    try { if (JSON.stringify(runtime) !== JSON.stringify(this.cached?.runtime)) { this.model.updateRuntime(runtime); this.dirty = true; } } catch (error) { this.fail(error); }
+  }
   observe(event: DashboardEvent): void {
     try {
       const sanitized = { ...event, ...(event.message ? { message: scrub(event.message) } : {}) };

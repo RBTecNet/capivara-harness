@@ -7,6 +7,8 @@ export interface Source {
   kind: "request" | "answer" | "repository";
   text: string;
   reference: string;
+  /** Materialized selected input, available when this literal excerpt needs its original file. */
+  localPath?: string;
 }
 
 export interface Requirement {
@@ -53,6 +55,10 @@ export interface ProductBrief {
   status: "discovering" | "ready" | "waiting";
   id: string;
   revision: number;
+  /** Fingerprint of the selected documentary material, independent of the literal request. */
+  materialRevision?: string;
+  /** Selected inputs are indexed once; their bodies stay in the materialized files. */
+  references?: DocumentReference[];
   name: string;
   summary: string;
   /** Kept once for provenance. Task packets contain only their requirement slices. */
@@ -163,9 +169,31 @@ export interface DomainHooks {
 
 export interface InitOptions extends DomainHooks {
   request: string;
+  /** Approved documents selected for this project; never the whole remote collection. */
+  documents?: SelectedDocument[];
   existing?: ProductBrief;
   repository?: string;
   repositoryConstraints?: { text: string; reference: string }[];
+}
+
+export interface SelectedDocument {
+  reference: string;
+  title?: string;
+  text: string;
+  localPath?: string;
+  kind?: "document" | "reference";
+  topics?: string[];
+  scope?: "global";
+  contentHash?: string;
+}
+
+export interface DocumentReference {
+  reference: string;
+  title?: string;
+  localPath?: string;
+  topics?: string[];
+  scope?: "global";
+  contentHash?: string;
 }
 
 export interface PlanOptions extends DomainHooks {
@@ -184,6 +212,7 @@ export interface ContextPacket {
   contracts: IntegrationContract[];
   environment: EnvironmentNode[];
   capabilityLimits: { forbidden: string[]; required: string[] };
+  references?: DocumentReference[];
 }
 
 export type ProductAction = { requiredCapabilities: string[]; description?: string };

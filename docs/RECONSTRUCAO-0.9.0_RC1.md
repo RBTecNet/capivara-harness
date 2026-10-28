@@ -35,3 +35,8 @@ Esta RC tem pilotos autenticados em Linux com Codex. APIs têm testes de protoco
 O agendamento desta RC é sequencial por dependências; não se anuncia execução paralela de vários construtores. A superfície nova é init, plan, build, run, config, status, answer e providers. Integrações MCP, comandos auxiliares e a interface administrativa anterior não foram transplantados. README e CAPIVARA.md descrevem o funcionamento atual; documentos antigos estão marcados como históricos.
 
 Recuperação em 99% permanece uma diretriz de continuidade e esforço de reparo. Não há amostra que permita anunciar taxa estatística de 99%, garantia de código sem defeito ou economia percentual. Custo USD só pode ser informado quando fornecido pelo transporte; não foi inventado a partir de tokens.
+
+
+## Atualização: wizard e data-center
+
+Após a entrega inicial, o wizard de início e o acesso de leitura ao data-center foram recriados a pedido do usuário, consultando a main. Esta atualização substitui a limitação anterior relativa a esses dois componentes; os motores antigos continuam removidos. Detalhes, funcionamento e verificações estão em [WIZARD-BASE-DOCUMENTAL.md](WIZARD-BASE-DOCUMENTAL.md).

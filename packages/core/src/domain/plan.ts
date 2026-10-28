@@ -2,6 +2,7 @@ import { allowedCapabilities, identity, inferredCapabilities, normalize } from "
 import { contextForTask, ContextTooLarge, ordered } from "./context.js";
 import { applyRepositoryConstraints, resolveQuestions, splitText } from "./init.js";
 import { cancelled, object, pause, records, requestObject, string, strings } from "./json.js";
+import { boundedReferences } from "./material.js";
 import type { CommandRecipe, DevelopmentPlan, DomainHooks, EnvironmentNode, IntegrationContract, PlanOptions, ProductBrief, Requirement, Verification, WorkUnit } from "./types.js";
 
 const cleanId = (value: unknown, fallback: string): string => string(value).replace(/[^a-zA-Z0-9_.:-]+/g, "-") || fallback;
@@ -190,9 +191,11 @@ function productFacts(brief: ProductBrief, budget = 3_000): string {
     if (statement.length + 100 > room) continue;
     details.push({ id: constraint.id, statement }); room -= statement.length + 100;
   }
-  const facts = { name: brief.name, summary: brief.summary.slice(0, Math.min(600, Math.floor(budget / 4))), modes: brief.modes, targets: brief.targets, capabilityLimits: limits, restrictionDetails: details, restrictionCount: brief.constraints.length, decisions: brief.decisions.slice(-6).map(({ fact, answer }) => ({ fact, answer: answer.slice(0, 200) })) };
+  const facts = { name: brief.name, summary: brief.summary.slice(0, Math.min(600, Math.floor(budget / 4))), modes: brief.modes, targets: brief.targets, capabilityLimits: limits, restrictionDetails: details, restrictionCount: brief.constraints.length, decisions: brief.decisions.slice(-6).map(({ fact, answer }) => ({ fact, answer: answer.slice(0, 200) })), references: [] as NonNullable<ProductBrief["references"]>, referenceCount: brief.references?.length ?? 0 };
   while (JSON.stringify(facts).length > budget && facts.decisions.length) facts.decisions.shift();
   while (JSON.stringify(facts).length > budget && facts.restrictionDetails.length) facts.restrictionDetails.pop();
+  const available = (brief.references ?? []).filter(reference => allowedCapabilities(brief, inferredCapabilities(reference.title ?? ""))).sort((a, b) => Number(b.scope === "global") - Number(a.scope === "global"));
+  facts.references = boundedReferences(available, budget - JSON.stringify(facts).length);
   return JSON.stringify(facts);
 }
 
@@ -319,7 +322,7 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
     const result = await requestObject({ ...options, operation: "environment", prompt: [
       "Plan executable technical prerequisites before implementation. Do not edit files. Return JSON.",
       'Shape: {"environment":[{"id":"stable-id","name":"runtime SDK tool package service or database","kind":"runtime|sdk|tool|package|service|database","dependsOn":[],"targets":[],"reason":"consumer and reason","check":{"command":"executable or shell command","args":[],"capabilities":[]},"prepare":[{"command":"preparation command","args":[],"system":false,"capabilities":[]}]}],"questions":[]}',
-      "Include only prerequisites of these actual requirements. Runtime of the harness is not the product runtime. Browser tooling is appropriate only for a browser interface. Prefer local preparation over host mutation. A missing product fact may be asked with fact/question/reason/impact/category/modes/options/blocks; otherwise questions=[].",
+      "Include only prerequisites of these actual requirements. Selected reference metadata is supporting material, not required product outcomes; read applicable local paths before architectural choices. Runtime of the harness is not the product runtime. Browser tooling is appropriate only for a browser interface. Prefer local preparation over host mutation. A missing product fact may be asked with fact/question/reason/impact/category/modes/options/blocks; otherwise questions=[].",
       `Product facts:\n${facts}`,
       `Requirements:\n${JSON.stringify(requirements)}`,
       options.repository ? `Repository facts:\n${options.repository.slice(0, Math.min(2_000, Math.floor(limit / 8)))}` : "",
@@ -344,6 +347,7 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
       "Structure small executable work units and their integration contracts for these requirements. Return JSON; do not edit code.",
       'Shape: {"contracts":[{"id":"contract-id","name":"name","description":"precise behavior/interface","inputs":[],"outputs":[],"requirementIds":[]}],"tasks":[{"id":"task-id","title":"capability","goal":"observable outcome","instructions":"local implementation work","requirementIds":[],"dependsOn":[],"environmentIds":[],"contractIds":[],"files":[],"criteria":["necessary observable results"],"checks":[{"id":"check-id","kind":"command|cli|tui|web|desktop","command":"actual invocation with arguments when needed","expected":"observable outcome","expectedExitCode":0,"requirementIds":[],"requiredCapabilities":[],"steps":[{"waitFor":"ready screen"},{"input":"key bytes","waitFor":"changed screen"}],"closeInput":"exit key"}],"risk":"low|normal|high","blockedBy":[]}],"questions":[]}',
       "There is no task, test or criterion quota. Each unit must fit one small context. Only relevant verification is useful. Define contracts before consumers. No server or browser for a terminal product unless explicitly required. TUI checks use synchronized steps: wait for readiness, send keys, wait for the observed state change, close input; pipes are not an interactive terminal. Omit steps for other kinds. CLI input[] contains literal bytes; include newline explicitly when needed. expectedExitCode is the actual successful outcome of that scenario, including a nonzero code when testing an expected rejection. Ask only a missing product fact with concrete impact; library and installer choices are engineering work.",
+      "Selected references support implementation; do not turn their code or every line into tasks. Read applicable skills/examples and cite their local paths in the instructions of units that need them, including globally applicable guidance.",
       `Product facts:\n${productFacts(brief, Math.floor(limit / 8))}`,
       `Requirements of this slice:\n${JSON.stringify(requirements)}`,
       `Technical prerequisites available in this slice (the full tree is recorded separately):\n${metadataList(plan.environment.filter((node) => scopedIds.has(node.id)).map(({ id, name, kind }) => ({ id, name: name.slice(0, 180), kind })), Math.floor(limit / 8))}`,

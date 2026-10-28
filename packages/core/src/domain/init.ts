@@ -1,5 +1,6 @@
 import { allowedCapabilities, explicitConstraints, explicitModes, explicitTargets, identity, inferredCapabilities, normalize, requestedCapabilities } from "./authority.js";
 import { cancelled, object, records, requestObject, string, strings } from "./json.js";
+import { documentaryAuthority, materialReferences, materialRevision, selectedMaterial } from "./material.js";
 import type { ApplicationMode, Gap, InitOptions, ProductBrief, ProductConstraint, Question, Requirement, Source, TargetPlatform } from "./types.js";
 
 const MODES = new Set<ApplicationMode>(["web", "desktop", "tui", "cli", "api", "service", "library", "other"]);
@@ -20,26 +21,28 @@ export function splitText(text: string, limit: number): string[] {
   return pieces;
 }
 
-function excerpt(raw: string, record: Record<string, unknown>): Source | null {
+type SourceOrigin = Pick<Source, "kind" | "reference" | "localPath">;
+
+function excerpt(raw: string, record: Record<string, unknown>, origin: SourceOrigin): Source | null {
   const nested = object(record.source) ? record.source : {};
   const quote = string(record.quote, string(nested.text));
-  if (quote && raw.includes(quote)) return { kind: "request", text: quote, reference: "request" };
+  if (quote && raw.includes(quote)) return { ...origin, text: quote };
   const statement = string(record.statement);
-  if (statement && raw.includes(statement)) return { kind: "request", text: statement, reference: "request" };
+  if (statement && raw.includes(statement)) return { ...origin, text: statement };
   return null;
 }
 
-function requirementsFrom(raw: string, values: unknown, modes: ApplicationMode[], sourceLimit = 1_400): Requirement[] {
+function requirementsFrom(raw: string, values: unknown, modes: ApplicationMode[], sourceLimit = 1_400, origin: SourceOrigin = { kind: "request", reference: "request" }): Requirement[] {
   const result: Requirement[] = [];
   const coveredRanges: [number, number][] = [];
   const add = (statement: string, source: Source, mode: Requirement["mode"]): void => {
     for (const fragment of splitText(source.text, sourceLimit)) {
-      result.push({ id: identity("req", fragment), statement: source.text.length > sourceLimit || statement.length > sourceLimit ? fragment : statement, source: { ...source, text: fragment }, mode });
+      result.push({ id: identity("req", origin.kind === "request" ? fragment : `${origin.reference}:${fragment}`), statement: source.text.length > sourceLimit || statement.length > sourceLimit ? fragment : statement, source: { ...source, text: fragment }, mode });
     }
   };
   for (const item of records(values)) {
     const statement = string(item.statement);
-    const source = excerpt(raw, item);
+    const source = excerpt(raw, item, origin);
     if (!statement || !source) continue;
     const modeValue = string(item.mode);
     const mode = MODES.has(modeValue as ApplicationMode) && modes.includes(modeValue as ApplicationMode) ? modeValue as ApplicationMode : "shared";
@@ -47,24 +50,26 @@ function requirementsFrom(raw: string, values: unknown, modes: ApplicationMode[]
     const start = raw.indexOf(source.text);
     if (start >= 0) coveredRanges.push([start, start + source.text.length]);
   }
-  // Every original clause remains attributable even when a model omits it.
+  // Only the user's request needs lossless coverage. Documentary code and examples
+  // remain references unless extraction identifies an actual product requirement.
+  if (origin.kind !== "request") return result;
   const ranges = coveredRanges.sort((left, right) => left[0] - right[0]);
   let cursor = 0;
   for (const [start, end] of [...ranges, [raw.length, raw.length] as [number, number]]) {
     if (start > cursor) {
       const residual = raw.slice(cursor, start).trim();
-      if (/[\p{L}\p{N}]/u.test(residual)) add(residual, { kind: "request", text: residual, reference: "request" }, modes.length === 1 ? modes[0]! : "shared");
+      if (/[\p{L}\p{N}]/u.test(residual)) add(residual, { ...origin, text: residual }, modes.length === 1 ? modes[0]! : "shared");
     }
     cursor = Math.max(cursor, end);
   }
   return result;
 }
 
-function constraintsFrom(raw: string, values: unknown): ProductConstraint[] {
-  const constraints = explicitConstraints(raw);
+function constraintsFrom(raw: string, values: unknown, origin: SourceOrigin = { kind: "request", reference: "request" }): ProductConstraint[] {
+  const constraints = explicitConstraints(raw, origin.kind, origin.reference).map(constraint => ({ ...constraint, source: { ...constraint.source, ...origin } }));
   for (const item of records(values)) {
     const statement = string(item.statement);
-    const source = excerpt(raw, item);
+    const source = excerpt(raw, item, origin);
     if (!statement || !source) continue;
     const explicit = explicitConstraints(source.text).flatMap((constraint) => constraint.forbiddenCapabilities);
     const forbiddenCapabilities = strings(item.forbiddenCapabilities).filter((capability) => explicit.includes(capability));
@@ -77,18 +82,22 @@ function constraintsFrom(raw: string, values: unknown): ProductConstraint[] {
     ]);
     const requiredCapabilities = strings(item.requiredCapabilities).filter((capability) => allowedRequired.has(capability));
     if (forbiddenCapabilities.length === 0 && requiredCapabilities.length === 0) continue;
-    constraints.push({ id: identity("constraint", source.text), statement: source.text, source, forbiddenCapabilities, requiredCapabilities });
+    constraints.push({ id: identity("constraint", `${origin.reference}:${source.text}`), statement: source.text, source, forbiddenCapabilities, requiredCapabilities });
   }
   return [...new Map(constraints.map((constraint) => [constraint.id, constraint])).values()];
 }
 
 /** Repository rules carry literal provenance separately from a technical file inventory. */
 export function applyRepositoryConstraints(brief: ProductBrief, sources?: { text: string; reference: string }[]): void {
-  if (!sources) return;
   const before = JSON.stringify(brief.constraints.filter((constraint) => constraint.source.kind === "repository"));
   const required = new Set(requestedCapabilities([brief.request, ...brief.decisions.map((decision) => decision.answer)].join("\n")));
   const direct = new Set(brief.constraints.filter(constraint => constraint.source.kind !== "repository").flatMap(constraint => constraint.forbiddenCapabilities));
-  const constraints = sources.flatMap((source) => explicitConstraints(source.text, "repository", source.reference)).map((constraint) => ({ ...constraint, forbiddenCapabilities: constraint.forbiddenCapabilities.filter((capability) => !required.has(capability) && !direct.has(capability)) })).filter((constraint) => constraint.forbiddenCapabilities.length > 0);
+  const documentReferences = new Set([...(brief.references ?? []).map(reference => reference.reference), ...brief.requirements.filter((requirement) => requirement.source.kind === "repository").map((requirement) => requirement.source.reference)]);
+  const documentaryConstraints = brief.constraints.filter((constraint) => constraint.source.kind === "repository" && documentReferences.has(constraint.source.reference));
+  const repositoryConstraints = sources === undefined
+    ? brief.constraints.filter((constraint) => constraint.source.kind === "repository" && !documentReferences.has(constraint.source.reference))
+    : sources.flatMap((source) => explicitConstraints(source.text, "repository", source.reference));
+  const constraints = [...documentaryConstraints, ...repositoryConstraints].map((constraint) => ({ ...constraint, forbiddenCapabilities: constraint.forbiddenCapabilities.filter((capability) => !required.has(capability) && !direct.has(capability)) })).filter((constraint) => constraint.forbiddenCapabilities.length > 0 || constraint.requiredCapabilities.length > 0);
   brief.constraints = [...brief.constraints.filter((constraint) => constraint.source.kind !== "repository"), ...constraints];
   if (JSON.stringify(constraints) !== before) brief.revision += 1;
 }
@@ -104,7 +113,7 @@ export function applicableQuestion(value: unknown, brief: ProductBrief): Questio
   if (!fact || !question || !reason || !impact || !CATEGORIES.has(category)) return null;
   if (brief.decisions.some((decision) => normalize(decision.fact) === normalize(fact))) return null;
   const factName = normalize(fact);
-  const authority = normalize([brief.request, ...brief.decisions.map((decision) => decision.answer)].join("\n"));
+  const authority = normalize([brief.request, ...brief.decisions.map((decision) => decision.answer), documentaryAuthority(brief)].join("\n"));
   if (/^(?:interface|modalidade|application.?mode|tipo de (?:interface|aplicacao))\b/.test(factName) && explicitModes(authority).length > 0) return null;
   if (/persistencia|armazenamento|storage|tipo de banco|database choice/.test(factName) && /\bjson\b|\bsqlite\b|postgres|\bmysql\b|\bmongodb\b|sem persistencia|in.memory|em memoria/.test(authority)) return null;
   const modes = strings(value.modes).filter((mode): mode is ApplicationMode => MODES.has(mode as ApplicationMode));
@@ -141,10 +150,13 @@ export async function resolveQuestions(brief: ProductBrief, candidates: unknown[
     brief.decisions = [...brief.decisions.filter((item) => item.questionId !== gap.id), decision];
     gap.status = "resolved";
     const requestedModes = explicitModes(brief.request);
+    const documentaryText = documentaryAuthority(brief);
+    const documentedModes = explicitModes(documentaryText);
     const modeDecisions = brief.decisions.filter((item) => brief.gaps.some((question) => question.id === item.questionId && question.category === "platform")).map((item) => explicitModes(item.answer)).filter((modes) => modes.length > 0);
-    brief.modes = modeDecisions.at(-1) ?? (requestedModes.length ? requestedModes : brief.modes);
+    brief.modes = modeDecisions.at(-1) ?? (requestedModes.length ? requestedModes : documentedModes.length ? documentedModes : brief.modes);
     const targetDecisions = brief.decisions.map((item) => explicitTargets(item.answer)).filter((targets) => targets.length > 0);
-    brief.targets = targetDecisions.at(-1) ?? explicitTargets(brief.request);
+    const requestedTargets = explicitTargets(brief.request);
+    brief.targets = targetDecisions.at(-1) ?? (requestedTargets.length ? requestedTargets : explicitTargets(documentaryText));
     brief.requirements = brief.requirements.filter((requirement) => !(requirement.source.kind === "answer" && requirement.source.reference === gap.id));
     brief.constraints = brief.constraints.filter((constraint) => !(constraint.source.kind === "answer" && constraint.source.reference === gap.id));
     brief.constraints.push(...explicitConstraints(answer, "answer", gap.id));
@@ -166,42 +178,82 @@ export async function runInit(options: InitOptions): Promise<ProductBrief> {
   const request = options.request.trim();
   if (!request) throw new Error("Falta o pedido do produto.");
   const id = identity("product", request);
-  if (options.existing?.id === id && options.existing.status !== "discovering") {
-    const existing = structuredClone(options.existing);
+  const documents = selectedMaterial(options.documents);
+  const revision = materialRevision(documents);
+  const previous = options.existing?.id === id ? options.existing : undefined;
+  const unchanged = previous?.materialRevision === revision || previous?.materialRevision === undefined && documents.length === 0;
+  if (previous && unchanged && previous.status !== "discovering") {
+    const existing = structuredClone(previous);
+    existing.materialRevision = revision;
+    existing.references = materialReferences(documents);
     applyRepositoryConstraints(existing, options.repositoryConstraints);
     await resolveQuestions(existing, [], options);
     applyRepositoryConstraints(existing, options.repositoryConstraints);
     await options.save?.({ brief: existing });
     return existing;
   }
-  const modes = explicitModes(request);
-  const brief: ProductBrief = { schema: "capivara/product/1", status: "discovering", id, revision: 1, name: "Aplicação", summary: "", request, modes, targets: explicitTargets(request), requirements: [], constraints: explicitConstraints(request), decisions: [], gaps: [] };
+  const requestedModes = explicitModes(request);
+  const factDocuments = documents.filter(document => document.kind !== "reference");
+  const modes = requestedModes.length ? requestedModes : [...new Set(factDocuments.flatMap((document) => explicitModes(document.text)))];
+  const requestedTargets = explicitTargets(request);
+  const priorAnswers = previous ? structuredClone(previous) : undefined;
+  const brief: ProductBrief = {
+    schema: "capivara/product/1", status: "discovering", id, revision: previous ? previous.revision + 1 : 1, materialRevision: revision, references: materialReferences(documents),
+    name: "Aplicação", summary: "", request, modes,
+    targets: requestedTargets.length ? requestedTargets : [...new Set(factDocuments.flatMap((document) => explicitTargets(document.text)))],
+    requirements: priorAnswers?.requirements.filter((requirement) => requirement.source.kind === "answer") ?? [],
+    constraints: [...explicitConstraints(request), ...(priorAnswers?.constraints.filter((constraint) => constraint.source.kind === "answer") ?? [])],
+    decisions: priorAnswers?.decisions ?? [], gaps: priorAnswers?.gaps.filter((gap) => gap.status === "resolved") ?? [],
+  };
+  const modeDecisions = brief.decisions.filter((decision) => brief.gaps.some((gap) => gap.id === decision.questionId && gap.category === "platform")).map((decision) => explicitModes(decision.answer)).filter((value) => value.length > 0);
+  brief.modes = modeDecisions.at(-1) ?? brief.modes;
+  const targetDecisions = brief.decisions.map((decision) => explicitTargets(decision.answer)).filter((value) => value.length > 0);
+  brief.targets = targetDecisions.at(-1) ?? brief.targets;
   applyRepositoryConstraints(brief, options.repositoryConstraints);
   const candidates: unknown[] = [];
   const capacity = options.contextChars ?? 24_000;
   const repositoryFacts = options.repository?.slice(0, Math.min(3_000, Math.floor(capacity / 5))) ?? "";
-  const size = Math.max(200, capacity - repositoryFacts.length - 2_500);
-  for (const [index, chunk] of splitText(request, size).entries()) {
-    cancelled(options.signal);
-    options.onEvent?.({ type: "working", message: "Entendendo o resultado pedido e suas restrições.", subject: `request-${index + 1}` });
-    const result = await requestObject({ ...options, operation: "discover", prompt: [
-      "Extract product facts from this request fragment. Do not implement code. Return one JSON object.",
-      'Shape: {"name":"short name","summary":"desired outcome","modes":["web|desktop|tui|cli|api|service|library|other"],"targets":["linux|windows|macos|browser|portable"],"requirements":[{"statement":"observable requirement","quote":"exact source words","mode":"shared or a mode"}],"constraints":[{"statement":"restriction","quote":"exact source words","forbiddenCapabilities":[],"requiredCapabilities":[]}],"questions":[{"fact":"missing product fact","question":"question","reason":"what is missing","impact":"concrete product consequence","category":"behavior|platform|data|integration|security|distribution|appearance","modes":[],"options":[],"blocks":[]}]}',
-      "Questions are optional. Return [] when the request is sufficient. Ask only for a real unresolved product decision; technical library/installer preferences are engineering work. Do not reopen explicit decisions.",
-      `Known interfaces: ${brief.modes.join(", ") || "unspecified"}. Known targets: ${brief.targets.join(", ") || "unspecified"}.`,
-      repositoryFacts ? `Existing repository facts:\n${repositoryFacts}` : "",
-      `Request fragment:\n${chunk}`,
-    ].filter(Boolean).join("\n\n") });
-    if (brief.name === "Aplicação") brief.name = string(result.name, brief.name).slice(0, 120);
-    if (!brief.summary) brief.summary = string(result.summary, chunk.slice(0, 800)).slice(0, 1_600);
-    if (modes.length === 0) brief.modes = [...new Set([...brief.modes, ...strings(result.modes).filter((mode): mode is ApplicationMode => MODES.has(mode as ApplicationMode))])];
-    if (brief.targets.length === 0) brief.targets = strings(result.targets).filter((target): target is TargetPlatform => TARGETS.has(target as TargetPlatform));
-    brief.requirements.push(...requirementsFrom(chunk, result.requirements, brief.modes, Math.max(200, Math.min(1_400, Math.floor((options.contextChars ?? 24_000) / 8)))));
-    brief.constraints.push(...constraintsFrom(chunk, result.constraints));
-    candidates.push(...records(result.questions));
-    brief.requirements = [...new Map(brief.requirements.map((requirement) => [requirement.id, requirement])).values()];
+  const sources: { text: string; origin: SourceOrigin; title?: string }[] = [
+    { text: request, origin: { kind: "request", reference: "request" } },
+    ...factDocuments.map((document) => ({ text: document.text, origin: { kind: "repository" as const, reference: document.reference, ...(document.localPath ? { localPath: document.localPath } : {}) }, ...(document.title ? { title: document.title } : {}) })),
+  ];
+  for (const source of sources) {
+    let remaining = source.text.trim();
+    let index = 0;
+    while (remaining) {
+      cancelled(options.signal);
+      const prefix = [
+        source.origin.kind === "request"
+          ? "Extract product facts from this request fragment. Do not implement code. Return one JSON object."
+          : "Extract only product requirements and literal restrictions relevant to the user's intended outcome from this selected document. Code, imports, examples, scripts and skills are reference material, not mandatory product behavior. Unrelated or uncovered text creates no requirement. Keep an exact quote for every extracted requirement. Do not change the request or reopen a prior user decision. Return one JSON object.",
+        'Shape: {"name":"short name","summary":"desired outcome","modes":["web|desktop|tui|cli|api|service|library|other"],"targets":["linux|windows|macos|browser|portable"],"requirements":[{"statement":"observable requirement","quote":"exact source words","mode":"shared or a mode"}],"constraints":[{"statement":"restriction","quote":"exact source words","forbiddenCapabilities":[],"requiredCapabilities":[]}],"questions":[{"fact":"missing product fact","question":"question","reason":"what is missing","impact":"concrete product consequence","category":"behavior|platform|data|integration|security|distribution|appearance","modes":[],"options":[],"blocks":[]}]}',
+        "Questions are optional. Return [] when the request is sufficient. Ask only for a real unresolved product decision; technical library/installer preferences are engineering work. Do not reopen explicit decisions.",
+        `Known interfaces: ${brief.modes.join(", ") || "unspecified"}. Known targets: ${brief.targets.join(", ") || "unspecified"}.`,
+        source.origin.kind === "repository" ? `User's intended outcome: ${brief.summary || request.slice(0, Math.min(800, Math.floor(capacity / 8)))}` : "",
+        repositoryFacts ? `Existing repository facts:\n${repositoryFacts}` : "",
+        source.origin.kind === "request" ? "Request fragment:" : `Selected document fragment (${source.origin.reference}${source.title ? `; ${source.title.slice(0, 240)}` : ""}):`,
+      ].filter(Boolean).join("\n\n") + "\n";
+      const size = capacity - prefix.length;
+      if (size < 200) throw new Error("A capacidade de contexto não comporta a descoberta de um fragmento documental.");
+      const chunk = splitText(remaining, size)[0]!;
+      remaining = remaining.slice(chunk.length).trimStart();
+      index += 1;
+      options.onEvent?.({ type: "working", message: source.origin.kind === "request" ? "Entendendo o resultado pedido e suas restrições." : "Lendo os documentos selecionados e suas restrições.", subject: `${source.origin.reference}#${index}` });
+      const result = await requestObject({ ...options, operation: "discover", prompt: `${prefix}${chunk}` });
+      if (brief.name === "Aplicação") brief.name = string(result.name, brief.name).slice(0, 120);
+      if (!brief.summary) brief.summary = string(result.summary, chunk.slice(0, 800)).slice(0, 1_600);
+      if (modes.length === 0 && modeDecisions.length === 0) brief.modes = [...new Set([...brief.modes, ...strings(result.modes).filter((mode): mode is ApplicationMode => MODES.has(mode as ApplicationMode))])];
+      if (brief.targets.length === 0) brief.targets = strings(result.targets).filter((target): target is TargetPlatform => TARGETS.has(target as TargetPlatform));
+      brief.requirements.push(...requirementsFrom(chunk, result.requirements, brief.modes, Math.max(200, Math.min(1_400, Math.floor(capacity / 8))), source.origin).filter(requirement => source.origin.kind !== "repository" || allowedCapabilities(brief, inferredCapabilities(`${requirement.statement}\n${requirement.source.text}`))));
+      brief.constraints.push(...constraintsFrom(chunk, result.constraints, source.origin));
+      candidates.push(...records(result.questions));
+      brief.requirements = [...new Map(brief.requirements.map((requirement) => [requirement.id, requirement])).values()];
+      brief.constraints = [...new Map(brief.constraints.map((constraint) => [constraint.id, constraint])).values()];
+      await options.save?.({ brief });
+    }
+    // A restriction crossing a packet boundary keeps its complete literal source.
+    brief.constraints.push(...constraintsFrom(source.text, [], source.origin));
     brief.constraints = [...new Map(brief.constraints.map((constraint) => [constraint.id, constraint])).values()];
-    await options.save?.({ brief });
   }
   if (brief.modes.length === 0) {
     candidates.push({ fact: "interface de uso", question: "Como as pessoas usarão a aplicação: terminal, navegador, janela nativa ou outra interface?", reason: "O pedido não identifica a interface de uso.", impact: "Define como entregar e executar o comportamento solicitado.", category: "platform", modes: [], options: ["TUI interativa no terminal", "CLI por comandos", "Aplicação web no navegador", "Aplicação desktop nativa"], blocks: [] });

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile, unlink, lstat } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
-const GENERATED = new Set(['.git', '.capivara-next', 'node_modules', '.venv', 'venv', '__pycache__', 'target', 'dist', 'obj', '.next']);
+const GENERATED = new Set(['.git', '.capivara-next', '.project-inputs', 'node_modules', '.venv', 'venv', '__pycache__', 'target', 'dist', 'obj', '.next']);
 export const digest = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex');
 export function inside(workspace: string, name: string): string {
   const base = resolve(workspace), path = resolve(base, name), rel = relative(base, path);

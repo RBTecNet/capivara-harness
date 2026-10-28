@@ -1,4 +1,5 @@
 import type { ContextPacket, DevelopmentPlan, ProductBrief, WorkUnit } from "./types.js";
+import { boundedReferences, relevantReferences } from "./material.js";
 
 export class ContextTooLarge extends Error {
   readonly taskId: string;
@@ -22,13 +23,14 @@ export function packetText(packet: ContextPacket): string {
     `Project: ${packet.project.name}; interfaces: ${packet.project.modes.join(", ")}; targets: ${packet.project.targets.join(", ") || "not restricted"}.`,
     `Work unit ${packet.task.id}: ${packet.task.title}\nGoal: ${reference(packet.task.goal)}\n${reference(packet.task.instructions)}`,
     `Required outcomes:\n${packet.task.criteria.map((criterion) => `- ${reference(criterion)}`).join("\n")}`,
-    `Requirements for this unit:\n${packet.requirements.map((requirement) => `${requirement.id}: ${requirement.statement}\nSource (${requirement.source.reference}): ${requirement.source.text === requirement.statement ? "same literal statement" : requirement.source.text}`).join("\n")}`,
+    `Requirements for this unit:\n${packet.requirements.map((requirement) => `${requirement.id}: ${requirement.statement}\nSource (${requirement.source.reference}): ${requirement.source.text === requirement.statement ? "same literal statement" : requirement.source.text}${requirement.source.localPath ? `\nOriginal selected input: ${requirement.source.localPath}` : ""}`).join("\n")}`,
     `Product restrictions (an instrument cannot override them):\n${packet.constraints.map((constraint) => `${constraint.id}: ${constraint.statement}; forbidden capabilities=${constraint.forbiddenCapabilities.join(",") || "none"}; required=${constraint.requiredCapabilities.join(",") || "none"}`).join("\n")}`,
     `Complete capability limits enforced by the executor: forbidden=${packet.capabilityLimits.forbidden.join(",") || "none"}; required=${packet.capabilityLimits.required.join(",") || "none"}. Original restriction details can be retrieved by their recorded identifiers.`,
     packet.decisions.length ? `Relevant decisions:\n${packet.decisions.map((decision) => `${decision.fact}: ${decision.answer}`).join("\n")}` : "",
     packet.contracts.length ? `Integration contracts:\n${JSON.stringify(packet.contracts)}` : "",
     packet.environment.length ? `Prepared technical requirements:\n${packet.environment.map((node) => `${node.id}: ${node.name} (${node.kind}); ${node.reason}`).join("\n")}` : "",
     packet.task.files.length ? `Relevant paths: ${packet.task.files.join(", ")}` : "",
+    packet.references?.length ? `Selected reference files for this unit (read relevant details at the recorded paths; these are supporting material, not additional required outcomes):\n${JSON.stringify(packet.references)}` : "",
     packet.task.checks.length ? `Focused verification recipes:\n${JSON.stringify(packet.task.checks)}` : "",
   ].filter(Boolean).join("\n\n");
 }
@@ -66,6 +68,8 @@ export function contextForTask(brief: ProductBrief, plan: DevelopmentPlan, task:
   };
   const size = packetText(packet).length;
   if (size > limitChars) throw new ContextTooLarge(task.id, size, limitChars);
+  const referenceText = [task.title, task.goal, task.instructions, ...task.files, ...task.criteria, ...requirements.map(requirement => requirement.statement)].join(" ");
+  packet.references = boundedReferences(relevantReferences(brief, referenceText, requirements.map(requirement => requirement.source.reference)), Math.min(1_800, Math.floor(limitChars / 5), limitChars - size - 200));
   return packet;
 }
 

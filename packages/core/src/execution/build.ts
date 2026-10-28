@@ -2,6 +2,7 @@ import { readFile, mkdir } from 'node:fs/promises';
 import type { DevelopmentPlan, EnvironmentNode, ProductBrief, Verification, WorkUnit } from '../domain/types.js';
 import { contextForTask, packetText } from '../domain/context.js';
 import { allowedCapabilities } from '../domain/authority.js';
+import { taskReferences } from '../domain/material.js';
 import { jsonObject, object } from '../domain/json.js';
 import { executeCommand as realCommand, runTerminal as realTerminal } from '../runtime/index.js';
 import type { AgentResult } from '../runtime/types.js';
@@ -97,7 +98,7 @@ export function interpretReview(text:string):Review {
   return{approved:positive,findings:[],readable:positive};
 }
 function revisionDescription(brief:ProductBrief,plan:DevelopmentPlan,task:WorkUnit):string {
-  return JSON.stringify({task,requirements:brief.requirements.filter(value=>task.requirementIds.includes(value.id)),constraints:brief.constraints,contracts:plan.contracts.filter(value=>task.contractIds.includes(value.id))});
+  return JSON.stringify({task,requirements:brief.requirements.filter(value=>task.requirementIds.includes(value.id)),constraints:brief.constraints,contracts:plan.contracts.filter(value=>task.contractIds.includes(value.id)),references:taskReferences(brief,task)});
 }
 async function taskRevision(options:BuildOptions,plan:DevelopmentPlan,task:WorkUnit):Promise<string>{return inputHash(options.workspace,taskInputs(plan,task),JSON.stringify({unit:revisionDescription(options.brief,plan,task),environment:environmentClosure(plan,task.environmentIds),platform:process.platform,node:process.version}));}
 async function manifestHash(workspace:string):Promise<string>{return inputHash(workspace,['package.json','package-lock.json','pnpm-lock.yaml','yarn.lock','bun.lock','Cargo.toml','Cargo.lock','go.mod','go.sum','requirements.txt','pyproject.toml']);}
@@ -164,7 +165,7 @@ export async function runBuild(options:BuildOptions):Promise<BuildOutcome>{
     for(const evidence of state.evidence){
       if(!evidence.passed||evidence.kind!==kind||kind==='tui'&&!evidence.terminal||target&&evidence.target!==target)continue;
       const unit=plan.tasks.find(value=>value.id===evidence.taskId),check=unit?.checks.find(value=>value.id===evidence.checkId);
-      if(unit&&check&&evidence.inputHash===await checkInputHash(options.workspace,plan,unit,check))return true;
+      if(unit&&check&&evidence.inputHash===await checkInputHash(options.workspace,plan,unit,check,options.brief))return true;
     }
     return false;
   };
@@ -247,7 +248,7 @@ export async function runBuild(options:BuildOptions):Promise<BuildOutcome>{
       if(progress.strategy==='focused-repair'){
         const previousFailures=state.evidence.filter(value=>value.taskId===task.id&&!value.passed);
         let staleFailure=false;
-        for(const previous of previousFailures){const check=task.checks.find(value=>value.id===previous.checkId);if(check&&previous.inputHash!==await checkInputHash(options.workspace,plan,task,check)){staleFailure=true;break;}}
+        for(const previous of previousFailures){const check=task.checks.find(value=>value.id===previous.checkId);if(check&&previous.inputHash!==await checkInputHash(options.workspace,plan,task,check,options.brief)){staleFailure=true;break;}}
         if(staleFailure){progress.status='checking';progress.strategy='revalidate-only';progress.findings=[];observer(options,'recovery','Reavaliando uma observação cuja fonte ou instrumento mudou antes de solicitar outra edição.',task.id);}
       }
       const shouldEdit=progress.status!=='checking'&&progress.status!=='reviewing'&&!['clarify-review','resume-review','revalidate-only','instrument','environment-only','diagnose-failure'].includes(progress.strategy);
@@ -309,7 +310,7 @@ export async function runBuild(options:BuildOptions):Promise<BuildOutcome>{
         if(check.kind==='desktop'&&!nativeTargetAvailable(check)){
           note(state,incident('environment',`target-${check.target}`,`The ${check.target} native proof needs a compatible runner. Local and independent work continues.`,check.command??'',true));continue;
         }
-        const hash=await checkInputHash(options.workspace,plan,task,check);
+        const hash=await checkInputHash(options.workspace,plan,task,check,options.brief);
         const previous=state.evidence.find(value=>value.taskId===task.id&&value.checkId===check.id&&value.inputHash===hash&&value.passed);
         if(previous){proof.push(`${check.id}: previous observed proof still valid.\n${previous.output}`);continue;}
         observer(options,'verification',`${task.id}: verificando ${check.kind}.`,check.id);

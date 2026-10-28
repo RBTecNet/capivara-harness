@@ -1,6 +1,6 @@
 import { AgentTools } from './tools.js';
 import { scrub } from './files.js';
-import type { AgentRequest, AgentResult, RuntimeIssue, Usage } from './types.js';
+import type { AgentConfig, AgentRequest, AgentResult, RuntimeIssue, Usage } from './types.js';
 
 const ROUTES: Record<string, { base: string; env: string; protocol?: 'anthropic' }> = {
   openai: { base: 'https://api.openai.com/v1', env: 'OPENAI_API_KEY' },
@@ -8,7 +8,38 @@ const ROUTES: Record<string, { base: string; env: string; protocol?: 'anthropic'
   deepseek: { base: 'https://api.deepseek.com', env: 'DEEPSEEK_API_KEY' },
   anthropic: { base: 'https://api.anthropic.com/v1', env: 'ANTHROPIC_API_KEY', protocol: 'anthropic' },
   minimax: { base: 'https://api.minimax.io/v1', env: 'MINIMAX_API_KEY' },
+  gemini: { base: 'https://generativelanguage.googleapis.com/v1beta/openai', env: 'GEMINI_API_KEY' },
 };
+export const API_ROUTES = ROUTES;
+
+/** Credentials follow a concrete destination, including its API path. */
+export function normalizedAPIDestination(provider: string, baseUrl?: string): string | undefined {
+  const base = baseUrl ?? ROUTES[provider]?.base;
+  if (!base) return undefined;
+  try {
+    const url = new URL(base);
+    url.pathname = url.pathname.replace(/\/(?:chat\/completions|messages)\/?$/, '').replace(/\/+$/, '') || '/';
+    return url.href.replace(/\/$/, '');
+  } catch { return base.trim().replace(/\/+$/, ''); }
+}
+
+/** A provider's environment secret is never the implicit key for an alternate endpoint. */
+export function defaultAPIKeyEnv(config: Pick<AgentConfig, 'provider' | 'baseUrl' | 'apiKeyEnv'>): string {
+  if (config.apiKeyEnv) return config.apiKeyEnv;
+  const route = ROUTES[config.provider];
+  return route && normalizedAPIDestination(config.provider, config.baseUrl) === normalizedAPIDestination(config.provider)
+    ? route.env : 'CAPIVARA_API_KEY';
+}
+
+/** Catalog discovery and inference resolve exactly the same credential. */
+export function apiCredential(config: AgentConfig, environment: NodeJS.ProcessEnv = process.env): string | undefined {
+  const variable = defaultAPIKeyEnv(config);
+  const key = config.apiKey || config.environment?.[variable] || environment[variable];
+  const geminiAlias = config.provider === 'gemini' && variable === 'GEMINI_API_KEY'
+    && normalizedAPIDestination(config.provider, config.baseUrl) === normalizedAPIDestination(config.provider)
+    ? config.environment?.GOOGLE_API_KEY || environment.GOOGLE_API_KEY : undefined;
+  return (key || geminiAlias)?.trim() || undefined;
+}
 
 type RecordValue = Record<string, unknown>;
 const object = (value: unknown): RecordValue => value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {};
@@ -89,8 +120,8 @@ export async function runApiAgent(request: AgentRequest): Promise<AgentResult> {
   const baseResult: AgentResult = { status: 'unavailable', text: '', commands, changedFiles: [] };
   if (request.signal?.aborted) return { ...baseResult, status: 'cancelled' };
   const route = ROUTES[request.config.provider];
-  const keyName = request.config.apiKeyEnv ?? route?.env ?? 'CAPIVARA_API_KEY';
-  const key = request.config.apiKey ?? request.config.environment?.[keyName] ?? process.env[keyName];
+  const keyName = defaultAPIKeyEnv(request.config);
+  const key = apiCredential(request.config);
   if (!key) return { ...baseResult, issue: { kind: 'authentication', recoverable: false, message: `Configure ${keyName} para a API ${request.config.provider}. Nenhuma inferência foi iniciada.` } };
   if (!request.config.model) return { ...baseResult, issue: { kind: 'configuration', recoverable: true, message: 'Escolha explicitamente o modelo da API; a credencial não determina qual modelo consumir.' } };
   const anthropic = route?.protocol === 'anthropic';

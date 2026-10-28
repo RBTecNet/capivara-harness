@@ -3,7 +3,7 @@ import { lstat, mkdir, readFile, readdir, readlink, realpath, rename, rm, writeF
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ExecutionConstraints } from './types.js';
 
-const IGNORED = new Set(['.git', 'node_modules', 'dist', 'target', '.venv', 'venv', '__pycache__', '.next', '.cache']);
+const IGNORED = new Set(['.git', '.project-inputs', 'node_modules', 'dist', 'target', '.venv', 'venv', '__pycache__', '.next', '.cache']);
 export const digest = (text: string | Uint8Array): string => createHash('sha256').update(text).digest('hex');
 const inside = (root: string, path: string): boolean => { const rel = relative(root, path); return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`)); };
 

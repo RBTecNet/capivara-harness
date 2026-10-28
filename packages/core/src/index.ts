@@ -6,3 +6,6 @@ export * from './execution/index.js';
 export { ProjectStore } from './app/store.js';
 export { runWorkflow } from './app/workflow.js';
 export type { WorkflowOptions } from './app/workflow.js';
+export * from './data-center/index.js';
+export { runWizard, createTerminalWizardIO } from './wizard/index.js';
+export type { WizardDeps, WizardIO, WizardResult } from './wizard/index.js';

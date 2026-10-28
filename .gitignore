@@ -4,3 +4,4 @@ dist/
 .capivara/runs/
 
 .capivara-next/
+.project-inputs/

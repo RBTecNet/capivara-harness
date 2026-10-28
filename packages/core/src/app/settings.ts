@@ -3,8 +3,15 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AgentConfig } from '../runtime/types.js';
+import type { DataCenterEndpoint } from '../data-center/types.js';
 
-export interface Settings { agent?: AgentConfig; reviewer?: AgentConfig; allowSystemInstall?: boolean; }
+export interface Settings {
+  agent?: AgentConfig;
+  reviewer?: AgentConfig;
+  allowSystemInstall?: boolean;
+  credentials?: Record<string, { apiKey: string; apiKeyEnv?: string; baseUrl?: string }>;
+  dataCenter?: DataCenterEndpoint;
+}
 export function settingsPath(): string {
   return join(process.env.CAPIVARA_CONFIG_DIR || join(homedir(), '.config', 'capivara'), 'settings.json');
 }

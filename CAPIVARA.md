@@ -7,6 +7,8 @@ Versão pública `0.9.0_RC1`; pacote `0.9.0-RC1`. Node.js >=24. Os motores anter
 - `packages/core/src/domain`: fatos com origem, modalidade, restrições, lacunas pertinentes, DAG técnico e unidades de trabalho; divisão e reparo de contexto.
 - `packages/core/src/execution`: preparação do ambiente, agendamento, editor, prova pertinente, revisor cooperativo e recuperação da causa na execução ativa.
 - `packages/core/src/runtime`: chamadas CLI/API, ferramentas reais, processos, isolamento disponível, comandos e pseudoterminal.
+- `packages/core/src/wizard`: painel de início, navegação, leitura por linha e comando equivalente.
+- `packages/core/src/data-center`: cliente MCP de leitura, projetos, prompts e materiais selecionados.
 - `packages/core/src/app`: coordenação das etapas, perguntas, configuração e SQLite transacional.
 - `packages/core/src/cli-program.ts`: comandos públicos; `src/version.ts`: versão exibida.
 
@@ -29,3 +31,10 @@ Falha recuperável é dado para a próxima ação. Corrigir ambiente, transporte
 Use `npm run check` para build, tipos e cenários locais relevantes. Não invocar provedores pagos automaticamente na suíte. Pilotos reais devem registrar pedido, transporte, resultado e limites da evidência, sem divulgar credenciais nem inventar custo quando o provedor não informa.
 
 A documentação histórica não impõe gates nem regras ao motor novo. A [auditoria](docs/AUDITORIA-RECONSTRUCAO-MOTORES.md) registra defeitos anteriores, e a [entrega](docs/RECONSTRUCAO-0.9.0_RC1.md) registra o que foi implementado e conferido.
+
+
+## Wizard e origem documental
+
+`capivara` e `capivara wizard` usam o mesmo fluxo inicial, recriado a partir da main sem importar seus motores. O comando impresso volta ao parser público para executar. Defaults explícitos de modelo/raciocínio não herdam silenciosamente valores antigos.
+
+A conexão da base pode reconhecer dados de `~/.capybara/config.json`; isso não é compatibilidade de motores. O projeto guarda seleção e cópia completa dos insumos sem credenciais MCP. Histórico e acervo não selecionado não entram como autoridade. Documentos são fatiados; arquivos de referência são apresentados pelo índice relevante em vez de repetir seus corpos por agente. Uma falha de leitura preserva o material completo anterior.

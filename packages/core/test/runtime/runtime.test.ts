@@ -6,6 +6,8 @@ import { runAgent } from '../../src/runtime/agent.js';
 import { executeCommand } from '../../src/runtime/command.js';
 import { runTerminal } from '../../src/runtime/terminal.js';
 import { AgentTools } from '../../src/runtime/tools.js';
+import { bindCredential, configuredAgent, createModelCatalog } from '../../src/app/catalog.js';
+import { saveSettings } from '../../src/app/settings.js';
 import type { AgentRequest } from '../../src/runtime/types.js';
 
 const directories: string[] = [];
@@ -13,6 +15,37 @@ async function workspace(): Promise<string> { const path = await mkdtemp(join(tm
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))); });
 
 describe('new runtime execution', () => {
+  it('keeps saved and environment credentials at their API destination and shares the Gemini alias with discovery', async () => {
+    const cwd = await workspace();
+    vi.stubEnv('CAPIVARA_CONFIG_DIR', await workspace());
+    vi.stubEnv('OPENAI_API_KEY', 'offline-openai-environment-key');
+    vi.stubEnv('CAPIVARA_API_KEY', '');
+    vi.stubEnv('GEMINI_API_KEY', '');
+    vi.stubEnv('GOOGLE_API_KEY', 'offline-google-alias');
+    try {
+      await saveSettings({ agent: { provider: 'openai', apiKey: 'offline-saved-key' }, credentials: { openai: { apiKey: 'offline-saved-key' } } });
+      const saved = await configuredAgent('openai', 'https://api.openai.com:443/v1/');
+      expect(saved.apiKey).toBe('offline-saved-key');
+      const alternate = await configuredAgent('openai', 'https://alternate.invalid/v1');
+      expect(alternate.apiKey).toBeUndefined();
+      expect(alternate.baseUrl).toBe('https://alternate.invalid/v1');
+      expect(bindCredential(saved, alternate.baseUrl).apiKey).toBeUndefined();
+      const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => String(input).endsWith('/models')
+        ? Response.json({ data: [{ id: 'offline-catalog-model' }] })
+        : Response.json({ choices: [{ message: { role: 'assistant', content: 'Offline result.' }, finish_reason: 'stop' }] }));
+      const request = { workspace: cwd, role: 'analyst', readOnly: true, instruction: 'Inspect a small fragment.' };
+      const blocked = await runAgent({ ...request, config: { ...alternate, model: 'offline-model' } });
+      expect(blocked.issue?.kind).toBe('authentication');
+      expect(fetch).not.toHaveBeenCalled();
+      const explicit = bindCredential(saved, alternate.baseUrl, 'OPENAI_API_KEY');
+      expect((await runAgent({ ...request, config: { ...explicit, model: 'offline-model' } })).status).toBe('complete');
+      expect(new Headers(fetch.mock.calls[0]?.[1]?.headers).get('authorization')).toBe('Bearer offline-openai-environment-key');
+      expect(await createModelCatalog(cwd).listModels('gemini')).toEqual([{ id: 'offline-catalog-model', name: '' }]);
+      expect((await runAgent({ ...request, config: { provider: 'gemini', model: 'offline-model' } })).status).toBe('complete');
+      expect(fetch.mock.calls.slice(1).every(([, init]) => new Headers(init?.headers).get('authorization') === 'Bearer offline-google-alias')).toBe(true);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it('retains process output and reports timeout/cancellation without starting a cancelled command', async () => {
     const cwd = await workspace();
     const normal = await executeCommand({ cwd, command: [process.execPath, '-e', 'process.stdout.write(process.cwd());process.stderr.write("diagnostic");process.exitCode=3'] });

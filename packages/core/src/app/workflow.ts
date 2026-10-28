@@ -2,7 +2,7 @@ import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { join, resolve, relative, isAbsolute, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { runInit, runPlan, repairWorkPlan } from '../domain/index.js';
-import type { ProductBrief, DomainAgentRequest, DevelopmentPlan } from '../domain/types.js';
+import type { ProductBrief, DomainAgentRequest, DevelopmentPlan, SelectedDocument } from '../domain/types.js';
 import { runAgent } from '../runtime/index.js';
 import type { AgentConfig, AgentRequest, AgentResult } from '../runtime/types.js';
 import { runBuild } from '../execution/index.js';
@@ -16,16 +16,19 @@ export interface WorkflowOptions {
   workspace: string;
   stage: 'init' | 'plan' | 'build' | 'run';
   request?: string;
+  documents?: SelectedDocument[];
   config?: AgentConfig;
   reviewer?: AgentConfig;
   allowSystemInstall?: boolean;
   signal: AbortSignal;
   announce?: (message: string) => void;
   agent?: typeof runAgent;
+  /** The CLI can retain one ownership lease while preparing remote inputs and constructing. */
+  store?: ProjectStore;
 }
 
 /** Discovery sees a short inventory, not all of an existing project's source. */
-async function inventory(workspace: string): Promise<string> {
+async function inventory(workspace: string, includeSelectedInputs: boolean): Promise<string> {
   const files: string[] = [];
   const walk = async (directory: string, depth: number): Promise<void> => {
     for (const item of await readdir(directory, { withFileTypes: true }).catch(() => [])) {
@@ -41,7 +44,8 @@ async function inventory(workspace: string): Promise<string> {
     const text = await readFile(join(workspace, file), 'utf8').catch(() => '');
     if (text) manifests.push(`${file}:\n${text.slice(0, 4000)}`);
   }
-  return `${files.join('\n')}\n${manifests.join('\n')}`.slice(0, 10_000);
+  const inputs = includeSelectedInputs ? await readFile(join(workspace, '.project-inputs/index.json'), 'utf8').catch(() => '') : '';
+  return `${files.join('\n')}\n${manifests.join('\n')}\n${inputs ? `Selected data-center input paths (read original contents when relevant):\n${inputs.slice(0, 2000)}` : ''}`.slice(0, 10_000);
 }
 
 /** Product rules stay separate from a technical inventory; literal origins remain available. */
@@ -61,7 +65,7 @@ async function repositoryRules(workspace: string, request: string): Promise<{ te
 async function workflowAttempt(options: WorkflowOptions): Promise<{ status: string; brief?: ProductBrief; plan?: DevelopmentPlan }> {
   const workspace = resolve(options.workspace);
   await mkdir(workspace, { recursive: true });
-  const store = new ProjectStore(workspace);
+  const store = options.store ?? new ProjectStore(workspace);
   const announce = (message: string): void => {
     store.event('message', { message });
     try { options.announce?.(message); } catch { /* Observer cannot end execution. */ }
@@ -144,10 +148,11 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
       onEvent: event,
       signal: options.signal,
     };
+    const documents = options.documents ?? saved.dataCenter?.documents ?? [];
     const request = options.request ?? saved.request ?? saved.brief?.request;
     if (!request?.trim()) throw new Error('Falta o pedido do produto. Informe texto ou --file; nenhuma chamada foi feita.');
     await persist({ request });
-    const repository = await inventory(workspace);
+    const repository = await inventory(workspace, documents.length > 0);
     const repositoryConstraints = await repositoryRules(workspace, request);
     let brief = saved.brief;
     const answeredGaps = (): boolean => !!brief?.gaps.some(gap => {
@@ -162,7 +167,7 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
     };
     reopenChangedAnswers();
     // Reconcile answers and local rules without a model call when discovery is already ready.
-    brief = await runInit({ ...hooks, request, repository, repositoryConstraints, ...(brief ? { existing: brief } : {}) });
+    brief = await runInit({ ...hooks, request, documents, repository, repositoryConstraints, ...(brief ? { existing: brief } : {}) });
     await persist({ brief });
     if (options.stage === 'init') { await persist({ status: brief.gaps.some(g => g.status === 'pending') ? 'waiting' : 'complete' }); return { status: store.read().status!, brief }; }
     const productChanged = saved.brief !== undefined && saved.brief.id !== brief.id || saved.plan !== undefined && saved.plan.briefId !== brief.id;
@@ -191,7 +196,7 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
       await persist({ plan, execution: outcome.state, status: outcome.status === 'complete' ? 'complete' : outcome.status === 'cancelled' ? 'cancelled' : 'waiting' });
       if (answeredGaps()) {
         reopenChangedAnswers();
-        brief = await runInit({ ...hooks, request, repository, repositoryConstraints, existing: brief });
+        brief = await runInit({ ...hooks, request, documents, repository, repositoryConstraints, existing: brief });
         plan = await runPlan({ ...hooks, brief, repository, repositoryConstraints, existing: plan });
         await persist({ brief, plan, status: 'working' });
         continue;
@@ -210,7 +215,7 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
       return { status: 'cancelled' };
     }
     throw error;
-  } finally { store.close(); }
+  } finally { if (!options.store) store.close(); }
 }
 
 /** Recovery belongs to the coordinator, including unexpected failures between module boundaries. */

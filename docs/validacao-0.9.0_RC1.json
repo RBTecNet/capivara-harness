@@ -163,5 +163,42 @@
     "Sem inferência autenticada em todos os provedores.",
     "Sem execução nativa Windows/macOS ou automação GUI universal.",
     "USD não informado pelo Codex; tokens observados não são estimativa financeira."
-  ]
+  ],
+  "wizardUpdate": {
+    "basedOnMain": "23b7241",
+    "verifiedAt": "2026-10-28T11:17:38.250930+00:00",
+    "command": "npm run check",
+    "testFiles": 10,
+    "tests": 67,
+    "build": "passed",
+    "typecheck": "passed",
+    "paidInferenceCalls": 0,
+    "realDataCenter": {
+      "projectsListed": 16,
+      "promptsListed": 16,
+      "selectedParentDocuments": 11,
+      "selectedAttachments": 7,
+      "writesToService": 0,
+      "preparedInputs": {
+        "selectedDocuments": 10,
+        "references": 8,
+        "assets": 18,
+        "allInputFilesPresent": true,
+        "relativeSkillReferencesPreserved": true,
+        "historyAddedToInputs": false,
+        "requestLoaded": true,
+        "binaryBase64InState": false
+      }
+    },
+    "wizardPty": {
+      "exitCode": 0,
+      "terminalRestored": true,
+      "executeDeclined": true,
+      "projectStateCreated": false
+    },
+    "lineInput": {
+      "pipedAnswersPreserved": true,
+      "multilineRequestPreserved": true
+    }
+  }
 }

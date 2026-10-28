@@ -4,12 +4,14 @@ import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { ProductBrief, DevelopmentPlan, Question } from '../domain/types.js';
 import type { AgentConfig } from '../runtime/types.js';
+import type { SelectedProjectInput } from './data-source.js';
 
 export interface SavedProject {
   request?: string;
   brief?: ProductBrief;
   plan?: DevelopmentPlan;
   execution?: unknown;
+  dataCenter?: SelectedProjectInput | null;
   config?: AgentConfig;
   reviewer?: AgentConfig;
   allowSystemInstall?: boolean;

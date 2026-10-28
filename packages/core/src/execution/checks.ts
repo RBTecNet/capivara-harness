@@ -2,6 +2,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { DevelopmentPlan, ProductBrief, Verification, WorkUnit } from '../domain/types.js';
 import { allowedCapabilities, inferredCapabilities } from '../domain/authority.js';
+import { taskReferences } from '../domain/material.js';
 import type { CommandResult, TerminalRequest } from '../runtime/types.js';
 import { digest, inputHash } from './files.js';
 import { executionConstraints, type CommandExecutor } from './environment.js';
@@ -41,8 +42,8 @@ export function taskInputs(plan: DevelopmentPlan, task: WorkUnit): string[] {
   const dependencies=plan.tasks.filter(other=>task.dependsOn.includes(other.id)).flatMap(other=>other.files);
   return [...new Set([...task.files,...dependencies,'package.json','package-lock.json','pnpm-lock.yaml','pnpm-workspace.yaml','yarn.lock','bun.lock','bun.lockb','.npmrc','.yarnrc','.yarnrc.yml','Cargo.toml','Cargo.lock','.cargo/config.toml','go.mod','go.sum','pyproject.toml','requirements.txt','poetry.lock','uv.lock','tsconfig.json','jsconfig.json','global.json','Directory.Build.props','Directory.Build.targets','Directory.Packages.props','NuGet.Config'])];
 }
-export async function checkInputHash(workspace: string,plan:DevelopmentPlan,task:WorkUnit,check:Verification):Promise<string> {
-  return inputHash(workspace,task.files.length?taskInputs(plan,task):[],JSON.stringify({verifier:'capivara-verification/2',check,targets:plan.environment.filter(node=>task.environmentIds.includes(node.id)),platform:process.platform,node:process.version}));
+export async function checkInputHash(workspace: string,plan:DevelopmentPlan,task:WorkUnit,check:Verification,brief?:ProductBrief):Promise<string> {
+  return inputHash(workspace,task.files.length?taskInputs(plan,task):[],JSON.stringify({verifier:'capivara-verification/2',check,targets:plan.environment.filter(node=>task.environmentIds.includes(node.id)),platform:process.platform,node:process.version,references:brief?taskReferences(brief,task):[]}));
 }
 export function hostTarget(): 'windows'|'macos'|'linux' { return process.platform==='win32'?'windows':process.platform==='darwin'?'macos':'linux'; }
 export function nativeTargetAvailable(check:Verification):boolean { return !check.target || check.target==='portable' || check.target===hostTarget(); }
@@ -78,7 +79,7 @@ export function expectedResult(expected:string|undefined,result:CommandResult):{
   return{passed:null,detail:`Semantic assertion for the reviewer: ${expected}`,instrument:false};
 }
 export async function runVerification(workspace:string,brief:ProductBrief,task:WorkUnit,plan:DevelopmentPlan,check:Verification,execute:CommandExecutor,terminal:(request:TerminalRequest)=>Promise<CommandResult>,options:{signal?:AbortSignal;allowSystemInstall?:boolean}={}):Promise<{evidence:VerificationEvidence;result:CommandResult|null;needsInstrument:boolean}> {
-  const hash=await checkInputHash(workspace,plan,task,check);
+  const hash=await checkInputHash(workspace,plan,task,check,brief);
   const evidence:VerificationEvidence={id:digest(`${task.id}:${check.id}:${hash}`).slice(0,20),taskId:task.id,checkId:check.id,inputHash:hash,passed:false,command:check.command??'',output:'',terminal:false,checkedAt:new Date().toISOString()};
   if(!check.command){evidence.output='No executable recipe is available for this proof. Derive a compatible recipe from the actual product; do not change the product to satisfy an invented convention.';return{evidence,result:null,needsInstrument:true};}
   if(check.kind==='desktop'&&!nativeTargetAvailable(check)){evidence.output='A required desktop target has no native runner on this host. Continue independent work and provide a compatible runner; do not claim its workflows were executed.';return{evidence,result:null,needsInstrument:true};}

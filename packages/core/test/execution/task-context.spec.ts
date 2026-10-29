@@ -14,6 +14,22 @@ const plan=(task:WorkUnit):DevelopmentPlan=>({schema:'capivara/plan/1',status:'r
 async function root(){const directory=await mkdtemp(join(tmpdir(),'capivara-task-context-'));roots.push(directory);return directory;}
 
 describe('contexto de fonte completo ou cobertura explicitamente limitada',()=>{
+  it('fits a 24561-character delivery into the original 24000 budget by removing repeated metadata without dropping authority',async()=>{
+    const directory=await root(),files=Array.from({length:30},(_,index)=>`source-${String(index).padStart(2,'0')}.ts`);
+    const source="export const state = '"+'actual-source-'.repeat(800)+"';\n";
+    await Promise.all(files.map(path=>writeFile(join(directory,path),source)));
+    const literal='The actual stored user content must remain unchanged.';
+    const request:ProductBrief={...brief,summary:literal,request:literal,requirements:[{id:'behavior',kind:'behavior',mode:'cli',statement:literal,source:{kind:'request',reference:'request',text:literal}}]};
+    const task:WorkUnit={...unit(files),id:'contribution',title:'Contribution',goal:'Implement the requested behavior',instructions:'Operate only on this contribution. '+'.'.repeat(8287),requirementIds:['behavior'],criteria:[literal]};
+    const extra='Current integration evidence: '+'e'.repeat(2900);
+    const context=await assembleTaskContext(request,plan(task),task,directory,24000,extra);
+    expect(context.text.length).toBeLessThanOrEqual(24000);
+    expect(context.text).toContain(task.instructions);expect(context.text).toContain(literal);expect(context.text).toContain(extra);
+    expect(context.coverage).toHaveLength(30);
+    for(const path of files){expect(context.text).toContain(path);expect(context.coverage).toContainEqual(expect.objectContaining({path,hash:digest(source),complete:false,status:'omitted',ranges:[]}));}
+    expect(context.text).not.toContain(source);
+  });
+
   it('registra uma referência de revisão fora do projeto e continua entregando a fonte válida',async()=>{
     const directory=await root();await writeFile(join(directory,'app.ts'),'export const answer = 42;\n');const task=unit(['app.ts']);
     const context=await assembleTaskContext(brief,plan(task),task,directory,5000,'Resolve the original source claim.',['../outside.ts:12','app.ts']);

@@ -3,7 +3,7 @@ import type { DevelopmentPlan, ProductBrief, Verification, VerificationAssertion
 import { verificationAssertionStatus } from '../domain/assertions.js';
 import { obligationMatchesProvider } from '../domain/bindings.js';
 import { consumesVerification, verificationRegistry } from '../domain/verifications.js';
-import { verificationLevel } from './checks.js';
+import { interfaceEvidenceUsable, verificationLevel } from './checks.js';
 import { invocationArguments, validateConformance } from './conformance.js';
 import { resolveVerificationInputs } from './dependencies.js';
 import { applyOperationalEnvironment, recipeCwd, verificationOperationalRevision, type OperationalEnvironment } from './environment.js';
@@ -59,7 +59,7 @@ export async function selectPendingAcceptance(options:AcceptanceSelectionOptions
   const {brief,workspace,operational}=options;
   const taskPlan:DevelopmentPlan={...options.plan,tasks:options.plan.tasks.map(task=>({...task,checks:[...(options.taskChecks?.[task.id]??task.checks)]})),acceptance:[]};
   const registry=verificationRegistry(taskPlan),requirements=new Map(brief.requirements.map(requirement=>[requirement.id,requirement]));
-  const receipts=options.currentTaskProofs.filter(proof=>proof.taskId!=='$acceptance'&&proof.passed&&proof.provenance&&!proof.provenance.cancelled&&!proof.provenance.timedOut);
+  const receipts=options.currentTaskProofs.filter(proof=>proof.taskId!=='$acceptance'&&proof.passed&&proof.provenance&&!proof.provenance.cancelled&&!proof.provenance.timedOut&&registry.some(owner=>owner.taskId===proof.taskId&&owner.check.id===proof.checkId&&interfaceEvidenceUsable(owner.check,proof)));
   const finalTask:WorkUnit={id:'$acceptance',title:'Final acceptance',goal:'Prove mandatory outcomes.',instructions:'Observe the integrated product.',requirementIds:brief.requirements.map(requirement=>requirement.id),dependsOn:[],environmentIds:taskPlan.environment.map(node=>node.id),contractIds:taskPlan.contracts.map(contract=>contract.id),files:[],inputs:[...new Set(taskPlan.tasks.flatMap(task=>task.files))],criteria:[],checks:[...options.checks],risk:'normal',blockedBy:[]};
   const reusable=new Map<Verification,AcceptanceReuse>(),reasons=new Map<Verification,string>();
   const snapshots=new Map<string,Promise<Record<string,string>>>(),validations=new Map<string,Promise<boolean>>();

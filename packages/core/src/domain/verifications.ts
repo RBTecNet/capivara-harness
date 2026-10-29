@@ -3,6 +3,13 @@ import type { DevelopmentPlan, Verification } from './types.js';
 /** A recipe keeps the owner whose actual command observation can prove it. */
 export interface OwnedVerification { taskId:string; check:Verification; }
 
+/** Several obligations may be observed by one real invocation. These are
+ * candidate declarations, never additional executions or copied proof IDs. */
+export function verificationConformanceClaims(check:Verification):NonNullable<Verification['conformance']>[]{
+  const claims=[...(check.conformance?[check.conformance]:[]),...check.conformanceClaims??[]];
+  return [...new Map(claims.map(claim=>[JSON.stringify(claim),claim])).values()];
+}
+
 /** An intended product recipe is not execution evidence. Obvious readiness and
  * syntax-only invocations remain pending verification debt even if mislabeled. */
 export function isPlannedProductRecipe(check:Verification):boolean{
@@ -14,7 +21,7 @@ export function isPlannedProductRecipe(check:Verification):boolean{
 /** A build artifact is a declared write even when its producer described it
  * in the conformance claim. Behavior checks consume artifacts, not produce them. */
 export function verificationOutputs(check:Verification):string[]{
-  return [...new Set([...(check.outputs??[]),...(check.level==='build'?check.conformance?.artifacts??[]:[])])];
+  return [...new Set([...(check.outputs??[]),...(check.level==='build'?verificationConformanceClaims(check).flatMap(claim=>claim.artifacts??[]):[])])];
 }
 
 export function verificationRegistry(plan:DevelopmentPlan):OwnedVerification[]{

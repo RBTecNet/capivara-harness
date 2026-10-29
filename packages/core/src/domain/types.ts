@@ -186,6 +186,8 @@ export interface Verification {
   constraintIds?: string[];
   timeoutMs?: number;
   target?: TargetPlatform;
+  /** Lossless decoding of an explicit interface placed in the transport target field; never execution evidence. */
+  declarationTransformation?:{schema:'capivara/verification-interface/1';original:{kind?:string|null;target:string};selectedKind:'cli'|'tui'|'web'|'desktop';reason:'explicit-interface-target'};
   inputs?: string[];
   cwd?: string;
   level?: "syntax" | "build" | "behavior";
@@ -197,6 +199,10 @@ export interface Verification {
   instrument?: { provider: string; output: "runner"; originalKind?: Verification["kind"]; declaredInputs?: string[]; sourceInputs?: string[]; transformations?: { original: { command?: string; args?: string[]; cwd?: string }; removedPreparations: { command: string; args: string[]; cwd: string }[]; reason: string }[] };
   /** Dedicated proof that product inputs actually consume the mandatory provider. */
   conformance?: CapabilityIdentity & { requirementId: string; productInputs: string[]; providerCommand?: string[]; providerInputs?: string[]; artifacts?: string[] };
+  /** Native candidates pair one observation with every relevant prepared provider; never proof by declaration. */
+  conformanceClaims?:NonNullable<Verification['conformance']>[];
+  /** Exact verifier programs excluded from product-consumption attribution. */
+  conformanceInstrumentInputs?:string[];
 }
 
 export interface WorkUnit {
@@ -219,6 +225,17 @@ export interface WorkUnit {
   risk: Risk;
   /** Only unanswered product decisions can withhold a consumer. */
   blockedBy: string[];
+}
+
+export interface ConformanceDeclarationCorrection {
+  schema:'capivara/conformance-declaration/1';
+  taskId:string;
+  checkId:string;
+  original:NonNullable<Verification['conformance']>;
+  selected:NonNullable<Verification['conformance']>;
+  reasons:('unique-scoped-provider-reference'|'owned-product-input-candidates')[];
+  environmentIds:string[];
+  validation:'actual-provider-consumption-required';
 }
 
 export interface PlanVerificationObligation {
@@ -261,6 +278,8 @@ export interface DevelopmentPlan {
   acceptance?: Verification[];
   obligations?:PlanVerificationObligation[];
   authorityCorrections?:PlanAuthorityCorrection[];
+  /** Technical declaration repairs are provenance, never provider-consumption evidence. */
+  conformanceCorrections?:ConformanceDeclarationCorrection[];
   /** Durable construction checkpoints; pending prompts retain exact cached-call identity. Removed when ready. */
   planning?: {
     schema: "capivara/plan-progress/1";

@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import type { DevelopmentPlan, ProductBrief, Verification, VerificationAssertion, WorkUnit } from '../domain/types.js';
 import { normalizeVerificationAssertion, verificationAssertionStatus } from '../domain/assertions.js';
+import { verificationConformanceClaims } from '../domain/verifications.js';
 export { normalizeVerificationAssertion, verificationAssertionStatus } from '../domain/assertions.js';
 import { allowedCapabilities, inferredCapabilities } from '../domain/authority.js';
 import { taskReferences } from '../domain/material.js';
@@ -15,12 +16,45 @@ import { beginConformanceObservation, finishConformanceObservation } from './con
 import { classifyReviewFailure, type ReviewFailureContext, type ReviewFailureKind } from './review.js';
 import { declaredTaskInputs, resolveVerificationInputs } from './dependencies.js';
 import { emitProgress, type ProgressEvent } from '../telemetry/progress.js';
-import { PROVIDER_OBSERVATION_PROTOCOL, startProviderObservation, type ModuleProviderWitness, type ProviderConsumption, type ProviderProcessWitness, type ProviderWitness } from '../runtime/provider-observation.js';
+import { PROVIDER_OBSERVATION_PROTOCOL, runtimeObservationProtocol, startProviderObservation, type ModuleProviderWitness, type ProviderConsumption, type ProviderProcessWitness, type ProviderWitness, type ProviderWrite } from '../runtime/provider-observation.js';
+import { checkInlineNodeSyntax, inlineNodeSyntaxCandidate } from './inline-verification.js';
+import { InvocationDeclarationError, literalInvocationArguments, normalizeCommandInvocation } from '../runtime/invocation.js';
+import { BROWSER_OBSERVATION_CONTRACT, browserInteractionAttempted, browserInteractionsObserved, startBrowserObservation } from '../runtime/browser-observation.js';
+
+export function inlineVerificationSyntaxRequired(check:Verification):boolean{
+  if(check.kind==='cli'||check.kind==='tui'||!check.command)return false;
+  if(!check.args)return inlineNodeSyntaxCandidate(check.command);
+  const literal=literalInvocationArguments(check.command);
+  const duplicated=literal&&literal.length>1&&literal.length===check.args.length+1&&check.args.every((arg,index)=>arg===literal[index+1]);
+  return inlineNodeSyntaxCandidate(duplicated?literal:[check.command,...check.args]);
+}
 
 /** An explicit browser behavior target needs a browser interaction protocol.
  * Generic command output does not identify that interface. Specific CLI/TUI
  * recipes may legitimately consume a browser as a dependency. */
 function ambiguousBrowserCommand(check:Verification):boolean{return check.kind==='command'&&verificationLevel(check)==='behavior'&&(check.target==='browser'||check.requiredCapabilities.includes('browser'));}
+
+/** Shell and PTY observations do not certify a native window. This contract
+ * stays explicitly unsupported until a coordinator-owned adapter can witness
+ * the application window, input and changed native state. */
+export const DESKTOP_OBSERVATION_CONTRACT={schema:'capivara/native-interaction/1',interface:'desktop',supportedAdapters:[],requiredObservations:['application-owned native window','actual native input','observed changed native state'],commandOutputIsInteraction:false,buildIsInteraction:false} as const;
+
+/** A model-supplied interface label cannot promote command output into an
+ * observed browser interaction. Legacy receipts remain auditable but need a
+ * fresh compatible instrument before they can certify web behavior. */
+export function interfaceEvidenceUsable(check:Verification,evidence:VerificationEvidence):boolean{
+  if(check.kind==='desktop')return false;
+  if(check.kind!=='web'||verificationLevel(check)!=='behavior')return true;
+  try{return evidence.kind==='web'&&evidence.browserObservation?.schema==='capivara/browser-interaction/1'&&Array.isArray(evidence.browserObservation.witnesses)&&browserInteractionsObserved(evidence.browserObservation.witnesses);}
+  catch{return false;}
+}
+
+export function browserObservationSummary(observation:NonNullable<VerificationEvidence['browserObservation']>):string{
+  const witnesses=observation.witnesses;
+  const bounded=(values:string[],limit:number):string[]=>[...new Set(values)].slice(0,limit);
+  const location=(value:string):string=>{try{const url=new URL(value);url.username='';url.password='';url.search='';url.hash='';return url.href.slice(0,240);}catch{return'[unresolved location]';}};
+  return JSON.stringify({schema:observation.schema,counts:{launched:witnesses.filter(item=>item.phase==='launch'&&item.status==='passed').length,navigated:witnesses.filter(item=>item.phase==='navigation'&&item.status==='passed').length,dom:witnesses.filter(item=>item.phase==='dom'&&item.status==='passed').length,failed:witnesses.filter(item=>item.status==='failed').length},navigation:bounded(witnesses.filter(item=>item.phase==='navigation'&&item.status==='passed'&&item.url).map(item=>location(item.url!)),4),operations:bounded(witnesses.filter(item=>item.phase==='dom'&&item.status==='passed').map(item=>item.operation.slice(0,100)),12),failedOperations:bounded(witnesses.filter(item=>item.status==='failed').map(item=>`${item.phase}:${item.operation}`.slice(0,120)),4)});
+}
 
 /** Wrong instruments are replaced; their failure never becomes an invented product requirement. */
 export function selectVerifications(brief: ProductBrief, task: WorkUnit): SelectedVerification[] {
@@ -62,14 +96,21 @@ export interface VerificationIdentity { inputHash:string; observationHash:string
 export async function verificationIdentity(workspace:string,plan:DevelopmentPlan,task:WorkUnit,check:Verification,brief?:ProductBrief,operational?:OperationalEnvironment,resolvedInputs?:readonly string[]):Promise<VerificationIdentity>{
   const inputs=resolvedInputs?[...resolvedInputs]:await resolveVerificationInputs(workspace,plan,task,check);
   const snapshot=await inputSnapshot(workspace,inputs);
-  const requirements=brief?.requirements.filter(requirement=>(check.requirementIds.length?check.requirementIds:task.requirementIds).includes(requirement.id))
+  const claims=verificationConformanceClaims(check),requirementsForProof=[...(check.requirementIds.length?check.requirementIds:task.requirementIds),...claims.map(claim=>claim.requirementId)];
+  const requirements=brief?.requirements.filter(requirement=>requirementsForProof.includes(requirement.id))
     .map(({bindingAuthority:_classification,bindingTransformations:_interpretations,...requirement})=>requirement);
   const contracts=plan.contracts.filter(contract=>task.contractIds.includes(contract.id));
   const environmentRevision=operational?verificationOperationalRevision(operational,inputs,check):undefined;
-  const moduleClaim=Boolean(check.conformance&&['sdk','library','driver'].includes(check.conformance.kind));
+  const moduleClaim=claims.some(claim=>['sdk','library','driver'].includes(claim.kind)),runtimeClaim=claims.some(claim=>claim.kind==='runtime');
   const consumptionNeeded=moduleClaim||inputs.length>0&&(Object.values(operational?.bindings??{}).some(binding=>['sdk','library','driver'].includes(binding.kind))||plan.environment.some(node=>['sdk','library','driver'].includes(node.identity?.kind??node.kind)));
-  const providerObservation=consumptionNeeded?{consumptions:PROVIDER_OBSERVATION_PROTOCOL.consumptions,processes:PROVIDER_OBSERVATION_PROTOCOL.processes,...(moduleClaim?{modules:PROVIDER_OBSERVATION_PROTOCOL.modules}:{}),...(check.conformance?.kind==='runtime'?{runtime:PROVIDER_OBSERVATION_PROTOCOL.runtime}:{})}:check.conformance?.kind==='runtime'?PROVIDER_OBSERVATION_PROTOCOL.runtime:undefined;
-  const descriptor={verifier:verificationLevel(check)==='behavior'?'capivara-verification/5':'capivara-verification/4',providerObservation,browserProtocol:ambiguousBrowserCommand(check)?'declared-interface/1':undefined,assertionContract:verificationAssertionStatus(check).status==='invalid'?'strict-invalid/1':undefined,check,requirements,contracts,constraints:brief?.constraints,environment:plan.environment.filter(node=>task.environmentIds.includes(node.id)),operational:environmentRevision,platform:process.platform,node:process.version,references:brief?taskReferences(brief,task):[]};
+  const runtimeProtocol=runtimeClaim?(operational?await runtimeObservationProtocol(workspace,check,operational):PROVIDER_OBSERVATION_PROTOCOL.runtime):undefined;
+  const providerObservation=consumptionNeeded?{consumptions:PROVIDER_OBSERVATION_PROTOCOL.consumptions,processes:PROVIDER_OBSERVATION_PROTOCOL.processes,...(moduleClaim?{modules:PROVIDER_OBSERVATION_PROTOCOL.modules}:{}),...(runtimeClaim?{runtime:runtimeProtocol}:{}),...(verificationLevel(check)==='build'&&check.conformanceClaims?.length?{writes:PROVIDER_OBSERVATION_PROTOCOL.writes}:{})}:runtimeProtocol;
+  let invocationProtocol:string|undefined;
+  if(check.command&&check.args&&(literalInvocationArguments(check.command)?.length??0)>1){
+    try{if((await normalizeCommandInvocation({cwd:recipeCwd(workspace,check.cwd),command:[check.command,...check.args],environment:operational?.env??{}})).transformation)invocationProtocol='literal-argv/1';}
+    catch(error){if(error instanceof InvocationDeclarationError)invocationProtocol='literal-argv/1';else throw error;}
+  }
+  const descriptor={verifier:verificationLevel(check)==='behavior'?'capivara-verification/5':'capivara-verification/4',providerObservation,invocationProtocol,browserProtocol:check.kind==='web'&&verificationLevel(check)==='behavior'?'observed-page-interaction/1':ambiguousBrowserCommand(check)?'declared-interface/1':undefined,nativeProtocol:check.kind==='desktop'?'native-observer-unavailable/1':undefined,assertionContract:verificationAssertionStatus(check).status==='invalid'?'strict-invalid/1':undefined,check,requirements,contracts,constraints:brief?.constraints,environment:plan.environment.filter(node=>task.environmentIds.includes(node.id)),operational:environmentRevision,platform:process.platform,node:process.version,references:brief?taskReferences(brief,task):[]};
   const fingerprint=(description:unknown):string=>digest(JSON.stringify({description:JSON.stringify(description),inputs:snapshot}));
   const {expected:_criterion,assertion:_assertion,assertionIssue:_assertionIssue,...execution}=check;
   return{inputHash:fingerprint(descriptor),observationHash:fingerprint({...descriptor,assertionContract:undefined,check:execution}),inputs,...(environmentRevision?{environmentRevision}:{})};
@@ -184,7 +225,7 @@ export function evaluateVerificationAssertion(check:Pick<Verification,'assertion
 }
 /** JSON transport for assertion recovery; raw output remains distinct from the criterion. */
 export function verificationObservation(result:CommandResult):VerificationObservation{
-  return{command:result.command,stdout:result.stdout,stderr:result.stderr,exitCode:result.exitCode,cancelled:result.cancelled,timedOut:result.timedOut,terminal:result.terminal===true,...(result.issue?{issue:structuredClone(result.issue)}:{})};
+  return{command:result.command,stdout:result.stdout,stderr:result.stderr,exitCode:result.exitCode,cancelled:result.cancelled,timedOut:result.timedOut,terminal:result.terminal===true,...(result.issue?{issue:structuredClone(result.issue)}:{}),...(result.invocationTransformation?{invocationTransformation:structuredClone(result.invocationTransformation)}:{})};
 }
 /** Kept for callers of the explicit legacy assertion syntax. */
 export function expectedResult(expected:string|undefined,result:CommandResult):EvaluatedVerificationAssertion{return evaluateVerificationAssertion(expected===undefined?{}:{expected},result);}
@@ -201,6 +242,7 @@ export interface RecordedObservationOptions { instrumentClassification?: { refer
  * an unclassified product failure. The original evidence and its transcript stay
  * intact; a separate proof explicitly links to the recorded observation. */
 export function evaluateRecordedObservation(check:Verification,recorded:VerificationEvidence,identity:VerificationIdentity,options:RecordedObservationOptions={}):VerificationOutcome|undefined{
+  if(!interfaceEvidenceUsable(check,recorded))return undefined;
   const observation=recorded.observation;
   if(!observation||!recorded.observationHash||recorded.observationHash!==identity.observationHash||recorded.inputHash===identity.inputHash)return undefined;
   if(observation.exitCode!==0||observation.issue||observation.cancelled||observation.timedOut)return undefined;
@@ -222,6 +264,7 @@ export function evaluateRecordedObservation(check:Verification,recorded:Verifica
 export async function runVerification(workspace:string,brief:ProductBrief,task:WorkUnit,plan:DevelopmentPlan,check:Verification,execute:CommandExecutor,terminal:(request:TerminalRequest)=>Promise<CommandResult>,options:{signal?:AbortSignal;allowSystemInstall?:boolean;onEvent?:(event:ProgressEvent)=>void;operational?:OperationalEnvironment;instrument?:ReviewFailureContext;preparationFailure?:string;identity?:VerificationIdentity}={}):Promise<VerificationOutcome>{
   const progress={id:`verification:${task.id}:${check.id}`,label:`${task.id}: ${check.id}`,stage:'build'};
   const finish=(result:CommandResult|null,classification:VerificationFailureClass|null):VerificationOutcome=>{
+    if(evidence.passed)delete evidence.instrumentSyntaxChecked;
     if(classification)evidence.classification=classification;
     emitProgress(options.onEvent,{...progress,status:evidence.passed?'complete':'waiting'});
     return{evidence,result,classification,needsInstrument:classification!==null&&classification!=='product',...(evidence.assertionStatus?{assertionStatus:evidence.assertionStatus,assertionPending:classification==='instrument'&&(evidence.assertionStatus==='missing'||evidence.assertionStatus==='invalid')}:{})};
@@ -241,28 +284,70 @@ export async function runVerification(workspace:string,brief:ProductBrief,task:W
   }
   if(!check.command){evidence.output='No executable recipe exists for this proof. Recover an instrument for the requested behavior.';return finish(null,'instrument');}
   if(check.kind==='desktop'&&!nativeTargetAvailable(check)){evidence.output='The declared target requires a compatible native runner. Independent work can continue, but this interaction is not proved.';return finish(null,'environment');}
+  if(check.kind==='desktop'){
+    evidence.output=`The native desktop interaction was NOT evaluated: the current executor has command and terminal instruments but no trusted native-window observation adapter. A printed report, process exit or successful build cannot certify native interaction. Preserve independent source and mechanical proofs; desktop acceptance remains unresolved.\nInterface observation contract: ${JSON.stringify(DESKTOP_OBSERVATION_CONTRACT)}`;
+    return finish(null,'instrument');
+  }
   if(check.kind==='tui'&&(!terminalInteraction(check)||!check.expected&&!check.assertion)){evidence.output='Interactive terminal proof needs an observed ready screen, input and a newly observed state. Recover the recipe without changing the product.';return finish(null,'instrument');}
   if(['desktop','web'].includes(check.kind)&&preparationOnly(check)){evidence.output='Compilation, installation or process status does not exercise application interaction.';return finish(null,'instrument');}
-  const request:CommandRequest=applyOperationalEnvironment({cwd:recipeCwd(workspace,check.cwd),command:check.args?[check.command,...check.args]:check.command,constraints:executionConstraints(brief,options.allowSystemInstall),capabilities:check.requiredCapabilities,inputs,...(check.kind!=='tui'&&check.input?{input:check.input.join('')}:{}),...(check.timeoutMs?{timeoutMs:check.timeoutMs}:{}),...(options.signal?{signal:options.signal}:{})},options.operational);
+  let request:CommandRequest={cwd:recipeCwd(workspace,check.cwd),command:check.args?[check.command,...check.args]:check.command,constraints:executionConstraints(brief,options.allowSystemInstall),capabilities:check.requiredCapabilities,inputs,...(check.kind!=='tui'&&check.input?{input:check.input.join('')}:{}),...(check.timeoutMs?{timeoutMs:check.timeoutMs}:{}),...(options.signal?{signal:options.signal}:{})};
+  let invocationTransformation:CommandResult['invocationTransformation'];
+  if(typeof request.command!=='string'){
+    try{
+      const normalized=await normalizeCommandInvocation({...request,environment:options.operational?.env??{}});
+      if(normalized.transformation){request.command=[normalized.binary,...normalized.args];invocationTransformation=normalized.transformation;}
+    }catch(error){
+      if(!(error instanceof InvocationDeclarationError))throw error;
+      evidence.output=`The product was NOT executed. Its verification invocation has conflicting or invalid executable/argv declarations. Recover the instrument without editing the product.\n${error.message}`;
+      return finish(null,'instrument');
+    }
+  }
+  request=applyOperationalEnvironment(request,options.operational);
+  if(check.kind!=='cli'&&check.kind!=='tui'&&inlineNodeSyntaxCandidate(request.command)){
+    const syntax=await checkInlineNodeSyntax(request,execute,options.operational?.revision);
+    if(syntax)evidence.instrumentSyntaxChecked={protocol:'inline-node-syntax/1',identity:syntax.identity,passed:syntax.result.exitCode===0&&!syntax.result.issue&&!syntax.result.cancelled&&!syntax.result.timedOut};
+    if(syntax&&(syntax.result.exitCode!==0||syntax.result.issue||syntax.result.cancelled||syntax.result.timedOut)){
+      evidence.output=`The product was NOT executed. The inline verification program failed its separate Node syntax probe; recover the instrument without editing product code.\nSyntax probe identity: ${syntax.identity}\nSyntax probe command: ${syntax.result.command}\nExit code: ${syntax.result.exitCode}\nSTDOUT:\n${syntax.result.stdout}\nSTDERR:\n${syntax.result.stderr}`;
+      return finish(null,'instrument');
+    }
+  }
   const observedCheck={...check,inputs:check.inputs??task.inputs??task.files};
   const observation=await beginConformanceObservation(workspace,observedCheck,typeof request.command==='string'?request.command:[...request.command],request.cwd);
   const providerObservation=options.operational?await startProviderObservation(workspace,observedCheck,{...options.operational,env:{...options.operational.env,...request.environment}}):undefined;
   if(providerObservation?.enabled)request.environment={...request.environment,...providerObservation.environment};
-  let result:CommandResult,witnesses:ProviderWitness[]=[],moduleWitnesses:ModuleProviderWitness[]=[],consumptions:ProviderConsumption[]=[],processes:ProviderProcessWitness[]=[];
+  let browserObservation:Awaited<ReturnType<typeof startBrowserObservation>>|undefined;
+  try{if(check.kind==='web'&&evidence.level==='behavior')browserObservation=await startBrowserObservation(workspace,request.environment);}
+  catch(error){
+    try{await providerObservation?.cleanup();}catch{/* Both instrument failures are recoverable; no product claim was executed. */}
+    evidence.output=`Browser observation could not be prepared: ${error instanceof Error?error.message:String(error)}. Product behavior was not evaluated.\nInterface observation contract: ${JSON.stringify(BROWSER_OBSERVATION_CONTRACT)}`;
+    return finish(null,'instrument');
+  }
+  if(browserObservation)request.environment={...request.environment,...browserObservation.environment};
+  let result:CommandResult,witnesses:ProviderWitness[]=[],moduleWitnesses:ModuleProviderWitness[]=[],consumptions:ProviderConsumption[]=[],processes:ProviderProcessWitness[]=[],writes:ProviderWrite[]=[];
   try{result=check.kind==='tui'?await terminal({...request,steps:check.steps??[],closeInput:check.closeInput??'\u0003'}):await execute(request);}
   finally{if(providerObservation){
-    try{witnesses=await providerObservation.finish();moduleWitnesses=await providerObservation.finishModules?.()??[];consumptions=await providerObservation.finishConsumptions?.()??[];processes=await providerObservation.finishProcesses?.()??[];}
+    try{witnesses=await providerObservation.finish();moduleWitnesses=await providerObservation.finishModules?.()??[];consumptions=await providerObservation.finishConsumptions?.()??[];processes=await providerObservation.finishProcesses?.()??[];writes=await providerObservation.finishWrites?.()??[];}
     catch(error){providerObservation.diagnostics.push(`Provider observation could not be read: ${error instanceof Error?error.message:String(error)}`);}
     finally{try{await providerObservation.cleanup();}catch(error){providerObservation.diagnostics.push(`Provider observation cleanup failed: ${error instanceof Error?error.message:String(error)}`);}}
+  }
+  if(browserObservation){
+    let browserWitnesses:Awaited<ReturnType<typeof browserObservation.finish>>=[];
+    try{browserWitnesses=await browserObservation.finish();}
+    catch(error){browserObservation.diagnostics.push(`Browser observation could not be read: ${error instanceof Error?error.message:String(error)}`);}
+    finally{try{await browserObservation.cleanup();}catch(error){browserObservation.diagnostics.push(`Browser observation cleanup failed: ${error instanceof Error?error.message:String(error)}`);}}
+    evidence.browserObservation={schema:'capivara/browser-interaction/1',witnesses:browserWitnesses,diagnostics:[...browserObservation.diagnostics]};
   }}
+  if(invocationTransformation)result.invocationTransformation=invocationTransformation;
   evidence.provenance=await finishConformanceObservation(observation,check,result);
   if(witnesses.length)evidence.provenance.runtimeWitnesses=witnesses;
   if(moduleWitnesses.length)evidence.provenance.moduleWitnesses=moduleWitnesses;
   if(consumptions.length)evidence.provenance.consumptions=consumptions;
   if(processes.length)evidence.provenance.processes=processes;
+  if(writes.length)evidence.provenance.generatedArtifacts=writes;
   if(providerObservation){
     evidence.provenance.runtimeObservation={enabled:providerObservation.enabled,...(providerObservation.reason?{reason:providerObservation.reason}:{}),diagnostics:[...providerObservation.diagnostics]};
     if(providerObservation.runtimeProvider)evidence.provenance.runtimeProvider=structuredClone(providerObservation.runtimeProvider);
+    if(providerObservation.runtimeProviders)evidence.provenance.runtimeProviders=structuredClone(providerObservation.runtimeProviders);
     if(providerObservation.moduleProviders)evidence.provenance.moduleProviders=structuredClone(providerObservation.moduleProviders);
   }
   evidence.observation=verificationObservation(result);
@@ -270,6 +355,7 @@ export async function runVerification(workspace:string,brief:ProductBrief,task:W
   evidence.command=result.command;evidence.terminal=result.terminal===true;
   evidence.output=`Command: ${result.command}\nExit code: ${result.exitCode}${result.timedOut?' (timed out)':''}${result.cancelled?' (cancelled)':''}\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}`;
   if(result.issue)evidence.output+=`\nRuntime issue (${result.issue.kind}): ${result.issue.message}`;
+  if(evidence.browserObservation)evidence.output+=`\nObserved browser interface: ${browserObservationSummary(evidence.browserObservation)}`;
   const assertion=evaluateVerificationAssertion(check,result);
   evidence.assertionStatus=assertion.status==='passed'?'ready':assertion.status;
   const expectedExit=check.expectedExitCode??(assertion.assertion?.type==='exit'?assertion.assertion.value:undefined)??0;
@@ -278,6 +364,13 @@ export async function runVerification(workspace:string,brief:ProductBrief,task:W
   const commandOkay=(result.exitCode===expectedExit||terminalClosed)&&!result.timedOut&&!result.cancelled&&!result.issue;
   const observed=!assertion.instrument&&(evidence.level==='behavior'?assertion.passed===true:assertion.passed!==false);
   evidence.passed=commandOkay&&observed&&(check.kind!=='tui'||result.terminal===true);
+  if(!interfaceEvidenceUsable(check,evidence)){
+    evidence.passed=false;
+    const browserWitnesses=evidence.browserObservation?.witnesses??[];
+    if(!commandOkay&&browserInteractionAttempted(browserWitnesses))return finish(result,browserWitnesses.some(witness=>witness.phase==='launch'&&witness.status==='failed')?'environment':classifyVerificationFailure(result,options.instrument));
+    evidence.output+=`\nBrowser interaction: no completed browser session, page navigation and page observation/action were recorded by a compatible interface instrument. The original command observation is preserved.\nInterface observation contract: ${JSON.stringify(BROWSER_OBSERVATION_CONTRACT)}`;
+    return finish(result,'instrument');
+  }
   if(evidence.passed)return finish(result,null);
   if(!commandOkay)return finish(result,classifyVerificationFailure(result,options.instrument));
   // A missing predicate is an unresolved assertion over a retained observation,

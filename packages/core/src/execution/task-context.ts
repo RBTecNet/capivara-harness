@@ -33,9 +33,13 @@ function focusAt(workspace: string, value: string): Focus {
 }
 function block(source: Source, content = ''): string {
   const receipt = source.coverage;
-  return `SOURCE ${JSON.stringify(receipt)}\n${content ? `${content}\nEND SOURCE ${receipt.path}\n` : 'No source text supplied for this file. This is a context limitation, not evidence that code is absent or defective.\n'}`;
+  // The shared delivery guidance already explains omission. Repeating that
+  // paragraph and the same reason for every indexed file can overflow a unit
+  // whose complete obligations fit; retain every receipt and its real ranges.
+  const {reason,...identity}=receipt;
+  return `SOURCE ${JSON.stringify(receipt.status==='omitted'?identity:receipt)}\n${content ? `${content}\nEND SOURCE ${receipt.path}\n` : ''}`;
 }
-const guidance = 'SOURCE DELIVERY: Each SOURCE header records the full-file hash, size and exact coverage. complete=false means omitted source remains available on disk. Absence from this context is not absence from the product. Request the named file/range or inspect it before alleging a defect outside supplied coverage.\n';
+const guidance = 'SOURCE DELIVERY: Each SOURCE header records the full-file hash, size and exact coverage. complete=false means omitted source remains available on disk, not evidence that code is absent or defective. Request the named file/range or inspect it before alleging a defect outside supplied coverage.\n';
 
 /** Assemble facts and actual source against one global budget. Never hide a
  * per-file cut or a final string.slice behind an apparently complete FILE label. */

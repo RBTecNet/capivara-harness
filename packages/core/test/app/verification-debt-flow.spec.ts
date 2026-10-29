@@ -42,7 +42,9 @@ it.each(['cli','web'] as const)('keeps fresh %s planning independent of executab
   // A plan reconciliation previously marked every affected unit "checking",
   // including units whose editor had never run. That label is not saved work.
   const state=createBuildState(planned.plan!);
-  state.tasks.health={status:'checking',revision:'',attempts:0,changedFiles:[],findings:[],strategy:'reconcile-existing-work',actions:[],reviews:[]};
+  // Legacy context overflow incremented attempts before an agent was called.
+  // That counter alone must not suppress the actual first implementation.
+  state.tasks.health={status:'checking',revision:'',attempts:1,changedFiles:[],findings:[],strategy:'reconcile-existing-work',actions:[],reviews:[]};
   state.pendingReplans={health:{id:'missing-earlier-instrument',kind:'instrument',subject:'health',message:'The earlier recipe was unavailable.',evidence:'No command existed before implementation.',action:'Recover the proof contract.',external:false,repairScope:'verification'}};
   const result=await runBuild({workspace,brief:planned.brief!,plan:planned.plan!,state,agent});
   expect(editors).toBe(1);expect(technical).toBe(3);

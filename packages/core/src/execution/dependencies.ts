@@ -2,7 +2,7 @@ import { readFile, stat, realpath } from 'node:fs/promises';
 import { createRequire, isBuiltin } from 'node:module';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, matchesGlob } from 'node:path';
 import type { DevelopmentPlan, Verification, WorkUnit } from '../domain/types.js';
-import { verificationOutputs } from '../domain/verifications.js';
+import { verificationConformanceClaims, verificationOutputs } from '../domain/verifications.js';
 import { inside, sourceFiles } from './files.js';
 
 export const DEPENDENCY_MANIFESTS:Record<string,string[]>={
@@ -77,7 +77,7 @@ export function declaredTaskInputs(_plan:DevelopmentPlan,task:WorkUnit):string[]
 export function declaredCheckInputs(plan:DevelopmentPlan,task:WorkUnit,check:Verification):string[]{
   const outputs=verificationOutputs(check);
   const explicit=check.inputs??declaredTaskInputs(plan,task);
-  return [...new Set([...explicit,...(check.inputs===undefined?outputs.map(output=>`!${output}`):[])])];
+  return [...new Set([...explicit,...verificationConformanceClaims(check).flatMap(claim=>[...claim.productInputs,...claim.providerInputs??[]]),...(check.conformanceInstrumentInputs??[]),...(check.inputs===undefined?outputs.map(output=>`!${output}`):[])])];
 }
 /** Parse only literal argv. Compound shell programs require explicit read sets. */
 function inputArguments(check:Verification):string[]|undefined{

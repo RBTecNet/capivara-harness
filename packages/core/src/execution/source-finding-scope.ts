@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { identity } from '../domain/authority.js';
-import { criterionIdentity, preferredProofOwner, taskDependsOn } from '../domain/contribution.js';
+import { criterionIdentity, taskDependsOn } from '../domain/contribution.js';
 import type { DevelopmentPlan, ProductBrief, Requirement, Source, WorkUnit } from '../domain/types.js';
 import type { ReviewAssessment, ReviewFinding } from './review.js';
 
@@ -42,9 +42,8 @@ export async function validateFindingDeferral(workspace: string, brief: ProductB
   const owner = plan.tasks.find(candidate => candidate.id === finding.deferToTaskId);
   if (!requirement || !task.requirementIds.includes(requirement.id) || !owner?.requirementIds.includes(requirement.id)) return reject('The active requirement must be owned by both the current contribution and the destination.');
   if (owner.id === task.id || !taskDependsOn(plan, owner, task.id)) return reject('The destination must transitively depend on the current contribution.');
-  if (preferredProofOwner(plan, requirement.id)?.id !== owner.id) return reject('The destination is not the current final proof owner of this requirement.');
   if (!await sourceIsCurrent(workspace, brief, requirement)) return reject('The requirement has no current literal source supporting this handoff.');
-  return { valid: true, reason: 'The explicit integration finding belongs to the later final owner of this same literal requirement. A criterion reference identifies its origin; the local criterion remains unchanged and required in this unit.', ownerTaskId: owner.id, requirementId: requirement.id, source: structuredClone(requirement.source) };
+  return { valid: true, reason: 'The explicit integration finding is assigned to a concrete downstream owner of this same literal requirement. A criterion reference identifies its origin; the local criterion remains unchanged and required in this unit.', ownerTaskId: owner.id, requirementId: requirement.id, source: structuredClone(requirement.source) };
 }
 
 /** Classification preserves the defect and its literal obligation in a durable

@@ -37,6 +37,8 @@ export interface RuntimeIssue {
   message: string;
   retryAfterMs?: number;
   recoverable: boolean;
+  /** Original OS/Node failure code retained for causal recovery. */
+  code?: string;
 }
 
 export interface Usage {
@@ -72,6 +74,13 @@ export interface CommandRequest {
   };
 }
 
+export interface InvocationTransformation {
+  schema: 'capivara/invocation/1';
+  original: string[];
+  resolved: string[];
+  reason: 'duplicate-literal-arguments' | 'literal-executable-and-arguments';
+}
+
 export interface CommandResult {
   command: string;
   cwd: string;
@@ -86,6 +95,8 @@ export interface CommandResult {
   /** Whether the actual execution used a pseudoterminal. */
   terminal?: boolean;
   issue?: RuntimeIssue;
+  /** Declaration reconciliation only; it is not proof of product behavior. */
+  invocationTransformation?: InvocationTransformation;
 }
 
 export interface TerminalStep {

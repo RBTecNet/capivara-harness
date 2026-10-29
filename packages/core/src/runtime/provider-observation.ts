@@ -10,10 +10,10 @@ import { executeCommand } from './command.js';
 
 /** Mechanical observation identity. These versions describe executable
  * instruments, independently from model prompts, inspection and user criteria. */
-export const PROVIDER_OBSERVATION_PROTOCOL={runtime:'node-load-hook/2',modules:'provider-module-import/2',consumptions:'bounded-file-consumption/2',processes:'loaded-provider-entrypoint/1'} as const;
+export const PROVIDER_OBSERVATION_PROTOCOL={runtime:'node-load-hook/2',runtimePython:'python-runtime-load/1',modules:'provider-module-import/2',consumptions:'bounded-file-consumption/2',processes:'loaded-provider-entrypoint/1',writes:'observed-provider-write/1'} as const;
 
 export interface ProviderWitness {
-  source: 'node-load-hook';
+  source: 'node-load-hook'|'python-profile-hook';
   execPath: string;
   argv: string[];
   execArgv: string[];
@@ -22,13 +22,16 @@ export interface ProviderWitness {
   /** Hashes have the same content/mode representation as inputSnapshot. Only loaded claimed files appear. */
   inputs: Record<string,string>;
   entryPoint?: string;
+  version?:string;
 }
 export interface NativeNodeResolution {
   execPath:string;
   nativeFingerprint:string;
   launcher:{path:string;fingerprint:string;shebang?:string;interpreter:string[]};
+  version?:string;
 }
 export interface RuntimeProviderReceipt extends NativeNodeResolution {
+  protocol?:'node'|'python';
   capability:string;
   kind:'runtime';
   provider:string;
@@ -69,8 +72,12 @@ export interface ProviderProcessWitness {
   protocol:ProviderModule['protocol'];execPath:string;nativeFingerprint:string;argv:string[];execArgv:string[];pid:number;observedAt:string;cwd?:string;
   entryPoint:{path:string;hash:string};
 }
+export interface ProviderWrite {
+  path:string;hash:string;execPath:string;nativeFingerprint:string;pid:number;observedAt:string;
+}
 export interface ProviderObservation {
   runtimeProvider?:RuntimeProviderReceipt;
+  runtimeProviders?:RuntimeProviderReceipt[];
   moduleProviders?:ModuleProviderReceipt[];
   enabled: boolean;
   environment: Record<string,string>;
@@ -80,6 +87,7 @@ export interface ProviderObservation {
   finishModules?():Promise<ModuleProviderWitness[]>;
   finishConsumptions?():Promise<ProviderConsumption[]>;
   finishProcesses?():Promise<ProviderProcessWitness[]>;
+  finishWrites?():Promise<ProviderWrite[]>;
   cleanup(): Promise<void>;
 }
 const executableFingerprints=new Map<string,{stamp:string;fingerprint:string}>();
@@ -146,13 +154,27 @@ export async function resolveNativeNode(cwd:string,bindingCommand:readonly strin
 export async function resolveModuleHost(cwd:string,module:ProviderModule,environment:Record<string,string>):Promise<NativeNodeResolution|undefined>{
   if(module.protocol==='node')return resolveNativeNode(cwd,module.runtimeCommand,environment);
   const launcher=module.runtimeCommand[0]&&await executable(module.runtimeCommand[0],cwd,environment);if(!launcher)return undefined;
-  const probe=await executeCommand({cwd,command:[...module.runtimeCommand,'-c','import sys,json;print("CAPIVARA_MODULE_HOST="+json.dumps({"protocol":"python","execPath":sys.executable,"audit":hasattr(sys,"addaudithook"),"profile":hasattr(sys,"setprofile")}))'],environment,timeoutMs:3000,inputs:[]});
+  const probe=await executeCommand({cwd,command:[...module.runtimeCommand,'-c','import sys,json;print("CAPIVARA_MODULE_HOST="+json.dumps({"protocol":"python","execPath":sys.executable,"version":sys.version,"audit":hasattr(sys,"addaudithook"),"profile":hasattr(sys,"setprofile")}))'],environment,timeoutMs:3000,inputs:[]});
   if(probe.exitCode!==0||probe.issue||probe.cancelled||probe.timedOut)return undefined;
-  let identity:{protocol?:unknown;execPath?:unknown;audit?:unknown;profile?:unknown};
+  let identity:{protocol?:unknown;execPath?:unknown;version?:unknown;audit?:unknown;profile?:unknown};
   try{identity=JSON.parse(probe.stdout.split('\n').findLast(line=>line.startsWith('CAPIVARA_MODULE_HOST='))?.slice('CAPIVARA_MODULE_HOST='.length)??'null') as typeof identity;}catch{return undefined;}
-  if(!identity||identity.protocol!=='python'||typeof identity.execPath!=='string'||identity.audit!==true||identity.profile!==true)return undefined;
+  if(!identity||identity.protocol!=='python'||typeof identity.execPath!=='string'||typeof identity.version!=='string'||identity.audit!==true||identity.profile!==true)return undefined;
   const native=await realpath(identity.execPath).catch(()=>undefined);if(!native)return undefined;
-  return{execPath:native,nativeFingerprint:await fileFingerprint(native),launcher:{path:launcher,fingerprint:await fileFingerprint(launcher),interpreter:[native,...module.runtimeCommand.slice(1)]}};
+  return{execPath:native,nativeFingerprint:await fileFingerprint(native),version:identity.version,launcher:{path:launcher,fingerprint:await fileFingerprint(launcher),interpreter:[native,...module.runtimeCommand.slice(1)]}};
+}
+/** Select an instrument by the actual executable protocol, never by a provider
+ * label or guessed binary name. Existing Node identities remain unchanged. */
+export async function runtimeObservationProtocol(workspace:string,check:Verification,operational:OperationalEnvironment):Promise<string|undefined>{
+  const claims=[...(check.conformance?[check.conformance]:[]),...((check as Verification&{conformanceClaims?:NonNullable<Verification['conformance']>[]}).conformanceClaims??[])].filter(claim=>claim.kind==='runtime');
+  const protocols=new Set<string>(),probes=new Map<string,Promise<string|undefined>>(),cwd=resolve(workspace,check.cwd??'.');
+  for(const claim of claims){
+    const binding=Object.values(operational.bindings).find(item=>item.ready&&item.capability===claim.capability&&item.kind===claim.kind&&item.provider===claim.provider);
+    if(!binding?.command?.length)continue;
+    const key=JSON.stringify(binding.command);let probe=probes.get(key);
+    if(!probe){probe=(async()=>await resolveNativeNode(cwd,binding.command!,operational.env).catch(()=>undefined)?PROVIDER_OBSERVATION_PROTOCOL.runtime:await resolveModuleHost(cwd,{protocol:'python',specifier:'',runtimeCommand:binding.command!},operational.env).catch(()=>undefined)?PROVIDER_OBSERVATION_PROTOCOL.runtimePython:undefined)();probes.set(key,probe);}
+    const protocol=await probe;if(protocol)protocols.add(protocol);
+  }
+  return protocols.size?[...protocols].sort().join('+'):undefined;
 }
 /** A legacy readiness probe may declare one literal module. Multiple imports,
  * computed specifiers and shell recipes need an explicit modules declaration. */
@@ -240,6 +262,16 @@ export async function providerConsumptionCurrent(workspace:string,observedWorksp
     return await fileFingerprint(resolve(workspace,consumption.path))===expectedHash;
   }catch{return false;}
 }
+export async function providerWriteCurrent(workspace:string,observedWorkspace:string,write:ProviderWrite):Promise<boolean>{
+  if(isAbsolute(write.path)||!write.path||write.path.includes('\0'))return false;
+  const logical=relative(resolve(observedWorkspace),resolve(observedWorkspace,write.path)).replaceAll('\\','/');
+  if(!logical||logical==='..'||logical.startsWith('../')||isAbsolute(logical)||['.git','.capivara-next','.capivara-runtime','.capivara-verification','node_modules'].includes(logical.split('/')[0]!))return false;
+  try{
+    const root=await realpath(workspace),actual=await realpath(resolve(workspace,logical)),local=relative(root,actual);
+    if(!local||local==='..'||local.startsWith('../')||local.startsWith('..\\')||isAbsolute(local))return false;
+    return await fileFingerprint(write.execPath)===write.nativeFingerprint&&await fileFingerprint(actual)===write.hash;
+  }catch{return false;}
+}
 export async function resolveProviderProgram(cwd:string,command:readonly string[],environment:Record<string,string>):Promise<{path:string;hash:string;arguments:string[]}|undefined>{
   let target=[...command];
   const name=(target[0]??'').replaceAll('\\','/').split('/').at(-1)?.replace(/\.(?:cmd|exe)$/i,'');
@@ -310,6 +342,26 @@ const fileReadPreload=String.raw`
   fs.readFile=function(...args){const callback=args.pop(),input=args[0],options=args[1];if(typeof callback!=='function')return originalCallbackRead(...args,callback);return originalCallbackRead(...args,(error,data)=>{if(!error)recordRead(input,data,options);callback(error,data);});};
   fsp.readFile=async function(input,options){const data=await originalAsyncRead(input,options);recordRead(input,data,options);return data;};
   fs.createReadStream=function(input,options){const stream=originalStream(input,options);if(selectedRead(input)){const chunks=[],push=stream.push;stream.push=function(chunk,encoding){if(chunk!==null)chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk,encoding||options?.encoding||'utf8'));else recordRead(input,Buffer.concat(chunks),undefined);return Reflect.apply(push,this,arguments);};}return stream;};
+  Module.syncBuiltinESMExports();
+`;
+const fileWritePreload=String.raw`
+  const written=new Map();
+  const writtenPath=input=>{try{
+    const file=input instanceof URL?url.fileURLToPath(input):typeof input==='string'?input:null;if(!file)return;
+    const actual=fs.realpathSync(file),local=path.relative(config.workspace,actual).replaceAll('\\','/');
+    if(!local||local==='..'||local.startsWith('../')||path.isAbsolute(local)||['.git','.capivara-next','.capivara-runtime','.capivara-verification','node_modules'].includes(local.split('/')[0])||!fs.statSync(actual).isFile())return;
+    return {actual,local};
+  }catch{}};
+  const recordWrite=input=>{const file=writtenPath(input);if(!file||written.size>=2048&&!written.has(file.local))return;try{
+    const value=hash(file.actual);if(written.get(file.local)===value)return;written.set(file.local,value);
+    append({type:'write',path:file.local,hash:value,observedAt:new Date().toISOString()});
+  }catch(error){append({type:'instrument-error',message:String(error)});}};
+  for(const name of ['writeFileSync','appendFileSync']){const original=fs[name];fs[name]=function(input,...args){const result=Reflect.apply(original,this,[input,...args]);recordWrite(input);return result;};}
+  for(const name of ['writeFile','appendFile']){
+    const original=fs[name];fs[name]=function(input,...args){const callback=args.pop();if(typeof callback!=='function')return Reflect.apply(original,this,[input,...args,callback]);return Reflect.apply(original,this,[input,...args,(error,...values)=>{if(!error)recordWrite(input);callback(error,...values);}]);};
+    const promise=fsp[name];fsp[name]=async function(input,...args){const result=await Reflect.apply(promise,this,[input,...args]);recordWrite(input);return result;};
+  }
+  const originalWriteStream=fs.createWriteStream;fs.createWriteStream=function(input,...args){const stream=Reflect.apply(originalWriteStream,this,[input,...args]);stream.once('finish',()=>recordWrite(input));return stream;};
   Module.syncBuiltinESMExports();
 `;
 const modulePreload=String.raw`'use strict';
@@ -385,6 +437,7 @@ const modulePreload=String.raw`'use strict';
     return result;
   };
   __CAPIVARA_FILE_READ_OBSERVATION__
+  __CAPIVARA_FILE_WRITE_OBSERVATION__
 })();
 `;
 const pythonPreload=String.raw`import sys,os,json,hashlib,uuid,atexit,builtins,base64
@@ -394,6 +447,7 @@ _cv_imported=set()
 _cv_inputs={}
 _cv_seen={}
 _cv_reads={}
+_cv_writes={}
 _cv_importers={}
 _cv_internal=0
 _cv_entrypoint=None
@@ -412,6 +466,14 @@ def _cv_hash(file):
 def _cv_profile(frame,event,arg):
     global _cv_entrypoint
     if _cv_internal: return
+    if event=='c_return' and getattr(arg,'__name__','') in ('write','writelines'):
+        name=getattr(getattr(arg,'__self__',None),'name',None)
+        if isinstance(name,str):
+            try:
+                file=os.path.realpath(name)
+                local=os.path.relpath(file,_cv_config['workspace']).replace(os.sep,'/')
+                if local not in ('.','..') and not local.startswith('../') and local.split('/')[0] not in ('.git','.capivara-next','.capivara-runtime','.capivara-verification','node_modules') and (len(_cv_writes)<2048 or local in _cv_writes): _cv_writes[local]=file
+            except Exception as error: _cv_diagnostics.append(str(error))
     if event=='c_return' and getattr(arg,'__name__','') in ('read','read1','readall','readline','readlines','readinto','readinto1'):
         name=getattr(getattr(arg,'__self__',None),'name',None)
         if isinstance(name,str):
@@ -476,7 +538,12 @@ def _cv_finish():
             elif isinstance(origin,str) and os.path.isfile(origin):
                 file=os.path.realpath(origin)
                 modules.append({'specifier':specifier,'origin':file,'hash':_cv_hash(file),'importedBy':_cv_importers.get(specifier,{})})
-        record={'type':'witness','source':'python-audit-hook','protocol':'python','execPath':os.path.realpath(sys.executable),'argv':getattr(sys,'orig_argv',sys.argv),'execArgv':[],'cwd':_cv_cwd,'pid':os.getpid(),'observedAt':_cv_now,'inputs':_cv_inputs,'modules':modules,'reads':_cv_reads,'entryPoint':_cv_entrypoint,'diagnostics':_cv_diagnostics}
+        writes={}
+        for local,file in list(_cv_writes.items()):
+            try:
+                if os.path.isfile(file): writes[local]=_cv_hash(file)
+            except Exception as error: _cv_diagnostics.append(str(error))
+        record={'type':'witness','source':'python-audit-hook','protocol':'python','execPath':os.path.realpath(sys.executable),'version':sys.version,'argv':getattr(sys,'orig_argv',sys.argv),'execArgv':[],'cwd':_cv_cwd,'pid':os.getpid(),'observedAt':_cv_now,'inputs':_cv_inputs,'modules':modules,'reads':_cv_reads,'writes':writes,'entryPoint':_cv_entrypoint,'diagnostics':_cv_diagnostics}
         path=os.path.join(_cv_config['output'],'process-'+str(os.getpid())+'-'+str(uuid.uuid4())+'.jsonl')
         descriptor=os.open(path,os.O_CREAT|os.O_WRONLY|os.O_EXCL,0o600)
         with os.fdopen(descriptor,'w') as stream: stream.write(json.dumps(record)+'\n')
@@ -499,8 +566,9 @@ async function startModuleObservation(workspace:string,check:Verification,operat
   }
   return observeProcesses(workspace,check,operational,receipts);
 }
-async function observeProcesses(workspace:string,check:Verification,operational:OperationalEnvironment,receipts:ModuleProviderReceipt[]=[]):Promise<ProviderObservation>{
-  const claim=check.conformance;
+async function observeProcesses(workspace:string,check:Verification,operational:OperationalEnvironment,receipts:ModuleProviderReceipt[]=[],runtimeSelection?:RuntimeProviderReceipt|RuntimeProviderReceipt[]):Promise<ProviderObservation>{
+  const claims=[...(check.conformance?[check.conformance]:[]),...((check as Verification&{conformanceClaims?:NonNullable<Verification['conformance']>[]}).conformanceClaims??[])];
+  const runtimeProviders=runtimeSelection?(Array.isArray(runtimeSelection)?runtimeSelection:[runtimeSelection]):[],runtimeProvider=runtimeProviders[0];
   const diagnostics:string[]=[];
   const observableFiles=async(selectors:readonly string[]):Promise<string[]>=>{
     try{return await sourceFiles(workspace,selectors);}catch{
@@ -513,21 +581,21 @@ async function observeProcesses(workspace:string,check:Verification,operational:
     }
   };
   const files:Record<string,string[]>={};
-  for(const file of await observableFiles(claim?.productInputs??[])){const absolute=await realpath(join(workspace,file));(files[absolute]??=[]).push(file);}
+  for(const file of await observableFiles([...new Set(claims.flatMap(claim=>claim.productInputs))])){const absolute=await realpath(join(workspace,file));(files[absolute]??=[]).push(file);}
   const reads:Record<string,string[]>={};
-  const selected=claim&&Object.values(operational.bindings).find(item=>item.ready&&item.capability===claim.capability&&item.kind===claim.kind&&item.provider===claim.provider);
+  const selected=Object.values(operational.bindings).filter(item=>item.ready&&claims.some(claim=>item.capability===claim.capability&&item.kind===claim.kind&&item.provider===claim.provider));
   const providerPrograms:string[]=[];
-  for(const argument of selected?.command??[]){
+  for(const argument of selected.flatMap(binding=>binding.command??[])){
     if(argument.startsWith('-'))continue;
     const absolute=resolve(workspace,argument),path=relative(resolve(workspace),absolute).replaceAll('\\','/');
     if(path==='..'||path.startsWith('../')||isAbsolute(path))continue;
     if((await stat(absolute).catch(()=>null))?.isFile())providerPrograms.push(path);
   }
-  for(const file of await observableFiles([...(check.inputs??[]),...(claim?.productInputs??[]),...(claim?.providerInputs??[]),...(selected?.inputs??[]),...providerPrograms])){
+  for(const file of await observableFiles([...(check.inputs??[]),...claims.flatMap(claim=>[...claim.productInputs,...claim.providerInputs??[]]),...selected.flatMap(binding=>binding.inputs??[]),...providerPrograms])){
     const lexical=resolve(workspace,file),absolute=await realpath(lexical);
     for(const path of new Set([lexical,absolute]))(reads[path]??=[]).push(file);
   }
-  for(const file of await resolveProviderModuleFiles(workspace,selected?.modules??[])){
+  for(const file of await resolveProviderModuleFiles(workspace,selected.flatMap(binding=>binding.modules??[]))){
     for(const path of new Set([resolve(workspace,file.logicalPath),file.path])){
       const aliases=reads[path]??=[];if(!aliases.includes(file.logicalPath))aliases.push(file.logicalPath);
     }
@@ -538,16 +606,38 @@ async function observeProcesses(workspace:string,check:Verification,operational:
   await mkdir(root,{recursive:true});const directory=await mkdtemp(join(root,'module-observation-'));
   const environment:Record<string,string>={};
   const node=receipts.filter(item=>item.protocol==='node'),python=receipts.filter(item=>item.protocol==='python');
-  if(node.length||!receipts.length){
-    const path=join(directory,'preload.cjs');await writeFile(path,modulePreload.replace('__CAPIVARA_OBSERVATION_CONFIG__',JSON.stringify({output:directory,files,reads,modules:node.map(item=>item.specifier)})).replace('__CAPIVARA_LITERAL_IMPORT_PARSER__',`(${literalProviderImports.toString()})`).replace('__CAPIVARA_FILE_READ_OBSERVATION__',fileReadPreload),{mode:0o600,flag:'wx'});
+  if(node.length||runtimeProviders.some(item=>item.protocol!=='python')||!receipts.length){
+    const path=join(directory,'preload.cjs');await writeFile(path,modulePreload.replace('__CAPIVARA_OBSERVATION_CONFIG__',JSON.stringify({output:directory,workspace:resolve(workspace),files,reads,modules:node.map(item=>item.specifier)})).replace('__CAPIVARA_LITERAL_IMPORT_PARSER__',`(${literalProviderImports.toString()})`).replace('__CAPIVARA_FILE_READ_OBSERVATION__',fileReadPreload).replace('__CAPIVARA_FILE_WRITE_OBSERVATION__',fileWritePreload),{mode:0o600,flag:'wx'});
     const inherited=operational.env.NODE_OPTIONS??process.env.NODE_OPTIONS??'';environment.NODE_OPTIONS=`${inherited}${inherited?' ':''}--require ${JSON.stringify(path)}`;
   }
-  if(python.length||!receipts.length){
-    await writeFile(join(directory,'sitecustomize.py'),pythonPreload.replace('__CAPIVARA_OBSERVATION_CONFIG__',JSON.stringify(Buffer.from(JSON.stringify({output:directory,files,reads,modules:python.map(item=>item.specifier)})).toString('base64'))),{mode:0o600,flag:'wx'});
+  if(python.length||runtimeProviders.some(item=>item.protocol==='python')||!receipts.length){
+    await writeFile(join(directory,'sitecustomize.py'),pythonPreload.replace('__CAPIVARA_OBSERVATION_CONFIG__',JSON.stringify(Buffer.from(JSON.stringify({output:directory,workspace:resolve(workspace),files,reads,modules:python.map(item=>item.specifier)})).toString('base64'))),{mode:0o600,flag:'wx'});
     const inherited=operational.env.PYTHONPATH??process.env.PYTHONPATH??'';environment.PYTHONPATH=`${directory}${inherited?delimiter+inherited:''}`;
     environment.PYTHONDONTWRITEBYTECODE='1';
   }
-  return{enabled:true,environment,diagnostics,moduleProviders:receipts,finish:async()=>[],finishModules:async()=>{
+  return{enabled:true,environment,diagnostics,moduleProviders:receipts,...(runtimeProvider?{runtimeProvider,runtimeProviders}:{}),finish:async()=>{
+    if(!runtimeProviders.length)return[];
+    const witnesses:ProviderWitness[]=[];
+    for(const name of (await readdir(directory)).filter(name=>/^process-\d+-[a-f0-9-]+\.jsonl$/.test(name))){
+      const path=join(directory,name),info=await lstat(path);if(!info.isFile()||info.size>8*1024*1024)continue;
+      let witness:ProviderWitness|undefined;
+      for(const line of (await readFile(path,'utf8')).split('\n').filter(Boolean)){
+        let value:Record<string,unknown>;try{value=JSON.parse(line) as Record<string,unknown>;}catch{continue;}
+        if((value.type==='witness'||value.type==='process')&&(value.protocol==='python'||value.protocol==='node')&&typeof value.execPath==='string'&&typeof value.pid==='number'&&typeof value.observedAt==='string'&&Array.isArray(value.argv)&&Array.isArray(value.execArgv)){
+          const execPath=await realpath(value.execPath).catch(()=>undefined);
+          const receipt=runtimeProviders.find(item=>item.execPath===execPath&&(item.protocol??'node')===value.protocol&&(value.protocol!=='python'||item.version===value.version));if(!receipt)continue;
+          const inputs:Record<string,string>={};
+          for(const [path,hash] of Object.entries(value.inputs as Record<string,unknown>??{}))if(typeof hash==='string'&&/^[a-f0-9]{64}$/.test(hash)&&Object.values(files).some(paths=>paths.includes(path)))inputs[path]=hash;
+          const entry=value.entryPoint;
+          witness={source:value.protocol==='python'?'python-profile-hook':'node-load-hook',execPath:receipt.execPath,...(receipt.version?{version:receipt.version}:{}),argv:value.argv.filter((item):item is string=>typeof item==='string'),execArgv:value.execArgv.filter((item):item is string=>typeof item==='string'),pid:value.pid,observedAt:value.observedAt,inputs,...(entry&&typeof entry==='object'&&'path' in entry&&typeof entry.path==='string'?{entryPoint:entry.path}:{})};
+        }else if(value.type==='load'&&witness&&Array.isArray(value.paths)&&typeof value.hash==='string'&&/^[a-f0-9]{64}$/.test(value.hash)){
+          for(const input of value.paths)if(typeof input==='string'&&Object.values(files).some(paths=>paths.includes(input)))witness.inputs[input]=value.hash;
+        }else if(value.type==='entrypoint'&&witness&&typeof value.path==='string')witness.entryPoint=value.path;
+      }
+      if(witness&&Object.keys(witness.inputs).length)witnesses.push(witness);
+    }
+    return witnesses;
+  },finishModules:async()=>{
     const witnesses:ModuleProviderWitness[]=[];
     for(const name of (await readdir(directory)).filter(name=>/^process-\d+-[a-f0-9-]+\.jsonl$/.test(name))){
       const path=join(directory,name),info=await lstat(path);if(!info.isFile()||info.size>8*1024*1024){diagnostics.push(`Invalid module observation record: ${name}`);continue;}
@@ -602,6 +692,24 @@ async function observeProcesses(workspace:string,check:Verification,operational:
       }
     }
     return result;
+  },finishWrites:async()=>{
+    const result:ProviderWrite[]=[];
+    for(const name of (await readdir(directory)).filter(name=>/^process-\d+-[a-f0-9-]+\.jsonl$/.test(name))){
+      const path=join(directory,name),info=await lstat(path);if(!info.isFile()||info.size>8*1024*1024)continue;
+      let processRecord:Omit<ProviderWrite,'path'|'hash'>|undefined;
+      const add=(path:unknown,hash:unknown,observedAt:unknown):void=>{
+        if(!processRecord||typeof path!=='string'||typeof hash!=='string'||!/^[a-f0-9]{64}$/.test(hash)||path==='..'||path.startsWith('../')||isAbsolute(path)||['.git','.capivara-next','.capivara-runtime','.capivara-verification','node_modules'].includes(path.split('/')[0]!))return;
+        result.push({...processRecord,path,hash,...(typeof observedAt==='string'?{observedAt}:{})});
+      };
+      for(const line of (await readFile(path,'utf8')).split('\n').filter(Boolean)){
+        let value:Record<string,unknown>;try{value=JSON.parse(line) as Record<string,unknown>;}catch{continue;}
+        if((value.type==='process'||value.type==='witness')&&(value.protocol==='node'||value.protocol==='python')&&typeof value.execPath==='string'&&typeof value.pid==='number'&&typeof value.observedAt==='string'){
+          try{const execPath=await realpath(value.execPath);processRecord={execPath,nativeFingerprint:await fileFingerprint(execPath),pid:value.pid,observedAt:value.observedAt};}catch{continue;}
+          if(value.type==='witness'&&value.writes&&typeof value.writes==='object')for(const [file,hash] of Object.entries(value.writes))add(file,hash,value.observedAt);
+        }else if(value.type==='write')add(value.path,value.hash,value.observedAt);
+      }
+    }
+    return result;
   },cleanup:async()=>{await rm(directory,{recursive:true,force:true});}};
 }
 function disabled(reason:string,environment:Record<string,string>={}):ProviderObservation{return{enabled:false,environment,reason,diagnostics:[],finish:async()=>[],cleanup:async()=>{}};}
@@ -616,7 +724,11 @@ async function startRuntimeObservation(workspace:string,check:Verification,opera
   if(!binding?.command?.length)return disabled('The selected runtime has no concrete executable binding.');
   let native:NativeNodeResolution|undefined;
   try{native=await resolveNativeNode(resolve(workspace,check.cwd??'.'),binding.command,operational.env);}catch(error){return disabled(`The concrete runtime binding could not be inspected: ${error instanceof Error?error.message:String(error)}`);}
-  if(!native)return disabled('The concrete provider or its exact shebang interpreter does not expose Node module-load observation.');
+  if(!native){
+    const python=await resolveModuleHost(resolve(workspace,check.cwd??'.'),{protocol:'python',specifier:'',runtimeCommand:binding.command},operational.env).catch(()=>undefined);
+    if(!python)return disabled('The concrete provider exposes neither the Node nor Python product-execution observation protocol.');
+    return observeProcesses(workspace,check,operational,[],{...python,protocol:'python',capability:binding.capability,kind:'runtime',provider:binding.provider,bindingCommand:[...binding.command],...(binding.fingerprint?{fingerprint:binding.fingerprint}:{}),observedAt:new Date().toISOString()});
+  }
   const runtimeProvider:RuntimeProviderReceipt={...native,capability:binding.capability,kind:'runtime',provider:binding.provider,bindingCommand:[...binding.command],...(binding.fingerprint?{fingerprint:binding.fingerprint}:{}),observedAt:new Date().toISOString()};
   const files:Record<string,string[]>={};
   for(const file of await sourceFiles(workspace,claim.productInputs)){
@@ -654,10 +766,37 @@ async function startRuntimeObservation(workspace:string,check:Verification,opera
 export async function startProviderObservation(workspace:string,check:Verification,operational:OperationalEnvironment):Promise<ProviderObservation>{
   let specific:ProviderObservation;
   try{
+    const additional=(check as Verification&{conformanceClaims?:NonNullable<Verification['conformance']>[]}).conformanceClaims;
+    if(additional?.length){
+      const claims=[...(check.conformance?[check.conformance]:[]),...additional];
+      const selected=Object.values(operational.bindings).filter(binding=>binding.ready&&claims.some(claim=>claim.capability===binding.capability&&claim.kind===binding.kind&&claim.provider===binding.provider));
+      const modules:ModuleProviderReceipt[]=[],runtimes:RuntimeProviderReceipt[]=[],diagnostics:string[]=[];
+      const hosts=new Map<string,Promise<NativeNodeResolution|undefined>>(),cwd=resolve(workspace,check.cwd??'.');
+      const host=(module:ProviderModule):Promise<NativeNodeResolution|undefined>=>{
+        const key=JSON.stringify({protocol:module.protocol,command:module.runtimeCommand});let result=hosts.get(key);
+        if(!result){result=resolveModuleHost(cwd,module,operational.env).catch(()=>undefined);hosts.set(key,result);}return result;
+      };
+      for(const binding of selected){
+        if(binding.kind==='runtime'&&binding.command?.length){
+          const node=await host({protocol:'node',specifier:'',runtimeCommand:binding.command});
+          const native=node??await host({protocol:'python',specifier:'',runtimeCommand:binding.command});
+          if(native)runtimes.push({...native,protocol:node?'node':'python',capability:binding.capability,kind:'runtime',provider:binding.provider,bindingCommand:[...binding.command],...(binding.fingerprint?{fingerprint:binding.fingerprint}:{}),observedAt:new Date().toISOString()});
+          else diagnostics.push(`The selected runtime ${binding.capability} has no confirmed executable observation protocol.`);
+        }
+        if(['library','driver','sdk'].includes(binding.kind))for(const module of binding.modules??[]){
+          const native=await host(module);
+          if(native)modules.push({...module,...native,capability:binding.capability,kind:binding.kind as ModuleProviderReceipt['kind'],provider:binding.provider,...(binding.fingerprint?{fingerprint:binding.fingerprint}:{}),observedAt:new Date().toISOString()});
+          else diagnostics.push(`The selected ${module.protocol} module host could not be confirmed for ${module.specifier}.`);
+        }
+      }
+      const observation=await observeProcesses(workspace,check,operational,modules,runtimes);
+      observation.diagnostics.push(...diagnostics);
+      return observation;
+    }
     specific=check.conformance&&['library','driver','sdk'].includes(check.conformance.kind)?await startModuleObservation(workspace,check,operational):await startRuntimeObservation(workspace,check,operational);
     if(specific.finishConsumptions)return specific;
     const reads=await observeProcesses(workspace,check,{...operational,env:{...operational.env,...specific.environment}});
     if(!reads.enabled)return specific;
-    return{enabled:true,environment:{...specific.environment,...reads.environment},diagnostics:specific.diagnostics,...(specific.reason?{reason:specific.reason}:{}),...(specific.runtimeProvider?{runtimeProvider:specific.runtimeProvider}:{}),finish:()=>specific.finish(),finishModules:()=>reads.finishModules?.()??Promise.resolve([]),finishConsumptions:()=>reads.finishConsumptions?.()??Promise.resolve([]),finishProcesses:()=>reads.finishProcesses?.()??Promise.resolve([]),cleanup:async()=>{try{await specific.cleanup();}finally{await reads.cleanup();}specific.diagnostics.push(...reads.diagnostics);}};
+    return{enabled:true,environment:{...specific.environment,...reads.environment},diagnostics:specific.diagnostics,...(specific.reason?{reason:specific.reason}:{}),...(specific.runtimeProvider?{runtimeProvider:specific.runtimeProvider,runtimeProviders:[specific.runtimeProvider]}:{}),finish:()=>specific.finish(),finishModules:()=>reads.finishModules?.()??Promise.resolve([]),finishConsumptions:()=>reads.finishConsumptions?.()??Promise.resolve([]),finishProcesses:()=>reads.finishProcesses?.()??Promise.resolve([]),finishWrites:()=>reads.finishWrites?.()??Promise.resolve([]),cleanup:async()=>{try{await specific.cleanup();}finally{await reads.cleanup();}specific.diagnostics.push(...reads.diagnostics);}};
   }catch(error){return disabled(`Provider observation could not be prepared: ${error instanceof Error?error.message:String(error)}`);}
 }

@@ -15,8 +15,9 @@ import { verificationRegistry } from "./verifications.js";
 import { deriveBindingAuthority, matchesOperationalClaim, obligationMatchesProvider, recordBindingTransformation } from "./bindings.js";
 import type { PlanIssue } from "./reconcile.js";
 import { rehydratePlanRecords } from "./plan-records.js";
-import { verificationDeclaration } from './verification-declarations.js';
+import { verificationDeclaration, verificationInterfaceDeclaration } from './verification-declarations.js';
 import { applyAuthorityAmendments } from './authority-repair.js';
+import { canonicalizeConformanceDeclaration, recordConformanceCorrection } from './conformance-declarations.js';
 
 const cleanId = (value: unknown, fallback: string): string => string(value).replace(/[^a-zA-Z0-9_.:-]+/g, "-") || fallback;
 const unique = <T extends { id: string }>(items: T[]): T[] => [...new Map(items.map((item) => [item.id, item])).values()];
@@ -192,12 +193,14 @@ export function normalizeChecks(value: unknown, brief: ProductBrief): Verificati
     // These adapters copy metadata; they never infer a provider or a proof.
     const item = verificationDeclaration(declaration);
     const conformance = declaredConformance(item);
-    const kind = ["command", "cli", "tui", "web", "desktop"].includes(string(item.kind)) ? string(item.kind) as Verification["kind"] : "command";
+    const interfaceDeclaration=verificationInterfaceDeclaration(item),kind=interfaceDeclaration.kind;
     const command = string(item.command);
     const capabilities = uniqueStrings([...strings(item.requiredCapabilities), ...inferredCapabilities(`${command} ${argv(item.args).join(" ")}`), ...(kind === "web" ? ["browser"] : [])]);
     if (!allowedCapabilities(brief, capabilities)) continue;
     if (kind === "desktop" && !brief.modes.includes("desktop")) continue;
     const check: Verification = { id: cleanId(item.id, identity("check", `${kind}:${command}:${string(item.expected)}`)), kind, requirementIds: uniqueStrings([...strings(item.requirementIds), ...(string(item.requirementId) ? [string(item.requirementId)] : []), ...(conformance && string(conformance.requirementId) ? [string(conformance.requirementId)] : [])]), requiredCapabilities: capabilities };
+    if(interfaceDeclaration.target)check.target=interfaceDeclaration.target;
+    if(interfaceDeclaration.declarationTransformation)check.declarationTransformation=interfaceDeclaration.declarationTransformation;
     if (command) check.command = command;
     const args = argv(item.args);
     if (args.length) check.args = args;
@@ -219,7 +222,6 @@ export function normalizeChecks(value: unknown, brief: ProductBrief): Verificati
     });
     if (typeof item.closeInput === "string") check.closeInput = item.closeInput;
     if (typeof item.timeoutMs === "number" && item.timeoutMs > 0) check.timeoutMs = item.timeoutMs;
-    if (["linux", "windows", "macos", "browser", "portable"].includes(string(item.target))) check.target = string(item.target) as NonNullable<Verification["target"]>;
     if (Array.isArray(item.inputs)) check.inputs = safePaths(item.inputs);
     if (Array.isArray(item.constraintIds)) check.constraintIds = strings(item.constraintIds).filter(id => brief.constraints.some(constraint => constraint.id === id));
     if (["syntax", "build", "behavior"].includes(string(item.level))) check.level = string(item.level) as NonNullable<Verification["level"]>;
@@ -888,10 +890,14 @@ async function repairRestrictedWorkPlan(options: RepairPlanOptions, task: WorkUn
         if(candidate.conformance!==undefined&&!claim)throw new PlanningFailure('invalid-plan',['A correção não pode remover ou tornar ilegível uma declaração de conformidade.'],task.id);
         const proposed={...original,...candidate,...(original?{id:original.id,...(original.expected!==undefined?{expected:original.expected}:{})}:{}),requirementIds:uniqueStrings([...(original?.requirementIds??[]),...strings(candidate.requirementIds).map(id=>resolveRequirementAlias(brief,id)).filter(id=>task.requirementIds.includes(id))]),...(claim?{conformance:claim}:{})};
         if(candidate.conformance!==undefined){
-          const normalized=normalizeChecks([proposed],brief)[0];
+          const parsed=normalizeChecks([proposed],brief)[0];
+          const decoded=parsed?canonicalizeConformanceDeclaration(brief,plan,target,parsed):undefined;
+          const normalized=decoded?.check;
           const conformance=normalized?.conformance;
           const requirement=brief.requirements.find(item=>item.id===conformance?.requirementId);
-          if(!conformance||!conformance.productInputs.length||!requirement||!task.requirementIds.includes(requirement.id)||!plan.environment.some(node=>selected.has(node.id)&&obligationMatchesProvider(requirement,node.identity)&&matchesOperationalClaim(requirement,conformance,node.identity)))throw new PlanningFailure('invalid-plan',['A conformidade proposta não corresponde à obrigação literal e ao provedor operacional consumido pela unidade. Nenhuma declaração ou prova foi adotada.'],task.id);
+          if(!conformance||!requirement||!task.requirementIds.includes(requirement.id)||!plan.environment.some(node=>selected.has(node.id)&&obligationMatchesProvider(requirement,node.identity)&&matchesOperationalClaim(requirement,conformance,node.identity)))throw new PlanningFailure('invalid-plan',['A conformidade proposta não corresponde à obrigação literal e ao provedor operacional consumido pela unidade. Nenhuma declaração ou prova foi adotada.'],task.id);
+          recordConformanceCorrection(plan,decoded?.correction);
+          return normalized!;
         }
         return proposed;
       });

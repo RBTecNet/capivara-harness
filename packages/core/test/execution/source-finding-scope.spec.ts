@@ -32,8 +32,11 @@ it('routes only an explicitly scoped integration finding to its real later owner
   expect(resolved.assessment.transformations.some(change => change.operation === 'classify')).toBe(true);
   const rejected = await resolveReviewScope(process.cwd(), brief, plan, foundation, interpretReview(JSON.stringify({ approved: false, findings: [finding] })));
   expect(rejected.assessment.decision).toBe('unresolved'); expect(rejected.assessment.approved).toBe(false); expect(rejected.handoffs).toHaveLength(1);
+  const intermediate = await resolveReviewScope(process.cwd(), brief, plan, foundation, interpretReview(JSON.stringify({ approved: false, findings: [{ ...finding, deferToTaskId: 'api' }] })));
+  expect(intermediate.handoffs).toEqual([expect.objectContaining({ ownerTaskId: 'api', requirementId: 'crud', status: 'pending' })]);
+  expect(intermediate.assessment.decision).toBe('unresolved'); expect(intermediate.assessment.approved).toBe(false);
   for (const patch of [
-    { deferToTaskId: 'api' }, { deferToTaskId: 'parallel' }, { requirementId: 'invented' },
+    { deferToTaskId: 'parallel' }, { requirementId: 'invented' },
     { scope: 'unit' }, { criterionId: 'invented' },
   ]) {
     const assessment = interpretReview(JSON.stringify({ approved: true, findings: [{ ...finding, ...patch }] }));

@@ -1,6 +1,6 @@
 import type { DevelopmentPlan, Verification, WorkUnit } from '../domain/types.js';
 import type { BuildState, VerificationEvidence } from './types.js';
-import { verificationLevel } from './checks.js';
+import { browserObservationSummary, verificationLevel } from './checks.js';
 import { pathScopesConflict } from './isolation.js';
 
 export interface ReviewEvidenceOptions { maxChars?:number; }
@@ -49,7 +49,7 @@ function rawProof(evidence:VerificationEvidence):string{
   const observation=evidence.observation;
   const raw=observation?`command=${observation.command}\nexit=${observation.exitCode} cancelled=${observation.cancelled} timedOut=${observation.timedOut}\nSTDOUT:\n${observation.stdout}\nSTDERR:\n${observation.stderr}`:evidence.output;
   const provenance=evidence.provenance;
-  return`${provenance?`PROVENANCE: ${JSON.stringify({command:provenance.command,cwd:provenance.cwd,exitCode:provenance.exitCode,runtimeWitnesses:provenance.runtimeWitnesses?.map(item=>({execPath:item.execPath,argv:item.argv,inputs:item.inputs}))})}\n`:''}${raw}`;
+  return`${provenance?`PROVENANCE: ${JSON.stringify({command:provenance.command,cwd:provenance.cwd,exitCode:provenance.exitCode,runtimeWitnesses:provenance.runtimeWitnesses?.map(item=>({execPath:item.execPath,argv:item.argv,inputs:item.inputs}))})}\n`:''}${evidence.browserObservation?`BROWSER INTERFACE: ${browserObservationSummary(evidence.browserObservation)}\n`:''}${raw}`;
 }
 /** Review sees the exact batch the scheduler verified, not the array's last N
  * entries. Related records are context, never substitutes for this unit's proof

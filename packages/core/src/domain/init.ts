@@ -49,6 +49,24 @@ const bindingChoice = (binding: Pick<CapabilityIdentity, "kind" | "provider">): 
 function technicalChoices(text: string): string[] {
   return text.split(/\r?\n|;|,\s*|\s+(?:and|e)\s+|\s+\+\s+/iu).map(part => part.trim().replace(/^(?:[-*+]\s+|\d+[.)]\s+)/, "")).filter(Boolean);
 }
+/** A citation is provenance, not a schema declaring every prose clause to be
+ * another provider. Lock explicit source lists and the original semantic
+ * selections, while retaining the complete original statement/source. */
+function technicalCoverageChoices(statement:string,source:string,bindings:readonly CapabilityIdentity[]):string[]{
+  const semantic=technicalChoices(statement).filter(part=>bindings.some(binding=>providerMention(part,binding.provider))||resolveLiteralExcerpt(source,part)!==undefined);
+  const listed=source.split(/\r?\n/).filter(line=>/^\s*(?:[-*+]\s+|\d+[.)]\s+)/u.test(line)).flatMap(technicalChoices);
+  const literal=source.trim();
+  const bareList=bindings.some(binding=>providerMention(literal,binding.provider)?.index===0)?technicalChoices(literal):[];
+  return [...new Set([...semantic,...listed,...bareList])];
+}
+/** A quote may omit a sentence terminator, not a word, version or technology.
+ * Literal resolution keeps compound provider names and polarity intact. */
+function coversLiteralChoice(choice:string,quote:string):boolean {
+  const literal=resolveLiteralExcerpt(choice,quote);
+  if(!literal)return false;
+  const start=choice.indexOf(literal);
+  return /^[\s.;!?]*$/u.test(choice.slice(0,start)+choice.slice(start+literal.length));
+}
 type TechnicalOutcome = { quote: string; statement: string };
 function bindingsFrom(value: unknown, source: Source): { bindings: CapabilityIdentity[]; issues: string[] } {
   const entries = records(value), bindings: CapabilityIdentity[] = [], issues: string[] = [];
@@ -91,26 +109,25 @@ async function requirementsFrom(raw: string, values: unknown, modes: Application
   const restored = recordedRequirementMetadata(raw, candidates, hooks.completedResponses?.() ?? [],
     (source, quote) => resolveLiteralExcerpt(source, quote) ?? recoverLiteralParagraphs(source, quote)?.text);
   for (const [index, patch] of restored.patches) metadata.set(index, patch);
-  for (const [index] of restored.patches) emitEvent(hooks.onEvent, { type:"metadata-restored", subject:origin.reference,
-    message:"Metadados da mesma origem literal recuperados da resposta já registrada; nenhuma nova inferência foi feita.", detail:{index} });
-  for (const conflict of restored.conflicts) if(candidates[conflict.index]?.kind === "stack" || object(candidates[conflict.index]?.binding)) emitEvent(hooks.onEvent, { type:"metadata-conflict", subject:origin.reference,
-    message:"Respostas registradas divergem nos metadados desta origem; nenhuma variante foi adotada arbitrariamente.", detail:{index:conflict.index} });
   const recovery = new PlanningProgress("init-requirement-metadata");
-  const inspect = (item: Record<string, unknown>, index: number) => {
-    const revised = metadata.get(index), candidate = revised ? { ...item, ...revised } : item;
+  const rejectedMetadata=new Map<number,string[]>();
+  const inspect = (item: Record<string, unknown>, index: number, proposed?:Record<string,unknown>) => {
+    const revised = proposed ?? metadata.get(index);
+    const evaluate=(candidate:Record<string,unknown>)=>{
     const originalSource = excerpt(raw, item, origin);
     const source = originalSource ?? excerpt(raw, candidate, origin);
     const stack = item.kind === "stack" || object(item.binding);
-    // Metadata may repair a citation, never narrow the original stack contract.
-    const choices = originalSource ? technicalChoices(originalSource.text) : [...new Set([...technicalChoices(string(item.statement)), ...technicalChoices(source?.text ?? "")])];
     const resolved = source && stack ? bindingsFrom(Array.isArray(candidate.bindings) ? candidate.bindings : object(candidate.binding) ? [candidate.binding] : [], source) : { bindings: [], issues: [] };
+    // Metadata may repair a citation, never narrow the original semantic
+    // selections or an explicitly enumerated literal source list.
+    const choices = originalSource ? technicalCoverageChoices(string(item.statement),originalSource.text,resolved.bindings) : [...new Set([...technicalChoices(string(item.statement)), ...technicalChoices(source?.text ?? "")])];
     const classified = source && stack ? outcomesFrom(candidate.outcomes, source) : { outcomes: [], issues: [] };
     const issues = [...(!source ? ["A citação não corresponde a uma origem literal inequívoca."] : []), ...resolved.issues, ...classified.issues];
     if (stack && source) {
       if (candidate.bindings !== undefined && !Array.isArray(candidate.bindings)) issues.push("A classificação de provedores deve ser uma lista de identidades técnicas.");
       if (!resolved.bindings.length && !classified.outcomes.length) issues.push("Nenhuma escolha de provedor nem obrigação observável foi classificada.");
       const uncovered = choices.filter(choice => !resolved.bindings.some(binding => providerMention(choice, binding.provider))
-        && !classified.outcomes.some(outcome => technicalChoices(outcome.quote).some(part => normalize(part) === normalize(choice))));
+        && !classified.outcomes.some(outcome => technicalChoices(outcome.quote).some(part => coversLiteralChoice(choice,part))));
       if (uncovered.length) issues.push(`Itens literais ainda sem classificação de provedor ou resultado: ${JSON.stringify(uncovered)}`);
       if (resolved.bindings.some(binding => normalize(binding.capability) === normalize(binding.provider)) && !Array.isArray(candidate.outcomes)) issues.push("Nome do provedor e rótulo de capacidade coincidem: classifique explicitamente a escolha de ferramenta ou o resultado exigido, sem presumir que cada item da lista é software.");
       const original = bindingsFrom([...records(item.bindings), ...(object(item.binding) ? [item.binding] : [])], source).bindings;
@@ -118,7 +135,25 @@ async function requirementsFrom(raw: string, values: unknown, modes: Application
         && !resolved.bindings.some(entry => normalize(entry.provider) === normalize(binding.provider))) issues.push(`A escolha original de provedor ${binding.provider} não pode desaparecer no reparo de metadados; um papel operacional inferido pode mudar sem remover a tecnologia.`);
     }
     return { source, stack, bindings: resolved.bindings, outcomes: classified.outcomes, issues, candidate };
+    };
+    const selected=evaluate(revised?{...item,...revised}:item);
+    if(revised&&proposed===undefined&&selected.issues.length){
+      const original=evaluate(item);
+      if(!original.issues.length){rejectedMetadata.set(index,selected.issues);return original;}
+    }
+    return selected;
   };
+  for(const conflict of restored.conflicts){
+    const item=candidates[conflict.index];if(!item)continue;
+    // A malformed proposal does not conflict with a fully validated one. Reuse
+    // only the unique valid classification; distinct valid meanings still need
+    // explicit resolution. Every original paid response remains in the ledger.
+    const valid=conflict.variants.filter(variant=>!inspect(item,conflict.index,variant).issues.length);
+    if(valid.length===1){
+      metadata.set(conflict.index,valid[0]!);
+      emitEvent(hooks.onEvent,{type:'metadata-restored',subject:origin.reference,message:'Classificação literal única validada recuperada entre respostas registradas; variantes inválidas permanecem no histórico, sem nova inferência.',detail:{index:conflict.index,variants:conflict.variants.length,valid:1}});
+    }else if(item.kind==='stack'||object(item.binding))emitEvent(hooks.onEvent,{type:'metadata-conflict',subject:origin.reference,message:'Respostas registradas sem uma única classificação válida desta origem; nenhuma variante foi adotada arbitrariamente.',detail:{index:conflict.index,variants:conflict.variants.length,valid:valid.length}});
+  }
   for (;;) {
     const pending = candidates.flatMap((item, index) => {
       if (!string(item.statement)) return [];
@@ -155,6 +190,8 @@ async function requirementsFrom(raw: string, values: unknown, modes: Application
     const statement = string(item.statement);
     if (!statement) continue;
     const inspected = inspect(item, index), source = inspected.source;
+    if(rejectedMetadata.has(index))emitEvent(hooks.onEvent,{type:'metadata-rejected',subject:origin.reference,message:'Uma proposta posterior inválida não substitui a declaração original já sustentada pela fonte literal. A resposta original e a proposta permanecem no histórico.',detail:{index,issues:rejectedMetadata.get(index)}});
+    else if(restored.patches.has(index)&&metadata.get(index)===restored.patches.get(index))emitEvent(hooks.onEvent,{type:'metadata-restored',subject:origin.reference,message:'Metadados válidos da mesma origem literal recuperados da resposta já registrada; nenhuma nova inferência foi feita.',detail:{index}});
     if (!source) {
       emitEvent(hooks.onEvent, { type: "requirement-rejected", message: `Extração sem sustentação literal rejeitada explicitamente: ${statement}. ${string(inspected.candidate.reason)}`, subject: origin.reference });
       continue;
@@ -290,7 +327,9 @@ function constraintsFrom(raw: string, values: unknown, origin: SourceOrigin = { 
       ...(sourceModes.some((mode) => mode === "web" || mode === "api" || mode === "service") ? ["http-server"] : []),
     ]);
     const requiredCapabilities = strings(item.requiredCapabilities).filter((capability) => allowedRequired.has(capability));
-    if (forbiddenCapabilities.length === 0 && requiredCapabilities.length === 0) continue;
+    // Native capability names are an execution vocabulary, not the authority
+    // of a literal user restriction. Preserve its source even when no current
+    // adapter recognizes the model's capability labels.
     constraints.push({ id: identity("constraint", `${origin.reference}:${source.text}`), statement: source.text, source, forbiddenCapabilities, requiredCapabilities });
   }
   return [...new Map(constraints.map((constraint) => [constraint.id, constraint])).values()];
@@ -311,7 +350,9 @@ export function reconcileAuthority(brief: ProductBrief): void {
       brief.authorityCorrections ??= [];
       if (!brief.authorityCorrections.some(existing => JSON.stringify(existing) === JSON.stringify(correction))) brief.authorityCorrections.push(correction);
     }
-    if (constraint.forbiddenCapabilities.length || constraint.requiredCapabilities.length || isLiteralProductInvariant(brief,constraint)) corrected.push(constraint);
+    const authority=constraint.source.kind==='request'&&constraint.source.reference==='request'?brief.request:constraint.source.kind==='answer'?brief.decisions.find(decision=>decision.questionId===constraint.source.reference)?.answer:undefined;
+    const literalAuthority=constraint.statement===constraint.source.text&&Boolean(constraint.source.text.trim()&&authority?.includes(constraint.source.text));
+    if (constraint.forbiddenCapabilities.length || constraint.requiredCapabilities.length || isLiteralProductInvariant(brief,constraint) || literalAuthority) corrected.push(constraint);
   }
   const direct = [...explicitConstraints(brief.request), ...brief.decisions.flatMap(decision => explicitConstraints(decision.answer, "answer", decision.questionId))];
   brief.constraints = [...new Map([...corrected, ...direct].map(constraint => [constraint.id, constraint])).values()];

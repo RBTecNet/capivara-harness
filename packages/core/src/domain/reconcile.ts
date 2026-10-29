@@ -6,6 +6,7 @@ import { verificationAssertionStatus } from './assertions.js';
 import { isPlannedProductRecipe, verificationRegistry } from './verifications.js';
 import { deriveBindingAuthority, matchesOperationalClaim, obligationMatchesProvider } from './bindings.js';
 import { expandPartitionedRequirementIds } from './requirement-lineage.js';
+import { canonicalizePlanConformance } from './conformance-declarations.js';
 import { preferredProofOwner, taskDependsOn as dependsOn } from './contribution.js';
 export { preferredProofOwner } from './contribution.js';
 import type { DevelopmentPlan, PlanVerificationObligation, ProductBrief, Requirement, Verification, VerificationAssertion, WorkUnit } from './types.js';
@@ -188,6 +189,7 @@ export function reconcilePlan(brief: ProductBrief, proposal: DevelopmentPlan, pr
   }
   plan.tasks = tasks;
   if (plan.acceptance) plan.acceptance = reconcileChecks(plan.acceptance);
+  canonicalizePlanConformance(brief,plan);
   plan.briefId = brief.id; plan.briefRevision = brief.revision;
   plan.obligations=derivePlanObligations(brief,plan);
   return plan;

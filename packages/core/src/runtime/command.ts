@@ -1,8 +1,9 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
 import { resolve, basename } from 'node:path';
 import { digest, scrub, workspaceFingerprint } from './files.js';
 import { executionRestriction, isolatedInvocation } from './isolation.js';
+import { normalizeCommandInvocation } from './invocation.js';
 import type { CommandRequest, CommandResult, ExecutionConstraints, RuntimeIssue } from './types.js';
 
 export function commandText(command: string | readonly string[]): string {
@@ -91,6 +92,15 @@ export function emptyCommandResult(request: CommandRequest, fingerprint = ''): C
   return { command: commandText(request.command), cwd: resolve(request.cwd), exitCode: null, stdout: '', stderr: '', durationMs: 0, timedOut: false, cancelled: false, signal: null, fingerprint };
 }
 
+function invocationIssue(error: unknown): RuntimeIssue {
+  const code = typeof (error as NodeJS.ErrnoException | undefined)?.code === 'string' ? (error as NodeJS.ErrnoException).code : undefined;
+  // Failure to start an executable says nothing about the application. Missing
+  // or unusable executables need environment recovery; invalid declarations
+  // and OS argument limits need a different instrument, not product edits.
+  const kind = ['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM', 'ENOEXEC'].includes(code ?? '') ? 'configuration' : 'instrument';
+  return { kind, recoverable: true, ...(code ? { code } : {}), message: error instanceof Error ? error.message : String(error) };
+}
+
 /** Shell-free spawn; string commands explicitly select the host shell. All failures return evidence to recovery. */
 export async function executeCommand(request: CommandRequest): Promise<CommandResult> {
   const start = Date.now();
@@ -103,18 +113,24 @@ export async function executeCommand(request: CommandRequest): Promise<CommandRe
   catch (error) { return { ...result, durationMs: Date.now() - start, issue: { kind: 'tool', recoverable: true, message: String(error) }, stderr: String(error) }; }
   if (request.signal?.aborted) return { ...result, cancelled: true, durationMs: Date.now() - start };
   let invocation: { binary: string; args: string[]; environment: Record<string, string>; isolated: boolean };
-  try { invocation = await isolatedInvocation(request, commandInvocation(request.command)); }
-  catch (error) { return { ...result, stderr: String(error), issue: { kind: 'tool', recoverable: true, message: String(error) } }; }
+  try {
+    const normalized = await normalizeCommandInvocation(request);
+    if (normalized.transformation) result.invocationTransformation = normalized.transformation;
+    invocation = await isolatedInvocation(request, normalized);
+  } catch (error) { const issue = invocationIssue(error); return { ...result, durationMs: Date.now() - start, stderr: issue.message, issue }; }
+  let child: ChildProcessWithoutNullStreams;
+  try {
+    child = spawn(invocation.binary, invocation.args, {
+      cwd: request.cwd, env: { ...process.env, ...invocation.environment }, shell: false,
+      windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (error) { const issue = invocationIssue(error); return { ...result, durationMs: Date.now() - start, stderr: issue.message, issue }; }
   return new Promise<CommandResult>(resolveResult => {
     let bytes = 0;
     let closed = false;
     let truncated = false;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     const maximum = request.maxOutputBytes ?? 2 * 1024 * 1024;
-    const child = spawn(invocation.binary, invocation.args, {
-      cwd: request.cwd, env: { ...process.env, ...invocation.environment }, shell: false,
-      windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'],
-    });
     const append = (buffer: Buffer | string, stream: 'stdout' | 'stderr'): void => {
       const text = String(buffer);
       bytes += Buffer.byteLength(text);
@@ -170,7 +186,7 @@ export async function executeCommand(request: CommandRequest): Promise<CommandRe
     timer.unref();
     request.signal?.addEventListener('abort', cancel, { once: true });
     if (request.signal?.aborted) cancel();
-    child.on('error', error => { result.stderr += error.message; result.issue = { kind: 'tool', recoverable: true, message: error.message }; finish(); });
+    child.on('error', error => { result.stderr += error.message; result.issue = invocationIssue(error); finish(); });
     child.on('close', (code, signal) => { result.exitCode = code; result.signal = signal; finish(); });
     child.stdin.end(request.input ?? '');
   });

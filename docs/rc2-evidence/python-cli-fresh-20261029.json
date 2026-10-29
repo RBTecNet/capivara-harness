@@ -1,0 +1,812 @@
+{
+  "schema": "capivara/execution-evidence/1",
+  "capturedAt": "2026-10-29T07:16:34.245Z",
+  "project": "CLI de cálculo",
+  "projectUpdatedAt": "2026-10-29T07:11:30.252Z",
+  "status": "complete",
+  "stage": "build",
+  "eventRange": {
+    "firstInclusive": 1,
+    "lastInclusive": 2144,
+    "captured": 2144
+  },
+  "completedProductTasks": 3,
+  "totalProductTasks": 3,
+  "tasks": [
+    {
+      "id": "operacoes",
+      "status": "complete",
+      "attempts": 1,
+      "strategy": "verified"
+    },
+    {
+      "id": "cli",
+      "status": "complete",
+      "attempts": 4,
+      "strategy": "verified"
+    },
+    {
+      "id": "validacao-manual",
+      "status": "complete",
+      "attempts": 1,
+      "strategy": "verified"
+    }
+  ],
+  "retiredTaskRecords": [],
+  "lastFailure": null,
+  "proofRecords": {
+    "total": 52,
+    "passedHistorical": 42,
+    "failedHistorical": 10,
+    "byTask": {
+      "operacoes": 15,
+      "cli": 32,
+      "validacao-manual": 5
+    },
+    "acceptanceTotal": 0,
+    "acceptancePassedHistorical": 0,
+    "reinterpreted": [
+      {
+        "id": "66c62560-b76e-43bc-8c19-5a27521c6d39",
+        "taskId": "operacoes",
+        "checkId": "operacoes-syntax-1a45abc8",
+        "reinterpretedFrom": "d17ba8c3-fc31-4fa4-837d-eeecf8f6cecf",
+        "observedAt": "2026-10-29T07:04:00.904Z",
+        "checkedAt": "2026-10-29T07:04:05.579Z",
+        "passed": true
+      },
+      {
+        "id": "4e67e0bc-40be-4d97-b422-eb580a320295",
+        "taskId": "operacoes",
+        "checkId": "operacoes-syntax-119be179",
+        "reinterpretedFrom": "70b05850-c501-410d-800f-c7b0f5425248",
+        "observedAt": "2026-10-29T07:04:01.146Z",
+        "checkedAt": "2026-10-29T07:04:05.639Z",
+        "passed": true
+      },
+      {
+        "id": "eb30683f-e308-446e-a002-0a5ca55dea2e",
+        "taskId": "operacoes",
+        "checkId": "operacoes-syntax-234b0b59",
+        "reinterpretedFrom": "3d9e54dc-cd90-4b93-aad9-5bb4e7a5bd23",
+        "observedAt": "2026-10-29T07:04:01.371Z",
+        "checkedAt": "2026-10-29T07:04:05.698Z",
+        "passed": true
+      }
+    ],
+    "caution": "Historical records are counts, not a claim of current valid coverage or completed acceptance."
+  },
+  "incidentsByKind": {
+    "planning": 2
+  },
+  "cumulativePersistedMetrics": {
+    "workflow": {
+      "timeByStageMs": {
+        "agent:analyst": 7975,
+        "agent:planner": 68410,
+        "init": 17045,
+        "plan": 39119,
+        "agent:editor": 40804,
+        "agent:reviewer": 56101,
+        "agent:repair": 87679,
+        "build": 219151
+      },
+      "callsByRole": {
+        "analyst": 1,
+        "planner": 6,
+        "editor": 3,
+        "reviewer": 8,
+        "repair": 7
+      },
+      "activeAgents": 0,
+      "maxConcurrency": 1
+    },
+    "build": {
+      "startedAt": "2026-10-29T07:00:48.404Z",
+      "elapsedMs": 219073,
+      "maxConcurrency": 1,
+      "active": 0,
+      "callsByRole": {
+        "editor": 3,
+        "reviewer": 8,
+        "repair": 7
+      },
+      "timeByStageMs": {
+        "queueWait": 0,
+        "providerPublication": 5,
+        "environmentPreparation": 370,
+        "dependencies": 385,
+        "isolation": 34,
+        "providerSynchronization": 0,
+        "proofInputs": 2719,
+        "agentInstrument": 19,
+        "editor": 40824,
+        "verificationIsolation": 66,
+        "browserPreparation": 269,
+        "verification": 3555,
+        "reviewer": 56176,
+        "cleanup": 27,
+        "integration": 468,
+        "repair": 87731,
+        "environmentRevalidation": 486,
+        "proofRevalidation": 430,
+        "acceptanceSelection": 2,
+        "conformance": 76
+      },
+      "invalidations": 7,
+      "repetitions": 12
+    }
+  },
+  "observedCalls": {
+    "starts": 25,
+    "finished": 25,
+    "callsByRole": {
+      "analyst": 1,
+      "planner": 6,
+      "editor": 3,
+      "reviewer": 8,
+      "repair": 7
+    },
+    "callsByRecordedStage": {
+      "build": 25
+    },
+    "phases": {
+      "understanding": {
+        "starts": 1,
+        "finished": 1,
+        "measuredAgentMs": 7975,
+        "callsByRole": {
+          "analyst": 1
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 1,
+          "inputTokens": 17365,
+          "cachedInputTokens": 11520,
+          "outputTokens": 556,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        }
+      },
+      "planning": {
+        "starts": 6,
+        "finished": 6,
+        "measuredAgentMs": 68412,
+        "callsByRole": {
+          "planner": 6
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 6,
+          "inputTokens": 179698,
+          "cachedInputTokens": 121856,
+          "outputTokens": 3945,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        }
+      },
+      "implementation": {
+        "starts": 7,
+        "finished": 7,
+        "measuredAgentMs": 108177,
+        "callsByRole": {
+          "editor": 3,
+          "repair": 4
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 7,
+          "inputTokens": 595377,
+          "cachedInputTokens": 484992,
+          "outputTokens": 5530,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        }
+      },
+      "review": {
+        "starts": 8,
+        "finished": 8,
+        "measuredAgentMs": 56100,
+        "callsByRole": {
+          "reviewer": 8
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 8,
+          "inputTokens": 344793,
+          "cachedInputTokens": 286848,
+          "outputTokens": 1674,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        }
+      },
+      "verification-recipe-recovery": {
+        "starts": 2,
+        "finished": 2,
+        "measuredAgentMs": 16432,
+        "callsByRole": {
+          "repair": 2
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 2,
+          "inputTokens": 78578,
+          "cachedInputTokens": 69376,
+          "outputTokens": 901,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        }
+      },
+      "assertion-recovery": {
+        "starts": 1,
+        "finished": 1,
+        "measuredAgentMs": 3872,
+        "callsByRole": {
+          "repair": 1
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 1,
+          "inputTokens": 14731,
+          "cachedInputTokens": 11520,
+          "outputTokens": 85,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        }
+      }
+    },
+    "reportedUsage": {
+      "callsWithReportedUsage": 25,
+      "inputTokens": 1230542,
+      "cachedInputTokens": 986112,
+      "outputTokens": 12691,
+      "callsWithReportedCost": 0,
+      "reportedCostUsd": null
+    },
+    "epochs": [
+      {
+        "firstEventId": 1,
+        "lastEventId": 2144,
+        "firstObservedAt": "2026-10-29T06:35:16.472Z",
+        "lastObservedAt": "2026-10-29T07:11:30.261Z",
+        "ending": "point-in-time-capture",
+        "calls": 25,
+        "callsByRole": {
+          "analyst": 1,
+          "planner": 6,
+          "editor": 3,
+          "reviewer": 8,
+          "repair": 7
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 25,
+          "inputTokens": 1230542,
+          "cachedInputTokens": 986112,
+          "outputTokens": 12691,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        },
+        "integratedTasksInInterval": [
+          "operacoes",
+          "cli",
+          "validacao-manual"
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "eventId": 6,
+        "id": "21d1a64b-86dd-4ffc-b635-9ac94d407c64",
+        "role": "analyst",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "understanding",
+        "startedAt": "2026-10-29T06:35:16.516Z",
+        "resultEventId": 14,
+        "finishedAt": "2026-10-29T06:35:24.491Z",
+        "durationMs": 7975,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 17365,
+          "outputTokens": 556,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 18,
+        "id": "3119e48a-849e-41a8-afb2-c2c51bb0d5b1",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T06:35:24.506Z",
+        "resultEventId": 26,
+        "finishedAt": "2026-10-29T06:35:29.095Z",
+        "durationMs": 4589,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 14579,
+          "outputTokens": 72,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 30,
+        "id": "162da08d-8185-4cc9-8c5e-376404ad10fa",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T06:35:29.100Z",
+        "resultEventId": 38,
+        "finishedAt": "2026-10-29T06:35:33.386Z",
+        "durationMs": 4286,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 17323,
+          "outputTokens": 72,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 56,
+        "id": "b4c1e2ca-99c9-40ff-bf23-8477c32b5779",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T07:00:09.276Z",
+        "resultEventId": 66,
+        "finishedAt": "2026-10-29T07:00:25.613Z",
+        "durationMs": 16337,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 36477,
+          "outputTokens": 349,
+          "cachedInputTokens": 23040
+        }
+      },
+      {
+        "eventId": 71,
+        "id": "52c5f195-6d73-4e4a-a0a5-a89f74d6aee4",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T07:00:25.623Z",
+        "resultEventId": 81,
+        "finishedAt": "2026-10-29T07:00:48.364Z",
+        "durationMs": 22741,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 36889,
+          "outputTokens": 2180,
+          "cachedInputTokens": 29696
+        }
+      },
+      {
+        "eventId": 125,
+        "id": "acf6b538-9c23-4d3a-a963-0399b5b6c04c",
+        "role": "editor",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "operacoes",
+        "strategy": "implement",
+        "startedAt": "2026-10-29T07:00:48.653Z",
+        "resultEventId": 142,
+        "finishedAt": "2026-10-29T07:01:04.031Z",
+        "durationMs": 15378,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 113605,
+          "outputTokens": 1150,
+          "cachedInputTokens": 104448
+        }
+      },
+      {
+        "eventId": 216,
+        "id": "2f10cf28-1ef1-413f-8326-b631213ca5a9",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "operacoes",
+        "strategy": "review",
+        "startedAt": "2026-10-29T07:01:04.451Z",
+        "resultEventId": 224,
+        "finishedAt": "2026-10-29T07:01:09.331Z",
+        "durationMs": 4880,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 19338,
+          "outputTokens": 13,
+          "cachedInputTokens": 15360
+        }
+      },
+      {
+        "eventId": 301,
+        "id": "9d5fc01f-07b2-40e8-9613-71cb3d443bb2",
+        "role": "editor",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "cli",
+        "strategy": "implement",
+        "startedAt": "2026-10-29T07:01:09.596Z",
+        "resultEventId": 317,
+        "finishedAt": "2026-10-29T07:01:22.282Z",
+        "durationMs": 12686,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 99230,
+          "outputTokens": 977,
+          "cachedInputTokens": 89600
+        }
+      },
+      {
+        "eventId": 390,
+        "id": "d91822f4-cc21-4c2c-9f74-f6384c3dbc45",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "cli",
+        "strategy": "assertion-diagnosis:518c7a5892bac14390de6243c3d2c478d3f98eb1c3909fdc19ac7e604776dd3b",
+        "startedAt": "2026-10-29T07:01:22.752Z",
+        "resultEventId": 402,
+        "finishedAt": "2026-10-29T07:01:33.668Z",
+        "durationMs": 10916,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 68714,
+          "outputTokens": 373,
+          "cachedInputTokens": 60288
+        }
+      },
+      {
+        "eventId": 425,
+        "id": "c56a23b8-02dd-4b67-ae13-415b5fe859cc",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "cli",
+        "strategy": "targeted-repair",
+        "startedAt": "2026-10-29T07:01:33.724Z",
+        "resultEventId": 441,
+        "finishedAt": "2026-10-29T07:01:57.429Z",
+        "durationMs": 23705,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 101544,
+          "outputTokens": 723,
+          "cachedInputTokens": 65792
+        }
+      },
+      {
+        "eventId": 518,
+        "id": "75ec7edd-246b-4df6-a539-f51723bc818f",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "cli",
+        "strategy": "materialize-verification:8028aefb84f384e4d77f7995955cd4f7af749366519ccd634df007714e341e55",
+        "startedAt": "2026-10-29T07:01:57.973Z",
+        "resultEventId": 526,
+        "finishedAt": "2026-10-29T07:02:04.071Z",
+        "durationMs": 6098,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 20001,
+          "outputTokens": 425,
+          "cachedInputTokens": 15360
+        }
+      },
+      {
+        "eventId": 641,
+        "id": "7269dbeb-ad54-49e8-a716-48eb4568b964",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "cli",
+        "strategy": "targeted-repair",
+        "startedAt": "2026-10-29T07:02:04.630Z",
+        "resultEventId": 658,
+        "finishedAt": "2026-10-29T07:02:26.147Z",
+        "durationMs": 21517,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 102245,
+          "outputTokens": 890,
+          "cachedInputTokens": 78720
+        }
+      },
+      {
+        "eventId": 788,
+        "id": "db8a9107-20a8-4108-8109-b6a7b9cf16e0",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "cli",
+        "strategy": "targeted-repair",
+        "startedAt": "2026-10-29T07:02:27.158Z",
+        "resultEventId": 803,
+        "finishedAt": "2026-10-29T07:02:43.211Z",
+        "durationMs": 16053,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 82245,
+          "outputTokens": 724,
+          "cachedInputTokens": 63488
+        }
+      },
+      {
+        "eventId": 888,
+        "id": "ff10f230-4c8f-43ce-a43d-b3120f49034b",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "cli",
+        "strategy": "diagnose-failure",
+        "startedAt": "2026-10-29T07:02:43.380Z",
+        "resultEventId": 896,
+        "finishedAt": "2026-10-29T07:02:48.060Z",
+        "durationMs": 4680,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 19238,
+          "outputTokens": 80,
+          "cachedInputTokens": 15360
+        }
+      },
+      {
+        "eventId": 906,
+        "id": "97101d7e-1326-4c28-8259-5ef755259215",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "verification-recipe-recovery",
+        "taskId": "cli",
+        "strategy": "instrument:adfb2c45f0a6d73a7e187314019cca52b40ef97d98054782ffc63dc8a9a35c7f",
+        "startedAt": "2026-10-29T07:02:48.088Z",
+        "resultEventId": 919,
+        "finishedAt": "2026-10-29T07:02:57.885Z",
+        "durationMs": 9797,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 58931,
+          "outputTokens": 547,
+          "cachedInputTokens": 54016
+        }
+      },
+      {
+        "eventId": 997,
+        "id": "61ce4e25-b242-4e76-9153-0f821dea0261",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "verification-recipe-recovery",
+        "taskId": "cli",
+        "strategy": "instrument:9c96fcd4ad7e32cb25a448a5507b4db388ebf2154867c3fb1dd95ba030345135",
+        "startedAt": "2026-10-29T07:02:58.072Z",
+        "resultEventId": 1005,
+        "finishedAt": "2026-10-29T07:03:04.707Z",
+        "durationMs": 6635,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 19647,
+          "outputTokens": 354,
+          "cachedInputTokens": 15360
+        }
+      },
+      {
+        "eventId": 1093,
+        "id": "861d473f-f5f4-417a-b3be-d938f782636a",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "cli",
+        "strategy": "review",
+        "startedAt": "2026-10-29T07:03:05.355Z",
+        "resultEventId": 1105,
+        "finishedAt": "2026-10-29T07:03:14.123Z",
+        "durationMs": 8768,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 62732,
+          "outputTokens": 389,
+          "cachedInputTokens": 56576
+        }
+      },
+      {
+        "eventId": 1119,
+        "id": "8c7e5b04-f8ad-463f-b3c5-7b92ed93e318",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "cli",
+        "strategy": "clarify-review",
+        "startedAt": "2026-10-29T07:03:14.170Z",
+        "resultEventId": 1136,
+        "finishedAt": "2026-10-29T07:03:27.472Z",
+        "durationMs": 13302,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 113894,
+          "outputTokens": 780,
+          "cachedInputTokens": 104704
+        }
+      },
+      {
+        "eventId": 1211,
+        "id": "7b1c4a0b-7a63-40ea-b894-21d813537b16",
+        "role": "editor",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "validacao-manual",
+        "strategy": "implement",
+        "startedAt": "2026-10-29T07:03:27.792Z",
+        "resultEventId": 1224,
+        "finishedAt": "2026-10-29T07:03:40.532Z",
+        "durationMs": 12740,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 76507,
+          "outputTokens": 641,
+          "cachedInputTokens": 67584
+        }
+      },
+      {
+        "eventId": 1372,
+        "id": "dafcc5cf-891e-48a9-a132-3f305170483a",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "validacao-manual",
+        "strategy": "review",
+        "startedAt": "2026-10-29T07:03:41.434Z",
+        "resultEventId": 1380,
+        "finishedAt": "2026-10-29T07:03:46.582Z",
+        "durationMs": 5148,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 19923,
+          "outputTokens": 13,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 1532,
+        "id": "6af97b78-9eff-4e73-96d4-16fe9b41fc7b",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "operacoes",
+        "strategy": "review",
+        "startedAt": "2026-10-29T07:03:47.648Z",
+        "resultEventId": 1540,
+        "finishedAt": "2026-10-29T07:03:52.241Z",
+        "durationMs": 4593,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 19985,
+          "outputTokens": 13,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 1720,
+        "id": "189b4a38-3ddd-4203-9aab-b122591e243e",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T07:03:53.454Z",
+        "resultEventId": 1728,
+        "finishedAt": "2026-10-29T07:04:00.404Z",
+        "durationMs": 6950,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 17912,
+          "outputTokens": 516,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 1817,
+        "id": "2507de1c-fac5-4720-979c-eefe052a734f",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "assertion-recovery",
+        "taskId": "operacoes",
+        "strategy": "assertion-contract:repair:c58202fd6b1e483bb3ac6b71253ae7fb262f5c6ffee426e849fbcb0fbcd96c54",
+        "startedAt": "2026-10-29T07:04:01.452Z",
+        "resultEventId": 1825,
+        "finishedAt": "2026-10-29T07:04:05.324Z",
+        "durationMs": 3872,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 14731,
+          "outputTokens": 85,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 1899,
+        "id": "638d78d8-42c2-48a7-9bfa-ae4a867d38c3",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "operacoes",
+        "strategy": "review",
+        "startedAt": "2026-10-29T07:04:06.022Z",
+        "resultEventId": 1907,
+        "finishedAt": "2026-10-29T07:04:09.835Z",
+        "durationMs": 3813,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 20969,
+          "outputTokens": 13,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 1966,
+        "id": "0520f393-6b12-4f21-a22a-68416000a23f",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T07:04:10.962Z",
+        "resultEventId": 1977,
+        "finishedAt": "2026-10-29T07:04:24.471Z",
+        "durationMs": 13509,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 56518,
+          "outputTokens": 756,
+          "cachedInputTokens": 34560
+        }
+      }
+    ]
+  },
+  "limits": [
+    "Point-in-time read transaction; execution can progress after capture.",
+    "Persisted active counts do not establish OS process liveness.",
+    "No agent stdout, commands, input prompts, credentials or configuration exported.",
+    "Phase attribution uses role and the nearest persisted action within five seconds, when one exists.",
+    "Epochs end at recorded workflow waiting events; they do not infer unrecorded process stops or manual debugging duration.",
+    "Agent duration includes provider work and transport; financial cost is absent unless the provider reports it."
+  ]
+}

@@ -4,6 +4,7 @@ import type { ProgressMeasurement, BuildGateMeasurement } from '../telemetry/pro
 import type { ReviewAssessment } from './review.js';
 import type { ConformanceProvenance } from './conformance.js';
 import type { ReviewScopeHandoff } from './source-finding-scope.js';
+import type { CompositeInspectionReceipt } from './inspection-composition.js';
 
 export type PersistedReviewHandoff = Omit<ReviewScopeHandoff,'status'> & {
   status:'pending'|'resolved';
@@ -50,7 +51,10 @@ export interface VerificationEvidence {
   provenance?: ConformanceProvenance;
   artifacts?: Record<string, string>;
   observation?: VerificationObservation;
+  browserObservation?: { schema:'capivara/browser-interaction/1'; witnesses:import('../runtime/browser-observation.js').BrowserInteractionWitness[]; diagnostics:string[] };
   assertionStatus?: 'ready' | 'missing' | 'invalid' | 'failed';
+  /** Negative inline-runner evidence distinguishes parsing from product execution. */
+  instrumentSyntaxChecked?:{protocol:'inline-node-syntax/1';identity:string;passed:boolean};
 }
 /** Original runner observation, reusable when only its predicate needs repair. */
 export interface VerificationObservation {
@@ -62,8 +66,12 @@ export interface VerificationObservation {
   timedOut: boolean;
   terminal: boolean;
   issue?: CommandResult['issue'];
+  invocationTransformation?: CommandResult['invocationTransformation'];
 }
 export interface ActionRecord {
+  purpose?: AgentRequest['purpose'];
+  /** Set only after context and invocation tools are ready for the agent. */
+  agentStartedAt?: string;
   /** A completed reconciliation result awaiting atomic adoption with execution. */
   planProposal?: DevelopmentPlan;
   id: string;
@@ -119,6 +127,8 @@ export interface TaskProgress {
   failureSignature?: string;
   actions?: ActionRecord[];
   reviews?: { inputHash: string; at: string; assessment: ReviewAssessment; inspection?: import('./inspection.js').InspectionIdentity; handoffIds?:string[] }[];
+  inspectionCompositions?: CompositeInspectionReceipt[];
+  interfaceRejections?:{key:string;kind:Exclude<Verification['kind'],'command'>;evidenceId:string;at:string}[];
   checkpoint?: WorkspaceCheckpoint;
   checks?: Verification[];
   /** Exact records selected by the latest verification batch, including reused proofs. */
@@ -151,6 +161,8 @@ export interface BuildState {
   reviewHandoffs?:PersistedReviewHandoff[];
   updatedAt: string;
   controlVersion?: 2;
+  /** Version of executable recovery transitions, independent of product proofs. */
+  controlProtocol?:string;
   metrics?: BuildMetrics;
   integrations?: IntegrationTransaction[];
   acceptance?: VerificationEvidence[];
@@ -159,6 +171,8 @@ export interface BuildState {
   pendingReplans?: Record<string, BuildIncident>;
   acceptanceChecks?: Verification[];
   acceptancePlanHash?: string;
+  nativeConformanceCheckIds?:string[];
+  nativeConformanceCoverage?:{id:string;checkId:string;coverage:import('./conformance-candidates.js').ConformanceCandidateCoverage}[];
   /** Current blocking causes, separate from the append-only incident history. */
   blockers?: BuildIncident[];
   /** Recovered recipes are durable even before the build publishes its final plan. */

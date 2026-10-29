@@ -1,0 +1,51 @@
+import { expect, it } from 'vitest';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { DevelopmentPlan, ProductBrief, WorkUnit } from '../../src/domain/types.js';
+import { runVerification, verificationIdentity } from '../../src/execution/checks.js';
+import { createInspectionIdentity, inspectionStillCurrent } from '../../src/execution/inspection.js';
+import { resolveInspectionReuse, type InspectionCompositionOptions } from '../../src/execution/inspection-composition.js';
+import { createTaskWorkspace, prepareIntegration, publishIntegration } from '../../src/execution/isolation.js';
+import { interpretReview } from '../../src/execution/review.js';
+import type { TaskProgress } from '../../src/execution/types.js';
+import { executeCommand } from '../../src/runtime/command.js';
+
+it('composes exact downstream source approvals after refreshing real proofs, while refusing missing proofs, irrelevant ownership and new predecessor defects',async()=>{
+  const workspace=await mkdtemp(join(tmpdir(),'capivara-composed-inspection-'));
+  try{
+    await mkdir(join(workspace,'src'));await writeFile(join(workspace,'package.json'),JSON.stringify({name:'inspection-fixture',version:'1.0.0',type:'module',scripts:{test:'old-runner'}}));
+    await writeFile(join(workspace,'src/parent.mjs'),"import{value}from'./child.mjs';console.log('VALUE='+value);\n");
+    await writeFile(join(workspace,'src/child.mjs'),'export const value=0;\n');
+    const brief:ProductBrief={schema:'capivara/product/1',id:'b',revision:1,status:'ready',name:'Composed modules',summary:'Expose a child value.',request:'Expose a child value.',modes:['cli'],targets:['portable'],requirements:['shared','child'].map(id=>({id,statement:`Deliver ${id}.`,mode:'cli',source:{kind:'request',reference:'request',text:'Expose a child value.'}})),constraints:[],decisions:[],gaps:[]};
+    const unit=(id:string):WorkUnit=>({id,title:id,goal:`Deliver ${id}.`,instructions:`Implement ${id}.`,requirementIds:id==='parent'?['shared']:['shared','child'],dependsOn:id==='parent'?[]:['parent'],environmentIds:[],contractIds:['value-contract'],files:[`src/${id}.mjs`],criteria:[`The ${id} command exposes the child value.`],checks:[{id:`${id}-proof`,kind:'cli',command:process.execPath,args:id==='parent'?['src/parent.mjs']:['--eval',"const{value}=await import('./src/child.mjs');console.log('VALUE='+value);"],inputs:[`src/${id}.mjs`],level:'behavior',assertion:{type:'regex',source:'stdout',pattern:'VALUE=\\d+'},requirementIds:id==='parent'?['shared']:['shared','child'],requiredCapabilities:[]}],risk:'normal',blockedBy:[]});
+    const parent=unit('parent'),child=unit('child');
+    const plan:DevelopmentPlan={schema:'capivara/plan/1',status:'ready',revision:1,briefId:brief.id,briefRevision:brief.revision,environment:[],contracts:[{id:'value-contract',name:'Value interface',description:'The child exports a numeric value consumed by the parent.',inputs:[],outputs:['numeric value'],requirementIds:['shared']}],tasks:[parent,child]};
+    const terminal=async()=>{throw Error('No terminal is requested.');};
+    const prove=async(unit:WorkUnit)=>{const result=await runVerification(workspace,brief,unit,plan,unit.checks[0]!,executeCommand,terminal);expect(result.evidence.passed).toBe(true);return result.evidence;};
+    const initialProof=await prove(parent),approved=interpretReview('{"approved":true,"findings":[]}');
+    const old={inputHash:initialProof.inputHash,at:'2026-01-01T00:00:00.000Z',assessment:approved,inspection:await createInspectionIdentity(workspace,brief,plan,parent,[],['src/parent.mjs','src/child.mjs'])};
+    const untouched=JSON.stringify(old);
+    const area=await createTaskWorkspace(workspace,child.id,'child-source',child.files);await writeFile(join(area.directory,'src/child.mjs'),'export const value=1;\n');
+    const partner={inputHash:'independent-child-review',at:'2026-01-01T00:00:01.000Z',assessment:approved,inspection:await createInspectionIdentity(area.directory,brief,plan,child,[],['src/child.mjs'])};
+    const integration=await prepareIntegration(workspace,child.id,area,child.files);await publishIntegration(workspace,integration);integration.phase='applied';
+    await writeFile(join(workspace,'package.json'),JSON.stringify({name:'inspection-fixture',version:'1.0.0',type:'module',scripts:{test:'new-instrument'}}));
+    const parentProof=await prove(parent),childProof=await prove(child);
+    expect(parentProof.inputHash).not.toBe(initialProof.inputHash);
+    expect((await verificationIdentity(workspace,plan,child,child.checks[0]!,brief)).inputHash).toBe(childProof.inputHash);
+    const progress=(changedFiles:string[],reviews:NonNullable<TaskProgress['reviews']>):TaskProgress=>({status:'complete',revision:'',attempts:1,changedFiles,findings:[],strategy:'verified',reviews});
+    const options:InspectionCompositionOptions={deliveryFiles:['src/parent.mjs','src/child.mjs'],tasks:{parent:progress(['src/parent.mjs','src/child.mjs'],[old]),child:progress(['src/child.mjs'],[partner])},integrations:[integration],currentProofs:{parent:[parentProof]}};
+    expect(await inspectionStillCurrent(old.inspection,workspace,brief,plan,parent,options.deliveryFiles)).toBe(false);
+    const pending=await resolveInspectionReuse(old,workspace,brief,plan,parent,options);expect(pending.status).toBe('awaiting-peer-proofs');expect(pending.waitingFor).toEqual(['child']);
+    options.currentProofs={parent:[parentProof],child:[childProof]};
+    const composed=await resolveInspectionReuse(old,workspace,brief,plan,parent,options);expect(composed.status).toBe('composed');
+    expect(composed.composition?.transfers).toEqual([expect.objectContaining({path:'src/child.mjs',publisher:'child',integrationId:integration.id,requirementIds:['shared'],contractIds:['value-contract'],review:expect.objectContaining({inputHash:partner.inputHash})})]);
+    expect(composed.composition?.proofs.map(proof=>proof.id).sort()).toEqual([parentProof.id,childProof.id].sort());expect(JSON.stringify(old)).toBe(untouched);
+    const unrelated=structuredClone(plan);unrelated.tasks[1]!.requirementIds=['child'];unrelated.tasks[1]!.contractIds=[];
+    const unrelatedReview={...partner,inspection:await createInspectionIdentity(workspace,brief,unrelated,unrelated.tasks[1]!,[],['src/child.mjs'])};
+    const irrelevant=await resolveInspectionReuse(old,workspace,brief,unrelated,parent,{...options,tasks:{...options.tasks,child:progress(['src/child.mjs'],[unrelatedReview])}});
+    expect(irrelevant.status).toBe('stale');expect(irrelevant.reason).toContain('does not cover');
+    await writeFile(join(workspace,'src/parent.mjs'),"throw Error('new actual predecessor defect');\n");
+    expect((await resolveInspectionReuse(old,workspace,brief,plan,parent,options)).status).toBe('stale');
+  }finally{await rm(workspace,{recursive:true,force:true});}
+});

@@ -19,6 +19,26 @@ function plan(unit=task()):DevelopmentPlan{return{schema:'capivara/plan/1',statu
 const goodCode="if(process.argv.includes('--greet')) console.log('hello'); else if(process.argv.includes('--stdin')){let input='';process.stdin.setEncoding('utf8');process.stdin.on('data', chunk=>input+=chunk);process.stdin.on('end',()=>console.log(input.trim()));}else process.exitCode=2;";
 
 describe('build cooperativo por evidência',()=>{
+  it('recria entradas privadas alteradas por uma verificação antes de recuperar a próxima prova',async()=>{
+    const root=await workspace(),unit=task();unit.files.push('state.json');
+    unit.checks.push({id:'runner-ready',kind:'command',command:process.execPath,args:['-e',"console.log('READY')"],inputs:['cli.mjs'],level:'behavior',expected:'The runner reports readiness.',requirementIds:[],requiredCapabilities:[]});
+    let edits=0,assertions=0,reviews=0;
+    const result=await runBuild({workspace:root,brief:brief(),plan:plan(unit),agent:async request=>{
+      if(request.role==='editor'){
+        edits++;await writeFile(join(request.workspace,'cli.mjs'),"import fs from 'node:fs';if(fs.readFileSync('state.json','utf8')!=='0')throw Error('stale verification state');fs.writeFileSync('state.json','1');console.log('hello');");
+        await writeFile(join(request.workspace,'state.json'),'0');return complete();
+      }
+      if(request.role==='repair'&&request.context?.includes('bind-observed-assertion')){assertions++;return complete(JSON.stringify({assertions:[{checkId:'runner-ready',assertion:{type:'contains',source:'stdout',value:'READY'}}]}));}
+      if(request.role==='reviewer'){reviews++;return complete('{"approved":true}');}
+      throw Error('A private temporary-state change must not authorize a product repair.');
+    }});
+    expect(result.status,JSON.stringify(result.incidents)).toBe('complete');
+    expect({edits,assertions,reviews}).toEqual({edits:1,assertions:1,reviews:1});
+    expect(result.state.metrics?.repetitions.some(item=>item.action==='replace-mutated-verification-workspace')).toBe(true);
+    expect(result.state.evidence.some(proof=>proof.output.includes('stale verification state'))).toBe(false);
+    expect(await readFile(join(root,'state.json'),'utf8')).toBe('0');
+  });
+
   it('encaminha defeito material do aceite final à entrega responsável e preserva a independente',async()=>{
     const root=await workspace();const product=brief();product.requirements[0]!.statement='Print hello normally and extra with --extra.';product.requirements[0]!.source.text=product.requirements[0]!.statement;
     product.requirements.push({id:'r2',statement:'Print stable independently.',mode:'cli',source:{kind:'request',reference:'request',text:'Print stable independently.'}});

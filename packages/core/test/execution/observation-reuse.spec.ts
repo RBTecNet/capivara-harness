@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { evaluateRecordedObservation, runVerification, verificationIdentity } from '../../src/execution/checks.js';
 import { runBuild } from '../../src/execution/build.js';
 import { emptyOperationalEnvironment } from '../../src/execution/environment.js';
+import { annotateBindingAuthority, recordBindingTransformation } from '../../src/domain/bindings.js';
+import { createInspectionIdentity } from '../../src/execution/inspection.js';
 import { executeCommand, runTerminal } from '../../src/runtime/index.js';
 import type { DevelopmentPlan, ProductBrief, Verification, WorkUnit } from '../../src/domain/types.js';
 import type { AgentResult } from '../../src/runtime/types.js';
@@ -19,6 +21,21 @@ function fixture(recipe=check()){
 }
 const source='console.log("completed at "+process.hrtime.bigint());';
 const complete=(text=''):AgentResult=>({status:'complete',text,commands:[],changedFiles:[]});
+it('preserves receipt identity across classification audit metadata while invalidating changed user outcomes',async()=>{
+  const root=await workspace();await writeFile(join(root,'runner.mjs'),source);
+  const brief=structuredClone(product),requirement=brief.requirements[0]!;
+  requirement.binding={capability:'extracted role',kind:'runtime',provider:'Node.js'};requirement.source.text='Node.js';
+  const recipe=check(),{plan,task}=fixture(recipe),before=await verificationIdentity(root,plan,task,recipe,brief);
+  const inspectionBefore=await createInspectionIdentity(root,brief,plan,task);
+  annotateBindingAuthority(requirement,'Use Node.js.','init');
+  recordBindingTransformation(requirement,{capability:'operational interpreter',kind:'runtime',provider:'Node.js'});
+  expect(requirement.bindingTransformations).toHaveLength(1);
+  expect(await verificationIdentity(root,plan,task,recipe,brief)).toEqual(before);
+  expect((await createInspectionIdentity(root,brief,plan,task)).authorityHash).toBe(inspectionBefore.authorityHash);
+  requirement.statement+=' It must also reject invalid input.';
+  expect((await verificationIdentity(root,plan,task,recipe,brief)).inputHash).not.toBe(before.inputHash);
+  expect((await createInspectionIdentity(root,brief,plan,task)).authorityHash).not.toBe(inspectionBefore.authorityHash);
+});
 it('separates execution identity from only criterion and assertion fields',async()=>{
   const root=await workspace();await writeFile(join(root,'runner.mjs'),source);const recipe=check(),{plan,task}=fixture(recipe),base=await verificationIdentity(root,plan,task,recipe,product);
   for(const revised of [{...recipe,expected:'A clarified criterion.'},{...recipe,assertion:{type:'contains' as const,value:'completed'}},{...recipe,assertionIssue:'An invalid predicate'}]){

@@ -147,7 +147,7 @@ describe('planejamento RC2 sem trabalho textual ou repetição sem progresso',()
   it('preserva contrato operacional e impede stack obrigatória satisfeita por outra capacidade',()=>{
     const product=brief();
     product.requirements[0]!.kind='stack';
-    product.requirements[0]!.binding={capability:'data-query',kind:'cli',provider:'RequiredDB'};
+    product.requirements[0]!.binding={capability:'data-query',kind:'cli',provider:'RequiredDB'};product.requirements[0]!.source.text='RequiredDB CLI';
     const environment=normalizeEnvironment([{id:'db',name:'Database',kind:'tool',identity:{capability:'data-query',kind:'driver',provider:'OtherDB'},provides:{command:['.tools/db-cli'],env:{DB_HOME:'.tools'},paths:['.tools'],inputs:['.tools/db-cli']},check:{command:'.tools/db-cli',args:['--version']},prepare:[]}],product);
     const tasks=normalizeTasks([{...unit('data','Consultar dados',['a','b']),environmentIds:['db'],inputs:['src/**/*.ts'],resources:['db-file'],exclusiveContracts:['contract'],checks:[{id:'stack-proof',kind:'command',command:'.tools/db-cli',args:['--version'],level:'build',inputs:['.tools/db-cli'],requirementIds:['a'],requiredCapabilities:[]}]}],product,environment,[]);
     const proposed={...plan(product,tasks),environment,acceptance:[{...tasks[0]!.checks[0]!,conformance:{requirementId:'a',capability:'data-query',kind:'cli' as const,provider:'RequiredDB',productInputs:['data.ts']}}]};
@@ -163,7 +163,7 @@ describe('planejamento RC2 sem trabalho textual ou repetição sem progresso',()
   });
 
   it('reconcilia identidade enriquecida por contrato operacional exato e preserva todas as referências sem inferência',async()=>{
-    const product=brief();product.requirements[0]!.binding={capability:'runtime',kind:'runtime',provider:'RequiredRuntime'};
+    const product=brief();product.requirements[0]!.binding={capability:'runtime',kind:'runtime',provider:'RequiredRuntime'};product.requirements[0]!.source.text='RequiredRuntime runtime';
     const task=unit('foundation','Exportar a e b',['a','b']);task.environmentIds=['runtime-original'];
     const current=plan(product,[task]);
     const original={id:'runtime-original',name:'Runtime escolhido',kind:'runtime' as const,dependsOn:[],targets:['portable' as const],reason:'Executar produto.',check:{command:'selected-runtime',args:['--version']},prepare:[]};
@@ -180,7 +180,7 @@ describe('planejamento RC2 sem trabalho textual ou repetição sem progresso',()
   });
 
   it('adota uma identidade sem id sob o pré-requisito estável e restringe um reparo de ambiente às referências',async()=>{
-    const product=brief();product.requirements[0]!.binding={capability:'runtime',kind:'runtime',provider:'RequiredRuntime'};
+    const product=brief();product.requirements[0]!.binding={capability:'runtime',kind:'runtime',provider:'RequiredRuntime'};product.requirements[0]!.source.text='RequiredRuntime runtime';
     const task=unit('foundation','Exportar a e b',['a','b']);task.environmentIds=['runtime-original'];
     const current=plan(product,[task]);
     const original={id:'runtime-original',name:'Runtime escolhido',kind:'runtime' as const,dependsOn:[],targets:['portable' as const],reason:'Executar produto.',check:{command:'selected-runtime',args:['--version']},prepare:[]};
@@ -192,7 +192,7 @@ describe('planejamento RC2 sem trabalho textual ou repetição sem progresso',()
   });
 
   it('não escolhe por nome entre contratos operacionais diferentes nem entre duas origens equivalentes',async()=>{
-    const product=brief();product.requirements[0]!.binding={capability:'runtime',kind:'runtime',provider:'RequiredRuntime'};
+    const product=brief();product.requirements[0]!.binding={capability:'runtime',kind:'runtime',provider:'RequiredRuntime'};product.requirements[0]!.source.text='RequiredRuntime runtime';
     const task=unit('foundation','Exportar a e b',['a','b']);task.environmentIds=['left'];
     const current=plan(product,[task]);
     const original={id:'left',name:'Runtime',kind:'runtime' as const,dependsOn:[],targets:['portable' as const],reason:'Executar produto.',check:{command:'selected-runtime',args:['--version']},prepare:[]};

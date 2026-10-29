@@ -8,6 +8,11 @@ import { emitEvent, emitProgress } from "../telemetry/progress.js";
 import { PlanningFailure, PlanningProgress } from "./control.js";
 import { assertValidPlan, reconcileChecks, reconcilePlan, sameDelivery, validatePlan, preferredProofOwner, resolveRequirementAlias } from "./reconcile.js";
 import { normalizeVerificationAssertion } from "./assertions.js";
+import { verificationAssertionStatus } from "./assertions.js";
+import { verificationRegistry } from "./verifications.js";
+import { obligationMatchesProvider, recordBindingTransformation } from "./bindings.js";
+import type { PlanIssue } from "./reconcile.js";
+import { rehydratePlanRecords } from "./plan-records.js";
 
 const cleanId = (value: unknown, fallback: string): string => string(value).replace(/[^a-zA-Z0-9_.:-]+/g, "-") || fallback;
 const unique = <T extends { id: string }>(items: T[]): T[] => [...new Map(items.map((item) => [item.id, item])).values()];
@@ -126,15 +131,24 @@ function contractsFrom(value: unknown, requirements: Requirement[]): Integration
   })).filter((contract) => contract.description !== "");
 }
 
+function declaredConformance(item: Record<string, unknown>): Record<string, unknown> | undefined {
+  return object(item.conformance) ? item.conformance
+    : object(item.acceptance) && object(item.acceptance.conformance) ? item.acceptance.conformance
+      : string(item.requirementId) && string(item.capability) && string(item.provider) && Array.isArray(item.productInputs) ? item : undefined;
+}
+
 export function normalizeChecks(value: unknown, brief: ProductBrief): Verification[] {
   const result: Verification[] = [];
   for (const item of records(value)) {
+    // Transport placement cannot discard an explicitly declared contract.
+    // These adapters copy metadata; they never infer a provider or a proof.
+    const conformance = declaredConformance(item);
     const kind = ["command", "cli", "tui", "web", "desktop"].includes(string(item.kind)) ? string(item.kind) as Verification["kind"] : "command";
     const command = string(item.command);
     const capabilities = uniqueStrings([...strings(item.requiredCapabilities), ...inferredCapabilities(`${command} ${argv(item.args).join(" ")}`), ...(kind === "web" ? ["browser"] : [])]);
     if (!allowedCapabilities(brief, capabilities)) continue;
     if (kind === "desktop" && !brief.modes.includes("desktop")) continue;
-    const check: Verification = { id: cleanId(item.id, identity("check", `${kind}:${command}:${string(item.expected)}`)), kind, requirementIds: strings(item.requirementIds), requiredCapabilities: capabilities };
+    const check: Verification = { id: cleanId(item.id, identity("check", `${kind}:${command}:${string(item.expected)}`)), kind, requirementIds: uniqueStrings([...strings(item.requirementIds), ...(conformance && string(conformance.requirementId) ? [string(conformance.requirementId)] : [])]), requiredCapabilities: capabilities };
     if (command) check.command = command;
     const args = argv(item.args);
     if (args.length) check.args = args;
@@ -163,8 +177,8 @@ export function normalizeChecks(value: unknown, brief: ProductBrief): Verificati
     if (string(item.cwd) && safePaths([item.cwd]).length) check.cwd = string(item.cwd);
     if (Array.isArray(item.outputs)) check.outputs = safePaths(item.outputs);
     if (Array.isArray(item.dependsOn)) check.dependsOn = strings(item.dependsOn);
-    if (object(item.conformance) && string(item.conformance.requirementId) && string(item.conformance.capability) && string(item.conformance.provider) && ["cli", "library", "driver", "service", "runtime", "sdk"].includes(string(item.conformance.kind))) {
-      check.conformance = { requirementId: string(item.conformance.requirementId), capability: string(item.conformance.capability), kind: string(item.conformance.kind) as NonNullable<Verification["conformance"]>["kind"], provider: string(item.conformance.provider), productInputs: safePaths(item.conformance.productInputs), ...(Array.isArray(item.conformance.providerCommand) ? {providerCommand:argv(item.conformance.providerCommand)} : {}), ...(Array.isArray(item.conformance.providerInputs) ? {providerInputs:safePaths(item.conformance.providerInputs)} : {}), ...(Array.isArray(item.conformance.artifacts) ? {artifacts:safePaths(item.conformance.artifacts)} : {}) };
+    if (conformance && string(conformance.requirementId) && string(conformance.capability) && string(conformance.provider) && ["cli", "library", "driver", "service", "runtime", "sdk"].includes(string(conformance.kind))) {
+      check.conformance = { requirementId: string(conformance.requirementId), capability: string(conformance.capability), kind: string(conformance.kind) as NonNullable<Verification["conformance"]>["kind"], provider: string(conformance.provider), productInputs: safePaths(conformance.productInputs), ...(Array.isArray(conformance.providerCommand) ? {providerCommand:argv(conformance.providerCommand)} : {}), ...(Array.isArray(conformance.providerInputs) ? {providerInputs:safePaths(conformance.providerInputs)} : {}), ...(Array.isArray(conformance.artifacts) ? {artifacts:safePaths(conformance.artifacts)} : {}) };
     }
     result.push(check);
   }
@@ -405,63 +419,144 @@ async function ensureCoverage(brief: ProductBrief, plan: DevelopmentPlan, hooks:
   }
 }
 
-/** Repair explicit invariant violations once per changed state, never approve around them. */
+const providerStages: Record<string, number> = { 'mandatory-provider-mismatch': 0, 'unused-mandatory-provider': 1, 'unproven-mandatory-provider': 2 };
+const repairTopic = (issue: PlanIssue): string => `${issue.code in providerStages ? 'provider' : issue.code}:${issue.subject}`;
+
+function recordPlanBindings(brief: ProductBrief, plan: DevelopmentPlan): boolean {
+  let changed = false;
+  for (const requirement of brief.requirements.filter(item => item.binding)) {
+    const offered = new Map(plan.environment.filter(node => obligationMatchesProvider(requirement, node.identity)).map(node => [stableJson(node.identity), node.identity!]));
+    let identities = [...offered.values()];
+    if (identities.length > 1) identities = identities.filter(identity => verificationRegistry(plan).some(({ check }) => check.conformance?.requirementId === requirement.id && normalize(check.conformance.provider) === normalize(identity.provider) && check.conformance.kind === identity.kind && normalize(check.conformance.capability) === normalize(identity.capability)));
+    if (identities.length !== 1) continue;
+    const previous = requirement.bindingTransformations?.length ?? 0;
+    recordBindingTransformation(requirement, identities[0]!);
+    changed ||= previous !== (requirement.bindingTransformations?.length ?? 0);
+  }
+  return changed;
+}
+
+/** Fingerprints contain executable contracts of this topic, never prose or clocks. */
+function invariantState(brief: ProductBrief, plan: DevelopmentPlan, issue: PlanIssue): string {
+  const requirement = brief.requirements.find(item => item.id === issue.subject);
+  const tasks = plan.tasks.filter(task => task.id === issue.subject || task.requirementIds.includes(issue.subject));
+  const providers = plan.environment.filter(node => requirement?.binding ? obligationMatchesProvider(requirement, node.identity) || !node.identity && tasks.some(task => task.environmentIds.includes(node.id)) : tasks.some(task => task.environmentIds.includes(node.id)));
+  const checks = verificationRegistry(plan).filter(({ check, taskId }) => check.conformance?.requirementId === issue.subject || check.requirementIds.includes(issue.subject) || taskId === issue.subject).map(({ taskId, check }) => {
+    const { expected: _description, ...recipe } = check;
+    return { taskId, ...recipe, assertion: verificationAssertionStatus(check).assertion ?? null };
+  });
+  return stableJson({ topic: repairTopic(issue), code: issue.code, binding: requirement?.binding, authority: requirement?.bindingAuthority, tasks: tasks.map(({ id, requirementIds, dependsOn, environmentIds, contractIds }) => ({ id, requirementIds, dependsOn, environmentIds, contractIds })), providers: providers.map(({ id, kind, identity, check, prepare, provides, dependsOn, targets }) => ({ id, kind, identity, check, prepare, provides, dependsOn, targets })), checks });
+}
+
+function mergeRepairChecks(originals: Verification[], values: unknown, brief: ProductBrief): Verification[] {
+  const result = structuredClone(originals), updates = records(values);
+  for (const update of updates) {
+    const original = result.find(check => check.id === update.id) ?? (!string(update.id) && result.length === 1 && updates.length === 1 ? result[0] : undefined);
+    const conformance = declaredConformance(update);
+    const normalized = normalizeChecks([{ ...original, ...update, ...(conformance ? { conformance } : {}), ...(original ? { id: original.id, ...(conformance === update && !['command','cli','tui','web','desktop'].includes(string(update.kind)) ? { kind: original.kind } : {}), requirementIds: uniqueStrings([...original.requirementIds, ...strings(update.requirementIds)]), constraintIds: uniqueStrings([...(original.constraintIds ?? []), ...strings(update.constraintIds)]) } : {}) }], brief);
+    for (const check of normalized) {
+      const index = result.findIndex(existing => existing.id === check.id);
+      if (index >= 0) result[index] = check; else result.push(check);
+    }
+  }
+  return reconcileChecks(result);
+}
+
+/** Unpublished technical transactions cannot replace product delivery contracts. */
+async function invariantProposal(brief: ProductBrief, base: DevelopmentPlan, issue: PlanIssue, task: WorkUnit | undefined, result: Record<string, unknown>, hooks: DomainHooks): Promise<DevelopmentPlan> {
+  const plan = structuredClone(base), nodes = await executableEnvironment(result.environment, brief, hooks);
+  const changed = new Set(nodes.map(node => node.id)), aliases = new Map<string, string>();
+  plan.environment = normalizeEnvironment([...plan.environment.filter(node => !changed.has(node.id)), ...nodes], brief, aliases);
+  remapEnvironmentReferences(plan, aliases);
+  plan.contracts = unique([...plan.contracts, ...contractsFrom(result.contracts, brief.requirements)]);
+  const technical = issue.code in providerStages || /proof|interface|environment|contract/.test(issue.code);
+  const updates = [...records(result.tasks), ...records(result.taskUpdates), ...(object(result.task) ? [{ id: task?.id, ...result.task }] : [])];
+  for (const update of updates) {
+    const existing = plan.tasks.find(candidate => candidate.id === update.id);
+    if (!existing) { if (!technical) plan.tasks.push(...normalizeTasks([update], brief, plan.environment, plan.contracts, [])); continue; }
+    if (Array.isArray(update.environmentIds)) {
+      const references = strings(update.environmentIds).map(id => aliases.get(id) ?? id);
+      existing.environmentIds = issue.code in providerStages && issue.code !== 'unproven-mandatory-provider' || issue.code.includes('environment') ? references : uniqueStrings([...existing.environmentIds, ...references]);
+    }
+    if (Array.isArray(update.contractIds)) existing.contractIds = uniqueStrings([...existing.contractIds, ...strings(update.contractIds)]);
+    if (Array.isArray(update.inputs)) existing.inputs = uniqueStrings([...(existing.inputs ?? []), ...safePaths(update.inputs)]);
+    existing.checks = mergeRepairChecks(existing.checks, update.checks, brief);
+    if (!technical) {
+      const proposed = normalizeTasks([{ ...existing, ...update }], brief, plan.environment, plan.contracts, [])[0];
+      if (proposed) Object.assign(existing, proposed, { criteria: uniqueStrings([...existing.criteria, ...proposed.criteria]), requirementIds: uniqueStrings([...existing.requirementIds, ...proposed.requirementIds]), files: uniqueStrings([...existing.files, ...proposed.files]), checks: mergeRepairChecks(existing.checks, proposed.checks, brief) });
+    }
+  }
+  if (task && Array.isArray(result.checks)) { const owner = plan.tasks.find(candidate => candidate.id === task.id)!; owner.checks = mergeRepairChecks(owner.checks, result.checks, brief); }
+  plan.acceptance = mergeRepairChecks(plan.acceptance ?? [], result.acceptance, brief);
+  for (const update of records(result.verificationUpdates)) {
+    if (!object(update.check)) continue;
+    if (update.owner === '$acceptance') plan.acceptance = mergeRepairChecks(plan.acceptance, [update.check], brief);
+    else { const owner = plan.tasks.find(candidate => candidate.id === update.owner); if (owner) owner.checks = mergeRepairChecks(owner.checks, [update.check], brief); }
+  }
+  const { onEvent: _publicationObserver, ...quiet } = hooks;
+  reconcileOperationalProviders(plan, quiet);
+  return reconcilePlan(brief, plan, base);
+}
+
+/** A retry changes protocol or a causal precondition. Rejected partial metadata
+ * is retained for its patch, but never published as an accepted plan. */
 async function repairPlanIssues(brief: ProductBrief, plan: DevelopmentPlan, hooks: DomainHooks): Promise<void> {
-  const recovery = new PlanningProgress("plan-invariants");
+  const attempts = new Map<string, { calls: number; rejection?: unknown; staged?: DevelopmentPlan }>();
   for (;;) {
+    cancelled(hooks.signal);
+    if (recordPlanBindings(brief, plan)) await hooks.save?.({ brief, plan });
     const issues = validatePlan(brief, plan);
     if (!issues.length) return;
-    if(issues.some(issue=>['mandatory-provider-mismatch','unused-mandatory-provider'].includes(issue.code))&&reconcileOperationalProviders(plan,hooks)){
-      await hooks.save?.({brief,plan});continue;
-    }
-    const issue = issues[0]!;
-    recovery.requireChange({ issues, tasks: plan.tasks, environment: plan.environment, acceptance: plan.acceptance }, "O plano viola invariantes de cobertura, capacidade ou conformidade.", `${issue.code}:${issue.subject}`);
-    const limit = hooks.contextChars ?? 24_000;
-    const task = issue.code === 'unproven-interface-behavior' ? preferredProofOwner(plan,issue.subject) : plan.tasks.find(candidate => candidate.id === issue.subject || candidate.requirementIds.includes(issue.subject));
-    const requirementIds = new Set([issue.subject, ...(task?.requirementIds ?? [])]);
-    const result = await requestObject({...hooks, operation: "repair", prompt: [
-      "Repair the concrete structural defect below. Preserve mandatory user choices and all unaffected deliveries. A passing syntax check cannot replace production build or behavior proof. Return only changed complete definitions, not another parallel plan.",
-      'Shape: {"tasks":[],"environment":[],"contracts":[],"acceptance":[],"reason":"causal correction"}. Definitions with existing IDs replace those definitions. Mandatory requirement.binding is matched by environment.identity={capability,kind,provider}; provide executable readiness and acceptance recipes with requirementIds and level=build|behavior. A driver does not satisfy a CLI capability.',
-      'Behavior recipes keep expected as a human criterion and declare assertion={"type":"contains","source":"stdout","value":"concrete scenario output"}; other typed predicates are regex{pattern,flags,source}, exit{value}, empty{source}, json{source,path:["key",0],equals:value} and all/any{assertions:[]}. expectedExitCode alone is not a behavioral assertion. Preserve actual interface and product inputs.',
-      'A mandatory binding needs dedicated acceptance.conformance={requirementId,capability,kind,provider,productInputs:["actual product paths"],artifacts:[]}. Runtime conformance executes product source with that actual runtime and an observed behavior assertion. SDK build conformance records outputs/artifacts and another behavior check with dependsOn:["producer-check-id"] consumes that exact produced artifact. --version/help and labels are not product usage.',
+    if (issues.some(issue => ['mandatory-provider-mismatch', 'unused-mandatory-provider'].includes(issue.code)) && reconcileOperationalProviders(plan, hooks)) { await hooks.save?.({ brief, plan }); continue; }
+    const issue = issues[0]!, stamp = invariantState(brief, plan, issue), attempt = attempts.get(stamp) ?? { calls: 0 };
+    if (attempt.calls >= 2) throw new PlanningFailure('no-progress', [`${issue.code} [${issue.subject}]: ${issue.message}`, 'A proposta e o protocolo de patch mínimo não corrigiram a causa. Entregas e provas originais foram preservadas.', stableJson(attempt.rejection)], 'plan-invariants');
+    const protocol = attempt.calls++ ? 'minimal-patches' : 'scoped-definitions'; attempts.set(stamp, attempt);
+    const context = attempt.staged ?? plan, limit = hooks.contextChars ?? 24_000;
+    const task = issue.code === 'unproven-interface-behavior' ? preferredProofOwner(context, issue.subject) : context.tasks.find(candidate => candidate.id === issue.subject || candidate.requirementIds.includes(issue.subject));
+    const recipes = verificationRegistry(context).filter(({ check, taskId }) => check.conformance?.requirementId === issue.subject || check.requirementIds.includes(issue.subject) || taskId === task?.id);
+    const result = await requestObject({ ...hooks, operation: 'repair', prompt: [
+      `Repair protocol: ${protocol}. Correct this invariant's technical contract only. Preserve every existing delivery ID, goal, criterion, requirement, owned file and dependency. A task-owned recipe is valid; it need not be copied to global acceptance. Do not implement code.`,
+      protocol === 'minimal-patches' ? 'Return {"verificationUpdates":[{"owner":"existing task ID or $acceptance","check":{"id":"existing or new check ID","conformance":{"requirementId":"affected requirement","capability":"actual capability","kind":"cli|library|driver|service|runtime|sdk","provider":"literal provider","productInputs":["actual product files"]}}}],"environment":[],"taskUpdates":[],"reason":"causal correction"}. A partial check patches the previously supplied recipe. For reference repairs use taskUpdates[{id,environmentIds:["actual IDs"]}]; omit unchanged fields, never erase a prerequisite as a placeholder. Do not repeat an unchanged answer.' : 'Return {"tasks":[],"environment":[],"contracts":[],"acceptance":[],"reason":"causal correction"}. Return only affected complete definitions or taskUpdates[{id,checks,environmentIds}]. Both task checks and global acceptance retain their actual owners. Explicit conformance is {requirementId,capability,kind,provider,productInputs,artifacts}; availability alone does not prove product usage.',
+      'Behavior recipes declare a typed assertion (contains/regex/exit/empty/json/all/any) and level=behavior. expected remains its human criterion. Build/syntax cannot replace interaction; SDK artifacts need a dependent behavior consumer. Do not alter a literal provider to fix an inferred engineering role.',
       `Invariant: ${JSON.stringify(issue)}`,
-      `Relevant mandatory requirements: ${metadataList(brief.requirements.filter(requirement=>requirementIds.has(requirement.id)), Math.floor(limit / 4))}`,
-      `Affected delivery: ${metadataList(task ? [task] : [], Math.floor(limit / 4))}`,
-      `Relevant capabilities: ${metadataList(plan.environment.filter(node=>task?.environmentIds.includes(node.id) || node.requirementIds?.some(id=>requirementIds.has(id)) || brief.requirements.some(requirement=>requirementIds.has(requirement.id) && requirement.binding?.capability===node.identity?.capability)), Math.floor(limit / 5))}`,
-      `Known identifiers: ${metadataList(plan.tasks.map(({id,requirementIds})=>({id,requirementIds})), Math.floor(limit / 10))}`,
-    ].join("\n\n")});
-    const nodes = await executableEnvironment(result.environment, brief, hooks);
-    const changedEnvironment = new Set(nodes.map(node=>node.id));
-    const environmentAliases=new Map<string,string>();
-    plan.environment = normalizeEnvironment([...plan.environment.filter(node=>!changedEnvironment.has(node.id)), ...nodes], brief,environmentAliases);
-    remapEnvironmentReferences(plan,environmentAliases);
-    const changedContracts = contractsFrom(result.contracts, brief.requirements);
-    plan.contracts = unique([...plan.contracts, ...changedContracts]);
-    const tasks = normalizeTasks(result.tasks, brief, plan.environment, plan.contracts, []);
-    const environmentOnly=['mandatory-provider-mismatch','unused-mandatory-provider'].includes(issue.code);
-    if(environmentOnly){
-      // Fix capability references without replacing a product delivery merely
-      // because a model returned its complete definition in an environment fix.
-      for(const update of tasks){const existing=plan.tasks.find(task=>task.id===update.id);if(existing)existing.environmentIds=update.environmentIds.map(id=>environmentAliases.get(id)??id);}
-    }else{
-      const changedTasks = new Set(tasks.map(unit=>unit.id));
-      plan.tasks = [...plan.tasks.filter(unit=>!changedTasks.has(unit.id)), ...tasks];
+      `Mandatory requirement: ${metadataList(brief.requirements.filter(requirement => requirement.id === issue.subject), Math.floor(limit / 5))}`,
+      `Locked delivery: ${metadataList(task ? [{ id: task.id, goal: task.goal, requirementIds: task.requirementIds, files: task.files, criteria: task.criteria, environmentIds: task.environmentIds, dependsOn: task.dependsOn }] : [], Math.floor(limit / 5))}`,
+      `Owned recipes: ${metadataList(recipes, Math.floor(limit / 3))}`,
+      `Operational providers: ${metadataList(context.environment.filter(node => !node.identity && task?.environmentIds.includes(node.id) || brief.requirements.some(requirement => requirement.id === issue.subject && obligationMatchesProvider(requirement, node.identity))), Math.floor(limit / 5))}`,
+      ...(attempt.rejection ? [`Previous proposal validation: ${stableJson(attempt.rejection)}`] : []),
+    ].join('\n\n') });
+    let candidate: DevelopmentPlan;
+    try { candidate = await invariantProposal(brief, context, issue, task, result, hooks); }
+    catch (error) { cancelled(hooks.signal); if (!(error instanceof PlanningFailure)) throw error; attempt.rejection = { reason: error.message }; emitEvent(hooks.onEvent, { type: 'recovering', message: 'A proposta técnica não pôde ser adotada; recuperando somente seu contrato em um protocolo de patch mínimo.', subject: issue.subject }); continue; }
+    const after = validatePlan(brief, candidate), key = (value: PlanIssue): string => `${value.code}:${value.subject}`;
+    const introduced = after.filter(next => !issues.some(previous => key(previous) === key(next)) && !issues.some(previous => repairTopic(previous) === repairTopic(next) && previous.code in providerStages && next.code in providerStages && providerStages[next.code]! > providerStages[previous.code]!));
+    const cleared = issues.filter(previous => !after.some(next => key(previous) === key(next)));
+    if (introduced.length || !cleared.length) {
+      if (!introduced.length) attempt.staged = candidate;
+      attempt.rejection = { remaining: after.filter(next => repairTopic(next) === repairTopic(issue)), introduced, reason: introduced.length ? 'The transaction introduced another invariant violation.' : 'No invariant or causal provider stage changed; wording, timestamps and unrelated edits are not progress.' };
+      emitEvent(hooks.onEvent, { type: 'recovering', message: 'A proposta não resolveu uma causa verificável; preservando o plano publicado e recuperando apenas os campos pendentes.', subject: issue.subject });
+      continue;
     }
-    reconcileOperationalProviders(plan,hooks);
-    const acceptance = normalizeChecks(result.acceptance, brief);
-    const changedChecks = new Set(acceptance.map(check=>check.id));
-    plan.acceptance = reconcileChecks([...(plan.acceptance ?? []).filter(check=>!changedChecks.has(check.id)), ...acceptance]);
-    Object.assign(plan, reconcilePlan(brief, plan));
-    await hooks.save?.({brief, plan});
+    Object.assign(plan, candidate); recordPlanBindings(brief, plan);
+    await hooks.save?.({ brief, plan });
+    emitEvent(hooks.onEvent, { type: 'replanned', message: `Reparo técnico adotado atomicamente: ${cleared.map(item => `${item.code}[${item.subject}]`).join(', ')}.`, subject: issue.subject });
   }
 }
+
 
 export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
   const brief = options.brief;
   applyRepositoryConstraints(brief, options.repositoryConstraints);
   await resolveQuestions(brief, [], options);
   applyRepositoryConstraints(brief, options.repositoryConstraints);
-  const existing=options.existing?.briefId===brief.id?reconcilePlan(brief,options.existing,options.existing):options.existing;
+  const restored=options.existing?.briefId===brief.id&&options.completedResponses
+    ?rehydratePlanRecords(brief,options.existing,options.completedResponses(),normalizeChecks):undefined;
+  const prior=restored?.plan??options.existing;
+  const existing=prior?.briefId===brief.id?reconcilePlan(brief,prior,prior):prior;
+  for(const record of restored?.restored??[])emitEvent(options.onEvent,{type:'replanned',subject:record.checkId,message:'Metadados explícitos recuperados da resposta já registrada; invocação e critérios preservados, sem repetir inferência.',detail:record});
+  for(const record of restored?.ambiguous??[])emitEvent(options.onEvent,{type:'recovering',subject:record.checkId,message:'Respostas registradas divergem sobre metadados; nenhuma interpretação conflitante foi adotada.',detail:record});
+  if(existing&&restored?.restored.length)await options.save?.({brief,plan:existing});
+  if (existing?.briefId === brief.id && recordPlanBindings(brief, existing)) await options.save?.({ brief, plan: existing });
   if (existing?.status === "ready" && existing.briefId === brief.id && options.existing?.briefRevision === brief.revision && !validatePlan(brief, existing).length) return existing;
   // The product is still the same: fix its missing proofs/constraints in place.
   // Re-extracting the whole plan after a harness authority correction discards

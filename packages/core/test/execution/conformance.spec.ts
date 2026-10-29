@@ -8,13 +8,14 @@ import { emptyOperationalEnvironment } from '../../src/execution/environment.js'
 import type { OperationalEnvironment } from '../../src/execution/environment.js';
 import { validateConformance } from '../../src/execution/conformance.js';
 import { runVerification } from '../../src/execution/checks.js';
+import { validatePlan } from '../../src/domain/reconcile.js';
 import type { DevelopmentPlan, ProductBrief, Verification, WorkUnit } from '../../src/domain/types.js';
 import type { VerificationEvidence } from '../../src/execution/types.js';
 
 const roots:string[]=[];
 afterEach(async()=>{await Promise.all(roots.splice(0).map(root=>rm(root,{recursive:true,force:true})));});
 async function workspace():Promise<string>{const root=await mkdtemp(join(tmpdir(),'capivara-conformance-'));roots.push(root);return root;}
-function brief(kind:'runtime'|'sdk'|'library'='runtime'):ProductBrief{return{schema:'capivara/product/1',status:'ready',id:'product',revision:1,name:'Greeting',summary:'Print hello with the mandatory provider.',request:'Create a Node.js CLI that prints hello.',modes:['cli'],targets:['portable'],requirements:[{id:'mandatory',statement:'Print hello using the mandatory provider.',source:{kind:'request',reference:'request',text:'Use the mandatory provider.'},mode:'cli',kind:'stack',binding:{capability:'implementation',kind,provider:'Required provider'}}],constraints:[],decisions:[],gaps:[]};}
+function brief(kind:'runtime'|'sdk'|'library'='runtime'):ProductBrief{return{schema:'capivara/product/1',status:'ready',id:'product',revision:1,name:'Greeting',summary:'Print hello with the mandatory provider.',request:'Create a Node.js CLI that prints hello.',modes:['cli'],targets:['portable'],requirements:[{id:'mandatory',statement:'Print hello using the mandatory provider.',source:{kind:'request',reference:'request',text:`Use the Required provider as ${kind}.`},mode:'cli',kind:'stack',binding:{capability:'implementation',kind,provider:'Required provider'}}],constraints:[],decisions:[],gaps:[]};}
 function unit(checks:Verification[]):WorkUnit{return{id:'greeting',title:'Greeting',goal:'Print hello.',instructions:'Implement the greeting.',requirementIds:['mandatory'],dependsOn:[],environmentIds:['provider'],contractIds:[],files:['cli.mjs'],criteria:['The CLI prints hello using the mandatory provider.'],checks,risk:'normal',blockedBy:[]};}
 function plan(product:ProductBrief,checks:Verification[]):DevelopmentPlan{return{schema:'capivara/plan/1',status:'ready',revision:1,briefId:product.id,briefRevision:1,environment:[{id:'provider',name:'Required provider',kind:product.requirements[0]!.binding!.kind==='sdk'?'sdk':'runtime',identity:product.requirements[0]!.binding!,reason:'Mandatory implementation provider.',dependsOn:[],targets:['portable'],check:{command:process.execPath,args:['--version']},prepare:[],provides:{command:[process.execPath]}}],contracts:[],tasks:[unit(checks)],acceptance:checks};}
 function runtimeCheck(command=process.execPath,args=['cli.mjs']):Verification{return{id:'runtime-usage',kind:'cli',command,args,expected:'contains:hello',level:'behavior',inputs:['cli.mjs'],requirementIds:['mandatory'],requiredCapabilities:[],conformance:{requirementId:'mandatory',capability:'implementation',kind:'runtime',provider:'Required provider',productInputs:['cli.mjs']}};}
@@ -28,6 +29,33 @@ async function observed(root:string,check:Verification):Promise<VerificationEvid
 }
 
 describe('mandatory provider conformance uses product execution provenance',()=>{
+  it('reuses task-owned runtime conformance without promoting or rerunning it as final acceptance',async()=>{
+    const root=await workspace(),product=brief(),check=runtimeCheck(),proposal=plan(product,[check]);proposal.acceptance=[];
+    let productRuns=0,calls=0;
+    const execute:typeof executeCommand=async request=>{if(Array.isArray(request.command)&&request.command.includes('cli.mjs'))productRuns++;return executeCommand(request);};
+    const agent:Parameters<typeof runBuild>[0]['agent']=async request=>{
+      calls++;if(request.role==='editor')await writeFile(join(request.workspace,'cli.mjs'),"console.log('hello');\n");
+      return{status:'complete',text:request.role==='reviewer'?'{"approved":true,"findings":[]}':'Implemented.',commands:[],changedFiles:[]};
+    };
+    const result=await runBuild({workspace:root,brief:product,plan:proposal,executeCommand:execute,agent});
+    expect(result.status,JSON.stringify(result.incidents)).toBe('complete');expect(productRuns).toBe(1);
+    expect(result.state.evidence.filter(proof=>proof.checkId===check.id&&proof.passed).map(proof=>proof.taskId)).toEqual(['greeting']);
+    expect(result.plan.acceptance).toEqual([]);const previousCalls=calls;
+    const resumed=await runBuild({workspace:root,brief:product,plan:result.plan,state:structuredClone(result.state),executeCommand:execute,agent});
+    expect(resumed.status,JSON.stringify(resumed.incidents)).toBe('complete');expect(productRuns).toBe(1);expect(calls).toBe(previousCalls);
+  });
+
+  it('rejects a proof from the wrong owner and a task proof whose product input changed',async()=>{
+    const root=await workspace(),product=brief(),check=runtimeCheck(),proposal=plan(product,[check]);proposal.acceptance=[];
+    await writeFile(join(root,'cli.mjs'),"console.log('hello');\n");
+    const run=(taskId:string)=>runVerification(root,product,{...unit([check]),id:taskId},proposal,check,executeCommand,runTerminal);
+    const unrelated=await run('unrelated');expect(unrelated.evidence.passed).toBe(true);
+    expect((await validateConformance(product,proposal,operational(root,product,[process.execPath]),[unrelated.evidence],root))[0]?.code).toBe('unproven-product-provider-usage');
+    const current=await run('greeting');expect(await validateConformance(product,proposal,operational(root,product,[process.execPath]),[current.evidence],root)).toEqual([]);
+    await writeFile(join(root,'cli.mjs'),"console.log('changed');\n");
+    expect((await validateConformance(product,proposal,operational(root,product,[process.execPath]),[current.evidence],root))[0]?.message).toContain('Product inputs changed');
+  });
+
   it('the real engine accepts actual runtime execution of product inputs',async()=>{
     const root=await workspace(),product=brief(),check=runtimeCheck();
     const result=await runBuild({workspace:root,brief:product,plan:plan(product,[check]),runTerminal,agent:async request=>{
@@ -35,7 +63,10 @@ describe('mandatory provider conformance uses product execution provenance',()=>
       return{status:'complete',text:request.role==='reviewer'?'{"approved":true,"findings":[]}':'Implemented.',commands:[],changedFiles:[]};
     }});
     expect(result.status).toBe('complete');
-    expect(result.state.evidence.some(proof=>proof.taskId==='$acceptance'&&proof.provenance&&proof.passed)).toBe(true);
+    const receipt=result.state.evidence.find(proof=>proof.taskId==='greeting'&&proof.provenance&&proof.passed);
+    expect(receipt?.provenance?.runtimeObservation?.enabled).toBe(true);
+    expect(result.state.metrics?.repetitions.some(item=>item.action==='reuse-verification-receipt'&&item.reason.includes(receipt!.id))).toBe(true);
+    expect(result.state.evidence.some(proof=>proof.taskId==='$acceptance'&&proof.checkId===check.id)).toBe(false);
   });
 
   it('the real engine rejects a different executable despite a ready correct provider and generic approvals',async()=>{
@@ -67,6 +98,16 @@ describe('mandatory provider conformance uses product execution provenance',()=>
     const issues=await validateConformance(product,proposal,provider,[produced,executed],root);
     expect(issues,JSON.stringify(issues)).toEqual([]);
     expect((await validateConformance(product,proposal,provider,[produced],root))[0]?.message).toMatch(/artifact/);
+    const taskOwned=structuredClone(proposal);taskOwned.acceptance=[];
+    expect((await validateConformance(product,taskOwned,provider,[produced,executed],root))[0]?.code).toBe('unproven-product-provider-usage');
+    const localBuild=await runVerification(root,product,taskOwned.tasks[0]!,taskOwned,build,executeCommand,runTerminal);
+    const localRun=await runVerification(root,product,taskOwned.tasks[0]!,taskOwned,run,executeCommand,runTerminal);
+    expect(await validateConformance(product,taskOwned,provider,[localBuild.evidence,localRun.evidence],root)).toEqual([]);
+    expect((await validateConformance(product,taskOwned,provider,[localBuild.evidence],root))[0]?.message).toContain('functional recipe');
+    const inferred=structuredClone(product);inferred.requirements[0]!.source.text='Required provider';inferred.requirements[0]!.binding!.kind='runtime';inferred.requirements[0]!.binding!.capability='An inferred language description';
+    expect(validatePlan(inferred,taskOwned)).toEqual([]);
+    expect(await validateConformance(inferred,taskOwned,provider,[localBuild.evidence,localRun.evidence],root)).toEqual([]);
+    expect((await validateConformance(inferred,taskOwned,provider,[localBuild.evidence],root))[0]?.message).toContain('functional recipe');
   });
 
   it('a compiler label with no observed artifact and a library label with no consumption are refused',async()=>{
@@ -140,9 +181,10 @@ describe('native runtime identity behind a concrete consumer launcher',()=>{
       }
       return{status:'complete',text:request.role==='reviewer'?'{"approved":true,"findings":[]}':'Implemented.',commands:[],changedFiles:[]};
     }});
-    const final=outcome.state.evidence.findLast(proof=>proof.taskId==='$acceptance'&&proof.checkId===recipe.id)!;expect(final.passed).toBe(true);expect(final.provenance?.runtimeObservation?.enabled).toBe(true);expect(final.provenance?.runtimeProvider?.launcher.shebang).toBe('#!/usr/bin/env node');expect(final.provenance?.runtimeProvider?.execPath).toBe(process.execPath);expect(final.provenance?.runtimeProvider?.bindingCommand[0]).not.toBe(process.execPath);
+    const final=outcome.state.evidence.findLast(proof=>proof.taskId==='$acceptance'&&proof.checkId===recipe.id)??outcome.state.evidence.findLast(proof=>proof.taskId==='greeting'&&proof.checkId===recipe.id)!;expect(final.passed).toBe(true);expect(final.provenance?.runtimeObservation?.enabled).toBe(true);expect(final.provenance?.runtimeProvider?.launcher.shebang).toBe('#!/usr/bin/env node');expect(final.provenance?.runtimeProvider?.execPath).toBe(process.execPath);expect(final.provenance?.runtimeProvider?.bindingCommand[0]).not.toBe(process.execPath);
     if(mode==='product-import'){
       expect(outcome.status,JSON.stringify(outcome.incidents)).toBe('complete');expect(final.provenance?.runtimeWitnesses?.some(witness=>witness.inputs['product-api.mjs'])).toBe(true);
+      expect(final.taskId).toBe('greeting');expect(outcome.state.metrics?.repetitions.some(item=>item.action==='reuse-verification-receipt'&&item.reason.includes(final.id))).toBe(true);
       const provider=outcome.state.environment.provider!.operational as OperationalEnvironment;
       const damaged=structuredClone(final);damaged.provenance!.runtimeProvider!.fingerprint='unrelated provider fingerprint';expect((await validateConformance(product,outcome.plan,provider,[damaged],root))[0]?.code).toBe('unproven-product-provider-usage');
     }else{

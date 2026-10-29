@@ -25,7 +25,8 @@ function providerIdentities(plan:DevelopmentPlan,task:WorkUnit):unknown[]{
 }
 function authority(brief:ProductBrief,plan:DevelopmentPlan,task:WorkUnit):unknown{
   const {checks:_mechanicalProofs,...delivery}=task;
-  const requirements=brief.requirements.filter(requirement=>task.requirementIds.includes(requirement.id));
+  const requirements=brief.requirements.filter(requirement=>task.requirementIds.includes(requirement.id))
+    .map(({bindingAuthority:_classification,bindingTransformations:_interpretations,...requirement})=>requirement);
   const words=new Set([task.title,task.goal,...requirements.map(requirement=>requirement.statement)].join(' ').toLowerCase().split(/\W+/).filter(word=>word.length>3));
   const decisions=brief.decisions.filter(decision=>task.blockedBy.includes(decision.questionId)||`${decision.fact} ${decision.answer}`.toLowerCase().split(/\W+/).some(word=>words.has(word)));
   const contracts=new Set([...task.contractIds,...task.exclusiveContracts??[]]);

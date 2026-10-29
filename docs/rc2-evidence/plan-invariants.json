@@ -1,0 +1,507 @@
+{
+  "schema": "capivara/plan-invariants-comparison/1",
+  "generatedAt": "2026-10-28T23:53:11.533Z",
+  "input": {
+    "databaseSHA256": "480400aba4aeaaa7b60c22a67119dd696bc22663a13e9436ce245c218aed8d25",
+    "eventCount": 211,
+    "status": "waiting",
+    "stage": "plan",
+    "calls": 17,
+    "requirements": 14,
+    "tasks": 8,
+    "environmentNodes": 6,
+    "hasExecution": false
+  },
+  "baseline": {
+    "commit": "83cb4a05de2dafa2442a48627d677fcbceb25166",
+    "issues": [
+      {
+        "code": "unproven-mandatory-provider",
+        "subject": "req-4c0c6cb54617",
+        "message": "A conformidade com Node.js precisa de uma receita de aceite dedicada, vinculada à capacidade e a arquivos reais do produto. Disponibilidade e sintaxe não provam uso."
+      }
+    ],
+    "taskLocalClaim": {
+      "taskId": "rest-api",
+      "checkId": "node-api-runtime-conformance",
+      "requirementId": "req-4c0c6cb54617",
+      "typedAssertionValid": true,
+      "productInputPathsDeclared": true
+    }
+  },
+  "after": {
+    "sourceSHA256": "3b492dedc8cb53576cb6cb08e0e5565851f406b8d8ab55313eef489bcc175e59",
+    "sources": [
+      {
+        "path": "packages/core/src/app/workflow.ts",
+        "sha256": "e19384779a4648b327a7f91f5cb640ed7ef4101d4dc17df581889839b064f37a"
+      },
+      {
+        "path": "packages/core/src/domain/bindings.ts",
+        "sha256": "89830b2c083c0e5ab1813914c89f72b12401490641ec776fc8f4d4c230764778"
+      },
+      {
+        "path": "packages/core/src/domain/index.ts",
+        "sha256": "150ee79d60527af53242aa641e21c9751519d6ee50ca4d7a50391a2fa956e3f1"
+      },
+      {
+        "path": "packages/core/src/domain/init.ts",
+        "sha256": "3e7c0d2780cbfcf957d162926582d732159b3dabd21e2511c150b0a6783ece36"
+      },
+      {
+        "path": "packages/core/src/domain/plan-records.ts",
+        "sha256": "73fd64bcd16ad18bc91c2bc0050d0be804a3763fb42ccac8d030d854f733568e"
+      },
+      {
+        "path": "packages/core/src/domain/plan.ts",
+        "sha256": "effd30f10343b56c6ff1ad5182f5f38ff44f19ccf800b26b21969d72ccc1da1e"
+      },
+      {
+        "path": "packages/core/src/domain/reconcile.ts",
+        "sha256": "0807302abdf9e7ded034628a3cacad2943db81e7efa0513b0d71bbef28f57d29"
+      },
+      {
+        "path": "packages/core/src/domain/types.ts",
+        "sha256": "ba716e904d6fcf6db4472f665fab1da2025972931da4575e7a2f5ebe7ada665d"
+      },
+      {
+        "path": "packages/core/src/domain/verifications.ts",
+        "sha256": "cb8e213309d241dbc6f209e4c728a0cea43003992c86360b49939b57c802c65f"
+      },
+      {
+        "path": "packages/core/src/execution/acceptance-selection.ts",
+        "sha256": "e3ad56030c50936dd9a10ef100e06ec226908862d5407648dcfe979cf197e45f"
+      },
+      {
+        "path": "packages/core/src/execution/build.ts",
+        "sha256": "5d5c7fbbf6a92975d7dfc033a5f44e589a9470451248e2bb69b3db3a3836a802"
+      },
+      {
+        "path": "packages/core/src/execution/checks.ts",
+        "sha256": "af1ca5cf42b11c322059c40099c4255a27387806e78447bcc3f9746115165552"
+      },
+      {
+        "path": "packages/core/src/execution/conformance.ts",
+        "sha256": "a853ea7ad39b0bdc93cd10411cde44f0b891ced2416c3bbf4f5a84600cc35b0c"
+      },
+      {
+        "path": "packages/core/src/execution/dependencies.ts",
+        "sha256": "c3bf94c539332b31c695a57d986e3f547ca551f08eee44f076c266c6f75bba62"
+      },
+      {
+        "path": "packages/core/src/execution/environment.ts",
+        "sha256": "27544c10ea1513c71015a35b28829418ade44072c0155b4317517ba2b064e008"
+      },
+      {
+        "path": "packages/core/src/execution/inspection.ts",
+        "sha256": "2513fd274f39a32b2543aae9e41ea5960ead889145306a1a0649a6afca8706b4"
+      }
+    ],
+    "status": "ready",
+    "tasks": 5,
+    "taskIds": [
+      "task-domain-foundation",
+      "task-rest-api",
+      "react-vite-foundation",
+      "task-web-foundation",
+      "application-views"
+    ],
+    "coveredRequirements": 14,
+    "taskChecks": 10,
+    "acceptanceRecipes": 19,
+    "registryEntries": 29,
+    "preservedCriteria": 34,
+    "allTaskInputsAndOutputsPreserved": true,
+    "executableRecipesPreserved": 29,
+    "nodeClaim": {
+      "taskId": "task-rest-api",
+      "previousTaskId": "rest-api",
+      "checkId": "node-api-runtime-conformance"
+    },
+    "metadataRestorations": [
+      {
+        "taskId": "react-vite-foundation",
+        "checkId": "client-build-check",
+        "fields": [
+          "conformance"
+        ],
+        "resultSHA256": "67094b4f453aef76f2b61daf3207f4f94c5f0a1540b8de89dfd2accc801d69a5"
+      },
+      {
+        "taskId": "$acceptance",
+        "checkId": "node-api-runtime-conformance",
+        "fields": [
+          "requirementIds",
+          "conformance"
+        ],
+        "resultSHA256": "af045a9ee82248d0aa948fc845255bcee80071bb2441361fe2edc543f2663010"
+      }
+    ],
+    "ambiguousRestorations": [],
+    "previouslyEmptyAcceptanceEntry": {
+      "taskId": "$acceptance",
+      "checkId": "node-api-runtime-conformance",
+      "originalRequirementIds": 0,
+      "originalConformance": false,
+      "restoredRequirementIds": [
+        "req-4c0c6cb54617"
+      ],
+      "restoredConformance": {
+        "requirementId": "req-4c0c6cb54617",
+        "capability": "JavaScript runtime",
+        "kind": "runtime",
+        "provider": "Node.js",
+        "productInputs": [
+          "server/app.ts",
+          "server/routes.ts",
+          "server/db.ts",
+          "server/domain.ts",
+          "server/repositories.ts"
+        ],
+        "artifacts": []
+      },
+      "sourceResultSHA256": "af045a9ee82248d0aa948fc845255bcee80071bb2441361fe2edc543f2663010",
+      "sourceIsOriginalPaidResponse": true,
+      "originalOrphanCannotReplaceQualifiedClaims": true,
+      "definitionOnlyNotExecutedProof": true
+    },
+    "issues": [],
+    "newAgentRequests": 0
+  },
+  "observed": {
+    "metrics": {
+      "discover": {
+        "calls": 1,
+        "elapsedMs": 10348,
+        "inputTokens": 18184,
+        "cachedInputTokens": 11520,
+        "outputTokens": 1182
+      },
+      "repair:init-metadata": {
+        "calls": 2,
+        "elapsedMs": 9948,
+        "inputTokens": 36219,
+        "cachedInputTokens": 27392,
+        "outputTokens": 258
+      },
+      "environment": {
+        "calls": 2,
+        "elapsedMs": 21673,
+        "inputTokens": 109437,
+        "cachedInputTokens": 83712,
+        "outputTokens": 1271
+      },
+      "outline": {
+        "calls": 2,
+        "elapsedMs": 80464,
+        "inputTokens": 148069,
+        "cachedInputTokens": 128384,
+        "outputTokens": 9174
+      },
+      "repair:plan-invariants": {
+        "calls": 10,
+        "elapsedMs": 130315,
+        "inputTokens": 237896,
+        "cachedInputTokens": 180864,
+        "outputTokens": 14022
+      }
+    },
+    "repeatedIssues": {
+      "mandatory-provider-mismatch:req-d965d6cb4ce7": 2,
+      "mandatory-provider-mismatch:req-51f434d8a94d": 1,
+      "unproven-mandatory-provider:req-51f434d8a94d": 2,
+      "mandatory-provider-mismatch:req-4c0c6cb54617": 1,
+      "unproven-mandatory-provider:req-4c0c6cb54617": 4
+    },
+    "timeline": [
+      {
+        "key": "e3c285faa1481e10927a22b28168d266cbb2ee352c32a20b26e5ae299ca9253c",
+        "invocationId": "c0ea0e4c-d938-4bc0-8d2e-5fc867241918",
+        "operation": "discover",
+        "status": "complete",
+        "start": "2026-10-28T22:59:42.313Z",
+        "end": "2026-10-28T22:59:52.661Z",
+        "elapsedMs": 10348,
+        "usage": {
+          "inputTokens": 18184,
+          "outputTokens": 1182,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "key": "3ebd246d53e941fc496190f721c9d026121f2f8a8870c2981381f1dfac0bf3a5",
+        "invocationId": "6b433ea1-6237-4394-97b4-842dcbe57abd",
+        "operation": "repair:init-metadata",
+        "status": "complete",
+        "start": "2026-10-28T22:59:52.728Z",
+        "end": "2026-10-28T22:59:58.142Z",
+        "elapsedMs": 5414,
+        "usage": {
+          "inputTokens": 18180,
+          "outputTokens": 213,
+          "cachedInputTokens": 15872
+        }
+      },
+      {
+        "key": "e46f1cf60e4371d9a0e26c6f9f38be1a3acf003efd2e3616f857627c2639a2eb",
+        "invocationId": "c218702d-7cd6-445e-950b-a2594d864fe8",
+        "operation": "repair:init-metadata",
+        "status": "complete",
+        "start": "2026-10-28T22:59:58.238Z",
+        "end": "2026-10-28T23:00:02.772Z",
+        "elapsedMs": 4534,
+        "usage": {
+          "inputTokens": 18039,
+          "outputTokens": 45,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "key": "57dff05dab7c75e8c2baca70640581e39205ac34573babfff586729877aa8477",
+        "invocationId": "d2096180-f90d-40f0-8140-2974a4ef548e",
+        "operation": "environment",
+        "status": "complete",
+        "start": "2026-10-28T23:00:14.636Z",
+        "end": "2026-10-28T23:00:28.425Z",
+        "elapsedMs": 13789,
+        "usage": {
+          "inputTokens": 51599,
+          "outputTokens": 931,
+          "cachedInputTokens": 38656
+        }
+      },
+      {
+        "key": "39fae468d040c05f602a25f6ab891df777ff1b5484eb34e9ec9c6a255a02d2d2",
+        "invocationId": "ce4c87c9-0015-4f23-ae55-db91b7938bd7",
+        "operation": "environment",
+        "status": "complete",
+        "start": "2026-10-28T23:00:28.495Z",
+        "end": "2026-10-28T23:00:36.379Z",
+        "elapsedMs": 7884,
+        "usage": {
+          "inputTokens": 57838,
+          "outputTokens": 340,
+          "cachedInputTokens": 45056
+        }
+      },
+      {
+        "key": "f853de908dfab2bd296a8d39aff37bb887ea617fd6501c13e55226efcf2fa80a",
+        "invocationId": "7002ccb0-8dcf-4d60-8679-5b6042101edc",
+        "operation": "outline",
+        "status": "complete",
+        "start": "2026-10-28T23:00:36.454Z",
+        "end": "2026-10-28T23:01:15.550Z",
+        "elapsedMs": 39096,
+        "usage": {
+          "inputTokens": 98796,
+          "outputTokens": 4785,
+          "cachedInputTokens": 87808
+        }
+      },
+      {
+        "key": "3145dd2b48d7c7d7b36270d6e41b4121a75beafe350c7b9ed05dd11f30e11c6c",
+        "invocationId": "2a428da6-e1cd-43c9-a1ec-c583daceadb4",
+        "operation": "outline",
+        "status": "complete",
+        "start": "2026-10-28T23:01:15.660Z",
+        "end": "2026-10-28T23:01:57.028Z",
+        "elapsedMs": 41368,
+        "usage": {
+          "inputTokens": 49273,
+          "outputTokens": 4389,
+          "cachedInputTokens": 40576
+        }
+      },
+      {
+        "key": "7713c4b3b56278a8458a9f6675d64d5190681458eac87000772b4ce0268f7ac5",
+        "invocationId": "b369e687-6955-4d22-ae6a-96060c07966d",
+        "operation": "repair:plan-invariants",
+        "status": "complete",
+        "start": "2026-10-28T23:01:57.136Z",
+        "end": "2026-10-28T23:02:11.434Z",
+        "elapsedMs": 14298,
+        "usage": {
+          "inputTokens": 16406,
+          "outputTokens": 2090,
+          "cachedInputTokens": 11520
+        },
+        "issue": {
+          "code": "mandatory-provider-mismatch",
+          "subject": "req-d965d6cb4ce7"
+        }
+      },
+      {
+        "key": "8afc6cb2dcaa3e92798f3c8a177bf484fa0fa50a424d70f83c02f981f63b9547",
+        "invocationId": "c622dc9e-d34e-4b14-9e0f-0476431841cd",
+        "operation": "repair:plan-invariants",
+        "status": "complete",
+        "start": "2026-10-28T23:02:11.498Z",
+        "end": "2026-10-28T23:02:24.336Z",
+        "elapsedMs": 12838,
+        "usage": {
+          "inputTokens": 38127,
+          "outputTokens": 1476,
+          "cachedInputTokens": 30336
+        },
+        "issue": {
+          "code": "mandatory-provider-mismatch",
+          "subject": "req-51f434d8a94d"
+        }
+      },
+      {
+        "key": "e5054f76b5d5f0358cbc942011f060f4d29facdfbbad8d66a912bc6b07f48de0",
+        "invocationId": "f3245777-a62d-4100-aa9d-8e2128f0b25a",
+        "operation": "repair:plan-invariants",
+        "status": "complete",
+        "start": "2026-10-28T23:02:24.400Z",
+        "end": "2026-10-28T23:02:38.684Z",
+        "elapsedMs": 14284,
+        "usage": {
+          "inputTokens": 38293,
+          "outputTokens": 1250,
+          "cachedInputTokens": 30464
+        },
+        "issue": {
+          "code": "unproven-mandatory-provider",
+          "subject": "req-51f434d8a94d"
+        }
+      },
+      {
+        "key": "8146cbf5721808c87c15ef3cf07f73ef3331fee50d66c8e4e8f2512dbaba5aa2",
+        "invocationId": "2f62d5b8-600c-48f0-ba0a-d67dadc753ca",
+        "operation": "repair:plan-invariants",
+        "status": "complete",
+        "start": "2026-10-28T23:02:38.736Z",
+        "end": "2026-10-28T23:02:52.334Z",
+        "elapsedMs": 13598,
+        "usage": {
+          "inputTokens": 38778,
+          "outputTokens": 1453,
+          "cachedInputTokens": 30720
+        },
+        "issue": {
+          "code": "unproven-mandatory-provider",
+          "subject": "req-51f434d8a94d"
+        }
+      },
+      {
+        "key": "5b6a444272a4a12a3aea61fe0d206c7f903d5d9a0e57ac68acf9259780c0c9cb",
+        "invocationId": "e1fd4c2b-2365-4436-9410-32823c5c7573",
+        "operation": "repair:plan-invariants",
+        "status": "complete",
+        "start": "2026-10-28T23:02:52.418Z",
+        "end": "2026-10-28T23:03:07.739Z",
+        "elapsedMs": 15321,
+        "usage": {
+          "inputTokens": 16113,
+          "outputTokens": 1353,
+          "cachedInputTokens": 11520
+        },
+        "issue": {
+          "code": "mandatory-provider-mismatch",
+          "subject": "req-4c0c6cb54617"
+        }
+      },
+      {
+        "key": "1d3e821bb2539544a3ae61cbf28bf18e2c98a79ba2a912352e959634607a6246",
+        "invocationId": "95472d08-9cc6-42e3-a3a7-254042c1db3a",
+        "operation": "repair:plan-invariants",
+        "status": "complete",
+        "start": "2026-10-28T23:03:07.832Z",
+        "end": "2026-10-28T23:03:23.343Z",
+        "elapsedMs": 15511,
+        "usage": {
+          "inputTokens": 19059,
+          "outputTokens": 1855,
+          "cachedInputTokens": 11520
+        },
+        "issue": {
+          "code": "mandatory-provider-mismatch",
+          "subject": "req-d965d6cb4ce7"
+        }
+      },
+      {
+        "key": "ca067e9feb4edee7c09fd6d3914b0f528fcf0c0cd15eb24c7065044b3f08d006",
+        "invocationId": "0e44940b-dda9-43ff-93da-0a79a0c56291",
+        "operation": "repair:plan-invariants",
+        "status": "complete",
+        "start": "2026-10-28T23:03:23.438Z",
+        "end": "2026-10-28T23:03:38.245Z",
+        "elapsedMs": 14807,
+        "usage": {
+          "inputTokens": 16129,
+          "outputTokens": 1680,
+          "cachedInputTokens": 11520
+        },
+        "issue": {
+          "code": "unproven-mandatory-provider",
+          "subject": "req-4c0c6cb54617"
+        }
+      },
+      {
+        "key": "c0663f9bd6e52f71d20efadb3f3303c2dfd0ca845308b504dbd47ed49988c7ae",
+        "invocationId": "967fa8f8-8516-4dbf-81c2-2d594675ccc3",
+        "operation": "repair:plan-invariants",
+        "status": "complete",
+        "start": "2026-10-28T23:03:38.339Z",
+        "end": "2026-10-28T23:03:48.391Z",
+        "elapsedMs": 10052,
+        "usage": {
+          "inputTokens": 16514,
+          "outputTokens": 950,
+          "cachedInputTokens": 11520
+        },
+        "issue": {
+          "code": "unproven-mandatory-provider",
+          "subject": "req-4c0c6cb54617"
+        }
+      },
+      {
+        "key": "60af6ad528322b3fbd93cbe1b3f1c7fa133cb9916cb774f783c0094bc3fc2f33",
+        "invocationId": "3f40a901-3685-4c87-b462-03118a8878c8",
+        "operation": "repair:plan-invariants",
+        "status": "complete",
+        "start": "2026-10-28T23:03:48.454Z",
+        "end": "2026-10-28T23:03:58.149Z",
+        "elapsedMs": 9695,
+        "usage": {
+          "inputTokens": 19207,
+          "outputTokens": 957,
+          "cachedInputTokens": 15872
+        },
+        "issue": {
+          "code": "unproven-mandatory-provider",
+          "subject": "req-4c0c6cb54617"
+        }
+      },
+      {
+        "key": "94f0c2d4711f37efa5635645988dd3256a971a527d06af334c9b2392da2e434c",
+        "invocationId": "c9ce62dc-feaa-4964-a893-d8827dcefa1f",
+        "operation": "repair:plan-invariants",
+        "status": "complete",
+        "start": "2026-10-28T23:03:58.211Z",
+        "end": "2026-10-28T23:04:08.122Z",
+        "elapsedMs": 9911,
+        "usage": {
+          "inputTokens": 19270,
+          "outputTokens": 958,
+          "cachedInputTokens": 15872
+        },
+        "issue": {
+          "code": "unproven-mandatory-provider",
+          "subject": "req-4c0c6cb54617"
+        }
+      }
+    ],
+    "financialCostReported": false,
+    "durationBasis": "agent.start to agent.result; cached input is included in input tokens"
+  },
+  "safety": {
+    "reproductionPaidInferenceCalls": 0,
+    "productCommands": 0,
+    "projectWrites": 0,
+    "databaseUnchanged": true,
+    "realPlanApplied": false,
+    "buildExecuted": false
+  }
+}

@@ -54,7 +54,8 @@ export interface VerificationIdentity { inputHash:string; observationHash:string
 export async function verificationIdentity(workspace:string,plan:DevelopmentPlan,task:WorkUnit,check:Verification,brief?:ProductBrief,operational?:OperationalEnvironment,resolvedInputs?:readonly string[]):Promise<VerificationIdentity>{
   const inputs=resolvedInputs?[...resolvedInputs]:await resolveVerificationInputs(workspace,plan,task,check);
   const snapshot=await inputSnapshot(workspace,inputs);
-  const requirements=brief?.requirements.filter(requirement=>(check.requirementIds.length?check.requirementIds:task.requirementIds).includes(requirement.id));
+  const requirements=brief?.requirements.filter(requirement=>(check.requirementIds.length?check.requirementIds:task.requirementIds).includes(requirement.id))
+    .map(({bindingAuthority:_classification,bindingTransformations:_interpretations,...requirement})=>requirement);
   const contracts=plan.contracts.filter(contract=>task.contractIds.includes(contract.id));
   const environmentRevision=operational?verificationOperationalRevision(operational,inputs,check):undefined;
   const descriptor={verifier:verificationLevel(check)==='behavior'?'capivara-verification/5':'capivara-verification/4',providerObservation:check.conformance?.kind==='runtime'?'node-load-hook/2':undefined,assertionContract:verificationAssertionStatus(check).status==='invalid'?'strict-invalid/1':undefined,check,requirements,contracts,constraints:brief?.constraints,environment:plan.environment.filter(node=>task.environmentIds.includes(node.id)),operational:environmentRevision,platform:process.platform,node:process.version,references:brief?taskReferences(brief,task):[]};

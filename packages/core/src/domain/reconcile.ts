@@ -3,6 +3,8 @@ import { allowedCapabilities, identity, inferredCapabilities, normalize, request
 import { ordered } from './context.js';
 import { PlanningFailure } from './control.js';
 import { verificationAssertionStatus } from './assertions.js';
+import { verificationRegistry } from './verifications.js';
+import { matchesOperationalClaim, obligationMatchesProvider } from './bindings.js';
 import type { DevelopmentPlan, ProductBrief, Requirement, Verification, VerificationAssertion, WorkUnit } from './types.js';
 
 export interface PlanIssue { code: string; subject: string; message: string; environmentIds?: string[]; taskIds?: string[]; }
@@ -83,13 +85,18 @@ export function requiredTaskInterfaces(brief: ProductBrief, plan: DevelopmentPla
   }
   return [...result];
 }
-/** Stable IDs plus output ownership identify sliced deliveries, independently
- * of the language used to describe them. Distinct IDs stay conservative. */
+/** Stable IDs or identical integration contracts plus compatible output
+ * ownership identify slices. Explicit stages remain separate deliveries. */
 export function sameDelivery(left: WorkUnit, right: WorkUnit): boolean {
   if (left.id === right.id) {
     if (left.files.length && right.files.length) return compatibleOutputs(left.files, right.files);
     if (left.contractIds.length && right.contractIds.length && !left.contractIds.some(id => right.contractIds.includes(id))) return false;
     return outcome(left) === outcome(right) || !!left.contractIds.length && sameValues(left.contractIds, right.contractIds);
+  }
+  if(left.dependsOn.includes(right.id)||right.dependsOn.includes(left.id))return false;
+  if(left.contractIds.length&&right.contractIds.length){
+    if(!sameValues(left.contractIds,right.contractIds))return false;
+    if(left.files.length&&right.files.length&&compatibleOutputs(left.files,right.files))return true;
   }
   if (outcome(left) !== outcome(right)) return false;
   if (left.files.length || right.files.length) return !!left.files.length && !!right.files.length && compatibleOutputs(left.files, right.files);
@@ -149,12 +156,22 @@ export function reconcilePlan(brief: ProductBrief, proposal: DevelopmentPlan, pr
   const byId = new Map<string, WorkUnit>();
   const aliases = new Map<string, string>();
   const tasks: WorkUnit[] = [];
+  const resolve = (id: string): string => { const seen = new Set<string>(); while (aliases.has(id) && !seen.has(id)) { seen.add(id); const next = aliases.get(id)!; if (next === id) break; id = next; } return id; };
+  const orderedStages=(left:string,right:string):boolean=>{
+    left=resolve(left);right=resolve(right);if(left===right)return false;
+    // Recompute the quotient graph after each accepted alias: individually
+    // independent pairs must not combine into a cycle through earlier merges.
+    const edges=new Map<string,Set<string>>();
+    for(const task of plan.tasks){const id=resolve(task.id),dependencies=edges.get(id)??new Set<string>();for(const dependency of task.dependsOn)dependencies.add(resolve(dependency));edges.set(id,dependencies);}
+    const reaches=(from:string,to:string,seen=new Set<string>()):boolean=>{if(seen.has(from))return false;seen.add(from);return[...edges.get(from)??[]].some(id=>id===to||reaches(id,to,seen));};
+    return reaches(left,right)||reaches(right,left);
+  };
   for (const original of plan.tasks) {
     const task = structuredClone(original);
     const idCollision = byId.get(task.id) ?? byId.get(aliases.get(task.id) ?? '');
     const identified = idCollision && idCollision.id !== task.id ? { ...task, id: idCollision.id } : task;
     if (idCollision && !sameDelivery(idCollision, identified)) throw new PlanningFailure('invalid-plan', [`O identificador ${task.id} representa duas entregas diferentes com propriedade de saídas incompatível: ${idCollision.goal}; ${task.goal}.`], 'reconcile');
-    const earlier = idCollision ?? tasks.find(candidate => sameDelivery(candidate, task));
+    const earlier = idCollision ?? tasks.find(candidate => !orderedStages(candidate.id,task.id)&&sameDelivery(candidate, task));
     if (earlier) {
       aliases.set(task.id, earlier.id);
       for (const field of ['requirementIds','dependsOn','environmentIds','contractIds','files','criteria','blockedBy'] as const) earlier[field] = unique([...earlier[field], ...task[field]]);
@@ -172,7 +189,6 @@ export function reconcilePlan(brief: ProductBrief, proposal: DevelopmentPlan, pr
     task.checks = reconcileChecks(task.checks);
     byId.set(task.id, task); tasks.push(task);
   }
-  const resolve = (id: string): string => { const seen = new Set<string>(); while (aliases.has(id) && !seen.has(id)) { seen.add(id); const next = aliases.get(id)!; if (next === id) break; id = next; } return id; };
   for (const task of tasks) {
     // A self dependency remains a planning defect, rather than being erased for a green DAG.
     task.dependsOn = unique(task.dependsOn.map(id => resolve(id)));
@@ -190,6 +206,7 @@ export function validatePlan(brief: ProductBrief, plan: DevelopmentPlan): PlanIs
   const required = new Set(brief.requirements.map(requirement => requirement.id));
   for(const id of Object.keys(brief.requirementAliases??{}))if(required.has(id)||resolveRequirementAlias(brief,id)===id)issue('invalid-requirement-alias',id,'O alias precisa aposentar somente uma identidade inativa e alcançar um requisito ativo sem ciclos.');
   const constraints = new Set(brief.constraints.map(constraint => constraint.id));
+  const recipes=verificationRegistry(plan);
   const taskIds = new Set<string>();
   const environment = new Set<string>();
   const contracts = new Set(plan.contracts.map(contract => contract.id));
@@ -221,13 +238,13 @@ export function validatePlan(brief: ProductBrief, plan: DevelopmentPlan): PlanIs
     if (!plan.tasks.some(task => task.requirementIds.includes(requirement.id))) issue('uncovered-requirement',requirement.id,'Nenhuma entrega cobre este requisito obrigatório.');
     const browserOutcome = requiredRequirementInterface(requirement) === 'web' && (requirement.kind === 'interface' || requestedCapabilities(requirement.source.text).includes('browser'));
     if (browserOutcome) {
-      const proof = [...plan.acceptance ?? [], ...plan.tasks.flatMap(task => task.checks)].some(check => check.requirementIds.includes(requirement.id) && check.command && check.level === 'behavior' && (check.kind === 'web' || check.requiredCapabilities.includes('browser')));
+      const proof = recipes.some(({check}) => check.requirementIds.includes(requirement.id) && check.command && check.level === 'behavior' && (check.kind === 'web' || check.requiredCapabilities.includes('browser')));
       if (!proof) issue('unproven-interface-behavior',requirement.id,'O resultado exige comportamento real no navegador. Inclua uma receita executável de nível behavior, kind=web ou requiredCapabilities=[browser], vinculada a este requisito. Build, API e sintaxe não comprovam interação no navegador.');
     }
     if (!requirement.binding) continue;
     const binding = requirement.binding;
-    const nodes = plan.environment.filter(node => node.identity && canonical(node.identity.capability) === canonical(binding.capability) && node.identity.kind === binding.kind);
-    const matches = nodes.filter(node => canonical(node.identity!.provider) === canonical(binding.provider));
+    const nodes = plan.environment.filter(node => node.identity);
+    const matches = nodes.filter(node => obligationMatchesProvider(requirement,node.identity));
     const consumers = plan.tasks.filter(task => task.requirementIds.includes(requirement.id));
     const references = { environmentIds: matches.map(node => node.id), taskIds: consumers.map(task => task.id) };
     const providers = new Set(matches.map(node => node.id));
@@ -239,8 +256,8 @@ export function validatePlan(brief: ProductBrief, plan: DevelopmentPlan): PlanIs
     };
     if (!matches.length) issue('mandatory-provider-mismatch',requirement.id,`A capacidade ${binding.capability} (${binding.kind}) deve usar ${binding.provider}; o plano não oferece esse provedor.`, { ...references, environmentIds: nodes.map(node => node.id) });
     else if (!plan.tasks.some(task => task.environmentIds.some(id => consumes(id)))) issue('unused-mandatory-provider',requirement.id,`O provedor obrigatório ${binding.provider}, declarado em ${references.environmentIds.join(', ')}, não é consumido diretamente nem por dependências explícitas das entregas. Consumidores do requisito: ${references.taskIds.join(', ') || 'nenhum'}.`, references);
-    const proof = [...plan.acceptance ?? []].some(check => check.requirementIds.includes(requirement.id) && check.command && check.level !== 'syntax' && check.conformance?.requirementId===requirement.id && check.conformance.capability===binding.capability && check.conformance.kind===binding.kind && check.conformance.provider===binding.provider && check.conformance.productInputs.length>0);
-    if (!proof) issue('unproven-mandatory-provider',requirement.id,`A conformidade com ${binding.provider} precisa de uma receita de aceite dedicada, vinculada à capacidade e a arquivos reais do produto. Disponibilidade e sintaxe não provam uso.`);
+    const proof = recipes.some(({check}) => check.requirementIds.includes(requirement.id) && check.command && check.level !== 'syntax' && check.conformance?.requirementId===requirement.id && matches.some(node=>matchesOperationalClaim(requirement,check.conformance!,node.identity)) && check.conformance.productInputs.length>0);
+    if (!proof) issue('unproven-mandatory-provider',requirement.id,`A conformidade com ${binding.provider} precisa de uma receita dedicada de tarefa ou aceite, vinculada à capacidade e a arquivos reais do produto. Disponibilidade e sintaxe não provam uso.`);
   }
   return issues;
 }

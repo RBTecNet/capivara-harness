@@ -1,5 +1,5 @@
 import { readFile, stat, readdir, access } from 'node:fs/promises';
-import { join, resolve, relative, sep, delimiter, dirname, basename, isAbsolute, extname } from 'node:path';
+import { join, resolve, relative, sep, delimiter, dirname, basename, isAbsolute, extname, matchesGlob } from 'node:path';
 import type { CommandRecipe, EnvironmentNode, ProductBrief, Verification } from '../domain/types.js';
 import { allowedCapabilities, inferredCapabilities } from '../domain/authority.js';
 import type { CommandRequest, CommandResult, ExecutionConstraints, TerminalRequest } from '../runtime/types.js';
@@ -90,6 +90,7 @@ function portableProviderValue(value:unknown,root:string,scopes:readonly string[
   return value;
 }
 function operationalIdentity(root:string,env:Record<string,string>,bindings:Record<string,CapabilityBinding>):unknown{
+  if(Object.values(bindings).some(binding=>binding.transformations?.some(item=>item.kind==='product-probe-separated-from-availability')))bindings=Object.fromEntries(Object.entries(bindings).map(([key,binding])=>[key,providerIdentity(binding)]));
   const fixed=Object.values(bindings).filter(binding=>binding.relocation==='fixed');
   // Preserve the previous protocol byte for byte when no shared provider exists.
   if(!fixed.length)return portable({env,bindings},root);
@@ -154,6 +155,38 @@ function words(value:string):{value:string;end:number}[]{
   const expression=/\s*(?:"([^"\\]*(?:\\.[^"\\]*)*)"|'([^']*)'|([^\s;&|<>]+))/gy;
   while(expression.lastIndex<value.length){const found=expression.exec(value);if(!found)break;result.push({value:found[1]?.replace(/\\(["\\])/g,'$1')??found[2]??found[3]??'',end:expression.lastIndex});}
   return result;
+}
+function providerIdentity(binding:CapabilityBinding):CapabilityBinding{
+  if(!binding.transformations?.some(item=>item.kind==='product-probe-separated-from-availability'))return binding;
+  const {transformations,...identity}=binding,selected=transformations.filter(item=>item.kind!=='product-probe-separated-from-availability');
+  return{...identity,...(selected.length?{transformations:selected}:{})};
+}
+function probeArgv(recipe:CommandRecipe):string[]|undefined{
+  if(recipe.args)return[recipe.command,...recipe.args];
+  const value=recipe.command.trim(),parsed=words(value);
+  return parsed.length&&parsed.at(-1)!.end===value.length?parsed.map(item=>item.value):undefined;
+}
+function interpreter(name:string):'node'|'python'|'java'|undefined{
+  const binary=basename(name).replace(/\.(?:exe|cmd|bat)$/i,'').toLowerCase();
+  return['node','nodejs'].includes(binary)?'node':/^python(?:\d+(?:\.\d+)*)?$/.test(binary)||binary==='py'?'python':binary==='java'?'java':undefined;
+}
+/** A compiler launched through an interpreter includes its actual program. */
+function sdkPrefix(recipe:CommandRecipe):string[]|undefined{
+  const argv=probeArgv(recipe);if(!argv?.length)return undefined;
+  const kind=interpreter(argv[0]!);if(!kind)return undefined;
+  if(kind==='java')return argv[1]==='-jar'&&argv[2]?[...argv.slice(0,3)]:undefined;
+  for(let index=1;index<argv.length;index++){
+    const arg=argv[index]!;
+    if(kind==='python'&&arg==='-m')return argv[index+1]?argv.slice(0,index+2):undefined;
+    if(arg==='--')return argv[index+1]?argv.slice(0,index+2):undefined;
+    if(!arg.startsWith('-'))return argv.slice(0,index+1);
+    if(kind==='node'&&['-r','--require','--import','--loader','--experimental-loader','--conditions','-C'].includes(arg)){if(!argv[++index])return undefined;continue;}
+    if(kind==='node'&&/^(?:--require|--import|--loader|--experimental-loader|--conditions)=/.test(arg))continue;
+    if(kind==='node'&&['--no-warnings','--enable-source-maps','--experimental-strip-types','--experimental-transform-types'].includes(arg))continue;
+    if(kind==='python'&&['-I','-B','-E','-S','-s','-u'].includes(arg))continue;
+    return undefined;
+  }
+  return undefined;
 }
 /** Shared by command execution and agent wrapper publication. */
 export function operationalInvocations(value:OperationalEnvironment,options:{readyOnly?:boolean}={}):CapabilityInvocation[]{
@@ -244,9 +277,10 @@ async function invocation(workspace:string,node:EnvironmentNode,base:Operational
   const transformations:NonNullable<CapabilityBinding['transformations']>=[];
   const declaration=JSON.stringify(node.provides??null);
   const previous=base.bindings[node.identity?.capability??node.id];
+  transformations.push(...previous?.transformations?.filter(item=>item.kind==='product-probe-separated-from-availability'&&item.original&&typeof item.original==='object'&&'declaration' in item.original&&item.original.declaration===JSON.stringify(node.check))??[]);
   const accepted=previous?.invocationResolution?.declaration===declaration?previous.invocationResolution:undefined;
   if(accepted)transformations.push(...previous?.transformations?.filter(item=>item.kind==='separated-executable-list')??[]);
-  const declared=node.provides?.command?.length?[...node.provides.command]:node.provides?.invocations?.[0]?.command?.length?[...node.provides.invocations[0].command]:node.check.args?[node.check.command]:[firstToken(node.check.command)];
+  const declared=node.provides?.command?.length?[...node.provides.command]:node.provides?.invocations?.[0]?.command?.length?[...node.provides.invocations[0].command]:defaultKind(node)==='sdk'&&sdkPrefix(node.check)?sdkPrefix(node.check)!:node.check.args?[node.check.command]:[firstToken(node.check.command)];
   let definitions:{command:string[];aliases?:string[]}[]=[{command:declared,...(node.provides?.aliases?{aliases:node.provides.aliases}:{})},...(node.provides?.invocations??[]).filter(item=>JSON.stringify(item.command)!==JSON.stringify(declared))];
   const provided=Boolean(node.provides?.command?.length||node.provides?.invocations?.length);
   let candidateDefinitions:{command:string[];aliases?:string[]}[]|undefined;
@@ -325,7 +359,12 @@ export async function environmentFingerprint(workspace:string,node:EnvironmentNo
     executableIdentity={path:portable(command,workspace),mode:info.mode,content:cached.hash};
   }
   const {PATH:_path,...variables}=resolved.env;
-  return digest(JSON.stringify({node:portable(node,workspace),provider:portable(binding,workspace),executableIdentity,inputs:await inputHash(workspace,node.provides?.inputs??[]),platform:process.platform,variables:portable(variables,workspace)}));
+  const fixedFiles=[];
+  for(const argument of binding.command?.slice(1)??[]){
+    if(argument.startsWith('-')||!argument.includes('/')&&!argument.includes('\\')&&!extname(argument))continue;
+    const path=resolve(workspace,argument);fixedFiles.push({path:portable(path,workspace),hash:await binaryFingerprint(path)??null});
+  }
+  return digest(JSON.stringify({node:portable(node,workspace),provider:portable(providerIdentity(binding),workspace),executableIdentity,...(fixedFiles.length?{fixedFiles}:{}),inputs:await inputHash(workspace,node.provides?.inputs??[]),platform:process.platform,variables:portable(variables,workspace)}));
 }
 /** Fingerprint only providers and installation inventories consumed by this proof. */
 export function projectDependencyScope(inputs?:readonly string[],checks:readonly Verification[]=[]):string{return inputs===undefined?'all':dependencyFamilies(inputs,checks).join('+')||'none';}
@@ -386,6 +425,32 @@ export function installationAlternative(command: string, output: string): string
   if (/\byarn\s+install\b/.test(command)) return command.replace(/\s+--(?:immutable|frozen-lockfile)\b/g,'');
   return null;
 }
+function availabilityRecipe(workspace:string,node:EnvironmentNode,probe:CommandRecipe,binding:CapabilityBinding,options:PreparationOptions):CommandRecipe|undefined{
+  if(!['runtime','sdk','cli'].includes(defaultKind(node))||!binding.command?.length)return undefined;
+  const argv=probeArgv(probe);if(!argv)return undefined;
+  // A failed version requirement or inline assertion must never become a
+  // successful availability check of the same interpreter.
+  if(argv.slice(1).some(arg=>/^(?:--(?:[\w-]*-)?version(?:$|=|-)|-[vV]$|version$)/i.test(arg.replace(/([a-z])([A-Z])/g,'$1-$2'))))return undefined;
+  const runtime=interpreter(argv[0]!);
+  const program=sdkPrefix(probe),interpreterArgs=program?argv.slice(1,program.length-1):argv.slice(1);
+  if(runtime==='node'&&interpreterArgs.some(arg=>['-e','--eval','-p','--print'].includes(arg)||/^(?:--eval|--print)=/.test(arg)))return undefined;
+  if(runtime==='python'&&interpreterArgs.includes('-c'))return undefined;
+  if(defaultKind(node)==='sdk'&&runtime&&binding.command.length===1)return undefined;
+  if(probe.capabilities?.some(capability=>/^(?:pty|terminal|interactive-terminal|pseudoterminal)$/i.test(capability)))return undefined;
+  const hints=[...options.inputs??[],...(options.checks??[]).flatMap(check=>[...check.inputs??[],...check.conformance?.productInputs??[]])];
+  const cwd=recipeCwd(workspace,probe.cwd),root=resolve(workspace),fixed=new Set([...(binding.match?.slice(1)??[]),...binding.command.slice(1)]);
+  const productArgument=(argument:string):boolean=>{
+    const value=argument.startsWith('-')&&argument.includes('=')?argument.slice(argument.indexOf('=')+1):argument;
+    if(!value||value.startsWith('-')||fixed.has(value)||/^[a-z]+:\/\//i.test(value))return false;
+    const path=resolve(cwd,value),local=relative(root,path).replaceAll('\\','/');
+    if(local==='..'||local.startsWith('../')||isAbsolute(local)||/^(?:node_modules|\.venv|\.tools|\.local|\.capivara-next|\.capivara-runtime)(?:\/|$)/.test(local))return false;
+    if(hints.some(scope=>{const selector=isAbsolute(scope)?relative(root,scope).replaceAll('\\','/'):scope.replace(/^\.\//,'').replace(/\/$/,'');return local===selector||matchesGlob(local,selector)||!/[?*{[]/.test(selector)&&local.startsWith(`${selector}/`);}))return true;
+    return /^[^\d-].*\.[a-z][a-z\d]*$/i.test(value)||value==='.'&&hints.length>0;
+  };
+  const product=argv.slice(1).some(productArgument)||hints.length>0&&argv.slice(1).some(arg=>['build','check','test','run'].includes(arg));
+  if(!product)return undefined;
+  return{command:binding.command[0]!,args:[...binding.command.slice(1),'--version'],...(probe.cwd?{cwd:probe.cwd}:{}),timeoutMs:Math.min(probe.timeoutMs??10_000,10_000),capabilities:[]};
+}
 export async function prepareEnvironmentNode(workspace:string,node:EnvironmentNode,brief:ProductBrief,execute:CommandExecutor,options:PreparationOptions={}):Promise<PreparationResult>{
   const results:CommandResult[]=[];
   let current=await bindNode(workspace,node,mergeOperationalEnvironments(workspace,options.previous?.operational,options.operational));
@@ -408,9 +473,11 @@ export async function prepareEnvironmentNode(workspace:string,node:EnvironmentNo
   const previous=options.previous;
   const unchangedPrevious=previous?.fingerprint===initialFingerprint;
   const dynamicProvider=['library','driver','service'].includes(defaultKind(node));
+  const availabilityAttempted=current.bindings[node.identity?.capability??node.id]?.transformations?.some(item=>item.kind==='product-probe-separated-from-availability');
+  const availabilityApplicable=Boolean(availabilityRecipe(workspace,node,node.check,current.bindings[node.identity?.capability??node.id]!,options));
   if(unchangedPrevious){
     if(previous.ready&&!options.revalidate&&!dynamicProvider)return finish(true);
-    if(previous.noProgress&&!options.revalidate&&!dynamicProvider)return finish(false,[issue(node.id,'Preparation already produced no progress for these exact inputs.',previous.failure??'No capability or invocation changed. Change the provider, recipe or relevant environment before trying again.')],true);
+    if(previous.noProgress&&!options.revalidate&&!dynamicProvider&&(!availabilityApplicable||availabilityAttempted))return finish(false,[issue(node.id,'Preparation already produced no progress for these exact inputs.',previous.failure??'No capability or invocation changed. Change the provider, recipe or relevant environment before trying again.')],true);
   }
   emitProgress(options.onEvent,{id:`environment:node:${node.id}`,label:node.name,status:'running',stage:'build'});
   const run=async(recipe:CommandRecipe):Promise<CommandResult>=>{
@@ -424,6 +491,18 @@ export async function prepareEnvironmentNode(workspace:string,node:EnvironmentNo
   // A readiness probe must exercise the published invocation. Otherwise `node --version`
   // could approve an unusable `node npm` provider without executing it at all.
   const probeRecipe=compound?{...node.check,command:binding.command![0]!,args:[...binding.command!.slice(1),...checkArgs]}:node.check;
+  const available=async(failed:CommandResult):Promise<boolean>=>{
+    if(okay(failed)||failed.cancelled||options.signal?.aborted)return false;
+    const selected=current.bindings[node.identity?.capability??node.id]!,replacement=availabilityRecipe(workspace,node,probeRecipe,selected,options);
+    if(!replacement)return false;
+    const observed=await run(replacement);
+    const published=current.bindings[selected.capability]!;
+    const usable=okay(observed)&&Boolean(published.command?.[0]&&await executable(published.command[0]));
+    const result=(value:CommandResult)=>({command:value.command,exitCode:value.exitCode,stdout:value.stdout,stderr:value.stderr,timedOut:value.timedOut,cancelled:value.cancelled,...(value.issue?{issue:value.issue}:{})});
+    const transformation={kind:'product-probe-separated-from-availability',original:{declaration:JSON.stringify(node.check),request:recipeCommand(probeRecipe),result:result(failed)},selected:{request:recipeCommand(replacement),result:result(observed)},reason:usable?'The declared readiness operation consumes product inputs. Its failure is preserved; the distinct concrete provider invocation is available. This records availability only, never product verification.':'The declared readiness operation consumes product inputs. The distinct availability probe also failed; both observations are preserved and no product verification or readiness is claimed.'};
+    current=operational(workspace,current.env,{...current.bindings,[published.capability]:{...published,transformations:[...(published.transformations??[]).filter(item=>item.kind!==transformation.kind),transformation]}});
+    return usable;
+  };
   const probe=await run(probeRecipe);
   const primaryExecutable=binding.command?.[0]&&await executable(binding.command[0]);
   if(binding.candidateInvocations?.length&&(!okay(probe)||!primaryExecutable)){
@@ -441,6 +520,7 @@ export async function prepareEnvironmentNode(workspace:string,node:EnvironmentNo
     }
   }
   if(okay(probe)&&primaryExecutable!==false)return finish(true);
+  if(await available(probe))return finish(true);
   if(unchangedPrevious&&previous?.noProgress)return finish(false,[issue(node.id,'The readiness probe still fails after an ineffective preparation.',`${probe.command}\n${probe.stderr}\n${probe.stdout}`)],true);
   if(!node.prepare.length)return finish(false,[issue(node.id,`Environment ${node.name} has no usable invocation and no preparation recipe.`,`${probe.command}\n${probe.stderr}\n${probe.stdout}\nPublished invocation: ${JSON.stringify(binding.command??null)}`)],true);
   const readinessOkay=async(result:CommandResult):Promise<boolean>=>{
@@ -454,13 +534,13 @@ export async function prepareEnvironmentNode(workspace:string,node:EnvironmentNo
     if(!okay(result)){
       const alternative=installationAlternative(result.command,`${result.stdout}\n${result.stderr}`);
       if(alternative){const {args:_args,...withoutArgs}=recipe;const replacement=await run({...withoutArgs,command:alternative});if(okay(replacement))continue;}
-      const readiness=await run(probeRecipe);if(await readinessOkay(readiness))return finish(true);
+      const readiness=await run(probeRecipe);if(await readinessOkay(readiness)||await available(readiness))return finish(true);
       const fingerprint=await environmentFingerprint(workspace,node,current);
       return finish(false,[issue(node.id,`Environment ${node.name} is not ready.`,`${result.command}\n${result.stderr}\n${result.stdout}`,Boolean(result.issue?.recoverable))],fingerprint===initialFingerprint);
     }
   }
   const readiness=await run(probeRecipe);
-  if(await readinessOkay(readiness))return finish(true);
+  if(await readinessOkay(readiness)||await available(readiness))return finish(true);
   const unchanged=await environmentFingerprint(workspace,node,current)===initialFingerprint;
   return finish(false,[issue(node.id,`Environment ${node.name} did not provide the required ${defaultKind(node)} capability.`,`${readiness.command}\n${readiness.stderr}\n${readiness.stdout}`)],unchanged);
 }

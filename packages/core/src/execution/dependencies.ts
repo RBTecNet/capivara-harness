@@ -2,6 +2,7 @@ import { readFile, stat, realpath } from 'node:fs/promises';
 import { createRequire, isBuiltin } from 'node:module';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, matchesGlob } from 'node:path';
 import type { DevelopmentPlan, Verification, WorkUnit } from '../domain/types.js';
+import { verificationOutputs } from '../domain/verifications.js';
 import { inside, sourceFiles } from './files.js';
 
 export const DEPENDENCY_MANIFESTS:Record<string,string[]>={
@@ -74,7 +75,7 @@ async function resolvePackage(workspace:string,file:string,name:string):Promise<
 /** Declared read sets are authoritative; relative imports add the files actually consumed by source. */
 export function declaredTaskInputs(_plan:DevelopmentPlan,task:WorkUnit):string[]{return [...new Set(task.inputs??task.files)];}
 export function declaredCheckInputs(plan:DevelopmentPlan,task:WorkUnit,check:Verification):string[]{
-  const outputs=check.outputs??[];
+  const outputs=verificationOutputs(check);
   const explicit=check.inputs??declaredTaskInputs(plan,task);
   return [...new Set([...explicit,...(check.inputs===undefined?outputs.map(output=>`!${output}`):[])])];
 }
@@ -94,7 +95,7 @@ function inputArguments(check:Verification):string[]|undefined{
   if(quote||escaped)return undefined;if(started)result.push(token);return result.length?result:undefined;
 }
 interface PathArgument { value:string; missing:boolean; }
-const outputOptions=new Set(['-o','--output','--out','--out-dir','--outdir','--output-dir','--output-directory']);
+const outputOptions=new Set(['-o','--output','--out','--out-dir','--outdir','--outDir','--out-file','--outfile','--outFile','--output-dir','--outputDir','--output-directory','--outputDirectory','--output-file','--outputFile','--output-path','--outputPath']);
 function readArguments(argv:readonly string[],depth=0):PathArgument[]{
   if(!argv.length||depth>8)return[];
   const binary=basename(argv[0]??'').replace(/\.(?:exe|cmd|bat)$/i,'').toLowerCase();
@@ -113,6 +114,7 @@ function readArguments(argv:readonly string[],depth=0):PathArgument[]{
   const allPaths=['cat','head','tail','wc','stat','less','more'].includes(binary);
   const result:PathArgument[]=[];let pattern=reader&&!args.includes('--files'),positional=false;
   const genericValues=new Set(['-e','--eval','-p','--print','-c','--command','-m','--module','--grep','--grep-invert','--reporter','--project','--target','--format','--name']);
+  const pathValues=new Set(['--project','--project-file','--config','--config-file','--tsconfig','--settings-file']);
   const readerValues=new Set(['-g','--glob','--iglob','-t','--type','-T','--type-not','--type-add','--type-clear','-A','--after-context','-B','--before-context','-C','--context','--context-separator','-m','--max-count','--max-depth','--maxdepth','--max-filesize','--threads','-j','--encoding','--engine','-r','--replace','--sort','--sortr','--path-separator']);
   const displayValues=new Set(['-n','--lines','-c','--bytes','--format','--printf']);
   for(let index=0;index<args.length;index++){
@@ -122,6 +124,7 @@ function readArguments(argv:readonly string[],depth=0):PathArgument[]{
       const equal=value.indexOf('='),option=equal>=0?value.slice(0,equal):value;
       const next=():string|undefined=>equal>=0?value.slice(equal+1):args[++index];
       if(outputOptions.has(option)){next();continue;}
+      if(!reader&&!allPaths&&pathValues.has(option)){const file=next();if(file)result.push({value:file,missing:false});continue;}
       if(reader&&(option==='-e'||option==='--regexp')){next();pattern=false;continue;}
       if(reader&&(option==='-f'||option==='--file')){const file=next();if(file)result.push({value:file,missing:true});pattern=false;continue;}
       if(reader&&value.startsWith('-e')&&!value.startsWith('--')&&value.length>2){pattern=false;continue;}
@@ -159,7 +162,7 @@ async function localReadSelector(workspace:string,cwd:string,argument:PathArgume
 export async function verificationInputSelectors(workspace:string,plan:DevelopmentPlan,task:WorkUnit,check:Verification):Promise<string[]>{
   const root=resolve(workspace),cwd=resolve(root,check.cwd??'.'),cwdRelative=relative(root,cwd).replaceAll('\\','/');
   if(cwdRelative==='..'||cwdRelative.startsWith('../')||isAbsolute(cwdRelative))throw new Error(`Verification cwd escapes its workspace: ${check.cwd}`);
-  const outputs=check.outputs??[];
+  const outputs=verificationOutputs(check);
   const isOutput=(path:string):boolean=>outputs.some(output=>matchesGlob(path,output)||matchesGlob(path,`${output.replace(/\/$/,'')}/**`));
   const inferred=await Promise.all(readArguments(inputArguments(check)??[]).map(argument=>localReadSelector(root,cwd,argument)));
   return [...new Set([...declaredCheckInputs(plan,task,check),...inferred.filter((path):path is string=>Boolean(path&&!isOutput(path)))])].sort();

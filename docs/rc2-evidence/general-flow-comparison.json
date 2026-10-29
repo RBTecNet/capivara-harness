@@ -1,0 +1,156 @@
+{
+  "schema": "capivara/general-engine-comparison/1",
+  "generatedAt": "2026-10-28T23:52:11.437Z",
+  "baseline": "83cb4a05de2dafa2442a48627d677fcbceb25166",
+  "test": {
+    "path": "packages/core/test/app/general-engine-flow.spec.ts",
+    "sha256": "7ec0944f2850a0f858e2b48f552acc79166b42e6fca425dd87c2f0da9818535d"
+  },
+  "sources": [
+    {
+      "path": "packages/core/src/domain/bindings.ts",
+      "sha256": "89830b2c083c0e5ab1813914c89f72b12401490641ec776fc8f4d4c230764778"
+    },
+    {
+      "path": "packages/core/src/domain/verifications.ts",
+      "sha256": "cb8e213309d241dbc6f209e4c728a0cea43003992c86360b49939b57c802c65f"
+    },
+    {
+      "path": "packages/core/src/domain/plan.ts",
+      "sha256": "effd30f10343b56c6ff1ad5182f5f38ff44f19ccf800b26b21969d72ccc1da1e"
+    },
+    {
+      "path": "packages/core/src/domain/plan-records.ts",
+      "sha256": "73fd64bcd16ad18bc91c2bc0050d0be804a3763fb42ccac8d030d854f733568e"
+    },
+    {
+      "path": "packages/core/src/domain/reconcile.ts",
+      "sha256": "0807302abdf9e7ded034628a3cacad2943db81e7efa0513b0d71bbef28f57d29"
+    },
+    {
+      "path": "packages/core/src/execution/build.ts",
+      "sha256": "5d5c7fbbf6a92975d7dfc033a5f44e589a9470451248e2bb69b3db3a3836a802"
+    },
+    {
+      "path": "packages/core/src/execution/checks.ts",
+      "sha256": "af1ca5cf42b11c322059c40099c4255a27387806e78447bcc3f9746115165552"
+    },
+    {
+      "path": "packages/core/src/execution/dependencies.ts",
+      "sha256": "c3bf94c539332b31c695a57d986e3f547ca551f08eee44f076c266c6f75bba62"
+    },
+    {
+      "path": "packages/core/src/execution/environment.ts",
+      "sha256": "27544c10ea1513c71015a35b28829418ade44072c0155b4317517ba2b064e008"
+    },
+    {
+      "path": "packages/core/src/execution/conformance.ts",
+      "sha256": "a853ea7ad39b0bdc93cd10411cde44f0b891ced2416c3bbf4f5a84600cc35b0c"
+    },
+    {
+      "path": "packages/core/src/app/workflow.ts",
+      "sha256": "e19384779a4648b327a7f91f5cb640ed7ef4101d4dc17df581889839b064f37a"
+    },
+    {
+      "path": "packages/core/src/domain/types.ts",
+      "sha256": "ba716e904d6fcf6db4472f665fab1da2025972931da4575e7a2f5ebe7ada665d"
+    },
+    {
+      "path": "packages/core/src/domain/init.ts",
+      "sha256": "3e7c0d2780cbfcf957d162926582d732159b3dabd21e2511c150b0a6783ece36"
+    },
+    {
+      "path": "packages/core/src/execution/inspection.ts",
+      "sha256": "2513fd274f39a32b2543aae9e41ea5960ead889145306a1a0649a6afca8706b4"
+    },
+    {
+      "path": "packages/core/src/execution/acceptance-selection.ts",
+      "sha256": "e3ad56030c50936dd9a10ef100e06ec226908862d5407648dcfe979cf197e45f"
+    }
+  ],
+  "before": {
+    "exitCode": 1,
+    "cases": [
+      {
+        "name": "runs discovery, planning, implementation and task-owned proof for Node.js without global proof copies",
+        "status": "failed",
+        "durationMs": 151.34534800000006,
+        "failure": "AssertionError: expected { Object (status, failure) } to deeply equal { status: 'complete', failure: null }\n    at /tmp/capivara-general-comparison-vWl7Fr/before/packages/core/test/app/general-engine-flow.spec.ts:73:69\n    at file:///home/bruno/Documentos/Projetos/NovoHarness/capivara/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+      },
+      {
+        "name": "runs discovery, planning, implementation and task-owned proof for Python without global proof copies",
+        "status": "failed",
+        "durationMs": 32.80490400000008,
+        "failure": "AssertionError: expected { Object (status, failure) } to deeply equal { status: 'complete', failure: null }\n    at /tmp/capivara-general-comparison-vWl7Fr/before/packages/core/test/app/general-engine-flow.spec.ts:73:69\n    at file:///home/bruno/Documentos/Projetos/NovoHarness/capivara/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+      },
+      {
+        "name": "runs discovery, planning, implementation and task-owned proof for TypeScript without global proof copies",
+        "status": "failed",
+        "durationMs": 32.23397699999987,
+        "failure": "AssertionError: expected { Object (status, failure) } to deeply equal { status: 'complete', failure: null }\n    at /tmp/capivara-general-comparison-vWl7Fr/before/packages/core/test/app/general-engine-flow.spec.ts:73:69\n    at file:///home/bruno/Documentos/Projetos/NovoHarness/capivara/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+      },
+      {
+        "name": "plans a fresh tui interface with its proof on the task and without an artificial interview",
+        "status": "failed",
+        "durationMs": 35.570591999999806,
+        "failure": "AssertionError: expected 'waiting' to be 'complete' // Object.is equality\n    at /tmp/capivara-general-comparison-vWl7Fr/before/packages/core/test/app/general-engine-flow.spec.ts:115:25\n    at file:///home/bruno/Documentos/Projetos/NovoHarness/capivara/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+      },
+      {
+        "name": "plans a fresh web interface with its proof on the task and without an artificial interview",
+        "status": "failed",
+        "durationMs": 30.09793999999988,
+        "failure": "AssertionError: expected 'waiting' to be 'complete' // Object.is equality\n    at /tmp/capivara-general-comparison-vWl7Fr/before/packages/core/test/app/general-engine-flow.spec.ts:115:25\n    at file:///home/bruno/Documentos/Projetos/NovoHarness/capivara/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+      }
+    ]
+  },
+  "after": {
+    "exitCode": 0,
+    "cases": [
+      {
+        "name": "runs discovery, planning, implementation and task-owned proof for Node.js without global proof copies",
+        "status": "passed",
+        "durationMs": 1699.7838199999999
+      },
+      {
+        "name": "runs discovery, planning, implementation and task-owned proof for Python without global proof copies",
+        "status": "passed",
+        "durationMs": 357.0797600000001
+      },
+      {
+        "name": "runs discovery, planning, implementation and task-owned proof for TypeScript without global proof copies",
+        "status": "passed",
+        "durationMs": 1288.063643
+      },
+      {
+        "name": "plans a fresh tui interface with its proof on the task and without an artificial interview",
+        "status": "passed",
+        "durationMs": 34.57788700000037
+      },
+      {
+        "name": "plans a fresh web interface with its proof on the task and without an artificial interview",
+        "status": "passed",
+        "durationMs": 26.04790099999991
+      }
+    ]
+  },
+  "evidenceScope": {
+    "completeWorkflows": [
+      "Node.js CLI",
+      "Python CLI",
+      "TypeScript compiler SDK and generated CLI"
+    ],
+    "planningWorkflows": [
+      "TUI",
+      "web"
+    ],
+    "agentTransport": "injected deterministic responses",
+    "productCommands": "real native execution",
+    "paidInferenceCalls": 0,
+    "originalExampleModified": false
+  },
+  "limits": [
+    "Five representative scenarios do not establish reliability for every possible project.",
+    "Web and TUI scenarios in this file validate planning; separate PTY pilots cover terminal execution.",
+    "Wall time of an interrupted baseline is not a completion-time performance comparison."
+  ]
+}

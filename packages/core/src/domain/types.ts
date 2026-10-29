@@ -10,6 +10,20 @@ export interface CapabilityIdentity {
   provider: string;
 }
 
+export interface BindingAuthority {
+  schema: "capivara/binding-authority/1";
+  original: CapabilityIdentity;
+  provider: { authority: "literal"; quote: string };
+  kind: { authority: "literal" | "inferred" | "legacy-conservative"; value?: CapabilityIdentity["kind"]; quote?: string };
+  capability: { authority: "literal" | "inferred"; quote?: string };
+}
+export interface BindingTransformation {
+  from: CapabilityIdentity;
+  to: CapabilityIdentity;
+  reason: "inferred-operational-role";
+  source: { reference: string; text: string };
+}
+
 export interface Source {
   kind: "request" | "answer" | "repository";
   text: string;
@@ -26,6 +40,8 @@ export interface Requirement {
   kind?: "behavior" | "stack" | "interface" | "constraint";
   /** Literal mandatory technology choice, checked against the operational provider. */
   binding?: CapabilityIdentity;
+  bindingAuthority?: BindingAuthority;
+  bindingTransformations?: BindingTransformation[];
 }
 
 export interface ProductConstraint {
@@ -227,6 +243,8 @@ export interface DomainEvent {
 
 export interface DomainHooks {
   agent: DomainAgent;
+  /** Original completed answers, for lossless adoption of metadata discarded by an older normalizer. */
+  completedResponses?: () => readonly { operation: string; result: string }[];
   /** Read-only lookup of an exact completed call; never authorizes another model invocation. */
   hasCachedCall?: (request: DomainAgentRequest) => boolean;
   ask?: (question: Question) => Promise<string | null>;

@@ -1,0 +1,84 @@
+{
+  "schema": "capivara/plan-control-live/1",
+  "recordedAt": "2026-10-28T23:55:21.136Z",
+  "version": "0.9.0-rc2",
+  "project": "samba_admin",
+  "command": "capivara plan --project <project> --no-dashboard",
+  "exitCode": 0,
+  "before": {
+    "status": "waiting",
+    "stage": "plan",
+    "lastEvent": 211,
+    "tasks": 8,
+    "requirements": 14,
+    "domainCalls": 17,
+    "lastFailure": {
+      "kind": "planning",
+      "message": "plan-invariants: O plano viola invariantes de cobertura, capacidade ou conformidade.; O reparo não alterou o estado rejeitado. Uma nova tentativa exige mudança de entrada, capacidade ou estratégia executável.",
+      "fingerprint": "e5e2b4a07deede7aeb66269458e8a21a917d3adf602f5134dab556644b5d8029",
+      "at": "2026-10-28T23:04:08.227Z"
+    }
+  },
+  "after": {
+    "status": "complete",
+    "stage": "plan",
+    "planStatus": "ready",
+    "tasks": 5,
+    "taskIds": [
+      "task-domain-foundation",
+      "task-rest-api",
+      "react-vite-foundation",
+      "task-web-foundation",
+      "application-views"
+    ],
+    "requirements": 14,
+    "coveredRequirements": 14,
+    "taskChecks": 10,
+    "acceptanceRecipes": 19,
+    "allOriginalCriteriaPreserved": true,
+    "domainCalls": 17,
+    "newAgentStarts": 0,
+    "newAgentResults": 0,
+    "lastEvent": 223,
+    "lastFailure": null,
+    "hasExecution": false,
+    "owner": []
+  },
+  "metadataRecoveries": [
+    {
+      "id": 218,
+      "at": "2026-10-28T23:54:10.196Z",
+      "taskId": "react-vite-foundation",
+      "checkId": "client-build-check",
+      "fields": [
+        "conformance"
+      ],
+      "resultSHA256": "67094b4f453aef76f2b61daf3207f4f94c5f0a1540b8de89dfd2accc801d69a5"
+    },
+    {
+      "id": 219,
+      "at": "2026-10-28T23:54:10.200Z",
+      "taskId": "$acceptance",
+      "checkId": "node-api-runtime-conformance",
+      "fields": [
+        "requirementIds",
+        "conformance"
+      ],
+      "resultSHA256": "af045a9ee82248d0aa948fc845255bcee80071bb2441361fe2edc543f2663010"
+    }
+  ],
+  "installation": {
+    "cli": "/home/bruno/.local/lib/node_modules/@capivara/core/dist/cli.js",
+    "installedSHA256": "ff936be7a6ecbe5b0fe1bc2b8ec26385b04b172ae2abac177c32569a32eff5c8",
+    "builtSHA256": "ff936be7a6ecbe5b0fe1bc2b8ec26385b04b172ae2abac177c32569a32eff5c8"
+  },
+  "validation": {
+    "command": "npm run check",
+    "tests": 394,
+    "files": 58
+  },
+  "limits": [
+    "The example project was resumed only through plan; its application was not built in this run.",
+    "Generated proof recipes are not execution evidence. General native build/CLI/PTY pilots are separate artifacts."
+  ]
+}

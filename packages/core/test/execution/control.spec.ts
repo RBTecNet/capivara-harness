@@ -107,21 +107,22 @@ it('retires queued owners removed by reconciliation instead of replaying a secon
   expect(result.state.metrics?.repetitions?.filter(item=>item.action==='retire-replan')).toHaveLength(2);
 });
 
-it('overlaps independent editors, integrates both products, and never overlaps conflicting writes',async()=>{
-  for(const conflict of [false,true]){
+it('overlaps independent editors, integrates both products, and never overlaps conflicting source or artifact writes',async()=>{
+  for(const conflict of ['none','source','artifact']){
     const root=await workspace();let active=0,max=0;
-    const tasks=['alpha','beta'].map(id=>unit(id,conflict?['shared.json']:[`${id}.mjs`]));
+    const tasks=['alpha','beta'].map(id=>unit(id,conflict==='source'?['shared.json']:[`${id}.mjs`]));
+    if(conflict==='artifact')for(const task of tasks)task.checks[0]!.outputs=['shared.json'];
     const options={workspace:root,brief,plan:plan(tasks),maxConcurrent:2,signal:AbortSignal.timeout(3000),agent:async(request:Parameters<BuildOptions['agent']>[0])=>{
       if(request.role==='reviewer')return complete('{"approved":true}');
       const id=request.context!.match(/Work unit (\w+):/)![1]!;
       active++;max=Math.max(max,active);await new Promise(resolve=>setTimeout(resolve,60));
-      if(conflict){const path=join(request.workspace,'shared.json');const before=JSON.parse(await readFile(path,'utf8').catch(()=>'[]'));await writeFile(path,JSON.stringify([...new Set([...before,id])]));}
-      else await writeFile(join(request.workspace,`${id}.mjs`),`console.log('${id}');`);
+      if(conflict==='source'){const path=join(request.workspace,'shared.json');const before=JSON.parse(await readFile(path,'utf8').catch(()=>'[]'));await writeFile(path,JSON.stringify([...new Set([...before,id])]));}
+      else await writeFile(join(request.workspace,`${id}.mjs`),`${conflict==='artifact'?"import{writeFileSync}from'node:fs';writeFileSync('shared.json',JSON.stringify(['alpha','beta']));":''}console.log('${id}');`);
       active--;return complete();
     }};
     const outcome=await runBuild(options);
-    expect(outcome.status).toBe('complete');expect(max).toBe(conflict?1:2);
-    if(conflict)expect(JSON.parse(await readFile(join(root,'shared.json'),'utf8'))).toEqual(['alpha','beta']);
+    expect(outcome.status).toBe('complete');expect(max).toBe(conflict==='none'?2:1);
+    if(conflict!=='none')expect(JSON.parse(await readFile(join(root,'shared.json'),'utf8'))).toEqual(['alpha','beta']);
     else for(const id of ['alpha','beta'])expect(await readFile(join(root,`${id}.mjs`),'utf8')).toContain(id);
   }
 });

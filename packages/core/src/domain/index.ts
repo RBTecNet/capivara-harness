@@ -9,3 +9,4 @@ export type { RepairPlanOptions } from "./plan.js";
 export { contextForTask, packetText, ordered, ContextTooLarge } from "./context.js";
 export { actionConflict, allowedCapabilities, explicitConstraints, explicitModes, explicitTargets, identity, inferredCapabilities } from "./authority.js";
 export { jsonObject } from "./json.js";
+export { deriveBindingAuthority, annotateBindingAuthority, literalProviderMention, obligationMatchesProvider, matchesMandatoryProvider, matchesOperationalClaim, recordBindingTransformation } from './bindings.js';

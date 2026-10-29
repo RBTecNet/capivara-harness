@@ -267,6 +267,9 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
     const hooks = {
       get contextChars(): number { return contextBudget(); },
       agent: domainAgent,
+      completedResponses: (): readonly { operation: string; result: string }[] => Object.values(domainCalls)
+        .filter(call => call.status === 'complete' && typeof call.result === 'string' && !!call.result.trim())
+        .map(call => ({ operation: call.operation, result: call.result! })),
       hasCachedCall: (request: DomainAgentRequest): boolean => {
         const previous = domainCalls[domainCallKey(request)];
         return previous?.status === 'complete' && typeof previous.result === 'string' && !!previous.result.trim();

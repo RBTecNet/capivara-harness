@@ -16,6 +16,16 @@ async function workspace(){const root=await mkdtemp(join(tmpdir(),'capivara-argv
 const brief:ProductBrief={schema:'capivara/product/1',status:'ready',id:'b',revision:1,name:'Artifact fixture',summary:'Preserve the required artifact',request:'Produce a readable document with a Wireframe section.',modes:['cli'],targets:['portable'],requirements:[{id:'r',statement:'The delivered document contains its Wireframe section.',mode:'cli',source:{kind:'request',reference:'request',text:'Produce a readable document with a Wireframe section.'}}],constraints:[],decisions:[],gaps:[]};
 function fixture(check:Verification){const task:WorkUnit={id:'artifact',title:'Required artifact',goal:'Deliver the readable artifact.',instructions:'Produce the required artifact.',requirementIds:['r'],dependsOn:[],environmentIds:[],contractIds:[],files:['docs/plan.md'],criteria:['The delivered document contains its Wireframe section.'],checks:[check],risk:'normal',blockedBy:[]};const plan:DevelopmentPlan={schema:'capivara/plan/1',status:'ready',revision:1,briefId:'b',briefRevision:1,environment:[],contracts:[],tasks:[task]};return{task,plan};}
 const documentCheck:Verification={id:'document',kind:'cli',command:'rg',args:['-n','Paleta|Tipografia|Wireframe|Princípios','docs'],expected:'The artifact contains its required Wireframe section.',assertion:{type:'contains',value:'Wireframe',source:'stdout'},expectedExitCode:0,inputs:['SKILL.md'],requirementIds:['r'],requiredCapabilities:[],level:'behavior'};
+it('tracks a selected build configuration without treating its output directory as a read dependency',async()=>{
+  const root=await workspace();await mkdir(join(root,'configs'));await writeFile(join(root,'main.ts'),'export const value = 1;');await writeFile(join(root,'configs/build.json'),'{}');
+  const check:Verification={id:'compile',kind:'command',command:'tsc',args:['--project','configs/build.json','--outDir','dist'],inputs:['main.ts'],outputs:['dist/main.js'],level:'build',requirementIds:['r'],requiredCapabilities:[]};
+  const {plan,task}=fixture(check),before=await checkInputHash(root,plan,task,check,brief);
+  expect(await verificationInputSelectors(root,plan,task,check)).toEqual(['configs/build.json','main.ts']);
+  await mkdir(join(root,'dist'));await writeFile(join(root,'dist/main.js'),'export const value = 1;');await writeFile(join(root,'README.md'),'Unrelated documentation.');
+  expect(await checkInputHash(root,plan,task,check,brief)).toBe(before);
+  await writeFile(join(root,'configs/build.json'),'{"strict":true}');
+  expect(await checkInputHash(root,plan,task,check,brief)).not.toBe(before);
+});
 it('records a bare reader directory before it exists and invalidates only changes in its actual read scope',async()=>{
   const root=await workspace();await writeFile(join(root,'SKILL.md'),'Reference');const {plan,task}=fixture(documentCheck);
   expect(await verificationInputSelectors(root,plan,task,documentCheck)).toEqual(['SKILL.md','docs']);

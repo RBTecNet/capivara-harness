@@ -5,6 +5,7 @@ import type { ApplicationMode, CapabilityIdentity, Gap, InitOptions, ProductBrie
 import { emitEvent, emitProgress } from "../telemetry/progress.js";
 import { PlanningFailure, PlanningProgress } from "./control.js";
 import { resolveLiteralExcerpt } from "./literal-source.js";
+import { annotateBindingAuthority, literalProviderMention as providerMention } from "./bindings.js";
 
 const MODES = new Set<ApplicationMode>(["web", "desktop", "tui", "cli", "api", "service", "library", "other"]);
 const TARGETS = new Set<TargetPlatform>(["linux", "windows", "macos", "browser", "portable"]);
@@ -40,12 +41,6 @@ function excerpt(raw: string, record: Record<string, unknown>, origin: SourceOri
 
 const BINDING_KINDS = new Set(["cli", "library", "driver", "service", "runtime", "sdk"]);
 const bindingChoice = (binding: Pick<CapabilityIdentity, "kind" | "provider">): string => `${binding.kind}:${binding.provider.normalize("NFC").toLowerCase()}`;
-function providerMention(text: string, provider: string): RegExpMatchArray | null {
-  const escaped = provider.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  // Technology names are complete literal tokens, including punctuation in
-  // names such as C++, .NET and dotted package/runtime identifiers.
-  return text.match(new RegExp(`(?<![\\p{L}\\p{N}_+#./-])${escaped}(?![\\p{L}\\p{N}_+#/-]|\\.(?=[\\p{L}\\p{N}_]))`, "iu"));
-}
 function technicalChoices(text: string): string[] {
   return text.split(/\r?\n|;|,\s*|\s+(?:and|e)\s+|\s+\+\s+/iu).map(part => part.trim().replace(/^(?:[-*+]\s+|\d+[.)]\s+)/, "")).filter(Boolean);
 }
@@ -136,9 +131,12 @@ async function requirementsFrom(raw: string, values: unknown, modes: Application
       for (const binding of bindings.slice(1)) {
         const choice = technicalChoices(source.text).find(part => providerMention(part, binding.provider))!;
         const literal = resolveLiteralExcerpt(source.text, choice) ?? source.text;
-        result.push({ id: identity("req", `${origin.reference}:${normalize(statement)}:${JSON.stringify(binding)}`), statement: `${binding.provider}: ${binding.capability} (${binding.kind}).`, source: { ...source, text: literal }, mode, kind: "stack", binding });
+        const child: Requirement = { id: identity("req", `${origin.reference}:${normalize(statement)}:${JSON.stringify(binding)}`), statement: `${binding.provider}: ${binding.capability} (${binding.kind}).`, source: { ...source, text: literal }, mode, kind: "stack", binding };
+        annotateBindingAuthority(child, raw, "init");
+        result.push(child);
       }
     }
+    annotateBindingAuthority(requirement, raw, "init");
     result.push(requirement);
   }
   if (metadata.size) emitProgress(hooks.onEvent, { id: "init:metadata", label: "Origens e escolhas técnicas", completed: candidates.length, total: candidates.length, status: "complete", stage: "init" });
@@ -312,6 +310,7 @@ export async function runInit(options: InitOptions): Promise<ProductBrief> {
   const unchanged = previous?.materialRevision === revision || previous?.materialRevision === undefined && documents.length === 0;
   if (previous && unchanged && previous.status !== "discovering") {
     const existing = structuredClone(previous);
+    for (const requirement of existing.requirements) annotateBindingAuthority(requirement, requirement.source.kind === "request" ? request : undefined);
     existing.materialRevision = revision;
     existing.references = materialReferences(documents);
     reconcileGeneratedBindings(existing, options);

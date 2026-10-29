@@ -67,6 +67,43 @@ it('preserves distinct task IDs and self-dependency defects instead of merging a
   expect(validatePlan(brief, merged).some(issue => issue.code === 'task-cycle')).toBe(true);
 });
 
+it('reconciles independent slices by complete contract identity and compatible ownership while preserving every obligation',()=>{
+  const first=task('records','Persist the domain records.',['src/records/**']);first.contractIds=['records-api'];
+  const second=task('resource-domain','Validar e armazenar os registros.',['src/records/model.ts']);second.contractIds=['records-api'];second.requirementIds=['validation'];second.criteria=['Reject invalid records.'];second.instructions='Implement validation and durable storage.';
+  second.checks=[{id:'validation-proof',kind:'command',command:'node',args:['verify.mjs'],assertion:{type:'contains',value:'valid'},requirementIds:['validation'],requiredCapabilities:[]}];
+  const consumer=task('consumer','Use the records.',['src/consumer.ts']);consumer.dependsOn=['resource-domain'];
+  const original=plan([first,second,consumer]),unchanged=structuredClone(original),result=reconcilePlan(brief,original);
+  expect(result.tasks.map(unit=>unit.id)).toEqual(['records','consumer']);
+  expect(result.tasks[0]!.requirementIds).toEqual(['crud','validation']);expect(result.tasks[0]!.criteria).toEqual([...first.criteria,...second.criteria]);
+  expect(result.tasks[0]!.checks).toEqual(second.checks);expect(result.tasks[0]!.instructions).toContain(second.instructions);
+  expect(result.tasks[1]!.dependsOn).toEqual(['records']);expect(original).toEqual(unchanged);
+});
+
+it('preserves intentional direct and transitive stages even when ownership and contracts are identical',()=>{
+  for(const indirect of [false,true]){
+    const first=task('foundation','Prepare the records.',['src/records.ts']);first.contractIds=['records-api'];
+    const later=task('migration','Refine the records.',['src/records.ts']);later.contractIds=['records-api'];later.dependsOn=[indirect?'middle':'foundation'];
+    const middle=task('middle','Consume the first stage.',['src/intermediate.ts']);middle.dependsOn=['foundation'];
+    const result=reconcilePlan(brief,plan(indirect?[first,middle,later]:[first,later]));
+    expect(result.tasks).toHaveLength(indirect?3:2);expect(result.tasks.find(task=>task.id==='migration')!.dependsOn).toEqual(later.dependsOn);
+  }
+});
+
+it('does not infer delivery identity from a shared manifest or incompatible contracts',()=>{
+  const left=task('customers','Create a controller.',['package.json','src/customers.ts']);left.contractIds=['shared-api'];
+  const right=task('orders','Create a controller.',['package.json','src/orders.ts']);right.contractIds=['shared-api'];
+  expect(reconcilePlan(brief,plan([left,right])).tasks).toHaveLength(2);
+  right.files=[...left.files];right.contractIds=['different-api'];
+  expect(reconcilePlan(brief,plan([left,right])).tasks).toHaveLength(2);
+});
+
+it('rechecks ordering after each alias so individually plausible merges cannot create a cycle',()=>{
+  const a=task('a','First X.',['src/x.ts']),d=task('d','Other X.',['src/x.ts']);a.contractIds=d.contractIds=['x-contract'];d.dependsOn=['c'];
+  const b=task('b','First Y.',['src/y.ts']),c=task('c','Other Y.',['src/y.ts']);b.contractIds=c.contractIds=['y-contract'];b.dependsOn=['a'];
+  const result=reconcilePlan(brief,plan([a,d,b,c]));
+  expect(result.tasks).toHaveLength(3);expect(validatePlan(brief,result).some(issue=>issue.code==='task-cycle'||issue.code==='missing-task-dependency')).toBe(false);
+});
+
 const proof = (): Verification => ({ id: 'records-proof', kind: 'command', command: 'node', args: ['tests/records.js'], inputs: ['src/records/**'], level: 'behavior', assertion: { type: 'contains', source: 'stdout', value: 'records' }, expected: 'Record operations persist.', requirementIds: ['crud'], constraintIds: ['constraint-original'], requiredCapabilities: [] });
 const unparsedProof = (): Verification => { const { assertion: _assertion, ...check } = proof(); return check; };
 
@@ -132,6 +169,7 @@ it('remaps duplicate producer IDs while preserving before/after ordering and act
 it('recognizes a mandatory provider through declared environment dependencies and diagnoses disconnected exact IDs', () => {
   const product = structuredClone(brief);
   product.requirements[0]!.binding = { capability: 'runtime', kind: 'runtime', provider: 'RequiredRuntime' };
+  product.requirements[0]!.source.text='Use runtime RequiredRuntime.';
   const delivery = task('records', 'Deliver records.', ['src/records.js']);
   delivery.requirementIds = ['crud', 'validation']; delivery.environmentIds = ['driver'];
   const current = plan([delivery]);

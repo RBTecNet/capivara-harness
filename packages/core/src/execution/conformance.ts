@@ -6,6 +6,8 @@ import type { OperationalEnvironment } from './environment.js';
 import type { VerificationEvidence } from './types.js';
 import { digest, inside, sourceFiles } from './files.js';
 import { resolveNativeNode, type ProviderWitness, type RuntimeProviderReceipt } from '../runtime/provider-observation.js';
+import { consumesVerification, verificationRegistry } from '../domain/verifications.js';
+import { matchesOperationalClaim, obligationMatchesProvider } from '../domain/bindings.js';
 
 export interface ObservedArtifact { hash: string; modified: string; changed: string; }
 export interface ConformanceProvenance {
@@ -100,29 +102,34 @@ function produced(provenance:ConformanceProvenance,path:string):boolean{
 export async function validateConformance(brief:ProductBrief,plan:DevelopmentPlan,operational:OperationalEnvironment,evidence:VerificationEvidence[],workspace:string):Promise<ConformanceIssue[]>{
   const issues:ConformanceIssue[]=[];
   const report=(requirementId:string,code:string,message:string):void=>{issues.push({requirementId,code,message});};
-  const checks=plan.acceptance??[];
+  const checks=verificationRegistry(plan);
   for(const requirement of brief.requirements){
     const binding=requirement.binding;if(!binding)continue;
-    const dedicated=checks.filter(check=>check.conformance?.requirementId===requirement.id&&check.requirementIds.includes(requirement.id)&&check.conformance.capability===binding.capability&&check.conformance.kind===binding.kind&&check.conformance.provider===binding.provider);
+    const dedicated=checks.filter(({check})=>check.conformance?.requirementId===requirement.id&&check.requirementIds.includes(requirement.id)&&obligationMatchesProvider(requirement,check.conformance));
     if(!dedicated.length){report(requirement.id,'missing-conformance','A mandatory provider needs dedicated product-usage evidence; readiness and generic behavior IDs are insufficient.');continue;}
-    const provider=Object.values(operational.bindings).find(candidate=>candidate.ready&&candidate.capability===binding.capability&&candidate.kind===binding.kind&&candidate.provider===binding.provider);
-    if(!provider){report(requirement.id,'provider-unavailable','The exact mandatory operational provider is not ready.');continue;}
+    const providers=Object.values(operational.bindings).filter(candidate=>candidate.ready&&obligationMatchesProvider(requirement,candidate));
+    if(!providers.length){report(requirement.id,'provider-unavailable','The mandatory operational provider and its explicitly required role are not ready.');continue;}
     let accepted=false;const reasons:string[]=[];
-    for(const check of dedicated){
+    for(const owned of dedicated){
+      const check=owned.check;
       const claim=check.conformance!;
-      const proof=evidence.findLast(item=>item.taskId==='$acceptance'&&item.checkId===check.id&&item.passed&&item.provenance);
+      const candidates=providers.filter(candidate=>matchesOperationalClaim(requirement,claim,candidate));
+      const exact=candidates.filter(candidate=>candidate.capability===claim.capability);
+      const provider=exact.length===1?exact[0]:candidates.length===1?candidates[0]:undefined;
+      if(!provider){reasons.push('The proof has no unique operational provider with its actual claimed role. Inferred labels cannot replace the provider or its role.');continue;}
+      const proof=evidence.findLast(item=>item.taskId===owned.taskId&&item.checkId===check.id&&item.kind===check.kind&&item.passed&&item.provenance);
       const observed=proof?.provenance;
       if(!proof||!observed||observed.cancelled||observed.timedOut||proof.level==='build'&&observed.exitCode!==0){reasons.push('No successful execution provenance exists for the dedicated recipe.');continue;}
       if(proof.level==='syntax'){reasons.push('Syntax does not establish provider consumption by the product.');continue;}
-      if(binding.kind==='sdk'&&proof.level!=='build'){reasons.push('A mandatory SDK needs an observed build, a produced artifact and a dependent functional execution; a behavior label on its compiler output is insufficient.');continue;}
-      if(['runtime','service'].includes(binding.kind)&&proof.level!=='behavior'){reasons.push('A mandatory runtime or service must execute the product behavior, rather than merely generate an artifact.');continue;}
+      if(provider.kind==='sdk'&&proof.level!=='build'){reasons.push('A mandatory SDK needs an observed build, a produced artifact and a dependent functional execution; a behavior label on its compiler output is insufficient.');continue;}
+      if(['runtime','service'].includes(provider.kind)&&proof.level!=='behavior'){reasons.push('A mandatory runtime or service must execute the product behavior, rather than merely generate an artifact.');continue;}
       const args=invocationArguments(observed.command);
       const productFiles=await sourceFiles(workspace,claim.productInputs);
       if(!productFiles.length){reasons.push('No existing product inputs are bound to this proof.');continue;}
       const canonical=await observedFiles(workspace,claim.productInputs);
       if(productFiles.some(path=>observed.inputs[path]!==canonical[path]?.hash)){reasons.push('Product inputs changed or were not captured before the provider invocation.');continue;}
       let runtimeWitness=false;
-      if(binding.kind==='runtime'&&provider.command?.length){
+      if(provider.kind==='runtime'&&provider.command?.length){
         const receipt=observed.runtimeProvider;
         let receiptMatches=false;
         if(receipt&&receipt.capability===provider.capability&&receipt.kind===provider.kind&&receipt.provider===provider.provider&&receipt.fingerprint===provider.fingerprint&&receipt.bindingCommand.length===provider.command.length&&matchingPrefix(receipt.bindingCommand,provider.command,observed.workspace,operational.root??workspace,observed.cwd)){
@@ -160,7 +167,7 @@ export async function validateConformance(brief:ProductBrief,plan:DevelopmentPla
       if(proof.level==='build'){
         const artifacts=Object.keys(observed.artifactsAfter).filter(path=>produced(observed,path));
         if(!artifacts.length){reasons.push('The purported production build produced no observed artifact.');continue;}
-        const functional=evidence.some(run=>run.passed&&run.level==='behavior'&&run.provenance&&checks.some(recipe=>recipe.id===run.checkId&&recipe.dependsOn?.includes(check.id)&&recipe.requirementIds.includes(requirement.id))&&artifacts.some(path=>run.provenance!.inputs[path]===observed.artifactsAfter[path]!.hash&&consumes(run.provenance!,path,0)));
+        const functional=evidence.some(run=>run.passed&&run.level==='behavior'&&run.provenance&&!run.provenance.cancelled&&!run.provenance.timedOut&&checks.some(recipe=>recipe.taskId===run.taskId&&recipe.check.id===run.checkId&&recipe.check.kind===run.kind&&recipe.check.requirementIds.includes(requirement.id)&&consumesVerification(plan,checks,recipe,owned))&&artifacts.some(path=>run.provenance!.inputs[path]===observed.artifactsAfter[path]!.hash&&consumes(run.provenance!,path,0)));
         if(!functional){reasons.push('No successful functional recipe consumed the exact artifact produced by the mandatory provider.');continue;}
       }else if(proof.level!=='behavior'){reasons.push('The dedicated recipe has no observed build or behavior level.');continue;}
       accepted=true;break;

@@ -31,6 +31,12 @@ node scripts/verify-completed-resume.mjs CAMINHO_DO_PROJETO /tmp/retomada.json
 
 A segunda operação invoca a CLI de verdade; não altera o estado para aprovar trabalho. Uma retomada válida preserva plano e conclusão sem chamar agentes ou criar provas novas. Registros de aceite podem voltar a referenciar o mesmo recibo existente.
 
+## Instalação conferida
+
+A versão `0.9.0-rc2`, commit de código `11e9eb1`, foi instalada em `~/.local`. O SHA-256 da CLI instalada é igual ao do build local: `88470af235df1a5fc0c48c57e74172cbb5f9e844ab7d8cb7e2d145d2dc7d2ac8`.
+
+As retomadas feitas **pela CLI instalada** também passaram: [web, 67.240 ms](rc2-evidence/samba-admin-installed-resume-20261029.json) e [Python CLI, 1.230 ms](rc2-evidence/python-cli-installed-resume-20261029.json). Ambas preservaram o plano e a conclusão, com zero chamadas de modelo e zero novos IDs de prova. O build e a checagem de tipos passaram. Após a última correção, a regressão focal `review-handoff-flow.spec.ts` passou em 2,36 segundos; não foi rodada a suíte completa.
+
 ## Limitações verificadas
 
 - A retomada web ainda custa cerca de 70 segundos em revalidação de ambiente, entradas e conformidade. Não há nova execução de produto nesse intervalo, mas existe trabalho local a otimizar.

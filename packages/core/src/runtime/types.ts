@@ -56,6 +56,8 @@ export interface CommandRequest {
   input?: string;
   maxOutputBytes?: number;
   onOutput?: (text: string, stream: 'stdout' | 'stderr') => void;
+  /** Starts ownership-aware cleanup even while inherited stdio delays close. */
+  onStop?: (reason:'timeout'|'cancelled')=>void;
   /** Relevant input paths, relative to cwd. Without this the product source tree is fingerprinted. */
   inputs?: readonly string[];
   constraints?: ExecutionConstraints;
@@ -102,6 +104,8 @@ export interface TerminalRequest extends CommandRequest {
 }
 
 export interface AgentRequest {
+  /** Coordinator identity for scoped process ownership and durable cleanup. */
+  invocationId?: string;
   workspace: string;
   config: AgentConfig;
   /** Operational bindings prepared by the coordinator; inherited by all process tools. */

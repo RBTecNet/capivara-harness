@@ -6,6 +6,8 @@ import { verificationAssertionStatus } from './assertions.js';
 import { isPlannedProductRecipe, verificationRegistry } from './verifications.js';
 import { deriveBindingAuthority, matchesOperationalClaim, obligationMatchesProvider } from './bindings.js';
 import { expandPartitionedRequirementIds } from './requirement-lineage.js';
+import { preferredProofOwner, taskDependsOn as dependsOn } from './contribution.js';
+export { preferredProofOwner } from './contribution.js';
 import type { DevelopmentPlan, PlanVerificationObligation, ProductBrief, Requirement, Verification, VerificationAssertion, WorkUnit } from './types.js';
 
 export interface PlanIssue { code: string; subject: string; message: string; environmentIds?: string[]; taskIds?: string[]; }
@@ -61,25 +63,14 @@ export function requiredRequirementInterface(requirement: Requirement): Interact
   if (['cli','tui','web','desktop'].includes(requirement.mode)) return requirement.mode as InteractionKind;
   return requestedCapabilities(requirement.source.text).includes('browser') && (requirement.kind === 'interface' || /\b(?:fluxos?|flows?|intera\w*|execut\w*|navega\w*|browser)\b/.test(normalize(requirement.statement))) ? 'web' : undefined;
 }
-function dependsOn(plan: DevelopmentPlan, task: WorkUnit, prerequisite: string, seen = new Set<string>()): boolean {
-  if (seen.has(task.id)) return false;
-  seen.add(task.id);
-  return task.dependsOn.some(id => id === prerequisite || !!plan.tasks.find(candidate => candidate.id === id && dependsOn(plan,candidate,prerequisite,seen)));
-}
-export function preferredProofOwner(plan: DevelopmentPlan, requirementId: string): WorkUnit | undefined {
-  const consumers = plan.tasks.filter(task => task.requirementIds.includes(requirementId));
-  return consumers.filter(task => !consumers.some(other => other.id !== task.id && dependsOn(plan,other,task.id))).sort((left,right) => {
-    const weight = (task: WorkUnit): number => consumers.filter(other => other.id !== task.id && dependsOn(plan,task,other.id)).length;
-    return weight(right)-weight(left) || plan.tasks.indexOf(right)-plan.tasks.indexOf(left);
-  })[0];
-}
 const provesInterface = (check: Verification, requirementId: string, kind: InteractionKind): boolean => check.requirementIds.includes(requirementId) && !!check.command && check.level === 'behavior' && (check.kind === kind || kind === 'web' && check.requiredCapabilities.includes('browser'));
 export function requiredTaskInterfaces(brief: ProductBrief, plan: DevelopmentPlan, task: WorkUnit): InteractionKind[] {
   const result = new Set<InteractionKind>();
   for (const requirement of brief.requirements.filter(candidate => task.requirementIds.includes(candidate.id))) {
     const kind = requiredRequirementInterface(requirement);
     if (!kind) continue;
-    if (task.checks.some(check => provesInterface(check,requirement.id,kind))) { result.add(kind); continue; }
+    // A suggested recipe is an instrument, not authority to promote a partial
+    // contribution into the final owner of a user interaction requirement.
     if ((plan.acceptance ?? []).some(check => provesInterface(check,requirement.id,kind))) continue;
     const consumers = plan.tasks.filter(candidate => candidate.requirementIds.includes(requirement.id));
     if (!consumers.some(other => other.id !== task.id && dependsOn(plan,other,task.id))) result.add(kind);
@@ -223,14 +214,14 @@ export function derivePlanObligations(brief:ProductBrief,plan:DevelopmentPlan):P
   return obligations;
 }
 
-/** Structural invariants are checked before scheduling and again before final acceptance. */
+/** Structural invariants are checked before scheduling and again before final
+ * acceptance. Missing product recipes remain explicit BUILD obligations. */
 export function validatePlan(brief: ProductBrief, plan: DevelopmentPlan): PlanIssue[] {
   const issues: PlanIssue[] = [];
   const issue = (code: string, subject: string, message: string, references: Pick<PlanIssue, 'environmentIds' | 'taskIds'> = {}): void => { issues.push({code,subject,message,...references}); };
   const required = new Set(brief.requirements.map(requirement => requirement.id));
   for(const id of Object.keys(brief.requirementAliases??{}))if(required.has(id)||resolveRequirementAlias(brief,id)===id)issue('invalid-requirement-alias',id,'O alias precisa aposentar somente uma identidade inativa e alcançar um requisito ativo sem ciclos.');
   const constraints = new Set(brief.constraints.map(constraint => constraint.id));
-  const recipes=verificationRegistry(plan);
   const taskIds = new Set<string>();
   const environment = new Set<string>();
   const contracts = new Set(plan.contracts.map(contract => contract.id));
@@ -260,11 +251,6 @@ export function validatePlan(brief: ProductBrief, plan: DevelopmentPlan): PlanIs
   if (ordered(plan.tasks).unresolved.length) issue('task-cycle','tasks','O grafo de entregas contém ciclo ou referência ausente.');
   for (const requirement of brief.requirements) {
     if (!plan.tasks.some(task => task.requirementIds.includes(requirement.id))) issue('uncovered-requirement',requirement.id,'Nenhuma entrega cobre este requisito obrigatório.');
-    const browserOutcome = requiredRequirementInterface(requirement) === 'web' && (requirement.kind === 'interface' || requestedCapabilities(requirement.source.text).includes('browser'));
-    if (browserOutcome) {
-      const proof = recipes.some(({check}) => isPlannedProductRecipe(check)&&check.requirementIds.includes(requirement.id) && check.level === 'behavior' && (check.kind === 'web' || check.requiredCapabilities.includes('browser')));
-      if (!proof) issue('unproven-interface-behavior',requirement.id,'O resultado exige comportamento real no navegador. Inclua uma receita executável de nível behavior, kind=web ou requiredCapabilities=[browser], vinculada a este requisito. Build, API e sintaxe não comprovam interação no navegador.');
-    }
     if (!requirement.binding) continue;
     const binding = requirement.binding;
     const nodes = plan.environment.filter(node => node.identity);

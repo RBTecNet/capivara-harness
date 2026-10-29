@@ -17,6 +17,11 @@ import { declaredTaskInputs, resolveVerificationInputs } from './dependencies.js
 import { emitProgress, type ProgressEvent } from '../telemetry/progress.js';
 import { PROVIDER_OBSERVATION_PROTOCOL, startProviderObservation, type ModuleProviderWitness, type ProviderConsumption, type ProviderProcessWitness, type ProviderWitness } from '../runtime/provider-observation.js';
 
+/** An explicit browser behavior target needs a browser interaction protocol.
+ * Generic command output does not identify that interface. Specific CLI/TUI
+ * recipes may legitimately consume a browser as a dependency. */
+function ambiguousBrowserCommand(check:Verification):boolean{return check.kind==='command'&&verificationLevel(check)==='behavior'&&(check.target==='browser'||check.requiredCapabilities.includes('browser'));}
+
 /** Wrong instruments are replaced; their failure never becomes an invented product requirement. */
 export function selectVerifications(brief: ProductBrief, task: WorkUnit): SelectedVerification[] {
   const result: SelectedVerification[]=[];
@@ -26,7 +31,10 @@ export function selectVerifications(brief: ProductBrief, task: WorkUnit): Select
     if (wrongMode || !allowedCapabilities(brief,capabilities)) {
       const {command:_command,args:_args,...compatible}=check;
       result.push({check:{...compatible,id:`${check.id}-compatible`,kind:'command',requiredCapabilities:[]},replaced:`${check.id}: ${check.kind} requires capabilities outside this product. Select a compatible proof.`});
-    } else result.push({check:{...check,requiredCapabilities:capabilities}});
+    } else if(ambiguousBrowserCommand(check)){
+      const {command:_command,args:_args,...pending}=check;
+      result.push({check:{...pending,kind:'web',requiredCapabilities:[...new Set([...capabilities,'browser'])]},requiredKind:'web',protocolIssue:{code:'ambiguous-browser-command',requiredKind:'web',original:structuredClone(check)},replaced:`${check.id}: browser behavior is declared through a generic command protocol. Preserve the original criterion and materialize an actual web interaction instrument; starting a process or interpreting stdout cannot prove this target.`});
+    }else result.push({check:{...check,requiredCapabilities:capabilities}});
   }
   return result;
 }
@@ -61,7 +69,7 @@ export async function verificationIdentity(workspace:string,plan:DevelopmentPlan
   const moduleClaim=Boolean(check.conformance&&['sdk','library','driver'].includes(check.conformance.kind));
   const consumptionNeeded=moduleClaim||inputs.length>0&&(Object.values(operational?.bindings??{}).some(binding=>['sdk','library','driver'].includes(binding.kind))||plan.environment.some(node=>['sdk','library','driver'].includes(node.identity?.kind??node.kind)));
   const providerObservation=consumptionNeeded?{consumptions:PROVIDER_OBSERVATION_PROTOCOL.consumptions,processes:PROVIDER_OBSERVATION_PROTOCOL.processes,...(moduleClaim?{modules:PROVIDER_OBSERVATION_PROTOCOL.modules}:{}),...(check.conformance?.kind==='runtime'?{runtime:PROVIDER_OBSERVATION_PROTOCOL.runtime}:{})}:check.conformance?.kind==='runtime'?PROVIDER_OBSERVATION_PROTOCOL.runtime:undefined;
-  const descriptor={verifier:verificationLevel(check)==='behavior'?'capivara-verification/5':'capivara-verification/4',providerObservation,assertionContract:verificationAssertionStatus(check).status==='invalid'?'strict-invalid/1':undefined,check,requirements,contracts,constraints:brief?.constraints,environment:plan.environment.filter(node=>task.environmentIds.includes(node.id)),operational:environmentRevision,platform:process.platform,node:process.version,references:brief?taskReferences(brief,task):[]};
+  const descriptor={verifier:verificationLevel(check)==='behavior'?'capivara-verification/5':'capivara-verification/4',providerObservation,browserProtocol:ambiguousBrowserCommand(check)?'declared-interface/1':undefined,assertionContract:verificationAssertionStatus(check).status==='invalid'?'strict-invalid/1':undefined,check,requirements,contracts,constraints:brief?.constraints,environment:plan.environment.filter(node=>task.environmentIds.includes(node.id)),operational:environmentRevision,platform:process.platform,node:process.version,references:brief?taskReferences(brief,task):[]};
   const fingerprint=(description:unknown):string=>digest(JSON.stringify({description:JSON.stringify(description),inputs:snapshot}));
   const {expected:_criterion,assertion:_assertion,assertionIssue:_assertionIssue,...execution}=check;
   return{inputHash:fingerprint(descriptor),observationHash:fingerprint({...descriptor,assertionContract:undefined,check:execution}),inputs,...(environmentRevision?{environmentRevision}:{})};
@@ -222,6 +230,10 @@ export async function runVerification(workspace:string,brief:ProductBrief,task:W
   const identity=options.identity??await verificationIdentity(workspace,plan,task,check,brief,options.operational);
   const {inputs,inputHash:hash}=identity;
   const evidence:VerificationOutcome['evidence']={id:randomUUID(),taskId:task.id,checkId:check.id,inputHash:hash,observationHash:identity.observationHash,passed:false,command:check.command??'',output:'',terminal:false,checkedAt:new Date().toISOString(),kind:check.kind,target:check.target??hostTarget(),level:verificationLevel(check),inputs,...(identity.environmentRevision?{environmentRevision:identity.environmentRevision}:{})};
+  if(ambiguousBrowserCommand(check)){
+    evidence.output=`The command was not executed: browser behavior has no compatible declared web interaction protocol. Preserve the product and recover its actual browser instrument. Original invocation: ${JSON.stringify({command:check.command,args:check.args,target:check.target,requiredCapabilities:check.requiredCapabilities})}`;
+    return finish(null,'instrument');
+  }
   if(options.preparationFailure){evidence.output=`The product command was not executed because its concrete runtime resource is unavailable.\n${options.preparationFailure}`;return finish(null,'environment');}
   if(task.requirementIds.length&&!inputs.length&&check.inputs===undefined&&task.inputs===undefined&&!task.files.length){
     evidence.output='The product proof has no declared read set. Declare its source/configuration/generated inputs, or explicitly declare an empty input set for a genuinely input-free operation. Unknown inputs cannot produce a reusable product proof.';

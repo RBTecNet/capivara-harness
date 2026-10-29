@@ -1,5 +1,7 @@
 import type { ContextPacket, DevelopmentPlan, ProductBrief, WorkUnit } from "./types.js";
 import { boundedReferences, relevantReferences } from "./material.js";
+import { scopeContribution } from './contribution.js';
+import { deriveBindingAuthority, obligationMatchesProvider } from './bindings.js';
 
 export class ContextTooLarge extends Error {
   readonly taskId: string;
@@ -19,16 +21,26 @@ export function packetText(packet: ContextPacket): string {
     const requirement = packet.requirements.find((item) => item.statement === text || item.source.text === text);
     return requirement ? `requirement ${requirement.id} below` : text;
   };
+  const binding=(requirement:ContextPacket['requirements'][number]):unknown=>{
+    if(!requirement.binding)return undefined;
+    const authority=requirement.bindingAuthority??deriveBindingAuthority(requirement);
+    return{
+      provider:{value:requirement.binding.provider,authority:authority?.provider.authority??'unclassified',quote:authority?.provider.quote},
+      role:{value:requirement.binding.kind,authority:authority?.kind.authority??'unclassified',quote:authority?.kind.quote},
+      capability:{value:requirement.binding.capability,authority:authority?.capability.authority??'unclassified',quote:authority?.capability.quote},
+    };
+  };
   return [
     `Project: ${packet.project.name}; interfaces: ${packet.project.modes.join(", ")}; targets: ${packet.project.targets.join(", ") || "not restricted"}.`,
     `Work unit ${packet.task.id}: ${packet.task.title}\nGoal: ${reference(packet.task.goal)}\n${reference(packet.task.instructions)}`,
-    `Required outcomes:\n${packet.task.criteria.map((criterion) => `- ${reference(criterion)}`).join("\n")}`,
-    `Requirements for this unit:\n${packet.requirements.map((requirement) => `${requirement.id}: ${requirement.statement}${requirement.binding ? `\nMandatory capability/provider: ${JSON.stringify(requirement.binding)}` : ""}\nSource (${requirement.source.reference}): ${requirement.source.text === requirement.statement ? "same literal statement" : requirement.source.text}${requirement.source.localPath ? `\nOriginal selected input: ${requirement.source.localPath}` : ""}`).join("\n")}`,
+    `Required outcomes:\n${packet.task.criteria.map((criterion,index) => `- ${packet.contribution?.localCriteria[index]?.id ? `${packet.contribution.localCriteria[index]!.id}: ` : ''}${reference(criterion)}`).join("\n")}`,
+    `Requirements for this unit:\n${packet.requirements.map((requirement) => `${requirement.id}: ${requirement.statement}${requirement.binding ? `\nProvider declaration and field authority: ${JSON.stringify(binding(requirement))}` : ""}\nSource (${requirement.source.reference}): ${requirement.source.text === requirement.statement ? "same literal statement" : requirement.source.text}${requirement.source.localPath ? `\nOriginal selected input: ${requirement.source.localPath}` : ""}`).join("\n")}`,
+    packet.contribution?.requirements.length ? `Unit contribution in the dependency graph:\n${JSON.stringify(packet.contribution.requirements)}` : '',
     `Product restrictions (an instrument cannot override them):\n${packet.constraints.map((constraint) => `${constraint.id}: ${constraint.statement}; forbidden capabilities=${constraint.forbiddenCapabilities.join(",") || "none"}; required=${constraint.requiredCapabilities.join(",") || "none"}`).join("\n")}`,
     `Complete capability limits enforced by the executor: forbidden=${packet.capabilityLimits.forbidden.join(",") || "none"}; required=${packet.capabilityLimits.required.join(",") || "none"}. Original restriction details can be retrieved by their recorded identifiers.`,
     packet.decisions.length ? `Relevant decisions:\n${packet.decisions.map((decision) => `${decision.fact}: ${decision.answer}`).join("\n")}` : "",
     packet.contracts.length ? `Integration contracts:\n${JSON.stringify(packet.contracts)}` : "",
-    packet.environment.length ? `Prepared technical requirements:\n${packet.environment.map((node) => `${node.id}: ${node.name} (${node.kind}); ${node.reason}${node.identity ? `; capability/provider=${JSON.stringify(node.identity)}` : ""}${node.provides?.command ? `; invocation=${JSON.stringify(node.provides.command)}` : ""}${node.provides?.modules?.length ? `; modules=${JSON.stringify(node.provides.modules)}` : ""}`).join("\n")}` : "",
+    packet.environment.length ? `Engineering environment selections:\n${packet.environment.map((node) => `${node.id}: ${node.name} (${node.kind}); ${node.reason}; userProviderRequirementIds=${JSON.stringify(packet.requirements.filter(requirement=>obligationMatchesProvider(requirement,node.identity)).map(requirement=>requirement.id))}${node.identity ? `; selectedCapability/provider=${JSON.stringify(node.identity)}` : ""}${node.provides?.command ? `; invocation=${JSON.stringify(node.provides.command)}` : ""}${node.provides?.modules?.length ? `; modules=${JSON.stringify(node.provides.modules)}` : ""}`).join("\n")}` : "",
     packet.task.files.length ? `Relevant paths: ${packet.task.files.join(", ")}` : "",
     packet.task.inputs?.length ? `Read dependencies: ${packet.task.inputs.join(", ")}` : "",
     packet.task.resources?.length ? `Exclusive resources: ${packet.task.resources.join(", ")}` : "",
@@ -67,6 +79,7 @@ export function contextForTask(brief: ProductBrief, plan: DevelopmentPlan, task:
     contracts: plan.contracts.filter((contract) => task.contractIds.includes(contract.id)),
     environment: plan.environment.filter((node) => ids.has(node.id)),
     capabilityLimits: { forbidden: [...new Set(brief.constraints.flatMap((constraint) => constraint.forbiddenCapabilities))], required: [...new Set(brief.constraints.flatMap((constraint) => constraint.requiredCapabilities))] },
+    contribution: scopeContribution(brief,plan,task),
   };
   const size = packetText(packet).length;
   if (size > limitChars) throw new ContextTooLarge(task.id, size, limitChars);

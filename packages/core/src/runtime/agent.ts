@@ -5,6 +5,7 @@ import { isApiProvider, runApiAgent } from './api.js';
 import { executeCommand } from './command.js';
 import { changedPaths, scrub, snapshotWorkspace } from './files.js';
 import type { AgentRequest, AgentResult, RuntimeIssue, Usage } from './types.js';
+import { createCliProcessOwnership, type CliProcessOwnership } from './agent-ownership.js';
 
 type Json = Record<string, unknown>;
 const object = (value: unknown): Json => value && typeof value === 'object' && !Array.isArray(value) ? value as Json : {};
@@ -62,10 +63,13 @@ async function runCliAgent(request: AgentRequest): Promise<AgentResult> {
   const { config } = request;
   const directory = await mkdtemp(join(tmpdir(), 'capivara-agent-'));
   const answer = join(directory, 'answer.txt');
+  let ownership:CliProcessOwnership|undefined;
   try {
     let binary = config.command ?? config.provider;
     let args: string[];
     const environment = { ...config.environment, ...request.environment };
+    ownership=await createCliProcessOwnership({workspace:request.workspace,provider:config.provider,...(request.invocationId?{invocationId:request.invocationId}:{}),...(request.operationKey?{operationKey:request.operationKey}:{}),role:request.role});
+    Object.assign(environment,ownership.environment);
     if (config.provider === 'codex') {
       binary = config.command ?? process.env.CAPIVARA_CODEX_BIN ?? 'codex';
       args = ['exec', '--json', '--color', 'never', '--skip-git-repo-check', '--ephemeral', '--cd', request.workspace, '--output-last-message', answer];
@@ -100,14 +104,23 @@ async function runCliAgent(request: AgentRequest): Promise<AgentResult> {
       request.instruction, request.context,
     ].filter(Boolean).join('\n\n');
     emit(request, `Executando ${config.provider}${config.model ? ` / ${config.model}` : ''} em ${request.workspace}.`);
+    let sessionOutput='';
+    const observeSession=(output:string,stream:'stdout'|'stderr'):void=>{
+      if(config.provider!=='codex'||stream!=='stdout')return;
+      sessionOutput=(sessionOutput+output).slice(-128_000);
+      const lines=sessionOutput.split('\n');sessionOutput=lines.pop()??'';
+      for(const line of lines){try{const event=object(JSON.parse(line));if(event.type==='thread.started'&&typeof event.thread_id==='string')ownership?.setSession(event.thread_id);}catch{}}
+    };
     const result = await executeCommand({
       cwd: request.workspace, command: [binary, ...args], input: instruction, environment,
       executionPolicy: { purpose: request.readOnly ? 'inspection' : 'implementation', writeScope: request.readOnly ? 'read-only' : 'workspace' },
       timeoutMs: request.timeoutMs ?? 600_000, maxOutputBytes: 8 * 1024 * 1024,
+      onStop:()=>{void ownership?.cleanup().catch(error=>emit(request,'A limpeza antecipada da invocação encontrou uma limitação.',{ownership:{id:ownership?.id,error:String(error)}}));},
       ...(request.signal ? { signal: request.signal } : {}),
-      onOutput: (output, stream) => { try { request.onEvent?.({ type: 'output', message: output, detail: { stream } }); } catch { /* observer isolation */ } },
+      onOutput: (output, stream) => { observeSession(output,stream);try { request.onEvent?.({ type: 'output', message: output, detail: { stream } }); } catch { /* observer isolation */ } },
     });
     const decoded = decodeOutput(result.stdout, config.provider);
+    if(decoded.sessionId)ownership.setSession(decoded.sessionId);
     let output = decoded.text;
     if (config.provider === 'codex') { try { output = (await readFile(answer, 'utf8')).trim() || output; } catch { /* A CLI failure may still leave useful JSON events. */ } }
     else if (config.command && !['claude', 'opencode'].includes(config.provider)) output = result.stdout.trim();
@@ -120,7 +133,13 @@ async function runCliAgent(request: AgentRequest): Promise<AgentResult> {
       ...(decoded.usage ? { usage: decoded.usage } : {}), ...(decoded.sessionId ? { sessionId: decoded.sessionId } : {}),
       ...(result.issue?.kind === 'instrument' ? { issue: result.issue } : problem ? { issue: cliIssue(scrub(problem, secret)) } : result.issue ? { issue: result.issue } : {}),
     };
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  } finally {
+    if(ownership){
+      try{const cleanup=await ownership.cleanup();emit(request,cleanup.remaining.length||cleanup.diagnostics.length?'Limpeza da invocação registrou processos pendentes ou limitação de instrumento.':'Processos da invocação reconciliados; processos sem identidade comprovada foram preservados.',{ownership:cleanup});}
+      catch(error){emit(request,'A limpeza da invocação não pôde ser concluída; nenhuma propriedade foi presumida.',{ownership:{id:ownership.id,error:String(error)}});}
+    }
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 /** One small agent operation. Recovery stays with the coordinator, with all local effects and observations retained. */

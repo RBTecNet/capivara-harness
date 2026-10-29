@@ -14,11 +14,21 @@ const coverage = (complete: boolean, source = code): SourceReviewCoverage[] => [
 const finding = (sourceEvidence?: unknown) => interpretReview(JSON.stringify({ approved: false, findings: [{ kind: 'product', evidenceType: 'source', file: 'src/store.js', observed: 'save throws when value is null.', expected: 'save accepts the documented optional input.', ...(sourceEvidence === undefined ? {} : { sourceEvidence }) }] })).findings[0]!;
 async function prepare() { const root = await workspace(); await mkdir(join(root, 'src')); await writeFile(join(root, 'src/store.js'), code); return root; }
 
-it('does not authorize product editing from a narrative finding about an incompletely delivered file', async () => {
+it('preserves a material finding against current source identity without claiming complete delivery or approving its verdict', async () => {
   const root = await prepare(), defect = finding(), before = structuredClone(defect);
   const result = await substantiateSourceFinding(root, defect, coverage(false));
-  expect(result.verified).toBe(false); expect(result.reason).toMatch(/complete current file/);
+  expect(result.verified).toBe(true);
+  expect(result.receipt).toMatchObject({ path: 'src/store.js', hash: digest(code), complete: false, startLine: 1, endLine: 1, ranges: [{ startLine: 1, endLine: 1 }] });
+  const omitted = await substantiateSourceFinding(root, defect, [{ path: 'src/store.js', hash: digest(code), complete: false, status: 'omitted', ranges: [] }]);
+  expect(omitted.verified).toBe(true); expect(omitted.receipt).toMatchObject({ complete: false, startLine: 0, endLine: 0, ranges: [] });
+  expect((await substantiateSourceFinding(root, defect, [])).verified).toBe(false);
+  expect((await substantiateSourceFinding(root, defect, coverage(false, 'stale'))).verified).toBe(false);
+  const fakeQuote = finding({ path: 'src/store.js', startLine: 2, endLine: 2, quote: 'return invented;', scope: 'range' });
+  expect((await substantiateSourceFinding(root, fakeQuote, coverage(false))).verified).toBe(false);
+  const outside = { ...defect, file: '../outside.js' };
+  expect((await substantiateSourceFinding(root, outside, coverage(false))).verified).toBe(false);
   expect(defect).toEqual(before); expect(defect.disposition).toBe('defect');
+  expect(interpretReview(JSON.stringify({ approved: false, findings: [defect.original] })).approved).toBe(false);
   expect(await readFile(join(root, 'src/store.js'), 'utf8')).toBe(code);
 });
 
@@ -27,6 +37,24 @@ it('preserves a material narrative finding when its complete current source was 
   const result = await substantiateSourceFinding(root, defect, coverage(true));
   expect(result.verified).toBe(true); expect(result.receipt).toMatchObject({ path: 'src/store.js', hash: digest(code), complete: true });
   expect(defect.disposition).toBe('defect');
+});
+
+it('normalizes file locations while preserving the range, original rejection and material local defect', async () => {
+  const root = await prepare();
+  const raw = { kind: 'product', evidenceType: 'source', scope: 'unit', file: 'src/store.js:2-2', observed: 'save throws for null.', expected: 'The documented optional input works.' };
+  const assessment = interpretReview(JSON.stringify({ approved: false, findings: [raw] })), defect = assessment.findings[0]!;
+  const result = await substantiateSourceFinding(root, defect, coverage(true));
+  expect(result.verified).toBe(true); expect(result.receipt).toMatchObject({ path: 'src/store.js', startLine: 2, endLine: 2 });
+  expect(defect).toMatchObject({ file: 'src/store.js', sourceLocation: { reference: raw.file, startLine: 2, endLine: 2 }, original: raw, disposition: 'defect' });
+  expect(assessment.decision).toBe('rejected'); expect(assessment.approved).toBe(false);
+  expect(assessment.transformations).toContainEqual(expect.objectContaining({ path: 'findings[0].file', operation: 'normalize', original: raw.file }));
+  const quoted = finding({ path: 'src/store.js', startLine: 2, endLine: 2, quote: 'return value.trim();', scope: 'range' });
+  quoted.file = 'src/store.js:2:3-2:22';
+  expect((await substantiateSourceFinding(root, quoted, coverage(false))).verified).toBe(true);
+  const hashLocation = interpretReview(JSON.stringify({ approved: false, findings: [{ ...raw, file: 'src/store.js#L2-L2' }] })).findings[0]!;
+  expect((await substantiateSourceFinding(root, hashLocation, coverage(true))).receipt).toMatchObject({ path: 'src/store.js', startLine: 2, endLine: 2 });
+  expect((await substantiateSourceFinding(root, { ...defect, file: '../outside.js:2-2' }, coverage(true))).verified).toBe(false);
+  expect(await readFile(join(root, 'src/store.js'), 'utf8')).toBe(code);
 });
 
 it('substantiates a concrete real defect from matching source while preserving its original claim and code', async () => {

@@ -1,5 +1,5 @@
 import { afterEach, expect, it } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -93,4 +93,24 @@ it('supports a client SDK as an actually imported module without requiring it to
   const check:Verification={id:'client',kind:'cli',command:process.execPath,args:['client.mjs'],inputs:['client.mjs'],level:'behavior',assertion:{type:'contains',value:'CLIENT_OK'},requirementIds:['stack'],requiredCapabilities:[],conformance:{...item.claim,productInputs:['client.mjs']}};
   item.task.checks=[check];const result=await item.run(check);expect(result.evidence.passed,result.evidence.output).toBe(true);
   expect(await validateConformance(item.product,item.plan,item.operational,[result.evidence],item.root)).toEqual([]);
+});
+
+it('proves compiled use through a declared package entrypoint and real logical read receipt when node_modules is an external symlink',async()=>{
+  const item=await fixture(),cache=await mkdtemp(join(tmpdir(),'capivara-provider-cache-'));roots.push(cache);
+  const packageRoot=join(cache,'node_modules','external-ui');await mkdir(packageRoot,{recursive:true});
+  await writeFile(join(packageRoot,'package.json'),JSON.stringify({name:'external-ui',type:'module',exports:'./entry.mjs'}));
+  await writeFile(join(packageRoot,'entry.mjs'),'export const twice=value=>value*2;');
+  await symlink(join(cache,'node_modules'),join(item.root,'node_modules'),'dir');
+  await writeFile(join(item.root,'src/main.ts'),"import {twice} from 'external-ui';const value:number=twice(4);console.log('RESULT '+value);");
+  item.operational.bindings.implementation!.modules=[{protocol:'node',specifier:'external-ui',runtimeCommand:[process.execPath]}];
+  item.operational.bindings.implementation!.inputs=[];item.build.conformance!.providerInputs=[];
+  const build=await item.run(item.build),behavior=await item.run(item.behavior);
+  expect(build.evidence.passed,build.evidence.output).toBe(true);expect(behavior.evidence.passed,behavior.evidence.output).toBe(true);
+  const reads=build.evidence.provenance!.consumptions??[];
+  expect(reads.some(read=>read.path==='node_modules/external-ui/entry.mjs'&&read.method==='file-read')).toBe(true);
+  expect(await validateConformance(item.product,item.plan,item.operational,[build.evidence,behavior.evidence],item.root)).toEqual([]);
+  const snapshotOnly=structuredClone(build.evidence);snapshotOnly.provenance!.consumptions=reads.filter(read=>read.path!=='node_modules/external-ui/entry.mjs');
+  expect((await validateConformance(item.product,item.plan,item.operational,[snapshotOnly,behavior.evidence],item.root))[0]?.code).toBe('unproven-product-provider-usage');
+  await rm(join(packageRoot,'entry.mjs'));
+  expect((await validateConformance(item.product,item.plan,item.operational,[build.evidence,behavior.evidence],item.root))[0]?.code).toBe('unproven-product-provider-usage');
 });

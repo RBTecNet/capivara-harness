@@ -42,6 +42,9 @@ export interface WorkflowOptions {
   onState?: (state: SavedProject) => void;
   ask?: (question: Question) => Promise<string | null>;
   agent?: typeof runAgent;
+  /** A diagnosed conflict between a generated plan and the literal request.
+   * Reconciled before construction through the same durable agent ledger. */
+  planningIncident?: { taskId:string; problem:string; repairScope:'authority' };
   /** The CLI can retain one ownership lease while preparing remote inputs and constructing. */
   store?: ProjectStore;
 }
@@ -164,7 +167,7 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
       await persist({ workflowMetrics });
       try {
         const operationKey = request.operationKey ?? digest(JSON.stringify({ role: request.role, instruction: request.instruction, context: request.context, config: selected }));
-        const result = await agent({ ...request, operationKey, config: selected, signal: options.signal, onEvent: event });
+        const result = await agent({ ...request, invocationId:id, operationKey, config: selected, signal: options.signal, onEvent: event });
         event({ type: 'agent.result', detail: { id, role: request.role, status: result.status, usage: result.usage, issue: result.issue } });
         event({ type: 'progress', progress: { ...progress, status: result.status === 'complete' ? 'complete' : 'waiting' } });
         await writeFile(join(callDirectory, `${id}.result.json`), JSON.stringify(result, null, 2), { mode: 0o600 }).catch(() => undefined);
@@ -307,6 +310,15 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
     if (!plan || plan.status !== 'ready' || plan.briefId !== brief.id || plan.briefRevision !== brief.revision || validatePlan(brief, plan).length) {
       plan = await timed('plan', () => runPlan({ ...hooks, brief: brief!, repository, repositoryConstraints, ...(plan ? { existing: plan } : {}) }));
       await persist({ plan });
+    }
+    if(options.planningIncident){
+      const problem=options.planningIncident;
+      const key=digest(JSON.stringify({product:brief.id,...problem}));
+      if(!store.read().resolvedPlanningIncidents?.includes(key)){
+        event({type:'recovery',subject:problem.taskId,message:'Reconciliando uma proposta do planejador com a fonte literal; os requisitos do usuário permanecem obrigatórios.'});
+        plan=await timed('plan-reconciliation',()=>repairWorkPlan({...hooks,brief:brief!,plan:plan!,...problem}));
+        await persist({plan,resolvedPlanningIncidents:[...(store.read().resolvedPlanningIncidents??[]),key]});
+      }
     }
     if (options.stage === 'plan') { await persist({ status: 'complete' }); return { status: 'complete', brief, plan }; }
     for (;;) {

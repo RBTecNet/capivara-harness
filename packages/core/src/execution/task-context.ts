@@ -39,12 +39,15 @@ const guidance = 'SOURCE DELIVERY: Each SOURCE header records the full-file hash
 
 /** Assemble facts and actual source against one global budget. Never hide a
  * per-file cut or a final string.slice behind an apparently complete FILE label. */
-export async function assembleTaskContext(brief: ProductBrief, plan: DevelopmentPlan, task: WorkUnit, workspace: string, limit: number, extra = '', focusPaths: string[] = []): Promise<AssembledTaskContext> {
+export async function assembleTaskContext(brief: ProductBrief, plan: DevelopmentPlan, task: WorkUnit, workspace: string, limit: number, extra = '', focusPaths: string[] = [], deliveryFiles?:readonly string[]): Promise<AssembledTaskContext> {
   const capacity=Math.floor(limit);
   if(!Number.isFinite(capacity)||capacity<=0)throw new RangeError('Task context capacity must be positive.');
   const rejectedFocus:{reference:string;reason:string}[]=[];
   const focus=focusPaths.flatMap(value=>{try{return[focusAt(workspace,value)];}catch(error){rejectedFocus.push({reference:value,reason:error instanceof Error?error.message:String(error)});return[];}});
-  const selectors=[...new Set([...task.files,...focus.map(item=>item.path)])];
+  // Planned write permissions are not the observed delivery. A retained editor
+  // may have used a different valid layout; inspect its actual changed files
+  // and explicit read dependencies instead of injecting missing draft paths.
+  const selectors=[...new Set([...(deliveryFiles?.length?deliveryFiles:task.files),...task.inputs??[],...focus.map(item=>item.path)])];
   const paths=new Set(await sourceFiles(workspace,selectors));
   // A named missing output is different from a file omitted by the delivery budget.
   for(const path of selectors.filter(value=>!/[!*?{}[\]]/.test(value)))if(!await stat(inside(workspace,path)).catch(()=>null))paths.add(path.replaceAll('\\','/').replace(/^\.\//,''));

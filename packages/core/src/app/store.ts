@@ -16,6 +16,8 @@ export interface SavedProject {
   reviewer?: AgentConfig;
   allowSystemInstall?: boolean;
   maxConcurrent?: number;
+  /** Source conflicts already reconciled in this product; never replay the same repair. */
+  resolvedPlanningIncidents?: string[];
   lastFailure?: { kind: string; message: string; fingerprint: string; at: string } | null;
   domainCalls?: Record<string, {
     operation: string;

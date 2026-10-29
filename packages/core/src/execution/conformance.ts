@@ -6,7 +6,7 @@ import type { CommandResult } from '../runtime/types.js';
 import type { CapabilityBinding, OperationalEnvironment } from './environment.js';
 import type { VerificationEvidence } from './types.js';
 import { digest, inside, sourceFiles } from './files.js';
-import { literalProviderImports, providerConsumptionCurrent, providerProcessCurrent, resolveModuleHost, resolveNativeNode, resolveProviderProgram, type ModuleProviderReceipt, type ModuleProviderWitness, type ProviderConsumption, type ProviderProcessWitness, type ProviderWitness, type RuntimeProviderReceipt } from '../runtime/provider-observation.js';
+import { literalProviderImports, providerConsumptionCurrent, providerProcessCurrent, resolveModuleHost, resolveNativeNode, resolveProviderModuleFiles, resolveProviderProgram, type ModuleProviderReceipt, type ModuleProviderWitness, type ProviderConsumption, type ProviderProcessWitness, type ProviderWitness, type RuntimeProviderReceipt } from '../runtime/provider-observation.js';
 import { verificationRegistry } from '../domain/verifications.js';
 import { matchesOperationalClaim, obligationMatchesProvider } from '../domain/bindings.js';
 
@@ -140,22 +140,23 @@ async function observedConsumption(observed:ConformanceProvenance,path:string,ha
   return observed.inputs[path]===hash&&consumes(observed,path,0);
 }
 async function sourceUsesProvider(workspace:string,observed:ConformanceProvenance,productFiles:string[],provider:CapabilityBinding,providerInputs:string[]):Promise<boolean>{
-  const scopes=[...(provider.inputs??[]),...(provider.paths??[])].map(path=>resolve(workspace,path));
-  const request=createRequire(resolve(workspace,'package.json'));
-  for(const module of provider.modules??[])if(module.protocol==='node'){
-    try{const path=request.resolve(module.specifier);if(isAbsolute(path))scopes.push(path.endsWith(`${sep}package.json`)?dirname(path):path);}catch{/* An unresolved module declaration proves no compiled source participation. */}
-  }
+  const entries=await resolveProviderModuleFiles(workspace,provider.modules??[]);
+  const scopes=await Promise.all([...(provider.inputs??[]),...(provider.paths??[])].map(path=>realpath(resolve(workspace,path)).catch(()=>resolve(workspace,path))));
   for(const source of productFiles){
     const file=resolve(workspace,source),text=await readFile(file,'utf8');
     for(const specifier of literalProviderImports(text)){
       let target:string|undefined;
       try{target=specifier.startsWith('.')||isAbsolute(specifier)?resolve(dirname(file),specifier):createRequire(file).resolve(specifier);}catch{continue;}
       if(basename(target)==='package.json')continue;
-      const local=relative(resolve(workspace),target).replaceAll('\\','/');if(local==='..'||local.startsWith('../')||isAbsolute(local))continue;
-      if(!scopes.some(scope=>target===scope||target!.startsWith(`${scope}${sep}`)))continue;
+      target=await realpath(target).catch(()=>target!);
+      const declared=entries.filter(entry=>entry.path===target);
+      if(!declared.length&&!scopes.some(scope=>target===scope||target!.startsWith(`${scope}${sep}`)))continue;
       const info=await stat(target).catch(()=>null);if(!info?.isFile())continue;
       const hash=digest(JSON.stringify({mode:info.mode&0o777,content:digest(await readFile(target))}));
-      if(await observedConsumption(observed,local,hash,workspace))return true;
+      const local=relative(resolve(workspace),target).replaceAll('\\','/');
+      const aliases=declared.map(entry=>entry.logicalPath);
+      if(local!=='..'&&!local.startsWith('../')&&!isAbsolute(local))aliases.push(local);
+      for(const path of new Set(aliases))if(await observedConsumption(observed,path,hash,workspace))return true;
     }
   }
   return false;

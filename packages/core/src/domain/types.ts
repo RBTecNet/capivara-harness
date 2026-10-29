@@ -230,6 +230,22 @@ export interface PlanVerificationObligation {
   verification:'required-in-build';
 }
 
+/** A derived planning instruction was corrected against an unchanged source.
+ * This receipt changes neither product authority nor verification evidence. */
+export interface PlanAuthorityCorrection {
+  taskId:string;
+  field:'criteria'|'instructions';
+  index?:number;
+  /** Original field offsets. Instruction patches replace this unique fragment only. */
+  range:{start:number;end:number};
+  original:string;
+  replacement:string|null;
+  requirementId:string;
+  quote:string;
+  source:Source;
+  reason:string;
+}
+
 export interface DevelopmentPlan {
   schema: "capivara/plan/1";
   status: "planning" | "ready";
@@ -242,6 +258,7 @@ export interface DevelopmentPlan {
   /** Final proof recipes for mandatory outcomes, stack choices and constraints. */
   acceptance?: Verification[];
   obligations?:PlanVerificationObligation[];
+  authorityCorrections?:PlanAuthorityCorrection[];
   /** Durable construction checkpoints; pending prompts retain exact cached-call identity. Removed when ready. */
   planning?: {
     schema: "capivara/plan-progress/1";
@@ -333,6 +350,7 @@ export interface ContextPacket {
   environment: EnvironmentNode[];
   capabilityLimits: { forbidden: string[]; required: string[] };
   references?: DocumentReference[];
+  contribution?: import('./contribution.js').ScopeContribution;
 }
 
 export type ProductAction = { requiredCapabilities: string[]; description?: string };

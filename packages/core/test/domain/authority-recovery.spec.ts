@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { allowedCapabilities, contextForTask, explicitConstraints, explicitModes, packetText, preferredProofOwner, requiredTaskInterfaces, runInit, runPlan, validatePlan } from '../../src/domain/index.js';
+import { derivePlanObligations } from '../../src/domain/reconcile.js';
 import type { DevelopmentPlan, ProductBrief, WorkUnit } from '../../src/domain/types.js';
 
 const literal = 'Fluxos reais executados no navegador.';
@@ -47,24 +48,20 @@ describe('autoridade literal e recuperação de interpretações do harness', ()
     expect(calls).toBe(1);
   });
 
-  it('repara apenas a prova perdida no plano existente e preserva entregas e dependências', async () => {
+  it('preserva a obrigação de navegador pendente sem comprar receita antes do código existir', async () => {
     const brief = await runInit({request,agent:async()=>discovery});
     const existing = plan(brief);
     const previousTasks = structuredClone(existing.tasks);
     brief.revision += 1;
     const operations: string[] = [];
-    const result = await runPlan({brief,existing,agent:async call => {
-      operations.push(call.operation);
-      expect(call.operation).toBe('repair');
-      expect(call.prompt).toContain('unproven-interface-behavior');
-      return JSON.stringify({acceptance:[{id:'browser-flow',kind:'web',command:'npm',args:['run','test:browser'],level:'behavior',inputs:['src/**','tests/browser/**'],requirementIds:[brief.requirements[0]!.id],requiredCapabilities:['browser']}]});
-    }});
-    expect(operations).toEqual(['repair']);
+    const result = await runPlan({brief,existing,agent:async call => {operations.push(call.operation);throw new Error('A future browser recipe is BUILD work.');}});
+    expect(operations).toEqual([]);
     expect(result.tasks).toEqual(previousTasks);
     expect(result.briefRevision).toBe(brief.revision);
     expect(validatePlan(brief,result)).toEqual([]);
     expect(existing.acceptance).toBeUndefined();
-    expect(result.acceptance?.[0]?.id).toBe('browser-flow');
+    expect(result.obligations).toContainEqual(expect.objectContaining({requirementId:brief.requirements[0]!.id,kind:'interface',interface:'web',recipeStatus:'pending',verification:'required-in-build'}));
+    expect(requiredTaskInterfaces(brief,result,result.tasks[0]!)).toEqual(['web']);
   });
 
   it('não aceita build, API ou metadado sem execução como prova de interação no navegador', async () => {
@@ -77,7 +74,8 @@ describe('autoridade literal e recuperação de interpretações do harness', ()
       {id:'label',kind:'web' as const,level:'behavior' as const,requirementIds:[id],requiredCapabilities:['browser']},
     ]) {
       proposed.acceptance = [check];
-      expect(validatePlan(brief,proposed).map(issue=>issue.code)).toContain('unproven-interface-behavior');
+      expect(validatePlan(brief,proposed)).toEqual([]);
+      expect(derivePlanObligations(brief,proposed)).toContainEqual(expect.objectContaining({requirementId:id,kind:'interface',interface:'web',recipeStatus:'pending',verification:'required-in-build'}));
     }
   });
 
@@ -95,13 +93,11 @@ describe('autoridade literal e recuperação de interpretações do harness', ()
     expect(requiredTaskInterfaces(brief,proposed,right)).toEqual([]);
     expect(requiredTaskInterfaces(brief,proposed,integrated)).toEqual(['web']);
     expect(preferredProofOwner(proposed,id)?.id).toBe('integration');
-    const repaired = await runPlan({brief,existing:proposed,agent:async call=>{
-      expect(call.prompt).toContain('"id":"integration"');
-      expect(call.prompt).not.toContain('"goal":"Compilar a base compartilhada"');
-      return JSON.stringify({acceptance:[{id:'browser-flow',kind:'web',command:'npm run test:browser',level:'behavior',requirementIds:[id],requiredCapabilities:['browser']}]});
-    }});
+    const repaired = await runPlan({brief,existing:proposed,agent:async()=>{throw new Error('No missing engineering decision.');}});
     expect(requiredTaskInterfaces(brief,repaired,foundation)).toEqual([]);
-    expect(requiredTaskInterfaces(brief,repaired,integrated)).toEqual([]);
+    expect(requiredTaskInterfaces(brief,repaired,integrated)).toEqual(['web']);
     expect(repaired.tasks).toEqual(proposed.tasks);
+    repaired.acceptance=[{id:'browser-flow',kind:'web',command:'npm run test:browser',level:'behavior',requirementIds:[id],requiredCapabilities:['browser']}];
+    expect(requiredTaskInterfaces(brief,repaired,integrated)).toEqual([]);
   });
 });

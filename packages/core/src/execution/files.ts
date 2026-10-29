@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readdir, readFile, writeFile, unlink, lstat, glob, stat, realpath, rename } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile, unlink, lstat, glob, stat, realpath, rename, readlink } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep, matchesGlob } from 'node:path';
 
 const GENERATED = new Set(['.git', '.capivara-next', '.project-inputs', 'node_modules', '.venv', 'venv', '__pycache__', 'target', 'dist', 'obj', '.next']);
@@ -12,9 +12,11 @@ export function inside(workspace: string, name: string): string {
 /** Undefined means source discovery; an explicit empty read-set means no file inputs. */
 export async function sourceFiles(workspace: string, paths?: readonly string[]): Promise<string[]> {
   const root = resolve(workspace), found = new Set<string>(), activeDirectories = new Set<string>();
+  const providerInventory=paths?.some(path=>{const given=path.replaceAll('\\','/').replace(/^\.\//,'');return given==='.capivara-tools'||given.startsWith('.capivara-tools/');})??false;
   const exclusions = (paths ?? []).filter(path => path.startsWith('!')).map(path => path.slice(1).replaceAll('\\', '/'));
   const visit = async (path: string, explicit: boolean): Promise<void> => {
     const name = relative(root, path).replaceAll('\\', '/');
+    if(!providerInventory&&(name==='.capivara-tools'||name.startsWith('.capivara-tools/')))return;
     if (name.split('/').some(part => ['.git','.capivara-next','.capivara-runtime','.capivara-verification'].includes(part)) || exclusions.some(pattern => matchesGlob(name, pattern)||matchesGlob(name, `${pattern.replace(/\/$/,'')}/**`))) return;
     let info = await lstat(path).catch(() => null);
     if (!info) return;
@@ -52,6 +54,10 @@ export async function inputSnapshot(workspace: string, paths: readonly string[])
   for (const path of await sourceFiles(workspace, paths)) {
     const absolute=join(workspace,path), info=await stat(absolute);
     result[path]=digest(JSON.stringify({mode:info.mode&0o777,content:digest(await readFile(absolute))}));
+  }
+  for(const path of paths.filter(path=>path!=='.'&&path!=='./'&&path!==''&&!path.startsWith('!')&&!/[*?{}[\]]/.test(path))){
+    const absolute=inside(workspace,path),info=await lstat(absolute).catch(error=>{if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error;});
+    if(info?.isSymbolicLink()&&!await stat(absolute).catch(error=>{if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error;}))result[`link:${path.replaceAll('\\','/')}`]=`missing-target:${await readlink(absolute)}`;
   }
   return result;
 }

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { readFile, readdir } from 'node:fs/promises';
 import { resolve, basename } from 'node:path';
 import { digest, scrub, workspaceFingerprint } from './files.js';
 import { executionRestriction, isolatedInvocation } from './isolation.js';
@@ -57,6 +58,30 @@ export function terminateProcess(pid: number | undefined, signal: NodeJS.Signals
   } catch { try { process.kill(pid, signal); } catch { /* process already gone */ } }
 }
 
+/** Verification runners own a temporary session created by detached spawn.
+ * Their children are not persistent application services. Other sessions never
+ * qualify, including unrelated processes using the same working directory. */
+async function cleanupVerificationGroup(pid:number):Promise<string|undefined>{
+  const active=async():Promise<boolean>=>{
+    try{process.kill(-pid,0);}catch(error){if((error as NodeJS.ErrnoException).code==='ESRCH')return false;throw error;}
+    if(process.platform!=='linux')return true;
+    const ids=(await readdir('/proc')).filter(name=>/^\d+$/.test(name));
+    for(let index=0;index<ids.length;index+=32){
+      const states=await Promise.all(ids.slice(index,index+32).map(async id=>{try{const value=await readFile(`/proc/${id}/stat`,'utf8');return value.slice(value.lastIndexOf(')')+2).split(' ');}catch{return undefined;}}));
+      if(states.some(state=>state&&Number(state[2])===pid&&Number(state[3])===pid&&!['Z','X'].includes(state[0]!)))return true;
+    }
+    return false;
+  };
+  try{
+    if(!await active())return undefined;
+    process.kill(-pid,'SIGTERM');
+    const deadline=Date.now()+200;
+    while(Date.now()<deadline){await new Promise(done=>setTimeout(done,20));if(!await active())return undefined;}
+    process.kill(-pid,'SIGKILL');await new Promise(done=>setTimeout(done,30));
+    return await active()?`Temporary verification process group ${pid} still has active members after cleanup; its process result is preserved but resource cleanup is pending.`:undefined;
+  }catch(error){return(error as NodeJS.ErrnoException).code==='ESRCH'?undefined:`Temporary verification process group ${pid} could not be reconciled: ${String(error)}`;}
+}
+
 export async function commandIdentity(request: CommandRequest): Promise<string> {
   const tree = await workspaceFingerprint(request.cwd, request.inputs);
   return digest(JSON.stringify({ command: request.command, cwd: resolve(request.cwd), node: process.version, platform: process.platform, environment: request.environment ?? {}, tree }));
@@ -107,24 +132,41 @@ export async function executeCommand(request: CommandRequest): Promise<CommandRe
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
       request.signal?.removeEventListener('abort', cancel);
-      result.durationMs = Date.now() - start;
-      result.stdout = scrub(result.stdout, secrets);
-      result.stderr = scrub(result.stderr, secrets);
-      const restriction = executionRestriction(request, result, invocation.isolated);
-      if (!result.issue && restriction) result.issue = restriction;
-      if (truncated) {
-        result.stderr += `\nSaída extensa: guardada a cauda; ${bytes} bytes recebidos.`;
-        result.issue ??= { kind: 'output-limit', recoverable: true, message: 'A saída da ferramenta excedeu o buffer; use uma consulta focada para o trecho necessário.' };
-      }
-      resolveResult(result);
+      void(async()=>{
+        if(request.executionPolicy?.purpose==='verification'&&process.platform!=='win32'&&child.pid&&!result.cancelled&&!result.timedOut){
+          const failure=await cleanupVerificationGroup(child.pid);
+          if(failure){append(`\n${failure}\n`,'stderr');result.issue??={kind:'instrument',recoverable:true,message:failure};}
+        }
+        result.durationMs = Date.now() - start;
+        result.stdout = scrub(result.stdout, secrets);
+        result.stderr = scrub(result.stderr, secrets);
+        const restriction = executionRestriction(request, result, invocation.isolated);
+        if (!result.issue && restriction) result.issue = restriction;
+        if (truncated) {
+          result.stderr += `\nSaída extensa: guardada a cauda; ${bytes} bytes recebidos.`;
+          result.issue ??= { kind: 'output-limit', recoverable: true, message: 'A saída da ferramenta excedeu o buffer; use uma consulta focada para o trecho necessário.' };
+        }
+        resolveResult(result);
+      })();
     };
-    const stop = (): void => {
+    const stop = (reason:'timeout'|'cancelled'): void => {
+      if(closed||killTimer)return;
+      try{request.onStop?.(reason);}catch{ /* Cleanup instrumentation cannot suppress direct termination. */ }
       terminateProcess(child.pid);
-      killTimer = setTimeout(() => terminateProcess(child.pid, 'SIGKILL'), 1000);
+      killTimer = setTimeout(() => {
+        if(closed)return;
+        terminateProcess(child.pid,'SIGKILL');
+        append('\nA execução foi interrompida; os canais stdio pertencentes a esta chamada foram encerrados após o prazo de limpeza. Processos fora da propriedade comprovada podem permanecer ativos e foram preservados.\n','stderr');
+        // An external server or uninterruptible process can retain inherited
+        // pipe writers after the CLI exits. Only our own pipe endpoints are
+        // closed here; timeout/cancel never becomes a successful observation.
+        child.stdin.destroy();child.stdout.destroy();child.stderr.destroy();child.unref();
+        finish();
+      }, 1000);
       killTimer.unref();
     };
-    const cancel = (): void => { result.cancelled = true; stop(); };
-    const timer = setTimeout(() => { result.timedOut = true; stop(); }, request.timeoutMs ?? 120_000);
+    const cancel = (): void => { result.cancelled = true; stop('cancelled'); };
+    const timer = setTimeout(() => { result.timedOut = true; stop('timeout'); }, request.timeoutMs ?? 120_000);
     timer.unref();
     request.signal?.addEventListener('abort', cancel, { once: true });
     if (request.signal?.aborted) cancel();

@@ -1,6 +1,8 @@
 import { access, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { delimiter, isAbsolute, join, relative, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { createRequire, isBuiltin } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import type { ProviderModule, Verification } from '../domain/types.js';
 import type { OperationalEnvironment } from '../execution/environment.js';
 import { sourceFiles } from '../execution/files.js';
@@ -8,7 +10,7 @@ import { executeCommand } from './command.js';
 
 /** Mechanical observation identity. These versions describe executable
  * instruments, independently from model prompts, inspection and user criteria. */
-export const PROVIDER_OBSERVATION_PROTOCOL={runtime:'node-load-hook/2',modules:'provider-module-import/2',consumptions:'bounded-file-consumption/1',processes:'loaded-provider-entrypoint/1'} as const;
+export const PROVIDER_OBSERVATION_PROTOCOL={runtime:'node-load-hook/2',modules:'provider-module-import/2',consumptions:'bounded-file-consumption/2',processes:'loaded-provider-entrypoint/1'} as const;
 
 export interface ProviderWitness {
   source: 'node-load-hook';
@@ -169,6 +171,43 @@ export async function inferProviderModule(cwd:string,argv:readonly string[],envi
   if(pythonImports.length===1)candidates.push({protocol:'python',specifier:pythonImports[0]!,runtimeCommand:argv.slice(0,index)});
   if(candidates.length!==1)return undefined;
   const candidate=candidates[0]!;return await resolveModuleHost(cwd,candidate,environment)?candidate:undefined;
+}
+
+/** Resolve only declared package entrypoints. External package stores qualify
+ * solely through a verified logical node_modules alias inside this workspace.
+ * Resolution itself never becomes a read or a product-usage witness. */
+export async function resolveProviderModuleFiles(workspace:string,modules:readonly ProviderModule[]):Promise<{path:string;logicalPath:string}[]>{
+  const root=resolve(workspace),resolver=createRequire(join(root,'.capivara-module-resolution.cjs'));
+  const files=new Map<string,{path:string;logicalPath:string}>();
+  for(const module of modules){
+    if(module.protocol!=='node'||isBuiltin(module.specifier)||!module.specifier||module.specifier.startsWith('.')||module.specifier.startsWith('/')||module.specifier.startsWith('#')||module.specifier.includes('\\')||module.specifier.includes(':'))continue;
+    const parts=module.specifier.split('/'),packageName=parts[0]!.startsWith('@')?parts.slice(0,2).join('/'):parts[0]!;
+    if(!packageName||packageName==='.'||packageName==='..'||parts.some(part=>!part||part==='.'||part==='..')||packageName.startsWith('@')&&parts.length<2)continue;
+    const alias=join(root,'node_modules',packageName),packageRoot=await realpath(alias).catch(()=>undefined);
+    if(!packageRoot||(await stat(alias).catch(()=>null))?.isDirectory()!==true)continue;
+    const candidates=new Set<string>();
+    try{candidates.add(resolver.resolve(module.specifier));}catch{}
+    // import.meta.resolve selects the actual import export condition without
+    // evaluating package code. Its parent is the workspace evaluation module.
+    if(module.runtimeCommand.length){
+      const result=await executeCommand({cwd:root,command:[...module.runtimeCommand,'--input-type=module','-e','try{process.stdout.write("\\nCAPIVARA_RESOLVED_MODULE="+JSON.stringify(import.meta.resolve(process.argv[1]))+"\\n")}catch{}',module.specifier],timeoutMs:3000,inputs:[]}).catch(()=>undefined);
+      if(result&&result.exitCode===0&&!result.issue&&!result.cancelled&&!result.timedOut){
+        const line=result.stdout.split('\n').findLast(line=>line.startsWith('CAPIVARA_RESOLVED_MODULE='));
+        try{const url:unknown=JSON.parse(line?.slice('CAPIVARA_RESOLVED_MODULE='.length)??'null');if(typeof url==='string'&&url.startsWith('file:'))candidates.add(fileURLToPath(url));}catch{}
+      }
+    }
+    for(const candidate of candidates){
+      const actual=await realpath(candidate).catch(()=>undefined);if(!actual||(await stat(actual).catch(()=>null))?.isFile()!==true)continue;
+      const suffix=relative(packageRoot,actual);
+      if(!suffix||suffix==='..'||suffix.startsWith('../')||suffix.startsWith('..\\')||isAbsolute(suffix))continue;
+      const lexical=join(alias,suffix);
+      if(await realpath(lexical).catch(()=>undefined)!==actual)continue;
+      const logicalPath=relative(root,lexical).replaceAll('\\','/');
+      if(!logicalPath.startsWith(`node_modules/${packageName}/`))continue;
+      files.set(`${logicalPath}\0${actual}`,{path:actual,logicalPath});
+    }
+  }
+  return[...files.values()].sort((left,right)=>left.logicalPath.localeCompare(right.logicalPath)||left.path.localeCompare(right.path));
 }
 /** Literal syntax only. Comments and strings containing example imports do not
  * establish a source edge. Resolution and execution are separate observations. */
@@ -462,8 +501,19 @@ async function startModuleObservation(workspace:string,check:Verification,operat
 }
 async function observeProcesses(workspace:string,check:Verification,operational:OperationalEnvironment,receipts:ModuleProviderReceipt[]=[]):Promise<ProviderObservation>{
   const claim=check.conformance;
+  const diagnostics:string[]=[];
+  const observableFiles=async(selectors:readonly string[]):Promise<string[]>=>{
+    try{return await sourceFiles(workspace,selectors);}catch{
+      const found=new Set<string>(),excluded=selectors.filter(selector=>selector.startsWith('!'));
+      for(const selector of new Set(selectors.filter(selector=>!selector.startsWith('!')))){
+        try{for(const file of await sourceFiles(workspace,[selector,...excluded]))found.add(file);}
+        catch(error){diagnostics.push(`Input selector could not be expanded for observation (${selector}): ${error instanceof Error?error.message:String(error)}. Exact declared package entrypoints remain eligible for actual read observation.`);}
+      }
+      return[...found].sort();
+    }
+  };
   const files:Record<string,string[]>={};
-  for(const file of await sourceFiles(workspace,claim?.productInputs??[])){const absolute=await realpath(join(workspace,file));(files[absolute]??=[]).push(file);}
+  for(const file of await observableFiles(claim?.productInputs??[])){const absolute=await realpath(join(workspace,file));(files[absolute]??=[]).push(file);}
   const reads:Record<string,string[]>={};
   const selected=claim&&Object.values(operational.bindings).find(item=>item.ready&&item.capability===claim.capability&&item.kind===claim.kind&&item.provider===claim.provider);
   const providerPrograms:string[]=[];
@@ -473,15 +523,20 @@ async function observeProcesses(workspace:string,check:Verification,operational:
     if(path==='..'||path.startsWith('../')||isAbsolute(path))continue;
     if((await stat(absolute).catch(()=>null))?.isFile())providerPrograms.push(path);
   }
-  for(const file of await sourceFiles(workspace,[...(check.inputs??[]),...(claim?.productInputs??[]),...(claim?.providerInputs??[]),...(selected?.inputs??[]),...providerPrograms])){
+  for(const file of await observableFiles([...(check.inputs??[]),...(claim?.productInputs??[]),...(claim?.providerInputs??[]),...(selected?.inputs??[]),...providerPrograms])){
     const lexical=resolve(workspace,file),absolute=await realpath(lexical);
     for(const path of new Set([lexical,absolute]))(reads[path]??=[]).push(file);
   }
-  if(!Object.keys(files).length&&!Object.keys(reads).length)return disabled('No current relevant input files exist to observe.');
+  for(const file of await resolveProviderModuleFiles(workspace,selected?.modules??[])){
+    for(const path of new Set([resolve(workspace,file.logicalPath),file.path])){
+      const aliases=reads[path]??=[];if(!aliases.includes(file.logicalPath))aliases.push(file.logicalPath);
+    }
+  }
+  if(!Object.keys(files).length&&!Object.keys(reads).length)return{...disabled('No current relevant input files exist to observe.'),diagnostics};
   const root=join(resolve(workspace),'.capivara-verification'),info=await lstat(root).catch(error=>{if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;});
   if(info&&!info.isDirectory())throw new Error('Provider observation directory is not a private directory.');
   await mkdir(root,{recursive:true});const directory=await mkdtemp(join(root,'module-observation-'));
-  const environment:Record<string,string>={},diagnostics:string[]=[];
+  const environment:Record<string,string>={};
   const node=receipts.filter(item=>item.protocol==='node'),python=receipts.filter(item=>item.protocol==='python');
   if(node.length||!receipts.length){
     const path=join(directory,'preload.cjs');await writeFile(path,modulePreload.replace('__CAPIVARA_OBSERVATION_CONFIG__',JSON.stringify({output:directory,files,reads,modules:node.map(item=>item.specifier)})).replace('__CAPIVARA_LITERAL_IMPORT_PARSER__',`(${literalProviderImports.toString()})`).replace('__CAPIVARA_FILE_READ_OBSERVATION__',fileReadPreload),{mode:0o600,flag:'wx'});

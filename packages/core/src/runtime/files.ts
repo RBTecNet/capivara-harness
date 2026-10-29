@@ -51,24 +51,45 @@ export async function writeProductFile(root: string, path: string, contents: str
 export async function snapshotWorkspace(root: string, paths?: readonly string[]): Promise<Map<string, string>> {
   const base = resolve(root);
   const entries = new Map<string, string>();
-  const visit = async (absolute: string): Promise<void> => {
+  const visit = async (absolute: string, providerInventory=false): Promise<void> => {
     const rel = relative(base, absolute);
     const info = await lstat(absolute).catch(() => null);
     if (!info) { if (paths) entries.set(rel, 'missing'); return; }
-    if (info.isSymbolicLink()) { entries.set(rel, `link:${await readlink(absolute)}`); return; }
+    if (info.isSymbolicLink()) {
+      const target=await readlink(absolute);
+      if(!providerInventory){entries.set(rel,`link:${target}`);return;}
+      const actual=await realpath(absolute).catch(error=>{if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error;});
+      if(!actual){entries.set(rel,`link:${target}:missing-target`);return;}
+      const targetInfo=await lstat(actual);
+      entries.set(rel,targetInfo.isFile()?`link:${target}:file:${targetInfo.mode&0o777}:${digest(await readFile(absolute))}`:`link:${target}:directory`);return;
+    }
     if (info.isDirectory()) {
       const names = await readdir(absolute);
       names.sort();
       for (const name of names) {
         if (IGNORED.has(name) || name.startsWith('.capivara') || name.includes('.capivara-edit-')) continue;
-        await visit(resolve(absolute, name));
+        await visit(resolve(absolute, name),providerInventory);
       }
     } else if (info.isFile()) {
       entries.set(rel, digest(await readFile(absolute)));
     }
   };
   if (paths) {
-    for (const path of paths) await visit(await projectPath(base, path));
+    for (const path of paths) {
+      if(path.includes('\0'))throw new Error('O caminho contém um byte nulo.');
+      const candidate=resolve(base,path),rel=relative(base,candidate),first=rel.split(sep)[0]??'';
+      if(!inside(base,candidate))throw new Error('O caminho deve permanecer dentro do projeto.');
+      if(first==='.capivara-tools'){await visit(candidate,true);continue;}
+      if(first==='.git'||first.startsWith('.capivara'))throw new Error('Estado de controle do harness não é um arquivo do produto.');
+      const actual=await realpath(candidate).catch(error=>{if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error;});
+      if(actual&&!inside(base,actual)){
+        // A prepared dependency can be shared by private workspaces. This is
+        // an exact read fingerprint, not product access or a write permission.
+        // Never recursively expand an external directory through this alias.
+        if(!(await lstat(actual)).isFile())throw new Error('External read aliases must identify exact files; directory traversal is not a file fingerprint.');
+        entries.set(rel,`alias:${actual}:${digest(await readFile(candidate))}`);
+      }else await visit(await projectPath(base,path));
+    }
   } else await visit(base);
   return entries;
 }

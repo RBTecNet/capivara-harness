@@ -48,7 +48,8 @@ export async function createTaskWorkspace(workspace: string, taskId: string, tas
         const outside = target === '..' || target.startsWith(`..${sep}`);
         await mkdir(dirname(destination), { recursive: true });
         if (outside) {
-          const info = await stat(path);
+          const info = await stat(path).catch(error=>{if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;});
+          if(!info){if(rel.split(sep)[0]!=='.capivara-tools')throw new Error(`External product link has no readable isolated target: ${rel}`);await symlink(await readlink(path),destination,'file');return false;}
           if (!info.isFile()) throw new Error(`Isolation cannot safely clone an external directory symlink: ${rel}`);
           await copyFile(path, destination, constants.COPYFILE_FICLONE); await chmod(destination, info.mode & 0o777);
         } else {

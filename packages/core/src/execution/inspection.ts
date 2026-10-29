@@ -9,6 +9,8 @@ export interface InspectionIdentity {
   authorityHash: string;
   selectors: string[];
   focusPaths: string[];
+  /** Concrete observed source writes, independent of the task's allowed scopes. */
+  deliveryFiles?: string[];
   /** Explicit selector membership, missing paths and content/mode hashes. */
   sources: Record<string,string>;
   usable: boolean;
@@ -43,12 +45,24 @@ function normalizedSelector(workspace:string,value:string):string{
 /** Independent inspection concerns product authority and explicitly inspected
  * sources. Automatically discovered build manifests belong to mechanical proof
  * identity and never become hidden inspection-wide dependencies. */
-export async function createInspectionIdentity(workspace:string,brief:ProductBrief,plan:DevelopmentPlan,task:WorkUnit,coverage:readonly InspectionCoverage[]=[]):Promise<InspectionIdentity>{
+export async function createInspectionIdentity(workspace:string,brief:ProductBrief,plan:DevelopmentPlan,task:WorkUnit,coverage:readonly InspectionCoverage[]=[],deliveryFiles?:readonly string[]):Promise<InspectionIdentity>{
   const sources:Record<string,string>={},issues:string[]=[];
   const identity:InspectionIdentity={schema:'capivara/inspection/1',authorityHash:fingerprint(authority(brief,plan,task)),selectors:[],focusPaths:[],sources,usable:false};
   try{
     identity.focusPaths=[...new Set(coverage.map(item=>normalizedSelector(workspace,item.path)))].sort();
-    identity.selectors=[...new Set([...task.files,...task.inputs??[],...identity.focusPaths].map(path=>normalizedSelector(workspace,path)))].sort();
+    let outputs=task.files;
+    if(deliveryFiles?.length){
+      identity.deliveryFiles=[...new Set(deliveryFiles.map(path=>normalizedSelector(workspace,path)))].sort();
+      for(const path of identity.deliveryFiles){
+        if(path==='.'||path.startsWith('!')||/[*?{}[\]]/.test(path)||(await lstat(inside(workspace,path)).catch(error=>{if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error;}))?.isDirectory())throw Error(`Observed delivery write is not a concrete file: ${path}`);
+      }
+      outputs=identity.deliveryFiles;
+      const selected=new Set([...outputs,...await sourceFiles(workspace,[...outputs,...task.inputs??[]])]);
+      // Broad permission/context delivery does not transfer another task's files
+      // to this owner. Explicit read dependencies retain their own full scope.
+      identity.focusPaths=identity.focusPaths.filter(path=>selected.has(path));
+    }
+    identity.selectors=[...new Set([...outputs,...task.inputs??[],...identity.focusPaths].map(path=>normalizedSelector(workspace,path)))].sort();
     const files=await sourceFiles(workspace,identity.selectors),root=resolve(workspace);
     for(const path of files){
       const actual=await realpath(inside(root,path)),rel=relative(root,actual);
@@ -64,6 +78,7 @@ export async function createInspectionIdentity(workspace:string,brief:ProductBri
     for(const delivered of coverage){
       if(delivered.hash===undefined)continue;
       const path=normalizedSelector(workspace,delivered.path);
+      if(identity.deliveryFiles&&!identity.focusPaths.includes(path))continue;
       const bytes=await readFile(inside(workspace,path)).catch(error=>{if((error as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw error;});
       if((bytes?digest(bytes):null)!==delivered.hash)issues.push(`Delivered inspection source changed before its receipt was recorded: ${path}`);
     }
@@ -75,8 +90,8 @@ export async function createInspectionIdentity(workspace:string,brief:ProductBri
 
 /** Only callers holding an approved verdict may consider reuse. Failed and
  * unresolved reviews never acquire approval merely by matching this identity. */
-export async function inspectionStillCurrent(identity:InspectionIdentity|undefined,workspace:string,brief:ProductBrief,plan:DevelopmentPlan,task:WorkUnit):Promise<boolean>{
+export async function inspectionStillCurrent(identity:InspectionIdentity|undefined,workspace:string,brief:ProductBrief,plan:DevelopmentPlan,task:WorkUnit,deliveryFiles?:readonly string[]):Promise<boolean>{
   if(identity?.schema!=='capivara/inspection/1'||!identity.usable||!Array.isArray(identity.focusPaths))return false;
-  const current=await createInspectionIdentity(workspace,brief,plan,task,identity.focusPaths.map(path=>({path})));
+  const current=await createInspectionIdentity(workspace,brief,plan,task,identity.focusPaths.map(path=>({path})),deliveryFiles??identity.deliveryFiles);
   return current.usable&&current.authorityHash===identity.authorityHash&&fingerprint(current.selectors)===fingerprint(identity.selectors)&&fingerprint(current.sources)===fingerprint(identity.sources);
 }

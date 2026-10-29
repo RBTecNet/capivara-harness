@@ -3,6 +3,15 @@ import type { AgentRequest, AgentResult, CommandRequest, CommandResult, RuntimeE
 import type { ProgressMeasurement, BuildGateMeasurement } from '../telemetry/progress.js';
 import type { ReviewAssessment } from './review.js';
 import type { ConformanceProvenance } from './conformance.js';
+import type { ReviewScopeHandoff } from './source-finding-scope.js';
+
+export type PersistedReviewHandoff = Omit<ReviewScopeHandoff,'status'> & {
+  status:'pending'|'resolved';
+  createdAt:string;
+  resolutions?:{at:string;proofIds:string[]}[];
+  resolvedAt?:string;
+  proofIds?:string[];
+};
 
 export interface BuildIncident {
   id: string;
@@ -14,7 +23,7 @@ export interface BuildIncident {
   external: boolean;
   /** Reduced total context capacity discovered from the provider, for local task splitting. */
   contextChars?: number;
-  repairScope?: 'verification' | 'environment' | 'delivery';
+  repairScope?: 'verification' | 'environment' | 'delivery' | 'authority';
 }
 export interface VerificationEvidence {
   id: string;
@@ -69,6 +78,8 @@ export interface ActionRecord {
   failure?: string;
   result?: AgentResult;
   sourceCoverage?: import('./task-context.js').TaskSourceCoverage[];
+  /** Integration obligations actually included in this invocation packet. */
+  handoffIds?:string[];
   instrumentRepairs?: import('./invocation-instrument.js').InstrumentRepair[];
 }
 export interface WorkspaceCheckpoint {
@@ -107,7 +118,7 @@ export interface TaskProgress {
   contextChars?: number;
   failureSignature?: string;
   actions?: ActionRecord[];
-  reviews?: { inputHash: string; at: string; assessment: ReviewAssessment; inspection?: import('./inspection.js').InspectionIdentity }[];
+  reviews?: { inputHash: string; at: string; assessment: ReviewAssessment; inspection?: import('./inspection.js').InspectionIdentity; handoffIds?:string[] }[];
   checkpoint?: WorkspaceCheckpoint;
   checks?: Verification[];
   /** Exact records selected by the latest verification batch, including reused proofs. */
@@ -115,6 +126,7 @@ export interface TaskProgress {
   suspension?: { fingerprint: string; reason: string; action: string };
   noProgress?: number;
   dependencyCache?: unknown;
+  providerSynchronization?:{directory:string;revision:string};
   retryGeneration?: number;
   reviewFailureSignature?: string;
   reviewNoProgress?: number;
@@ -132,9 +144,11 @@ export interface BuildState {
   schema: 'capivara/build/1';
   planRevision: number;
   tasks: Record<string, TaskProgress>;
-  environment: Record<string, { inputHash: string; ready: boolean; fingerprint?: string; operational?: unknown; failedFingerprint?: string; actions?: ActionRecord[]; preparedAt?: string; recovery?: { fingerprint: string; configuration: string; protocol?: string; exhausted: boolean; reason: string } }>;
+  environment: Record<string, { inputHash: string; ready: boolean; fingerprint?: string; installationRevision?: string; operational?: unknown; failedFingerprint?: string; actions?: ActionRecord[]; preparedAt?: string; recovery?: { fingerprint: string; configuration: string; protocol?: string; exhausted: boolean; reason: string } }>;
   evidence: VerificationEvidence[];
   incidents: BuildIncident[];
+  /** Deferred findings remain obligations until their final owner proves them. */
+  reviewHandoffs?:PersistedReviewHandoff[];
   updatedAt: string;
   controlVersion?: 2;
   metrics?: BuildMetrics;
@@ -195,4 +209,6 @@ export interface BuildOutcome {
 export interface SelectedVerification {
   check: Verification;
   replaced?: string;
+  requiredKind?:Verification['kind'];
+  protocolIssue?:{code:'ambiguous-browser-command';requiredKind:'web';original:Verification};
 }

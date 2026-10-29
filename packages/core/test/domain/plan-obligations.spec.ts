@@ -34,7 +34,7 @@ it('does not classify a version probe or syntax check as a planned product proof
   expect(derivePlanObligations(brief,plan)[0]!).toMatchObject({recipeStatus:'planned',recipes:[{taskId:'application',checkId:'candidate'}],verification:'required-in-build'});
 });
 
-it('keeps actual provider, graph, coverage and browser interface defects blocking',()=>{
+it('keeps actual provider, graph, coverage and forbidden-interface defects blocking',()=>{
   const {brief,plan}=fixture();
   const wrong=structuredClone(plan);wrong.environment[0]!.identity!.provider='Other runtime';
   expect(validatePlan(brief,wrong).some(issue=>issue.code==='mandatory-provider-mismatch')).toBe(true);
@@ -46,8 +46,12 @@ it('keeps actual provider, graph, coverage and browser interface defects blockin
   expect(validatePlan(brief,cycle).some(issue=>issue.code==='task-cycle')).toBe(true);
   const uncovered=structuredClone(plan);uncovered.tasks[0]!.requirementIds=[];
   expect(validatePlan(brief,uncovered).some(issue=>issue.code==='uncovered-requirement')).toBe(true);
-  brief.requirements.push({id:'browser',statement:'Execute actual browser flows.',kind:'interface',mode:'web',source:{kind:'request',reference:'request',text:'Execute actual browser flows.'}});plan.tasks[0]!.requirementIds.push('browser');
-  expect(validatePlan(brief,plan).some(issue=>issue.code==='unproven-interface-behavior')).toBe(true);
+  brief.modes.push('web');brief.requirements.push({id:'browser',statement:'Execute actual browser flows.',kind:'interface',mode:'web',source:{kind:'request',reference:'request',text:'Execute actual browser flows.'}});plan.tasks[0]!.requirementIds.push('browser');
+  expect(validatePlan(brief,plan)).toEqual([]);
+  expect(derivePlanObligations(brief,plan)).toContainEqual(expect.objectContaining({requirementId:'browser',kind:'interface',recipeStatus:'pending',verification:'required-in-build'}));
+  brief.constraints.push({id:'forbidden-browser',statement:'Do not use a browser.',source:{kind:'request',reference:'request',text:'Do not use a browser.'},forbiddenCapabilities:['browser'],requiredCapabilities:[]});
+  plan.tasks[0]!.checks=[{id:'forbidden-recipe',kind:'web',command:'npm',args:['run','test:browser'],level:'behavior',requirementIds:['browser'],requiredCapabilities:['browser']}];
+  expect(validatePlan(brief,plan).some(issue=>issue.code==='forbidden-proof-capability')).toBe(true);
 });
 
 it('adopts an explicit literal identity correction without changing its executable or manufacturing a proof',async()=>{

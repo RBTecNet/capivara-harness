@@ -8,6 +8,9 @@ import { digest, inside } from './files.js';
 import { captureFiles, createTaskWorkspace, fileDigest, IntegrationConflict, publishIntegration } from './isolation.js';
 
 const installationRoots = ['node_modules', '.venv', 'venv', '.tools', 'tools', '.local', '.deps', '.vendor', 'vendor', '.sdk', '.capivara-tools'];
+/** Project package inventories belong to their manifest fork. Tool installations
+ * can instead be propagated through their applied generation receipts. */
+export const publishedToolInstallationRoots = installationRoots.filter(root => !['node_modules','.venv','venv','.deps','.vendor','vendor'].includes(root));
 const manifests = new Set(['package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lock', 'bun.lockb', 'pyproject.toml', 'poetry.lock', 'uv.lock', 'Pipfile', 'Pipfile.lock', 'requirements.txt', 'Cargo.toml', 'Cargo.lock', 'go.mod', 'go.sum', 'Gemfile', 'Gemfile.lock', 'composer.json', 'composer.lock', 'packages.lock.json', 'nuget.config']);
 const forbiddenParts = new Set(['.git', '.capivara-next', '.capivara-runtime', '.capivara-verification', '.project-inputs']);
 const cleanPath = (value: string): string | null => {
@@ -46,7 +49,8 @@ async function directoryFingerprint(workspace: string, name: string): Promise<st
     if (info.isSymbolicLink()) {
       const target = resolve(dirname(path), await readlink(path)), rel = relative(workspace, target);
       if (rel === '..' || rel.startsWith(`..${sep}`)) {
-        const targetInfo = await stat(path);
+        const targetInfo = await stat(path).catch(error=>{if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;});
+        if(!targetInfo){entries.push([key,'dangling-link',await readlink(path)]);return;}
         if (!targetInfo.isFile()) throw new Error(`Provider installation link escapes its private workspace: ${name}/${key}`);
         entries.push([key, targetInfo.mode & 0o777, digest(await readFile(path))]);
       } else entries.push([key, 'link', relative(dirname(path), target).replaceAll('\\', '/')]);
@@ -58,6 +62,7 @@ async function directoryFingerprint(workspace: string, name: string): Promise<st
   try { await visit(root); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
   return digest(JSON.stringify(entries));
 }
+export { directoryFingerprint as providerDirectoryFingerprint };
 
 export async function beginEnvironmentRecovery(workspace: string, node: EnvironmentNode): Promise<WorkspaceCheckpoint> {
   const checkpoint: RecoveryCheckpoint = await createTaskWorkspace(workspace, `$environment:${node.id}`, digest(JSON.stringify(node)), environmentRecoveryOutputs(node));
@@ -108,12 +113,15 @@ export async function commitEnvironmentRecovery(workspace: string, node: Environ
         const target = resolve(dirname(source), await readlink(source));
         const rel = relative(checkpoint.directory, target);
         if (rel === '..' || rel.startsWith(`..${sep}`)) {
-          const targetInfo = await stat(source);
+          const targetInfo = await stat(source).catch(error=>{if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;});
+          if(!targetInfo){await mkdir(dirname(destination),{recursive:true});await symlink(await readlink(source),destination,'file');return false;}
           if (!targetInfo.isFile()) throw new Error(`Provider installation link escapes its private workspace: ${relative(checkpoint.directory, source)}`);
           await mkdir(dirname(destination), { recursive: true }); await copyFile(source, destination, constants.COPYFILE_FICLONE); await chmod(destination, targetInfo.mode & 0o777); return false;
         }
-        if (isAbsolute(await readlink(source))) { await mkdir(dirname(destination), { recursive: true }); await symlink(relative(dirname(source), target), destination, (await stat(source)).isDirectory() ? 'dir' : 'file'); return false; }
-        await realpath(source); return true;
+        if (isAbsolute(await readlink(source))) { const targetInfo=await stat(source).catch(error=>{if((error as NodeJS.ErrnoException).code==='ENOENT')return null;throw error;});await mkdir(dirname(destination), { recursive: true }); await symlink(relative(dirname(source), target), destination, targetInfo?.isDirectory() ? 'dir' : 'file'); return false; }
+        // A relative link is installation data even while its optional target
+        // is absent. The actual selected provider's readiness still decides use.
+        return true;
       } });
       if (await directoryFingerprint(workspace, basename(path)) !== item.after) throw new Error(`Provider installation changed while staging: ${item.root}`);
     }

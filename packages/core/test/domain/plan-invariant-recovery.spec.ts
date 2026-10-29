@@ -16,10 +16,9 @@ function fixture() {
   return { brief, plan, task, proof };
 }
 
-function interfaceFixture(){
-  const result=fixture();result.brief.modes=['web'];result.brief.request='Crie uma aplicação web com fluxos reais no navegador. Use runtime Deno.';
-  Object.assign(result.brief.requirements[1]!,{kind:'interface',mode:'web',statement:'Fluxos reais no navegador.',source:{kind:'request',reference:'request',text:'Fluxos reais no navegador.'}});
-  result.proof.kind='web';result.proof.requiredCapabilities=['browser'];result.proof.requirementIds=['stack','records'];
+const missingContract={id:'records-contract',name:'Records',description:'The repository accepts validated records.',inputs:['Record'],outputs:['StoredRecord'],requirementIds:['records']};
+function structuralFixture(){
+  const result=fixture();result.task.contractIds=[missingContract.id];
   return result;
 }
 
@@ -45,11 +44,11 @@ it('adopts environment and task-owned proof repairs together without replacing p
 });
 
 it('patches retained unpublished recipe data after escalating a sterile proposal', async () => {
-  const { brief, plan, task, proof } = interfaceFixture(), { conformance, ...partial } = proof;partial.kind='command';partial.requiredCapabilities=[];
+  const { brief, plan, task, proof } = structuralFixture(), { conformance, ...partial } = proof;
   const calls: DomainAgentRequest[] = [], published: DevelopmentPlan[] = [];
   const result = await runPlan({ brief, existing: plan, save: async patch => { if (patch.plan) published.push(structuredClone(patch.plan)); }, agent: async call => {
     calls.push(call);
-    return JSON.stringify(calls.length === 1 ? { taskUpdates: [{ id: task.id, checks: [partial] }] } : { verificationUpdates: [{ owner: task.id, check: { id: proof.id,kind:'web', conformance } }] });
+    return JSON.stringify(calls.length === 1 ? { taskUpdates: [{ id: task.id, checks: [partial] }] } : { contracts:[missingContract],verificationUpdates: [{ owner: task.id, check: { id: proof.id, conformance } }] });
   } });
   expect(calls).toHaveLength(2); expect(calls[0]!.prompt).toContain('scoped-definitions'); expect(calls[1]!.prompt).toContain('minimal-patches');
   expect(result.tasks[0]!.checks.find(check => check.id === proof.id)).toMatchObject({ command: proof.command, args: proof.args, assertion: proof.assertion, conformance });
@@ -70,18 +69,18 @@ it('retains incorrect claim metadata as explicit debt rather than buying a plann
 });
 
 it('rejects a newly introduced dependency defect atomically before adopting a corrected proof patch', async () => {
-  const { brief, plan, task, proof } = interfaceFixture(), published: DevelopmentPlan[] = [];
+  const { brief, plan, task, proof } = structuralFixture(), published: DevelopmentPlan[] = [];
   let calls = 0;
   const result = await runPlan({ brief, existing: plan, save: async patch => { if (patch.plan) published.push(structuredClone(patch.plan)); }, agent: async () => {
     calls++;
-    return JSON.stringify(calls === 1 ? { environment: [{ ...plan.environment[0]!, dependsOn: ['missing-provider'] }], tasks: [{ id: task.id, checks: [proof] }] } : { verificationUpdates: [{ owner: task.id, check: proof }] });
+    return JSON.stringify(calls === 1 ? { contracts:[missingContract],environment: [{ ...plan.environment[0]!, dependsOn: ['missing-provider'] }], tasks: [{ id: task.id, checks: [proof] }] } : { contracts:[missingContract],verificationUpdates: [{ owner: task.id, check: proof }] });
   } });
   expect(calls).toBe(2); expect(validatePlan(brief, result)).toEqual([]);
   expect(published.every(candidate => candidate.environment.every(node => !node.dependsOn.includes('missing-provider')))).toBe(true);
 });
 
 it('does not buy more repair calls with wording or clocks and never publishes that churn', async () => {
-  const { brief, plan, task } = interfaceFixture(), published: DevelopmentPlan[] = [], calls: DomainAgentRequest[] = [];
+  const { brief, plan, task } = structuralFixture(), published: DevelopmentPlan[] = [], calls: DomainAgentRequest[] = [];
   await expect(runPlan({ brief, existing: plan, save: async patch => { if (patch.plan) published.push(structuredClone(patch.plan)); }, agent: async call => {
     calls.push(call);
     return JSON.stringify({ reason: `Cosmetic ${Date.now()}`, tasks: [{ ...task, title: `New label ${calls.length}`, criteria: ['Only log the report.'] }], environment: [{ ...plan.environment[0]!, reason: `New prose ${calls.length}` }] });

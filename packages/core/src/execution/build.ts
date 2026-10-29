@@ -14,7 +14,7 @@ import type { AgentRequest, AgentResult, CommandRequest, TerminalRequest } from 
 import { emitEvent, emitGate, emitProgress, type BuildGateId, type BuildGateStatus } from '../telemetry/progress.js';
 import { changedSince, digest, inputHash, inputSnapshot, inside, introducedServers, restoreFiles, snapshot, sourceFiles } from './files.js';
 import { declaredCheckInputs, resolveInputDependencies, verificationInputSelectors } from './dependencies.js';
-import { applyOperationalEnvironment, emptyOperationalEnvironment, environmentFingerprint, executionConstraints, mergeOperationalEnvironments, OperationalInvocationConflict, prepareEnvironmentNode, prepareProjectDependencies, projectDependencyScope, relocateOperationalEnvironment, selectOperationalEnvironment, type OperationalEnvironment, type PreparedEnvironment } from './environment.js';
+import { applyOperationalEnvironment, emptyOperationalEnvironment, environmentFingerprint, executionConstraints, mergeOperationalEnvironments, OperationalInvocationConflict, prepareEnvironmentNode, prepareProjectDependencies, projectDependencyScope, projectInstallationEnvironment, relocateOperationalEnvironment, selectOperationalEnvironment, type OperationalEnvironment, type PreparedEnvironment } from './environment.js';
 import { checkInputHash, derivedChecks, evaluateRecordedObservation, evaluateVerificationAssertion, normalizeVerificationAssertion, runVerification, selectVerifications, taskInputs, verificationAssertionStatus, verificationIdentity, verificationLevel, type VerificationOutcome } from './checks.js';
 import { createTaskWorkspace, fileDigest, IntegrationConflict, pathScopesConflict, prepareIntegration, publishIntegration, SerialQueue } from './isolation.js';
 import { interpretReview, reviewFindingText } from './review.js';
@@ -24,17 +24,22 @@ import { prepareInvocationInstrument } from './invocation-instrument.js';
 import { assembleTaskContext } from './task-context.js';
 import { preparedContextPlan } from './prepared-context.js';
 import { substantiateSourceFinding } from './source-review.js';
+import { resolveReviewScope, validateFindingDeferral } from './source-finding-scope.js';
 import { buildReviewEvidence } from './review-evidence.js';
 import { createInspectionIdentity, inspectionStillCurrent } from './inspection.js';
+import { deliveryWriteSet } from './delivery-sources.js';
 import { recoverPlanLineage } from './plan-lineage.js';
 import { repositoryRecipeCandidate } from './recipe-candidates.js';
+import { repositoryVerificationCandidates, verificationSurfaces } from './verification-debt.js';
 import { prepareBrowserResources, type BrowserResourceResult } from '../runtime/browser-resources.js';
 import { beginEnvironmentRecovery, commitEnvironmentRecovery, environmentRecoveryTask, environmentRecoveryContext, resumeEnvironmentRecovery } from './recovery-scope.js';
+import { publishedToolInstallationRoots } from './recovery-scope.js';
+import { ProviderSynchronizationError, synchronizePublishedInstallations } from './provider-synchronization.js';
 import type { ActionRecord, BuildIncident, BuildMetrics, BuildOptions, BuildOutcome, BuildState, TaskProgress, VerificationEvidence } from './types.js';
 export { interpretReview } from './review.js';
 
 const now = (): string => new Date().toISOString();
-const executionProtocol = 'capivara-control/12';
+const executionProtocol = 'capivara-control/17';
 const external = (result: AgentResult): boolean => result.status === 'unavailable' && !result.issue || ['transport','authentication','rate-limit','capacity','configuration'].includes(result.issue?.kind ?? '');
 const definitionHash = (task: WorkUnit): string => digest(JSON.stringify(task));
 const exists = (path: string): Promise<boolean> => access(path).then(() => true, () => false);
@@ -47,6 +52,17 @@ export function createBuildState(plan: DevelopmentPlan): BuildState {
   return { schema: 'capivara/build/1', controlVersion: 2, planRevision: plan.revision, tasks: {}, environment: {}, evidence: [], incidents: [], integrations: [], acceptance: [], updatedAt: now() };
 }
 function initialTask(): TaskProgress { return { status: 'pending', revision: '', attempts: 0, changedFiles: [], findings: [], strategy: 'implement', actions: [], reviews: [], noProgress: 0 }; }
+function hasRecordedDelivery(progress:TaskProgress):boolean {
+  return progress.attempts>0||progress.changedFiles.length>0||Boolean(progress.verificationEvidence?.length||progress.reviews?.length)||progress.actions?.some(action=>action.action==='editor'||Boolean(action.result?.changedFiles.length))===true||progress.status==='complete';
+}
+/** A new explanation of the same operation is not a new recovery strategy. */
+function recoveryPlanIdentity(plan:DevelopmentPlan,scope:BuildIncident['repairScope']):string {
+  const recipe=({capabilities:_capabilities,...value}:EnvironmentNode['check']):unknown=>value;
+  const environment=plan.environment.map(({reason:_reason,name:_name,identityTransformations:_interpretations,check,prepare,...node})=>({...node,check:recipe(check),prepare:prepare.map(recipe)}));
+  if(scope==='environment')return digest(JSON.stringify({environment,consumers:plan.tasks.map(task=>({id:task.id,environmentIds:task.environmentIds}))}));
+  if(scope==='verification')return digest(JSON.stringify({environment,tasks:plan.tasks.map(task=>({id:task.id,checks:task.checks})),acceptance:plan.acceptance}));
+  return digest(JSON.stringify({...plan,revision:0,environment}));
+}
 function closure(plan: DevelopmentPlan, task: WorkUnit): EnvironmentNode[] {
   const nodes: EnvironmentNode[] = [], visited = new Set<string>();
   const visit = (id: string): void => { if (visited.has(id)) return; visited.add(id); const node = plan.environment.find(item => item.id === id); if (!node) return; node.dependsOn.forEach(visit); nodes.push(node); };
@@ -108,7 +124,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     browserPreparation:'Preparando recursos do navegador',agentInstrument:'Preparando instrumentos do agente',providerPublication:'Publicando provedor de ambiente',
     dependencies:'Preparando dependências',verificationIsolation:'Isolando verificações',environmentPreparation:'Preparando ambiente',isolation:'Isolando área de trabalho',
     integration:'Integrando alterações verificadas',integrationRecovery:'Recuperando integração',integrationReconciliation:'Preparando reconciliação de alterações',cleanup:'Limpando área integrada',
-    environmentRevalidation:'Revalidando ambiente',proofRevalidation:'Revalidando provas',proofInputs:'Resolvendo entradas e hashes das provas',acceptance:'Executando aceite final',acceptanceIntegration:'Integrando artefatos do aceite',
+    environmentRevalidation:'Revalidando ambiente',providerSynchronization:'Disponibilizando ferramentas recuperadas',proofRevalidation:'Revalidando provas',proofInputs:'Resolvendo entradas e hashes das provas',acceptance:'Executando aceite final',acceptanceIntegration:'Integrando artefatos do aceite',
     conformance:'Conferindo conformidade dos requisitos e provedores',
   };
   const measured=async<T>(stage:string,operation:()=>Promise<T>):Promise<T>=>{
@@ -148,7 +164,26 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     progress.status = status;
     event('transition',`${task.id}: ${before} → ${status}. ${reason}`,task.id,{before,after:status,reason}); await save();
   };
-  const canonicalOperational = (task: WorkUnit): OperationalEnvironment => mergeOperationalEnvironments(options.workspace,...Object.entries(state.environment).filter(([key])=>key.startsWith('$project:')).sort(([,left],[,right])=>(left.preparedAt??'').localeCompare(right.preparedAt??'')).map(([,value])=>operationalValue(value.operational)),...closure(plan,task).map(node => operationalValue(state.environment[node.id]?.operational)));
+  const canonicalOperational = (task: WorkUnit): OperationalEnvironment => mergeOperationalEnvironments(options.workspace,...Object.entries(state.environment).filter(([key])=>key.startsWith('$project:')).sort(([,left],[,right])=>(left.preparedAt??'').localeCompare(right.preparedAt??'')).flatMap(([,value])=>{const stored=operationalValue(value.operational);return stored?[projectInstallationEnvironment(stored)]:[];}),...closure(plan,task).map(node => operationalValue(state.environment[node.id]?.operational)));
+  const providerGeneration=():string=>{
+    const latest=new Map<string,string|null>();
+    for(const transaction of state.integrations??[])if(transaction.phase==='applied')for(const installation of transaction.installations??[])if(publishedToolInstallationRoots.includes(installation.path))latest.set(installation.path,installation.after);
+    return digest(JSON.stringify([...latest].sort(([a],[b])=>a.localeCompare(b))));
+  };
+  const synchronizeProviders=async(task:WorkUnit,workspace:string,operational:OperationalEnvironment):Promise<OperationalEnvironment>=>{
+    if(workspace===options.workspace||!plan.tasks.some(unit=>unit.id===task.id))return operational;
+    const progress=state.tasks[task.id]!;const revision=providerGeneration();
+    if(progress.providerSynchronization?.directory===workspace&&progress.providerSynchronization.revision===revision)return operational;
+    const result=await serial('providerSynchronization',()=>synchronizePublishedInstallations(options.workspace,workspace,state.integrations??[],progress.changedFiles));
+    progress.providerSynchronization={directory:workspace,revision};
+    if(result.synchronized.length){
+      progress.retryGeneration=(progress.retryGeneration??0)+1;
+      metrics.repetitions.push({taskId:task.id,action:'provider-synchronization',reason:JSON.stringify(result.synchronized),at:now()});
+      event('recovery','Ferramentas recuperadas disponibilizadas na área existente; código e dependências privadas preservados.',task.id,result);
+    }
+    await save();
+    return result.synchronized.length?mergeOperationalEnvironments(workspace,relocateOperationalEnvironment(canonicalOperational(task),options.workspace,workspace),projectInstallationEnvironment(operational)):operational;
+  };
   const checkOperational=(task:WorkUnit,check:Verification,workspace:string,base:OperationalEnvironment):OperationalEnvironment=>{
     const key=state.resourceBindings?.[task.id]?.[check.id],resource=key?operationalValue(state.environment[key]?.operational):undefined;
     return resource?mergeOperationalEnvironments(workspace,base,relocateOperationalEnvironment(resource,resource.root??options.workspace,workspace)):base;
@@ -194,24 +229,36 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     progress.suspension = { fingerprint: await suspensionFingerprint(task,progress), reason, action: kind };
     await transition(task,'waiting',reason); gate(task,kind === 'product' ? 'G3' : 'G0','waiting',reason);
   };
+  const acknowledgedHandoffs=async(task:WorkUnit,workspace:string):Promise<Set<string>>=>{
+    const progress=state.tasks[task.id],acknowledged=new Set<string>();if(!progress)return acknowledged;
+    for(const review of progress.reviews??[])if(review.assessment.decision==='approved'&&review.handoffIds?.length&&await inspectionStillCurrent(review.inspection,workspace,options.brief,plan,task,deliveryWriteSet(task.id,progress,state.integrations)))for(const id of review.handoffIds)acknowledged.add(id);
+    return acknowledged;
+  };
   const context = async (task: WorkUnit,workspace: string,extra='',operational?: OperationalEnvironment) => {
     const progress=state.tasks[task.id];
     const focus=[...new Set([...(progress?.reviews?.at(-1)?.assessment.findings.filter(finding=>finding.disposition==='defect').flatMap(finding=>finding.file?[finding.file]:[])??[]),...(progress?.contextFocus??[])])];
-    return assembleTaskContext(options.brief,operational?preparedContextPlan(plan,task,operational):plan,task,workspace,progress?.contextChars??options.contextChars??24000,extra,focus);
+    const limit=progress?.contextChars??options.contextChars??24000,acknowledged=await acknowledgedHandoffs(task,workspace);
+    const pending=(state.reviewHandoffs??[]).filter(item=>item.ownerTaskId===task.id&&!acknowledged.has(item.id));
+    const selected:typeof pending=[],details:unknown[]=[];
+    for(const item of pending){let summary:unknown={id:item.id,requirementId:item.requirementId,fromTaskId:item.fromTaskId,status:item.status,observed:item.finding.observed.slice(0,250),expected:item.finding.expected?.slice(0,250),excerpt:item.finding.observed.length>250||Boolean(item.finding.expected&&item.finding.expected.length>250),source:{kind:item.source.kind,reference:item.source.reference,quote:item.source.text.slice(0,150)}};const budget=Math.max(700,Math.floor(limit*.12));if(JSON.stringify([...details,summary]).length>budget){if(details.length)break;summary={id:item.id,requirementId:item.requirementId,fromTaskId:item.fromTaskId,expected:item.finding.expected?.slice(0,80),excerpt:true};}selected.push(item);details.push(summary);}
+    const obligations=details.length?`\nINTEGRATION OBLIGATIONS ${JSON.stringify({remaining:pending.length,items:details})}\nThese original observations came from an earlier partial contribution. Inspect the current product against their expected outcomes; do not assume the old defect persists. Current owner proof and explicit review are still required.`:'';
+    const supplied=await assembleTaskContext(options.brief,operational?preparedContextPlan(plan,task,operational):plan,task,workspace,limit,extra+obligations,focus,deliveryWriteSet(task.id,progress,state.integrations));
+    return{...supplied,handoffIds:selected.map(item=>item.id)};
   };
   const invoke = async (task: WorkUnit,workspace: string,role: string,instruction: string,extra: string,readOnly: boolean,strategy: string,operational: OperationalEnvironment,operationContext?: string,operationPurpose?: AgentRequest['purpose']): Promise<AgentResult> => {
     const progress = state.tasks[task.id]!; progress.actions ??= [];
     if (options.signal?.aborted || persistenceFailed) return {status:'cancelled',text:'',commands:[],changedFiles:[]};
+    operational=await synchronizeProviders(task,workspace,operational);
     const resources=[...new Set(Object.values(state.resourceBindings?.[task.id]??{}))].map(key=>state.environment[key]).filter(value=>value?.ready).flatMap(value=>{const prepared=operationalValue(value?.operational);return prepared?[prepared]:[];});
     if(resources.length===1)operational=mergeOperationalEnvironments(workspace,operational,relocateOperationalEnvironment(resources[0]!,resources[0]!.root??options.workspace,workspace));
-    const supplied = operationContext ? {text:operationContext,coverage:[]} : await context(task,workspace,extra,operational);
+    const supplied = operationContext ? {text:operationContext,coverage:[],handoffIds:[]} : await context(task,workspace,extra,operational);
     const suppliedContext = supplied.text;
-    const input = digest(JSON.stringify({role,strategy,instruction,context:suppliedContext,source:await inputHash(workspace,taskInputs(plan,task)),environment:operational.revision,configuration:options.configurationRevision ?? '',resourceAttempt:progress.retryGeneration ?? 0}));
+    const input = digest(JSON.stringify({protocol:executionProtocol,role,strategy,instruction,context:suppliedContext,source:await inputHash(workspace,taskInputs(plan,task)),environment:operational.revision,configuration:options.configurationRevision ?? '',resourceAttempt:progress.retryGeneration ?? 0}));
     const previous = progress.actions.findLast(action => action.id === input && action.result && action.outcome !== 'cancelled');
     if (previous?.result) { metrics.repetitions.push({taskId:task.id,action:role,reason:`Reused persisted result: same input and strategy (${strategy}).`,at:now()}); return structuredClone(previous.result); }
     const unresolved = progress.actions.findLast(action => action.id === input && action.outcome === 'running');
     if (unresolved) return {status:'unavailable',text:'',commands:[],changedFiles:[],issue:{kind:'instrument',recoverable:true,message:'The preceding identical operation was interrupted without a recorded result. Inspect its persisted workspace before requesting another action.'}};
-    const action: ActionRecord = {id:input,action:role,input,strategy,reason:extra.slice(0,1200) || 'Initial implementation of this work unit.',at:now(),durationMs:0,outcome:'running',sourceCoverage:supplied.coverage};
+    const action: ActionRecord = {id:input,action:role,input,strategy,reason:extra.slice(0,1200) || 'Initial implementation of this work unit.',at:now(),durationMs:0,outcome:'running',sourceCoverage:supplied.coverage,...(supplied.handoffIds.length?{handoffIds:supplied.handoffIds}:{})};
     progress.actions.push(action); await save();
     const begin=Date.now();
     let before:Awaited<ReturnType<typeof snapshot>>|undefined;
@@ -220,9 +267,10 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     let result:AgentResult={status:'unavailable',text:'',commands:[],changedFiles:[],issue:{kind:'instrument',recoverable:true,message:'The invocation instrument did not become executable.'}};
     const instrumentFailure=(error:unknown):void=>{
       const message=`Invocation ${phase} failed: ${error instanceof Error?error.message:String(error)}`;
+      const kind=error instanceof OperationalInvocationConflict?'environment':'instrument';
       result={...result,status:result.changedFiles.length?'partial':'unavailable',issue:{kind:'instrument',recoverable:true,message}};
-      note(incident('instrument',task.id,message,workspace));
-      if(error instanceof OperationalInvocationConflict)scheduleReplan(task,incident('planning',task.id,'Provider invocation aliases conflict; reconcile bindings for this consumer.',message));
+      note(incident(kind,task.id,message,workspace));
+      if(error instanceof OperationalInvocationConflict)scheduleReplan(task,incident('environment',task.id,'Provider invocation aliases conflict; reconcile bindings for this consumer.',message));
     };
     try{
       before=await snapshot(workspace);
@@ -267,9 +315,15 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     const consumers=plan.tasks.filter(task=>closure(plan,task).some(prerequisite=>prerequisite.id===node.id));
     return {inputs:[...new Set(consumers.flatMap(task=>taskInputs(plan,task)))],checks:consumers.flatMap(task=>state.tasks[task.id]?.checks??task.checks)};
   };
+  const installationEnvironment=(workspace:string):OperationalEnvironment=>relocateOperationalEnvironment(mergeOperationalEnvironments(options.workspace,...plan.environment.flatMap(node=>{
+    const value=state.environment[node.id];
+    const prepared=value?.ready&&value.inputHash===digest(JSON.stringify(node))?operationalValue(value.operational):undefined;
+    return prepared?[prepared]:[];
+  })),options.workspace,workspace);
   const preparations = async (task: WorkUnit): Promise<boolean> => {
     for (const node of closure(plan,task)) {
-      const flightKey = `${node.id}:${await environmentFingerprint(options.workspace,node,operationalValue(state.environment[node.id]?.operational))}`;
+      const installer=installationEnvironment(options.workspace);
+      const flightKey = `${node.id}:${await environmentFingerprint(options.workspace,node,operationalValue(state.environment[node.id]?.operational))}:${installer.revision}`;
       let flight = nodeFlights.get(flightKey);
       if (!flight) {
         flight = serial('environmentPreparation',async () => {
@@ -279,8 +333,8 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
           const originalHash=storedDefinition&&(storedDefinition.originalHash===declarationHash||digest(JSON.stringify(storedDefinition.definition))===declarationHash)?storedDefinition.originalHash:declarationHash;
           const rememberDeclaration=():void=>{state.environmentDefinitions![node.id]={originalHash,definition:structuredClone(node)};};
           const base = mergeOperationalEnvironments(options.workspace,...node.dependsOn.map(id=>operationalValue(state.environment[id]?.operational)));
-          let result = await prepareEnvironmentNode(options.workspace,node,options.brief,command,{...consumerHints(node),operational:base,...(options.signal?{signal:options.signal}:{}),allowSystemInstall:options.allowSystemInstall === true,terminal,onEvent:detail=>emitEvent(options.onEvent,detail),...(previous?.fingerprint ? {previous:{ready:previous.ready,fingerprint:previous.fingerprint,operational:operationalValue(previous.operational) ?? base,...(previous.failedFingerprint?{noProgress:true}: {})}} : {})});
-          const exhausted = previous?.recovery?.exhausted && previous.recovery.protocol===executionProtocol && previous.recovery.fingerprint===result.fingerprint && previous.recovery.configuration===(options.configurationRevision??'') && !options.retrySuspended;
+          let result = await prepareEnvironmentNode(options.workspace,node,options.brief,command,{...consumerHints(node),operational:base,installationOperational:installationEnvironment(options.workspace),...(options.signal?{signal:options.signal}:{}),allowSystemInstall:options.allowSystemInstall === true,terminal,onEvent:detail=>emitEvent(options.onEvent,detail),...(previous?.fingerprint ? {previous:{ready:previous.ready,fingerprint:previous.fingerprint,...(previous.installationRevision?{installationRevision:previous.installationRevision}:{}),operational:operationalValue(previous.operational) ?? base,...(previous.failedFingerprint?{noProgress:true}: {})}} : {})});
+          const exhausted = previous?.recovery?.exhausted && previous.recovery.protocol===executionProtocol && previous.recovery.fingerprint===result.fingerprint && previous.recovery.configuration===(options.configurationRevision??'') && previous.installationRevision===installer.revision && !options.retrySuspended;
           if (!result.ready && !exhausted) {
             // An environment operation owns only installation/configuration. Its private proposal
             // cannot silently become an implementation of the product work unit.
@@ -290,7 +344,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
             const observe = (): string => environmentRecoveryContext(node,result.incidents);
             const probe = async (): Promise<void> => {
               rememberDeclaration();await save();
-              result = await prepareEnvironmentNode(options.workspace,node,options.brief,command,{...consumerHints(node),previous:result.cache,revalidate:true,operational:base,allowSystemInstall:options.allowSystemInstall === true,terminal,...(options.signal?{signal:options.signal}:{}),onEvent:detail=>emitEvent(options.onEvent,detail)});
+              result = await prepareEnvironmentNode(options.workspace,node,options.brief,command,{...consumerHints(node),previous:result.cache,revalidate:true,operational:base,installationOperational:installationEnvironment(options.workspace),allowSystemInstall:options.allowSystemInstall === true,terminal,...(options.signal?{signal:options.signal}:{}),onEvent:detail=>emitEvent(options.onEvent,detail)});
               for (const problem of result.incidents) note(problem);
               await save();
             };
@@ -351,7 +405,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
             try{await measured('providerPublication',()=>prepareInvocationInstrument(options.workspace,mergeOperationalEnvironments(options.workspace,base,result.operational)));}
             catch(error){note(incident('instrument',node.id,'The provider is ready, but its canonical convenience wrappers could not be published. The isolated invocation instrument will repair or classify the concrete cause.',String(error)));}
           }
-          state.environment[node.id] = {ready:result.ready,inputHash:digest(JSON.stringify(node)),fingerprint:result.fingerprint,operational:result.operational,...(!result.ready?{failedFingerprint:result.fingerprint,recovery:{fingerprint:result.fingerprint,configuration:options.configurationRevision??'',protocol:executionProtocol,exhausted:!cancelled,reason:result.incidents.map(item=>`${item.message}\n${item.evidence}`).join('\n')}}:{})};
+          state.environment[node.id] = {ready:result.ready,inputHash:digest(JSON.stringify(node)),fingerprint:result.fingerprint,...(result.cache.installationRevision?{installationRevision:result.cache.installationRevision}:{}),operational:result.operational,...(!result.ready?{failedFingerprint:result.fingerprint,recovery:{fingerprint:result.fingerprint,configuration:options.configurationRevision??'',protocol:executionProtocol,exhausted:!cancelled,reason:result.incidents.map(item=>`${item.message}\n${item.evidence}`).join('\n')}}:{})};
           for (const problem of result.incidents) note(problem); await save(); return result.ready;
         });
         nodeFlights.set(flightKey,flight);
@@ -362,8 +416,8 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       if(integrationBlocked||persistenceFailed)return false;
       const inputs=taskInputs(plan,task),checks=state.tasks[task.id]?.checks??task.checks;const key=`$project:${projectDependencyScope(inputs,checks)}`;
       const previous=state.environment[key];const base=canonicalOperational(task);
-      const result=await prepareProjectDependencies(options.workspace,options.brief,request=>command(applyOperationalEnvironment(request,base)),{inputs:taskInputs(plan,task),checks:state.tasks[task.id]?.checks??task.checks,operational:emptyOperationalEnvironment(options.workspace),terminal,allowSystemInstall:options.allowSystemInstall===true,...(options.signal?{signal:options.signal}:{}),...(previous?.fingerprint?{previous:{ready:previous.ready,fingerprint:previous.fingerprint,operational:operationalValue(previous.operational)??emptyOperationalEnvironment(options.workspace),...(previous.failedFingerprint?{noProgress:true}: {})}}:{}),onEvent:detail=>emitEvent(options.onEvent,detail)});
-      state.environment[key]={ready:result.ready,inputHash:result.fingerprint,fingerprint:result.fingerprint,operational:selectOperationalEnvironment(result.operational,inputs,checks),preparedAt:now(),...(!result.ready?{failedFingerprint:result.fingerprint}:{})};
+      const result=await prepareProjectDependencies(options.workspace,options.brief,request=>command(applyOperationalEnvironment(request,base)),{inputs:taskInputs(plan,task),checks:state.tasks[task.id]?.checks??task.checks,operational:base,terminal,installationOperational:installationEnvironment(options.workspace),allowSystemInstall:options.allowSystemInstall===true,...(options.signal?{signal:options.signal}:{}),...(previous?.fingerprint?{previous:{ready:previous.ready,fingerprint:previous.fingerprint,operational:operationalValue(previous.operational)??emptyOperationalEnvironment(options.workspace),...(previous.failedFingerprint?{noProgress:true}: {})}}:{}),onEvent:detail=>emitEvent(options.onEvent,detail)});
+      state.environment[key]={ready:result.ready,inputHash:result.fingerprint,fingerprint:result.fingerprint,operational:selectOperationalEnvironment(result.cache.operational,inputs,checks),preparedAt:now(),...(!result.ready?{failedFingerprint:result.fingerprint}:{})};
       if(!state.tasks[task.id]!.dependencyCache)state.tasks[task.id]!.dependencyCache=result.cache;
       for(const problem of result.incidents)note(problem);
       if(!result.ready){const problem=incident('environment',task.id,'Project dependency preparation has no usable consumer environment; reconcile its concrete installation and provider contract.',result.incidents.map(item=>`${item.message}\n${item.evidence}`).join('\n'));problem.repairScope='environment';scheduleReplan(task,problem);}
@@ -382,15 +436,16 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   };
   const projectDependencies = async (task: WorkUnit,workspace: string,operational: OperationalEnvironment): Promise<OperationalEnvironment | null> => {
     const progress = state.tasks[task.id]!;
+    operational=await synchronizeProviders(task,workspace,operational);
     const old=progress.dependencyCache as PreparedEnvironment|undefined;
     const previous=old?{...old,operational:old.operational.root&&old.operational.root!==workspace?relocateOperationalEnvironment(old.operational,old.operational.root,workspace):old.operational}:undefined;
-    const result = await measured('dependencies',()=>prepareProjectDependencies(workspace,options.brief,command,{inputs:taskInputs(plan,task),checks:progress.checks??task.checks,operational,terminal,allowSystemInstall:options.allowSystemInstall === true,...(options.signal?{signal:options.signal}:{}),...(previous?{previous}:{}),onEvent:detail=>emitEvent(options.onEvent,detail)}));
+    const result = await measured('dependencies',()=>prepareProjectDependencies(workspace,options.brief,command,{inputs:taskInputs(plan,task),checks:progress.checks??task.checks,operational,terminal,installationOperational:installationEnvironment(workspace),allowSystemInstall:options.allowSystemInstall === true,...(options.signal?{signal:options.signal}:{}),...(previous?{previous}:{}),onEvent:detail=>emitEvent(options.onEvent,detail)}));
     progress.dependencyCache = result.cache; await save();
     if (result.ready) return result.operational;
     for (const problem of result.incidents) note({...problem,subject:task.id});
     const answer = await invoke(task,workspace,'repair','Repair only the dependency preparation and exact local provider responsible for this failure. Reconcile the manifest or install locally; do not change product behavior or replace a mandatory stack.',result.incidents.map(item=>`${item.message}\n${item.evidence}`).join('\n'),false,`project-environment:${result.fingerprint}`,operational);
     if (answer.status === 'cancelled' || external(answer)) return null;
-    let again = await measured('dependencies',()=>prepareProjectDependencies(workspace,options.brief,command,{inputs:taskInputs(plan,task),checks:progress.checks??task.checks,previous:result.cache,revalidate:true,operational:result.operational,terminal,allowSystemInstall:options.allowSystemInstall === true,...(options.signal?{signal:options.signal}:{}),onEvent:detail=>emitEvent(options.onEvent,detail)}));
+    let again = await measured('dependencies',()=>prepareProjectDependencies(workspace,options.brief,command,{inputs:taskInputs(plan,task),checks:progress.checks??task.checks,previous:result.cache,revalidate:true,operational:result.operational,terminal,installationOperational:installationEnvironment(workspace),allowSystemInstall:options.allowSystemInstall === true,...(options.signal?{signal:options.signal}:{}),onEvent:detail=>emitEvent(options.onEvent,detail)}));
     progress.dependencyCache = again.cache;await save();
     if(again.ready)return again.operational;
     const detail=again.incidents.map(item=>`${item.message}\n${item.evidence}`).join('\n');
@@ -400,7 +455,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     if(fix&&!diagnosis.issue){
       const guided=await invoke(task,workspace,'repair','Repair only the dependency/provider cause using this independently diagnosed alternative. Preserve product behavior and the mandatory stack.',`${detail}\nDIAGNOSED ALTERNATIVE\n${fix}`,false,`guided-project-environment:${again.fingerprint}:${digest(fix)}`,again.operational);
       if(guided.status==='cancelled'||options.signal?.aborted){cancelled=true;return null;}
-      if(!external(guided))again=await measured('dependencies',()=>prepareProjectDependencies(workspace,options.brief,command,{inputs:taskInputs(plan,task),checks:progress.checks??task.checks,previous:again.cache,revalidate:true,operational:again.operational,terminal,allowSystemInstall:options.allowSystemInstall === true,...(options.signal?{signal:options.signal}:{}),onEvent:detail=>emitEvent(options.onEvent,detail)}));
+      if(!external(guided))again=await measured('dependencies',()=>prepareProjectDependencies(workspace,options.brief,command,{inputs:taskInputs(plan,task),checks:progress.checks??task.checks,previous:again.cache,revalidate:true,operational:again.operational,terminal,installationOperational:installationEnvironment(workspace),allowSystemInstall:options.allowSystemInstall === true,...(options.signal?{signal:options.signal}:{}),onEvent:detail=>emitEvent(options.onEvent,detail)}));
       progress.dependencyCache=again.cache;await save();if(again.ready)return again.operational;
     }
     const problem=incident('environment',task.id,'Dependency preparation and the independently diagnosed alternative did not produce a usable consumer environment. Reconcile the provider contract.',`${detail}\n${diagnosis.text}`);problem.repairScope='environment';scheduleReplan(task,problem);note(problem);await save();return null;
@@ -462,16 +517,50 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     const classified=candidates.map(failure=>({...failure,classification:'instrument' as const,evidence:{...failure.evidence,assertionStatus:'invalid' as const}}));
     return recoverAssertions(task,workspace,operational,classified,true);
   };
-  const repairRecipe = async (task: WorkUnit,workspace: string,operational: OperationalEnvironment,reason: string,requiredKind?: Verification['kind'],extend=false): Promise<boolean> => {
+  const repairRecipe = async (task: WorkUnit,workspace: string,operational: OperationalEnvironment,reason: string,requiredKind?: Verification['kind'],extend=false,strategy='instrument',packet?:string,behaviorRequired=false): Promise<boolean> => {
     const progress = state.tasks[task.id]!;
-    const answer = await invoke(task,workspace,'repair','Repair only the verification recipe for this existing work unit. Inspect the actual entrypoint and evidence; preserve product files, requirements and interface. Return JSON {checks:[{kind,command,args,expected,assertion:{type:"contains",value:"literal observable output"},expectedExitCode,input,steps,closeInput,requiredCapabilities,target,inputs,level}]}. expected is the human criterion; assertion is an executable object. TUI steps must observe literal ready output before input and a new literal state after input. Do not require more tests by count.',`INSTRUMENT TO RECOVER\n${reason}`,true,`instrument:${digest(reason)}`,operational);
+    const answer = await invoke(task,workspace,'repair','Repair only the verification recipe for this existing work unit. Inspect the actual entrypoint and evidence; preserve product files, requirements and interface. Return JSON {checks:[{kind,command,args,expected,assertion:{type:"contains",value:"literal observable output"},expectedExitCode,input,steps,closeInput,requiredCapabilities,target,inputs,level}]}. expected is the human criterion; assertion is an executable object. An inline Node/Python runner may perform actual interaction and create temporary instruments under .capivara-verification in its private writable verification workspace; it is not delivered product code. TUI steps must observe literal ready output before input and a new literal state after input. Do not require more tests by count.',`INSTRUMENT TO RECOVER\n${reason}`,true,`${strategy}:${digest(reason)}`,operational,packet,packet?'inspection':undefined);
     if (answer.status === 'cancelled' || external(answer) || answer.issue) return false;
     const value = jsonObject(answer.text);
-    const checks = normalizeChecks(value?.checks,options.brief).map(check=>({...check,requirementIds:check.requirementIds.length?check.requirementIds:task.requirementIds})).filter(check=>(!requiredKind || check.kind === requiredKind) && check.command && selectVerifications(options.brief,{...task,checks:[check]}).every(item=>!item.replaced));
+    const decoded=normalizeChecks(value?.checks,options.brief);
+    const checks = decoded.map(check=>({...check,...(requiredKind==='web'&&check.kind==='command'&&(check.target==='browser'||check.requiredCapabilities.includes('browser'))?{kind:'web' as const}:{}),requirementIds:check.requirementIds.length?check.requirementIds:task.requirementIds})).filter(check=>(!requiredKind || check.kind === requiredKind) && (!behaviorRequired||verificationLevel(check)==='behavior') && check.command && selectVerifications(options.brief,{...task,checks:[check]}).every(item=>!item.replaced));
     const key = (items: Verification[]): string => digest(JSON.stringify(items.map(check=>{const {id:_id,expected:_criterion,assertionIssue:_issue,...item}=check;return {...item,assertion:verificationAssertionStatus(check).assertion??null};})));
     const revised=reconcileChecks(extend?[...(progress.checks??task.checks),...checks]:checks);
     if (!checks.length || key(revised) === key(progress.checks ?? task.checks)) return false;
+    for(const original of decoded)if(original.kind==='command'&&checks.some(check=>check.id===original.id&&check.kind==='web'))metrics.repetitions.push({taskId:task.id,action:'verification-interface-decoding',reason:JSON.stringify({original,selectedKind:'web',basis:'The recovery operation explicitly requested web interaction and the declaration explicitly targets browser. No execution or approval is inferred.'}),at:now()});
     progress.checks = revised; progress.strategy = 'revalidate-only';if(progress.checkpoint)progress.checkpoint.phase='checking';event('recovery','Receita alterada; o código do produto permanece preservado.',task.id); await save(); return true;
+  };
+  const materializeVerification = async(task:WorkUnit,workspace:string,operational:OperationalEnvironment,reason:string,requiredKind?:Verification['kind'],integrated=false):Promise<boolean>=>{
+    const progress=state.tasks[task.id]!;
+    // A write permission such as src/ or . does not assign every future test
+    // to this fragment. Before integration, native runners need a concrete
+    // source changed by this delivery; project suites belong to final proof.
+    const native=await repositoryVerificationCandidates(workspace,integrated?task:{...task,files:progress.changedFiles},requiredKind,integrated);
+    const before=progress.checks??task.checks;
+    const fresh=native.filter(check=>!before.some(existing=>existing.command===check.command&&JSON.stringify(existing.args)===JSON.stringify(check.args)&&existing.kind===check.kind));
+    if(fresh.length){progress.checks=reconcileChecks([...before,...fresh]);progress.strategy='revalidate-only';if(progress.checkpoint)progress.checkpoint.phase='checking';metrics.repetitions.push({taskId:task.id,action:'materialize-repository-verification',reason:'A concrete current repository runner now supplies a candidate; its command and interaction still have to execute.',at:now()});await save();return true;}
+    if(await repairRecipe(task,workspace,operational,reason,requiredKind,true,'materialize-verification',undefined,true))return true;
+    if(cancelled||options.signal?.aborted)return false;
+    const surfaces=await verificationSurfaces(workspace,task);
+    const first=progress.actions?.findLast(action=>action.strategy===`materialize-verification:${digest(reason)}`);
+    const packet=JSON.stringify({operation:'resolve-verification-interface',taskId:task.id,interface:requiredKind,criteria:task.criteria,requirementIds:task.requirementIds,sourceIndex:surfaces,previousAnswer:first?.result?.text,problem:'The first answer supplied no different executable behavior recipe. Inspect these actual files and return only the missing proof; source code is preserved.'});
+    if(await repairRecipe(task,workspace,operational,`${reason}\nA concrete source/manifest index is now available; resolve the actual interface, not the previous proposed format.`,requiredKind,true,'inspect-verification-surface',packet,true))return true;
+    if(cancelled||options.signal?.aborted)return false;
+    let probe:unknown;
+    if(surfaces.probe&&(requiredKind==='cli'||!requiredKind&&options.brief.modes.length===1&&options.brief.modes[0]==='cli')){
+      const request=surfaces.probe,key=digest(JSON.stringify({request,source:await inputHash(workspace,taskInputs(plan,task)),environment:operational.revision}));
+      let action=progress.actions?.findLast(item=>item.id===key&&item.action==='verification-probe');
+      if(!action){
+        action={id:key,action:'verification-probe',input:key,strategy:'observe-entrypoint',reason:'The recorded recipe answers were unusable; observe a bounded real entrypoint interface before choosing an alternative.',at:now(),durationMs:0,outcome:'running'};progress.actions??=[];progress.actions.push(action);await save();
+        const area=await serial('verificationIsolation',()=>createTaskWorkspace(workspace,`${task.id}:interface-probe`,definitionHash(task),taskWriteScopes(task,state))),start=Date.now();
+        try{const result=await command(applyOperationalEnvironment({cwd:area.directory,command:[request.command,...request.args],timeoutMs:1500,constraints:executionConstraints(options.brief,options.allowSystemInstall),executionPolicy:{purpose:'verification',writeScope:'isolated-workspace'},...(options.signal?{signal:options.signal}:{})},relocateOperationalEnvironment(operational,workspace,area.directory)));action.result={status:result.cancelled?'cancelled':'complete',text:JSON.stringify({command:result.command,exitCode:result.exitCode,stdout:result.stdout,stderr:result.stderr,timedOut:result.timedOut}),commands:[result],changedFiles:[]};action.outcome=result.cancelled?'cancelled':'complete';}
+        catch(error){action.outcome='failed';action.failure=String(error);}
+        finally{action.durationMs=Date.now()-start;await save();await rm(dirname(area.directory),{recursive:true,force:true}).catch(()=>{});}
+      }
+      probe=action.result?.text??action.failure;
+    }
+    const alternative=JSON.stringify({operation:'compose-verification-runner',taskId:task.id,interface:requiredKind,criteria:task.criteria,sourceIndex:surfaces,entrypointObservation:probe,recordedFailures:progress.actions?.filter(action=>action.strategy.startsWith('materialize-verification:')||action.strategy.startsWith('inspect-verification-surface:')).map(action=>({strategy:action.strategy,result:action.result?.text})),strategy:'Use a self-contained focused runner for the existing product when no repository test interface exists. Return a literal command/args and a typed assertion for the requested interaction. A runner can live in command args and create its temporary files in the isolated verification directory. Missing delivered functionality remains a product finding; a missing recipe alone never authorizes a product rewrite.'});
+    return repairRecipe(task,workspace,operational,`${reason}\nThe repository runner and prior interface proposals were unavailable. Compose a different executable instrument from the actual source${probe?' and the recorded entrypoint observation':''}.`,requiredKind,true,'compose-verification-runner',alternative,true);
   };
   const verify = async (task: WorkUnit,workspace: string,operational: OperationalEnvironment,checks: Verification[]): Promise<VerificationOutcome[]> => {
     const order=ordered(checks.map(check=>({...check,dependsOn:check.dependsOn??[]})));
@@ -601,13 +690,14 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       delete progress.suspension;
       const taskHash = definitionHash(task);
       if (!progress.checkpoint || progress.checkpoint.taskHash !== taskHash || !await exists(progress.checkpoint.directory)) {
-        const existing = (await sourceFiles(options.workspace,task.files)).length > 0;
-        const phase = progress.status === 'checking' || progress.status === 'reviewing' || progress.status === 'complete' || existing ? 'checking' : 'editing';
-        if(existing&&phase==='checking')event('recovery','Código existente preservado: verificar os critérios da unidade antes de solicitar nova edição.',task.id);
+        const recordedWork=hasRecordedDelivery(progress);
+        const phase = recordedWork ? 'checking' : 'editing';
+        if(recordedWork)event('recovery','Trabalho registrado preservado: verificar os critérios da unidade antes de solicitar nova edição.',task.id);
         progress.checkpoint = await serial('isolation',async()=>{ if(integrationBlocked||persistenceFailed)throw new Error('Canonical publication is blocked; the private work remains preserved.');return createTaskWorkspace(options.workspace,task.id,taskHash,taskWriteScopes(task,state)); }); progress.checkpoint.phase = phase; await save();
       }
       const workspace = progress.checkpoint.directory;
       let operational = relocateOperationalEnvironment(canonicalOperational(task),options.workspace,workspace);
+      operational=await synchronizeProviders(task,workspace,operational);
       for (;;) {
         if (options.signal?.aborted || persistenceFailed || integrationBlocked) { cancelled = options.signal?.aborted === true; return; }
         const controlState=digest(JSON.stringify({protocol:executionProtocol,phase:progress.checkpoint.phase,input:await revision(task,workspace,operational),strategy:progress.strategy,findings:progress.findings,reviewFailure:progress.reviewFailureSignature,configuration:options.configurationRevision??'',resourceGeneration:progress.retryGeneration??0}));
@@ -635,13 +725,33 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
           }
         }
         const prepared = await projectDependencies(task,workspace,operational);
-        if (!prepared) { await suspend(task,'environment','Dependency recovery made no usable operational progress.','The consumer still cannot use its selected provider.',true); return; }
+        if (!prepared) { await suspend(task,'environment','Dependency recovery made no usable operational progress.','The consumer still cannot use its selected provider.'); return; }
         operational = prepared;
         if (progress.checkpoint.phase === 'checking') {
           await transition(task,'checking','Checking only relevant, current proof inputs.');
           const selected = selectVerifications(options.brief,{...task,checks:progress.checks ?? task.checks});
           if (selected.some(item=>item.replaced)) {
             const detail=selected.filter(item=>item.replaced).map(item=>item.replaced).join('\n');
+            const protocols=selected.filter(item=>item.protocolIssue);
+            if(protocols.length){
+              const originals=protocols.map(item=>item.protocolIssue!.original),ids=new Set(originals.map(check=>check.id));
+              // Retire an incoherent instrument, never a product failure. The
+              // original declaration stays in the durable recovery audit.
+              progress.checks=reconcileChecks((progress.checks??task.checks).filter(check=>!ids.has(check.id)));
+              metrics.repetitions.push({taskId:task.id,action:'verification-protocol',reason:JSON.stringify({issues:protocols.map(item=>item.protocolIssue),ownership:requiredTaskInterfaces(options.brief,plan,task)}),at:now()});
+              await save();
+              const owned=protocols.find(item=>item.requiredKind&&requiredTaskInterfaces(options.brief,plan,task).some(kind=>kind===item.requiredKind));
+              if(!owned){
+                const local=await derivedChecks(workspace,task);
+                if(local.length){
+                  progress.checks=reconcileChecks([...progress.checks,...local]);progress.strategy='revalidate-only';
+                  event('recovery','Instrumento incompatível substituído pela verificação local pertinente; a interação completa continua obrigatória no responsável final.',task.id);await save();continue;
+                }
+              }
+              const kind=owned?.requiredKind??protocols[0]!.requiredKind;
+              if(await materializeVerification(task,workspace,operational,`${detail}\nOriginal declarations (preserved, not executed as browser proof):\n${JSON.stringify(originals)}`,kind))continue;
+              const problem=incident('instrument',task.id,'The declared browser interaction needs a compatible executable runner; starting a server alone supplies no interaction proof.',detail);scheduleReplan(task,problem);await suspend(task,'instrument',problem.message,detail);return;
+            }
             if (await repairRecipe(task,workspace,operational,detail)) continue;
             const problem=incident('instrument',task.id,'The verification recipe needs a compatible invocation; reconcile its proof contract without editing the product.',detail);problem.repairScope='verification';scheduleReplan(task,problem);
             await suspend(task,'instrument',problem.message,detail); return;
@@ -672,7 +782,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
             metrics.repetitions.push({taskId:task.id,action:'verify',reason:`Observed ${failures.length} failed proofs; consecutive identical failure ${progress.noProgress}.`,at:now()}); await save();
             if (failures.some(result=>result.classification==='transport'||result.classification==='environment')) {
               const kind=failures.some(result=>result.classification==='environment')?'environment':'transport';
-              if(kind==='environment')scheduleReplan(task,incident('planning',task.id,'The verification consumer cannot use its declared environment. Reconcile the actual invocation, dependency and readiness contract.',detail));
+              if(kind==='environment')scheduleReplan(task,incident('environment',task.id,'The verification consumer cannot use its declared environment. Reconcile the actual invocation, dependency and readiness contract.',detail));
               await suspend(task,kind,'A verification resource must be recovered before its behavior can be proved.',detail,kind==='transport'); return;
             }
             if (failures.some(result=>result.classification==='instrument')) {
@@ -697,7 +807,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
           const requiredKind = requireInterface(task,results);
           if (requiredKind) {
             const detail=`The work unit requires actual ${requiredKind} interaction; syntax or compilation alone does not establish its behavior. Observed proofs:\n${results.map(result=>result.evidence.output).join('\n')}`;
-            if (await repairRecipe(task,workspace,operational,detail,requiredKind)) continue;
+            if (await materializeVerification(task,workspace,operational,detail,requiredKind)) continue;
             const problem=incident('instrument',task.id,`The requested ${requiredKind} behavior still needs an executable proof contract after local recipe recovery. Reconcile its actual interface and invocation while preserving existing product work.`,detail);problem.repairScope='verification';scheduleReplan(task,problem);
             await suspend(task,'instrument',problem.message,detail); return;
           }
@@ -713,10 +823,10 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
             progress.checkpoint.phase='checking';progress.strategy='recover-review-evidence';
             event('recovery','Referências de provas ausentes ou desatualizadas; reconciliando a verificação antes de solicitar um parecer.',task.id,{missing:proofPacket.missing,referencesCurrent});await save();continue;
           }
-          let approved = progress.reviews.findLast(item=>item.inputHash===hash&&item.assessment.decision==='approved');
-          if(!approved){
-            for(const review of [...progress.reviews].reverse())if(review.assessment.decision==='approved'&&await inspectionStillCurrent(review.inspection,workspace,options.brief,plan,task)){approved=review;break;}
-          }
+          let approved:NonNullable<TaskProgress['reviews']>[number]|undefined;
+          const acknowledged=await acknowledgedHandoffs(task,workspace);
+          const incoming=(state.reviewHandoffs??[]).filter(item=>item.ownerTaskId===task.id);
+          if(incoming.every(item=>acknowledged.has(item.id)))for(const review of [...progress.reviews].reverse())if(review.assessment.decision==='approved'&&(review.inspection?await inspectionStillCurrent(review.inspection,workspace,options.brief,plan,task,deliveryWriteSet(task.id,progress,state.integrations)):review.inputHash===hash)){approved=review;break;}
           if(approved){
             gate(task,'G3','complete','Inspeção independente preservada: fontes e critérios idênticos; provas atuais confirmadas.');
             if(approved.inputHash!==hash){metrics.repetitions.push({taskId:task.id,action:'reuse-inspection',reason:`Independent approval ${approved.inputHash} remains bound to unchanged authority and source; every current verification receipt passed.`,at:now()});event('recovery','Provas revalidadas; o parecer de código válido foi preservado sem nova chamada ao auditor.',task.id);}
@@ -728,12 +838,19 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
               const previous = progress.reviews.filter(item=>item.inputHash===hash).at(-1);
               const previousLimit=Math.max(256,Math.floor((progress.contextChars??options.contextChars??24000)*.08));
               const preceding=clarification&&previous?`\nPRECEDING REVIEW ${JSON.stringify({characters:previous.assessment.original.length,complete:previous.assessment.original.length<=previousLimit})}\n${previous.assessment.original.slice(0,previousLimit)}`:'';
-              const result = await invoke(task,workspace,'reviewer',clarification ? 'Clarify only the preceding review of these same files. Identify a material expected/observed defect linked to a supplied criterion, or explicitly approve. An instrument restriction, absent test quota or unreadable format is not grounds to edit correct code. Return one JSON {approved,findings:[{kind,file,observed,expected,evidence,fix,evidenceType,verification}]}.' : 'Inspect this work unit and its actual evidence without executing mutating verification commands. Return one JSON {approved:true,findings:[]} if its supplied criteria and mandatory stack are fulfilled, otherwise findings:[{kind,file,observed,expected,evidence,fix}]. Report only material product defects; classify instrument, environment and planning failures separately. A runtime claim must cite existing verification evidence or declare evidenceType:"inspection-command" with a concrete verification recipe for independent writable reproduction. Static source findings use evidenceType:"source" with location and expected/observed behavior.',`${proofPacket.text}${preceding}`,true,clarification?'clarify-review':'review',operational);
+              const result = await invoke(task,workspace,'reviewer',(clarification ? 'Clarify only the preceding review of these same files. Identify a material expected/observed defect linked to a supplied criterion, or explicitly approve. An instrument restriction, absent test quota or unreadable format is not grounds to edit correct code. Return one JSON {approved,findings:[{kind,file,observed,expected,evidence,fix,evidenceType,verification}]}.' : 'Inspect this work unit and its actual evidence without executing mutating verification commands. Return one JSON {approved:true,findings:[]} if its supplied criteria and mandatory stack are fulfilled, otherwise findings:[{kind,file,observed,expected,evidence,fix}]. Report only material product defects; classify instrument, environment and planning failures separately. A runtime claim must cite existing verification evidence or declare evidenceType:"inspection-command" with a concrete verification recipe for independent writable reproduction. Static source findings use evidenceType:"source" with location and expected/observed behavior.')+' A finding may declare scope:"unit"|"integration", requirementId, deferToTaskId and criterionId. Only the supplied DAG/source can assign a later owner; a local criterion stays with this unit. Explicitly state whether this unit is approved while a valid integration obligation remains pending.',`${proofPacket.text}${preceding}`,true,clarification?'clarify-review':'review',operational);
               if (result.status === 'cancelled' || options.signal?.aborted) { cancelled = true; return; }
               if (external(result)) { progress.strategy = 'resume-review'; await suspend(task,'transport','The reviewer is unavailable; no edit or confirmed proof will be replayed.',result.issue?.message ?? '',true); return; }
-              const assessment = interpretReview(result.text);
+              let assessment = interpretReview(result.text);
               if(result.issue){assessment.decision='unresolved';assessment.approved=false;assessment.transformations.push({path:'$',operation:'unresolved',reason:`The inspection operation failed (${result.issue.kind}); its original verdict is retained but is not a valid approval.`});}
-              const coverage=progress.actions.findLast(action=>action.action==='reviewer'&&action.strategy===(clarification?'clarify-review':'review')&&action.result?.text===result.text)?.sourceCoverage??[];
+              const scoped=await resolveReviewScope(workspace,options.brief,plan,task,assessment);assessment=scoped.assessment;
+              if(scoped.handoffs.length){
+                state.reviewHandoffs??=[];
+                for(const handoff of scoped.handoffs){const previous=state.reviewHandoffs.find(item=>item.id===handoff.id);if(previous){previous.status='pending';delete previous.proofIds;delete previous.resolvedAt;}else state.reviewHandoffs.push({...handoff,createdAt:now()});}
+                event('recovery','Achado de integração preservado na fila do responsável final; o critério local permanece separado.',task.id,{handoffIds:scoped.handoffs.map(item=>item.id)});await save();
+              }
+              const reviewAction=progress.actions.findLast(action=>action.action==='reviewer'&&action.strategy===(clarification?'clarify-review':'review')&&action.result?.text===result.text);
+              const coverage=reviewAction?.sourceCoverage??[];
               for(const finding of assessment.findings){
                 if(finding.disposition!=='defect'||!finding.file||finding.evidenceType==='verification'||finding.evidenceType==='inspection-command')continue;
                 const source=await substantiateSourceFinding(workspace,finding,coverage);
@@ -743,7 +860,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
                 if(finding.file)progress.contextFocus=[finding.file,...(progress.contextFocus??[]).filter(path=>path!==finding.file)];
               }
               for(const finding of assessment.findings){
-                if(finding.evidenceType!=='inspection-command')continue;
+                if(finding.disposition!=='defect'||finding.evidenceType!=='inspection-command')continue;
                 const recipes=normalizeChecks(finding.reproduction?[finding.reproduction]:[],options.brief).map(check=>({...check,id:`inspection-${finding.id}`,requirementIds:task.requirementIds}));
                 if(!recipes.length||recipes.some(check=>selectVerifications(options.brief,{...task,checks:[check]}).some(selected=>selected.replaced))){
                   assessment.decision='unresolved';assessment.approved=false;assessment.transformations.push({path:`findings.${finding.id}`,operation:'unresolved',reason:'A runtime claim needs a concrete compatible reproduction in writable isolation. The original claim is preserved and is not grounds for an edit.'});
@@ -767,8 +884,8 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
                 finding.text=reviewFindingText(finding);
               }
               assessment.actionableFindings=assessment.findings.filter(finding=>finding.disposition==='defect');assessment.advisories=assessment.findings.filter(finding=>finding.disposition==='advisory');
-              const inspection=assessment.decision==='approved'?await createInspectionIdentity(workspace,options.brief,plan,task,coverage):undefined;
-              progress.reviews.push({inputHash:hash,at:now(),assessment,...(inspection?{inspection}:{})}); event('review',`Review decision: ${assessment.decision}`,task.id,assessment); await save();
+              const inspection=assessment.decision==='approved'?await createInspectionIdentity(workspace,options.brief,plan,task,coverage,deliveryWriteSet(task.id,progress,state.integrations)):undefined;
+              progress.reviews.push({inputHash:hash,at:now(),assessment,...(inspection?{inspection}:{}),...(reviewAction?.handoffIds?.length?{handoffIds:[...reviewAction.handoffIds]}:{})}); event('review',`Review decision: ${assessment.decision}`,task.id,assessment); await save();
               if(progress.checkpoint.phase==='checking')break;
               if(replans.has(task.id)){const problem=replans.get(task.id)!;await suspend(task,'planning',problem.message,problem.evidence);return;}
               const observedProofs=state.evidence.filter(item=>item.taskId===task.id);
@@ -817,6 +934,11 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
             progress.revision = await revision(task,options.workspace,canonicalOperational(task)); progress.definitionHash=definitionHash(task); progress.findings=[]; progress.strategy='verified'; delete progress.suspension;
             state.incidents = state.incidents.filter(item=>item.subject!==task.id);
             await transition(task,'complete','Approved isolated changes integrated without overwriting concurrent work.');
+            const recovered=replans.get(task.id);
+            if(recovered){
+              replans.delete(task.id);delete state.pendingReplans?.[task.id];
+              metrics.repetitions.push({taskId:task.id,action:'resolve-replan',reason:`The queued incident ${recovered.id} is superseded by current successful verification, explicit approval and integration of this same delivery.`,at:now()});
+            }
             if(!persistenceFailed){const directory=progress.checkpoint!.directory;delete progress.checkpoint;delete progress.verificationCheckpoint;delete progress.dependencyCache;await save();if(!persistenceFailed)await measured('cleanup',()=>rm(dirname(directory),{recursive:true,force:true})).catch(error=>event('recovery',`A área já integrada será limpa depois: ${String(error)}`,task.id));}
           });
           emitProgress(options.onEvent,{id:`task:${task.id}:stages`,label:`${task.id}: edição, verificações e revisão`,completed:3,total:3,status:'complete',stage:'build',unit:'etapas'}); return;
@@ -831,7 +953,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         if(error instanceof ContextTooLarge){problem.contextChars=Math.max(1,Math.floor((progress.contextChars??options.contextChars??24000)/2));problem.repairScope='delivery';}
         scheduleReplan(task,problem);await suspend(task,'planning',problem.message,problem.evidence);return;
       }
-      if(error instanceof OperationalInvocationConflict){const problem=incident('planning',task.id,'Provider aliases resolve to contradictory invocations for this consumer.',error.message);scheduleReplan(task,problem);await suspend(task,'planning',problem.message,problem.evidence);return;}
+      if(error instanceof OperationalInvocationConflict||error instanceof ProviderSynchronizationError){const problem=incident('environment',task.id,error instanceof OperationalInvocationConflict?'Provider aliases resolve to contradictory invocations for this consumer.':'A published provider could not be materialized for the existing consumer.',error.message);scheduleReplan(task,problem);await suspend(task,'environment',problem.message,problem.evidence);return;}
       await suspend(task,error instanceof IntegrationConflict?'integration':'instrument',error instanceof Error?error.message:String(error),progress.checkpoint?.directory ?? '');
     }
   };
@@ -978,9 +1100,9 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         }finally{action.durationMs=Date.now()-start;await save();}
         if(cancelled||options.signal?.aborted)break;
         if(proposal){
-          const reconciled=reconcilePlan(options.brief,proposal,plan);const meaningful=(value:DevelopmentPlan):string=>digest(JSON.stringify({...value,revision:0}));
+          const reconciled=reconcilePlan(options.brief,proposal,plan);
           const effectiveProofChanged=problem.repairScope==='verification'&&JSON.stringify(progress.checks??task.checks)!==JSON.stringify(reconciled.tasks.find(unit=>unit.id===task.id)?.checks??[]);
-          if(!validatePlan(options.brief,reconciled).length&&(meaningful(reconciled)!==meaningful(plan)||effectiveProofChanged)){
+          if(!validatePlan(options.brief,reconciled).length&&(recoveryPlanIdentity(reconciled,problem.repairScope)!==recoveryPlanIdentity(plan,problem.repairScope)||effectiveProofChanged)){
             const preceding=plan;plan=reconciled;
             recordRetiredReplans(retireObsoleteReplans(state,plan));
             for(const definition of plan.tasks){state.taskDefinitions??={};state.taskDefinitionHistory??={};state.taskDefinitions[definition.id]=structuredClone(definition);state.taskDefinitionHistory[definitionHash(definition)]=structuredClone(definition);}
@@ -989,22 +1111,26 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
               if(old&&(definitionHash(old)!==definitionHash(unit)||unit.id===id&&effectiveProofChanged)){
                 if(JSON.stringify(old.checks)!==JSON.stringify(unit.checks)||unit.id===id&&effectiveProofChanged)delete progress.checks;
                 delete progress.suspension;delete progress.verificationCheckpoint;
-                if(progress.checkpoint){progress.checkpoint.taskHash=definitionHash(unit);progress.checkpoint.phase='checking';}
-                progress.status='checking';progress.strategy='reconcile-existing-work';
+                const recordedWork=hasRecordedDelivery(progress);
+                if(progress.checkpoint){progress.checkpoint.taskHash=definitionHash(unit);progress.checkpoint.phase=recordedWork?'checking':'editing';}
+                progress.status=recordedWork?'checking':'pending';progress.strategy=recordedWork?'reconcile-existing-work':'implement';
               }
             }
             attempted.clear();changed=true;
-          }
+          }else if(!validatePlan(options.brief,reconciled).length){action.outcome='unchanged';note(incident('planning',task.id,'The scoped reconciliation changed no executable operation. Its explanation is preserved without replaying the same failed preparation.',problem.evidence));}
         }
         if(action.outcome==='running')action.outcome='complete';consume();await save();
       }if(cancelled||options.signal?.aborted)return finish('cancelled');if(changed||replans.size)continue;
     }
+    // Finalization cannot prepare unrelated providers or invalidate completed
+    // deliveries while a drained worker still has an unresolved obligation.
+    if(plan.tasks.some(task=>state.tasks[task.id]?.status!=='complete'))return finish('waiting');
     // Revalidate concrete provider identity before trusting cached proofs or final acceptance.
     for(const node of plan.environment){
       const previous=state.environment[node.id];if(!previous)continue;
       const base=mergeOperationalEnvironments(options.workspace,...node.dependsOn.map(id=>operationalValue(state.environment[id]?.operational)));
-      const result=await measured('environmentRevalidation',()=>prepareEnvironmentNode(options.workspace,node,options.brief,command,{...consumerHints(node),operational:base,previous:{ready:previous.ready,fingerprint:previous.fingerprint??'',operational:operationalValue(previous.operational)??base,...(previous.failedFingerprint?{noProgress:true}:{})},revalidate:true,terminal,allowSystemInstall:options.allowSystemInstall===true,...(options.signal?{signal:options.signal}:{}),onEvent:detail=>emitEvent(options.onEvent,detail)}));
-      state.environment[node.id]={...previous,ready:result.ready,inputHash:digest(JSON.stringify(node)),fingerprint:result.fingerprint,operational:result.operational,...(!result.ready?{failedFingerprint:result.fingerprint}:{})};
+      const result=await measured('environmentRevalidation',()=>prepareEnvironmentNode(options.workspace,node,options.brief,command,{...consumerHints(node),operational:base,installationOperational:installationEnvironment(options.workspace),previous:{ready:previous.ready,fingerprint:previous.fingerprint??'',...(previous.installationRevision?{installationRevision:previous.installationRevision}:{}),operational:operationalValue(previous.operational)??base,...(previous.failedFingerprint?{noProgress:true}:{})},revalidate:true,terminal,allowSystemInstall:options.allowSystemInstall===true,...(options.signal?{signal:options.signal}:{}),onEvent:detail=>emitEvent(options.onEvent,detail)}));
+      state.environment[node.id]={...previous,ready:result.ready,inputHash:digest(JSON.stringify(node)),fingerprint:result.fingerprint,...(result.cache.installationRevision?{installationRevision:result.cache.installationRevision}:{}),operational:result.operational,...(!result.ready?{failedFingerprint:result.fingerprint}:{})};
       if(!result.ready){
         for(const problem of result.incidents)note(problem);
         // Final readiness uses the same recovery path as initial readiness. A
@@ -1046,7 +1172,9 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       for(const check of checks){const hash=await proofHash(task,check,options.workspace,operational);if(!state.evidence.some(item=>item.taskId===task.id&&item.checkId===check.id&&item.inputHash===hash&&item.passed))stale.push(check);}
       if(!stale.length){
         delete progress.revalidationFingerprint;
-        if(progress.definitionHash!==definitionHash(task)){
+        let currentInspection=false;
+        for(const review of [...progress.reviews??[]].reverse())if(review.assessment.decision==='approved'&&(review.inspection?await inspectionStillCurrent(review.inspection,options.workspace,options.brief,plan,task,deliveryWriteSet(task.id,progress,state.integrations)):review.inputHash===current)){currentInspection=true;break;}
+        if(progress.definitionHash!==definitionHash(task)||!currentInspection){
           const area=await serial('isolation',()=>createTaskWorkspace(options.workspace,task.id,definitionHash(task),taskWriteScopes(task,state)));area.phase='reviewing';progress.checkpoint=area;progress.status='reviewing';progress.strategy='review-changed-criteria';attempted.delete(task.id);invalidated=true;await save();
         }else progress.revision=current;
         continue;
@@ -1059,7 +1187,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       delete progress.checkpoint;progress.status='checking';progress.strategy='revalidate-only';attempted.delete(task.id);invalidated=true;await save();
     }
     if(invalidated)continue;
-    if(plan.tasks.some(task=>state.tasks[task.id]?.status!=='complete')||state.integrations.some(transaction=>transaction.phase!=='applied'))return finish('waiting');
+    if(state.integrations.some(transaction=>transaction.phase!=='applied'))return finish('waiting');
     // Final recipes and requirement/interface coverage are independent of the model's approval.
     const acceptanceTask:WorkUnit={id:'$acceptance',title:'Final acceptance',goal:'Prove mandatory outcomes in the requested interface.',instructions:'Verify integrated deliveries without changing them.',requirementIds:options.brief.requirements.map(item=>item.id),dependsOn:[],environmentIds:plan.environment.map(item=>item.id),contractIds:plan.contracts.map(item=>item.id),files:[],inputs:[...new Set(plan.tasks.flatMap(task=>task.files))],criteria:['Every mandatory requirement has current appropriate evidence.'],checks:plan.acceptance??[],risk:'normal',blockedBy:[]};
     const operational=canonicalOperational(acceptanceTask);
@@ -1106,8 +1234,19 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       const provider=binding?Object.values(operational.bindings).some(item=>item.ready&&obligationMatchesProvider(requirement,item)):true;
       if(!proof||!provider){
         const problem=incident(binding&&!provider?'environment':'instrument',requirement.id,'Mandatory requirement has no current proof in its required interface/provider.',requirement.statement);note(problem);
+        problem.repairScope=binding&&!provider?'environment':'verification';
         const fingerprint=digest(JSON.stringify({requirement,kind,proof,provider,proofs:currentProofs.map(item=>item.inputHash)}));state.acceptanceRecovery??={};
         const owner=consumers.find(task=>!consumers.some(other=>other.dependsOn.includes(task.id)))??consumers[0];
+        const materializationKey=`${fingerprint}:verification-materialization`;
+        if(!proof&&provider&&owner&&!state.acceptanceRecovery[materializationKey]){
+          state.acceptanceRecovery[materializationKey]='running:verification-materialization';await save();
+          if(await materializeVerification(owner,options.workspace,canonicalOperational(owner),`Mandatory outcome still needs its actual final proof after integration. Preserve the delivery and materialize only verification.\n${requirement.statement}`,kind,true)){
+            state.acceptanceRecovery[materializationKey]='complete:verification-materialization';
+            const progress=state.tasks[owner.id]!;progress.status='checking';progress.strategy='revalidate-only';delete progress.checkpoint;delete progress.verificationCheckpoint;delete progress.suspension;attempted.delete(owner.id);await save();continue execution;
+          }
+          if(options.signal?.aborted||cancelled)return finish('cancelled');
+          state.acceptanceRecovery[materializationKey]='complete:instrument-unresolved';await save();
+        }
         if(options.repairPlan&&owner&&!state.acceptanceRecovery[fingerprint]){state.acceptanceRecovery[fingerprint]='planning';scheduleReplan(owner,problem);await save();continue execution;}
         return finish('waiting');
       }
@@ -1119,6 +1258,41 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       const fingerprint=digest(JSON.stringify({issues:conformity,proofs:currentProofs.map(proof=>proof.inputHash)}));state.acceptanceRecovery??={};
       if(options.repairPlan&&!state.acceptanceRecovery[fingerprint]){state.acceptanceRecovery[fingerprint]='planning';const issue=conformity[0]!,owner=plan.tasks.find(task=>task.requirementIds.includes(issue.requirementId))??plan.tasks[0];if(owner){const problem=incident(issue.code==='provider-unavailable'?'environment':'instrument',issue.requirementId,'Mandatory provider usage is not yet proved; reconcile its actual provider and verification contract before changing any delivery.',issue.message);problem.repairScope=issue.code==='provider-unavailable'?'environment':'verification';scheduleReplan(owner,problem);await save();continue;}}
       return finish('waiting');
+    }
+    // Moving an integration finding never proves it. Only the current final
+    // owner's acknowledgement and a fresh appropriate receipt can discharge it.
+    for(const handoff of state.reviewHandoffs??[]){
+      const origin=plan.tasks.find(task=>task.id===handoff.fromTaskId),owner=plan.tasks.find(task=>task.id===handoff.ownerTaskId),requirement=options.brief.requirements.find(item=>item.id===handoff.requirementId);
+      const relation=origin?await validateFindingDeferral(options.workspace,options.brief,plan,origin,handoff.finding):{valid:false,reason:'The originating contribution no longer has an active plan identity.'};
+      if(!relation.valid||!owner||!requirement||JSON.stringify(requirement.source)!==JSON.stringify(handoff.source)){
+        handoff.status='pending';const problem=incident('instrument',handoff.id,'The deferred finding needs a current source and final owner before completion.',relation.reason);problem.repairScope='verification';note(problem);await save();return finish('waiting');
+      }
+      const kind=requiredRequirementInterface(requirement),stack=requirement.kind==='stack'&&Boolean(requirement.binding);
+      const recipes=[...plan.tasks.flatMap(task=>(state.tasks[task.id]?.checks??task.checks).map(check=>({taskId:task.id,check}))),...finalChecks.map(check=>({taskId:'$acceptance',check}))];
+      const proofs=currentProofs.filter(proof=>recipes.some(({taskId,check})=>taskId===proof.taskId&&check.id===proof.checkId&&(stack?check.conformance?.requirementId===requirement.id:(taskId===owner.id||taskId==='$acceptance')&&check.requirementIds.includes(requirement.id)))&&(stack?proof.level!=='syntax':proof.level==='behavior'&&(!kind||proof.kind===kind)));
+      if(!proofs.length){
+        handoff.status='pending';const key=digest(JSON.stringify({handoff:handoff.id,proofs:currentProofs.map(proof=>proof.inputHash)}));state.acceptanceRecovery??={};
+        const previous=state.acceptanceRecovery[key];
+        if(!previous||previous.startsWith('running:')||previous.startsWith('interrupted:')){
+          state.acceptanceRecovery[key]='running:handoff-proof';await save();
+          if(await materializeVerification(owner,options.workspace,canonicalOperational(owner),`The final integration obligation still has no current owner proof. Preserve the earlier contribution; verify this expected outcome on the integrated product.\n${reviewFindingText(handoff.finding)}`,kind,true)){
+            state.acceptanceRecovery[key]='complete:handoff-proof-recipe';
+            const progress=state.tasks[owner.id]!;progress.status='checking';progress.strategy='revalidate-only';delete progress.checkpoint;delete progress.verificationCheckpoint;delete progress.suspension;attempted.delete(owner.id);await save();continue execution;
+          }
+          if(options.signal?.aborted||cancelled){state.acceptanceRecovery[key]='interrupted:handoff-proof';await save();return finish('cancelled');}
+          state.acceptanceRecovery[key]='complete:handoff-proof-unresolved';
+        }
+        const problem=incident('instrument',handoff.id,'The deferred integration finding remains unproved by its final owner.',reviewFindingText(handoff.finding));problem.repairScope='verification';note(problem);
+        if(options.repairPlan&&state.acceptanceRecovery[key]!=='planning-handoff'){state.acceptanceRecovery[key]='planning-handoff';scheduleReplan(owner,problem);await save();continue execution;}
+        await save();return finish('waiting');
+      }
+      const acknowledged=await acknowledgedHandoffs(owner,options.workspace);
+      if(!acknowledged.has(handoff.id)){
+        handoff.status='pending';const progress=state.tasks[owner.id]!,area=await serial('isolation',()=>createTaskWorkspace(options.workspace,owner.id,definitionHash(owner),taskWriteScopes(owner,state)));
+        area.phase='reviewing';progress.checkpoint=area;progress.status='reviewing';progress.strategy=`integration-obligation:${digest(JSON.stringify((state.reviewHandoffs??[]).filter(item=>item.ownerTaskId===owner.id&&!acknowledged.has(item.id)).map(item=>item.id)))}`;delete progress.suspension;attempted.delete(owner.id);await save();continue execution;
+      }
+      const proofIds=proofs.map(proof=>proof.id);
+      if(handoff.status!=='resolved'||JSON.stringify(handoff.proofIds)!==JSON.stringify(proofIds)){handoff.status='resolved';handoff.proofIds=proofIds;handoff.resolvedAt=now();handoff.resolutions??=[];handoff.resolutions.push({at:handoff.resolvedAt,proofIds});event('recovery','Obrigação de integração confirmada pelo responsável final com provas atuais.',owner.id,{handoffId:handoff.id,proofIds});await save();}
     }
     event('complete','Todos os fragmentos foram integrados e os requisitos obrigatórios possuem provas observadas.');return finish('complete');
   }

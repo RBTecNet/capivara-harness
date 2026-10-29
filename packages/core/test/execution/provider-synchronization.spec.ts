@@ -1,0 +1,47 @@
+import { afterEach, expect, it } from 'vitest';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { EnvironmentNode, ProductBrief } from '../../src/domain/types.js';
+import { createTaskWorkspace } from '../../src/execution/isolation.js';
+import { beginEnvironmentRecovery, commitEnvironmentRecovery } from '../../src/execution/recovery-scope.js';
+import { prepareEnvironmentNode, applyOperationalEnvironment, relocateOperationalEnvironment } from '../../src/execution/environment.js';
+import { synchronizePublishedInstallations } from '../../src/execution/provider-synchronization.js';
+import { executeCommand } from '../../src/runtime/command.js';
+
+const roots: string[] = [];
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+
+it.skipIf(process.platform === 'win32')('propagates a later applied tool generation into a retained workspace without replaying its editor or replacing product and dependency forks', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'capivara-provider-generation-')); roots.push(root);
+  await writeFile(join(root, 'app.mjs'), 'console.log("initial app");\n');
+  await writeFile(join(root, 'package.json'), '{"name":"canonical","version":"1.0.0"}');
+  await mkdir(join(root, 'node_modules')); await writeFile(join(root, 'node_modules/fork.marker'), 'original dependency');
+  const checkpoint = await createTaskWorkspace(root, 'application', 'same-task-definition', ['app.mjs', 'package.json']);
+  checkpoint.phase = 'checking';
+  await writeFile(join(checkpoint.directory, 'app.mjs'), 'console.log("completed application work");\n');
+  await writeFile(join(checkpoint.directory, 'package.json'), '{"name":"private-fork","version":"5.0.0"}');
+  await writeFile(join(checkpoint.directory, 'node_modules/fork.marker'), 'private dependency fork');
+  const saved = await Promise.all(['app.mjs', 'package.json', 'node_modules/fork.marker'].map(path => readFile(join(checkpoint.directory, path), 'utf8')));
+  const node: EnvironmentNode = { id: 'builder', name: 'Builder', kind: 'tool', identity: { capability: 'builder', kind: 'cli', provider: 'Prepared builder' }, dependsOn: [], targets: [], reason: 'Build the application.', check: { command: '.capivara-tools/bin/builder', args: ['--version'] }, prepare: [], provides: { command: ['.capivara-tools/bin/builder'], aliases: ['builder'] } };
+  const repair = await beginEnvironmentRecovery(root, node);
+  await mkdir(join(repair.directory, '.capivara-tools/bin'), { recursive: true });
+  await writeFile(join(repair.directory, '.capivara-tools/bin/builder'), `#!${process.execPath}\nconsole.log('BUILDER_READY');\n`, { mode: 0o755 });
+  await writeFile(join(repair.directory, 'package.json'), '{"name":"canonical","version":"2.0.0"}');
+  await writeFile(join(repair.directory, 'node_modules/fork.marker'), 'new canonical dependency');
+  const publication = await commitEnvironmentRecovery(root, node, repair);
+  expect(publication.transaction.phase).toBe('applied');
+  const brief: ProductBrief = { schema: 'capivara/product/1', id: 'b', revision: 1, status: 'ready', name: 'App', summary: 'Run the app.', request: 'Run the app.', modes: ['cli'], targets: [], requirements: [], constraints: [], decisions: [], gaps: [] };
+  const prepared = await prepareEnvironmentNode(root, node, brief, executeCommand);
+  expect(prepared.ready).toBe(true);
+  const local = relocateOperationalEnvironment(prepared.operational, root, checkpoint.directory);
+  const consume = () => executeCommand(applyOperationalEnvironment({ cwd: checkpoint.directory, command: ['builder', '--version'] }, local));
+  const missing = await consume(); expect(missing.exitCode).not.toBe(0);
+  const synchronized = await synchronizePublishedInstallations(root, checkpoint.directory, [publication.transaction], ['app.mjs', 'package.json']);
+  expect(synchronized.synchronized.map(item => item.path)).toEqual(['.capivara-tools']);
+  expect(synchronized.retained.some(item => item.path === 'node_modules')).toBe(true);
+  const retried = await consume(); expect(retried.exitCode, retried.stderr).toBe(0); expect(retried.stdout).toContain('BUILDER_READY');
+  expect(await Promise.all(['app.mjs', 'package.json', 'node_modules/fork.marker'].map(path => readFile(join(checkpoint.directory, path), 'utf8')))).toEqual(saved);
+  expect(checkpoint.phase).toBe('checking'); expect(checkpoint.taskHash).toBe('same-task-definition');
+  expect((await synchronizePublishedInstallations(root, checkpoint.directory, [publication.transaction])).synchronized).toEqual([]);
+});

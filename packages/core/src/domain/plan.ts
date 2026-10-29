@@ -8,13 +8,15 @@ import { boundedReferences } from "./material.js";
 import type { CapabilityIdentity, CommandRecipe, DevelopmentPlan, DomainHooks, EnvironmentNode, IntegrationContract, PlanOptions, ProductBrief, Requirement, Verification, WorkUnit } from "./types.js";
 import { emitEvent, emitProgress } from "../telemetry/progress.js";
 import { PlanningFailure, PlanningProgress } from "./control.js";
-import { assertValidPlan, derivePlanObligations, reconcileChecks, reconcilePlan, sameDelivery, validatePlan, preferredProofOwner, resolveRequirementAlias } from "./reconcile.js";
+import { assertValidPlan, derivePlanObligations, reconcileChecks, reconcilePlan, sameDelivery, validatePlan, resolveRequirementAlias } from "./reconcile.js";
 import { normalizeVerificationAssertion } from "./assertions.js";
 import { verificationAssertionStatus } from "./assertions.js";
 import { verificationRegistry } from "./verifications.js";
 import { deriveBindingAuthority, matchesOperationalClaim, obligationMatchesProvider, recordBindingTransformation } from "./bindings.js";
 import type { PlanIssue } from "./reconcile.js";
 import { rehydratePlanRecords } from "./plan-records.js";
+import { verificationDeclaration } from './verification-declarations.js';
+import { applyAuthorityAmendments } from './authority-repair.js';
 
 const cleanId = (value: unknown, fallback: string): string => string(value).replace(/[^a-zA-Z0-9_.:-]+/g, "-") || fallback;
 const unique = <T extends { id: string }>(items: T[]): T[] => [...new Map(items.map((item) => [item.id, item])).values()];
@@ -185,16 +187,17 @@ function declaredConformance(item: Record<string, unknown>): Record<string, unkn
 
 export function normalizeChecks(value: unknown, brief: ProductBrief): Verification[] {
   const result: Verification[] = [];
-  for (const item of records(value)) {
+  for (const declaration of records(value)) {
     // Transport placement cannot discard an explicitly declared contract.
     // These adapters copy metadata; they never infer a provider or a proof.
+    const item = verificationDeclaration(declaration);
     const conformance = declaredConformance(item);
     const kind = ["command", "cli", "tui", "web", "desktop"].includes(string(item.kind)) ? string(item.kind) as Verification["kind"] : "command";
     const command = string(item.command);
     const capabilities = uniqueStrings([...strings(item.requiredCapabilities), ...inferredCapabilities(`${command} ${argv(item.args).join(" ")}`), ...(kind === "web" ? ["browser"] : [])]);
     if (!allowedCapabilities(brief, capabilities)) continue;
     if (kind === "desktop" && !brief.modes.includes("desktop")) continue;
-    const check: Verification = { id: cleanId(item.id, identity("check", `${kind}:${command}:${string(item.expected)}`)), kind, requirementIds: uniqueStrings([...strings(item.requirementIds), ...(conformance && string(conformance.requirementId) ? [string(conformance.requirementId)] : [])]), requiredCapabilities: capabilities };
+    const check: Verification = { id: cleanId(item.id, identity("check", `${kind}:${command}:${string(item.expected)}`)), kind, requirementIds: uniqueStrings([...strings(item.requirementIds), ...(string(item.requirementId) ? [string(item.requirementId)] : []), ...(conformance && string(conformance.requirementId) ? [string(conformance.requirementId)] : [])]), requiredCapabilities: capabilities };
     if (command) check.command = command;
     const args = argv(item.args);
     if (args.length) check.args = args;
@@ -204,7 +207,7 @@ export function normalizeChecks(value: unknown, brief: ProductBrief): Verificati
       const assertion = normalizeVerificationAssertion(item.assertion);
       if (assertion) check.assertion = assertion;
       else check.assertionIssue = "The proposed assertion is invalid. Use a typed contains/regex/exit/empty/json/all/any predicate with a concrete selector and value.";
-    }
+    } else if (string(item.assertionIssue)) check.assertionIssue = string(item.assertionIssue);
     if (typeof item.expectedExitCode === "number" && Number.isInteger(item.expectedExitCode) && item.expectedExitCode >= 0 && item.expectedExitCode <= 255) check.expectedExitCode = item.expectedExitCode;
     if (Array.isArray(item.input)) check.input = item.input.filter((input): input is string => typeof input === "string");
     if (Array.isArray(item.steps)) check.steps = records(item.steps).map((step) => {
@@ -496,7 +499,8 @@ function invariantState(brief: ProductBrief, plan: DevelopmentPlan, issue: PlanI
 
 function mergeRepairChecks(originals: Verification[], values: unknown, brief: ProductBrief): Verification[] {
   const result = structuredClone(originals), updates = records(values);
-  for (const update of updates) {
+  for (const declaration of updates) {
+    const update = verificationDeclaration(declaration);
     const original = result.find(check => check.id === update.id) ?? (!string(update.id) && result.length === 1 && updates.length === 1 ? result[0] : undefined);
     const conformance = declaredConformance(update);
     const normalized = normalizeChecks([{ ...original, ...update, ...(conformance ? { conformance } : {}), ...(original ? { id: original.id, ...(conformance === update && !['command','cli','tui','web','desktop'].includes(string(update.kind)) ? { kind: original.kind } : {}), requirementIds: uniqueStrings([...original.requirementIds, ...strings(update.requirementIds)]), constraintIds: uniqueStrings([...(original.constraintIds ?? []), ...strings(update.constraintIds)]) } : {}) }], brief);
@@ -535,7 +539,7 @@ async function invariantProposal(brief: ProductBrief, base: DevelopmentPlan, iss
     if (!existing) { if (!technical) plan.tasks.push(...normalizeTasks([update], brief, plan.environment, plan.contracts, [])); continue; }
     if (Array.isArray(update.environmentIds)) {
       const references = strings(update.environmentIds).map(id => aliases.get(id) ?? id);
-      existing.environmentIds = issue.code in providerStages && issue.code !== 'unproven-mandatory-provider' || issue.code.includes('environment') ? references : uniqueStrings([...existing.environmentIds, ...references]);
+      existing.environmentIds = issue.code in providerStages || issue.code.includes('environment') ? references : uniqueStrings([...existing.environmentIds, ...references]);
     }
     if (Array.isArray(update.contractIds)) existing.contractIds = uniqueStrings([...existing.contractIds, ...strings(update.contractIds)]);
     if (Array.isArray(update.inputs)) existing.inputs = uniqueStrings([...(existing.inputs ?? []), ...safePaths(update.inputs)]);
@@ -573,7 +577,7 @@ async function repairPlanIssues(brief: ProductBrief, plan: DevelopmentPlan, hook
     const environmentCause=issue.code==='mandatory-provider-mismatch'||issue.code==='unused-mandatory-provider'||issue.code.includes('environment');
     const protocol = environmentCause ? attempt.calls++?'environment-reference-patches':'environment-identity' : attempt.calls++ ? 'minimal-patches' : 'scoped-definitions'; attempts.set(stamp, attempt);
     const context = attempt.staged ?? plan, limit = hooks.contextChars ?? 24_000;
-    const task = issue.code === 'unproven-interface-behavior' ? preferredProofOwner(context, issue.subject) : context.tasks.find(candidate => candidate.id === issue.subject || candidate.requirementIds.includes(issue.subject));
+    const task = context.tasks.find(candidate => candidate.id === issue.subject || candidate.requirementIds.includes(issue.subject));
     const recipes = verificationRegistry(context).filter(({ check, taskId }) => check.conformance?.requirementId === issue.subject || check.requirementIds.includes(issue.subject) || taskId === task?.id);
     const requirement=brief.requirements.find(candidate=>candidate.id===issue.subject);
     const conformanceTargets=context.environment.filter(node=>requirement&&obligationMatchesProvider(requirement,node.identity)).map(node=>({environmentId:node.id,identity:node.identity,requirementId:issue.subject,requiredLevel:node.identity!.kind==='sdk'?'build':['runtime','service'].includes(node.identity!.kind)?'behavior':'build-or-behavior',artifactAndDependentBehaviorRequired:node.identity!.kind==='sdk',taskIds:context.tasks.filter(owner=>owner.environmentIds.includes(node.id)).map(owner=>owner.id)}));
@@ -781,7 +785,27 @@ export interface RepairPlanOptions extends DomainHooks {
   problem: string;
   finalize?: boolean;
   /** Instrument and provider incidents cannot redefine the product delivery. */
-  repairScope?: "verification" | "environment" | "delivery";
+  repairScope?: "verification" | "environment" | "delivery" | "authority";
+}
+
+async function repairSourceAuthority(options:RepairPlanOptions,task:WorkUnit):Promise<DevelopmentPlan>{
+  const requirements=options.brief.requirements.filter(requirement=>task.requirementIds.includes(requirement.id));
+  const prompt=[
+    'Correct only a derived planning fragment that contradicts an unchanged literal product obligation. Do not implement code, alter the brief or replace deliveries. Return JSON.',
+    'Shape: {"amendments":[{"taskId":"affected existing task ID","field":"criteria|instructions","index":0,"original":"exact original derived criterion or unique instruction fragment","replacement":"source-supported corrected text, or null to remove that derived fragment","requirementId":"active requirement covered by this task","quote":"exact words from that requirement source","reason":"concrete conflict between the derived fragment and its unchanged source"}]}. For criteria, index and original identify the whole criterion. For instructions, omit index and select only the unique conflicting substring; all surrounding text remains unchanged. Literal user criteria cannot be deleted or rewritten. Omit unchanged fields and do not create new tasks, requirements, checks or file ownership.',
+    `Affected task: ${JSON.stringify({id:task.id,goal:task.goal,instructions:task.instructions,criteria:task.criteria.map((text,index)=>({index,text})),requirementIds:task.requirementIds})}`,
+    `Unchanged authoritative obligations: ${JSON.stringify(requirements.map(({id,statement,source})=>({id,statement,source})))}`,
+    `Observed planning conflict: ${options.problem}`,
+  ].join('\n\n');
+  const response=await requestObject({...options,operation:'repair',prompt});
+  const {plan,corrections}=applyAuthorityAmendments(options.brief,options.plan,response.amendments,task.id);
+  plan.obligations=derivePlanObligations(options.brief,plan);
+  plan.revision=options.plan.revision+1;
+  plan.briefId=options.brief.id;plan.briefRevision=options.brief.revision;
+  if(options.finalize===false)plan.status='planning';
+  await options.save?.({brief:options.brief,plan});
+  emitEvent(options.onEvent,{type:'replanned',subject:task.id,message:'Fragmento derivado corrigido contra a fonte literal; pedido, entregas e provas preservados.',detail:{authorityCorrections:corrections}});
+  return plan;
 }
 
 /** Restore immutable definitions by reference before decoding an engineering
@@ -914,6 +938,7 @@ export async function repairWorkPlan(options: RepairPlanOptions): Promise<Develo
   plan.status = "planning";
   const task = plan.tasks.find((candidate) => candidate.id === options.taskId);
   if (!task) return options.plan;
+  if(options.repairScope==='authority')return repairSourceAuthority(options,task);
   if(options.repairScope==='verification'||options.repairScope==='environment')return repairRestrictedWorkPlan(options,task,options.repairScope);
   const progress = { id: `plan:repair:${task.id}`, label: `Revisão do plano: ${task.title}`, stage: "plan" };
   emitProgress(options.onEvent, { ...progress, status: "running" });

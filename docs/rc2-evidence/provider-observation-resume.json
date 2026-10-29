@@ -1,0 +1,30 @@
+{
+  "schema": "capivara/provider-observation-resume/1",
+  "capturedAt": "2026-10-29T01:44:06.308Z",
+  "baselineCommit": "bab97eb5836c60924dcec8bdf3fc7ff220caf899",
+  "sourceDigest": "8533576d01a35537b9b8835dec74aa5264e47e8538981a155dca91fbb5084757",
+  "environment": {
+    "node": "v24.22.1",
+    "platform": "linux"
+  },
+  "paidInferenceCalls": 0,
+  "productProjectAccess": false,
+  "baseline": {
+    "status": "complete",
+    "proofs": 2,
+    "hasConsumptionOrProcessWitnesses": false,
+    "injectedAgentCallbacks": 1
+  },
+  "upgrade": {
+    "status": "complete",
+    "agentCallbacks": 0,
+    "newProofs": 2,
+    "proofsWithRealObservations": 2
+  },
+  "unchangedResume": {
+    "status": "complete",
+    "agentCallbacks": 0,
+    "newProofs": 0
+  },
+  "sourcePreserved": true
+}

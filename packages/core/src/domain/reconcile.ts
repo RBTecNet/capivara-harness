@@ -3,9 +3,10 @@ import { allowedCapabilities, identity, inferredCapabilities, normalize, request
 import { ordered } from './context.js';
 import { PlanningFailure } from './control.js';
 import { verificationAssertionStatus } from './assertions.js';
-import { verificationRegistry } from './verifications.js';
-import { matchesOperationalClaim, obligationMatchesProvider } from './bindings.js';
-import type { DevelopmentPlan, ProductBrief, Requirement, Verification, VerificationAssertion, WorkUnit } from './types.js';
+import { isPlannedProductRecipe, verificationRegistry } from './verifications.js';
+import { deriveBindingAuthority, matchesOperationalClaim, obligationMatchesProvider } from './bindings.js';
+import { expandPartitionedRequirementIds } from './requirement-lineage.js';
+import type { DevelopmentPlan, PlanVerificationObligation, ProductBrief, Requirement, Verification, VerificationAssertion, WorkUnit } from './types.js';
 
 export interface PlanIssue { code: string; subject: string; message: string; environmentIds?: string[]; taskIds?: string[]; }
 const canonical = (text: string): string => normalize(text).replace(/[^\p{L}\p{N}+#.]+/gu, ' ').trim().replace(/\s+/g,' ');
@@ -153,6 +154,7 @@ export function reconcileChecks(checks: Verification[]): Verification[] {
 export function reconcilePlan(brief: ProductBrief, proposal: DevelopmentPlan, previous?: DevelopmentPlan): DevelopmentPlan {
   const plan = structuredClone(proposal);
   remapRequirements(brief,plan);
+  for(const task of plan.tasks)task.requirementIds=expandPartitionedRequirementIds(brief,task.requirementIds);
   const byId = new Map<string, WorkUnit>();
   const aliases = new Map<string, string>();
   const tasks: WorkUnit[] = [];
@@ -196,7 +198,29 @@ export function reconcilePlan(brief: ProductBrief, proposal: DevelopmentPlan, pr
   plan.tasks = tasks;
   if (plan.acceptance) plan.acceptance = reconcileChecks(plan.acceptance);
   plan.briefId = brief.id; plan.briefRevision = brief.revision;
+  plan.obligations=derivePlanObligations(brief,plan);
   return plan;
+}
+
+/** Obligations survive incomplete recipes. Only BUILD can certify their real
+ * execution; this ledger describes intended verification work, never success. */
+export function derivePlanObligations(brief:ProductBrief,plan:DevelopmentPlan):PlanVerificationObligation[]{
+  const registry=verificationRegistry(plan),obligations:PlanVerificationObligation[]=[];
+  for(const requirement of brief.requirements){
+    const binding=requirement.binding;
+    if(binding){
+      const authority=requirement.bindingAuthority??deriveBindingAuthority(requirement);
+      const providers=plan.environment.filter(node=>obligationMatchesProvider(requirement,node.identity));
+      const recipes=registry.filter(({check})=>isPlannedProductRecipe(check)&&check.requirementIds.includes(requirement.id)&&check.conformance?.requirementId===requirement.id&&check.conformance.productInputs.length>0&&providers.some(node=>matchesOperationalClaim(requirement,check.conformance!,node.identity))).map(({taskId,check})=>({taskId,checkId:check.id}));
+      obligations.push({requirementId:requirement.id,kind:'provider',provider:{provider:binding.provider,...(authority?.kind.authority==='literal'&&authority.kind.value?{kind:authority.kind.value}:{}),...(authority?.capability.authority==='literal'?{capability:binding.capability}:{})},recipeStatus:recipes.length?'planned':'pending',recipes,verification:'required-in-build'});
+    }
+    const kind=requiredRequirementInterface(requirement);
+    if(kind){
+      const recipes=registry.filter(({check})=>isPlannedProductRecipe(check)&&provesInterface(check,requirement.id,kind)).map(({taskId,check})=>({taskId,checkId:check.id}));
+      obligations.push({requirementId:requirement.id,kind:'interface',interface:kind,recipeStatus:recipes.length?'planned':'pending',recipes,verification:'required-in-build'});
+    }
+  }
+  return obligations;
 }
 
 /** Structural invariants are checked before scheduling and again before final acceptance. */
@@ -238,7 +262,7 @@ export function validatePlan(brief: ProductBrief, plan: DevelopmentPlan): PlanIs
     if (!plan.tasks.some(task => task.requirementIds.includes(requirement.id))) issue('uncovered-requirement',requirement.id,'Nenhuma entrega cobre este requisito obrigatório.');
     const browserOutcome = requiredRequirementInterface(requirement) === 'web' && (requirement.kind === 'interface' || requestedCapabilities(requirement.source.text).includes('browser'));
     if (browserOutcome) {
-      const proof = recipes.some(({check}) => check.requirementIds.includes(requirement.id) && check.command && check.level === 'behavior' && (check.kind === 'web' || check.requiredCapabilities.includes('browser')));
+      const proof = recipes.some(({check}) => isPlannedProductRecipe(check)&&check.requirementIds.includes(requirement.id) && check.level === 'behavior' && (check.kind === 'web' || check.requiredCapabilities.includes('browser')));
       if (!proof) issue('unproven-interface-behavior',requirement.id,'O resultado exige comportamento real no navegador. Inclua uma receita executável de nível behavior, kind=web ou requiredCapabilities=[browser], vinculada a este requisito. Build, API e sintaxe não comprovam interação no navegador.');
     }
     if (!requirement.binding) continue;
@@ -256,8 +280,6 @@ export function validatePlan(brief: ProductBrief, plan: DevelopmentPlan): PlanIs
     };
     if (!matches.length) issue('mandatory-provider-mismatch',requirement.id,`A capacidade ${binding.capability} (${binding.kind}) deve usar ${binding.provider}; o plano não oferece esse provedor.`, { ...references, environmentIds: nodes.map(node => node.id) });
     else if (!plan.tasks.some(task => task.environmentIds.some(id => consumes(id)))) issue('unused-mandatory-provider',requirement.id,`O provedor obrigatório ${binding.provider}, declarado em ${references.environmentIds.join(', ')}, não é consumido diretamente nem por dependências explícitas das entregas. Consumidores do requisito: ${references.taskIds.join(', ') || 'nenhum'}.`, references);
-    const proof = recipes.some(({check}) => check.requirementIds.includes(requirement.id) && check.command && check.level !== 'syntax' && check.conformance?.requirementId===requirement.id && matches.some(node=>matchesOperationalClaim(requirement,check.conformance!,node.identity)) && check.conformance.productInputs.length>0);
-    if (!proof) issue('unproven-mandatory-provider',requirement.id,`A conformidade com ${binding.provider} precisa de uma receita dedicada de tarefa ou aceite, vinculada à capacidade e a arquivos reais do produto. Disponibilidade e sintaxe não provam uso.`);
   }
   return issues;
 }

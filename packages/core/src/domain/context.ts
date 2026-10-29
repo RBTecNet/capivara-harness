@@ -28,7 +28,7 @@ export function packetText(packet: ContextPacket): string {
     `Complete capability limits enforced by the executor: forbidden=${packet.capabilityLimits.forbidden.join(",") || "none"}; required=${packet.capabilityLimits.required.join(",") || "none"}. Original restriction details can be retrieved by their recorded identifiers.`,
     packet.decisions.length ? `Relevant decisions:\n${packet.decisions.map((decision) => `${decision.fact}: ${decision.answer}`).join("\n")}` : "",
     packet.contracts.length ? `Integration contracts:\n${JSON.stringify(packet.contracts)}` : "",
-    packet.environment.length ? `Prepared technical requirements:\n${packet.environment.map((node) => `${node.id}: ${node.name} (${node.kind}); ${node.reason}${node.identity ? `; capability/provider=${JSON.stringify(node.identity)}` : ""}${node.provides?.command ? `; invocation=${JSON.stringify(node.provides.command)}` : ""}`).join("\n")}` : "",
+    packet.environment.length ? `Prepared technical requirements:\n${packet.environment.map((node) => `${node.id}: ${node.name} (${node.kind}); ${node.reason}${node.identity ? `; capability/provider=${JSON.stringify(node.identity)}` : ""}${node.provides?.command ? `; invocation=${JSON.stringify(node.provides.command)}` : ""}${node.provides?.modules?.length ? `; modules=${JSON.stringify(node.provides.modules)}` : ""}`).join("\n")}` : "",
     packet.task.files.length ? `Relevant paths: ${packet.task.files.join(", ")}` : "",
     packet.task.inputs?.length ? `Read dependencies: ${packet.task.inputs.join(", ")}` : "",
     packet.task.resources?.length ? `Exclusive resources: ${packet.task.resources.join(", ")}` : "",

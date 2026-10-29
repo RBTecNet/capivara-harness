@@ -1,5 +1,10 @@
 # Contratos e recuperação do motor
 
+Registro da rodada anterior (`bab97eb`). A distinção atual entre prontidão do
+plano e comprovação final, bem como a nova falha de ambiente, está em
+[PLAN, ambiente e entrevista](PLAN-AMBIENTE-ENTREVISTA.md). Os estados e números
+abaixo pertencem à execução identificada neste documento.
+
 Esta análise pertence ao novo banco de `samba_admin`, com **211 eventos**, 17
 chamadas concluídas, 14 requisitos, oito tarefas e seis ambientes. A execução
 parou em `waiting/plan` às **23:04:08 UTC**, sem owner, agente ativo ou estado

@@ -1,0 +1,180 @@
+{
+  "schema": "capivara/general-engine-comparison/1",
+  "generatedAt": "2026-10-29T01:43:25.292Z",
+  "baseline": "bab97eb5836c60924dcec8bdf3fc7ff220caf899",
+  "test": {
+    "path": "packages/core/test/app/general-engine-flow.spec.ts",
+    "sha256": "6f1d14a9b0095b7661b01b80600eb9d303282dea63972ebc9eb71ac93633cc5b"
+  },
+  "sources": [
+    {
+      "path": "packages/core/src/app/workflow.ts",
+      "sha256": "e19384779a4648b327a7f91f5cb640ed7ef4101d4dc17df581889839b064f37a"
+    },
+    {
+      "path": "packages/core/src/app/questions.ts",
+      "sha256": "e56a9a5737fd5d6b0f104a593929bb0f059ec308723d69f398d1f049e26043f9"
+    },
+    {
+      "path": "packages/core/src/domain/types.ts",
+      "sha256": "80a111b256c97e2c6108c080548bed0a872a80f6b1ea9690539cdb819b09024e"
+    },
+    {
+      "path": "packages/core/src/domain/init.ts",
+      "sha256": "e17ca733eb24b85a6addfd1642aca406443a732ee12e9f1f0e8b5b16d6f5b8d7"
+    },
+    {
+      "path": "packages/core/src/domain/question-policy.ts",
+      "sha256": "a564eefd4636c025e12fc8aae43e8235efc6d9900b2e67096978ce3f316da228"
+    },
+    {
+      "path": "packages/core/src/domain/bindings.ts",
+      "sha256": "89830b2c083c0e5ab1813914c89f72b12401490641ec776fc8f4d4c230764778"
+    },
+    {
+      "path": "packages/core/src/domain/verifications.ts",
+      "sha256": "2a2aa02ffba3fdadafad5fac24de4a7f785b8c50977a799c9bd3d159c1177331"
+    },
+    {
+      "path": "packages/core/src/domain/plan.ts",
+      "sha256": "cd4230180a6a21b8ff8240209b90eb918cda90b02710c2d1d63756697ef938e4"
+    },
+    {
+      "path": "packages/core/src/domain/plan-records.ts",
+      "sha256": "73fd64bcd16ad18bc91c2bc0050d0be804a3763fb42ccac8d030d854f733568e"
+    },
+    {
+      "path": "packages/core/src/domain/reconcile.ts",
+      "sha256": "0e8f930a30cf49ff2e45e26a2212c219dda9269c95e66e24cdbbdc56b4a2c9cc"
+    },
+    {
+      "path": "packages/core/src/domain/requirement-lineage.ts",
+      "sha256": "bd79d3c267eb4189e8b269fcdca8b1a5fa7d7812f3a747f71af97026f9bce94d"
+    },
+    {
+      "path": "packages/core/src/domain/engineering-context.ts",
+      "sha256": "f3ce002ba057cb47da44b9ccb15d377513b972a387258002791037d558175a5c"
+    },
+    {
+      "path": "packages/core/src/execution/build.ts",
+      "sha256": "7d5c7bb9d68f12a498e28316e4e6134f46bc240531bb34f1f66b1421d8731699"
+    },
+    {
+      "path": "packages/core/src/execution/checks.ts",
+      "sha256": "0c5ed09c8685447c01b80a76ff81ba0c06ff833b74ee2f75335dfb159c69591e"
+    },
+    {
+      "path": "packages/core/src/execution/dependencies.ts",
+      "sha256": "c3bf94c539332b31c695a57d986e3f547ca551f08eee44f076c266c6f75bba62"
+    },
+    {
+      "path": "packages/core/src/execution/environment.ts",
+      "sha256": "333df2a31a1013893e30037b9b41ac2c3a39ebb2ff2fa5be04512ec2d71b1383"
+    },
+    {
+      "path": "packages/core/src/execution/conformance.ts",
+      "sha256": "efc4f03f899cf212dbad544d3ab8b0a9525584c3cadc3399c0d598a38aec6416"
+    },
+    {
+      "path": "packages/core/src/execution/inspection.ts",
+      "sha256": "2513fd274f39a32b2543aae9e41ea5960ead889145306a1a0649a6afca8706b4"
+    },
+    {
+      "path": "packages/core/src/execution/acceptance-selection.ts",
+      "sha256": "e3ad56030c50936dd9a10ef100e06ec226908862d5407648dcfe979cf197e45f"
+    },
+    {
+      "path": "packages/core/src/execution/prepared-context.ts",
+      "sha256": "dc679ef300aa028d5c54240ce88ebf3429c12ec5bef8f60438402abb835edb4b"
+    },
+    {
+      "path": "packages/core/src/runtime/provider-observation.ts",
+      "sha256": "45fa2b13e6257dcb0b726761a3fcb6ca7a2910e20fdb0ee39e90b6e01fae5ba0"
+    }
+  ],
+  "before": {
+    "exitCode": 1,
+    "cases": [
+      {
+        "name": "runs discovery, planning, implementation and task-owned proof for Node.js without global proof copies",
+        "status": "failed",
+        "durationMs": 141.6776940000001,
+        "failure": "AssertionError: expected { Object (status, failure) } to deeply equal { status: 'complete', failure: null }\n    at /tmp/capivara-general-comparison-hHDKAK/before/packages/core/test/app/general-engine-flow.spec.ts:75:69\n    at file:///home/bruno/Documentos/Projetos/NovoHarness/capivara/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+      },
+      {
+        "name": "runs discovery, planning, implementation and task-owned proof for Python without global proof copies",
+        "status": "failed",
+        "durationMs": 33.785696000000144,
+        "failure": "AssertionError: expected { Object (status, failure) } to deeply equal { status: 'complete', failure: null }\n    at /tmp/capivara-general-comparison-hHDKAK/before/packages/core/test/app/general-engine-flow.spec.ts:75:69\n    at file:///home/bruno/Documentos/Projetos/NovoHarness/capivara/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+      },
+      {
+        "name": "runs discovery, planning, implementation and task-owned proof for TypeScript without global proof copies",
+        "status": "failed",
+        "durationMs": 31.68692400000009,
+        "failure": "AssertionError: expected { Object (status, failure) } to deeply equal { status: 'complete', failure: null }\n    at /tmp/capivara-general-comparison-hHDKAK/before/packages/core/test/app/general-engine-flow.spec.ts:75:69\n    at file:///home/bruno/Documentos/Projetos/NovoHarness/capivara/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+      },
+      {
+        "name": "plans a fresh tui interface with its proof on the task and without an artificial interview",
+        "status": "failed",
+        "durationMs": 44.91274499999986,
+        "failure": "AssertionError: expected 'waiting' to be 'complete' // Object.is equality\n    at /tmp/capivara-general-comparison-hHDKAK/before/packages/core/test/app/general-engine-flow.spec.ts:117:25\n    at file:///home/bruno/Documentos/Projetos/NovoHarness/capivara/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+      },
+      {
+        "name": "plans a fresh web interface with its proof on the task and without an artificial interview",
+        "status": "failed",
+        "durationMs": 28.775934000000007,
+        "failure": "AssertionError: expected 'waiting' to be 'complete' // Object.is equality\n    at /tmp/capivara-general-comparison-hHDKAK/before/packages/core/test/app/general-engine-flow.spec.ts:117:25\n    at file:///home/bruno/Documentos/Projetos/NovoHarness/capivara/node_modules/vitest/dist/chunks/run.C5UmxDPh.js:2783:20"
+      }
+    ]
+  },
+  "after": {
+    "exitCode": 0,
+    "cases": [
+      {
+        "name": "runs discovery, planning, implementation and task-owned proof for Node.js without global proof copies",
+        "status": "passed",
+        "durationMs": 2243.1104139999998
+      },
+      {
+        "name": "runs discovery, planning, implementation and task-owned proof for Python without global proof copies",
+        "status": "passed",
+        "durationMs": 669.9224679999998
+      },
+      {
+        "name": "runs discovery, planning, implementation and task-owned proof for TypeScript without global proof copies",
+        "status": "passed",
+        "durationMs": 1593.0040720000006
+      },
+      {
+        "name": "plans a fresh tui interface with its proof on the task and without an artificial interview",
+        "status": "passed",
+        "durationMs": 45.50478199999998
+      },
+      {
+        "name": "plans a fresh web interface with its proof on the task and without an artificial interview",
+        "status": "passed",
+        "durationMs": 35.17022100000031
+      }
+    ]
+  },
+  "evidenceScope": {
+    "completeWorkflows": [
+      "Node.js CLI",
+      "Python CLI",
+      "TypeScript compiler SDK and generated CLI"
+    ],
+    "planningWorkflows": [
+      "TUI",
+      "web"
+    ],
+    "agentTransport": "injected deterministic responses",
+    "productCommands": "real native execution",
+    "paidInferenceCalls": 0,
+    "originalExampleModified": false
+  },
+  "limits": [
+    "Five representative scenarios do not establish reliability for every possible project.",
+    "Web and TUI scenarios in this file validate planning; separate PTY pilots cover terminal execution.",
+    "Wall time of an interrupted baseline is not a completion-time performance comparison."
+  ]
+}

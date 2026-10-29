@@ -39,7 +39,8 @@ it('never changes capability, provider or kind to make an old conformance claim 
   const reconciled=reconcilePlan(brief,plan);
   expect(reconciled.acceptance![0]!.conformance!.requirementId).toBe('runtime');
   expect(reconciled.acceptance![0]!.conformance!.capability).toBe('backend-runtime');
-  expect(validatePlan(brief,reconciled).some(issue=>issue.code==='unproven-mandatory-provider'&&issue.subject==='runtime')).toBe(true);
+  expect(validatePlan(brief,reconciled)).toEqual([]);
+  expect(reconciled.obligations).toContainEqual(expect.objectContaining({requirementId:'runtime',kind:'provider',recipeStatus:'pending',verification:'required-in-build'}));
 });
 
 it('keeps cycles and nonexistent targets diagnosable instead of mapping them to an arbitrary active requirement',()=>{

@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { validatePlan } from '../../src/domain/index.js';
+import { derivePlanObligations } from '../../src/domain/reconcile.js';
 import type { CapabilityIdentity, DevelopmentPlan, ProductBrief, WorkUnit } from '../../src/domain/types.js';
 
 function brief():ProductBrief{return{schema:'capivara/product/1',id:'multi-stack',status:'ready',revision:1,name:'Mandatory stack',summary:'A complete application',request:'Use Node.js, TypeScript, React, Vite and SQLite.',modes:['web'],targets:['browser'],requirements:[],constraints:[],decisions:[],gaps:[]};}
@@ -24,9 +25,10 @@ it('exige provedor e aceite específicos para cada escolha de uma stack composta
     const missingProvider=structuredClone(current);missingProvider.environment=missingProvider.environment.filter(node=>node.requirementIds?.includes(requirement.id)!==true);
     expect(validatePlan(product,missingProvider).some(issue=>issue.code==='mandatory-provider-mismatch'&&issue.subject===requirement.id)).toBe(true);
     const missingProof=structuredClone(current);missingProof.acceptance=missingProof.acceptance!.filter(check=>check.conformance?.requirementId!==requirement.id);
-    expect(validatePlan(product,missingProof).filter(issue=>issue.code==='unproven-mandatory-provider').map(issue=>issue.subject)).toEqual([requirement.id]);
+    expect(validatePlan(product,missingProof)).toEqual([]);
+    expect(derivePlanObligations(product,missingProof).filter(obligation=>obligation.kind==='provider'&&obligation.recipeStatus==='pending').map(obligation=>obligation.requirementId)).toEqual([requirement.id]);
   }
   const onlyRuntime=structuredClone(current);onlyRuntime.acceptance=[{...current.acceptance[0]!,requirementIds:product.requirements.map(requirement=>requirement.id)}];
-  expect(validatePlan(product,onlyRuntime).filter(issue=>issue.code==='unproven-mandatory-provider').map(issue=>issue.subject)).toEqual(['stack-1','stack-2','stack-3','stack-4']);
+  expect(derivePlanObligations(product,onlyRuntime).filter(obligation=>obligation.kind==='provider'&&obligation.recipeStatus==='pending').map(obligation=>obligation.requirementId)).toEqual(['stack-1','stack-2','stack-3','stack-4']);
 });
 

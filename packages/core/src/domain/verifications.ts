@@ -3,6 +3,14 @@ import type { DevelopmentPlan, Verification } from './types.js';
 /** A recipe keeps the owner whose actual command observation can prove it. */
 export interface OwnedVerification { taskId:string; check:Verification; }
 
+/** An intended product recipe is not execution evidence. Obvious readiness and
+ * syntax-only invocations remain pending verification debt even if mislabeled. */
+export function isPlannedProductRecipe(check:Verification):boolean{
+  if(!check.command||!['build','behavior'].includes(check.level??''))return false;
+  const invocation=[check.command,...check.args??[]].join(' ');
+  return!/(?:^|\s|['"])(?:--version|--help|--check|--noEmit|-V|-h|py_compile|compileall)(?=$|\s|['"])/.test(invocation);
+}
+
 /** A build artifact is a declared write even when its producer described it
  * in the conformance claim. Behavior checks consume artifacts, not produce them. */
 export function verificationOutputs(check:Verification):string[]{

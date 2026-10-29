@@ -13,23 +13,33 @@ export function questionChannel(store: ProjectStore, signal: AbortSignal, announ
     }
     store.update({ status: 'waiting', pendingQuestion: question });
     announce(`${question.question}\nMotivo: ${question.reason}\nImpacto: ${question.impact}`);
+    if (signal.aborted) return null;
     if (interact) {
       try {
         const input = (await interact(question))?.trim();
+        if (signal.aborted) return null;
         if (input) {
           const answer = /^\d+$/.test(input) ? question.options[Number(input) - 1] ?? input : input;
           store.answer(question.id, answer);
           store.update({ status: 'working', pendingQuestion: null });
           return answer;
         }
-        return null;
       } catch { if (signal.aborted) return null; }
     }
+    // Closing presentation leaves the decision pending; another channel may
+    // still answer it. A concurrent durable answer takes precedence over asking again.
+    const external = store.getAnswer(question.id);
+    if (external !== undefined) {
+      store.update({ status: 'working', pendingQuestion: null });
+      return external;
+    }
+    if (signal.aborted) return null;
     if (stdin.isTTY) {
       const reader = createInterface({ input: stdin, output: stdout });
       try {
         question.options.forEach((option, index) => stdout.write(`  ${index + 1}) ${option}\n`));
         const input = (await reader.question('Resposta (número ou texto): ', { signal })).trim();
+        if (signal.aborted) return null;
         if (input) {
           const answer = /^\d+$/.test(input) ? question.options[Number(input) - 1] ?? input : input;
           store.answer(question.id, answer);

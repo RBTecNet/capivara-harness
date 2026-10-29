@@ -5,6 +5,7 @@ import type { ApplicationMode, CapabilityIdentity, Gap, InitOptions, ProductBrie
 import { emitEvent, emitProgress } from "../telemetry/progress.js";
 import { PlanningFailure, PlanningProgress } from "./control.js";
 import { resolveLiteralExcerpt } from "./literal-source.js";
+import { choiceAlreadySpecified, engineeringChoiceQuestion } from "./question-policy.js";
 import { annotateBindingAuthority, literalProviderMention as providerMention } from "./bindings.js";
 
 const MODES = new Set<ApplicationMode>(["web", "desktop", "tui", "cli", "api", "service", "library", "other"]);
@@ -44,8 +45,10 @@ const bindingChoice = (binding: Pick<CapabilityIdentity, "kind" | "provider">): 
 function technicalChoices(text: string): string[] {
   return text.split(/\r?\n|;|,\s*|\s+(?:and|e)\s+|\s+\+\s+/iu).map(part => part.trim().replace(/^(?:[-*+]\s+|\d+[.)]\s+)/, "")).filter(Boolean);
 }
-function bindingsFrom(value: unknown, source: Source, choices: string[]): { bindings: CapabilityIdentity[]; issues: string[] } {
+type TechnicalOutcome = { quote: string; statement: string };
+function bindingsFrom(value: unknown, source: Source): { bindings: CapabilityIdentity[]; issues: string[] } {
   const entries = records(value), bindings: CapabilityIdentity[] = [], issues: string[] = [];
+  if (Array.isArray(value) && value.some(entry => !object(entry))) issues.push("Cada provedor deve conter uma identidade técnica estruturada.");
   for (const item of entries) {
     const capability = string(item.capability), kind = string(item.kind), provider = string(item.provider);
     const mention = provider ? providerMention(source.text, provider) : null;
@@ -55,10 +58,27 @@ function bindingsFrom(value: unknown, source: Source, choices: string[]): { bind
     const binding = { capability, kind: kind as CapabilityIdentity["kind"], provider: mention[0] };
     if (!bindings.some(existing => bindingChoice(existing) === bindingChoice(binding))) bindings.push(binding);
   }
-  if (!bindings.length) issues.push("Nenhuma identidade de capacidade/provedor literal foi declarada para a escolha técnica.");
-  const uncovered = choices.filter(choice => !bindings.some(binding => providerMention(choice, binding.provider)));
-  if (uncovered.length) issues.push(`Escolhas técnicas literais ainda sem capacidade/provedor: ${JSON.stringify(uncovered)}`);
   return { bindings, issues };
+}
+
+function outcomesFrom(value: unknown, source: Source): { outcomes: TechnicalOutcome[]; issues: string[] } {
+  const outcomes: TechnicalOutcome[] = [], issues: string[] = [];
+  if (value !== undefined && !Array.isArray(value)) issues.push("A classificação de resultados deve ser uma lista de citações e obrigações observáveis.");
+  for (const entry of Array.isArray(value) ? value : []) {
+    const statement = object(entry) ? string(entry.statement) : "";
+    const quote = object(entry) ? resolveLiteralExcerpt(source.text, string(entry.quote)) : undefined;
+    if (!statement || !quote) { issues.push(`Resultado sem obrigação e origem literal inequívoca: ${JSON.stringify(entry)}`); continue; }
+    if (!outcomes.some(existing => existing.quote === quote && normalize(existing.statement) === normalize(statement))) outcomes.push({ quote, statement });
+  }
+  return { outcomes, issues };
+}
+
+function generatedBindingChildren(brief: ProductBrief, parent: Requirement): Requirement[] {
+  return brief.requirements.filter(child => child !== parent && !!child.binding && child.kind === "stack"
+    && child.id === identity("req", `${parent.source.reference}:${normalize(parent.statement)}:${JSON.stringify(child.binding)}`)
+    && child.statement === `${child.binding.provider}: ${child.binding.capability} (${child.binding.kind}).`
+    && child.source.kind === parent.source.kind && child.source.reference === parent.source.reference && child.source.localPath === parent.source.localPath
+    && !!child.source.text.trim() && parent.source.text.includes(child.source.text) && !!providerMention(parent.source.text, child.binding.provider));
 }
 
 async function requirementsFrom(raw: string, values: unknown, modes: ApplicationMode[], sourceLimit: number, origin: SourceOrigin, hooks: Pick<InitOptions, "agent" | "contextChars" | "signal" | "onEvent">): Promise<Requirement[]> {
@@ -72,16 +92,28 @@ async function requirementsFrom(raw: string, values: unknown, modes: Application
     const stack = item.kind === "stack" || object(item.binding);
     // Metadata may repair a citation, never narrow the original stack contract.
     const choices = originalSource ? technicalChoices(originalSource.text) : [...new Set([...technicalChoices(string(item.statement)), ...technicalChoices(source?.text ?? "")])];
-    const resolved = source && stack ? bindingsFrom(Array.isArray(candidate.bindings) ? candidate.bindings : object(candidate.binding) ? [candidate.binding] : [], source, choices) : { bindings: [], issues: [] };
-    const issues = [...(!source ? ["A citação não corresponde a uma origem literal inequívoca."] : []), ...resolved.issues];
-    return { source, stack, bindings: resolved.bindings, issues, candidate };
+    const resolved = source && stack ? bindingsFrom(Array.isArray(candidate.bindings) ? candidate.bindings : object(candidate.binding) ? [candidate.binding] : [], source) : { bindings: [], issues: [] };
+    const classified = source && stack ? outcomesFrom(candidate.outcomes, source) : { outcomes: [], issues: [] };
+    const issues = [...(!source ? ["A citação não corresponde a uma origem literal inequívoca."] : []), ...resolved.issues, ...classified.issues];
+    if (stack && source) {
+      if (candidate.bindings !== undefined && !Array.isArray(candidate.bindings)) issues.push("A classificação de provedores deve ser uma lista de identidades técnicas.");
+      if (!resolved.bindings.length && !classified.outcomes.length) issues.push("Nenhuma escolha de provedor nem obrigação observável foi classificada.");
+      const uncovered = choices.filter(choice => !resolved.bindings.some(binding => providerMention(choice, binding.provider))
+        && !classified.outcomes.some(outcome => technicalChoices(outcome.quote).some(part => normalize(part) === normalize(choice))));
+      if (uncovered.length) issues.push(`Itens literais ainda sem classificação de provedor ou resultado: ${JSON.stringify(uncovered)}`);
+      if (resolved.bindings.some(binding => normalize(binding.capability) === normalize(binding.provider)) && !Array.isArray(candidate.outcomes)) issues.push("Nome do provedor e rótulo de capacidade coincidem: classifique explicitamente a escolha de ferramenta ou o resultado exigido, sem presumir que cada item da lista é software.");
+      const original = bindingsFrom([...records(item.bindings), ...(object(item.binding) ? [item.binding] : [])], source).bindings;
+      for (const binding of original) if (normalize(binding.capability) !== normalize(binding.provider)
+        && !resolved.bindings.some(entry => normalize(entry.provider) === normalize(binding.provider))) issues.push(`A escolha original de provedor ${binding.provider} não pode desaparecer no reparo de metadados; um papel operacional inferido pode mudar sem remover a tecnologia.`);
+    }
+    return { source, stack, bindings: resolved.bindings, outcomes: classified.outcomes, issues, candidate };
   };
   for (;;) {
     const pending = candidates.flatMap((item, index) => {
       if (!string(item.statement)) return [];
       const inspected = inspect(item, index);
       if (!inspected.issues.length || inspected.candidate.unsupported === true && !inspected.source && string(inspected.candidate.reason)) return [];
-      return [{ index, statement: string(item.statement), quote: string(inspected.candidate.quote, object(inspected.candidate.source) ? string(inspected.candidate.source.text) : ""), kind: string(item.kind), bindings: inspected.bindings, issues: inspected.issues, ...(inspected.source ? { literalSource: inspected.source.text } : {}) }];
+      return [{ index, statement: string(item.statement), quote: string(inspected.candidate.quote, object(inspected.candidate.source) ? string(inspected.candidate.source.text) : ""), kind: string(item.kind), bindings: inspected.bindings, outcomes: inspected.outcomes, issues: inspected.issues, ...(inspected.source ? { literalSource: inspected.source.text } : {}) }];
     });
     if (!pending.length) break;
     recovery.requireChange(pending, "A origem ou a identidade das escolhas técnicas ainda não foi recuperada; nenhum requisito será descartado nem aprovado incompleto.");
@@ -90,7 +122,7 @@ async function requirementsFrom(raw: string, values: unknown, modes: Application
     emitProgress(hooks.onEvent, { id: "init:metadata", label: "Origens e escolhas técnicas", completed: candidates.length - pending.length, total: candidates.length, status: "running", stage: "init" });
     const repaired = await requestObject({ ...hooks, operation: "repair", prompt: [
       "Operation: init-requirement-metadata. Repair only metadata of the already extracted requirements below. Do not rediscover or change their statements, product scope or interfaces. Do not implement code or ask the user an already answered fact.",
-      'Return {"requirements":[{"index":0,"quote":"exact words from the source","bindings":[{"capability":"concrete technical capability","kind":"cli|library|driver|service|runtime|sdk","provider":"complete literal technology name"}]}]}. Preserve the original index. Stack bindings must cover EVERY explicit technology in the quoted list, one identity per capability; a runtime does not cover a UI library, compiler, build tool or database. Do not invent technology choices. For a genuinely unsupported extraction only, return {index,unsupported:true,reason:"why the source does not establish it"}.',
+      'Return {"requirements":[{"index":0,"quote":"exact words from the source","bindings":[{"capability":"concrete technical capability","kind":"cli|library|driver|service|runtime|sdk","provider":"complete literal technology name"}],"outcomes":[{"quote":"exact source words","statement":"required observable result"}]}]}. Preserve the original index. Classify EVERY item in the original literal source: bindings are explicitly selected named technologies; outcomes are required capabilities or observable behavior without a selected tool. Outcomes are optional; return [] when all items are technology choices. A list under a stack heading can contain both kinds: do not turn capabilities, testing, observability, accessibility or an interface to deliver into names of software providers. Do not erase any named technology or observable obligation. A runtime does not cover a library, compiler, build tool or database. Do not invent tool choices or user decisions. For a genuinely unsupported extraction only, return {index,unsupported:true,reason:"why the source does not establish it"}.',
       `Unresolved requirements: ${JSON.stringify(pending)}`,
       `Literal source (${origin.reference}):\n${pending.every(item => item.literalSource) ? [...new Set(pending.map(item => item.literalSource))].join("\n\n") : raw}`,
     ].join("\n\n") });
@@ -102,6 +134,7 @@ async function requirementsFrom(raw: string, values: unknown, modes: Application
       if (typeof update.quote === "string") patch.quote = update.quote;
       if (Array.isArray(update.bindings)) patch.bindings = update.bindings;
       else if (object(update.binding)) patch.bindings = [update.binding];
+      if (update.outcomes !== undefined) patch.outcomes = update.outcomes;
       if (update.unsupported === true && string(update.reason)) { patch.unsupported = true; patch.reason = string(update.reason); }
       metadata.set(index, { ...metadata.get(index), ...patch });
     }
@@ -122,7 +155,13 @@ async function requirementsFrom(raw: string, values: unknown, modes: Application
     if (["behavior", "stack", "interface", "constraint"].includes(string(item.kind))) requirement.kind = string(item.kind) as NonNullable<Requirement["kind"]>;
     if (inspected.stack) {
       const bindings = [...inspected.bindings].sort((left, right) => (providerMention(source.text, left.provider)?.index ?? 0) - (providerMention(source.text, right.provider)?.index ?? 0));
-      requirement.binding = bindings[0]!; requirement.kind = "stack";
+      if (bindings[0]) { requirement.binding = bindings[0]; requirement.kind = "stack"; }
+      else requirement.kind = "behavior";
+      if (Array.isArray(inspected.candidate.outcomes)) requirement.technicalClassification = {
+        schema: "capivara/technical-choices/1", source: structuredClone(source),
+        providers: bindings.map(binding => ({ binding: structuredClone(binding), quote: technicalChoices(source.text).find(part => providerMention(part, binding.provider)) ?? binding.provider })),
+        outcomes: inspected.outcomes.map(outcome => ({ ...outcome })),
+      };
       const proposed = records(Array.isArray(inspected.candidate.bindings) ? inspected.candidate.bindings : [inspected.candidate.binding]);
       for (const binding of bindings) {
         const labels = [...new Set(proposed.filter(item => string(item.kind) === binding.kind && bindingChoice({ kind: binding.kind, provider: string(item.provider) }) === bindingChoice(binding)).map(item => string(item.capability)).filter(Boolean))];
@@ -134,6 +173,14 @@ async function requirementsFrom(raw: string, values: unknown, modes: Application
         const child: Requirement = { id: identity("req", `${origin.reference}:${normalize(statement)}:${JSON.stringify(binding)}`), statement: `${binding.provider}: ${binding.capability} (${binding.kind}).`, source: { ...source, text: literal }, mode, kind: "stack", binding };
         annotateBindingAuthority(child, raw, "init");
         result.push(child);
+      }
+      for (const outcome of inspected.outcomes) {
+        if (normalize(outcome.statement) === normalize(statement) && outcome.quote === source.text && !bindings.length) continue;
+        if (outcome.statement.length > sourceLimit) throw new PlanningFailure("context-capacity", ["A classificação de resultado excedeu uma unidade semântica; preserve a obrigação sem expandir o contexto."], "init");
+        const child: Requirement = { id: identity("req", `${origin.reference}:${normalize(statement)}:outcome:${normalize(outcome.quote)}:${normalize(outcome.statement)}`), statement: outcome.statement, source: { ...source, text: outcome.quote }, mode, kind: "behavior" };
+        result.push(child);
+        const classification = requirement.technicalClassification?.outcomes.find(entry => entry.quote === outcome.quote && entry.statement === outcome.statement);
+        if (classification) classification.requirementId = child.id;
       }
     }
     annotateBindingAuthority(requirement, raw, "init");
@@ -151,11 +198,7 @@ function reconcileGeneratedBindings(brief: ProductBrief, hooks: Pick<InitOptions
   const retired = new Set<string>();
   for (const parent of brief.requirements) {
     if (!parent.binding || parent.kind !== "stack" || parent.id !== identity("req", `${parent.source.reference}:${normalize(parent.statement)}`)) continue;
-    const children = brief.requirements.filter(child => child !== parent && !!child.binding && child.kind === "stack"
-      && child.id === identity("req", `${parent.source.reference}:${normalize(parent.statement)}:${JSON.stringify(child.binding)}`)
-      && child.statement === `${child.binding.provider}: ${child.binding.capability} (${child.binding.kind}).`
-      && child.source.kind === parent.source.kind && child.source.reference === parent.source.reference && child.source.localPath === parent.source.localPath
-      && !!child.source.text.trim() && parent.source.text.includes(child.source.text) && !!providerMention(parent.source.text, child.binding.provider));
+    const children = generatedBindingChildren(brief, parent);
     const choices = new Map<string, Requirement>([[bindingChoice(parent.binding), parent]]);
     for (const child of children) {
       const key = bindingChoice(child.binding!), pivot = choices.get(key);
@@ -167,6 +210,54 @@ function reconcileGeneratedBindings(brief: ProductBrief, hooks: Pick<InitOptions
     }
   }
   if (retired.size) { brief.requirements = brief.requirements.filter(requirement => !retired.has(requirement.id)); brief.revision++; }
+}
+
+/** Old extraction treated every list item as software. Reclassify only a proven
+ * generated group, never an independent requirement, and retain the prior interpretation. */
+async function classifyGeneratedChoices(brief: ProductBrief, hooks: InitOptions): Promise<void> {
+  for (const parent of [...brief.requirements]) {
+    if (!parent.binding || parent.kind !== "stack" || parent.technicalClassification
+      || parent.id !== identity("req", `${parent.source.reference}:${normalize(parent.statement)}`)) continue;
+    const group = [parent, ...generatedBindingChildren(brief, parent)];
+    if (!group.some(requirement => normalize(requirement.binding!.capability) === normalize(requirement.binding!.provider))) continue;
+    const source = parent.source;
+    emitEvent(hooks.onEvent, { type: "recovering", message: "Reavaliando somente a distinção entre ferramentas escolhidas e resultados exigidos na fonte técnica já registrada.", subject: parent.id });
+    const resolved = await requirementsFrom(source.text, [{ statement: parent.statement, quote: source.text, kind: "stack", mode: parent.mode, bindings: group.map(requirement => requirement.binding) }], brief.modes,
+      Math.max(1_400, parent.statement.length), { kind: source.kind, reference: source.reference, ...(source.localPath ? { localPath: source.localPath } : {}) }, hooks);
+    cancelled(hooks.signal);
+    const replacement = resolved.find(requirement => requirement.id === parent.id)!;
+    // Reuse identities only with the same concrete provider or the exact literal
+    // outcome span. Changed interpretation is not proof of product behavior.
+    const used = new Set<string>([parent.id]);
+    for (const requirement of resolved) {
+      if (requirement === replacement) continue;
+      const candidates = group.filter(old => !used.has(old.id) && (requirement.binding
+        ? normalize(old.binding!.provider) === normalize(requirement.binding.provider)
+          && (old.binding!.kind === requirement.binding.kind || old.bindingAuthority?.kind.authority === "inferred")
+        : resolved.filter(current => current !== replacement && !current.binding && normalize(current.source.text) === normalize(requirement.source.text)).length === 1
+          && normalize(old.source.text) === normalize(requirement.source.text)
+          && !resolved.some(current => current.binding && bindingChoice(current.binding) === bindingChoice(old.binding!))));
+      if (candidates.length !== 1) continue;
+      const originalId = requirement.id;
+      requirement.id = candidates[0]!.id; used.add(requirement.id);
+      const outcome = replacement.technicalClassification?.outcomes.find(entry => entry.requirementId === originalId);
+      if (outcome) outcome.requirementId = requirement.id;
+    }
+    replacement.id = parent.id;
+    replacement.statement = parent.statement;
+    replacement.source = structuredClone(parent.source);
+    if (replacement.technicalClassification) replacement.technicalClassification.previous = group.map(requirement => ({ requirementId: requirement.id, statement: requirement.statement, source: structuredClone(requirement.source), binding: structuredClone(requirement.binding!) }));
+    const groupIds = new Set(group.map(requirement => requirement.id));
+    const retainedIds = new Set(resolved.map(requirement => requirement.id));
+    for (const old of group) if (!retainedIds.has(old.id)) {
+      brief.requirementAliases ??= {};
+      brief.requirementAliases[old.id] = parent.id;
+    }
+    brief.requirements = brief.requirements.flatMap(requirement => requirement.id === parent.id ? resolved : groupIds.has(requirement.id) ? [] : [requirement]);
+    brief.revision++;
+    emitEvent(hooks.onEvent, { type: "requirement-reconciled", message: "Classificação técnica recuperada da fonte literal: escolhas de ferramentas e obrigações de resultado permanecem separadas, com a interpretação anterior preservada.", subject: parent.id });
+    await hooks.save?.({ brief });
+  }
 }
 
 function constraintsFrom(raw: string, values: unknown, origin: SourceOrigin = { kind: "request", reference: "request" }): ProductConstraint[] {
@@ -238,17 +329,14 @@ export function applicableQuestion(value: unknown, brief: ProductBrief): Questio
   const category = string(value.category) as Question["category"];
   if (!fact || !question || !reason || !impact || !CATEGORIES.has(category)) return null;
   if (brief.decisions.some((decision) => normalize(decision.fact) === normalize(fact))) return null;
-  const factName = normalize(fact);
   const authority = normalize([brief.request, ...brief.decisions.map((decision) => decision.answer), documentaryAuthority(brief)].join("\n"));
-  if (/^(?:interface|modalidade|application.?mode|tipo de (?:interface|aplicacao))\b/.test(factName) && explicitModes(authority).length > 0) return null;
-  if (/persistencia|armazenamento|storage|tipo de banco|database choice/.test(factName) && /\bjson\b|\bsqlite\b|postgres|\bmysql\b|\bmongodb\b|sem persistencia|in.memory|em memoria/.test(authority)) return null;
+  if(choiceAlreadySpecified(fact,category,authority,question))return null;
   const modes = strings(value.modes).filter((mode): mode is ApplicationMode => MODES.has(mode as ApplicationMode));
   if (modes.length > 0 && brief.modes.length > 0 && !modes.some((mode) => brief.modes.includes(mode))) return null;
   const text = `${fact} ${question} ${reason}`;
   if (!allowedCapabilities(brief, inferredCapabilities(text))) return null;
   // A library/installer/framework preference is engineering work, not a product gap.
-  if (/\b(?:bootstrap|tailwind|framework|orm|npm ci|npm install)\b/i.test(question)) return null;
-  if (/qual.{0,25}(?:biblioteca|linguagem|stack|banco de dados)|which.{0,25}(?:library|framework|language|database)/i.test(question)) return null;
+  if(engineeringChoiceQuestion(question))return null;
   if (category === "appearance" && !brief.modes.some((mode) => ["web", "desktop", "tui"].includes(mode))) return null;
   if (category === "platform" && /sistemas? operaciona|plataform|operating system|target/i.test(question) && brief.targets.length > 0) return null;
   return { id: identity("gap", `${brief.id}:${normalize(fact)}`), fact, question, reason, impact, category, modes, options: strings(value.options), blocks: strings(value.blocks) };
@@ -314,6 +402,7 @@ export async function runInit(options: InitOptions): Promise<ProductBrief> {
     existing.materialRevision = revision;
     existing.references = materialReferences(documents);
     reconcileGeneratedBindings(existing, options);
+    await classifyGeneratedChoices(existing, options);
     applyRepositoryConstraints(existing, options.repositoryConstraints);
     await resolveQuestions(existing, [], options);
     applyRepositoryConstraints(existing, options.repositoryConstraints);

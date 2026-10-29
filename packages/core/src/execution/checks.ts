@@ -15,7 +15,7 @@ import { beginConformanceObservation, finishConformanceObservation } from './con
 import { classifyReviewFailure, type ReviewFailureContext, type ReviewFailureKind } from './review.js';
 import { declaredTaskInputs, resolveVerificationInputs } from './dependencies.js';
 import { emitProgress, type ProgressEvent } from '../telemetry/progress.js';
-import { startProviderObservation, type ProviderWitness } from '../runtime/provider-observation.js';
+import { PROVIDER_OBSERVATION_PROTOCOL, startProviderObservation, type ModuleProviderWitness, type ProviderConsumption, type ProviderProcessWitness, type ProviderWitness } from '../runtime/provider-observation.js';
 
 /** Wrong instruments are replaced; their failure never becomes an invented product requirement. */
 export function selectVerifications(brief: ProductBrief, task: WorkUnit): SelectedVerification[] {
@@ -58,7 +58,10 @@ export async function verificationIdentity(workspace:string,plan:DevelopmentPlan
     .map(({bindingAuthority:_classification,bindingTransformations:_interpretations,...requirement})=>requirement);
   const contracts=plan.contracts.filter(contract=>task.contractIds.includes(contract.id));
   const environmentRevision=operational?verificationOperationalRevision(operational,inputs,check):undefined;
-  const descriptor={verifier:verificationLevel(check)==='behavior'?'capivara-verification/5':'capivara-verification/4',providerObservation:check.conformance?.kind==='runtime'?'node-load-hook/2':undefined,assertionContract:verificationAssertionStatus(check).status==='invalid'?'strict-invalid/1':undefined,check,requirements,contracts,constraints:brief?.constraints,environment:plan.environment.filter(node=>task.environmentIds.includes(node.id)),operational:environmentRevision,platform:process.platform,node:process.version,references:brief?taskReferences(brief,task):[]};
+  const moduleClaim=Boolean(check.conformance&&['sdk','library','driver'].includes(check.conformance.kind));
+  const consumptionNeeded=moduleClaim||inputs.length>0&&(Object.values(operational?.bindings??{}).some(binding=>['sdk','library','driver'].includes(binding.kind))||plan.environment.some(node=>['sdk','library','driver'].includes(node.identity?.kind??node.kind)));
+  const providerObservation=consumptionNeeded?{consumptions:PROVIDER_OBSERVATION_PROTOCOL.consumptions,processes:PROVIDER_OBSERVATION_PROTOCOL.processes,...(moduleClaim?{modules:PROVIDER_OBSERVATION_PROTOCOL.modules}:{}),...(check.conformance?.kind==='runtime'?{runtime:PROVIDER_OBSERVATION_PROTOCOL.runtime}:{})}:check.conformance?.kind==='runtime'?PROVIDER_OBSERVATION_PROTOCOL.runtime:undefined;
+  const descriptor={verifier:verificationLevel(check)==='behavior'?'capivara-verification/5':'capivara-verification/4',providerObservation,assertionContract:verificationAssertionStatus(check).status==='invalid'?'strict-invalid/1':undefined,check,requirements,contracts,constraints:brief?.constraints,environment:plan.environment.filter(node=>task.environmentIds.includes(node.id)),operational:environmentRevision,platform:process.platform,node:process.version,references:brief?taskReferences(brief,task):[]};
   const fingerprint=(description:unknown):string=>digest(JSON.stringify({description:JSON.stringify(description),inputs:snapshot}));
   const {expected:_criterion,assertion:_assertion,assertionIssue:_assertionIssue,...execution}=check;
   return{inputHash:fingerprint(descriptor),observationHash:fingerprint({...descriptor,assertionContract:undefined,check:execution}),inputs,...(environmentRevision?{environmentRevision}:{})};
@@ -229,17 +232,26 @@ export async function runVerification(workspace:string,brief:ProductBrief,task:W
   if(check.kind==='tui'&&(!terminalInteraction(check)||!check.expected&&!check.assertion)){evidence.output='Interactive terminal proof needs an observed ready screen, input and a newly observed state. Recover the recipe without changing the product.';return finish(null,'instrument');}
   if(['desktop','web'].includes(check.kind)&&preparationOnly(check)){evidence.output='Compilation, installation or process status does not exercise application interaction.';return finish(null,'instrument');}
   const request:CommandRequest=applyOperationalEnvironment({cwd:recipeCwd(workspace,check.cwd),command:check.args?[check.command,...check.args]:check.command,constraints:executionConstraints(brief,options.allowSystemInstall),capabilities:check.requiredCapabilities,inputs,...(check.kind!=='tui'&&check.input?{input:check.input.join('')}:{}),...(check.timeoutMs?{timeoutMs:check.timeoutMs}:{}),...(options.signal?{signal:options.signal}:{})},options.operational);
-  const observation=await beginConformanceObservation(workspace,check,typeof request.command==='string'?request.command:[...request.command],request.cwd);
-  const providerObservation=options.operational?await startProviderObservation(workspace,check,{...options.operational,env:{...options.operational.env,...request.environment}}):undefined;
+  const observedCheck={...check,inputs:check.inputs??task.inputs??task.files};
+  const observation=await beginConformanceObservation(workspace,observedCheck,typeof request.command==='string'?request.command:[...request.command],request.cwd);
+  const providerObservation=options.operational?await startProviderObservation(workspace,observedCheck,{...options.operational,env:{...options.operational.env,...request.environment}}):undefined;
   if(providerObservation?.enabled)request.environment={...request.environment,...providerObservation.environment};
-  let result:CommandResult,witnesses:ProviderWitness[]=[];
+  let result:CommandResult,witnesses:ProviderWitness[]=[],moduleWitnesses:ModuleProviderWitness[]=[],consumptions:ProviderConsumption[]=[],processes:ProviderProcessWitness[]=[];
   try{result=check.kind==='tui'?await terminal({...request,steps:check.steps??[],closeInput:check.closeInput??'\u0003'}):await execute(request);}
-  finally{if(providerObservation){try{witnesses=await providerObservation.finish();}finally{await providerObservation.cleanup();}}}
+  finally{if(providerObservation){
+    try{witnesses=await providerObservation.finish();moduleWitnesses=await providerObservation.finishModules?.()??[];consumptions=await providerObservation.finishConsumptions?.()??[];processes=await providerObservation.finishProcesses?.()??[];}
+    catch(error){providerObservation.diagnostics.push(`Provider observation could not be read: ${error instanceof Error?error.message:String(error)}`);}
+    finally{try{await providerObservation.cleanup();}catch(error){providerObservation.diagnostics.push(`Provider observation cleanup failed: ${error instanceof Error?error.message:String(error)}`);}}
+  }}
   evidence.provenance=await finishConformanceObservation(observation,check,result);
   if(witnesses.length)evidence.provenance.runtimeWitnesses=witnesses;
+  if(moduleWitnesses.length)evidence.provenance.moduleWitnesses=moduleWitnesses;
+  if(consumptions.length)evidence.provenance.consumptions=consumptions;
+  if(processes.length)evidence.provenance.processes=processes;
   if(providerObservation){
     evidence.provenance.runtimeObservation={enabled:providerObservation.enabled,...(providerObservation.reason?{reason:providerObservation.reason}:{}),diagnostics:[...providerObservation.diagnostics]};
     if(providerObservation.runtimeProvider)evidence.provenance.runtimeProvider=structuredClone(providerObservation.runtimeProvider);
+    if(providerObservation.moduleProviders)evidence.provenance.moduleProviders=structuredClone(providerObservation.moduleProviders);
   }
   evidence.observation=verificationObservation(result);
   evidence.observedAt=new Date().toISOString();

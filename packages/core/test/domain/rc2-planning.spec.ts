@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { explicitModes, normalizeEnvironment, normalizeTasks, reconcilePlan, repairWorkPlan, runInit, runPlan, validatePlan } from '../../src/domain/index.js';
+import { derivePlanObligations } from '../../src/domain/reconcile.js';
 import { requestObject } from '../../src/domain/json.js';
 import type { DevelopmentPlan, DomainAgent, ProductBrief, Requirement, WorkUnit } from '../../src/domain/types.js';
 
@@ -77,15 +78,20 @@ describe('planejamento RC2 sem trabalho textual ou repetição sem progresso',()
 
   it.each([true,false])('preserva a identidade legada somente quando sua resposta já está no cache: %s',async cached=>{
     const product=brief(),partial=plan(product,[unit('foundation','Preparar exportação',['a']),unit('export-a','Exportar a',['a'])]);partial.status='planning';
+    partial.environment=[{id:'compiler',name:'Compiler',kind:'sdk',identity:{capability:'compiler',kind:'sdk',provider:'Compiler'},dependsOn:[],targets:[],reason:'Compile the application.',check:{command:'compiler',args:['--version']},prepare:[]}];
     let probes=0,calls=0;
     const result=await runPlan({brief:product,existing:partial,contextChars:6000,hasCachedCall:request=>{
-      probes++;expect(request.operation).toBe('outline');expect(request.prompt).toContain('Earlier foundations and relevant unit identifiers:');return cached;
+      probes++;expect(request.operation).toBe('outline');expect(request.prompt).toContain('Earlier foundations and relevant unit identifiers:');expect(request.prompt).toContain('For every mandatory requirement.binding, acceptance has a dedicated conformance=');return cached;
     },agent:async request=>{
       calls++;expect(request.operation).toBe('outline');
       if(cached)expect(request.prompt).toContain('Earlier foundations and relevant unit identifiers:');
       else{
         expect(request.prompt).toContain('Existing delivery identities and owned paths (details are stored separately):');
         expect(request.prompt).toContain('"id":"export-a","files":["export-a.ts"]');
+        expect(request.prompt).toContain('Stack obligations with missing recipes remain explicit pending work for BUILD');
+        expect(request.prompt).not.toContain('For every mandatory requirement.binding, acceptance has a dedicated conformance=');
+        const providers=JSON.parse(request.prompt.split('Technical prerequisites available in this slice (the full tree is recorded separately):\n')[1]!.split('\n\n')[0]!);
+        expect(providers[0].identity).toEqual(partial.environment[0]!.identity);
       }
       return JSON.stringify({tasks:[unit('export-b','Exportar b',['b'])]});
     }});
@@ -159,7 +165,8 @@ describe('planejamento RC2 sem trabalho textual ou repetição sem progresso',()
     tasks[0]!.exclusiveContracts=[];
     expect(validatePlan(product,proposed)).toEqual([]);
     proposed.acceptance[0]!.level='syntax';
-    expect(validatePlan(product,proposed).some(issue=>issue.code==='unproven-mandatory-provider')).toBe(true);
+    expect(validatePlan(product,proposed)).toEqual([]);
+    expect(derivePlanObligations(product,proposed)).toContainEqual(expect.objectContaining({requirementId:'a',kind:'provider',recipeStatus:'pending',verification:'required-in-build'}));
   });
 
   it('reconcilia identidade enriquecida por contrato operacional exato e preserva todas as referências sem inferência',async()=>{

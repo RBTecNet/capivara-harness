@@ -1,16 +1,18 @@
 import { allowedCapabilities, identity, inferredCapabilities, normalize } from "./authority.js";
 import { contextForTask, ContextTooLarge, ordered } from "./context.js";
-import { applyRepositoryConstraints, resolveQuestions, splitText } from "./init.js";
+import { applyRepositoryConstraints, resolveQuestions } from "./init.js";
+import { matchesGlob } from 'node:path';
+import { engineeringRepairContext } from './engineering-context.js';
 import { cancelled, object, records, requestObject, string, strings } from "./json.js";
 import { boundedReferences } from "./material.js";
-import type { CommandRecipe, DevelopmentPlan, DomainHooks, EnvironmentNode, IntegrationContract, PlanOptions, ProductBrief, Requirement, Verification, WorkUnit } from "./types.js";
+import type { CapabilityIdentity, CommandRecipe, DevelopmentPlan, DomainHooks, EnvironmentNode, IntegrationContract, PlanOptions, ProductBrief, Requirement, Verification, WorkUnit } from "./types.js";
 import { emitEvent, emitProgress } from "../telemetry/progress.js";
 import { PlanningFailure, PlanningProgress } from "./control.js";
-import { assertValidPlan, reconcileChecks, reconcilePlan, sameDelivery, validatePlan, preferredProofOwner, resolveRequirementAlias } from "./reconcile.js";
+import { assertValidPlan, derivePlanObligations, reconcileChecks, reconcilePlan, sameDelivery, validatePlan, preferredProofOwner, resolveRequirementAlias } from "./reconcile.js";
 import { normalizeVerificationAssertion } from "./assertions.js";
 import { verificationAssertionStatus } from "./assertions.js";
 import { verificationRegistry } from "./verifications.js";
-import { obligationMatchesProvider, recordBindingTransformation } from "./bindings.js";
+import { deriveBindingAuthority, matchesOperationalClaim, obligationMatchesProvider, recordBindingTransformation } from "./bindings.js";
 import type { PlanIssue } from "./reconcile.js";
 import { rehydratePlanRecords } from "./plan-records.js";
 
@@ -22,6 +24,41 @@ const stableJson=(value:unknown):string=>JSON.stringify(value,(_key,item:unknown
 function environmentOperation(node:EnvironmentNode):string{
   const invocation=(command:CommandRecipe)=>({command:command.command,args:command.args??[],cwd:command.cwd??'.',system:command.system??false,timeoutMs:command.timeoutMs??null,capabilities:[...command.capabilities??[]].sort()});
   return stableJson({kind:node.kind,dependsOn:[...node.dependsOn].sort(),targets:[...node.targets].sort(),check:invocation(node.check),prepare:node.prepare.map(invocation),provides:node.provides??null});
+}
+
+function inferredEnvironmentIdentity(node:EnvironmentNode,brief:ProductBrief):Pick<EnvironmentNode,'identity'|'identityOrigin'>|undefined{
+  if(node.identity)return undefined;
+  const roles:Partial<Record<EnvironmentNode['kind'],CapabilityIdentity['kind']>>={runtime:'runtime',sdk:'sdk',tool:'cli',package:'library',service:'service'};
+  const kind=roles[node.kind];if(!kind)return undefined;
+  const exactName=(value:string):string=>value.normalize('NFC').trim().replace(/\s+/g,' ').toLowerCase();
+  const candidates=brief.requirements.filter(requirement=>requirement.binding&&exactName(requirement.binding.provider)===exactName(node.name)).map(requirement=>{
+    const authority=requirement.bindingAuthority??deriveBindingAuthority(requirement);
+    const identity:CapabilityIdentity={provider:requirement.binding!.provider,kind,capability:authority?.capability.authority==='literal'?requirement.binding!.capability:node.id};
+    return{requirement,identity};
+  }).filter(({requirement,identity})=>obligationMatchesProvider(requirement,identity));
+  const identities=new Map(candidates.map(candidate=>[stableJson(candidate.identity),candidate.identity]));
+  if(identities.size!==1)return undefined;
+  return{identity:[...identities.values()][0]!,identityOrigin:{kind:'literal-provider-name',requirementIds:candidates.map(candidate=>candidate.requirement.id),operationalKind:kind}};
+}
+
+function completeEnvironmentIdentities(brief:ProductBrief,plan:DevelopmentPlan,hooks:DomainHooks):boolean{
+  let changed=false;
+  for(const node of plan.environment){
+    const completed=inferredEnvironmentIdentity(node,brief);if(!completed)continue;
+    Object.assign(node,completed);node.requirementIds=uniqueStrings([...(node.requirementIds??[]),...completed.identityOrigin!.requirementIds]);changed=true;
+    emitEvent(hooks.onEvent,{type:'replanned',subject:node.id,message:'Identidade técnica completada por nome de provedor literal exato e papel operacional do nó; nenhuma instalação ou prova foi inferida.',detail:{id:node.id,identity:node.identity,origin:node.identityOrigin}});
+  }
+  return changed;
+}
+
+function recordPlanObligations(brief:ProductBrief,plan:DevelopmentPlan):boolean{
+  const obligations=derivePlanObligations(brief,plan),changed=stableJson(plan.obligations??[])!==stableJson(obligations);
+  plan.obligations=obligations;return changed;
+}
+
+function capabilityIdentity(value:unknown):CapabilityIdentity|undefined{
+  if(!object(value)||!['cli','library','driver','service','runtime','sdk'].includes(string(value.kind))||!string(value.capability)||!string(value.provider))return undefined;
+  return{capability:string(value.capability),kind:string(value.kind) as CapabilityIdentity['kind'],provider:string(value.provider)};
 }
 
 function recipe(value: unknown): CommandRecipe | null {
@@ -53,6 +90,13 @@ export function normalizeEnvironment(value: unknown, brief: ProductBrief, resolv
     if (!allowedCapabilities(brief, capabilities)) { incompatible.add(cleanId(item.id, identity("env", normalize(name)))); continue; }
     const node: EnvironmentNode = { id: cleanId(item.id, identity("env", normalize(name))), name, kind, dependsOn: strings(item.dependsOn), targets: strings(item.targets), reason: string(item.reason, `Preparar ${name} para o comportamento pedido.`), check, prepare };
     if (object(item.identity) && ["cli", "library", "driver", "service", "runtime", "sdk"].includes(string(item.identity.kind)) && string(item.identity.capability) && string(item.identity.provider)) node.identity = { capability: string(item.identity.capability), kind: string(item.identity.kind) as NonNullable<EnvironmentNode["identity"]>["kind"], provider: string(item.identity.provider) };
+    if(node.identity&&object(item.identityOrigin)&&item.identityOrigin.kind==='literal-provider-name'&&item.identityOrigin.operationalKind===node.identity.kind)node.identityOrigin={kind:'literal-provider-name',requirementIds:strings(item.identityOrigin.requirementIds),operationalKind:node.identity.kind};
+    const transformations=records(item.identityTransformations).flatMap(change=>{
+      const from=capabilityIdentity(change.from),to=capabilityIdentity(change.to),source=object(change.source)?change.source:undefined;
+      if(!from||!to||!source||!['request','answer','repository'].includes(string(source.kind))||!string(source.reference)||!string(source.text)||!string(change.requirementId))return[];
+      return[{from,to,requirementId:string(change.requirementId),source:{kind:string(source.kind) as Requirement['source']['kind'],reference:string(source.reference),text:string(source.text)},reason:string(change.reason)}];
+    });
+    if(transformations.length)node.identityTransformations=transformations;
     if (Array.isArray(item.requirementIds)) node.requirementIds = strings(item.requirementIds).filter(id => brief.requirements.some(requirement => requirement.id === id));
     if (object(item.provides)) {
       const provided: NonNullable<EnvironmentNode["provides"]> = {};
@@ -62,8 +106,10 @@ export function normalizeEnvironment(value: unknown, brief: ProductBrief, resolv
       if (object(item.provides.env)) provided.env = Object.fromEntries(Object.entries(item.provides.env).filter((entry): entry is [string, string] => typeof entry[1] === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(entry[0])));
       if (Array.isArray(item.provides.paths)) provided.paths = strings(item.provides.paths);
       if (Array.isArray(item.provides.inputs)) provided.inputs = safePaths(item.provides.inputs);
+      if(Array.isArray(item.provides.modules))provided.modules=records(item.provides.modules).filter(module=>['node','python'].includes(string(module.protocol))&&!!string(module.specifier)&&argv(module.runtimeCommand).length>0).map(module=>({protocol:string(module.protocol) as 'node'|'python',specifier:string(module.specifier),runtimeCommand:argv(module.runtimeCommand)}));
       if (Object.keys(provided).length) node.provides = provided;
     }
+    const completed=inferredEnvironmentIdentity(node,brief);if(completed){Object.assign(node,completed);node.requirementIds=uniqueStrings([...(node.requirementIds??[]),...completed.identityOrigin!.requirementIds]);}
     result.push(node);
   }
   const byName = new Map<string, EnvironmentNode>();
@@ -419,7 +465,7 @@ async function ensureCoverage(brief: ProductBrief, plan: DevelopmentPlan, hooks:
   }
 }
 
-const providerStages: Record<string, number> = { 'mandatory-provider-mismatch': 0, 'unused-mandatory-provider': 1, 'unproven-mandatory-provider': 2 };
+const providerStages: Record<string, number> = { 'mandatory-provider-mismatch': 0, 'unused-mandatory-provider': 1 };
 const repairTopic = (issue: PlanIssue): string => `${issue.code in providerStages ? 'provider' : issue.code}:${issue.subject}`;
 
 function recordPlanBindings(brief: ProductBrief, plan: DevelopmentPlan): boolean {
@@ -464,7 +510,20 @@ function mergeRepairChecks(originals: Verification[], values: unknown, brief: Pr
 
 /** Unpublished technical transactions cannot replace product delivery contracts. */
 async function invariantProposal(brief: ProductBrief, base: DevelopmentPlan, issue: PlanIssue, task: WorkUnit | undefined, result: Record<string, unknown>, hooks: DomainHooks): Promise<DevelopmentPlan> {
-  const plan = structuredClone(base), nodes = await executableEnvironment(result.environment, brief, hooks);
+  const plan = structuredClone(base);
+  const environmentUpdates=records(result.environmentUpdates).flatMap(update=>{
+    const existing=plan.environment.find(node=>node.id===string(update.id));if(!existing)return[];
+    const selected=capabilityIdentity(update.identity),requirement=brief.requirements.find(item=>item.id===issue.subject);
+    if(object(update.identity)&&(!selected||!requirement||!obligationMatchesProvider(requirement,selected)))return[];
+    if(object(update.identity)&&['runtime','sdk','service'].includes(existing.kind)&&string(update.identity.kind)!==existing.kind)return[];
+    const transformations=[...existing.identityTransformations??[]];
+    if(selected&&requirement&&existing.identity&&stableJson(existing.identity)!==stableJson(selected)){
+      const change={from:structuredClone(existing.identity),to:structuredClone(selected),requirementId:requirement.id,source:structuredClone(requirement.source),reason:string(result.reason,'Explicit identity metadata correction; readiness and preparation remain unchanged. No execution proof was inferred.')};
+      if(!transformations.some(previous=>stableJson(previous)===stableJson(change)))transformations.push(change);
+    }
+    return[{...existing,...(selected?{identity:selected}:{}),...(transformations.length?{identityTransformations:transformations}:{}),...(object(update.provides)?{provides:{...existing.provides,...update.provides}}:{}),requirementIds:uniqueStrings([...(existing.requirementIds??[]),...strings(update.requirementIds)])}];
+  });
+  const nodes = await executableEnvironment([...(Array.isArray(result.environment)?result.environment:[]),...environmentUpdates], brief, hooks);
   const changed = new Set(nodes.map(node => node.id)), aliases = new Map<string, string>();
   plan.environment = normalizeEnvironment([...plan.environment.filter(node => !changed.has(node.id)), ...nodes], brief, aliases);
   remapEnvironmentReferences(plan, aliases);
@@ -504,22 +563,27 @@ async function repairPlanIssues(brief: ProductBrief, plan: DevelopmentPlan, hook
   const attempts = new Map<string, { calls: number; rejection?: unknown; staged?: DevelopmentPlan }>();
   for (;;) {
     cancelled(hooks.signal);
-    if (recordPlanBindings(brief, plan)) await hooks.save?.({ brief, plan });
+    const identitiesChanged=completeEnvironmentIdentities(brief,plan,hooks),bindingsChanged=recordPlanBindings(brief,plan),obligationsChanged=recordPlanObligations(brief,plan);
+    if(identitiesChanged||bindingsChanged||obligationsChanged)await hooks.save?.({brief,plan});
     const issues = validatePlan(brief, plan);
     if (!issues.length) return;
     if (issues.some(issue => ['mandatory-provider-mismatch', 'unused-mandatory-provider'].includes(issue.code)) && reconcileOperationalProviders(plan, hooks)) { await hooks.save?.({ brief, plan }); continue; }
     const issue = issues[0]!, stamp = invariantState(brief, plan, issue), attempt = attempts.get(stamp) ?? { calls: 0 };
     if (attempt.calls >= 2) throw new PlanningFailure('no-progress', [`${issue.code} [${issue.subject}]: ${issue.message}`, 'A proposta e o protocolo de patch mínimo não corrigiram a causa. Entregas e provas originais foram preservadas.', stableJson(attempt.rejection)], 'plan-invariants');
-    const protocol = attempt.calls++ ? 'minimal-patches' : 'scoped-definitions'; attempts.set(stamp, attempt);
+    const environmentCause=issue.code==='mandatory-provider-mismatch'||issue.code==='unused-mandatory-provider'||issue.code.includes('environment');
+    const protocol = environmentCause ? attempt.calls++?'environment-reference-patches':'environment-identity' : attempt.calls++ ? 'minimal-patches' : 'scoped-definitions'; attempts.set(stamp, attempt);
     const context = attempt.staged ?? plan, limit = hooks.contextChars ?? 24_000;
     const task = issue.code === 'unproven-interface-behavior' ? preferredProofOwner(context, issue.subject) : context.tasks.find(candidate => candidate.id === issue.subject || candidate.requirementIds.includes(issue.subject));
     const recipes = verificationRegistry(context).filter(({ check, taskId }) => check.conformance?.requirementId === issue.subject || check.requirementIds.includes(issue.subject) || taskId === task?.id);
+    const requirement=brief.requirements.find(candidate=>candidate.id===issue.subject);
+    const conformanceTargets=context.environment.filter(node=>requirement&&obligationMatchesProvider(requirement,node.identity)).map(node=>({environmentId:node.id,identity:node.identity,requirementId:issue.subject,requiredLevel:node.identity!.kind==='sdk'?'build':['runtime','service'].includes(node.identity!.kind)?'behavior':'build-or-behavior',artifactAndDependentBehaviorRequired:node.identity!.kind==='sdk',taskIds:context.tasks.filter(owner=>owner.environmentIds.includes(node.id)).map(owner=>owner.id)}));
     const result = await requestObject({ ...hooks, operation: 'repair', prompt: [
       `Repair protocol: ${protocol}. Correct this invariant's technical contract only. Preserve every existing delivery ID, goal, criterion, requirement, owned file and dependency. A task-owned recipe is valid; it need not be copied to global acceptance. Do not implement code.`,
-      protocol === 'minimal-patches' ? 'Return {"verificationUpdates":[{"owner":"existing task ID or $acceptance","check":{"id":"existing or new check ID","conformance":{"requirementId":"affected requirement","capability":"actual capability","kind":"cli|library|driver|service|runtime|sdk","provider":"literal provider","productInputs":["actual product files"]}}}],"environment":[],"taskUpdates":[],"reason":"causal correction"}. A partial check patches the previously supplied recipe. For reference repairs use taskUpdates[{id,environmentIds:["actual IDs"]}]; omit unchanged fields, never erase a prerequisite as a placeholder. Do not repeat an unchanged answer.' : 'Return {"tasks":[],"environment":[],"contracts":[],"acceptance":[],"reason":"causal correction"}. Return only affected complete definitions or taskUpdates[{id,checks,environmentIds}]. Both task checks and global acceptance retain their actual owners. Explicit conformance is {requirementId,capability,kind,provider,productInputs,artifacts}; availability alone does not prove product usage.',
+      environmentCause ? 'Return {"environmentUpdates":[{"id":"existing prerequisite ID","identity":{"capability":"actual operational capability","kind":"cli|library|driver|service|runtime|sdk","provider":"complete literal provider"},"provides":{"command":[],"aliases":[],"invocations":[],"modules":[{"protocol":"node|python","specifier":"literal module name","runtimeCommand":[]}],"env":{},"paths":[],"inputs":[]}}],"environment":[],"taskUpdates":[{"id":"existing actual task ID","environmentIds":["retained prerequisite IDs"]}],"reason":"causal identity or reference correction"}. Omit unchanged fields. environmentUpdates patches metadata over the existing readiness/preparation definition; do not repeat that definition without its missing identity. Use environment only for a genuinely new or changed executable provider. Preserve the actual SDK/runtime role. Verification claims cannot repair a missing provider identity; do not replace product deliveries.' : protocol === 'minimal-patches' ? 'Return {"verificationUpdates":[{"owner":"existing task ID or $acceptance","check":{"id":"existing or new check ID","conformance":{"requirementId":"affected requirement","capability":"actual capability","kind":"cli|library|driver|service|runtime|sdk","provider":"literal provider","productInputs":["actual product files"]}}}],"environment":[],"taskUpdates":[],"reason":"causal correction"}. A partial check patches the previously supplied recipe. For reference repairs use taskUpdates[{id,environmentIds:["actual IDs"]}]; omit unchanged fields, never erase a prerequisite as a placeholder. Do not repeat an unchanged answer.' : 'Return {"tasks":[],"environment":[],"contracts":[],"acceptance":[],"reason":"causal correction"}. Return only affected complete definitions or taskUpdates[{id,checks,environmentIds}]. Both task checks and global acceptance retain their actual owners. Explicit conformance is {requirementId,capability,kind,provider,productInputs,artifacts}; availability alone does not prove product usage.',
       'Behavior recipes declare a typed assertion (contains/regex/exit/empty/json/all/any) and level=behavior. expected remains its human criterion. Build/syntax cannot replace interaction; SDK artifacts need a dependent behavior consumer. Do not alter a literal provider to fix an inferred engineering role.',
       `Invariant: ${JSON.stringify(issue)}`,
       `Mandatory requirement: ${metadataList(brief.requirements.filter(requirement => requirement.id === issue.subject), Math.floor(limit / 5))}`,
+      `Operational conformance targets (actual provider roles, not inferred INIT labels): ${metadataList(conformanceTargets,Math.floor(limit / 8))}`,
       `Locked delivery: ${metadataList(task ? [{ id: task.id, goal: task.goal, requirementIds: task.requirementIds, files: task.files, criteria: task.criteria, environmentIds: task.environmentIds, dependsOn: task.dependsOn }] : [], Math.floor(limit / 5))}`,
       `Owned recipes: ${metadataList(recipes, Math.floor(limit / 3))}`,
       `Operational providers: ${metadataList(context.environment.filter(node => !node.identity && task?.environmentIds.includes(node.id) || brief.requirements.some(requirement => requirement.id === issue.subject && obligationMatchesProvider(requirement, node.identity))), Math.floor(limit / 5))}`,
@@ -553,6 +617,10 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
     ?rehydratePlanRecords(brief,options.existing,options.completedResponses(),normalizeChecks):undefined;
   const prior=restored?.plan??options.existing;
   const existing=prior?.briefId===brief.id?reconcilePlan(brief,prior,prior):prior;
+  if(existing?.briefId===brief.id){
+    const identitiesChanged=completeEnvironmentIdentities(brief,existing,options);recordPlanObligations(brief,existing);
+    if(identitiesChanged||stableJson(prior?.obligations??[])!==stableJson(existing.obligations))await options.save?.({brief,plan:existing});
+  }
   for(const record of restored?.restored??[])emitEvent(options.onEvent,{type:'replanned',subject:record.checkId,message:'Metadados explícitos recuperados da resposta já registrada; invocação e critérios preservados, sem repetir inferência.',detail:record});
   for(const record of restored?.ambiguous??[])emitEvent(options.onEvent,{type:'recovering',subject:record.checkId,message:'Respostas registradas divergem sobre metadados; nenhuma interpretação conflitante foi adotada.',detail:record});
   if(existing&&restored?.restored.length)await options.save?.({brief,plan:existing});
@@ -583,6 +651,7 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
   const facts = productFacts(brief, Math.floor(limit / 8));
   const partial=existing?.status === "planning" && existing.briefId === brief.id && existing.tasks.every(task=>task.requirementIds.every(id=>brief.requirements.some(requirement=>requirement.id===id))) ? existing : undefined;
   const plan: DevelopmentPlan = partial ? reconcilePlan(brief,partial,partial) : { schema: "capivara/plan/1", status: "planning", revision: (options.existing?.revision ?? 0) + 1, briefId: brief.id, briefRevision: brief.revision, environment: [], contracts: [], tasks: [] };
+  recordPlanObligations(brief,plan);
   const checkpoint=plan.planning?.schema === "capivara/plan-progress/1" && plan.planning.briefRevision === brief.revision && plan.planning.groups.every(group=>group.requirementIds.every(id=>brief.requirements.some(requirement=>requirement.id===id))) ? plan.planning : undefined;
   // Legacy drafts already persisted every environment slice before the first
   // delivery. Keep their original outline request shape so a paid response in
@@ -606,7 +675,7 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
     if(group.environmentComplete)continue;
     const prompt=group.environmentPrompt??[
       "Plan executable technical prerequisites before implementation. Do not edit files. Return JSON.",
-      'Shape: {"environment":[{"id":"stable-id","name":"runtime SDK tool package service or database","kind":"runtime|sdk|tool|package|service|database","dependsOn":[],"targets":[],"reason":"consumer and reason","check":{"command":"executable or shell command","args":[],"capabilities":[]},"prepare":[{"command":"preparation command","args":[],"system":false,"capabilities":[]}]}],"questions":[]}',
+      'Shape: {"environment":[{"id":"stable-id","name":"runtime SDK tool package service or database","kind":"runtime|sdk|tool|package|service|database","identity":{"capability":"actual operational capability","kind":"cli|library|driver|service|runtime|sdk","provider":"complete literal provider"},"provides":{"command":[],"aliases":[],"invocations":[],"modules":[{"protocol":"node|python","specifier":"literal module name","runtimeCommand":[]}],"env":{},"paths":[],"inputs":[]},"dependsOn":[],"targets":[],"reason":"consumer and reason","check":{"command":"executable or shell command","args":[],"capabilities":[]},"prepare":[{"command":"preparation command","args":[],"system":false,"capabilities":[]}]}],"questions":[]}. identity/provides are typed optional metadata when the engine can complete them unambiguously from the exact provider name and actual node role; never use descriptive placeholders as executable commands or environment values.',
       "Include only prerequisites of these actual requirements. Selected reference metadata is supporting material, not required product outcomes; read applicable local paths before architectural choices. Runtime of the harness is not the product runtime. Browser tooling is appropriate only for a browser interface. Prefer local preparation over host mutation. A missing product fact may be asked with fact/question/reason/impact/category/modes/options/blocks; otherwise questions=[].",
       'Mandatory requirement.binding must match node.identity={capability,kind,provider}. Publish usable node.provides={command:[],env:{},paths:[],inputs:[]} for consumers and a concrete readiness probe. A CLI, library, driver, service and runtime are distinct capabilities.',
       `Product facts:\n${facts}`,
@@ -639,17 +708,17 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
       for (const node of plan.environment) if (scopedIds.has(node.id)) node.dependsOn.forEach((id) => scopedIds.add(id));
       if (before === scopedIds.size) break;
     }
-    const outlinePrompt=(existingUnits:string):string=>[
+    const outlinePrompt=(existingUnits:string,legacy=false):string=>[
       "Structure small executable work units and their integration contracts for these requirements. Return JSON; do not edit code.",
       'Shape: {"contracts":[{"id":"contract-id","name":"name","description":"precise behavior/interface","inputs":[],"outputs":[],"requirementIds":[]}],"tasks":[{"id":"task-id","title":"capability","goal":"observable outcome","instructions":"local implementation work","requirementIds":[],"dependsOn":[],"environmentIds":[],"contractIds":[],"files":[],"criteria":["necessary observable results"],"checks":[{"id":"check-id","kind":"command|cli|tui|web|desktop","command":"actual invocation with arguments when needed","expected":"human criterion","assertion":{"type":"contains","source":"stdout","value":"concrete scenario output"},"expectedExitCode":0,"requirementIds":[],"requiredCapabilities":[],"steps":[{"waitFor":"ready screen"},{"input":"key bytes","waitFor":"changed screen"}],"closeInput":"exit key"}],"risk":"low|normal|high","blockedBy":[]}],"questions":[]}',
       "There is no task, test or criterion quota. Each unit must fit one small context. Only relevant verification is useful. Define contracts before consumers. No server or browser for a terminal product unless explicitly required. TUI checks use synchronized steps: wait for readiness, send keys, wait for the observed state change, close input; pipes are not an interactive terminal. Omit steps for other kinds. CLI input[] contains literal bytes; include newline explicitly when needed. expectedExitCode is the actual successful outcome of that scenario, including a nonzero code when testing an expected rejection. Ask only a missing product fact with concrete impact; library and installer choices are engineering work.",
-      'Declare task.inputs (read dependencies), files (owned outputs), resources (exclusive names), and exclusiveContracts when a unit changes a shared interface. Checks declare inputs, cwd, level=syntax|build|behavior and requirementIds. Final acceptance=[] contains the concrete mandatory stack/interface/behavior proof recipes; syntax does not prove a production build or interaction.',
+      legacy?'Declare task.inputs (read dependencies), files (owned outputs), resources (exclusive names), and exclusiveContracts when a unit changes a shared interface. Checks declare inputs, cwd, level=syntax|build|behavior and requirementIds. Final acceptance=[] contains the concrete mandatory stack/interface/behavior proof recipes; syntax does not prove a production build or interaction.':'Declare task.inputs, owned files, resources and integration contracts. Suggest relevant checks and optional final acceptance when their real invocation is known. Stack obligations with missing recipes remain explicit pending work for BUILD; do not invent paths or commands to make PLAN appear verified. Syntax and readiness never establish product conformance.',
       'A behavior recipe declares assertion: contains{source,value}, regex{source,pattern,flags}, empty{source}, exit{value}, json{source,path:["key",0],equals:value} or all/any{assertions:[]}. source is stdout/stderr/output (JSON uses stdout/stderr). expected is human prose and never parsed as a machine predicate. expectedExitCode alone is not an assertion.',
-      'For every mandatory requirement.binding, acceptance has a dedicated conformance={requirementId,capability,kind,provider,productInputs:["real product paths"],artifacts:[]}. The real bound runtime executes product source; a compiled SDK build must produce declared outputs and a dependent functional recipe (dependsOn:["producer-check-id"]) consumes those exact artifacts. A ready tool or version probe cannot establish product conformance.',
+      legacy?'For every mandatory requirement.binding, acceptance has a dedicated conformance={requirementId,capability,kind,provider,productInputs:["real product paths"],artifacts:[]}. The real bound runtime executes product source; a compiled SDK build must produce declared outputs and a dependent functional recipe (dependsOn:["producer-check-id"]) consumes those exact artifacts. A ready tool or version probe cannot establish product conformance.':'A shared build or functional observation may support several provider obligations; there is no build/test-per-provider quota. Conformance metadata is optional before the code exists and remains pending until BUILD can establish actual provider usage. Exact argv, recipe dependency IDs and artifact consumers are technical verification details, not additional user requirements. BUILD still requires real product evidence before completion.',
       "Selected references support implementation; do not turn their code or every line into tasks. Read applicable skills/examples and cite their local paths in the instructions of units that need them, including globally applicable guidance.",
       `Product facts:\n${productFacts(brief, Math.floor(limit / 8))}`,
       `Requirements of this slice:\n${JSON.stringify(requirements)}`,
-      `Technical prerequisites available in this slice (the full tree is recorded separately):\n${metadataList(plan.environment.filter((node) => scopedIds.has(node.id)).map(({ id, name, kind }) => ({ id, name: name.slice(0, 180), kind })), Math.floor(limit / 8))}`,
+      `Technical prerequisites available in this slice (the full tree is recorded separately):\n${metadataList(plan.environment.filter((node) => scopedIds.has(node.id)).map(({ id, name, kind, identity }) => ({ id, name: name.slice(0, 180), kind, ...(!legacy&&identity?{identity}:{}) })), Math.floor(limit / 8))}`,
       existingUnits,
       plan.contracts.length ? `Relevant existing contract identifiers (details are stored in the plan):\n${metadataList(plan.contracts.filter((contract) => contract.requirementIds.some((id) => requirements.some((requirement) => requirement.id === id))).map(({ id, name }) => ({ id, name: name.slice(0, 120) })), Math.floor(limit / 12))}` : "",
     ].filter(Boolean).join("\n\n");
@@ -657,7 +726,7 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
     if(!prompt){
       prompt=outlinePrompt(plan.tasks.length?`Existing delivery identities and owned paths (details are stored separately):\n${metadataList(plan.tasks.map(({id,files,contractIds})=>({id,files,contractIds})),Math.floor(limit / 12))}`:"");
       if(legacyRequestShape){
-        const legacy=outlinePrompt(plan.tasks.length?`Earlier foundations and relevant unit identifiers:\n${metadataList(plan.tasks.filter((task,unitIndex)=>unitIndex===0||task.requirementIds.some(id=>requirements.some(requirement=>requirement.id===id))).map(({id,title})=>({id,title:title.slice(0,120)})),Math.floor(limit/12))}`:"");
+        const legacy=outlinePrompt(plan.tasks.length?`Earlier foundations and relevant unit identifiers:\n${metadataList(plan.tasks.filter((task,unitIndex)=>unitIndex===0||task.requirementIds.some(id=>requirements.some(requirement=>requirement.id===id))).map(({id,title})=>({id,title:title.slice(0,120)})),Math.floor(limit/12))}`:"",true);
         if(options.hasCachedCall?.({operation:"outline",prompt:legacy,readOnly:true}))prompt=legacy;
       }
     }
@@ -688,7 +757,7 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
   for (;;) {
     let oversized: ContextTooLarge | null = null;
     for (const task of plan.tasks) {
-      try { contextForTask(brief, plan, task, Math.floor(limit / 2)); }
+      try { contextForTask(brief, plan, task, limit); }
       catch (error) { if (!(error instanceof ContextTooLarge)) throw error; oversized = error; break; }
     }
     if (!oversized) break;
@@ -715,13 +784,61 @@ export interface RepairPlanOptions extends DomainHooks {
   repairScope?: "verification" | "environment" | "delivery";
 }
 
+/** Restore immutable definitions by reference before decoding an engineering
+ * split. The model assigns responsibilities; it does not have to retranscribe
+ * long recipes or acceptance criteria to keep them alive. */
+function decompositionTasks(value:unknown,original:WorkUnit):Record<string,unknown>[] {
+  const checks=new Map(original.checks.map(check=>[check.id,check]));
+  const indexed=(item:Record<string,unknown>,key:string,source:readonly string[]):string[]=>{
+    if(item[key]===undefined)return[];
+    if(!Array.isArray(item[key])||item[key].some(index=>!Number.isInteger(index)||Number(index)<0||Number(index)>=source.length))throw new PlanningFailure('invalid-plan',[`Referência ${key} inválida na decomposição de ${original.id}.`],original.id);
+    return(item[key] as number[]).map(index=>source[index]!);
+  };
+  return records(value).map(item=>{
+    const checkIds=strings(item.checkIds);
+    if(checkIds.some(id=>!checks.has(id)))throw new PlanningFailure('invalid-plan',[`Receita original desconhecida na decomposição de ${original.id}.`],original.id);
+    const definitions=[...records(item.checks),...checkIds.map(id=>structuredClone(checks.get(id)!))];
+    return{...item,criteria:uniqueStrings([...strings(item.criteria),...indexed(item,'criterionIndexes',original.criteria)]),
+      checks:definitions.map(check=>checks.has(string(check.id))?structuredClone(checks.get(string(check.id))!):check),
+      inputs:uniqueStrings([...strings(item.inputs),...indexed(item,'inputIndexes',original.inputs??[])]),
+      resources:uniqueStrings([...strings(item.resources),...indexed(item,'resourceIndexes',original.resources??[])]),
+      exclusiveContracts:uniqueStrings([...strings(item.exclusiveContracts),...indexed(item,'exclusiveContractIndexes',original.exclusiveContracts??[])])};
+  });
+}
+
+function decompositionIssues(original:WorkUnit,replacements:WorkUnit[],plan:DevelopmentPlan):string[]{
+  const issues:string[]=[];
+  if(!replacements.length)return['A proposta não contém responsabilidades executáveis.'];
+  const keep=(label:string,values:readonly string[],selected:readonly string[])=>{const missing=values.filter(value=>!selected.includes(value));if(missing.length)issues.push(`${label} originais sem atribuição: ${JSON.stringify(missing)}.`);};
+  keep('Requisitos',original.requirementIds,replacements.flatMap(task=>task.requirementIds));
+  keep('Critérios',original.criteria,replacements.flatMap(task=>task.criteria));
+  keep('Receitas',original.checks.map(check=>check.id),replacements.flatMap(task=>task.checks.map(check=>check.id)));
+  keep('Contratos',original.contractIds,replacements.flatMap(task=>task.contractIds));
+  keep('Dependências do ambiente',original.environmentIds,replacements.flatMap(task=>task.environmentIds));
+  keep('Entradas',original.inputs??[],replacements.flatMap(task=>task.inputs??[]));
+  keep('Recursos exclusivos',original.resources??[],replacements.flatMap(task=>task.resources??[]));
+  keep('Contratos exclusivos',original.exclusiveContracts??[],replacements.flatMap(task=>task.exclusiveContracts??[]));
+  const scope=(value:string)=>value.replaceAll('\\','/').replace(/^\.\//,'').replace(/\/$/,'');
+  const covers=(parent:string,child:string)=>{parent=scope(parent);child=scope(child);return parent===child||matchesGlob(child,parent)||(!/[?*{[\]()]/.test(parent)&&child.startsWith(`${parent}/`));};
+  const assigned=replacements.flatMap(task=>task.files);
+  for(const path of original.files)if(!assigned.some(candidate=>covers(path,candidate)||covers(candidate,path)))issues.push(`Escopo original sem atribuição: ${path}.`);
+  for(const task of replacements){
+    // Re-emitting an existing prerequisite is reconciled with that owner later.
+    if(plan.tasks.some(existing=>existing.id!==original.id&&sameDelivery(existing,task)))continue;
+    for(const path of task.files)if(original.files.length&&!original.files.some(parent=>covers(parent,path)))issues.push(`Escopo novo fora da responsabilidade original: ${path}.`);
+    task.checks=task.checks.map(check=>structuredClone(original.checks.find(previous=>previous.id===check.id)??check));
+  }
+  return issues;
+}
+
 async function repairRestrictedWorkPlan(options: RepairPlanOptions, task: WorkUnit, scope: "verification" | "environment"): Promise<DevelopmentPlan> {
   const plan=structuredClone(options.plan),brief=options.brief;
+  const verificationTransformations:{taskId:string;checkId:string;before:Verification|undefined;after:Verification}[]=[];
   const result=await requestObject({...options,operation:'repair',prompt:[
     `Repair the ${scope} contract only. The executor locks the delivery identity, goal, instructions, product criteria, requirement IDs, owned files and task dependencies. Do not replace a product delivery with recording, reviewing or documenting verification work. Return JSON.`,
     scope==='verification'
-      ? 'Shape: {"checks":[{"id":"existing proof id","kind":"command|cli|tui|web|desktop","command":"actual invocation","args":[],"expected":"human criterion","assertion":{"type":"contains","source":"stdout","value":"concrete observable value"},"expectedExitCode":0,"inputs":[],"requirementIds":[],"requiredCapabilities":[],"level":"behavior"}],"inputs":[],"environmentIds":[],"environment":[],"acceptance":[]}. Change only the affected technical recipes. Preserve original proof coverage and mandatory conformance. A mismatch in report spelling does not authorize changing the implementation or the delivery.'
-      : 'Shape: {"environment":[{"id":"existing or necessary provider id","name":"provider","kind":"runtime|sdk|tool|package|service|database","identity":{"capability":"consumed capability","kind":"cli|library|driver|service|runtime|sdk","provider":"provider"},"dependsOn":[],"check":{"command":"usable readiness probe","args":[]},"prepare":[],"provides":{"command":[],"paths":[],"env":{}}}],"environmentIds":[]}. Only provider definitions and references may change; do not modify delivery or verification contracts.',
+      ? 'Shape: {"checks":[{"id":"existing proof id","kind":"command|cli|tui|web|desktop","command":"actual invocation","args":[],"expected":"human criterion","assertion":{"type":"contains","source":"stdout","value":"concrete observable value"},"expectedExitCode":0,"inputs":[],"requirementIds":[],"requiredCapabilities":[],"level":"behavior","conformance":{"requirementId":"existing stack obligation","capability":"selected operational capability","kind":"cli|library|driver|service|runtime|sdk","provider":"literal required provider","productInputs":[]}}],"inputs":[],"environmentIds":[],"environment":[],"acceptance":[]}. Existing IDs accept partial technical patches; omitted recipes and fields remain intact. Original proof coverage and the human criterion remain intact. Additional requirement IDs must already belong to this delivery. Optional conformance metadata may be corrected to the selected operational provider while literal user restrictions remain authoritative; metadata is never proof. A mismatch in report spelling does not authorize changing the implementation or the delivery.'
+      : 'Shape: {"environment":[{"id":"existing or necessary provider id","name":"provider","kind":"runtime|sdk|tool|package|service|database","identity":{"capability":"consumed capability","kind":"cli|library|driver|service|runtime|sdk","provider":"provider"},"dependsOn":[],"check":{"command":"usable readiness probe","args":[]},"prepare":[],"provides":{"command":[],"paths":[],"env":{},"modules":[{"protocol":"node|python","specifier":"actual import specifier","runtimeCommand":["actual runtime"]}]}}],"environmentIds":[]}. Only provider definitions and references may change; do not modify delivery or verification contracts.',
     `Locked delivery: ${JSON.stringify(task)}`,
     `Available environment: ${JSON.stringify(plan.environment)}`,
     `Incident: ${options.problem}`,
@@ -736,16 +853,35 @@ async function repairRestrictedWorkPlan(options: RepairPlanOptions, task: WorkUn
   const environmentIds=technical.environmentIds??result.environmentIds;
   if(Array.isArray(environmentIds))target.environmentIds=strings(environmentIds);
   if(scope==='verification'){
-    const scopedChecks=(values:unknown,originals:Verification[]):Verification[]=>{
+    const scopedChecks=(values:unknown,originals:Verification[],owner=task.id):Verification[]=>{
       const raw=records(values);
+      if(!raw.length&&originals.length)throw new PlanningFailure('invalid-plan',['A correção de verificação não pode apagar as receitas originais.'],task.id);
+      const selected=new Set(target.environmentIds);
+      for(;;){const size=selected.size;for(const node of plan.environment)if(selected.has(node.id))node.dependsOn.forEach(id=>selected.add(id));if(size===selected.size)break;}
       const prepared=raw.map(candidate=>{
         const original=originals.find(check=>check.id===candidate.id)??(originals.length===1&&raw.length===1?originals[0]:undefined);
-        return{...candidate,...(original?{id:original.id,requirementIds:original.requirementIds,...(original.expected?{expected:original.expected}:{}),...(original.conformance?{conformance:original.conformance}:{})}:{requirementIds:strings(candidate.requirementIds).filter(id=>task.requirementIds.includes(id))})};
+        const claim=candidate.conformance===undefined?original?.conformance:object(candidate.conformance)?{...original?.conformance,...candidate.conformance}:null;
+        if(candidate.conformance!==undefined&&!claim)throw new PlanningFailure('invalid-plan',['A correção não pode remover ou tornar ilegível uma declaração de conformidade.'],task.id);
+        const proposed={...original,...candidate,...(original?{id:original.id,...(original.expected!==undefined?{expected:original.expected}:{})}:{}),requirementIds:uniqueStrings([...(original?.requirementIds??[]),...strings(candidate.requirementIds).map(id=>resolveRequirementAlias(brief,id)).filter(id=>task.requirementIds.includes(id))]),...(claim?{conformance:claim}:{})};
+        if(candidate.conformance!==undefined){
+          const normalized=normalizeChecks([proposed],brief)[0];
+          const conformance=normalized?.conformance;
+          const requirement=brief.requirements.find(item=>item.id===conformance?.requirementId);
+          if(!conformance||!conformance.productInputs.length||!requirement||!task.requirementIds.includes(requirement.id)||!plan.environment.some(node=>selected.has(node.id)&&obligationMatchesProvider(requirement,node.identity)&&matchesOperationalClaim(requirement,conformance,node.identity)))throw new PlanningFailure('invalid-plan',['A conformidade proposta não corresponde à obrigação literal e ao provedor operacional consumido pela unidade. Nenhuma declaração ou prova foi adotada.'],task.id);
+        }
+        return proposed;
       });
-      const checks=normalizeChecks(prepared,brief);
+      const updates=normalizeChecks(prepared,brief).map(check=>{
+        const original=originals.find(item=>item.id===check.id),candidate=raw.find(item=>item.id===check.id)??(originals.length===1&&raw.length===1?raw[0]:undefined);
+        const sameInvocation=original&&stableJson([original.command,original.args??[],original.cwd??'.'])===stableJson([check.command,check.args??[],check.cwd??'.']);
+        return{...check,...(sameInvocation&&original.instrument?{instrument:structuredClone(original.instrument)}:{}),...(sameInvocation&&original.recipeCandidate?{recipeCandidate:structuredClone(original.recipeCandidate)}:{}),...(original?.assertionIssue&&candidate?.assertion===undefined?{assertionIssue:original.assertionIssue}:{})};
+      });
+      const byId=new Map(updates.map(check=>[check.id,check])),originalIds=new Set(originals.map(check=>check.id));
+      const checks=[...originals.map(check=>byId.get(check.id)??check),...updates.filter(check=>!originalIds.has(check.id))];
       const covered=new Set(checks.flatMap(check=>check.requirementIds));
       const missing=uniqueStrings(originals.flatMap(check=>check.requirementIds)).filter(id=>!covered.has(id));
       if(missing.length)throw new PlanningFailure('invalid-plan',[`A correção de verificação removeu cobertura obrigatória: ${missing.join(', ')}. A entrega original foi preservada.`],task.id);
+      for(const after of updates){const before=originals.find(check=>check.id===after.id);if(stableJson(before)!==stableJson(after))verificationTransformations.push({taskId:owner,checkId:after.id,before:before?structuredClone(before):undefined,after:structuredClone(after)});}
       return checks;
     };
     const checks=technical.checks??result.checks;
@@ -756,7 +892,7 @@ async function repairRestrictedWorkPlan(options: RepairPlanOptions, task: WorkUn
       for(const candidate of records(result.acceptance)){
         const original=plan.acceptance?.find(check=>check.id===candidate.id);
         if(original&&!original.requirementIds.some(id=>task.requirementIds.includes(id)))throw new PlanningFailure('invalid-plan',['A correção local tentou alterar uma prova de aceite sem relação com a entrega afetada.'],task.id);
-        const checks=scopedChecks([candidate],original?[original]:[]);
+        const checks=scopedChecks([candidate],original?[original]:[],'$acceptance');
         const ids=new Set(checks.map(check=>check.id));
         plan.acceptance=[...(plan.acceptance??[]).filter(check=>!ids.has(check.id)),...checks];
       }
@@ -768,7 +904,7 @@ async function repairRestrictedWorkPlan(options: RepairPlanOptions, task: WorkUn
   plan.revision+=1;plan.briefId=brief.id;plan.briefRevision=brief.revision;
   plan.status=options.finalize===false?'planning':'ready';
   await options.save?.({brief,plan});
-  emitEvent(options.onEvent,{type:'replanned',message:`Contrato técnico de ${scope} corrigido; identidade, critérios e código da entrega preservados.`,subject:task.id});
+  emitEvent(options.onEvent,{type:'replanned',message:`Contrato técnico de ${scope} corrigido; identidade, critérios e código da entrega preservados.`,subject:task.id,detail:{verificationTransformations}});
   return plan;
 }
 
@@ -784,38 +920,36 @@ export async function repairWorkPlan(options: RepairPlanOptions): Promise<Develo
   const brief = options.brief;
   const requirements = brief.requirements.filter((requirement) => task.requirementIds.includes(requirement.id));
   if (!requirements.length) throw new PlanningFailure("missing-requirement", ["A unidade afetada não está vinculada a nenhum resultado obrigatório do pedido."], task.id);
-  const prompt = [
-    "Repair this local engineering work plan. The product intent and restrictions are authoritative. Return a JSON object; do not edit files.",
-    'Shape: {"tasks":[{"id":"replacement-id","title":"small capability","goal":"observable outcome","instructions":"local work","requirementIds":[],"dependsOn":[],"environmentIds":[],"contractIds":[],"files":[],"criteria":[],"checks":[],"risk":"normal","blockedBy":[]}],"environment":[{"id":"new-id","name":"only necessary new prerequisite","kind":"tool","dependsOn":[],"targets":[],"check":{"command":"availability command"},"prepare":[]}],"contracts":[{"id":"new-interface","name":"name","description":"precise integration interface","inputs":[],"outputs":[],"requirementIds":[]}],"questions":[]}',
-    "Split the unit if its context is too large. Keep the required behavior; do not change the product to satisfy an inappropriate validation tool. Replacement tasks must preserve all requirement IDs. Do not repeat already completed independent work. Questions are only for a missing product fact with concrete impact, never to settle an installer preference.",
-    `Authoritative product facts and capability limits: ${productFacts(brief, Math.floor((options.contextChars ?? 24_000) / 5))}`,
-    `Affected work unit: ${JSON.stringify(task)}`,
-    `Relevant requirements: ${JSON.stringify(requirements)}`,
-    `Contracts: ${JSON.stringify(plan.contracts.filter((contract) => task.contractIds.includes(contract.id)))}`,
-    `Environment identifiers: ${plan.environment.map((node) => `${node.id}:${node.name}`).join(", ")}`,
-    `Incident: ${options.problem}`,
-  ].join("\n\n");
   const limit = options.contextChars ?? 24_000;
-  const chunks = splitText(prompt, Math.max(2_000, limit - 2_000));
-  let repaired: Record<string, unknown>;
+  let repairProblem=options.problem;
   let replacements: WorkUnit[] = [];
   const repairRecovery = new PlanningProgress(`repair:${task.id}`);
   for (;;) {
     cancelled(options.signal);
-    if (chunks.length === 1) repaired = await requestObject({ ...options, operation: "repair", prompt });
-    else {
-      // Reduce only the affected source packet, preserving each requirement and its literal content.
-      const pieces = requirements.map((requirement) => ({ text: requirement.statement, requirementIds: [requirement.id] }));
-      const taskCopies = pieces.map((piece, index): WorkUnit => ({ ...task, id: `${task.id}.${index + 1}`, title: piece.text.slice(0, 120), requirementIds: piece.requirementIds, goal: piece.text, instructions: `Implement the local outcome; preserve the consumed integration contracts.`, criteria: [piece.text], dependsOn: index === 0 ? task.dependsOn : [`${task.id}.${index}`], contractIds: task.contractIds.filter((id) => plan.contracts.some((contract) => contract.id === id && (contract.requirementIds.length === 0 || contract.requirementIds.some((requirementId) => piece.requirementIds.includes(requirementId))))), checks: task.checks.filter((check) => check.requirementIds.some((id) => piece.requirementIds.includes(id)) || check.requirementIds.length === 0 && index === pieces.length - 1) }));
-      repaired = { tasks: taskCopies };
+    const prompt=engineeringRepairContext({brief,plan,task,problem:repairProblem,limit});
+    const repaired=await requestObject({...options,operation:'repair',prompt});
+    const candidate=structuredClone(plan);
+    candidate.environment=normalizeEnvironment([...candidate.environment,...records(repaired.environment)],brief);
+    candidate.contracts=unique([...candidate.contracts,...contractsFrom(repaired.contracts,brief.requirements)]);
+    let issues:string[]=[];
+    try{
+      replacements=normalizeTasks(decompositionTasks(repaired.tasks,task),brief,candidate.environment,candidate.contracts,requirements);
+      issues=decompositionIssues(task,replacements,plan);
+    }catch(error){
+      if(!(error instanceof PlanningFailure))throw error;
+      issues=error.details;
     }
-    await resolveQuestions(brief, records(repaired.questions), options);
-    plan.environment = normalizeEnvironment([...plan.environment, ...await executableEnvironment(repaired.environment, brief, options)], brief);
-    plan.contracts = unique([...plan.contracts, ...contractsFrom(repaired.contracts, brief.requirements)]);
-    replacements = normalizeTasks(repaired.tasks, brief, plan.environment, plan.contracts, requirements);
-    if (replacements.length) break;
-    emitEvent(options.onEvent, { type: "recovering", message: "O reparo local não trouxe unidades executáveis; preservando a tarefa e buscando uma decomposição útil.", subject: task.id });
-    repairRecovery.requireChange({repaired, task}, "O reparo local não produziu uma decomposição executável.");
+    if(issues.length){
+      emitEvent(options.onEvent,{type:'recovering',message:'A decomposição perdeu obrigações ou escopos; proposta recusada e tarefa original preservada.',subject:task.id,detail:{issues}});
+      repairRecovery.requireChange({repaired,issues},'A decomposição de engenharia não preservou a responsabilidade original.');
+      repairProblem=`${options.problem}\nPrevious proposal was not adopted. Correct its concrete omissions; original definitions remain available by indexed reference. ${JSON.stringify(issues)}`;
+      continue;
+    }
+    await resolveQuestions(brief,records(repaired.questions),options);
+    candidate.environment=normalizeEnvironment([...plan.environment,...await executableEnvironment(repaired.environment,brief,options)],brief);
+    plan=candidate;
+    emitEvent(options.onEvent,{type:'replanned',message:'Decomposição por responsabilidades de engenharia adotada; critérios e receitas originais preservados por referência.',subject:task.id,detail:{sourceTaskId:task.id,replacements:replacements.map(item=>({id:item.id,files:item.files,originalScopes:task.files}))}});
+    break;
   }
   await repairGraph(plan, brief, "environment", options);
   const replacementAliases = new Map<string, string>();
@@ -844,7 +978,7 @@ export async function repairWorkPlan(options: RepairPlanOptions): Promise<Develo
     for (;;) {
       let oversized: ContextTooLarge | null = null;
       for (const candidate of plan.tasks) {
-        try { contextForTask(brief, plan, candidate, Math.floor(limit / 2)); }
+        try { contextForTask(brief, plan, candidate, limit); }
         catch (error) { if (!(error instanceof ContextTooLarge)) throw error; oversized = error; break; }
       }
       if (!oversized) break;

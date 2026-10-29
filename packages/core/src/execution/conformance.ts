@@ -1,12 +1,13 @@
 import { readFile, stat, realpath } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { createRequire } from 'node:module';
 import type { DevelopmentPlan, ProductBrief, Verification } from '../domain/types.js';
 import type { CommandResult } from '../runtime/types.js';
-import type { OperationalEnvironment } from './environment.js';
+import type { CapabilityBinding, OperationalEnvironment } from './environment.js';
 import type { VerificationEvidence } from './types.js';
 import { digest, inside, sourceFiles } from './files.js';
-import { resolveNativeNode, type ProviderWitness, type RuntimeProviderReceipt } from '../runtime/provider-observation.js';
-import { consumesVerification, verificationRegistry } from '../domain/verifications.js';
+import { literalProviderImports, providerConsumptionCurrent, providerProcessCurrent, resolveModuleHost, resolveNativeNode, resolveProviderProgram, type ModuleProviderReceipt, type ModuleProviderWitness, type ProviderConsumption, type ProviderProcessWitness, type ProviderWitness, type RuntimeProviderReceipt } from '../runtime/provider-observation.js';
+import { verificationRegistry } from '../domain/verifications.js';
 import { matchesOperationalClaim, obligationMatchesProvider } from '../domain/bindings.js';
 
 export interface ObservedArtifact { hash: string; modified: string; changed: string; }
@@ -22,6 +23,10 @@ export interface ConformanceProvenance {
   timedOut: boolean;
   runtimeWitnesses?: ProviderWitness[];
   runtimeProvider?: RuntimeProviderReceipt;
+  moduleProviders?:ModuleProviderReceipt[];
+  moduleWitnesses?:ModuleProviderWitness[];
+  consumptions?:ProviderConsumption[];
+  processes?:ProviderProcessWitness[];
   runtimeObservation?: { enabled:boolean; reason?:string; diagnostics:string[] };
 }
 export interface ConformanceObservation {
@@ -87,7 +92,7 @@ function consumes(provenance:ConformanceProvenance,path:string,start=1):boolean{
   const args=invocationArguments(provenance.command);if(!args)return false;
   for(let index=start;index<args.length;index++){
     // Probe/evaluation flags before a source argument do not establish execution of that source.
-    if(['--version','-V','--help','-h','--eval','-e','-c','--command'].includes(args[index]!))return false;
+    if(['--version','-V','--help','-h','--check','--eval','-e','-c','--command'].includes(args[index]!))return false;
     const candidate=localArgument(provenance.workspace,provenance.cwd,args[index]!);
     if(candidate&&(candidate==='.'||path===candidate||path.startsWith(`${candidate.replace(/\/$/,'')}/`)))return true;
   }
@@ -96,6 +101,77 @@ function consumes(provenance:ConformanceProvenance,path:string,start=1):boolean{
 function produced(provenance:ConformanceProvenance,path:string):boolean{
   const after=provenance.artifactsAfter[path],before=provenance.artifactsBefore[path];
   return Boolean(after&&(!before||after.hash!==before.hash||after.modified!==before.modified||after.changed!==before.changed));
+}
+async function loadedProviderModule(observed:ConformanceProvenance,provider:CapabilityBinding,operational:OperationalEnvironment,workspace:string,canonical:Record<string,ObservedArtifact>):Promise<boolean>{
+  if(!provider.modules?.length||!['library','driver','sdk'].includes(provider.kind))return false;
+  for(const declaration of provider.modules){
+    const receipt=observed.moduleProviders?.find(item=>item.capability===provider.capability&&item.kind===provider.kind&&item.provider===provider.provider&&item.fingerprint===provider.fingerprint&&item.protocol===declaration.protocol&&item.specifier===declaration.specifier&&item.runtimeCommand.length===declaration.runtimeCommand.length&&matchingPrefix(item.runtimeCommand,declaration.runtimeCommand,observed.workspace,operational.root??workspace,observed.cwd));
+    if(!receipt)return false;
+    const currentCwd=resolve(workspace,relative(observed.workspace,observed.cwd));
+    const current=await resolveModuleHost(currentCwd,declaration,operational.env).catch(()=>undefined);
+    if(!current||current.nativeFingerprint!==receipt.nativeFingerprint||current.launcher.fingerprint!==receipt.launcher.fingerprint||!matchingPrefix([receipt.execPath],[current.execPath],observed.workspace,operational.root??workspace)||!matchingPrefix([receipt.launcher.path],[current.launcher.path],observed.workspace,operational.root??workspace))return false;
+    let proved=false;
+    for(const witness of observed.moduleWitnesses??[]){
+      if(witness.protocol!==declaration.protocol||witness.source!==(declaration.protocol==='node'?'node-module-hook':'python-audit-hook'))continue;
+      const native=await realpath(witness.execPath).catch(()=>undefined);if(!native||native!==current.execPath)continue;
+      const args=declaration.protocol==='node'?[native,...witness.execArgv,...witness.argv.slice(1)]:[native,...witness.argv.slice(1)];
+      if(declaration.protocol==='node'&&witness.execArgv.some(arg=>['--check','-c','--version','--help'].includes(arg)))continue;
+      if(!current.launcher.shebang&&!matchingPrefix(args,[native,...declaration.runtimeCommand.slice(1)],observed.workspace,operational.root??workspace,observed.cwd))continue;
+      if(!Object.entries(witness.inputs).some(([path,hash])=>canonical[path]?.hash===hash))continue;
+      for(const module of witness.modules.filter(item=>item.specifier===declaration.specifier)){
+        if(!Object.entries(module.importedBy??{}).some(([path,hash])=>canonical[path]?.hash===hash))continue;
+        if(module.origin.startsWith('builtin:')&&!module.hash){proved=true;break;}
+        if(!module.hash||!isAbsolute(module.origin))continue;
+        const relativeOrigin=relative(observed.workspace,module.origin);
+        const path=relativeOrigin==='..'||relativeOrigin.startsWith(`..${sep}`)?module.origin:resolve(workspace,relativeOrigin);
+        try{const info=await stat(path);if(info.isFile()&&digest(JSON.stringify({mode:info.mode&0o777,content:digest(await readFile(path))}))===module.hash){proved=true;break;}}catch{/* Removed or changed module files cannot reuse their old witness. */}
+      }
+      if(proved)break;
+    }
+    if(!proved)return false;
+  }
+  return true;
+}
+async function observedConsumption(observed:ConformanceProvenance,path:string,hash:string,workspace:string):Promise<boolean>{
+  if((await observedFiles(workspace,[path]))[path]?.hash!==hash)return false;
+  for(const receipt of observed.consumptions??[])if(receipt.path===path&&await providerConsumptionCurrent(workspace,observed.workspace,receipt,hash))return true;
+  // A concrete source operand remains a valid direct observation. Named read
+  // sets alone never enter this branch: snapshots are not execution witnesses.
+  return observed.inputs[path]===hash&&consumes(observed,path,0);
+}
+async function sourceUsesProvider(workspace:string,observed:ConformanceProvenance,productFiles:string[],provider:CapabilityBinding,providerInputs:string[]):Promise<boolean>{
+  const scopes=[...(provider.inputs??[]),...(provider.paths??[])].map(path=>resolve(workspace,path));
+  const request=createRequire(resolve(workspace,'package.json'));
+  for(const module of provider.modules??[])if(module.protocol==='node'){
+    try{const path=request.resolve(module.specifier);if(isAbsolute(path))scopes.push(path.endsWith(`${sep}package.json`)?dirname(path):path);}catch{/* An unresolved module declaration proves no compiled source participation. */}
+  }
+  for(const source of productFiles){
+    const file=resolve(workspace,source),text=await readFile(file,'utf8');
+    for(const specifier of literalProviderImports(text)){
+      let target:string|undefined;
+      try{target=specifier.startsWith('.')||isAbsolute(specifier)?resolve(dirname(file),specifier):createRequire(file).resolve(specifier);}catch{continue;}
+      if(basename(target)==='package.json')continue;
+      const local=relative(resolve(workspace),target).replaceAll('\\','/');if(local==='..'||local.startsWith('../')||isAbsolute(local))continue;
+      if(!scopes.some(scope=>target===scope||target!.startsWith(`${scope}${sep}`)))continue;
+      const info=await stat(target).catch(()=>null);if(!info?.isFile())continue;
+      const hash=digest(JSON.stringify({mode:info.mode&0o777,content:digest(await readFile(target))}));
+      if(await observedConsumption(observed,local,hash,workspace))return true;
+    }
+  }
+  return false;
+}
+async function functionalArtifactChain(workspace:string,plan:DevelopmentPlan,evidence:VerificationEvidence[],requirementId:string,product:Record<string,ObservedArtifact>,producer?:VerificationEvidence):Promise<boolean>{
+  const registry=verificationRegistry(plan);
+  const producers=producer?[producer]:evidence.filter(proof=>proof.passed&&proof.level==='build'&&registry.some(({taskId,check})=>taskId===proof.taskId&&check.id===proof.checkId&&check.kind===proof.kind));
+  for(const build of producers){
+    const built=build.provenance;if(!built||built.exitCode!==0||built.cancelled||built.timedOut||!Object.keys(product).length||!Object.keys(product).every(path=>built.inputs[path]===product[path]!.hash))continue;
+    const artifacts=Object.keys(built.artifactsAfter).filter(path=>produced(built,path));
+    for(const run of evidence){
+      if(!run.passed||run.level!=='behavior'||!run.provenance||run.provenance.cancelled||run.provenance.timedOut||!registry.some(({taskId,check})=>taskId===run.taskId&&check.id===run.checkId&&check.kind===run.kind))continue;
+      for(const path of artifacts)if(await observedConsumption(run.provenance,path,built.artifactsAfter[path]!.hash,workspace))return true;
+    }
+  }
+  return false;
 }
 
 /** Availability is never product conformance. Only actual invocation/input/artifact provenance qualifies. */
@@ -120,8 +196,7 @@ export async function validateConformance(brief:ProductBrief,plan:DevelopmentPla
       const proof=evidence.findLast(item=>item.taskId===owned.taskId&&item.checkId===check.id&&item.kind===check.kind&&item.passed&&item.provenance);
       const observed=proof?.provenance;
       if(!proof||!observed||observed.cancelled||observed.timedOut||proof.level==='build'&&observed.exitCode!==0){reasons.push('No successful execution provenance exists for the dedicated recipe.');continue;}
-      if(proof.level==='syntax'){reasons.push('Syntax does not establish provider consumption by the product.');continue;}
-      if(provider.kind==='sdk'&&proof.level!=='build'){reasons.push('A mandatory SDK needs an observed build, a produced artifact and a dependent functional execution; a behavior label on its compiler output is insufficient.');continue;}
+      if(proof.level==='syntax'&&provider.kind!=='sdk'){reasons.push('Syntax does not establish provider consumption by the product.');continue;}
       if(['runtime','service'].includes(provider.kind)&&proof.level!=='behavior'){reasons.push('A mandatory runtime or service must execute the product behavior, rather than merely generate an artifact.');continue;}
       const args=invocationArguments(observed.command);
       const productFiles=await sourceFiles(workspace,claim.productInputs);
@@ -139,6 +214,7 @@ export async function validateConformance(brief:ProductBrief,plan:DevelopmentPla
             receiptMatches=Boolean(current&&current.nativeFingerprint===receipt.nativeFingerprint&&current.launcher.fingerprint===receipt.launcher.fingerprint&&matchingPrefix([receipt.execPath],[current.execPath],observed.workspace,operational.root??workspace,observed.cwd));
           }catch{/* A missing or changed native binding is unproved, never a product failure. */}
         }
+        if(receipt&&!receiptMatches){reasons.push('The recorded native runtime identity no longer matches the selected operational provider.');continue;}
         const selected=await realpath(provider.command[0]!).catch(()=>provider.command![0]!);
         for(const witness of observed.runtimeWitnesses??[]){
           if(witness.source!=='node-load-hook'||witness.execArgv.some(arg=>['--check','-c','--version','--help'].includes(arg)))continue;
@@ -153,21 +229,37 @@ export async function validateConformance(brief:ProductBrief,plan:DevelopmentPla
           if(productFiles.some(path=>witness.inputs[path]===canonical[path]?.hash)){runtimeWitness=true;break;}
         }
       }
-      const directConsumption=Boolean(args&&productFiles.some(path=>consumes(observed,path,provider.command?.length??1)));
-      if(!directConsumption&&!runtimeWitness){reasons.push('Neither the actual invocation nor a concrete descendant runtime loaded a current product input. Readiness and instrument scripts are insufficient.');continue;}
-      if(provider.command?.length){
-        if(!runtimeWitness&&(!args||!matchingPrefix(args,provider.command,observed.workspace,operational.root??workspace,observed.cwd))){reasons.push('The command that ran is not the mandatory operational provider.');continue;}
+      const moduleWitness=proof.level==='behavior'&&await loadedProviderModule(observed,provider,operational,workspace,canonical);
+      if(provider.kind==='sdk'&&proof.level==='behavior'&&!moduleWitness){reasons.push('A behavior label on compiler output cannot bypass the observed build and functional artifact chain. A client SDK instead needs actual module consumption by the product.');continue;}
+      let directConsumption=Boolean(args&&productFiles.some(path=>consumes(observed,path,provider.command?.length??1)));
+      if(!directConsumption&&provider.kind!=='runtime')for(const path of productFiles)if(await observedConsumption(observed,path,canonical[path]!.hash,workspace)){directConsumption=true;break;}
+      let providerProcess=false;
+      if(provider.command?.length&&['sdk','cli'].includes(provider.kind)){
+        const program=await resolveProviderProgram(resolve(workspace,relative(observed.workspace,observed.cwd)),provider.command,operational.env).catch(()=>undefined);
+        if(program)for(const process of observed.processes??[])if(await providerProcessCurrent(workspace,observed.workspace,process,program)){
+          providerProcess=true;
+          const invocation={...observed,cwd:process.cwd??observed.cwd,command:[process.execPath,...process.execArgv,...process.argv.slice(1)]};
+          if(productFiles.some(path=>consumes(invocation,path,1)))directConsumption=true;
+          break;
+        }
+      }
+      if(!directConsumption&&!runtimeWitness&&!moduleWitness){reasons.push('Neither the actual invocation nor a concrete descendant runtime loaded a current product input. Readiness and instrument scripts are insufficient.');continue;}
+      if(provider.command?.length&&!moduleWitness){
+        if(!runtimeWitness&&!providerProcess&&(!args||!matchingPrefix(args,provider.command,observed.workspace,operational.root??workspace,observed.cwd))){reasons.push('The command that ran is not the mandatory operational provider.');continue;}
         if(claim.providerCommand?.length&&!matchingPrefix(claim.providerCommand,provider.command,workspace,operational.root??workspace)){reasons.push('The declared provider invocation contradicts its operational binding.');continue;}
-      }else{
+      }else if(!moduleWitness){
         const providerInputs=claim.providerInputs??[];
         const declared=[...(provider.inputs??[]),...(provider.paths??[])].map(path=>portable(isAbsolute(path)?path:resolve(workspace,path),operational.root??workspace));
         const providerFiles=await sourceFiles(workspace,providerInputs);
-        if(!providerFiles.length||!providerFiles.every(path=>declared.some(scope=>{const target=portable(resolve(workspace,path),workspace);return target===scope||target.startsWith(`${scope.replace(/\/$/,'')}/`);})&&observed.inputs[path]&&consumes(observed,path,0))){reasons.push('A library/driver/service needs actual provider-file consumption or a concrete provider invocation, plus product interaction. Metadata alone is insufficient.');continue;}
+        const compiledUse=proof.level==='build'&&['library','driver'].includes(provider.kind)&&await sourceUsesProvider(workspace,observed,productFiles,provider,providerInputs);
+        if(!compiledUse&&(!providerFiles.length||!providerFiles.every(path=>declared.some(scope=>{const target=portable(resolve(workspace,path),workspace);return target===scope||target.startsWith(`${scope.replace(/\/$/,'')}/`);})&&observed.inputs[path]&&consumes(observed,path,0)))){reasons.push('A library/driver/service needs a current module-load witness in the same process as the executed product, actual provider-file consumption or a concrete provider invocation, plus product interaction. Metadata alone is insufficient.');continue;}
       }
-      if(proof.level==='build'){
+      if(proof.level==='syntax'&&provider.kind==='sdk'){
+        if(!await functionalArtifactChain(workspace,plan,evidence,requirement.id,canonical)){reasons.push('A non-emitting SDK check proves source participation only; a real build and functional consumption of its current artifact are still required.');continue;}
+      }else if(proof.level==='build'){
         const artifacts=Object.keys(observed.artifactsAfter).filter(path=>produced(observed,path));
         if(!artifacts.length){reasons.push('The purported production build produced no observed artifact.');continue;}
-        const functional=evidence.some(run=>run.passed&&run.level==='behavior'&&run.provenance&&!run.provenance.cancelled&&!run.provenance.timedOut&&checks.some(recipe=>recipe.taskId===run.taskId&&recipe.check.id===run.checkId&&recipe.check.kind===run.kind&&recipe.check.requirementIds.includes(requirement.id)&&consumesVerification(plan,checks,recipe,owned))&&artifacts.some(path=>run.provenance!.inputs[path]===observed.artifactsAfter[path]!.hash&&consumes(run.provenance!,path,0)));
+        const functional=await functionalArtifactChain(workspace,plan,evidence,requirement.id,canonical,proof);
         if(!functional){reasons.push('No successful functional recipe consumed the exact artifact produced by the mandatory provider.');continue;}
       }else if(proof.level!=='behavior'){reasons.push('The dedicated recipe has no observed build or behavior level.');continue;}
       accepted=true;break;

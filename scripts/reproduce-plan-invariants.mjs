@@ -24,7 +24,7 @@ function command(binary, args, options = {}) {
 }
 async function api(source, label, registry = false) {
   const file = join(temporary, `${label}.mjs`);
-  const entry = `export * from ${JSON.stringify(join(source, 'packages/core/src/domain/index.ts'))};${registry ? `export * from ${JSON.stringify(join(source, 'packages/core/src/domain/verifications.ts'))};export * from ${JSON.stringify(join(source, 'packages/core/src/domain/plan-records.ts'))};` : ''}`;
+  const entry = `export * from ${JSON.stringify(join(source, 'packages/core/src/domain/index.ts'))};${registry ? `export * from ${JSON.stringify(join(source, 'packages/core/src/domain/verifications.ts'))};export * from ${JSON.stringify(join(source, 'packages/core/src/domain/plan-records.ts'))};export {validateConformance} from ${JSON.stringify(join(source, 'packages/core/src/execution/conformance.ts'))};` : ''}`;
   await build({ stdin: { contents: entry, resolveDir: root }, outfile: file, bundle: true, platform: 'node', format: 'esm', target: 'node24', packages: 'external', logLevel: 'silent' });
   return import(pathToFileURL(file).href);
 }
@@ -93,7 +93,18 @@ try {
   const removed = structuredClone(ready);
   removed.tasks.find(task => task.id === selected.taskId).checks = removed.tasks.find(task => task.id === selected.taskId).checks.filter(check => check.id !== selected.check.id);
   removed.acceptance = removed.acceptance.map(check => check.id === selected.check.id ? structuredClone(empty.check) : check);
-  assert.ok(after.validatePlan(brief, removed).some(issue => issue.code === 'unproven-mandatory-provider' && issue.subject === nodeIssue.subject), 'An empty same-ID acceptance entry must not stand in for the task-local claim.');
+  const missingClaim = after.reconcilePlan(brief, removed);
+  assert.deepEqual(after.validatePlan(brief, missingClaim), []);
+  const pendingDebt = missingClaim.obligations.find(obligation => obligation.kind === 'provider' && obligation.requirementId === nodeIssue.subject);
+  assert.equal(pendingDebt.recipeStatus, 'pending', 'An empty same-ID acceptance entry cannot count as a planned usage recipe.');
+  assert.equal(pendingDebt.verification, 'required-in-build');
+  // Synthetic readiness isolates the negative proof check. It is not a claim
+  // that any provider was prepared or executed by this read-only reproduction.
+  const assumedReady = { root: temporary, revision: 'negative-control-only', env: {}, bindings: Object.fromEntries(ready.environment.filter(node => node.identity).map(node => [node.id, { ...node.identity, ready: true }])) };
+  const withoutEvidence = await after.validateConformance(brief, ready, assumedReady, [], temporary);
+  assert.ok(withoutEvidence.some(issue => issue.requirementId === nodeIssue.subject), 'A ready plan with recipe metadata cannot certify an unexecuted product.');
+  const absentClaim = await after.validateConformance({ ...brief, requirements: brief.requirements.filter(requirement => requirement.id === nodeIssue.subject) }, missingClaim, assumedReady, [], temporary);
+  assert.ok(absentClaim.some(issue => issue.requirementId === nodeIssue.subject && issue.code === 'missing-conformance'), 'Pending debt must still be rejected by final conformance.');
 
   const starts = new Map(events.filter(event => event.type === 'agent.start').map(event => [event.detail.detail.id, event]));
   const ends = new Map(events.filter(event => event.type === 'agent.result').map(event => [event.detail.detail.id, event]));
@@ -122,7 +133,7 @@ try {
     schema: 'capivara/plan-invariants-comparison/1', generatedAt: new Date().toISOString(),
     input: { databaseSHA256: databaseHash, eventCount: events.length, status: project.status, stage: project.stage, calls: timeline.length, requirements: project.brief.requirements.length, tasks: project.plan.tasks.length, environmentNodes: project.plan.environment.length, hasExecution: false },
     baseline: { commit: String(command('git', ['rev-parse', baseline], { encoding: 'utf8' })).trim(), issues: beforeIssues, taskLocalClaim: { taskId: originalClaim.taskId, checkId: originalClaim.check.id, requirementId: nodeIssue.subject, typedAssertionValid: true, productInputPathsDeclared: true } },
-    after: { sourceSHA256: sha(stable(sources)), sources, status: ready.status, tasks: ready.tasks.length, taskIds: ready.tasks.map(task => task.id), coveredRequirements: covered.length, taskChecks: ready.tasks.flatMap(task => task.checks).length, acceptanceRecipes: ready.acceptance.length, registryEntries: registry.length, preservedCriteria: oldCriteria.length, allTaskInputsAndOutputsPreserved: true, executableRecipesPreserved: originalRegistry.length, nodeClaim: { taskId: selected.taskId, previousTaskId: originalClaim.taskId, checkId: selected.check.id }, metadataRestorations: recovered.restored, ambiguousRestorations: recovered.ambiguous, previouslyEmptyAcceptanceEntry: { taskId: '$acceptance', checkId: empty.check.id, originalRequirementIds: 0, originalConformance: false, restoredRequirementIds: restoredGlobal.check.requirementIds, restoredConformance: restoredGlobal.check.conformance, sourceResultSHA256: nodeRestoration.resultSHA256, sourceIsOriginalPaidResponse: true, originalOrphanCannotReplaceQualifiedClaims: true, definitionOnlyNotExecutedProof: true }, issues: [], newAgentRequests: requests.length },
+    after: { sourceSHA256: sha(stable(sources)), sources, status: ready.status, tasks: ready.tasks.length, taskIds: ready.tasks.map(task => task.id), coveredRequirements: covered.length, taskChecks: ready.tasks.flatMap(task => task.checks).length, acceptanceRecipes: ready.acceptance.length, registryEntries: registry.length, obligations: ready.obligations, preservedCriteria: oldCriteria.length, allTaskInputsAndOutputsPreserved: true, executableRecipesPreserved: originalRegistry.length, nodeClaim: { taskId: selected.taskId, previousTaskId: originalClaim.taskId, checkId: selected.check.id }, metadataRestorations: recovered.restored, ambiguousRestorations: recovered.ambiguous, previouslyEmptyAcceptanceEntry: { taskId: '$acceptance', checkId: empty.check.id, originalRequirementIds: 0, originalConformance: false, restoredRequirementIds: restoredGlobal.check.requirementIds, restoredConformance: restoredGlobal.check.conformance, sourceResultSHA256: nodeRestoration.resultSHA256, sourceIsOriginalPaidResponse: true, originalOrphanCannotReplaceQualifiedClaims: true, definitionOnlyNotExecutedProof: true }, negativeControls: { removedClaimDebt: pendingDebt, readinessAssumedOnlyForNegativeControl: true, executionReceipts: 0, unexecutedProductRejected: withoutEvidence.length > 0, missingClaimRejectedAtBuild: true }, issues: [], newAgentRequests: requests.length },
     observed: { metrics, repeatedIssues: repeated, timeline, financialCostReported: false, durationBasis: 'agent.start to agent.result; cached input is included in input tokens' },
     safety: { reproductionPaidInferenceCalls: 0, productCommands: 0, projectWrites: 0, databaseUnchanged: true, realPlanApplied: false, buildExecuted: false },
   };

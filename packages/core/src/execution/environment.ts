@@ -1,6 +1,6 @@
 import { readFile, stat, readdir, access } from 'node:fs/promises';
 import { join, resolve, relative, sep, delimiter, dirname, basename, isAbsolute, extname, matchesGlob } from 'node:path';
-import type { CommandRecipe, EnvironmentNode, ProductBrief, Verification } from '../domain/types.js';
+import type { CommandRecipe, EnvironmentNode, ProductBrief, ProviderModule, Verification } from '../domain/types.js';
 import { allowedCapabilities, inferredCapabilities } from '../domain/authority.js';
 import type { CommandRequest, CommandResult, ExecutionConstraints, TerminalRequest } from '../runtime/types.js';
 import { runTerminal as realTerminal } from '../runtime/terminal.js';
@@ -8,6 +8,7 @@ import type { BuildIncident } from './types.js';
 import { dependencyFamilies, DEPENDENCY_MANIFESTS } from './dependencies.js';
 import { digest, inputHash, sourceFiles } from './files.js';
 import { emitProgress, type ProgressEvent } from '../telemetry/progress.js';
+import { inferProviderModule, resolveModuleHost } from '../runtime/provider-observation.js';
 
 export type CommandExecutor = (request: CommandRequest) => Promise<CommandResult>;
 export type CapabilityKind = 'cli' | 'library' | 'driver' | 'service' | 'runtime' | 'sdk';
@@ -44,6 +45,7 @@ export interface CapabilityBinding {
   env?: Record<string, string>;
   paths?: string[];
   inputs?: string[];
+  modules?: ProviderModule[];
 }
 export interface OperationalEnvironment {
   root?: string;
@@ -72,7 +74,7 @@ function portable(value: unknown, root: string): unknown {
 }
 function fixedScopes(bindings:Record<string,CapabilityBinding>):string[]{
   return [...new Set(Object.values(bindings).filter(binding=>binding.relocation==='fixed').flatMap(binding=>[
-    ...(binding.paths??[]),...(binding.command??[]),...(binding.invocations??[]).flatMap(invocation=>invocation.command),...(binding.env?.PATH?.split(delimiter)??[]),
+    ...(binding.paths??[]),...(binding.command??[]),...(binding.invocations??[]).flatMap(invocation=>invocation.command),...(binding.modules??[]).flatMap(module=>module.runtimeCommand),...(binding.env?.PATH?.split(delimiter)??[]),
   ]).filter(path=>isAbsolute(path)).map(path=>resolve(path)))];
 }
 function protectedRootReplace(value:string,from:string,to:string,scopes:readonly string[]):string{
@@ -327,7 +329,12 @@ async function invocation(workspace:string,node:EnvironmentNode,base:Operational
   const unverified=new Set(unverifiedEnvironmentExports(node));
   const exported=Object.fromEntries(Object.entries(node.provides?.env??{}).filter(([key])=>!unverified.has(key)));
   for(const key of unverified)transformations.push({kind:'unverified-environment-export',original:{key,value:node.provides?.env?.[key]},selected:null,reason:'No provider readiness or preparation recipe declares this environment variable as an input. Do not inject an unverified application setting into unrelated tools.'});
-  return {capability:node.identity?.capability??node.id,kind:defaultKind(node),provider:node.identity?.provider??node.id,...(executableKind?{command:selected.command,aliases:selected.aliases,match:selected.match,...(invocations.length>1?{invocations:invocations.slice(1)}:{}),...(candidates?{candidateInvocations:candidates}:{}),...(accepted?{invocationResolution:accepted}:{})}:{}),...(node.provides?.env?{env:exported}:{}),...(paths.length?{paths}:{}),...(node.provides?.inputs?{inputs:[...node.provides.inputs]}:{}),...(transformations.length?{transformations}:{})};
+  let modules=node.provides?.modules?.map(module=>({...module,runtimeCommand:[...module.runtimeCommand]}));
+  if(!modules?.length&&['library','driver'].includes(defaultKind(node))){
+    const argv=probeArgv(node.check),inferred=argv&&await inferProviderModule(recipeCwd(workspace,node.check.cwd),argv,{...base.env,...exported});
+    if(inferred){modules=[inferred];transformations.push({kind:'literal-module-readiness-protocol',original:structuredClone(node.check),selected:inferred,reason:'The readiness recipe contains exactly one literal import and its concrete host confirms the declared module protocol. This declares observation only; readiness never proves product usage.'});}
+  }
+  return {capability:node.identity?.capability??node.id,kind:defaultKind(node),provider:node.identity?.provider??node.id,...(executableKind?{command:selected.command,aliases:selected.aliases,match:selected.match,...(invocations.length>1?{invocations:invocations.slice(1)}:{}),...(candidates?{candidateInvocations:candidates}:{}),...(accepted?{invocationResolution:accepted}:{})}:{}),...(modules?.length?{modules}:{}),...(node.provides?.env?{env:exported}:{}),...(paths.length?{paths}:{}),...(node.provides?.inputs?{inputs:[...node.provides.inputs]}:{}),...(transformations.length?{transformations}:{})};
 }
 async function bindNode(workspace:string,node:EnvironmentNode,base?:OperationalEnvironment):Promise<OperationalEnvironment>{
   const previous=base??emptyOperationalEnvironment(workspace), binding=await invocation(workspace,node,previous);
@@ -364,7 +371,9 @@ export async function environmentFingerprint(workspace:string,node:EnvironmentNo
     if(argument.startsWith('-')||!argument.includes('/')&&!argument.includes('\\')&&!extname(argument))continue;
     const path=resolve(workspace,argument);fixedFiles.push({path:portable(path,workspace),hash:await binaryFingerprint(path)??null});
   }
-  return digest(JSON.stringify({node:portable(node,workspace),provider:portable(providerIdentity(binding),workspace),executableIdentity,...(fixedFiles.length?{fixedFiles}:{}),inputs:await inputHash(workspace,node.provides?.inputs??[]),platform:process.platform,variables:portable(variables,workspace)}));
+  const moduleHosts=[];
+  for(const module of binding.modules??[]){const host=await resolveModuleHost(recipeCwd(workspace,node.check.cwd),module,resolved.env).catch(()=>undefined);moduleHosts.push({module,host:host??null});}
+  return digest(JSON.stringify({node:portable(node,workspace),provider:portable(providerIdentity(binding),workspace),executableIdentity,...(fixedFiles.length?{fixedFiles}:{}),...(moduleHosts.length?{moduleHosts:portable(moduleHosts,workspace)}:{}),inputs:await inputHash(workspace,node.provides?.inputs??[]),platform:process.platform,variables:portable(variables,workspace)}));
 }
 /** Fingerprint only providers and installation inventories consumed by this proof. */
 export function projectDependencyScope(inputs?:readonly string[],checks:readonly Verification[]=[]):string{return inputs===undefined?'all':dependencyFamilies(inputs,checks).join('+')||'none';}

@@ -1,0 +1,411 @@
+{
+  "schema": "capivara/control-measurement/1",
+  "generatedAt": "2026-10-29T01:45:05.787Z",
+  "before": {
+    "databaseSHA256": "9ea206be92107f2c0cf47f8853959e84c810ed45ed9bf3a2b8c725b306309c23",
+    "status": "waiting",
+    "stage": "plan",
+    "lastFailureKind": "planning",
+    "events": 152,
+    "lastEventId": 152,
+    "domainCalls": 10,
+    "roles": {
+      "analyst": {
+        "calls": 1,
+        "durationMs": 13612
+      },
+      "planner": {
+        "calls": 9,
+        "durationMs": 168579
+      }
+    },
+    "calls": [
+      {
+        "eventId": 18,
+        "role": "analyst",
+        "status": "complete",
+        "durationMs": 13612
+      },
+      {
+        "eventId": 29,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 5281
+      },
+      {
+        "eventId": 58,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 14098
+      },
+      {
+        "eventId": 71,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 10098
+      },
+      {
+        "eventId": 87,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 11782
+      },
+      {
+        "eventId": 104,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 63898
+      },
+      {
+        "eventId": 119,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 37508
+      },
+      {
+        "eventId": 130,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 14849
+      },
+      {
+        "eventId": 139,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 5339
+      },
+      {
+        "eventId": 149,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 5726
+      }
+    ],
+    "requirements": 15,
+    "uncoveredRequirementIds": [],
+    "interview": {
+      "gaps": 0,
+      "answered": 0,
+      "pending": false
+    },
+    "plan": {
+      "status": "planning",
+      "tasks": 5,
+      "obligations": []
+    },
+    "execution": {
+      "present": false,
+      "completed": 0,
+      "proofs": 0
+    }
+  },
+  "after": {
+    "databaseSHA256": "35ab227e879691710333ddfae8b0ff7e2941fa799043a8710110c37ab41a4238",
+    "status": "complete",
+    "stage": "plan",
+    "lastFailureKind": null,
+    "events": 270,
+    "lastEventId": 270,
+    "domainCalls": 17,
+    "roles": {
+      "analyst": {
+        "calls": 1,
+        "durationMs": 13612
+      },
+      "planner": {
+        "calls": 16,
+        "durationMs": 299976
+      }
+    },
+    "calls": [
+      {
+        "eventId": 18,
+        "role": "analyst",
+        "status": "complete",
+        "durationMs": 13612
+      },
+      {
+        "eventId": 29,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 5281
+      },
+      {
+        "eventId": 58,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 14098
+      },
+      {
+        "eventId": 71,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 10098
+      },
+      {
+        "eventId": 87,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 11782
+      },
+      {
+        "eventId": 104,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 63898
+      },
+      {
+        "eventId": 119,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 37508
+      },
+      {
+        "eventId": 130,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 14849
+      },
+      {
+        "eventId": 139,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 5339
+      },
+      {
+        "eventId": 149,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 5726
+      },
+      {
+        "eventId": 169,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 6074
+      },
+      {
+        "eventId": 191,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 35288
+      },
+      {
+        "eventId": 201,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 43696
+      },
+      {
+        "eventId": 212,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 4381
+      },
+      {
+        "eventId": 226,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 12996
+      },
+      {
+        "eventId": 238,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 15858
+      },
+      {
+        "eventId": 250,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 13104
+      }
+    ],
+    "requirements": 17,
+    "uncoveredRequirementIds": [],
+    "interview": {
+      "gaps": 0,
+      "answered": 0,
+      "pending": false
+    },
+    "plan": {
+      "status": "ready",
+      "tasks": 5,
+      "obligations": [
+        {
+          "requirementId": "req-f54289aa4364",
+          "kind": "provider",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-9ad243c0e5c2",
+          "kind": "provider",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-ba3f53683f31",
+          "kind": "provider",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-074c9c6d24cd",
+          "kind": "provider",
+          "recipeStatus": "planned",
+          "recipes": [
+            {
+              "taskId": "foundation",
+              "checkId": "foundation-api-conformance"
+            }
+          ],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-02870af3b93b",
+          "kind": "provider",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-3cdb528f4468",
+          "kind": "interface",
+          "recipeStatus": "planned",
+          "recipes": [
+            {
+              "taskId": "tasks-module",
+              "checkId": "tasks-ui-conformance"
+            }
+          ],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-f6b77687fa8c",
+          "kind": "interface",
+          "recipeStatus": "planned",
+          "recipes": [
+            {
+              "taskId": "categories-module",
+              "checkId": "categories-ui-conformance"
+            }
+          ],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-be13536c84ea",
+          "kind": "interface",
+          "recipeStatus": "planned",
+          "recipes": [
+            {
+              "taskId": "notes-module",
+              "checkId": "notes-ui-conformance"
+            }
+          ],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-4c2137a84385",
+          "kind": "interface",
+          "recipeStatus": "planned",
+          "recipes": [
+            {
+              "taskId": "tasks-module",
+              "checkId": "tasks-ui-conformance"
+            },
+            {
+              "taskId": "categories-module",
+              "checkId": "categories-ui-conformance"
+            },
+            {
+              "taskId": "notes-module",
+              "checkId": "notes-ui-conformance"
+            },
+            {
+              "taskId": "integration-acceptance",
+              "checkId": "responsive-shell-conformance"
+            }
+          ],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-fe338dc92eb5",
+          "kind": "interface",
+          "recipeStatus": "planned",
+          "recipes": [
+            {
+              "taskId": "integration-acceptance",
+              "checkId": "browser-full-workflow"
+            },
+            {
+              "taskId": "$acceptance",
+              "checkId": "accept-three-module-browser-crud"
+            }
+          ],
+          "verification": "required-in-build"
+        }
+      ]
+    },
+    "execution": {
+      "present": false,
+      "completed": 0,
+      "proofs": 0
+    }
+  },
+  "delta": {
+    "domainCalls": 7,
+    "calls": [
+      {
+        "eventId": 169,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 6074
+      },
+      {
+        "eventId": 191,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 35288
+      },
+      {
+        "eventId": 201,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 43696
+      },
+      {
+        "eventId": 212,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 4381
+      },
+      {
+        "eventId": 226,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 12996
+      },
+      {
+        "eventId": 238,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 15858
+      },
+      {
+        "eventId": 250,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 13104
+      }
+    ]
+  },
+  "limits": [
+    "A ready plan is not product acceptance.",
+    "Agent wall time is not financial cost.",
+    "Database hashes cover the named database file, not uncheckpointed WAL contents."
+  ]
+}

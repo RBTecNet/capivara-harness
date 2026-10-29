@@ -9,6 +9,11 @@ export interface CapabilityIdentity {
   kind: "cli" | "library" | "driver" | "service" | "runtime" | "sdk";
   provider: string;
 }
+export interface ProviderModule {
+  protocol: "node" | "python";
+  specifier: string;
+  runtimeCommand: string[];
+}
 
 export interface BindingAuthority {
   schema: "capivara/binding-authority/1";
@@ -42,6 +47,15 @@ export interface Requirement {
   binding?: CapabilityIdentity;
   bindingAuthority?: BindingAuthority;
   bindingTransformations?: BindingTransformation[];
+  /** Semantic classification of a mixed literal list; outcomes never imply a chosen tool. */
+  technicalClassification?: {
+    schema: "capivara/technical-choices/1";
+    source: Source;
+    providers: { quote: string; binding: CapabilityIdentity }[];
+    outcomes: { quote: string; statement: string; requirementId?: string }[];
+    /** Superseded generated interpretations stay auditable, never become product evidence. */
+    previous?: { requirementId: string; statement: string; source: Source; binding: CapabilityIdentity }[];
+  };
 }
 
 export interface ProductConstraint {
@@ -121,9 +135,12 @@ export interface EnvironmentNode {
   prepare: CommandRecipe[];
   /** Required capability and its actual provider, independent of display names. */
   identity?: CapabilityIdentity;
+  /** Engine completion from an exact literal provider name and the real node role; not readiness evidence. */
+  identityOrigin?: { kind:"literal-provider-name"; requirementIds:string[]; operationalKind:CapabilityIdentity['kind'] };
+  identityTransformations?: { from:CapabilityIdentity; to:CapabilityIdentity; requirementId:string; source:Source; reason:string }[];
   requirementIds?: string[];
   /** Operational bindings made available to consumers after readiness is proven. */
-  provides?: { command?: string[]; aliases?: string[]; invocations?: { command: string[]; aliases?: string[] }[]; env?: Record<string, string>; paths?: string[]; inputs?: string[] };
+  provides?: { command?: string[]; aliases?: string[]; invocations?: { command: string[]; aliases?: string[] }[]; modules?: ProviderModule[]; env?: Record<string, string>; paths?: string[]; inputs?: string[] };
 }
 
 export interface IntegrationContract {
@@ -199,6 +216,17 @@ export interface WorkUnit {
   blockedBy: string[];
 }
 
+export interface PlanVerificationObligation {
+  requirementId:string;
+  kind:'provider'|'interface';
+  provider?:{provider:string;kind?:CapabilityIdentity['kind'];capability?:string};
+  interface?:'cli'|'tui'|'web'|'desktop';
+  recipeStatus:'planned'|'pending';
+  recipes:{taskId:string;checkId:string}[];
+  /** Planning never certifies execution. BUILD still requires current real evidence. */
+  verification:'required-in-build';
+}
+
 export interface DevelopmentPlan {
   schema: "capivara/plan/1";
   status: "planning" | "ready";
@@ -210,6 +238,7 @@ export interface DevelopmentPlan {
   tasks: WorkUnit[];
   /** Final proof recipes for mandatory outcomes, stack choices and constraints. */
   acceptance?: Verification[];
+  obligations?:PlanVerificationObligation[];
   /** Durable construction checkpoints; pending prompts retain exact cached-call identity. Removed when ready. */
   planning?: {
     schema: "capivara/plan-progress/1";

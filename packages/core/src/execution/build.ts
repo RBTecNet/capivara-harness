@@ -22,6 +22,7 @@ import { validateConformance } from './conformance.js';
 import { selectPendingAcceptance } from './acceptance-selection.js';
 import { prepareInvocationInstrument } from './invocation-instrument.js';
 import { assembleTaskContext } from './task-context.js';
+import { preparedContextPlan } from './prepared-context.js';
 import { substantiateSourceFinding } from './source-review.js';
 import { buildReviewEvidence } from './review-evidence.js';
 import { createInspectionIdentity, inspectionStillCurrent } from './inspection.js';
@@ -193,17 +194,17 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     progress.suspension = { fingerprint: await suspensionFingerprint(task,progress), reason, action: kind };
     await transition(task,'waiting',reason); gate(task,kind === 'product' ? 'G3' : 'G0','waiting',reason);
   };
-  const context = async (task: WorkUnit,workspace: string,extra='') => {
+  const context = async (task: WorkUnit,workspace: string,extra='',operational?: OperationalEnvironment) => {
     const progress=state.tasks[task.id];
     const focus=[...new Set([...(progress?.reviews?.at(-1)?.assessment.findings.filter(finding=>finding.disposition==='defect').flatMap(finding=>finding.file?[finding.file]:[])??[]),...(progress?.contextFocus??[])])];
-    return assembleTaskContext(options.brief,plan,task,workspace,progress?.contextChars??options.contextChars??24000,extra,focus);
+    return assembleTaskContext(options.brief,operational?preparedContextPlan(plan,task,operational):plan,task,workspace,progress?.contextChars??options.contextChars??24000,extra,focus);
   };
   const invoke = async (task: WorkUnit,workspace: string,role: string,instruction: string,extra: string,readOnly: boolean,strategy: string,operational: OperationalEnvironment,operationContext?: string,operationPurpose?: AgentRequest['purpose']): Promise<AgentResult> => {
     const progress = state.tasks[task.id]!; progress.actions ??= [];
     if (options.signal?.aborted || persistenceFailed) return {status:'cancelled',text:'',commands:[],changedFiles:[]};
     const resources=[...new Set(Object.values(state.resourceBindings?.[task.id]??{}))].map(key=>state.environment[key]).filter(value=>value?.ready).flatMap(value=>{const prepared=operationalValue(value?.operational);return prepared?[prepared]:[];});
     if(resources.length===1)operational=mergeOperationalEnvironments(workspace,operational,relocateOperationalEnvironment(resources[0]!,resources[0]!.root??options.workspace,workspace));
-    const supplied = operationContext ? {text:operationContext,coverage:[]} : await context(task,workspace,extra);
+    const supplied = operationContext ? {text:operationContext,coverage:[]} : await context(task,workspace,extra,operational);
     const suppliedContext = supplied.text;
     const input = digest(JSON.stringify({role,strategy,instruction,context:suppliedContext,source:await inputHash(workspace,taskInputs(plan,task)),environment:operational.revision,configuration:options.configurationRevision ?? '',resourceAttempt:progress.retryGeneration ?? 0}));
     const previous = progress.actions.findLast(action => action.id === input && action.result && action.outcome !== 'cancelled');
@@ -1097,8 +1098,11 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       const consumers=plan.tasks.filter(task=>task.requirementIds.includes(requirement.id));
       const candidates=currentProofs.filter(item=>item.level==='behavior'&&(consumers.some(task=>task.id===item.taskId&&(state.tasks[task.id]?.checks??task.checks).some(check=>check.id===item.checkId&&check.requirementIds.includes(requirement.id)))||finalChecks.some(check=>item.taskId===acceptanceTask.id&&check.id===item.checkId&&check.requirementIds.includes(requirement.id))));
       const kind=requiredRequirementInterface(requirement);
-      const proof=candidates.some(item=>!kind||item.kind===kind);
       const binding=requirement.binding;
+      // A stack obligation is certified below by actual provider consumption
+      // and its functional evidence chain. Requiring another behavior recipe
+      // with the identical metadata ID would reject a valid compiled product.
+      const proof=requirement.kind==='stack'&&binding?true:candidates.some(item=>!kind||item.kind===kind);
       const provider=binding?Object.values(operational.bindings).some(item=>item.ready&&obligationMatchesProvider(requirement,item)):true;
       if(!proof||!provider){
         const problem=incident(binding&&!provider?'environment':'instrument',requirement.id,'Mandatory requirement has no current proof in its required interface/provider.',requirement.statement);note(problem);

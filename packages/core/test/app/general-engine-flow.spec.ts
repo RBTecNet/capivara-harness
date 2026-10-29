@@ -35,7 +35,8 @@ it.each(scenarios)('runs discovery, planning, implementation and task-owned proo
     ], questions: [], constraints: [] });
     if (call.role === 'planner' && call.instruction.startsWith('Plan executable technical prerequisites')) return complete({ environment: [{
       id: 'toolchain', name: scenario.provider, kind: scenario.kind, dependsOn: [], targets: ['linux'], reason: 'Run the requested product.',
-      identity: { capability: scenario.capability, kind: scenario.kind, provider: scenario.provider }, provides: { command: [scenario.command] },
+      // Small-model responses may omit redundant identity/invocation metadata.
+      // The exact literal name, operational kind and executable are present.
       // A generated project configuration is not a prerequisite for finding
       // an already installed compiler. Availability recovery must not invent
       // a successful product build from this failed pre-implementation probe.
@@ -48,8 +49,9 @@ it.each(scenarios)('runs discovery, planning, implementation and task-owned proo
       const conformance = { requirementId: stack.id, capability: scenario.capability, kind: scenario.kind, provider: scenario.provider, productInputs: [scenario.file] };
       const functional: Verification = { id: 'functional', kind: 'cli', command: scenario.kind === 'sdk' ? process.execPath : scenario.command,
         args: [scenario.kind === 'sdk' ? 'dist/main.js' : scenario.file], level: 'behavior', expected: 'The actual product prints healthy.', assertion: { type: 'contains', value: 'healthy' },
-        requirementIds: ids, requiredCapabilities: [], inputs: [scenario.kind === 'sdk' ? 'dist/main.js' : scenario.file],
-        ...(scenario.kind === 'sdk' ? { dependsOn: ['compile'] } : { conformance }) };
+        requirementIds: scenario.kind === 'sdk' ? ids.filter(id=>id!==stack.id) : ids,
+        requiredCapabilities: [], inputs: [scenario.kind === 'sdk' ? 'dist/main.js' : scenario.file],
+        ...(scenario.kind === 'sdk' ? {} : { conformance }) };
       const checks: Verification[] = scenario.kind === 'sdk' ? [{ id: 'compile', kind: 'command', command: compiler,
         args: ['--ignoreConfig', '--target', 'ES2022', '--module', 'commonjs', '--outDir', 'dist', scenario.file], level: 'build', assertion: { type: 'exit', value: 0 },
         requirementIds: [stack.id], requiredCapabilities: [], inputs: [scenario.file], conformance: { ...conformance, artifacts: ['dist/main.js'] } }, functional] : [functional];
@@ -97,7 +99,7 @@ it.each(['tui', 'web'] as const)('plans a fresh %s interface with its proof on t
       { statement: 'Usar Node.js.', quote: 'Node.js', kind: 'stack', binding: { capability: 'runtime', kind: 'runtime', provider: 'Node.js' } },
     ], questions: [] });
     if (call.role === 'planner' && call.instruction.startsWith('Plan executable technical prerequisites')) return complete({ environment: [{ id: 'runtime', name: 'Node.js', kind: 'runtime',
-      identity: { capability: 'javascript', kind: 'runtime', provider: 'Node.js' }, provides: { command: [process.execPath] }, check: { command: process.execPath, args: ['--version'] }, prepare: [], dependsOn: [] }] });
+      check: { command: process.execPath, args: ['--version'] }, prepare: [], dependsOn: [] }] });
     if (call.role === 'planner' && call.instruction.startsWith('Structure small executable')) {
       const requirements = JSON.parse(call.instruction.split('Requirements of this slice:\n')[1]!.split('\n\n')[0]!) as Requirement[];
       const stack = requirements.find(requirement => requirement.binding)!;

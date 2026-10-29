@@ -1,5 +1,5 @@
-import { readFile, realpath, stat } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { lstat, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { isAbsolute, relative, resolve, sep, matchesGlob } from 'node:path';
 import { ContextTooLarge, contextForTask, packetText } from '../domain/context.js';
 import type { DevelopmentPlan, ProductBrief, WorkUnit } from '../domain/types.js';
 import { digest, inside, sourceFiles } from './files.js';
@@ -41,6 +41,33 @@ function block(source: Source, content = ''): string {
 }
 const guidance = 'SOURCE DELIVERY: Each SOURCE header records the full-file hash, size and exact coverage. complete=false means omitted source remains available on disk, not evidence that code is absent or defective. Request the named file/range or inspect it before alleging a defect outside supplied coverage.\n';
 
+async function retain(workspace:string,kind:string,value:unknown):Promise<{path:string;sha256:string;complete:false}>{
+  const bytes=JSON.stringify(value,null,2)+'\n',sha256=digest(bytes),folder=resolve(workspace,'.capivara-verification');
+  await mkdir(folder,{recursive:true,mode:0o700});const info=await lstat(folder);
+  if(!info.isDirectory()||info.isSymbolicLink())throw new Error('Context receipts require a private independent directory.');
+  const path=`.capivara-verification/${kind}-${sha256}.json`,absolute=resolve(workspace,path);
+  try{await writeFile(absolute,bytes,{flag:'wx',mode:0o600});}catch(error){
+    if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;
+    const retained=await lstat(absolute);if(!retained.isFile()||retained.isSymbolicLink()||digest(await readFile(absolute))!==sha256)throw new Error('Context receipt identity changed.');
+  }
+  return{path,sha256,complete:false};
+}
+
+async function boundedFacts(brief:ProductBrief,plan:DevelopmentPlan,task:WorkUnit,workspace:string,capacity:number,extra:string):Promise<string>{
+  try{const full=packetText(contextForTask(brief,plan,task,capacity));if(full.length<=capacity*.65)return full;}
+  catch(error){if(!(error instanceof ContextTooLarge))throw error;}
+  const packet=contextForTask(brief,plan,task,Number.MAX_SAFE_INTEGER);
+  const reference=await retain(workspace,'task-data',{schema:'capivara/task-data/1',packet,extra});
+  let text=`TASK DATA ${JSON.stringify(reference)}\nWork unit ${task.id}: ${task.title}\n`;
+  const budget=Math.floor(capacity*.65);
+  for(const [key,value] of Object.entries(packet)){
+    const full=`\n${key} ${JSON.stringify({complete:true,value})}`;
+    const pointer=`\n${key} ${JSON.stringify({complete:false,pointer:'/packet/'+key})}`;
+    text+=text.length+full.length<=budget?full:pointer;
+  }
+  return text;
+}
+
 /** Assemble facts and actual source against one global budget. Never hide a
  * per-file cut or a final string.slice behind an apparently complete FILE label. */
 export async function assembleTaskContext(brief: ProductBrief, plan: DevelopmentPlan, task: WorkUnit, workspace: string, limit: number, extra = '', focusPaths: string[] = [], deliveryFiles?:readonly string[]): Promise<AssembledTaskContext> {
@@ -74,19 +101,36 @@ export async function assembleTaskContext(brief: ProductBrief, plan: Development
   }
   // Focus can name an owned file, a dependency, or an exact line range from a
   // finding. Reordering only affects which complete sources fit; it changes no code.
+  const owned=new Set(task.files.filter(scope=>!/[!*?{}[\]]/.test(scope)).map(scope=>scope.replaceAll('\\','/').replace(/^\.\//,'').replace(/\/$/,'')));
+  const patterns=task.files.filter(scope=>/[*?{}[\]]/.test(scope));
+  const ranks=new Map(sources.map(source=>{
+    const path=source.coverage.path,index=focus.findIndex(item=>item.path===path);
+    let ancestor=path,selected=owned.has('.');
+    for(;;){if(owned.has(ancestor)){selected=true;break;}const slash=ancestor.lastIndexOf('/');if(slash<0)break;ancestor=ancestor.slice(0,slash);}
+    return[path,index>=0?index:selected||patterns.some(scope=>matchesGlob(path,scope))?focus.length:focus.length+1] as const;
+  }));
   sources.sort((left,right)=>{
-    const rank=(path:string):number=>{const index=focus.findIndex(item=>item.path===path);return index<0?focus.length:index;};
+    const rank=(path:string):number=>ranks.get(path)!;
     return rank(left.coverage.path)-rank(right.coverage.path)||left.coverage.path.localeCompare(right.coverage.path);
   });
-  const packet=packetText(contextForTask(brief,plan,task,capacity));
+  const packet=await boundedFacts(brief,plan,task,workspace,capacity,extra);
   const extraLimit=Math.max(0,Math.min(extra.length,Math.floor(capacity*.3)));
   const extraStart=extra.length-extraLimit;
   const note=extra ? `\nOPERATION DETAILS ${JSON.stringify({complete:extraStart===0,startCharacter:extraStart,endCharacter:extra.length,characters:extra.length})}\n${extra.slice(extraStart)}` : '';
-  const prefix=`${packet}\n\n${guidance}${rejectedFocus.length?`UNRESOLVED SOURCE REFERENCES ${JSON.stringify(rejectedFocus)}\n`:''}`;
+  let prefix=`${packet}\n\n${guidance}${rejectedFocus.length?`UNRESOLVED SOURCE REFERENCES ${JSON.stringify(rejectedFocus)}\n`:''}`;
   const blocks=sources.map(source=>block(source));
-  const size=():number=>prefix.length+blocks.join('\n').length+note.length;
-  // Even metadata must fit honestly; the planner must split an oversized unit
-  // rather than discard its authority or source coverage receipt.
+  const size=():number=>prefix.length+blocks.filter(Boolean).join('\n').length+note.length;
+  // Index growth is a delivery problem, not evidence that the engineering unit
+  // needs decomposition. Keep every original receipt retrievable by identity.
+  if(size()>capacity){
+    const inventory=await retain(workspace,'source-index',{schema:'capivara/source-inventory/1',sources:sources.map(source=>source.coverage)});
+    prefix+=`SOURCE INVENTORY ${JSON.stringify({...inventory,entries:sources.length})}\n`;
+    blocks.fill('');
+    for(let index=0;index<sources.length;index++){
+      const candidate=block(sources[index]!);
+      if(size()+candidate.length<=capacity-Math.min(1000,Math.floor(capacity*.2)))blocks[index]=candidate;
+    }
+  }
   if(size()>capacity)throw new ContextTooLarge(task.id,size(),capacity);
   for(let index=0;index<sources.length;index++){
     const source=sources[index]!;
@@ -113,6 +157,6 @@ export async function assembleTaskContext(brief: ProductBrief, plan: Development
     }
     if(best){source.coverage=best.coverage;blocks[index]=best.block;}
   }
-  const text=`${prefix}${blocks.join('\n')}${note}`;
+  const text=`${prefix}${blocks.filter(Boolean).join('\n')}${note}`;
   return{text,coverage:sources.map(source=>source.coverage)};
 }

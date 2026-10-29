@@ -24,7 +24,7 @@ export interface BuildIncident {
   external: boolean;
   /** Reduced total context capacity discovered from the provider, for local task splitting. */
   contextChars?: number;
-  repairScope?: 'verification' | 'environment' | 'delivery' | 'authority';
+  repairScope?: 'verification' | 'environment' | 'delivery' | 'authority' | 'dependencies';
 }
 export interface VerificationEvidence {
   id: string;
@@ -117,6 +117,8 @@ export interface BuildMetrics {
   timeline: { taskId: string; stage: string; start: number; end?: number }[];
 }
 export interface TaskProgress {
+  dependencyReconciliations?:string[];
+  operationalReconciliations?:string[];
   status: 'pending' | 'preparing' | 'editing' | 'checking' | 'reviewing' | 'integrating' | 'complete' | 'waiting';
   revision: string;
   attempts: number;

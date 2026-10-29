@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DevelopmentPlan, ProductBrief, WorkUnit } from '../../src/domain/types.js';
 import { assembleTaskContext } from '../../src/execution/task-context.js';
 import { digest } from '../../src/execution/files.js';
+import { AgentTools } from '../../src/runtime/tools.js';
 
 const roots:string[]=[];
 afterEach(async()=>{await Promise.all(roots.splice(0).map(root=>rm(root,{recursive:true,force:true})));});
@@ -14,6 +15,24 @@ const plan=(task:WorkUnit):DevelopmentPlan=>({schema:'capivara/plan/1',status:'r
 async function root(){const directory=await mkdtemp(join(tmpdir(),'capivara-task-context-'));roots.push(directory);return directory;}
 
 describe('contexto de fonte completo ou cobertura explicitamente limitada',()=>{
+  it('keeps a large source inventory retrievable without splitting an executable unit',async()=>{
+    const directory=await root(),files=Array.from({length:850},(_,index)=>`module-${index}.py`);
+    await Promise.all(files.map(path=>writeFile(join(directory,path),'value = 42\n')));
+    const task=unit(files),context=await assembleTaskContext(brief,plan(task),task,directory,4000,'Inspect the requested implementation.',[files[700]!]);
+    expect(context.text.length).toBeLessThanOrEqual(4000);
+    expect(context.text).toContain('SOURCE INVENTORY');
+    const receipt=JSON.parse(context.text.split('\n').find(line=>line.startsWith('SOURCE INVENTORY '))!.slice('SOURCE INVENTORY '.length));
+    const bytes=await readFile(join(directory,receipt.path));expect(digest(bytes)).toBe(receipt.sha256);
+    expect(JSON.parse(bytes.toString()).sources).toHaveLength(850);
+    const tools=new AgentTools({workspace:directory,config:{provider:'codex',model:'fixture'},role:'reviewer',instruction:'Inspect the indexed sources.',readOnly:true});
+    const read=await tools.execute('read_file',{path:receipt.path,startLine:1,endLine:8});
+    expect(read).not.toHaveProperty('error');expect(read).toHaveProperty('content',expect.stringContaining('capivara/source-inventory/1'));
+    expect(await tools.execute('read_file',{path:receipt.path,jsonPointer:'/schema',maxChars:100})).toMatchObject({jsonPointer:'/schema',content:'"capivara/source-inventory/1"',truncated:false});
+    expect(await tools.execute('read_file',{path:'.capivara-next/project.snapshot.json'})).toHaveProperty('error');
+    expect(context.coverage).toHaveLength(850);
+    expect(context.coverage.find(item=>item.path===files[700])?.complete).toBe(true);
+    expect(context.coverage.some(item=>item.status==='omitted')).toBe(true);
+  });
   it('fits a 24561-character delivery into the original 24000 budget by removing repeated metadata without dropping authority',async()=>{
     const directory=await root(),files=Array.from({length:30},(_,index)=>`source-${String(index).padStart(2,'0')}.ts`);
     const source="export const state = '"+'actual-source-'.repeat(800)+"';\n";

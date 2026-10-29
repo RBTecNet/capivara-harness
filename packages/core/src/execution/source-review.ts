@@ -90,6 +90,17 @@ async function safeSource(workspace: string, path: string, allowMissing = false)
  */
 export async function substantiateSourceFinding(workspace: string, finding: Finding, coverage: readonly SourceReviewCoverage[]): Promise<SourceFindingSubstantiation> {
   const raw = finding.sourceEvidence ?? (record(finding.original) ? finding.original.sourceEvidence : undefined);
+  // The affected area and the cited evidence can be different paths. Preserve
+  // the original finding, but validate concrete structured citations rather
+  // than trying to read a directory as one text source.
+  if(raw===undefined&&record(finding.original)&&Array.isArray(finding.original.evidence)){
+    for(const evidence of finding.original.evidence){
+      const reference=typeof evidence==='string'?evidence:record(evidence)&&typeof evidence.location==='string'?evidence.location:undefined;
+      if(!reference||!reviewSourceReference(reference).location)continue;
+      const cited=await substantiateSourceFinding(workspace,{file:reference,original:{...finding.original,evidence:undefined}},coverage);
+      if(cited.verified)return{...cited,reason:'Structured citation independently matched the current source receipt; the affected area and original negative finding remain unchanged. '+cited.reason};
+    }
+  }
   if (raw !== undefined && !record(raw)) return denied('The sourceEvidence certificate is malformed; recover its source reference without editing the product.');
   const certificate = record(raw) ? raw : undefined;
   const path = certificate?.path ?? finding.file;

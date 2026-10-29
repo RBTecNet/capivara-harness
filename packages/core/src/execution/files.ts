@@ -26,6 +26,15 @@ export async function sourceFiles(workspace: string, paths?: readonly string[]):
       if(info.isDirectory()){const target=await realpath(path);const rel=relative(root,target);if(rel==='..'||rel.startsWith(`..${sep}`)||target===root)throw new Error(`Input directory symlink escapes or recursively re-enters the workspace: ${name}`);}
     }
     if (info.isDirectory()) {
+      // A PEP 405 environment is installed dependency state regardless of its
+      // directory name. Explicit read sets can still inspect its exact files.
+      if(!explicit&&path!==root){
+        const marker=await lstat(join(path,'pyvenv.cfg')).catch(()=>null);
+        if(marker?.isFile()){
+          const config=await readFile(join(path,'pyvenv.cfg'),'utf8');
+          if(/^home\s*=/m.test(config)&&/^include-system-site-packages\s*=\s*(?:true|false)\s*$/im.test(config)&&((await stat(join(path,'bin','python')).catch(()=>null))?.isFile()||(await stat(join(path,'Scripts','python.exe')).catch(()=>null))?.isFile()))return;
+        }
+      }
       const actual=await realpath(path);if(activeDirectories.has(actual))throw new Error(`Recursive input directory: ${name}`);activeDirectories.add(actual);
       try {
         const entries = await readdir(path, { withFileTypes: true });

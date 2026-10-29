@@ -1,6 +1,6 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { executeCommand } from './command.js';
-import { projectPath, scrub, writeProductFile } from './files.js';
+import { projectPath, readContextReceipt, scrub, writeProductFile } from './files.js';
 import { closeProcesses, readProcess, startProcess, stopProcess } from './processes.js';
 import { runTerminal } from './terminal.js';
 import type { AgentRequest, CommandResult, TerminalStep } from './types.js';
@@ -11,7 +11,7 @@ const number = { type: 'number' };
 const schema = (properties: Record<string, unknown>, required: string[] = []): object => ({ type: 'object', properties, required, additionalProperties: false });
 export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
   { name: 'list_files', description: 'List files in a directory inside the product workspace. Control state and dependencies are excluded.', parameters: schema({ path: string }, []), writes: false },
-  { name: 'read_file', description: 'Read a relevant text file, optionally by line range, inside the product workspace.', parameters: schema({ path: string, startLine: number, endLine: number }, ['path']), writes: false },
+  { name: 'read_file', description: 'Read a relevant product file or hash-verified context receipt, by line range or JSON pointer, with an optional character budget.', parameters: schema({ path: string, startLine: number, endLine: number, jsonPointer: string, maxChars: number }, ['path']), writes: false },
   { name: 'write_file', description: 'Create or replace a product text file. Parent directories are created. Never writes harness control state.', parameters: schema({ path: string, content: string }, ['path', 'content']), writes: true },
   { name: 'edit_file', description: 'Replace one exact occurrence of oldText in an existing file. Read the relevant file first; ambiguous edits return a recoverable tool error.', parameters: schema({ path: string, oldText: string, newText: string }, ['path', 'oldText', 'newText']), writes: true },
   { name: 'run_command', description: 'Run a focused command in the product workspace. Returns separate stdout/stderr, status, elapsed time and input fingerprint. Failure is evidence to diagnose and recover.', parameters: schema({ command: string, timeoutMs: number, input: string }, ['command']), writes: true },
@@ -53,11 +53,25 @@ export class AgentTools {
       }
       if (name === 'read_file') {
         const path = field(args, 'path');
-        const lines = (await readFile(await projectPath(workspace, path), 'utf8')).split('\n');
+        const receipt=await readContextReceipt(workspace,path);
+        const source=receipt??await readFile(await projectPath(workspace, path), 'utf8');
+        const maximum=Math.max(1,Math.min(48000,Math.floor(optionalNumber(args,'maxChars')??48000)));
+        const pointer=optionalString(args,'jsonPointer');
+        if(pointer!==undefined){
+          if(pointer!==''&&!pointer.startsWith('/')||/~(?![01])/.test(pointer))throw new Error('Invalid JSON pointer.');
+          let value:unknown=JSON.parse(source);
+          for(const token of pointer===''?[]:pointer.slice(1).split('/').map(part=>part.replaceAll('~1','/').replaceAll('~0','~'))){
+            if(value===null||typeof value!=='object'||!Object.prototype.hasOwnProperty.call(value,token))throw new Error('The JSON pointer does not identify an existing field.');
+            value=(value as Record<string,unknown>)[token];
+          }
+          const content=JSON.stringify(value,null,2);
+          return{path,jsonPointer:pointer,totalCharacters:content.length,content:scrub(content.slice(0,maximum)),truncated:content.length>maximum};
+        }
+        const lines=source.split('\n');
         const start = Math.max(1, Math.floor(optionalNumber(args, 'startLine') ?? 1));
         const end = Math.max(start, Math.floor(optionalNumber(args, 'endLine') ?? Math.min(lines.length, start + 299)));
         const text = lines.slice(start - 1, end).map((line, i) => `${start + i}: ${line}`).join('\n');
-        return { path, totalLines: lines.length, startLine: start, endLine: Math.min(end, lines.length), content: scrub(text.slice(0, 48_000)), truncated: text.length > 48_000 };
+        return { path, totalLines: lines.length, startLine: start, endLine: Math.min(end, lines.length), content: scrub(text.slice(0, maximum)), truncated: text.length > maximum };
       }
       if (name === 'write_file') { await writeProductFile(workspace, field(args, 'path'), field(args, 'content'), constraints); return { written: field(args, 'path') }; }
       if (name === 'edit_file') {

@@ -102,7 +102,7 @@ export function interpretReview(original: string): ReviewAssessment {
           continue;
         }
         const expected = firstText(item.expected);
-        const evidence = firstText(item.evidence);
+        const evidence = firstText(item.evidence)||(Array.isArray(item.evidence)?JSON.stringify(item.evidence):'');
         const reference = reviewSourceReference(firstText(item.file, item.location)), file = reference.file;
         if (reference.location) transformations.push({ path: `${path}.file`, operation: 'normalize', reason: 'Source coordinates were separated from the filename; the original reference and its range remain attached to the finding.', original: reference.location.reference });
         const fix = firstText(item.fix, item.action, item.guidance);

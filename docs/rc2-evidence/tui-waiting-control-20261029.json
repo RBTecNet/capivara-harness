@@ -1,0 +1,1274 @@
+{
+  "schema": "capivara/control-measurement/1",
+  "generatedAt": "2026-10-29T23:01:06.741Z",
+  "before": {
+    "databaseSHA256": "2c669cd039088270e54e8d947b3087478ef959598643587dcc27579e0ce6b2f9",
+    "status": "waiting",
+    "stage": "build",
+    "lastFailureKind": "planning",
+    "events": 3258,
+    "lastEventId": 3258,
+    "domainCalls": 24,
+    "roles": {
+      "analyst": {
+        "calls": 1,
+        "durationMs": 40852
+      },
+      "planner": {
+        "calls": 23,
+        "durationMs": 1850943
+      },
+      "editor": {
+        "calls": 9,
+        "durationMs": 2287622
+      },
+      "repair": {
+        "calls": 7,
+        "durationMs": 1144982
+      },
+      "reviewer": {
+        "calls": 9,
+        "durationMs": 437037
+      }
+    },
+    "calls": [
+      {
+        "eventId": 20,
+        "role": "analyst",
+        "status": "complete",
+        "durationMs": 40852
+      },
+      {
+        "eventId": 46,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 11040
+      },
+      {
+        "eventId": 57,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 7767
+      },
+      {
+        "eventId": 70,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 7765
+      },
+      {
+        "eventId": 84,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 12951
+      },
+      {
+        "eventId": 104,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 13528
+      },
+      {
+        "eventId": 117,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 7317
+      },
+      {
+        "eventId": 136,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 29203
+      },
+      {
+        "eventId": 156,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 54080
+      },
+      {
+        "eventId": 180,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 31801
+      },
+      {
+        "eventId": 195,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 59556
+      },
+      {
+        "eventId": 206,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 8927
+      },
+      {
+        "eventId": 217,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 6284
+      },
+      {
+        "eventId": 295,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 391737
+      },
+      {
+        "eventId": 342,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 300559
+      },
+      {
+        "eventId": 376,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 295379
+      },
+      {
+        "eventId": 485,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 266358
+      },
+      {
+        "eventId": 551,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 132251
+      },
+      {
+        "eventId": 644,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 113730
+      },
+      {
+        "eventId": 721,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 34333
+      },
+      {
+        "eventId": 843,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 348570
+      },
+      {
+        "eventId": 911,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 42116
+      },
+      {
+        "eventId": 995,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 65032
+      },
+      {
+        "eventId": 1126,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 112751
+      },
+      {
+        "eventId": 1255,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 375357
+      },
+      {
+        "eventId": 1350,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 315994
+      },
+      {
+        "eventId": 1388,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 68246
+      },
+      {
+        "eventId": 1553,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 57899
+      },
+      {
+        "eventId": 1597,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 214506
+      },
+      {
+        "eventId": 1657,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 43589
+      },
+      {
+        "eventId": 1802,
+        "role": "editor",
+        "status": "partial",
+        "durationMs": 600419
+      },
+      {
+        "eventId": 1876,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 71530
+      },
+      {
+        "eventId": 1941,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 57554
+      },
+      {
+        "eventId": 1973,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 39221
+      },
+      {
+        "eventId": 2045,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 90553
+      },
+      {
+        "eventId": 2152,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 180574
+      },
+      {
+        "eventId": 2231,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 51680
+      },
+      {
+        "eventId": 2302,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 269155
+      },
+      {
+        "eventId": 2389,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 57549
+      },
+      {
+        "eventId": 2450,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 137733
+      },
+      {
+        "eventId": 2478,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 97901
+      },
+      {
+        "eventId": 2543,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 75278
+      },
+      {
+        "eventId": 2703,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 95079
+      },
+      {
+        "eventId": 2801,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 207578
+      },
+      {
+        "eventId": 2869,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 53096
+      },
+      {
+        "eventId": 2995,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 106041
+      },
+      {
+        "eventId": 3009,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 8320
+      },
+      {
+        "eventId": 3116,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 80379
+      },
+      {
+        "eventId": 3156,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 12318
+      }
+    ],
+    "requirements": 34,
+    "uncoveredRequirementIds": [],
+    "interview": {
+      "gaps": 0,
+      "answered": 0,
+      "pending": false
+    },
+    "plan": {
+      "status": "ready",
+      "tasks": 47,
+      "obligations": [
+        {
+          "requirementId": "req-472a31975b54",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-82132fd65061",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-23e0e1e53481",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-e42e6f0bbaa3",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-d974e3d093e4",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-50c977f8e4f7",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-f139bc6a74d2",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-59834a7e7b2c",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-011951825414",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-e48098aa52ff",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-28b6e903649b",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-8c921b3047e8",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-2d40971f6c9f",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-ed267f95c00c",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-1ed5943bc5e7",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-79d2e9ab7ba2",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-e30461d4df2f",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-3740236e79ec",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-535828899b35",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-41e82807a5b1",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-3a0bfd6fecde",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        }
+      ]
+    },
+    "execution": {
+      "present": true,
+      "completed": 6,
+      "proofs": 19
+    }
+  },
+  "after": {
+    "databaseSHA256": "e3c950abc9eb342b0bacdc8844cc74291e6aa0af313122e4c634c0635effe5d6",
+    "status": "working",
+    "stage": "build",
+    "lastFailureKind": null,
+    "events": 4984,
+    "lastEventId": 4984,
+    "domainCalls": 25,
+    "roles": {
+      "analyst": {
+        "calls": 1,
+        "durationMs": 40852
+      },
+      "planner": {
+        "calls": 24,
+        "durationMs": 1868620
+      },
+      "editor": {
+        "calls": 12,
+        "durationMs": 3114999
+      },
+      "repair": {
+        "calls": 14,
+        "durationMs": 2255506
+      },
+      "reviewer": {
+        "calls": 21,
+        "durationMs": 1272011
+      }
+    },
+    "calls": [
+      {
+        "eventId": 20,
+        "role": "analyst",
+        "status": "complete",
+        "durationMs": 40852
+      },
+      {
+        "eventId": 46,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 11040
+      },
+      {
+        "eventId": 57,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 7767
+      },
+      {
+        "eventId": 70,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 7765
+      },
+      {
+        "eventId": 84,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 12951
+      },
+      {
+        "eventId": 104,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 13528
+      },
+      {
+        "eventId": 117,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 7317
+      },
+      {
+        "eventId": 136,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 29203
+      },
+      {
+        "eventId": 156,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 54080
+      },
+      {
+        "eventId": 180,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 31801
+      },
+      {
+        "eventId": 195,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 59556
+      },
+      {
+        "eventId": 206,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 8927
+      },
+      {
+        "eventId": 217,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 6284
+      },
+      {
+        "eventId": 295,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 391737
+      },
+      {
+        "eventId": 342,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 300559
+      },
+      {
+        "eventId": 376,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 295379
+      },
+      {
+        "eventId": 485,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 266358
+      },
+      {
+        "eventId": 551,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 132251
+      },
+      {
+        "eventId": 644,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 113730
+      },
+      {
+        "eventId": 721,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 34333
+      },
+      {
+        "eventId": 843,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 348570
+      },
+      {
+        "eventId": 911,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 42116
+      },
+      {
+        "eventId": 995,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 65032
+      },
+      {
+        "eventId": 1126,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 112751
+      },
+      {
+        "eventId": 1255,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 375357
+      },
+      {
+        "eventId": 1350,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 315994
+      },
+      {
+        "eventId": 1388,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 68246
+      },
+      {
+        "eventId": 1553,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 57899
+      },
+      {
+        "eventId": 1597,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 214506
+      },
+      {
+        "eventId": 1657,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 43589
+      },
+      {
+        "eventId": 1802,
+        "role": "editor",
+        "status": "partial",
+        "durationMs": 600419
+      },
+      {
+        "eventId": 1876,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 71530
+      },
+      {
+        "eventId": 1941,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 57554
+      },
+      {
+        "eventId": 1973,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 39221
+      },
+      {
+        "eventId": 2045,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 90553
+      },
+      {
+        "eventId": 2152,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 180574
+      },
+      {
+        "eventId": 2231,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 51680
+      },
+      {
+        "eventId": 2302,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 269155
+      },
+      {
+        "eventId": 2389,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 57549
+      },
+      {
+        "eventId": 2450,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 137733
+      },
+      {
+        "eventId": 2478,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 97901
+      },
+      {
+        "eventId": 2543,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 75278
+      },
+      {
+        "eventId": 2703,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 95079
+      },
+      {
+        "eventId": 2801,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 207578
+      },
+      {
+        "eventId": 2869,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 53096
+      },
+      {
+        "eventId": 2995,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 106041
+      },
+      {
+        "eventId": 3009,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 8320
+      },
+      {
+        "eventId": 3116,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 80379
+      },
+      {
+        "eventId": 3156,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 12318
+      },
+      {
+        "eventId": 3438,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 158329
+      },
+      {
+        "eventId": 3489,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 39249
+      },
+      {
+        "eventId": 3562,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 74930
+      },
+      {
+        "eventId": 3671,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 324900
+      },
+      {
+        "eventId": 3729,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 74780
+      },
+      {
+        "eventId": 3757,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 140132
+      },
+      {
+        "eventId": 3794,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 110407
+      },
+      {
+        "eventId": 3905,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 268548
+      },
+      {
+        "eventId": 4003,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 70561
+      },
+      {
+        "eventId": 4103,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 121621
+      },
+      {
+        "eventId": 4178,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 47688
+      },
+      {
+        "eventId": 4291,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 380856
+      },
+      {
+        "eventId": 4350,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 17677
+      },
+      {
+        "eventId": 4438,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 66083
+      },
+      {
+        "eventId": 4465,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 54144
+      },
+      {
+        "eventId": 4498,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 59983
+      },
+      {
+        "eventId": 4527,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 52547
+      },
+      {
+        "eventId": 4618,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 426118
+      },
+      {
+        "eventId": 4692,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 71788
+      },
+      {
+        "eventId": 4801,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 51290
+      },
+      {
+        "eventId": 4871,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 67976
+      },
+      {
+        "eventId": 4911,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 60183
+      },
+      {
+        "eventId": 4941,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 50762
+      }
+    ],
+    "requirements": 34,
+    "uncoveredRequirementIds": [],
+    "interview": {
+      "gaps": 0,
+      "answered": 0,
+      "pending": false
+    },
+    "plan": {
+      "status": "ready",
+      "tasks": 47,
+      "obligations": [
+        {
+          "requirementId": "req-472a31975b54",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-82132fd65061",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-23e0e1e53481",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-e42e6f0bbaa3",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-d974e3d093e4",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-50c977f8e4f7",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-f139bc6a74d2",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-59834a7e7b2c",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-011951825414",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-e48098aa52ff",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-28b6e903649b",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-8c921b3047e8",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-2d40971f6c9f",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-ed267f95c00c",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-1ed5943bc5e7",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-79d2e9ab7ba2",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-e30461d4df2f",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-3740236e79ec",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-535828899b35",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-41e82807a5b1",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-3a0bfd6fecde",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        }
+      ]
+    },
+    "execution": {
+      "present": true,
+      "completed": 10,
+      "proofs": 21
+    }
+  },
+  "delta": {
+    "domainCalls": 1,
+    "calls": [
+      {
+        "eventId": 3438,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 158329
+      },
+      {
+        "eventId": 3489,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 39249
+      },
+      {
+        "eventId": 3562,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 74930
+      },
+      {
+        "eventId": 3671,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 324900
+      },
+      {
+        "eventId": 3729,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 74780
+      },
+      {
+        "eventId": 3757,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 140132
+      },
+      {
+        "eventId": 3794,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 110407
+      },
+      {
+        "eventId": 3905,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 268548
+      },
+      {
+        "eventId": 4003,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 70561
+      },
+      {
+        "eventId": 4103,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 121621
+      },
+      {
+        "eventId": 4178,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 47688
+      },
+      {
+        "eventId": 4291,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 380856
+      },
+      {
+        "eventId": 4350,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 17677
+      },
+      {
+        "eventId": 4438,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 66083
+      },
+      {
+        "eventId": 4465,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 54144
+      },
+      {
+        "eventId": 4498,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 59983
+      },
+      {
+        "eventId": 4527,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 52547
+      },
+      {
+        "eventId": 4618,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 426118
+      },
+      {
+        "eventId": 4692,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 71788
+      },
+      {
+        "eventId": 4801,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 51290
+      },
+      {
+        "eventId": 4871,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 67976
+      },
+      {
+        "eventId": 4911,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 60183
+      },
+      {
+        "eventId": 4941,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 50762
+      }
+    ]
+  },
+  "limits": [
+    "A ready plan is not product acceptance.",
+    "Agent wall time is not financial cost.",
+    "Database hashes cover the named database file, not uncheckpointed WAL contents."
+  ]
+}

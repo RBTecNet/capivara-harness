@@ -14,6 +14,16 @@ const coverage = (complete: boolean, source = code): SourceReviewCoverage[] => [
 const finding = (sourceEvidence?: unknown) => interpretReview(JSON.stringify({ approved: false, findings: [{ kind: 'product', evidenceType: 'source', file: 'src/store.js', observed: 'save throws when value is null.', expected: 'save accepts the documented optional input.', ...(sourceEvidence === undefined ? {} : { sourceEvidence }) }] })).findings[0]!;
 async function prepare() { const root = await workspace(); await mkdir(join(root, 'src')); await writeFile(join(root, 'src/store.js'), code); return root; }
 
+it('validates structured source citations when the affected file field names a directory',async()=>{
+  const root=await prepare(),original={approved:false,findings:[{kind:'product-defect',file:'src/',observed:'save throws for null.',expected:'The optional input is accepted.',evidence:[{location:'src/store.js:2-2',observed:'The argument is dereferenced without guarding null.'}],evidenceType:'source'}]};
+  const review=interpretReview(JSON.stringify(original)),finding=review.findings[0]!;
+  expect(finding.evidence).toContain('src/store.js:2-2');
+  const result=await substantiateSourceFinding(root,finding,coverage(true));
+  expect(result.verified).toBe(true);expect(result.receipt?.sourceLocation?.startLine).toBe(2);
+  expect(review.approved).toBe(false);expect(review.original).toBe(JSON.stringify(original));
+  expect((await substantiateSourceFinding(root,finding,coverage(true,'stale'))).verified).toBe(false);
+});
+
 it('preserves a material finding against current source identity without claiming complete delivery or approving its verdict', async () => {
   const root = await prepare(), defect = finding(), before = structuredClone(defect);
   const result = await substantiateSourceFinding(root, defect, coverage(false));

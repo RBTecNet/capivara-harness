@@ -865,7 +865,31 @@ export interface RepairPlanOptions extends DomainHooks {
   problem: string;
   finalize?: boolean;
   /** Instrument and provider incidents cannot redefine the product delivery. */
-  repairScope?: "verification" | "environment" | "delivery" | "authority";
+  repairScope?: "verification" | "environment" | "delivery" | "authority" | "dependencies";
+}
+
+async function repairTaskDependencies(options:RepairPlanOptions,task:WorkUnit):Promise<DevelopmentPlan>{
+  const text=task.instructions+'\n'+options.problem;
+  const candidates=options.plan.tasks.filter(unit=>unit.id!==task.id&&(text.includes(unit.id)||task.dependsOn.includes(unit.id)));
+  const result=await requestObject({...options,operation:'repair',prompt:[
+    'Resolve this observed consumer/producer scheduling incident. Return JSON {dependsOn:[existing prerequisite task IDs],contractIds:[existing consumed contract IDs],inputs:[concrete relative source paths],reason}. Only add real producer dependencies and their read interfaces. Do not change requirements, instructions, criteria, checks, file ownership or completed deliveries. A downstream handoff is not a prerequisite. Return no added dependencies when the observation does not establish one.',
+    `Consumer: ${JSON.stringify(task)}`,
+    `Candidate task graph: ${JSON.stringify(candidates.map(({id,title,dependsOn,contractIds,files})=>({id,title,dependsOn,contractIds,files})))}`,
+    `Available contracts: ${JSON.stringify(options.plan.contracts.map(({id,name})=>({id,name})))}`,
+    `Original incident: ${options.problem}`,
+  ].join('\n\n')});
+  const dependencies=strings(result.dependsOn),contracts=strings(result.contractIds),inputs=strings(result.inputs);
+  if(dependencies.some(id=>id===task.id||!candidates.some(unit=>unit.id===id))||contracts.some(id=>!options.plan.contracts.some(contract=>contract.id===id))||inputs.some(path=>path.startsWith('/')||/^[A-Za-z]:/.test(path)||path.replaceAll('\\','/').split('/').includes('..')))throw new PlanningFailure('invalid-plan',['O reparo de dependências precisa referenciar produtores e interfaces existentes com caminhos locais.'],task.id);
+  const plan=structuredClone(options.plan),updated=plan.tasks.find(unit=>unit.id===task.id)!;
+  updated.dependsOn=uniqueStrings([...updated.dependsOn,...dependencies]);
+  updated.contractIds=uniqueStrings([...updated.contractIds,...contracts]);
+  if(inputs.length)updated.inputs=uniqueStrings([...updated.inputs??[],...inputs]);
+  if(ordered(plan.tasks).unresolved.length)throw new PlanningFailure('invalid-plan',['O reparo de dependências criaria ciclo ou referência inexistente.'],task.id);
+  if(stableJson(updated)===stableJson(task))throw new PlanningFailure('invalid-plan',['A observação não estabeleceu uma nova relação executável entre consumidor e produtor.'],task.id);
+  assertValidPlan(options.brief,plan);plan.revision++;plan.obligations=derivePlanObligations(options.brief,plan);
+  await options.save?.({brief:options.brief,plan});
+  emitEvent(options.onEvent,{type:'replanned',subject:task.id,message:'Dependência de produtor reconciliada; escopo da entrega e provas obrigatórias preservados.',detail:{before:task.dependsOn,after:updated.dependsOn,reason:result.reason}});
+  return plan;
 }
 
 async function repairSourceAuthority(options:RepairPlanOptions,task:WorkUnit):Promise<DevelopmentPlan>{
@@ -1034,6 +1058,7 @@ export async function repairWorkPlan(options: RepairPlanOptions): Promise<Develo
   plan.status = "planning";
   const task = plan.tasks.find((candidate) => candidate.id === options.taskId);
   if (!task) return options.plan;
+  if(options.repairScope==='dependencies')return repairTaskDependencies(options,task);
   if(options.repairScope==='authority')return repairSourceAuthority(options,task);
   if(options.repairScope==='verification'||options.repairScope==='environment')return repairRestrictedWorkPlan(options,task,options.repairScope);
   const progress = { id: `plan:repair:${task.id}`, label: `Revisão do plano: ${task.title}`, stage: "plan" };

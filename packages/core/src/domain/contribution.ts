@@ -7,9 +7,17 @@ export function taskDependsOn(plan: DevelopmentPlan, task: WorkUnit, prerequisit
   return task.dependsOn.some(id => id === prerequisite || !!plan.tasks.find(candidate => candidate.id === id && taskDependsOn(plan, candidate, prerequisite, seen)));
 }
 
+/** A consumer can receive an outcome through a typed integration contract.
+ * This establishes a data-flow boundary, not a passed interface proof or a
+ * new local criterion. Final integrated acceptance still owes the outcome. */
+export function requirementConsumers(plan:DevelopmentPlan,requirementId:string):WorkUnit[]{
+  const contracts=new Set(plan.contracts.filter(contract=>contract.requirementIds.includes(requirementId)).map(contract=>contract.id));
+  return plan.tasks.filter(task=>task.requirementIds.includes(requirementId)||task.contractIds.some(id=>contracts.has(id)));
+}
+
 export function preferredProofOwner(plan: DevelopmentPlan, requirementId: string): WorkUnit | undefined {
-  const consumers = plan.tasks.filter(task => task.requirementIds.includes(requirementId));
-  return consumers.filter(task => !consumers.some(other => other.id !== task.id && taskDependsOn(plan, other, task.id))).sort((left, right) => {
+  const consumers = requirementConsumers(plan,requirementId);
+  return consumers.filter(task => task.requirementIds.includes(requirementId)&&!consumers.some(other => other.id !== task.id && taskDependsOn(plan, other, task.id))).sort((left, right) => {
     const weight = (task: WorkUnit): number => consumers.filter(other => other.id !== task.id && taskDependsOn(plan, task, other.id)).length;
     return weight(right) - weight(left) || plan.tasks.indexOf(right) - plan.tasks.indexOf(left);
   })[0];
@@ -30,7 +38,7 @@ export function scopeContribution(brief: ProductBrief, plan: DevelopmentPlan, ta
     localCriteria: task.criteria.map(statement => ({ id: criterionIdentity(task.id, statement), statement })),
     requirements: brief.requirements.filter(requirement => task.requirementIds.includes(requirement.id)).map(requirement => {
       const owner = preferredProofOwner(plan, requirement.id);
-      const downstreamTaskIds = plan.tasks.filter(candidate => candidate.id !== task.id && candidate.requirementIds.includes(requirement.id) && taskDependsOn(plan, candidate, task.id)).map(candidate => candidate.id);
+      const downstreamTaskIds = requirementConsumers(plan,requirement.id).filter(candidate => candidate.id !== task.id && taskDependsOn(plan, candidate, task.id)).map(candidate => candidate.id);
       return { requirementId: requirement.id, contribution: downstreamTaskIds.length ? 'partial' : 'final', ...(owner ? { finalOwnerTaskId: owner.id } : {}), downstreamTaskIds };
     }),
   };

@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest';
 import { runPlan } from '../../src/domain/plan.js';
-import { derivePlanObligations, requiredTaskInterfaces, validatePlan } from '../../src/domain/reconcile.js';
+import { derivePlanObligations, preferredProofOwner, requiredTaskInterfaces, validatePlan } from '../../src/domain/reconcile.js';
+import { scopeContribution } from '../../src/domain/contribution.js';
 import type { DevelopmentPlan, ProductBrief, Verification } from '../../src/domain/types.js';
 
 it.each(['web','tui','desktop','cli'] as const)('persists required %s behavior as explicit BUILD debt without inventing a pre-code command',async mode=>{
@@ -33,4 +34,18 @@ it('a suggested browser recipe cannot promote a partial contribution into the fi
   expect(requiredTaskInterfaces(brief,plan,foundation)).toEqual([]);
   expect(requiredTaskInterfaces(brief,plan,final)).toEqual(['web']);
   expect(foundation.checks[0]).toEqual(expect.objectContaining({id:'suggested',command:'npm'}));
+});
+
+it('keeps interface debt global when a downstream contract consumes an internal contribution without repeating every requirement ID',()=>{
+  const brief:ProductBrief={schema:'capivara/product/1',id:'p',revision:1,status:'ready',name:'TUI',summary:'Search through the terminal interface.',request:'Search through the terminal interface.',modes:['tui'],targets:[],requirements:[{id:'search',statement:'Search records through the terminal interface.',kind:'behavior',mode:'tui',source:{kind:'request',reference:'request',text:'Search records through the terminal interface.'}},{id:'layout',statement:'Render terminal navigation.',kind:'interface',mode:'tui',source:{kind:'request',reference:'request',text:'Render terminal navigation.'}}],constraints:[],decisions:[],gaps:[]};
+  const backend={id:'catalog',title:'Catalog',goal:'Return filtered records.',instructions:'Provide the catalog interface.',requirementIds:['search'],dependsOn:[],environmentIds:[],contractIds:['catalog'],files:['catalog.py'],criteria:['Return filtered records.'],checks:[],risk:'normal' as const,blockedBy:[]};
+  const frontend={...backend,id:'navigation',title:'Navigation',goal:'Render terminal navigation.',requirementIds:['layout'],dependsOn:['catalog'],files:['navigation.py']};
+  const plan:DevelopmentPlan={schema:'capivara/plan/1',status:'ready',revision:1,briefId:'p',briefRevision:1,environment:[],contracts:[{id:'catalog',name:'Searchable records',description:'Provide filtered records to navigation.',inputs:[],outputs:['filtered records'],requirementIds:['search']}],tasks:[backend,frontend]};
+  expect(requiredTaskInterfaces(brief,plan,backend)).toEqual([]);
+  expect(requiredTaskInterfaces(brief,plan,frontend)).toEqual(['tui']);
+  expect(scopeContribution(brief,plan,backend).requirements).toEqual([{requirementId:'search',contribution:'partial',downstreamTaskIds:['navigation']}]);
+  expect(preferredProofOwner(plan,'search')).toBeUndefined();
+  expect(derivePlanObligations(brief,plan)).toContainEqual(expect.objectContaining({requirementId:'search',interface:'tui',recipeStatus:'pending',verification:'required-in-build'}));
+  frontend.dependsOn=[];
+  expect(requiredTaskInterfaces(brief,plan,backend)).toEqual(['tui']);
 });

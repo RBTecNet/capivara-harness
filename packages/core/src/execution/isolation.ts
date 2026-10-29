@@ -1,6 +1,6 @@
 import { cp, mkdir, readFile, writeFile, rename, unlink, lstat, realpath, chmod, stat, readdir, readlink, symlink, copyFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import { join, dirname, relative, resolve, sep } from 'node:path';
+import { join, dirname, relative, resolve, sep, matchesGlob } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { digest, inside, sourceFiles } from './files.js';
 import type { IntegrationTransaction, WorkspaceCheckpoint } from './types.js';
@@ -65,6 +65,33 @@ export async function createTaskWorkspace(workspace: string, taskId: string, tas
     });
   }
   return { directory, base: await captureFiles(directory, outputs), phase: 'editing', taskHash };
+}
+
+/** Incorporate newly published prerequisites without discarding private work.
+ * A file edited on both sides requires reconciliation, never overwrite. */
+export async function refreshWorkspaceInputs(workspace:string,checkpoint:WorkspaceCheckpoint,paths:readonly string[]):Promise<string[]>{
+  const changed:string[]=[];
+  const selected=new Set([...await sourceFiles(workspace,paths),...Object.keys(checkpoint.base).filter(path=>paths.some(scope=>scope==='.'||path===scope||path.startsWith(scope.replace(/\/$/,'')+'/')||matchesGlob(path,scope)))]);
+  for(const path of selected){
+    const baseline=checkpoint.base[path]??null,current=await fileDigest(workspace,path),local=await fileDigest(checkpoint.directory,path);
+    if(current===baseline)continue;
+    if(local!==baseline&&local!==current)throw new IntegrationConflict(path,baseline,current,local);
+    if(local!==current){
+      await safePublicationPath(checkpoint.directory,path);
+      const target=inside(checkpoint.directory,path),info=await lstat(target).catch(()=>null);
+      if(info&&!info.isFile())throw new Error(`A required input cannot replace a non-file private entry: ${path}`);
+      if(current===null)await unlink(target);
+      else{
+        const source=await safePublicationPath(workspace,path),sourceInfo=await lstat(source);
+        if(!sourceInfo.isFile())throw new Error(`A required published input must be an independent file: ${path}`);
+        await mkdir(dirname(target),{recursive:true});await copyFile(source,target);await chmod(target,sourceInfo.mode&0o777);
+        if(await fileDigest(checkpoint.directory,path)!==current||await fileDigest(workspace,path)!==current)throw new IntegrationConflict(path,baseline,await fileDigest(workspace,path),await fileDigest(checkpoint.directory,path));
+      }
+      changed.push(path);
+    }
+    if(current!==null)checkpoint.base[path]=current;else delete checkpoint.base[path];
+  }
+  return changed;
 }
 
 /** Prepare a durable write set; no canonical file is modified here. */

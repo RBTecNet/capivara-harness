@@ -7,6 +7,19 @@ const IGNORED = new Set(['.git', '.project-inputs', 'node_modules', 'dist', 'tar
 export const digest = (text: string | Uint8Array): string => createHash('sha256').update(text).digest('hex');
 const inside = (root: string, path: string): boolean => { const rel = relative(root, path); return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`)); };
 
+/** Context data is readable independently of product files. It cannot grant
+ * access to configuration/state, nor authorize product-tool writes. */
+export async function readContextReceipt(root:string,path:string):Promise<string|undefined>{
+  const match=path.match(/^\.capivara-verification\/(?:task-data|source-index|recovery)-([a-f0-9]{64})\.json$/);
+  if(!match)return undefined;
+  const base=await realpath(resolve(root)),folder=resolve(base,'.capivara-verification'),file=resolve(base,path);
+  const parent=await lstat(folder),entry=await lstat(file);
+  if(!parent.isDirectory()||parent.isSymbolicLink()||!entry.isFile()||entry.isSymbolicLink())throw new Error('The context receipt is not an independent coordinator data file.');
+  const bytes=await readFile(file);
+  if(digest(bytes)!==match[1])throw new Error('The context receipt no longer matches its recorded identity.');
+  return bytes.toString('utf8');
+}
+
 /** Resolves the real parent, so a symlink cannot turn a valid-looking project path into an outside write. */
 export async function projectPath(root: string, path: string, write = false, constraints?: ExecutionConstraints): Promise<string> {
   if (path.includes('\0')) throw new Error('O caminho contém um byte nulo.');

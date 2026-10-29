@@ -7,7 +7,7 @@ import { isPlannedProductRecipe, verificationRegistry } from './verifications.js
 import { deriveBindingAuthority, matchesOperationalClaim, obligationMatchesProvider } from './bindings.js';
 import { expandPartitionedRequirementIds } from './requirement-lineage.js';
 import { canonicalizePlanConformance } from './conformance-declarations.js';
-import { preferredProofOwner, taskDependsOn as dependsOn } from './contribution.js';
+import { preferredProofOwner, requirementConsumers, taskDependsOn as dependsOn } from './contribution.js';
 export { preferredProofOwner } from './contribution.js';
 import type { DevelopmentPlan, PlanVerificationObligation, ProductBrief, Requirement, Verification, VerificationAssertion, WorkUnit } from './types.js';
 
@@ -73,7 +73,7 @@ export function requiredTaskInterfaces(brief: ProductBrief, plan: DevelopmentPla
     // A suggested recipe is an instrument, not authority to promote a partial
     // contribution into the final owner of a user interaction requirement.
     if ((plan.acceptance ?? []).some(check => provesInterface(check,requirement.id,kind))) continue;
-    const consumers = plan.tasks.filter(candidate => candidate.requirementIds.includes(requirement.id));
+    const consumers = requirementConsumers(plan,requirement.id);
     if (!consumers.some(other => other.id !== task.id && dependsOn(plan,other,task.id))) result.add(kind);
   }
   return [...result];

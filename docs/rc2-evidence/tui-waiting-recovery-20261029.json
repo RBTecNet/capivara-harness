@@ -1,0 +1,986 @@
+{
+  "schema": "capivara/execution-evidence/1",
+  "capturedAt": "2026-10-29T23:01:06.230Z",
+  "project": "samba-admin",
+  "projectUpdatedAt": "2026-10-29T23:00:24.281Z",
+  "status": "working",
+  "stage": "build",
+  "eventRange": {
+    "firstInclusive": 3261,
+    "lastInclusive": 4984,
+    "captured": 1724
+  },
+  "completedProductTasks": 10,
+  "totalProductTasks": 47,
+  "tasks": [
+    {
+      "id": "task-startup",
+      "status": "complete",
+      "attempts": 1,
+      "strategy": "verified"
+    },
+    {
+      "id": "task-investigate-secure-password-transport",
+      "status": "complete",
+      "attempts": 1,
+      "strategy": "verified"
+    },
+    {
+      "id": "task-slice-runtime-packaging",
+      "status": "complete",
+      "attempts": 3,
+      "strategy": "verified"
+    },
+    {
+      "id": "task-slice-result-model",
+      "status": "complete",
+      "attempts": 2,
+      "strategy": "verified"
+    },
+    {
+      "id": "task-quality-build-protocol",
+      "status": "complete",
+      "attempts": 1,
+      "strategy": "verified"
+    },
+    {
+      "id": "task-directory-provider",
+      "status": "complete",
+      "attempts": 2,
+      "strategy": "verified"
+    },
+    {
+      "id": "task-directory-group-catalog",
+      "status": "complete",
+      "attempts": 2,
+      "strategy": "verified"
+    },
+    {
+      "id": "task-slice-samba-capabilities",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-quality-validation-boundaries",
+      "status": "complete",
+      "attempts": 3,
+      "strategy": "verified"
+    },
+    {
+      "id": "task-directory-catalog",
+      "status": "editing",
+      "attempts": 3,
+      "strategy": "partner-guidance",
+      "phase": "editing"
+    },
+    {
+      "id": "task-group-admin-operations",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-slice-password-channel-evidence",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-slice-authorized-dispatch",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-acceptance-scope-and-ledger",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-tui-navigation",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-user-list-and-details",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-group-ou-tui",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-slice-operation-lifecycle",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-quality-operation-support-evidence",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-user-admin",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-group-admin",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-user-forms",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-user-delete-and-account-state",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-slice-view-reconciliation",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-quality-responsive-directory-reads",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-quality-domain-postconditions",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-user-password-reset",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-slice-contextual-keyboard",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-slice-specific-result-view",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-quality-form-draft-protection",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-acceptance-password-security",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-slice-wire-existing-workflows",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-quality-terminal-lifecycle",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-slice-functional-evidence",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-quality-workflow-integration",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-quality-functional-acceptance",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-acceptance-user-create-edit-move",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-acceptance-user-state-delete",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-acceptance-group-lifecycle",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-acceptance-memberships",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-delivery-operating-guide",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-acceptance-startup-terminal",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-acceptance-navigation-refresh",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-delivery-final-audit",
+      "status": "pending",
+      "attempts": 0,
+      "strategy": "implement"
+    },
+    {
+      "id": "task-slice-runtime-startup-entry",
+      "status": "complete",
+      "attempts": 1,
+      "strategy": "verified"
+    },
+    {
+      "id": "task-slice-runtime-installation-lifecycle",
+      "status": "checking",
+      "attempts": 1,
+      "strategy": "implement",
+      "phase": "checking"
+    },
+    {
+      "id": "task-slice-runtime-dependency-lock",
+      "status": "complete",
+      "attempts": 1,
+      "strategy": "verified"
+    }
+  ],
+  "retiredTaskRecords": [],
+  "lastFailure": null,
+  "proofRecords": {
+    "total": 21,
+    "passedHistorical": 14,
+    "failedHistorical": 7,
+    "byTask": {
+      "task-startup": 2,
+      "task-slice-runtime-packaging": 8,
+      "task-slice-result-model": 4,
+      "task-quality-validation-boundaries": 6,
+      "task-slice-runtime-startup-entry": 1
+    },
+    "acceptanceTotal": 0,
+    "acceptancePassedHistorical": 0,
+    "reinterpreted": [],
+    "caution": "Historical records are counts, not a claim of current valid coverage or completed acceptance."
+  },
+  "incidentsByKind": {
+    "environment": 1,
+    "instrument": 1,
+    "integration": 1
+  },
+  "cumulativePersistedMetrics": {
+    "workflow": {
+      "timeByStageMs": {
+        "agent:analyst": 40853,
+        "init": 43929,
+        "agent:planner": 1868558,
+        "plan": 1240913,
+        "agent:editor": 3114978,
+        "agent:repair": 2255499,
+        "agent:reviewer": 1271938,
+        "build": 6109702
+      },
+      "callsByRole": {
+        "analyst": 1,
+        "planner": 24,
+        "editor": 12,
+        "repair": 15,
+        "reviewer": 21
+      },
+      "activeAgents": 1,
+      "maxConcurrency": 2
+    },
+    "build": {
+      "startedAt": "2026-10-29T17:48:14.576Z",
+      "elapsedMs": 7131152,
+      "maxConcurrency": 2,
+      "active": 0,
+      "callsByRole": {
+        "editor": 12,
+        "repair": 14,
+        "reviewer": 21
+      },
+      "timeByStageMs": {
+        "queueWait": 73327,
+        "providerPublication": 207,
+        "environmentPreparation": 82460,
+        "dependencies": 24156,
+        "isolation": 12684,
+        "providerSynchronization": 294,
+        "proofInputs": 92367,
+        "agentInstrument": 386,
+        "editor": 3116228,
+        "verificationIsolation": 39966,
+        "repair": 2257129,
+        "browserPreparation": 306,
+        "verification": 13367,
+        "reviewer": 1275304,
+        "cleanup": 812,
+        "integration": 16277,
+        "dependencySynchronization": 130,
+        "integrationReconciliation": 3365
+      },
+      "invalidations": 0,
+      "repetitions": 11
+    }
+  },
+  "observedCalls": {
+    "starts": 24,
+    "finished": 23,
+    "callsByRole": {
+      "reviewer": 12,
+      "repair": 8,
+      "editor": 3,
+      "planner": 1
+    },
+    "callsByRecordedStage": {
+      "build": 24
+    },
+    "phases": {
+      "review": {
+        "starts": 12,
+        "finished": 12,
+        "measuredAgentMs": 834974,
+        "callsByRole": {
+          "reviewer": 12
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 12,
+          "inputTokens": 3803055,
+          "cachedInputTokens": 3276928,
+          "outputTokens": 35283,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        }
+      },
+      "implementation": {
+        "starts": 11,
+        "finished": 10,
+        "measuredAgentMs": 1937901,
+        "callsByRole": {
+          "repair": 8,
+          "editor": 3
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 10,
+          "inputTokens": 5573399,
+          "cachedInputTokens": 5133824,
+          "outputTokens": 89945,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        }
+      },
+      "planning": {
+        "starts": 1,
+        "finished": 1,
+        "measuredAgentMs": 17677,
+        "callsByRole": {
+          "planner": 1
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 1,
+          "inputTokens": 72983,
+          "cachedInputTokens": 54656,
+          "outputTokens": 523,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        }
+      }
+    },
+    "reportedUsage": {
+      "callsWithReportedUsage": 23,
+      "inputTokens": 9449437,
+      "cachedInputTokens": 8465408,
+      "outputTokens": 125751,
+      "callsWithReportedCost": 0,
+      "reportedCostUsd": null
+    },
+    "epochs": [
+      {
+        "firstEventId": 3261,
+        "lastEventId": 4984,
+        "firstObservedAt": "2026-10-29T22:09:33.053Z",
+        "lastObservedAt": "2026-10-29T23:00:45.809Z",
+        "ending": "point-in-time-capture",
+        "calls": 24,
+        "callsByRole": {
+          "reviewer": 12,
+          "repair": 8,
+          "editor": 3,
+          "planner": 1
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 23,
+          "inputTokens": 9449437,
+          "cachedInputTokens": 8465408,
+          "outputTokens": 125751,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        },
+        "integratedTasksInInterval": [
+          "task-directory-provider",
+          "task-slice-runtime-packaging",
+          "task-slice-runtime-startup-entry",
+          "task-directory-group-catalog"
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "eventId": 3392,
+        "id": "83696750-4088-4787-9f60-41d401972701",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "task-directory-provider",
+        "strategy": "review",
+        "startedAt": "2026-10-29T22:09:41.309Z",
+        "resultEventId": 3438,
+        "finishedAt": "2026-10-29T22:12:19.638Z",
+        "durationMs": 158329,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 945881,
+          "outputTokens": 5591,
+          "cachedInputTokens": 859904
+        }
+      },
+      {
+        "eventId": 3463,
+        "id": "b432a196-7631-47d8-8130-69b42a6aa6ca",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "task-directory-provider",
+        "strategy": "partner-guidance",
+        "startedAt": "2026-10-29T22:12:21.167Z",
+        "resultEventId": 3489,
+        "finishedAt": "2026-10-29T22:13:00.416Z",
+        "durationMs": 39249,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 198486,
+          "outputTokens": 1781,
+          "cachedInputTokens": 160512
+        }
+      },
+      {
+        "eventId": 3529,
+        "id": "d558511b-0d19-41f9-b50e-d1247442f60b",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "task-directory-provider",
+        "strategy": "review",
+        "startedAt": "2026-10-29T22:13:02.555Z",
+        "resultEventId": 3562,
+        "finishedAt": "2026-10-29T22:14:17.485Z",
+        "durationMs": 74930,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 467130,
+          "outputTokens": 2818,
+          "cachedInputTokens": 403200
+        }
+      },
+      {
+        "eventId": 3621,
+        "id": "39b1e07a-adf1-4e92-b933-16f534ab5487",
+        "role": "editor",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "task-directory-catalog",
+        "strategy": "implement",
+        "startedAt": "2026-10-29T22:14:21.782Z",
+        "resultEventId": 3671,
+        "finishedAt": "2026-10-29T22:19:46.682Z",
+        "durationMs": 324900,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 610353,
+          "outputTokens": 16291,
+          "cachedInputTokens": 574848
+        }
+      },
+      {
+        "eventId": 3705,
+        "id": "16337b13-06a0-4dce-878b-e84c2e0439c0",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "task-directory-catalog",
+        "strategy": "materialize-verification:fe2fd30d67033bf1faf949627633244ec5d472604413f137e0fc40f5e1ffac13",
+        "startedAt": "2026-10-29T22:19:49.653Z",
+        "resultEventId": 3729,
+        "finishedAt": "2026-10-29T22:21:04.433Z",
+        "durationMs": 74780,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 252959,
+          "outputTokens": 4042,
+          "cachedInputTokens": 208384
+        }
+      },
+      {
+        "eventId": 3739,
+        "id": "3b626ee2-c25c-4059-802a-2bea90710275",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "task-directory-catalog",
+        "strategy": "inspect-verification-surface:d74335fc8f936f34472f6e99dd06652538ccd800b46ab75388e5d691ed82709d",
+        "startedAt": "2026-10-29T22:21:05.418Z",
+        "resultEventId": 3757,
+        "finishedAt": "2026-10-29T22:23:25.550Z",
+        "durationMs": 140132,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 195073,
+          "outputTokens": 6727,
+          "cachedInputTokens": 167040
+        }
+      },
+      {
+        "eventId": 3767,
+        "id": "5002316e-66e5-4920-bfa4-9c3cf5bb79c4",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "task-directory-catalog",
+        "strategy": "compose-verification-runner:a82c52788f31fc740bbb9d7d649b46783e5e51dc15a826fd745c9865e067011f",
+        "startedAt": "2026-10-29T22:23:26.747Z",
+        "resultEventId": 3794,
+        "finishedAt": "2026-10-29T22:25:17.154Z",
+        "durationMs": 110407,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 228901,
+          "outputTokens": 5135,
+          "cachedInputTokens": 194432
+        }
+      },
+      {
+        "eventId": 3855,
+        "id": "c54991c5-445e-4e12-8128-b5a457b2b4f5",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "task-slice-runtime-packaging",
+        "strategy": "integration-reconcile:0848fa9d933a14dae29a9ee4d851521be3dd42d1e15294f5d3a404348034f824",
+        "startedAt": "2026-10-29T22:25:27.768Z",
+        "resultEventId": 3905,
+        "finishedAt": "2026-10-29T22:29:56.316Z",
+        "durationMs": 268548,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 720719,
+          "outputTokens": 11735,
+          "cachedInputTokens": 666880
+        }
+      },
+      {
+        "eventId": 3964,
+        "id": "0b4483f7-3c61-486f-a762-035187f37030",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "task-slice-runtime-packaging",
+        "strategy": "review",
+        "startedAt": "2026-10-29T22:30:31.347Z",
+        "resultEventId": 4003,
+        "finishedAt": "2026-10-29T22:31:41.908Z",
+        "durationMs": 70561,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 430653,
+          "outputTokens": 3411,
+          "cachedInputTokens": 376448
+        }
+      },
+      {
+        "eventId": 4069,
+        "id": "57921516-5863-47e2-b51d-41067477839f",
+        "role": "editor",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "task-slice-runtime-startup-entry",
+        "strategy": "implement",
+        "startedAt": "2026-10-29T22:32:02.889Z",
+        "resultEventId": 4103,
+        "finishedAt": "2026-10-29T22:34:04.510Z",
+        "durationMs": 121621,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 397160,
+          "outputTokens": 5351,
+          "cachedInputTokens": 357760
+        }
+      },
+      {
+        "eventId": 4155,
+        "id": "915a950f-bd8c-40fe-bdb9-21caad16753e",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "task-slice-runtime-startup-entry",
+        "strategy": "review",
+        "startedAt": "2026-10-29T22:34:12.905Z",
+        "resultEventId": 4178,
+        "finishedAt": "2026-10-29T22:35:00.593Z",
+        "durationMs": 47688,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 186594,
+          "outputTokens": 2137,
+          "cachedInputTokens": 150144
+        }
+      },
+      {
+        "eventId": 4237,
+        "id": "cde8c198-bc42-4c4b-8722-ca77c4d60316",
+        "role": "editor",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "task-slice-runtime-installation-lifecycle",
+        "strategy": "implement",
+        "startedAt": "2026-10-29T22:35:09.417Z",
+        "resultEventId": 4291,
+        "finishedAt": "2026-10-29T22:41:30.273Z",
+        "durationMs": 380856,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 1220761,
+          "outputTokens": 17043,
+          "cachedInputTokens": 1161472
+        }
+      },
+      {
+        "eventId": 4337,
+        "id": "7e942c0f-aa8d-4245-bbc5-da741ede2d5b",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T22:43:22.233Z",
+        "resultEventId": 4350,
+        "finishedAt": "2026-10-29T22:43:39.910Z",
+        "durationMs": 17677,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 72983,
+          "outputTokens": 523,
+          "cachedInputTokens": 54656
+        }
+      },
+      {
+        "eventId": 4412,
+        "id": "02ab9f23-a71f-405e-bbd0-074181e92277",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "task-directory-group-catalog",
+        "strategy": "review",
+        "startedAt": "2026-10-29T22:43:46.623Z",
+        "resultEventId": 4438,
+        "finishedAt": "2026-10-29T22:44:52.706Z",
+        "durationMs": 66083,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 179330,
+          "outputTokens": 3118,
+          "cachedInputTokens": 132736
+        }
+      },
+      {
+        "eventId": 4448,
+        "id": "b3a9412d-2901-4294-9312-10bd579a3d5e",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "task-directory-group-catalog",
+        "strategy": "classify-review-basis:a93fe1cc51005d5db6116f59f988d8aa82628cd960ea30c865f186093dcb55f3",
+        "startedAt": "2026-10-29T22:44:53.952Z",
+        "resultEventId": 4465,
+        "finishedAt": "2026-10-29T22:45:48.096Z",
+        "durationMs": 54144,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 138517,
+          "outputTokens": 2659,
+          "cachedInputTokens": 116096
+        }
+      },
+      {
+        "eventId": 4475,
+        "id": "66b115eb-30ba-4eca-bb2d-7e9ef9c5c8d5",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "task-directory-group-catalog",
+        "strategy": "classify-review-basis:989517d348abe1d4fab72b76e45e824bc67cb254ac10285e49e57d3984670391",
+        "startedAt": "2026-10-29T22:45:49.190Z",
+        "resultEventId": 4498,
+        "finishedAt": "2026-10-29T22:46:49.173Z",
+        "durationMs": 59983,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 227578,
+          "outputTokens": 3107,
+          "cachedInputTokens": 199040
+        }
+      },
+      {
+        "eventId": 4508,
+        "id": "a370bfa9-2609-4328-bddb-ef6f2e1acba0",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "task-directory-group-catalog",
+        "strategy": "classify-review-basis:14f68f876c9eb6777142e951cefc03cd4100ae5b1ea985b140d05b61e5392df8",
+        "startedAt": "2026-10-29T22:46:50.389Z",
+        "resultEventId": 4527,
+        "finishedAt": "2026-10-29T22:47:42.936Z",
+        "durationMs": 52547,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 135699,
+          "outputTokens": 2080,
+          "cachedInputTokens": 113024
+        }
+      },
+      {
+        "eventId": 4552,
+        "id": "32973455-0592-44bf-9dd8-fd8f147789c6",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "task-directory-group-catalog",
+        "strategy": "partner-guidance",
+        "startedAt": "2026-10-29T22:47:45.434Z",
+        "resultEventId": 4618,
+        "finishedAt": "2026-10-29T22:54:51.552Z",
+        "durationMs": 426118,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 1491413,
+          "outputTokens": 19827,
+          "cachedInputTokens": 1417600
+        }
+      },
+      {
+        "eventId": 4658,
+        "id": "2fce2db1-792c-4d44-80f3-803396a8b4a9",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "task-directory-group-catalog",
+        "strategy": "review",
+        "startedAt": "2026-10-29T22:54:54.849Z",
+        "resultEventId": 4692,
+        "finishedAt": "2026-10-29T22:56:06.637Z",
+        "durationMs": 71788,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 487006,
+          "outputTokens": 3123,
+          "cachedInputTokens": 428800
+        }
+      },
+      {
+        "eventId": 4773,
+        "id": "3699aeb4-ad5d-4f6f-a2e1-f2e7809da3cf",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "task-directory-catalog",
+        "strategy": "integration-reconcile:b1bfaee335d3f8d9684fef47b074e696989a2452db71ab68e3059b2c65b3325d",
+        "startedAt": "2026-10-29T22:56:15.566Z",
+        "resultEventId": 4801,
+        "finishedAt": "2026-10-29T22:57:06.856Z",
+        "durationMs": 51290,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 257574,
+          "outputTokens": 2013,
+          "cachedInputTokens": 224896
+        }
+      },
+      {
+        "eventId": 4848,
+        "id": "40d1bd38-8f7e-4593-80f0-abc6c367b35a",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "task-directory-catalog",
+        "strategy": "review",
+        "startedAt": "2026-10-29T22:57:17.323Z",
+        "resultEventId": 4871,
+        "finishedAt": "2026-10-29T22:58:25.299Z",
+        "durationMs": 67976,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 234371,
+          "outputTokens": 2311,
+          "cachedInputTokens": 192640
+        }
+      },
+      {
+        "eventId": 4885,
+        "id": "2bbcfe25-2b77-43a3-aee9-680a06bb5680",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "task-directory-catalog",
+        "strategy": "clarify-review",
+        "startedAt": "2026-10-29T22:58:27.481Z",
+        "resultEventId": 4911,
+        "finishedAt": "2026-10-29T22:59:27.664Z",
+        "durationMs": 60183,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 210812,
+          "outputTokens": 2686,
+          "cachedInputTokens": 167808
+        }
+      },
+      {
+        "eventId": 4921,
+        "id": "174adfb9-d403-476a-9d97-83809069299f",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "task-directory-catalog",
+        "strategy": "classify-review-basis:1e4edf11e9a3180e7599c377d45cfe2ee9b56e4f7fdc8fa4f23b56080eb0eda4",
+        "startedAt": "2026-10-29T22:59:29.502Z",
+        "resultEventId": 4941,
+        "finishedAt": "2026-10-29T23:00:20.264Z",
+        "durationMs": 50762,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 159484,
+          "outputTokens": 2242,
+          "cachedInputTokens": 137088
+        }
+      },
+      {
+        "eventId": 4966,
+        "id": "0c0ba327-75b8-424c-a61b-26a5aa8cf9c3",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "task-directory-catalog",
+        "strategy": "partner-guidance",
+        "startedAt": "2026-10-29T23:00:24.224Z",
+        "status": "no-result-recorded-at-capture"
+      }
+    ]
+  },
+  "limits": [
+    "Point-in-time read transaction; execution can progress after capture.",
+    "Persisted active counts do not establish OS process liveness.",
+    "No agent stdout, commands, input prompts, credentials or configuration exported.",
+    "Phase attribution uses role and the nearest persisted action within five seconds, when one exists.",
+    "Epochs end at recorded workflow waiting events; they do not infer unrecorded process stops or manual debugging duration.",
+    "Agent duration includes provider work and transport; financial cost is absent unless the provider reports it."
+  ]
+}

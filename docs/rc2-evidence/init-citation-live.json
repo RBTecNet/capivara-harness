@@ -1,0 +1,45 @@
+{
+  "schema": "capivara/init-citation-live/1",
+  "generatedAt": "2026-10-29T02:07:28.999Z",
+  "before": {
+    "status": "waiting",
+    "stage": "init",
+    "brief": "discovering",
+    "requirements": 0,
+    "agentOutputs": 3,
+    "userDecisions": 0,
+    "pendingQuestion": false,
+    "storedUserAnswers": 0,
+    "lastFailureKind": "planning",
+    "ownerCount": 0
+  },
+  "after": {
+    "status": "complete",
+    "stage": "init",
+    "brief": "ready",
+    "requirements": 21,
+    "agentOutputs": 3,
+    "userDecisions": 0,
+    "pendingQuestion": false,
+    "storedUserAnswers": 0,
+    "lastFailureKind": null,
+    "ownerCount": 0
+  },
+  "newAgentCalls": 0,
+  "recoveries": [
+    {
+      "requirementId": "req-a54d6cf4d791",
+      "sourceSHA256": "4d5036be0547670b781f5b2fc0984d76748040c9c013430a5d36d3cde59a8f59",
+      "literalSourcePreserved": true,
+      "omissionsIncluded": true
+    }
+  ],
+  "installation": {
+    "version": "0.9.0-rc2",
+    "testedCLI": "ca3cc0de7204f580b9d61520c9d08ef19125667c206ec19e4f18df08f4fd9096",
+    "installedCLI": "ca3cc0de7204f580b9d61520c9d08ef19125667c206ec19e4f18df08f4fd9096",
+    "identical": true
+  },
+  "productCodeChanged": false,
+  "planOrBuildExecuted": false
+}

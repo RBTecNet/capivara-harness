@@ -4,7 +4,8 @@ import { documentaryAuthority, materialReferences, materialRevision, selectedMat
 import type { ApplicationMode, CapabilityIdentity, Gap, InitOptions, ProductBrief, ProductConstraint, Question, Requirement, Source, TargetPlatform } from "./types.js";
 import { emitEvent, emitProgress } from "../telemetry/progress.js";
 import { PlanningFailure, PlanningProgress } from "./control.js";
-import { resolveLiteralExcerpt } from "./literal-source.js";
+import { recoverLiteralParagraphs, resolveLiteralExcerpt } from "./literal-source.js";
+import { recordedRequirementMetadata } from "./requirement-metadata.js";
 import { choiceAlreadySpecified, engineeringChoiceQuestion } from "./question-policy.js";
 import { annotateBindingAuthority, literalProviderMention as providerMention } from "./bindings.js";
 
@@ -35,6 +36,8 @@ function excerpt(raw: string, record: Record<string, unknown>, origin: SourceOri
   const quote = string(record.quote, string(nested.text));
   const resolved = quote ? resolveLiteralExcerpt(raw, quote) : undefined;
   if (resolved) return { ...origin, text: resolved };
+  const recovered = quote ? recoverLiteralParagraphs(raw, quote) : undefined;
+  if (recovered) return { ...origin, text: recovered.text, citationRecovery: { strategy:"ordered-literal-paragraphs", quote:recovered.quote, spans:recovered.spans, includedGaps:recovered.includedGaps } };
   const statement = string(record.statement);
   if (statement && raw.includes(statement)) return { ...origin, text: statement };
   return null;
@@ -81,9 +84,16 @@ function generatedBindingChildren(brief: ProductBrief, parent: Requirement): Req
     && !!child.source.text.trim() && parent.source.text.includes(child.source.text) && !!providerMention(parent.source.text, child.binding.provider));
 }
 
-async function requirementsFrom(raw: string, values: unknown, modes: ApplicationMode[], sourceLimit: number, origin: SourceOrigin, hooks: Pick<InitOptions, "agent" | "contextChars" | "signal" | "onEvent">): Promise<Requirement[]> {
+async function requirementsFrom(raw: string, values: unknown, modes: ApplicationMode[], sourceLimit: number, origin: SourceOrigin, hooks: Pick<InitOptions, "agent" | "contextChars" | "signal" | "onEvent" | "completedResponses">): Promise<Requirement[]> {
   const result: Requirement[] = [];
   const candidates = records(values), metadata = new Map<number, Record<string, unknown>>();
+  const restored = recordedRequirementMetadata(raw, candidates, hooks.completedResponses?.() ?? [],
+    (source, quote) => resolveLiteralExcerpt(source, quote) ?? recoverLiteralParagraphs(source, quote)?.text);
+  for (const [index, patch] of restored.patches) metadata.set(index, patch);
+  for (const [index] of restored.patches) emitEvent(hooks.onEvent, { type:"metadata-restored", subject:origin.reference,
+    message:"Metadados da mesma origem literal recuperados da resposta já registrada; nenhuma nova inferência foi feita.", detail:{index} });
+  for (const conflict of restored.conflicts) if(candidates[conflict.index]?.kind === "stack" || object(candidates[conflict.index]?.binding)) emitEvent(hooks.onEvent, { type:"metadata-conflict", subject:origin.reference,
+    message:"Respostas registradas divergem nos metadados desta origem; nenhuma variante foi adotada arbitrariamente.", detail:{index:conflict.index} });
   const recovery = new PlanningProgress("init-requirement-metadata");
   const inspect = (item: Record<string, unknown>, index: number) => {
     const revised = metadata.get(index), candidate = revised ? { ...item, ...revised } : item;
@@ -148,6 +158,9 @@ async function requirementsFrom(raw: string, values: unknown, modes: Application
       emitEvent(hooks.onEvent, { type: "requirement-rejected", message: `Extração sem sustentação literal rejeitada explicitamente: ${statement}. ${string(inspected.candidate.reason)}`, subject: origin.reference });
       continue;
     }
+    if(source.citationRecovery)emitEvent(hooks.onEvent,{type:"source-recovered",subject:origin.reference,
+      message:"Citação descontínua recuperada por trechos literais únicos; o intervalo real conserva também as cláusulas omitidas.",
+      detail:{index,recovery:source.citationRecovery}});
     const modeValue = string(item.mode);
     const mode = MODES.has(modeValue as ApplicationMode) && modes.includes(modeValue as ApplicationMode) ? modeValue as ApplicationMode : "shared";
     if (statement.length > sourceLimit) throw new PlanningFailure("context-capacity", ["A extração devolveu uma descrição maior que uma unidade semântica. Divida os resultados observáveis, preservando a fonte original."], "init");

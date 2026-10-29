@@ -151,3 +151,45 @@ pode usar uma invocação direta com artefato e comportamento observados; sem es
 cadeia, precisa de outro instrumento. Providers compilados resolvidos apenas em
 cache externo também podem exigir uma observação adicional. Esses casos não
 recebem conformidade inventada nem são classificados como defeito do produto.
+
+## Nova execução: falha de origem no INIT
+
+Após reiniciar o projeto, o INIT parou em `2026-10-29T01:47:56Z`, com zero
+requisitos adotados e três saídas de agentes gravadas. Não havia pergunta
+pendente nem resposta humana. As referências anteriores a “respostas salvas”
+neste diagnóstico significam saídas técnicas dos agentes, não entrevistas.
+
+Uma das 16 citações extraídas concatenava três parágrafos literais e omitia a
+exigência intermediária de banco isolado nos testes. O parser estrito recusava
+a concatenação; os dois reparos repetiam a mesma citação. O motor não tentava
+a recuperação estrutural possível antes de suspender.
+
+O INIT agora recupera o intervalo real a partir de uma cadeia única de
+parágrafos ou linhas literais completos. O intervalo inclui as cláusulas
+omitidas, e a origem conserva a citação recebida, offsets e lacunas preenchidas.
+Palavras inventadas, linhas parciais, ordem invertida e cadeias ambíguas não são
+aceitas como fonte. O parser estrito continua estrito. A classificação técnica
+já gravada só é reutilizada com o mesmo índice e a mesma origem literal única;
+variantes conflitantes não usam a última resposta arbitrariamente.
+
+O [reprodutor](../scripts/reproduce-init-citation.mjs) compara o baseline
+`f0d38fb` com o motor corrigido usando somente as saídas capturadas:
+
+```sh
+node scripts/reproduce-init-citation.mjs BEFORE.sqlite
+npm run check
+```
+
+O [resultado](rc2-evidence/init-citation-replay.json) confirma: o baseline
+interrompe; um INIT novo conclui com um único reparo técnico da stack; a
+recuperação reutiliza esse reparo existente e conclui sem nenhum novo reparo.
+Não há inferência paga no reprodutor. As duas formas preservam os mesmos 21
+requisitos e a cláusula intermediária omitida. Um teste separado confirma que
+uma pergunta real de retenção continua chegando ao usuário após a recuperação.
+
+Na pasta real, o INIT terminou `complete`, com `brief=ready`, 21 requisitos,
+`lastFailure=null` e o ledger ainda com as três chamadas originais. Não houve
+nova chamada paga, resposta humana inventada ou execução de PLAN/BUILD nesta
+recuperação. A [CLI instalada](rc2-evidence/init-citation-live.json) repetiu o
+INIT com sucesso e coincide byte a byte com o build testado. O check completo
+passou com **481 testes em 71 arquivos**, build e tipos.

@@ -35,6 +35,9 @@ export interface Source {
   reference: string;
   /** Materialized selected input, available when this literal excerpt needs its original file. */
   localPath?: string;
+  /** A malformed model citation was expanded to its unique real source span.
+   * Omitted clauses remain in text; this is provenance, never product evidence. */
+  citationRecovery?: { strategy:"ordered-literal-paragraphs"; quote:string; spans:{start:number;end:number}[]; includedGaps:{start:number;end:number}[] };
 }
 
 export interface Requirement {

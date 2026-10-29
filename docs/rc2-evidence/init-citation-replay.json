@@ -1,0 +1,106 @@
+{
+  "schema": "capivara/init-citation-replay/1",
+  "generatedAt": "2026-10-29T02:05:33.228Z",
+  "baseline": "f0d38fb",
+  "input": {
+    "databaseSHA256": "b1a917b3a6392752dba9d2d248951790b2be2713b70c2a2ba7147efddb3e16bf",
+    "savedAgentOutputs": 3,
+    "userDecisions": 0
+  },
+  "sources": [
+    {
+      "path": "packages/core/src/domain/init.ts",
+      "sha256": "67c08ffb3c3eb20642159ab340ba476c5b2abbfee5cd55971cd22f6f7903a2cb"
+    },
+    {
+      "path": "packages/core/src/domain/types.ts",
+      "sha256": "3f7b43ce657a1bc3a273a7d9ad37c3ff847a052ce7b3d9a29be60fce2f449fa0"
+    },
+    {
+      "path": "packages/core/src/domain/literal-source.ts",
+      "sha256": "48f18f068f1f9a2e3e7f994fb6c06df199d51823d9b2ba934e333c9ac6113f63"
+    },
+    {
+      "path": "packages/core/src/domain/requirement-metadata.ts",
+      "sha256": "a2846056d05a2a136e745a1fcba4c8f2a547aa71f88052230c7d895ae124fed0"
+    }
+  ],
+  "before": {
+    "result": "rejected",
+    "code": "no-progress",
+    "scope": "init-requirement-metadata",
+    "discoveryCallbacks": 1,
+    "repairCallbacks": 2,
+    "events": [
+      "progress",
+      "progress",
+      "working",
+      "progress",
+      "recovering",
+      "progress",
+      "recovering",
+      "progress"
+    ]
+  },
+  "fresh": {
+    "result": "ready",
+    "requirements": 21,
+    "discoveryCallbacks": 1,
+    "repairCallbacks": 1,
+    "userDecisions": 0,
+    "sourceRecoveryCount": 1,
+    "sourceIntervalsAreLiteral": true,
+    "recoveredIntervalsIncludeOmissions": true,
+    "requirementDigest": "d487cd27b4362592da5ec682155944d6604bf3fa1e4a14331a87c5109d85b367",
+    "events": [
+      "progress",
+      "progress",
+      "working",
+      "progress",
+      "recovering",
+      "progress",
+      "binding-reconciled",
+      "source-recovered",
+      "progress",
+      "progress",
+      "progress",
+      "progress",
+      "progress",
+      "progress",
+      "complete"
+    ]
+  },
+  "resumed": {
+    "result": "ready",
+    "requirements": 21,
+    "discoveryCallbacks": 1,
+    "repairCallbacks": 0,
+    "userDecisions": 0,
+    "sourceRecoveryCount": 1,
+    "sourceIntervalsAreLiteral": true,
+    "recoveredIntervalsIncludeOmissions": true,
+    "requirementDigest": "d487cd27b4362592da5ec682155944d6604bf3fa1e4a14331a87c5109d85b367",
+    "events": [
+      "progress",
+      "progress",
+      "working",
+      "progress",
+      "metadata-restored",
+      "binding-reconciled",
+      "source-recovered",
+      "progress",
+      "progress",
+      "progress",
+      "progress",
+      "progress",
+      "progress",
+      "complete"
+    ]
+  },
+  "paidInferenceCalls": 0,
+  "projectWrites": 0,
+  "limits": [
+    "Callbacks return only the captured model outputs; no inference provider is called.",
+    "This replay proves citation recovery and reuse of one captured discovery, not universal extraction quality."
+  ]
+}

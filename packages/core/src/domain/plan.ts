@@ -8,7 +8,7 @@ import { boundedReferences } from "./material.js";
 import type { CapabilityIdentity, CommandRecipe, DevelopmentPlan, DomainHooks, EnvironmentNode, IntegrationContract, PlanOptions, ProductBrief, Requirement, Verification, WorkUnit } from "./types.js";
 import { emitEvent, emitProgress } from "../telemetry/progress.js";
 import { PlanningFailure, PlanningProgress } from "./control.js";
-import { assertValidPlan, derivePlanObligations, reconcileChecks, reconcilePlan, sameDelivery, validatePlan, resolveRequirementAlias } from "./reconcile.js";
+import { assertValidPlan, amendPlanTasks, derivePlanObligations, reconcileChecks, reconcilePlan, sameDelivery, validatePlan, resolveRequirementAlias } from "./reconcile.js";
 import { normalizeVerificationAssertion } from "./assertions.js";
 import { verificationAssertionStatus } from "./assertions.js";
 import { verificationRegistry } from "./verifications.js";
@@ -24,6 +24,76 @@ const unique = <T extends { id: string }>(items: T[]): T[] => [...new Map(items.
 const uniqueStrings = (items: string[]): string[] => [...new Set(items)];
 const argv = (value: unknown): string[] => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 const stableJson=(value:unknown):string=>JSON.stringify(value,(_key,item:unknown)=>item&&typeof item==='object'&&!Array.isArray(item)?Object.fromEntries(Object.entries(item).sort(([left],[right])=>left.localeCompare(right))):item);
+
+/** A malformed delivery identity is an engineering incident. Resolve only the
+ * ambiguous names and references; every definition and original edge survives.
+ * Existing graph defects are subsequently handled by repairGraph, never hidden
+ * by this naming transaction or promoted into a ready plan. */
+async function reconcileDeliveries(brief:ProductBrief,proposal:DevelopmentPlan,hooks:DomainHooks,previous?:DevelopmentPlan):Promise<DevelopmentPlan>{
+  try{return reconcilePlan(brief,proposal,previous);}
+  catch(error){
+    if(!(error instanceof PlanningFailure)||error.code!=='invalid-plan'||error.scope!=='reconcile')throw error;
+    const definitions=proposal.tasks;
+    const byId=new Map<string,number[]>();
+    definitions.forEach((task,index)=>byId.set(task.id,[...(byId.get(task.id)??[]),index]));
+    const collisions=[...byId].filter(([,indexes])=>indexes.length>1);
+    if(!collisions.length)throw error;
+    const disputed=new Set(collisions.map(([id])=>id));
+    const progress=new PlanningProgress('delivery-identities');
+    let rejection=error.message;
+    for(;;){
+      cancelled(hooks.signal);
+      emitEvent(hooks.onEvent,{type:'recovering',subject:'plan',message:'Resolvendo identidades de entregas distintas sem apagar definições, critérios ou dependências.'});
+      const result=await requestObject({...hooks,operation:'repair',prompt:[
+        'Resolve colliding task identifiers only. The definitions are distinct deliveries; do not merge, delete or rewrite them. Return JSON.',
+        'Shape: {"renames":[{"index":0,"id":"unique-stable-id"}],"references":[{"index":2,"dependencyId":"old-colliding-id","targetIndexes":[0]}],"reason":"why these identities and prerequisite owners are correct"}. index always identifies the original zero-based definition. Rename only definitions with a colliding ID. For every original dependsOn edge to a colliding ID, explicitly select its actual prerequisite definition(s) using targetIndexes. An original edge cannot be deleted; noncolliding edges remain unchanged. Do not add tasks, outcomes or dependencies.',
+        `Product interfaces: ${JSON.stringify(brief.modes)}`,
+        `Colliding definitions: ${JSON.stringify(collisions.flatMap(([,indexes])=>indexes.map(index=>{const {id,goal,files,contractIds,dependsOn,requirementIds}=definitions[index]!;return{index,id,goal,files,contractIds,dependsOn,requirementIds};})))}`,
+        `Consumers: ${JSON.stringify(definitions.flatMap((task,index)=>task.dependsOn.some(id=>disputed.has(id))?[{index,id:task.id,goal:task.goal,dependsOn:task.dependsOn}]:[]))}`,
+        `Occupied identifiers: ${JSON.stringify([...byId.keys()])}`,
+        `Previous rejection: ${rejection}`,
+      ].join('\n\n')});
+      const changes=records(result.renames),references=records(result.references);
+      const structural={renames:changes.map(change=>({index:change.index,id:change.id})),references:references.map(reference=>({index:reference.index,dependencyId:reference.dependencyId,targetIndexes:reference.targetIndexes}))};
+      progress.requireChange(structural,'A correção de identidades não resolveu as referências ambíguas.','colliding-deliveries');
+      try{
+        if(!string(result.reason))throw Error('An identity correction needs its concrete technical reason.');
+        const tasks=structuredClone(definitions),renamed=new Set<number>();
+        for(const change of changes){
+          const index=change.index;
+          if(typeof index!=='number'||!Number.isInteger(index)||!tasks[index]||!disputed.has(definitions[index]!.id)||renamed.has(index))throw Error('A rename must select one original colliding definition once.');
+          const id=string(change.id);
+          if(!id||cleanId(id,'')!==id)throw Error('A renamed identity must be an explicit valid identifier.');
+          tasks[index]!.id=id;renamed.add(index);
+        }
+        if(new Set(tasks.map(task=>task.id)).size!==tasks.length)throw Error('The proposal still contains colliding identifiers.');
+        const used=new Set<Record<string,unknown>>();
+        for(const [index,task] of tasks.entries()){
+          task.dependsOn=uniqueStrings(definitions[index]!.dependsOn.flatMap(id=>{
+            const candidates=byId.get(id)??[];
+            if(candidates.length<2)return candidates.length?[tasks[candidates[0]!]!.id]:[id];
+            const matching=references.filter(reference=>reference.index===index&&reference.dependencyId===id);
+            if(matching.length!==1)throw Error(`Dependency ${index}:${id} needs one explicit owner selection.`);
+            const reference=matching[0]!,targets=reference.targetIndexes;
+            if(!Array.isArray(targets)||!targets.length||targets.some(target=>!Number.isInteger(target)||!candidates.includes(Number(target))))throw Error(`Dependency ${index}:${id} targets an unrelated definition.`);
+            used.add(reference);
+            return targets.map(target=>tasks[Number(target)]!.id);
+          }));
+        }
+        if(used.size!==references.length)throw Error('The correction contains an unknown or repeated dependency reference.');
+        const candidate=reconcilePlan(brief,{...proposal,tasks},previous);
+        // This transaction preserves the complete edge set. A missing/cyclic
+        // prerequisite is still explicit and repaired by the normal graph path.
+        const graph=ordered(candidate.tasks);
+        emitEvent(hooks.onEvent,{type:'replanned',subject:'plan',message:'Identidades corrigidas por referências explícitas; entregas e arestas preservadas.',detail:{renames:changes.map(change=>({index:change.index,from:definitions[Number(change.index)]!.id,to:change.id})),unresolvedGraphNodes:graph.unresolved.map(task=>task.id)}});
+        return candidate;
+      }catch(correctionError){
+        cancelled(hooks.signal);
+        rejection=correctionError instanceof Error?correctionError.message:String(correctionError);
+      }
+    }
+  }
+}
 function environmentOperation(node:EnvironmentNode):string{
   const invocation=(command:CommandRecipe)=>({command:command.command,args:command.args??[],cwd:command.cwd??'.',system:command.system??false,timeoutMs:command.timeoutMs??null,capabilities:[...command.capabilities??[]].sort()});
   return stableJson({kind:node.kind,dependsOn:[...node.dependsOn].sort(),targets:[...node.targets].sort(),check:invocation(node.check),prepare:node.prepare.map(invocation),provides:node.provides??null});
@@ -455,9 +525,9 @@ async function ensureCoverage(brief: ProductBrief, plan: DevelopmentPlan, hooks:
       `Existing deliveries:\n${metadataList(plan.tasks.map(({id,title,goal,requirementIds})=>({id,title,goal,requirementIds})), Math.floor((hooks.contextChars ?? 24_000) / 5))}`,
     ].join("\n\n")});
     plan.environment = normalizeEnvironment([...plan.environment, ...await executableEnvironment(result.environment, brief, hooks)], brief);
-    plan.tasks.push(...normalizeTasks(result.tasks, brief, plan.environment, plan.contracts, group));
+    const amendments=normalizeTasks(result.tasks, brief, plan.environment, plan.contracts, group);
     plan.acceptance = reconcileChecks([...(plan.acceptance ?? []), ...normalizeChecks(result.acceptance, brief)]);
-    Object.assign(plan, reconcilePlan(brief, plan));
+    Object.assign(plan, await reconcileDeliveries(brief,amendPlanTasks(plan,amendments),hooks,plan));
     await hooks.save?.({brief, plan});
   }
   for (const task of plan.tasks) {
@@ -488,10 +558,18 @@ function recordPlanBindings(brief: ProductBrief, plan: DevelopmentPlan): boolean
 }
 
 /** Fingerprints contain executable contracts of this topic, never prose or clocks. */
+function invariantProviders(brief:ProductBrief,plan:DevelopmentPlan,issue:PlanIssue):EnvironmentNode[]{
+  const requirement=brief.requirements.find(item=>item.id===issue.subject);
+  const tasks=plan.tasks.filter(task=>task.id===issue.subject||task.requirementIds.includes(issue.subject)||issue.taskIds?.includes(task.id));
+  const ids=new Set([issue.subject,...issue.environmentIds??[]]);
+  for(const node of plan.environment)if(requirement?.binding?obligationMatchesProvider(requirement,node.identity)||!node.identity&&tasks.some(task=>task.environmentIds.includes(node.id)):tasks.some(task=>task.environmentIds.includes(node.id)))ids.add(node.id);
+  for(;;){const before=ids.size;for(const node of plan.environment)if(ids.has(node.id))node.dependsOn.forEach(id=>ids.add(id));if(ids.size===before)break;}
+  return plan.environment.filter(node=>ids.has(node.id));
+}
 function invariantState(brief: ProductBrief, plan: DevelopmentPlan, issue: PlanIssue): string {
   const requirement = brief.requirements.find(item => item.id === issue.subject);
   const tasks = plan.tasks.filter(task => task.id === issue.subject || task.requirementIds.includes(issue.subject));
-  const providers = plan.environment.filter(node => requirement?.binding ? obligationMatchesProvider(requirement, node.identity) || !node.identity && tasks.some(task => task.environmentIds.includes(node.id)) : tasks.some(task => task.environmentIds.includes(node.id)));
+  const providers = invariantProviders(brief,plan,issue);
   const checks = verificationRegistry(plan).filter(({ check, taskId }) => check.conformance?.requirementId === issue.subject || check.requirementIds.includes(issue.subject) || taskId === issue.subject).map(({ taskId, check }) => {
     const { expected: _description, ...recipe } = check;
     return { taskId, ...recipe, assertion: verificationAssertionStatus(check).assertion ?? null };
@@ -520,7 +598,7 @@ async function invariantProposal(brief: ProductBrief, base: DevelopmentPlan, iss
   const environmentUpdates=records(result.environmentUpdates).flatMap(update=>{
     const existing=plan.environment.find(node=>node.id===string(update.id));if(!existing)return[];
     const selected=capabilityIdentity(update.identity),requirement=brief.requirements.find(item=>item.id===issue.subject);
-    if(object(update.identity)&&(!selected||!requirement||!obligationMatchesProvider(requirement,selected)))return[];
+    if(object(update.identity)&&(!selected||requirement?.binding&&!obligationMatchesProvider(requirement,selected)))return[];
     if(object(update.identity)&&['runtime','sdk','service'].includes(existing.kind)&&string(update.identity.kind)!==existing.kind)return[];
     const transformations=[...existing.identityTransformations??[]];
     if(selected&&requirement&&existing.identity&&stableJson(existing.identity)!==stableJson(selected)){
@@ -560,7 +638,7 @@ async function invariantProposal(brief: ProductBrief, base: DevelopmentPlan, iss
   }
   const { onEvent: _publicationObserver, ...quiet } = hooks;
   reconcileOperationalProviders(plan, quiet);
-  return reconcilePlan(brief, plan, base);
+  return reconcileDeliveries(brief, plan, hooks, base);
 }
 
 /** A retry changes protocol or a causal precondition. Rejected partial metadata
@@ -579,7 +657,7 @@ async function repairPlanIssues(brief: ProductBrief, plan: DevelopmentPlan, hook
     const environmentCause=issue.code==='mandatory-provider-mismatch'||issue.code==='unused-mandatory-provider'||issue.code.includes('environment');
     const protocol = environmentCause ? attempt.calls++?'environment-reference-patches':'environment-identity' : attempt.calls++ ? 'minimal-patches' : 'scoped-definitions'; attempts.set(stamp, attempt);
     const context = attempt.staged ?? plan, limit = hooks.contextChars ?? 24_000;
-    const task = context.tasks.find(candidate => candidate.id === issue.subject || candidate.requirementIds.includes(issue.subject));
+    const task = context.tasks.find(candidate => candidate.id === issue.subject || candidate.requirementIds.includes(issue.subject))??context.tasks.find(candidate=>candidate.environmentIds.includes(issue.subject)||issue.taskIds?.includes(candidate.id));
     const recipes = verificationRegistry(context).filter(({ check, taskId }) => check.conformance?.requirementId === issue.subject || check.requirementIds.includes(issue.subject) || taskId === task?.id);
     const requirement=brief.requirements.find(candidate=>candidate.id===issue.subject);
     const conformanceTargets=context.environment.filter(node=>requirement&&obligationMatchesProvider(requirement,node.identity)).map(node=>({environmentId:node.id,identity:node.identity,requirementId:issue.subject,requiredLevel:node.identity!.kind==='sdk'?'build':['runtime','service'].includes(node.identity!.kind)?'behavior':'build-or-behavior',artifactAndDependentBehaviorRequired:node.identity!.kind==='sdk',taskIds:context.tasks.filter(owner=>owner.environmentIds.includes(node.id)).map(owner=>owner.id)}));
@@ -592,7 +670,7 @@ async function repairPlanIssues(brief: ProductBrief, plan: DevelopmentPlan, hook
       `Operational conformance targets (actual provider roles, not inferred INIT labels): ${metadataList(conformanceTargets,Math.floor(limit / 8))}`,
       `Locked delivery: ${metadataList(task ? [{ id: task.id, goal: task.goal, requirementIds: task.requirementIds, files: task.files, criteria: task.criteria, environmentIds: task.environmentIds, dependsOn: task.dependsOn }] : [], Math.floor(limit / 5))}`,
       `Owned recipes: ${metadataList(recipes, Math.floor(limit / 3))}`,
-      `Operational providers: ${metadataList(context.environment.filter(node => !node.identity && task?.environmentIds.includes(node.id) || brief.requirements.some(requirement => requirement.id === issue.subject && obligationMatchesProvider(requirement, node.identity))), Math.floor(limit / 5))}`,
+      `Operational providers: ${metadataList(invariantProviders(brief,context,issue), Math.floor(limit / 5))}`,
       ...(attempt.rejection ? [`Previous proposal validation: ${stableJson(attempt.rejection)}`] : []),
     ].join('\n\n') });
     let candidate: DevelopmentPlan;
@@ -622,7 +700,7 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
   const restored=options.existing?.briefId===brief.id&&options.completedResponses
     ?rehydratePlanRecords(brief,options.existing,options.completedResponses(),normalizeChecks):undefined;
   const prior=restored?.plan??options.existing;
-  const existing=prior?.briefId===brief.id?reconcilePlan(brief,prior,prior):prior;
+  const existing=prior?.briefId===brief.id?await reconcileDeliveries(brief,prior,options,prior):prior;
   if(existing?.briefId===brief.id){
     const identitiesChanged=completeEnvironmentIdentities(brief,existing,options);recordPlanObligations(brief,existing);
     if(identitiesChanged||stableJson(prior?.obligations??[])!==stableJson(existing.obligations))await options.save?.({brief,plan:existing});
@@ -636,7 +714,7 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
   // Re-extracting the whole plan after a harness authority correction discards
   // useful contracts and reopens independent deliveries unnecessarily.
   if (existing?.status === "ready" && existing.briefId === brief.id && existing.tasks.every(task => task.requirementIds.every(id => brief.requirements.some(requirement => requirement.id === id)))) {
-    const plan = reconcilePlan(brief, existing, existing);
+    const plan = await reconcileDeliveries(brief, existing, options, existing);
     plan.status = "planning";
     plan.revision += 1;
     const constraints = new Set(brief.constraints.map(constraint => constraint.id));
@@ -656,7 +734,7 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
   const limit = options.contextChars ?? 24_000;
   const facts = productFacts(brief, Math.floor(limit / 8));
   const partial=existing?.status === "planning" && existing.briefId === brief.id && existing.tasks.every(task=>task.requirementIds.every(id=>brief.requirements.some(requirement=>requirement.id===id))) ? existing : undefined;
-  const plan: DevelopmentPlan = partial ? reconcilePlan(brief,partial,partial) : { schema: "capivara/plan/1", status: "planning", revision: (options.existing?.revision ?? 0) + 1, briefId: brief.id, briefRevision: brief.revision, environment: [], contracts: [], tasks: [] };
+  const plan: DevelopmentPlan = partial ? await reconcileDeliveries(brief,partial,options,partial) : { schema: "capivara/plan/1", status: "planning", revision: (options.existing?.revision ?? 0) + 1, briefId: brief.id, briefRevision: brief.revision, environment: [], contracts: [], tasks: [] };
   recordPlanObligations(brief,plan);
   const checkpoint=plan.planning?.schema === "capivara/plan-progress/1" && plan.planning.briefRevision === brief.revision && plan.planning.groups.every(group=>group.requirementIds.every(id=>brief.requirements.some(requirement=>requirement.id===id))) ? plan.planning : undefined;
   // Legacy drafts already persisted every environment slice before the first
@@ -746,13 +824,13 @@ export async function runPlan(options: PlanOptions): Promise<DevelopmentPlan> {
     plan.acceptance = reconcileChecks([...(plan.acceptance ?? []), ...normalizeChecks(result.acceptance, brief)]);
     construction.briefRevision=brief.revision;
     group.outlineComplete=true;delete group.outlinePrompt;
-    Object.assign(plan, reconcilePlan(brief, plan, options.existing));
+    Object.assign(plan, await reconcileDeliveries(brief, plan, options, options.existing));
     plan.planning=construction;
     await options.save?.({ brief, plan });
     emitProgress(options.onEvent, { ...outlineProgress, completed: construction.groups.filter(group=>group.outlineComplete).length, status: construction.groups.every(group=>group.outlineComplete) ? "complete" : "running" });
   }
   await ensureCoverage(brief, plan, options);
-  Object.assign(plan, reconcilePlan(brief, plan, options.existing));
+  Object.assign(plan, await reconcileDeliveries(brief, plan, options, options.existing));
   await repairReferences(plan, brief, options);
   await repairGraph(plan, brief, "environment", options);
   await repairGraph(plan, brief, "tasks", options);
@@ -997,7 +1075,7 @@ export async function repairWorkPlan(options: RepairPlanOptions): Promise<Develo
   plan.tasks.splice(index, 1, ...replacements);
   for (const candidate of plan.tasks) if (!ids.has(candidate.id) && candidate.dependsOn.includes(task.id)) candidate.dependsOn = uniqueStrings(candidate.dependsOn.flatMap((id) => id === task.id ? terminal : [id]));
   await ensureCoverage(brief, plan, options);
-  Object.assign(plan, reconcilePlan(brief, plan, options.plan));
+  Object.assign(plan, await reconcileDeliveries(brief, plan, options, options.plan));
   await repairReferences(plan, brief, options);
   await repairGraph(plan, brief, "environment", options);
   await repairGraph(plan, brief, "tasks", options);

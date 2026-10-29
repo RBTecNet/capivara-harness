@@ -1,0 +1,58 @@
+{
+  "schema": "capivara/plan-recovery/1",
+  "capturedAt": "2026-10-29T09:43:15.053Z",
+  "original": {
+    "status": "waiting",
+    "stage": "plan",
+    "planStatus": "planning",
+    "tasks": 12,
+    "eventId": 121,
+    "lastFailure": {
+      "kind": "planning",
+      "message": "reconcile: O identificador task-foundation representa duas entregas diferentes com propriedade de saídas incompatível: A documented local install and startup produce a TypeScript Node REST server and Vite React browser client backed by an on-disk SQLite database.; A documented local setup runs a TypeScript Node.js REST backend and a React browser client built with Vite, backed by a SQLite database stored in a local file..",
+      "fingerprint": "6732c1cd5ab6d38ece648a07cf6230a00c53767f511debf1c89660096771d44e",
+      "at": "2026-10-29T09:31:34.093Z"
+    }
+  },
+  "recovered": {
+    "status": "complete",
+    "stage": "plan",
+    "planStatus": "ready",
+    "tasks": 12,
+    "eventId": 231,
+    "lastFailure": null
+  },
+  "repeated": {
+    "status": "complete",
+    "stage": "plan",
+    "planStatus": "ready",
+    "tasks": 12,
+    "eventId": 237,
+    "lastFailure": null
+  },
+  "validationIssues": [],
+  "missingRequirements": [],
+  "retiredOriginalTasks": [],
+  "installedCLI": {
+    "version": "0.9.0-rc2",
+    "sha256": "6deabda6e9102d975cfd3c42cc3365bb4e9f0848e23574f924931bad24896f21",
+    "matchesLocalBuild": true
+  },
+  "recoveryCallsByRole": {
+    "planner": 6
+  },
+  "lastEnvironmentRecoveryCallsByRole": {
+    "planner": 1
+  },
+  "resume": {
+    "exitCode": 0,
+    "elapsedMs": 1264,
+    "callsByRole": {},
+    "unchangedPlan": true
+  },
+  "limitations": [
+    "This validates PLAN readiness and its repeated invocation. BUILD was not run on this new project state.",
+    "The first recovery invocation exposed another engine defect; its waiting result is preserved in the first-run report."
+  ],
+  "passed": true
+}

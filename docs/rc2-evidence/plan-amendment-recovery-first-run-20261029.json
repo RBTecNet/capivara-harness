@@ -1,0 +1,47 @@
+{
+  "schema": "capivara/plan-amendment-recovery/1",
+  "startedAt": "2026-10-29T09:38:56.099Z",
+  "finishedAt": "2026-10-29T09:39:44.408Z",
+  "elapsedMs": 48308,
+  "exitCode": 2,
+  "cliSHA256": "a55f04e3c9927846aa02696d262cfd00458d375469c40e65420cb5b57d6d9227",
+  "before": {
+    "status": "waiting",
+    "stage": "plan",
+    "planStatus": "planning",
+    "eventId": 121,
+    "tasks": 12,
+    "lastFailure": {
+      "kind": "planning",
+      "message": "reconcile: O identificador task-foundation representa duas entregas diferentes com propriedade de saídas incompatível: A documented local install and startup produce a TypeScript Node REST server and Vite React browser client backed by an on-disk SQLite database.; A documented local setup runs a TypeScript Node.js REST backend and a React browser client built with Vite, backed by a SQLite database stored in a local file..",
+      "fingerprint": "6732c1cd5ab6d38ece648a07cf6230a00c53767f511debf1c89660096771d44e",
+      "at": "2026-10-29T09:31:34.093Z"
+    }
+  },
+  "after": {
+    "status": "waiting",
+    "stage": "plan",
+    "planStatus": "planning",
+    "eventId": 210,
+    "tasks": 12,
+    "lastFailure": {
+      "kind": "planning",
+      "message": "plan-invariants: ambiguous-environment-kind [sqlite]: Uma dependência de banco precisa declarar se é CLI, driver, biblioteca ou serviço e qual provedor será consumido.; A proposta e o protocolo de patch mínimo não corrigiram a causa. Entregas e provas originais foram preservadas.; {\"introduced\":[],\"reason\":\"No invariant or causal provider stage changed; wording, timestamps and unrelated edits are not progress.\",\"remaining\":[{\"code\":\"ambiguous-environment-kind\",\"message\":\"Uma dependência de banco precisa declarar se é CLI, driver, biblioteca ou serviço e qual provedor será consumido.\",\"subject\":\"sqlite\"}]}",
+      "fingerprint": "7d14e520139cf3a22ac550f56a616c6af63e736c4f405ff8215643f096726f56",
+      "at": "2026-10-29T09:39:44.330Z"
+    }
+  },
+  "callsByRole": {
+    "planner": 5
+  },
+  "missingRequirements": [],
+  "retiredBeforeTasks": [],
+  "validationIssues": [
+    {
+      "code": "ambiguous-environment-kind",
+      "subject": "sqlite",
+      "message": "Uma dependência de banco precisa declarar se é CLI, driver, biblioteca ou serviço e qual provedor será consumido."
+    }
+  ],
+  "passed": false
+}

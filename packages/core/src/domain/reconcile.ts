@@ -142,6 +142,30 @@ export function reconcileChecks(checks: Verification[]): Verification[] {
   return result;
 }
 
+function extendDelivery(earlier:WorkUnit,addition:WorkUnit):void {
+  for(const field of ['requirementIds','dependsOn','environmentIds','contractIds','files','criteria','blockedBy'] as const)earlier[field]=unique([...earlier[field],...addition[field]]);
+  for(const field of ['inputs','resources','exclusiveContracts'] as const)if(earlier[field]||addition[field])earlier[field]=unique([...(earlier[field]??[]),...(addition[field]??[])]);
+  earlier.checks=reconcileChecks([...earlier.checks,...addition.checks]);
+  if(addition.goal!==earlier.goal&&!earlier.instructions.includes(addition.goal))earlier.instructions+=`\n${addition.goal}`;
+  if(!earlier.instructions.includes(addition.instructions))earlier.instructions+=`\n${addition.instructions}`;
+  if(['low','normal','high'].indexOf(addition.risk)>['low','normal','high'].indexOf(earlier.risk))earlier.risk=addition.risk;
+}
+
+/** An incremental coverage response refers to an existing delivery by its ID.
+ * Apply its additions to that definition before reconciling independent tasks.
+ * Preserve every earlier obligation, output, predicate and dependency: wording
+ * and a partially overlapping file list cannot retire the existing work. This
+ * operation is deliberately separate from deduplicating independent proposals. */
+export function amendPlanTasks(base:DevelopmentPlan,updates:WorkUnit[]):DevelopmentPlan {
+  const proposal=structuredClone(base);
+  for(const update of updates){
+    const existing=proposal.tasks.find(task=>task.id===update.id);
+    if(existing)extendDelivery(existing,update);
+    else proposal.tasks.push(structuredClone(update));
+  }
+  return proposal;
+}
+
 /** Reconcile deliveries, not source fragments. Omitted old deliveries are retired on full replanning. */
 export function reconcilePlan(brief: ProductBrief, proposal: DevelopmentPlan, previous?: DevelopmentPlan): DevelopmentPlan {
   const plan = structuredClone(proposal);
@@ -168,14 +192,7 @@ export function reconcilePlan(brief: ProductBrief, proposal: DevelopmentPlan, pr
     const earlier = idCollision ?? tasks.find(candidate => !orderedStages(candidate.id,task.id)&&sameDelivery(candidate, task));
     if (earlier) {
       aliases.set(task.id, earlier.id);
-      for (const field of ['requirementIds','dependsOn','environmentIds','contractIds','files','criteria','blockedBy'] as const) earlier[field] = unique([...earlier[field], ...task[field]]);
-      if (earlier.inputs || task.inputs) earlier.inputs = unique([...(earlier.inputs ?? []), ...(task.inputs ?? [])]);
-      if (earlier.resources || task.resources) earlier.resources = unique([...(earlier.resources ?? []), ...(task.resources ?? [])]);
-      if (earlier.exclusiveContracts || task.exclusiveContracts) earlier.exclusiveContracts = unique([...(earlier.exclusiveContracts ?? []), ...(task.exclusiveContracts ?? [])]);
-      earlier.checks = reconcileChecks([...earlier.checks, ...task.checks]);
-      if (task.goal !== earlier.goal && !earlier.instructions.includes(task.goal)) earlier.instructions += `\n${task.goal}`;
-      if (!earlier.instructions.includes(task.instructions)) earlier.instructions += `\n${task.instructions}`;
-      if (['low','normal','high'].indexOf(task.risk) > ['low','normal','high'].indexOf(earlier.risk)) earlier.risk = task.risk;
+      extendDelivery(earlier,task);
       continue;
     }
     const stable = previous?.tasks.find(candidate=>sameDelivery(candidate,task))?.id;

@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { join, relative, dirname } from 'node:path';
 import { ContextTooLarge, ordered } from '../domain/context.js';
 import { allowedCapabilities } from '../domain/authority.js';
+import { materializeProductInvariants } from '../domain/product-invariants.js';
 import { obligationMatchesProvider } from '../domain/bindings.js';
 import { verificationOutputs } from '../domain/verifications.js';
 import { normalizeChecks, normalizeEnvironment } from '../domain/plan.js';
@@ -15,7 +16,7 @@ import { emitEvent, emitGate, emitProgress, type BuildGateId, type BuildGateStat
 import { changedSince, digest, inputHash, inputSnapshot, inside, introducedServers, restoreFiles, snapshot, sourceFiles } from './files.js';
 import { declaredCheckInputs, resolveInputDependencies, verificationInputSelectors } from './dependencies.js';
 import { applyOperationalEnvironment, emptyOperationalEnvironment, environmentFingerprint, executionConstraints, mergeOperationalEnvironments, OperationalInvocationConflict, prepareEnvironmentNode, prepareProjectDependencies, projectDependencyScope, projectInstallationEnvironment, relocateOperationalEnvironment, selectOperationalEnvironment, type OperationalEnvironment, type PreparedEnvironment } from './environment.js';
-import { checkInputHash, derivedChecks, evaluateRecordedObservation, evaluateVerificationAssertion, normalizeVerificationAssertion, runVerification, selectVerifications, taskInputs, verificationAssertionStatus, verificationIdentity, verificationLevel, type VerificationOutcome } from './checks.js';
+import { derivedChecks, evaluateRecordedObservation, evaluateVerificationAssertion, normalizeVerificationAssertion, runVerification, selectVerifications, taskInputs, verificationAssertionStatus, verificationIdentity, verificationLevel, type VerificationOutcome } from './checks.js';
 import { createTaskWorkspace, fileDigest, IntegrationConflict, pathScopesConflict, prepareIntegration, publishIntegration, SerialQueue } from './isolation.js';
 import { interpretReview, reviewFindingText } from './review.js';
 import { validateConformance } from './conformance.js';
@@ -27,7 +28,7 @@ import { substantiateSourceFinding } from './source-review.js';
 import { resolveReviewScope, validateFindingDeferral } from './source-finding-scope.js';
 import { buildReviewEvidence } from './review-evidence.js';
 import { createInspectionIdentity, inspectionStillCurrent } from './inspection.js';
-import { deliveryWriteSet } from './delivery-sources.js';
+import { deliveryProofSelectors, deliveryWriteSet } from './delivery-sources.js';
 import { recoverPlanLineage } from './plan-lineage.js';
 import { repositoryRecipeCandidate } from './recipe-candidates.js';
 import { repositoryVerificationCandidates, verificationSurfaces } from './verification-debt.js';
@@ -95,6 +96,7 @@ function retireObsoleteReplans(state:BuildState,plan:DevelopmentPlan):[string,Bu
 
 /** Explicit persisted transitions, isolated workers and one FIFO publication coordinator. No sleep/retry loop owns execution. */
 export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
+  materializeProductInvariants(options.brief);
   let plan = reconcilePlan(options.brief,options.plan,options.plan);
   const state = options.state ?? createBuildState(plan);
   // A historical proposal must not resurrect a recovery job whose delivery was
@@ -188,7 +190,9 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     const key=state.resourceBindings?.[task.id]?.[check.id],resource=key?operationalValue(state.environment[key]?.operational):undefined;
     return resource?mergeOperationalEnvironments(workspace,base,relocateOperationalEnvironment(resource,resource.root??options.workspace,workspace)):base;
   };
-  const proofHash=(task:WorkUnit,check:Verification,workspace:string,operational:OperationalEnvironment):Promise<string>=>checkInputHash(workspace,plan,task,check,options.brief,checkOperational(task,check,workspace,operational));
+  const proofSelectors=async(task:WorkUnit,check:Verification,workspace:string):Promise<string[]>=>deliveryProofSelectors(check,await verificationInputSelectors(workspace,plan,task,check),deliveryWriteSet(task.id,state.tasks[task.id],state.integrations)??[],verificationLevel(check));
+  const proofIdentity=async(task:WorkUnit,check:Verification,workspace:string,operational:OperationalEnvironment)=>verificationIdentity(workspace,plan,task,check,options.brief,checkOperational(task,check,workspace,operational),await resolveInputDependencies(workspace,await proofSelectors(task,check,workspace)));
+  const proofHash=async(task:WorkUnit,check:Verification,workspace:string,operational:OperationalEnvironment):Promise<string>=>(await proofIdentity(task,check,workspace,operational)).inputHash;
   const prepareResources=async(task:WorkUnit,check:Verification,workspace:string,base:OperationalEnvironment):Promise<BrowserResourceResult>=>{
     const caches=[workspace,state.tasks[task.id]?.checkpoint?.directory,...state.tasks[task.id]?.proposals??[],options.workspace].filter((path):path is string=>!!path).map(path=>join(path,'.capivara-runtime','cache','ms-playwright'));
     const result=await measured('browserPreparation',()=>prepareBrowserResources(workspace,check,base,{resourceRoot:join(options.workspace,'.capivara-next','providers'),caches,...(options.signal?{signal:options.signal}:{}),execute:request=>command({...request,constraints:executionConstraints(options.brief,options.allowSystemInstall),onOutput:(message,stream)=>emitEvent(options.onEvent,{type:'output',message,detail:{stream}})})}));
@@ -568,7 +572,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     checks=order.ready.map(item=>checks.find(check=>check.id===item.id)!);
     const owner=state.tasks[task.id];
     const {selectors,sourceHash}=await measured('proofInputs',async()=>{
-      const selectors=[...new Set([...(await Promise.all(checks.map(check=>verificationInputSelectors(workspace,plan,task,check)))).flat(),...checks.flatMap(declaredOutputs)])];
+      const selectors=[...new Set([...(await Promise.all(checks.map(check=>proofSelectors(task,check,workspace)))).flat(),...checks.flatMap(declaredOutputs)])];
       return{selectors,sourceHash:await inputHash(workspace,await resolveInputDependencies(workspace,selectors),operational.revision)};
     });
     let area=owner?.verificationCheckpoint;
@@ -583,7 +587,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       const id: BuildGateId = ['web','tui','desktop'].includes(check.kind) ? 'G4' : 'G2';
       const completed = groups.get(id) ?? []; groups.set(id,completed); gate(task,id,'running','Conferindo a prova pertinente em área isolada gravável.');
       const effective=checkOperational(task,check,area.directory,local);
-      const identity=await measured('proofInputs',()=>verificationIdentity(area.directory,plan,task,check,options.brief,effective)),hash=identity.inputHash;
+      const identity=await measured('proofInputs',()=>proofIdentity(task,check,area.directory,local)),hash=identity.inputHash;
       const artifactState=await inputSnapshot(area.directory,declaredOutputs(check));
       const cached = state.evidence.findLast(item=>item.taskId===task.id&&item.checkId===check.id&&item.inputHash===hash&&item.kind===check.kind&&item.level===verificationLevel(check)&&!item.observation?.cancelled&&(item.passed||item.classification==='product'||item.classification==='instrument')&&(!declaredOutputs(check).length||JSON.stringify(item.artifacts)===JSON.stringify(artifactState)));
       if (cached&&resource.ready) results.push({evidence:{...cached,level:cached.level ?? verificationLevel(check),inputs:cached.inputs ?? []},result:null,classification:cached.passed?null:cached.classification??'product',needsInstrument:!cached.passed&&cached.classification==='instrument'});
@@ -810,6 +814,11 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
             if (await materializeVerification(task,workspace,operational,detail,requiredKind)) continue;
             const problem=incident('instrument',task.id,`The requested ${requiredKind} behavior still needs an executable proof contract after local recipe recovery. Reconcile its actual interface and invocation while preserving existing product work.`,detail);problem.repairScope='verification';scheduleReplan(task,problem);
             await suspend(task,'instrument',problem.message,detail); return;
+          }
+          const recovered=replans.get(task.id)??state.pendingReplans?.[task.id];
+          if(recovered&&['verification','environment'].includes(recovered.repairScope??'')){
+            replans.delete(task.id);delete state.pendingReplans?.[task.id];
+            metrics.repetitions.push({taskId:task.id,action:'resolve-operational-incident',reason:JSON.stringify({original:recovered,resolution:'Current provider preparation and selected proofs succeeded, and the unit interface obligation is satisfied. Independent product review remains required.'}),at:now()});
           }
           progress.noProgress = 0; progress.findings = []; progress.checkpoint.phase = 'reviewing'; await save();
         }

@@ -2,6 +2,7 @@ import type { ContextPacket, DevelopmentPlan, ProductBrief, WorkUnit } from "./t
 import { boundedReferences, relevantReferences } from "./material.js";
 import { scopeContribution } from './contribution.js';
 import { deriveBindingAuthority, obligationMatchesProvider } from './bindings.js';
+import { isLiteralProductInvariant, productConstraints } from './product-invariants.js';
 
 export class ContextTooLarge extends Error {
   readonly taskId: string;
@@ -54,13 +55,14 @@ export function contextForTask(brief: ProductBrief, plan: DevelopmentPlan, task:
   const words = new Set(`${task.title} ${task.goal} ${requirements.map((requirement) => requirement.statement).join(" ")}`.toLowerCase().split(/\W+/).filter((word) => word.length > 3));
   const decisions = brief.decisions.filter((decision) => task.blockedBy.includes(decision.questionId) || `${decision.fact} ${decision.answer}`.toLowerCase().split(/\W+/).some((word) => words.has(word)));
   const relevance = (text: string): number => text.toLowerCase().split(/\W+/).filter((word) => words.has(word)).length;
-  const constraints = [...brief.constraints].sort((left, right) => relevance(right.statement) - relevance(left.statement));
+  const constraints = productConstraints(brief).sort((left, right) => relevance(right.statement) - relevance(left.statement));
   const selectedConstraints: ContextPacket["constraints"] = [];
   let restrictionRoom = Math.max(600, Math.floor(limitChars / 5));
   for (const constraint of constraints) {
-    const statement = constraint.statement.slice(0, 900);
+    const mandatory=isLiteralProductInvariant(brief,constraint);
+    const statement = mandatory?constraint.statement:constraint.statement.slice(0, 900);
     const cost = statement.length + 180;
-    if (cost > restrictionRoom) continue;
+    if (!mandatory&&cost > restrictionRoom) continue;
     selectedConstraints.push({ ...constraint, statement });
     restrictionRoom -= cost;
   }

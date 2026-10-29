@@ -43,10 +43,12 @@ it.each(['cli','web'] as const)('keeps fresh %s planning independent of executab
   // including units whose editor had never run. That label is not saved work.
   const state=createBuildState(planned.plan!);
   state.tasks.health={status:'checking',revision:'',attempts:0,changedFiles:[],findings:[],strategy:'reconcile-existing-work',actions:[],reviews:[]};
+  state.pendingReplans={health:{id:'missing-earlier-instrument',kind:'instrument',subject:'health',message:'The earlier recipe was unavailable.',evidence:'No command existed before implementation.',action:'Recover the proof contract.',external:false,repairScope:'verification'}};
   const result=await runBuild({workspace,brief:planned.brief!,plan:planned.plan!,state,agent});
   expect(editors).toBe(1);expect(technical).toBe(3);
   if(mode==='cli'){
     expect(result.status,JSON.stringify(result.incidents)).toBe('complete');expect(reviewers).toBe(1);
+    expect(result.state.pendingReplans?.health).toBeUndefined();
     expect(result.state.evidence.some(proof=>proof.level==='behavior'&&proof.passed&&proof.output.includes('healthy'))).toBe(true);
     expect(await readFile(join(workspace,'cli.mjs'),'utf8')).toBe(code);
     const resumed=await runBuild({workspace,brief:planned.brief!,plan:result.plan,state:structuredClone(result.state),agent:async()=>{throw Error('A completed unchanged delivery must not call an agent again.');}});

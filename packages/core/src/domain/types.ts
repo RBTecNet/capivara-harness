@@ -67,6 +67,8 @@ export interface ProductConstraint {
   source: Source;
   forbiddenCapabilities: string[];
   requiredCapabilities: string[];
+  /** Literal product prohibition recovered from an active source slice. */
+  origin?: { schema: "capivara/constraint-origin/1"; kind: "explicit-prohibition"; requirementIds: string[] };
 }
 
 export interface Question {

@@ -8,6 +8,7 @@ import { recoverLiteralParagraphs, resolveLiteralExcerpt } from "./literal-sourc
 import { recordedRequirementMetadata } from "./requirement-metadata.js";
 import { choiceAlreadySpecified, engineeringChoiceQuestion } from "./question-policy.js";
 import { annotateBindingAuthority, literalProviderMention as providerMention } from "./bindings.js";
+import { isLiteralProductInvariant, materializeProductInvariants } from './product-invariants.js';
 
 const MODES = new Set<ApplicationMode>(["web", "desktop", "tui", "cli", "api", "service", "library", "other"]);
 const TARGETS = new Set<TargetPlatform>(["linux", "windows", "macos", "browser", "portable"]);
@@ -298,6 +299,7 @@ function constraintsFrom(raw: string, values: unknown, origin: SourceOrigin = { 
 /** Reinterpret persisted machine decisions against their literal sources, without
  * asking a model to rediscover the product or treating stale inference as law. */
 export function reconcileAuthority(brief: ProductBrief): void {
+  materializeProductInvariants(brief);
   const before = JSON.stringify(brief.constraints);
   const corrected: ProductConstraint[] = [];
   for (const original of brief.constraints) {
@@ -309,10 +311,11 @@ export function reconcileAuthority(brief: ProductBrief): void {
       brief.authorityCorrections ??= [];
       if (!brief.authorityCorrections.some(existing => JSON.stringify(existing) === JSON.stringify(correction))) brief.authorityCorrections.push(correction);
     }
-    if (constraint.forbiddenCapabilities.length || constraint.requiredCapabilities.length) corrected.push(constraint);
+    if (constraint.forbiddenCapabilities.length || constraint.requiredCapabilities.length || isLiteralProductInvariant(brief,constraint)) corrected.push(constraint);
   }
   const direct = [...explicitConstraints(brief.request), ...brief.decisions.flatMap(decision => explicitConstraints(decision.answer, "answer", decision.questionId))];
   brief.constraints = [...new Map([...corrected, ...direct].map(constraint => [constraint.id, constraint])).values()];
+  materializeProductInvariants(brief);
   if (JSON.stringify(brief.constraints) !== before) brief.revision += 1;
 }
 

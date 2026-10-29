@@ -1,7 +1,7 @@
 import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { join, resolve, relative, isAbsolute, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { runInit, runPlan, repairWorkPlan } from '../domain/index.js';
+import { runInit, runPlan, repairWorkPlan, materializeProductInvariants } from '../domain/index.js';
 import { validatePlan } from '../domain/reconcile.js';
 import type { ProductBrief, DomainAgentRequest, DevelopmentPlan, SelectedDocument, Question } from '../domain/types.js';
 import { runAgent } from '../runtime/index.js';
@@ -302,6 +302,7 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
     reopenChangedAnswers();
     // Reconcile answers and local rules without a model call when discovery is already ready.
     brief = await timed('init', () => runInit({ ...hooks, request, documents, repository, repositoryConstraints, ...(brief ? { existing: brief } : {}) }));
+    materializeProductInvariants(brief);
     await persist({ brief });
     if (options.stage === 'init') { await persist({ status: brief.gaps.some(g => g.status === 'pending') ? 'waiting' : 'complete' }); return { status: store.read().status!, brief }; }
     const productChanged = saved.brief !== undefined && saved.brief.id !== brief.id || saved.plan !== undefined && saved.plan.briefId !== brief.id;
@@ -348,6 +349,7 @@ async function workflowAttempt(options: WorkflowOptions): Promise<{ status: stri
       if (answeredGaps()) {
         reopenChangedAnswers();
         brief = await timed('init', () => runInit({ ...hooks, request, documents, repository, repositoryConstraints, existing: brief! }));
+        materializeProductInvariants(brief);
         plan = await timed('plan', () => runPlan({ ...hooks, brief: brief!, repository, repositoryConstraints, existing: plan! }));
         await persist({ brief, plan, status: 'working' });
         continue;

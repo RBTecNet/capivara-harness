@@ -29,10 +29,10 @@ export function inlineVerificationSyntaxRequired(check:Verification):boolean{
   return inlineNodeSyntaxCandidate(duplicated?literal:[check.command,...check.args]);
 }
 
-/** An explicit browser behavior target needs a browser interaction protocol.
- * Generic command output does not identify that interface. Specific CLI/TUI
- * recipes may legitimately consume a browser as a dependency. */
-function ambiguousBrowserCommand(check:Verification):boolean{return check.kind==='command'&&verificationLevel(check)==='behavior'&&(check.target==='browser'||check.requiredCapabilities.includes('browser'));}
+/** A platform does not identify a verification interface. Technical process or
+ * API checks can support a browser application without interacting with a page.
+ * An explicitly required browser capability still needs its actual protocol. */
+function ambiguousBrowserCommand(check:Verification):boolean{return check.kind==='command'&&verificationLevel(check)==='behavior'&&check.requiredCapabilities.includes('browser');}
 
 /** Shell and PTY observations do not certify a native window. This contract
  * stays explicitly unsupported until a coordinator-owned adapter can witness
@@ -311,7 +311,7 @@ export async function runVerification(workspace:string,brief:ProductBrief,task:W
       return finish(null,'instrument');
     }
   }
-  const observedCheck={...check,inputs:check.inputs??task.inputs??task.files};
+  const observedCheck={...check,inputs};
   const observation=await beginConformanceObservation(workspace,observedCheck,typeof request.command==='string'?request.command:[...request.command],request.cwd);
   const providerObservation=options.operational?await startProviderObservation(workspace,observedCheck,{...options.operational,env:{...options.operational.env,...request.environment}}):undefined;
   if(providerObservation?.enabled)request.environment={...request.environment,...providerObservation.environment};

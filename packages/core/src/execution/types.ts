@@ -121,6 +121,8 @@ export interface TaskProgress {
   revision: string;
   attempts: number;
   changedFiles: string[];
+  /** Exact files observed as mechanical producer outputs, separate from editor source. */
+  generatedFiles?: string[];
   findings: string[];
   strategy: string;
   contextChars?: number;
@@ -172,6 +174,7 @@ export interface BuildState {
   acceptanceChecks?: Verification[];
   acceptancePlanHash?: string;
   nativeConformanceCheckIds?:string[];
+  retiredInstruments?:{key:string;authorityHash:string;checkId:string;evidenceId:string;at:string}[];
   nativeConformanceCoverage?:{id:string;checkId:string;coverage:import('./conformance-candidates.js').ConformanceCandidateCoverage}[];
   /** Current blocking causes, separate from the append-only incident history. */
   blockers?: BuildIncident[];

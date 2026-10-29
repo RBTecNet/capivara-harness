@@ -1,0 +1,2125 @@
+{
+  "schema": "capivara/execution-evidence/1",
+  "capturedAt": "2026-10-29T14:53:31.939Z",
+  "project": "Parallel Lab",
+  "projectUpdatedAt": "2026-10-29T14:52:46.371Z",
+  "status": "complete",
+  "stage": "build",
+  "eventRange": {
+    "firstInclusive": 3769,
+    "lastInclusive": 12570,
+    "captured": 8802
+  },
+  "completedProductTasks": 14,
+  "totalProductTasks": 14,
+  "tasks": [
+    {
+      "id": "domain-types",
+      "status": "complete",
+      "attempts": 1,
+      "strategy": "verified"
+    },
+    {
+      "id": "stack-foundation",
+      "status": "complete",
+      "attempts": 1,
+      "strategy": "verified"
+    },
+    {
+      "id": "sqlite-storage",
+      "status": "complete",
+      "attempts": 1,
+      "strategy": "verified"
+    },
+    {
+      "id": "rest-backend",
+      "status": "complete",
+      "attempts": 1,
+      "strategy": "verified"
+    },
+    {
+      "id": "web-bootstrap",
+      "status": "complete",
+      "attempts": 2,
+      "strategy": "verified"
+    },
+    {
+      "id": "task-module-ui",
+      "status": "complete",
+      "attempts": 3,
+      "strategy": "verified"
+    },
+    {
+      "id": "category-module-ui",
+      "status": "complete",
+      "attempts": 2,
+      "strategy": "verified"
+    },
+    {
+      "id": "notes-module-ui",
+      "status": "complete",
+      "attempts": 1,
+      "strategy": "verified"
+    },
+    {
+      "id": "release-verification",
+      "status": "complete",
+      "attempts": 2,
+      "strategy": "verified"
+    },
+    {
+      "id": "shared-validation-tests",
+      "status": "complete",
+      "attempts": 1,
+      "strategy": "verified"
+    },
+    {
+      "id": "sqlite-persistence-tests",
+      "status": "complete",
+      "attempts": 2,
+      "strategy": "verified"
+    },
+    {
+      "id": "rest-api-tests",
+      "status": "complete",
+      "attempts": 2,
+      "strategy": "verified"
+    },
+    {
+      "id": "module-ui-tests",
+      "status": "complete",
+      "attempts": 1,
+      "strategy": "verified"
+    },
+    {
+      "id": "test-command-configuration",
+      "status": "complete",
+      "attempts": 2,
+      "strategy": "verified"
+    }
+  ],
+  "retiredTaskRecords": [
+    {
+      "id": "automated-test-suite",
+      "status": "waiting",
+      "attempts": 1,
+      "strategy": "revalidate-only",
+      "phase": "checking"
+    }
+  ],
+  "lastFailure": null,
+  "proofRecords": {
+    "total": 103,
+    "passedHistorical": 85,
+    "failedHistorical": 18,
+    "byTask": {
+      "stack-foundation": 2,
+      "sqlite-storage": 7,
+      "rest-backend": 4,
+      "web-bootstrap": 4,
+      "category-module-ui": 2,
+      "task-module-ui": 4,
+      "notes-module-ui": 2,
+      "automated-test-suite": 2,
+      "shared-validation-tests": 2,
+      "sqlite-persistence-tests": 5,
+      "rest-api-tests": 7,
+      "module-ui-tests": 5,
+      "test-command-configuration": 8,
+      "release-verification": 28,
+      "$acceptance": 11,
+      "domain-types": 10
+    },
+    "acceptanceTotal": 42,
+    "acceptancePassedHistorical": 36,
+    "reinterpreted": [
+      {
+        "id": "5e96ab66-bbc0-4888-ae5e-94a131f06f70",
+        "taskId": "test-command-configuration",
+        "checkId": "check-87c9af941ec7",
+        "reinterpretedFrom": "b3fbeeb9-1179-43d5-a46d-70439c456d7f",
+        "observedAt": "2026-10-29T10:20:43.195Z",
+        "checkedAt": "2026-10-29T10:21:09.251Z",
+        "passed": true
+      },
+      {
+        "id": "e9e5580e-01bb-429f-a5cc-923a86612612",
+        "taskId": "release-verification",
+        "checkId": "release-verification-observed-web",
+        "reinterpretedFrom": "738bfe00-3377-418e-8075-8c1ec492b42b",
+        "observedAt": "2026-10-29T10:23:13.985Z",
+        "checkedAt": "2026-10-29T10:23:31.713Z",
+        "passed": true
+      },
+      {
+        "id": "0a7d6ea4-637e-4ade-81df-c775217696af",
+        "taskId": "release-verification",
+        "checkId": "check-583beabfb134",
+        "reinterpretedFrom": "5a55a56d-ffe8-46ca-94ff-03596869f40b",
+        "observedAt": "2026-10-29T12:45:21.836Z",
+        "checkedAt": "2026-10-29T12:45:58.171Z",
+        "passed": true
+      },
+      {
+        "id": "98b46e7b-b6ad-4c74-bd59-186de869bb1f",
+        "taskId": "test-command-configuration",
+        "checkId": "check-87c9af941ec7",
+        "reinterpretedFrom": "2734d7b8-eb19-4fd3-b2bc-34845a0cad2a",
+        "observedAt": "2026-10-29T12:58:07.461Z",
+        "checkedAt": "2026-10-29T12:58:43.000Z",
+        "passed": true
+      },
+      {
+        "id": "a7facf2e-a70c-4d6e-b55b-4dbc91248abc",
+        "taskId": "domain-types",
+        "checkId": "domain-types-check",
+        "reinterpretedFrom": "4326076e-1b1d-4e77-a64a-9d4af505626f",
+        "observedAt": "2026-10-29T13:03:46.806Z",
+        "checkedAt": "2026-10-29T13:04:17.373Z",
+        "passed": true
+      },
+      {
+        "id": "7b06b174-f8a3-4f20-9a8f-9297262cd1b7",
+        "taskId": "domain-types",
+        "checkId": "check-475b8ef2cfa4",
+        "reinterpretedFrom": "83bdbe36-16a7-42df-9b31-a737ed6bea95",
+        "observedAt": "2026-10-29T13:05:57.526Z",
+        "checkedAt": "2026-10-29T13:06:21.375Z",
+        "passed": true
+      },
+      {
+        "id": "50179c34-f619-4030-8cdb-29c5637e76ae",
+        "taskId": "domain-types",
+        "checkId": "check-check-475b8ef2cfa4-c25ac0c16408",
+        "reinterpretedFrom": "e705d5ca-d9f3-49e6-a65e-03080b1fb1f3",
+        "observedAt": "2026-10-29T13:07:47.065Z",
+        "checkedAt": "2026-10-29T13:08:07.928Z",
+        "passed": true
+      },
+      {
+        "id": "5e679c95-5ad3-4fb5-9135-3d62b03e9168",
+        "taskId": "domain-types",
+        "checkId": "check-check-check-475b8ef2cfa4-c25ac0c16408-c25ac0c16408",
+        "reinterpretedFrom": "772ef5bc-40de-4e31-b78b-363cd0237f66",
+        "observedAt": "2026-10-29T13:09:37.097Z",
+        "checkedAt": "2026-10-29T13:10:01.959Z",
+        "passed": true
+      }
+    ],
+    "caution": "Historical records are counts, not a claim of current valid coverage or completed acceptance."
+  },
+  "incidentsByKind": {
+    "planning": 6,
+    "instrument": 2,
+    "integration": 2,
+    "product": 2
+  },
+  "cumulativePersistedMetrics": {
+    "workflow": {
+      "timeByStageMs": {
+        "agent:analyst": 12566,
+        "agent:planner": 360735,
+        "init": 33579,
+        "plan": 117210,
+        "agent:editor": 1322496,
+        "agent:reviewer": 510057,
+        "agent:repair": 529994,
+        "build": 5970952
+      },
+      "callsByRole": {
+        "analyst": 1,
+        "planner": 25,
+        "editor": 15,
+        "reviewer": 57,
+        "repair": 33
+      },
+      "activeAgents": 0,
+      "maxConcurrency": 2
+    },
+    "build": {
+      "startedAt": "2026-10-29T09:48:26.515Z",
+      "elapsedMs": 5960910,
+      "maxConcurrency": 2,
+      "active": 0,
+      "callsByRole": {
+        "editor": 15,
+        "reviewer": 57,
+        "repair": 33
+      },
+      "timeByStageMs": {
+        "queueWait": 29350,
+        "providerPublication": 218,
+        "environmentPreparation": 25155,
+        "dependencies": 57113,
+        "isolation": 240182,
+        "providerSynchronization": 140,
+        "proofInputs": 579615,
+        "agentInstrument": 1101,
+        "editor": 1323954,
+        "verificationIsolation": 326241,
+        "reviewer": 521038,
+        "cleanup": 7714,
+        "integration": 68532,
+        "browserPreparation": 115849,
+        "verification": 593752,
+        "repair": 539297,
+        "integrationReconciliation": 10744,
+        "environmentRevalidation": 77755,
+        "proofRevalidation": 173437,
+        "acceptanceSelection": 77,
+        "acceptance": 372493,
+        "conformance": 6894,
+        "acceptanceIntegration": 7514
+      },
+      "invalidations": 16,
+      "repetitions": 49
+    }
+  },
+  "observedCalls": {
+    "starts": 74,
+    "finished": 74,
+    "callsByRole": {
+      "reviewer": 37,
+      "repair": 22,
+      "planner": 15
+    },
+    "callsByRecordedStage": {
+      "build": 74
+    },
+    "phases": {
+      "review": {
+        "starts": 33,
+        "finished": 33,
+        "measuredAgentMs": 309091,
+        "callsByRole": {
+          "reviewer": 33
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 33,
+          "inputTokens": 1794587,
+          "cachedInputTokens": 1295232,
+          "outputTokens": 9925,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        }
+      },
+      "implementation": {
+        "starts": 7,
+        "finished": 7,
+        "measuredAgentMs": 223738,
+        "callsByRole": {
+          "repair": 7
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 7,
+          "inputTokens": 1023944,
+          "cachedInputTokens": 896896,
+          "outputTokens": 9773,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        }
+      },
+      "planning": {
+        "starts": 15,
+        "finished": 15,
+        "measuredAgentMs": 157206,
+        "callsByRole": {
+          "planner": 15
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 15,
+          "inputTokens": 514940,
+          "cachedInputTokens": 332672,
+          "outputTokens": 9349,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        }
+      },
+      "verification-recipe-recovery": {
+        "starts": 6,
+        "finished": 6,
+        "measuredAgentMs": 87269,
+        "callsByRole": {
+          "repair": 6
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 6,
+          "inputTokens": 461800,
+          "cachedInputTokens": 355840,
+          "outputTokens": 4294,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        }
+      },
+      "assertion-recovery": {
+        "starts": 13,
+        "finished": 13,
+        "measuredAgentMs": 73289,
+        "callsByRole": {
+          "repair": 9,
+          "reviewer": 4
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 13,
+          "inputTokens": 224353,
+          "cachedInputTokens": 168960,
+          "outputTokens": 1288,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        }
+      }
+    },
+    "reportedUsage": {
+      "callsWithReportedUsage": 74,
+      "inputTokens": 4019624,
+      "cachedInputTokens": 3049600,
+      "outputTokens": 34629,
+      "callsWithReportedCost": 0,
+      "reportedCostUsd": null
+    },
+    "epochs": [
+      {
+        "firstEventId": 3769,
+        "lastEventId": 8956,
+        "firstObservedAt": "2026-10-29T12:40:26.231Z",
+        "lastObservedAt": "2026-10-29T13:12:25.352Z",
+        "ending": "workflow-waiting-event",
+        "calls": 57,
+        "callsByRole": {
+          "reviewer": 31,
+          "repair": 16,
+          "planner": 10
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 57,
+          "inputTokens": 3125183,
+          "cachedInputTokens": 2355456,
+          "outputTokens": 24552,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        },
+        "integratedTasksInInterval": [
+          "release-verification",
+          "domain-types",
+          "stack-foundation",
+          "sqlite-storage",
+          "rest-backend",
+          "web-bootstrap",
+          "task-module-ui",
+          "category-module-ui",
+          "notes-module-ui",
+          "shared-validation-tests",
+          "sqlite-persistence-tests",
+          "rest-api-tests",
+          "module-ui-tests",
+          "test-command-configuration"
+        ],
+        "blockingMessage": "domain-types: Plan reconciliation failed; its completed work and original cause remain preserved."
+      },
+      {
+        "firstEventId": 8957,
+        "lastEventId": 9219,
+        "firstObservedAt": "2026-10-29T13:12:25.762Z",
+        "lastObservedAt": "2026-10-29T13:16:20.040Z",
+        "ending": "workflow-waiting-event",
+        "calls": 0,
+        "callsByRole": {},
+        "reportedUsage": {
+          "callsWithReportedUsage": 0,
+          "inputTokens": 0,
+          "cachedInputTokens": 0,
+          "outputTokens": 0,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        },
+        "integratedTasksInInterval": [],
+        "blockingMessage": "$acceptance: Verification native-providers-behavior has different input state in its isolated execution. Recover its read/write and temporary-state contract without approving mutated product inputs."
+      },
+      {
+        "firstEventId": 9220,
+        "lastEventId": 9921,
+        "firstObservedAt": "2026-10-29T13:16:20.524Z",
+        "lastObservedAt": "2026-10-29T13:24:45.250Z",
+        "ending": "workflow-waiting-event",
+        "calls": 5,
+        "callsByRole": {
+          "repair": 2,
+          "planner": 3
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 5,
+          "inputTokens": 270873,
+          "cachedInputTokens": 199040,
+          "outputTokens": 3671,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        },
+        "integratedTasksInInterval": [],
+        "blockingMessage": "release-verification: Verification dependencies are cyclic or missing: check-c2b2105d2544."
+      },
+      {
+        "firstEventId": 9922,
+        "lastEventId": 9968,
+        "firstObservedAt": "2026-10-29T13:24:46.003Z",
+        "lastObservedAt": "2026-10-29T13:30:48.094Z",
+        "ending": "workflow-waiting-event",
+        "calls": 0,
+        "callsByRole": {},
+        "reportedUsage": {
+          "callsWithReportedUsage": 0,
+          "inputTokens": 0,
+          "cachedInputTokens": 0,
+          "outputTokens": 0,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        },
+        "integratedTasksInInterval": [],
+        "blockingMessage": "release-verification: Verification dependencies are cyclic or missing: check-c2b2105d2544."
+      },
+      {
+        "firstEventId": 9969,
+        "lastEventId": 10491,
+        "firstObservedAt": "2026-10-29T13:30:48.571Z",
+        "lastObservedAt": "2026-10-29T13:38:56.330Z",
+        "ending": "workflow-waiting-event",
+        "calls": 1,
+        "callsByRole": {
+          "reviewer": 1
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 1,
+          "inputTokens": 81979,
+          "cachedInputTokens": 74496,
+          "outputTokens": 622,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        },
+        "integratedTasksInInterval": [
+          "release-verification"
+        ],
+        "blockingMessage": "$acceptance: A tarefa $acceptance:check-c2b2105d2544 precisa ser dividida: pacote 26761 caracteres, capacidade 24000."
+      },
+      {
+        "firstEventId": 10492,
+        "lastEventId": 11068,
+        "firstObservedAt": "2026-10-29T13:38:57.268Z",
+        "lastObservedAt": "2026-10-29T13:56:10.441Z",
+        "ending": "workflow-waiting-event",
+        "calls": 4,
+        "callsByRole": {
+          "reviewer": 2,
+          "repair": 2
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 4,
+          "inputTokens": 255643,
+          "cachedInputTokens": 204544,
+          "outputTokens": 2695,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        },
+        "integratedTasksInInterval": [],
+        "blockingMessage": "check-8920cb91a4fc: Mandatory acceptance did not pass."
+      },
+      {
+        "firstEventId": 11069,
+        "lastEventId": 11860,
+        "firstObservedAt": "2026-10-29T13:56:11.889Z",
+        "lastObservedAt": "2026-10-29T14:18:47.622Z",
+        "ending": "workflow-waiting-event",
+        "calls": 7,
+        "callsByRole": {
+          "repair": 2,
+          "planner": 2,
+          "reviewer": 3
+        },
+        "reportedUsage": {
+          "callsWithReportedUsage": 7,
+          "inputTokens": 285946,
+          "cachedInputTokens": 216064,
+          "outputTokens": 3089,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        },
+        "integratedTasksInInterval": [
+          "sqlite-storage"
+        ],
+        "blockingMessage": "check-8920cb91a4fc: Mandatory acceptance did not pass."
+      },
+      {
+        "firstEventId": 11861,
+        "lastEventId": 11994,
+        "firstObservedAt": "2026-10-29T14:18:49.235Z",
+        "lastObservedAt": "2026-10-29T14:44:29.674Z",
+        "ending": "workflow-waiting-event",
+        "calls": 0,
+        "callsByRole": {},
+        "reportedUsage": {
+          "callsWithReportedUsage": 0,
+          "inputTokens": 0,
+          "cachedInputTokens": 0,
+          "outputTokens": 0,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        },
+        "integratedTasksInInterval": [],
+        "blockingMessage": "check-8920cb91a4fc: Mandatory acceptance did not pass."
+      },
+      {
+        "firstEventId": 11995,
+        "lastEventId": 12570,
+        "firstObservedAt": "2026-10-29T14:44:30.814Z",
+        "lastObservedAt": "2026-10-29T14:52:48.134Z",
+        "ending": "point-in-time-capture",
+        "calls": 0,
+        "callsByRole": {},
+        "reportedUsage": {
+          "callsWithReportedUsage": 0,
+          "inputTokens": 0,
+          "cachedInputTokens": 0,
+          "outputTokens": 0,
+          "callsWithReportedCost": 0,
+          "reportedCostUsd": null
+        },
+        "integratedTasksInInterval": [
+          "rest-backend",
+          "sqlite-persistence-tests"
+        ]
+      }
+    ],
+    "calls": [
+      {
+        "eventId": 3874,
+        "id": "751ee7d8-64cb-486e-bbfb-8d5200f88dbd",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "release-verification",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:40:51.964Z",
+        "resultEventId": 3888,
+        "finishedAt": "2026-10-29T12:41:05.981Z",
+        "durationMs": 14017,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 104223,
+          "outputTokens": 525,
+          "cachedInputTokens": 74752
+        }
+      },
+      {
+        "eventId": 3913,
+        "id": "63d4cf94-ea29-4864-b9bd-4a7c9e0b6774",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "release-verification",
+        "strategy": "partner-guidance",
+        "startedAt": "2026-10-29T12:41:07.206Z",
+        "resultEventId": 3941,
+        "finishedAt": "2026-10-29T12:41:59.262Z",
+        "durationMs": 52056,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 266798,
+          "outputTokens": 1978,
+          "cachedInputTokens": 245760
+        }
+      },
+      {
+        "eventId": 3985,
+        "id": "2074709e-6f31-4a46-acc7-8fe39431faea",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "release-verification",
+        "strategy": "diagnose-review-failure",
+        "startedAt": "2026-10-29T12:42:01.010Z",
+        "resultEventId": 3993,
+        "finishedAt": "2026-10-29T12:42:06.535Z",
+        "durationMs": 5525,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 19841,
+          "outputTokens": 114,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 4010,
+        "id": "679fabf7-02ad-4747-8836-30341333806a",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T12:42:07.223Z",
+        "resultEventId": 4018,
+        "finishedAt": "2026-10-29T12:42:19.674Z",
+        "durationMs": 12451,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 19961,
+          "outputTokens": 982,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 4021,
+        "id": "4a6b1a86-0bd1-4638-a223-0e9b326d76e4",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T12:42:19.965Z",
+        "resultEventId": 4029,
+        "finishedAt": "2026-10-29T12:42:29.334Z",
+        "durationMs": 9369,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 19967,
+          "outputTokens": 738,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 4083,
+        "id": "844d7403-6e73-4cd3-8409-a40ecd863eb3",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "release-verification",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:42:31.461Z",
+        "resultEventId": 4091,
+        "finishedAt": "2026-10-29T12:42:39.059Z",
+        "durationMs": 7598,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 21623,
+          "outputTokens": 330,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 4101,
+        "id": "9f492dbd-3120-40d1-aee1-a4df0ffebcae",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "verification-recipe-recovery",
+        "taskId": "release-verification",
+        "strategy": "instrument:c266d4255a29aaed229421a7c4c255846f9e7e36d94914a13bf90bdfa013709e",
+        "startedAt": "2026-10-29T12:42:39.532Z",
+        "resultEventId": 4114,
+        "finishedAt": "2026-10-29T12:42:55.879Z",
+        "durationMs": 16347,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 69443,
+          "outputTokens": 1038,
+          "cachedInputTokens": 46976
+        }
+      },
+      {
+        "eventId": 4127,
+        "id": "5d268294-6f0e-4f65-8cf3-90866bfa08ca",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "verification-recipe-recovery",
+        "taskId": "release-verification",
+        "strategy": "instrument:a87b1ae026974b17e2c36d2579a1cdd479d6e0ac15f9ecfa617924b85c0cb01d",
+        "startedAt": "2026-10-29T12:42:56.582Z",
+        "resultEventId": 4140,
+        "finishedAt": "2026-10-29T12:43:11.536Z",
+        "durationMs": 14954,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 72521,
+          "outputTokens": 825,
+          "cachedInputTokens": 55424
+        }
+      },
+      {
+        "eventId": 4337,
+        "id": "bd1f24fb-df74-4a3d-9f65-b23a3ae3535d",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "release-verification",
+        "strategy": "assertion-diagnosis:395ed62db5f038d790d4daf1de4f252276b21f8439e238f06c90c3142ade7a78",
+        "startedAt": "2026-10-29T12:44:00.633Z",
+        "resultEventId": 4350,
+        "finishedAt": "2026-10-29T12:44:09.873Z",
+        "durationMs": 9240,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 59205,
+          "outputTokens": 434,
+          "cachedInputTokens": 48512
+        }
+      },
+      {
+        "eventId": 4362,
+        "id": "a3bd63a7-216e-415a-b13c-b775fbfdf89c",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "assertion-recovery",
+        "taskId": "release-verification",
+        "strategy": "assertion-contract:repair:9f4b860ffaea8e99cc08eae98440c67af80650a5ffc5e664f33cfe976fedd642",
+        "startedAt": "2026-10-29T12:44:10.513Z",
+        "resultEventId": 4370,
+        "finishedAt": "2026-10-29T12:44:14.966Z",
+        "durationMs": 4453,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 17716,
+          "outputTokens": 74,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 4380,
+        "id": "a7b268d8-9689-4621-a2a2-f9b5dfac3aec",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "assertion-recovery",
+        "taskId": "release-verification",
+        "strategy": "assertion-contract:reviewer:a9f5bd640f1b2dd336e7e512469519b0fdfda0ddcfa29bef6d131a5afbc772e9",
+        "startedAt": "2026-10-29T12:44:15.586Z",
+        "resultEventId": 4388,
+        "finishedAt": "2026-10-29T12:44:20.118Z",
+        "durationMs": 4532,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 17817,
+          "outputTokens": 79,
+          "cachedInputTokens": 15360
+        }
+      },
+      {
+        "eventId": 4404,
+        "id": "b58543f5-f206-4c8a-8300-c76904f7ef2a",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T12:44:21.005Z",
+        "resultEventId": 4412,
+        "finishedAt": "2026-10-29T12:44:26.396Z",
+        "durationMs": 5391,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 22092,
+          "outputTokens": 129,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 4553,
+        "id": "2e46a5c1-45c9-4a76-afd2-88784b25a10d",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "release-verification",
+        "strategy": "assertion-diagnosis:f58067b55581606903f0be73f1c8075b9062b2172a11a343b651d4384e25d3a6",
+        "startedAt": "2026-10-29T12:45:22.412Z",
+        "resultEventId": 4565,
+        "finishedAt": "2026-10-29T12:45:31.999Z",
+        "durationMs": 9587,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 48189,
+          "outputTokens": 312,
+          "cachedInputTokens": 40960
+        }
+      },
+      {
+        "eventId": 4577,
+        "id": "3e193663-eedd-49fb-942c-6e2377f07713",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "assertion-recovery",
+        "taskId": "release-verification",
+        "strategy": "assertion-contract:repair:c3a92bad32ab58c59916819cbd717dde59e3e87dc460b4d69c3850b2d5a5aa55",
+        "startedAt": "2026-10-29T12:45:32.718Z",
+        "resultEventId": 4585,
+        "finishedAt": "2026-10-29T12:45:37.072Z",
+        "durationMs": 4354,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 17204,
+          "outputTokens": 37,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 4595,
+        "id": "a4d5b7c1-d1cb-4c4b-be31-76704781cda2",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "assertion-recovery",
+        "taskId": "release-verification",
+        "strategy": "assertion-contract:reviewer:1f1aef91ba7ef9958378bdd6e483fccd1e102e056e93ecf8a8c508694e30f6bf",
+        "startedAt": "2026-10-29T12:45:37.609Z",
+        "resultEventId": 4603,
+        "finishedAt": "2026-10-29T12:45:42.449Z",
+        "durationMs": 4840,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 17266,
+          "outputTokens": 37,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 4619,
+        "id": "ab8c7c9f-96b6-42ee-b253-45ec1f8b01cf",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T12:45:43.306Z",
+        "resultEventId": 4627,
+        "finishedAt": "2026-10-29T12:45:49.444Z",
+        "durationMs": 6138,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 21577,
+          "outputTokens": 161,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 4751,
+        "id": "73f4aed9-850a-43d0-aa3f-3015f4d66659",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "release-verification",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:45:59.692Z",
+        "resultEventId": 4759,
+        "finishedAt": "2026-10-29T12:46:04.344Z",
+        "durationMs": 4652,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 23233,
+          "outputTokens": 13,
+          "cachedInputTokens": 15360
+        }
+      },
+      {
+        "eventId": 4963,
+        "id": "4b7fc5c1-8cf6-4652-b198-230f0f51456a",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "domain-types",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:46:42.567Z",
+        "resultEventId": 4976,
+        "finishedAt": "2026-10-29T12:46:50.593Z",
+        "durationMs": 8026,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 70738,
+          "outputTokens": 250,
+          "cachedInputTokens": 45952
+        }
+      },
+      {
+        "eventId": 5071,
+        "id": "0e91fa7b-2dae-4e2f-ad6e-f1d52bbc870b",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "stack-foundation",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:47:18.482Z",
+        "resultEventId": 5082,
+        "finishedAt": "2026-10-29T12:47:28.205Z",
+        "durationMs": 9723,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 42686,
+          "outputTokens": 177,
+          "cachedInputTokens": 31744
+        }
+      },
+      {
+        "eventId": 5187,
+        "id": "21b85ca1-c46a-40be-9616-7e64703eca88",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "sqlite-storage",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:47:56.564Z",
+        "resultEventId": 5200,
+        "finishedAt": "2026-10-29T12:48:04.570Z",
+        "durationMs": 8006,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 74363,
+          "outputTokens": 303,
+          "cachedInputTokens": 47744
+        }
+      },
+      {
+        "eventId": 5295,
+        "id": "050ff7eb-2ded-408b-b8f9-907da9c58cbf",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "rest-backend",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:48:31.278Z",
+        "resultEventId": 5308,
+        "finishedAt": "2026-10-29T12:48:41.626Z",
+        "durationMs": 10348,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 77966,
+          "outputTokens": 349,
+          "cachedInputTokens": 58752
+        }
+      },
+      {
+        "eventId": 5420,
+        "id": "300f24d2-b3f0-44c0-b397-1e1a7fcf040b",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "web-bootstrap",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:49:24.971Z",
+        "resultEventId": 5435,
+        "finishedAt": "2026-10-29T12:49:35.848Z",
+        "durationMs": 10877,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 104316,
+          "outputTokens": 385,
+          "cachedInputTokens": 70784
+        }
+      },
+      {
+        "eventId": 5530,
+        "id": "996db89a-9eb1-4f8e-9a8e-b87aeaa1b4e5",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "task-module-ui",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:50:01.887Z",
+        "resultEventId": 5541,
+        "finishedAt": "2026-10-29T12:50:10.823Z",
+        "durationMs": 8936,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 50937,
+          "outputTokens": 271,
+          "cachedInputTokens": 37888
+        }
+      },
+      {
+        "eventId": 5636,
+        "id": "4af0588e-1808-42ae-84f4-0ff8584e4f77",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "category-module-ui",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:50:33.335Z",
+        "resultEventId": 5644,
+        "finishedAt": "2026-10-29T12:50:41.734Z",
+        "durationMs": 8399,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 23132,
+          "outputTokens": 371,
+          "cachedInputTokens": 15360
+        }
+      },
+      {
+        "eventId": 5669,
+        "id": "8e3ff44c-3800-4388-a1f3-6345408474d2",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "category-module-ui",
+        "strategy": "partner-guidance",
+        "startedAt": "2026-10-29T12:50:43.259Z",
+        "resultEventId": 5694,
+        "finishedAt": "2026-10-29T12:51:19.293Z",
+        "durationMs": 36034,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 334192,
+          "outputTokens": 1545,
+          "cachedInputTokens": 310656
+        }
+      },
+      {
+        "eventId": 5731,
+        "id": "cf63d048-5148-400d-a0d0-3c4ac48d33cf",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "category-module-ui",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:51:21.695Z",
+        "resultEventId": 5741,
+        "finishedAt": "2026-10-29T12:51:29.305Z",
+        "durationMs": 7610,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 50291,
+          "outputTokens": 124,
+          "cachedInputTokens": 23040
+        }
+      },
+      {
+        "eventId": 5836,
+        "id": "15c1f679-a5aa-46ef-86a0-4f2f71fc684b",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "notes-module-ui",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:51:52.586Z",
+        "resultEventId": 5847,
+        "finishedAt": "2026-10-29T12:51:59.948Z",
+        "durationMs": 7362,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 45067,
+          "outputTokens": 214,
+          "cachedInputTokens": 31872
+        }
+      },
+      {
+        "eventId": 5949,
+        "id": "22ec7e5a-751f-41a4-bc36-80e4054f8db0",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "shared-validation-tests",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:52:22.881Z",
+        "resultEventId": 5961,
+        "finishedAt": "2026-10-29T12:52:32.379Z",
+        "durationMs": 9498,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 69086,
+          "outputTokens": 342,
+          "cachedInputTokens": 44032
+        }
+      },
+      {
+        "eventId": 6056,
+        "id": "02295d94-b89b-4596-8fe7-559d36ebd110",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "sqlite-persistence-tests",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:52:56.099Z",
+        "resultEventId": 6067,
+        "finishedAt": "2026-10-29T12:53:06.340Z",
+        "durationMs": 10241,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 47698,
+          "outputTokens": 192,
+          "cachedInputTokens": 34304
+        }
+      },
+      {
+        "eventId": 6162,
+        "id": "4a927c27-950d-4bd9-b796-72ebb97e9c1d",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "rest-api-tests",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:53:31.065Z",
+        "resultEventId": 6170,
+        "finishedAt": "2026-10-29T12:53:37.609Z",
+        "durationMs": 6544,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 23089,
+          "outputTokens": 176,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 6180,
+        "id": "17277648-4288-4777-ba08-34b7bb4717a7",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "verification-recipe-recovery",
+        "taskId": "rest-api-tests",
+        "strategy": "instrument:3c64602d9cbdd98188333a46aa8a9a1581697ca6aac295f2cdcc8a132abac3dd",
+        "startedAt": "2026-10-29T12:53:38.461Z",
+        "resultEventId": 6192,
+        "finishedAt": "2026-10-29T12:53:49.298Z",
+        "durationMs": 10837,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 66557,
+          "outputTokens": 331,
+          "cachedInputTokens": 44928
+        }
+      },
+      {
+        "eventId": 6245,
+        "id": "64dc4228-6494-48f2-9dab-8daad43277d2",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "rest-api-tests",
+        "strategy": "assertion-diagnosis:b78563c7771547e8669e5c9d865ff569c0b814e39a12e2eb0ffedddb18e34d49",
+        "startedAt": "2026-10-29T12:53:56.500Z",
+        "resultEventId": 6256,
+        "finishedAt": "2026-10-29T12:54:06.066Z",
+        "durationMs": 9566,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 38219,
+          "outputTokens": 303,
+          "cachedInputTokens": 26880
+        }
+      },
+      {
+        "eventId": 6279,
+        "id": "53444a0f-8e13-4ca9-af64-9d17dad529f2",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "rest-api-tests",
+        "strategy": "targeted-repair",
+        "startedAt": "2026-10-29T12:54:07.927Z",
+        "resultEventId": 6299,
+        "finishedAt": "2026-10-29T12:55:03.737Z",
+        "durationMs": 55810,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 156284,
+          "outputTokens": 1545,
+          "cachedInputTokens": 120064
+        }
+      },
+      {
+        "eventId": 6350,
+        "id": "a2ace3e6-7844-45de-842c-4fad17403275",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "rest-api-tests",
+        "strategy": "assertion-diagnosis:175014cee2198b20cab7a38390c5926e0b16f90b83d774cc820b90d576b71aea",
+        "startedAt": "2026-10-29T12:55:22.251Z",
+        "resultEventId": 6363,
+        "finishedAt": "2026-10-29T12:55:30.433Z",
+        "durationMs": 8182,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 60767,
+          "outputTokens": 365,
+          "cachedInputTokens": 47744
+        }
+      },
+      {
+        "eventId": 6375,
+        "id": "f4c10b3c-4053-432d-bff7-040897df4962",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "assertion-recovery",
+        "taskId": "rest-api-tests",
+        "strategy": "assertion-contract:repair:ee283fd1a2195a3bb02b94efbef42fac4497f6f394d5c91fbb1526a85ea825ac",
+        "startedAt": "2026-10-29T12:55:31.472Z",
+        "resultEventId": 6383,
+        "finishedAt": "2026-10-29T12:55:35.868Z",
+        "durationMs": 4396,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 17363,
+          "outputTokens": 42,
+          "cachedInputTokens": 15360
+        }
+      },
+      {
+        "eventId": 6393,
+        "id": "7dd36ec7-7541-43a0-a171-7a77b74d55cc",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "assertion-recovery",
+        "taskId": "rest-api-tests",
+        "strategy": "assertion-contract:reviewer:f5f6b7b44802bbfd96b2aa331ee18d713ac1263b92452a189ccc86586c5e8aac",
+        "startedAt": "2026-10-29T12:55:36.525Z",
+        "resultEventId": 6401,
+        "finishedAt": "2026-10-29T12:55:43.198Z",
+        "durationMs": 6673,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 14713,
+          "outputTokens": 167,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 6417,
+        "id": "2b387521-49d8-44d1-9068-423225e45504",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T12:55:45.072Z",
+        "resultEventId": 6427,
+        "finishedAt": "2026-10-29T12:55:53.743Z",
+        "durationMs": 8671,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 41288,
+          "outputTokens": 411,
+          "cachedInputTokens": 23040
+        }
+      },
+      {
+        "eventId": 6502,
+        "id": "e8fb5e53-9d6a-42fa-b796-91f908040bd8",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "rest-api-tests",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:56:15.252Z",
+        "resultEventId": 6510,
+        "finishedAt": "2026-10-29T12:56:19.230Z",
+        "durationMs": 3978,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 22775,
+          "outputTokens": 13,
+          "cachedInputTokens": 15360
+        }
+      },
+      {
+        "eventId": 6628,
+        "id": "e0bf15d9-5bd0-4fc5-a86b-724aa961f549",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "module-ui-tests",
+        "strategy": "review",
+        "startedAt": "2026-10-29T12:57:15.761Z",
+        "resultEventId": 6639,
+        "finishedAt": "2026-10-29T12:57:22.644Z",
+        "durationMs": 6883,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 47952,
+          "outputTokens": 143,
+          "cachedInputTokens": 34048
+        }
+      },
+      {
+        "eventId": 6735,
+        "id": "64a362c8-b318-416c-b2bc-11db7e4927db",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "test-command-configuration",
+        "strategy": "assertion-diagnosis:19b424527f53f4a7fd8828cc77f5b4dfd246322a2fdf39e0d043841e65bbfcbf",
+        "startedAt": "2026-10-29T12:58:08.109Z",
+        "resultEventId": 6747,
+        "finishedAt": "2026-10-29T12:58:20.051Z",
+        "durationMs": 11942,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 54751,
+          "outputTokens": 349,
+          "cachedInputTokens": 38400
+        }
+      },
+      {
+        "eventId": 6759,
+        "id": "8ba1f10e-00d1-46cf-a6d8-b9456f626087",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "assertion-recovery",
+        "taskId": "test-command-configuration",
+        "strategy": "assertion-contract:repair:9b742f8b7170d8f6bc01f9fa5d28009bb8a39a99044dadb4e6f67aaaf0f297f0",
+        "startedAt": "2026-10-29T12:58:21.115Z",
+        "resultEventId": 6767,
+        "finishedAt": "2026-10-29T12:58:26.046Z",
+        "durationMs": 4931,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 17639,
+          "outputTokens": 47,
+          "cachedInputTokens": 15360
+        }
+      },
+      {
+        "eventId": 7343,
+        "id": "3262224f-471d-4208-9d9d-67f091bb235b",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T13:03:13.552Z",
+        "resultEventId": 7354,
+        "finishedAt": "2026-10-29T13:03:30.092Z",
+        "durationMs": 16540,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 41319,
+          "outputTokens": 487,
+          "cachedInputTokens": 23040
+        }
+      },
+      {
+        "eventId": 7427,
+        "id": "578ecb64-54c7-4680-8194-7561ca3e6aaa",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "domain-types",
+        "strategy": "assertion-diagnosis:0abd82b42bbd4d40a4df2f555d06f5119c38ca96ebf8d20a4ea998ea0c8428d4",
+        "startedAt": "2026-10-29T13:03:50.645Z",
+        "resultEventId": 7441,
+        "finishedAt": "2026-10-29T13:04:06.063Z",
+        "durationMs": 15418,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 75824,
+          "outputTokens": 578,
+          "cachedInputTokens": 59392
+        }
+      },
+      {
+        "eventId": 7453,
+        "id": "961c6d8a-2a39-4b79-8c68-64c90120b7e2",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "assertion-recovery",
+        "taskId": "domain-types",
+        "strategy": "assertion-contract:repair:4d93786938d63b93609b11b0360c57515f124abf140ab2d6fc8c410a83a4ee82",
+        "startedAt": "2026-10-29T13:04:07.967Z",
+        "resultEventId": 7461,
+        "finishedAt": "2026-10-29T13:04:15.547Z",
+        "durationMs": 7580,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 17412,
+          "outputTokens": 54,
+          "cachedInputTokens": 15360
+        }
+      },
+      {
+        "eventId": 7520,
+        "id": "57ee9c4c-3786-4699-83f7-5db670757b14",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "domain-types",
+        "strategy": "review",
+        "startedAt": "2026-10-29T13:04:19.664Z",
+        "resultEventId": 7528,
+        "finishedAt": "2026-10-29T13:04:24.351Z",
+        "durationMs": 4687,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 19428,
+          "outputTokens": 13,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 7682,
+        "id": "b9de543b-ac15-4c3d-80a2-a10be98738ca",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T13:05:19.093Z",
+        "resultEventId": 7692,
+        "finishedAt": "2026-10-29T13:05:29.186Z",
+        "durationMs": 10093,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 41986,
+          "outputTokens": 455,
+          "cachedInputTokens": 35456
+        }
+      },
+      {
+        "eventId": 7700,
+        "id": "c17c2ff2-86dd-4cae-83b9-8950243cf26c",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "verification-recipe-recovery",
+        "taskId": "domain-types",
+        "strategy": "instrument:95efa127048c3078b6b3dcbfee3de0f73aca4fa559f7ef464d589c04aba812e1",
+        "startedAt": "2026-10-29T13:05:30.347Z",
+        "resultEventId": 7711,
+        "finishedAt": "2026-10-29T13:05:39.417Z",
+        "durationMs": 9070,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 57822,
+          "outputTokens": 413,
+          "cachedInputTokens": 41344
+        }
+      },
+      {
+        "eventId": 7805,
+        "id": "4d9e2783-9bbe-44dd-b043-0d3bd29c5d73",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "domain-types",
+        "strategy": "assertion-diagnosis:b77170f188ab0afd423440689ca66d529424ce7cb7939d7c34e5e4f10a0d6046",
+        "startedAt": "2026-10-29T13:06:00.786Z",
+        "resultEventId": 7818,
+        "finishedAt": "2026-10-29T13:06:10.895Z",
+        "durationMs": 10109,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 59669,
+          "outputTokens": 294,
+          "cachedInputTokens": 40192
+        }
+      },
+      {
+        "eventId": 7830,
+        "id": "2c8f0aea-265f-4b3d-af06-f80dcbba4e6d",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "assertion-recovery",
+        "taskId": "domain-types",
+        "strategy": "assertion-contract:repair:be3d9620671a34ed814d8426363899138a8353fd66a0c04d28822e15df298c96",
+        "startedAt": "2026-10-29T13:06:12.880Z",
+        "resultEventId": 7838,
+        "finishedAt": "2026-10-29T13:06:18.937Z",
+        "durationMs": 6057,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 17438,
+          "outputTokens": 200,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 8052,
+        "id": "3de281f8-87a7-464e-928e-e390863c2230",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T13:07:15.592Z",
+        "resultEventId": 8063,
+        "finishedAt": "2026-10-29T13:07:29.109Z",
+        "durationMs": 13517,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 42541,
+          "outputTokens": 1105,
+          "cachedInputTokens": 23040
+        }
+      },
+      {
+        "eventId": 8161,
+        "id": "1f7109af-b243-4d0a-8651-addab9119399",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "domain-types",
+        "strategy": "assertion-diagnosis:c7ef3518f0e52e62bd7431a6169754e731edc811f0c3a81a942bdd86ad1b1bcb",
+        "startedAt": "2026-10-29T13:07:48.381Z",
+        "resultEventId": 8175,
+        "finishedAt": "2026-10-29T13:07:57.980Z",
+        "durationMs": 9599,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 61166,
+          "outputTokens": 359,
+          "cachedInputTokens": 50176
+        }
+      },
+      {
+        "eventId": 8187,
+        "id": "0159f79f-fe89-4361-8aa8-297046cc4792",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "assertion-recovery",
+        "taskId": "domain-types",
+        "strategy": "assertion-contract:repair:33b3b8d287de47b3b36959563c1d589b21787e5a21584b75d61c66b3e938a393",
+        "startedAt": "2026-10-29T13:07:59.386Z",
+        "resultEventId": 8195,
+        "finishedAt": "2026-10-29T13:08:05.771Z",
+        "durationMs": 6385,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 17440,
+          "outputTokens": 255,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 8416,
+        "id": "6897b41c-baf7-4c65-bd22-e9203e8dab9b",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T13:09:02.890Z",
+        "resultEventId": 8427,
+        "finishedAt": "2026-10-29T13:09:18.423Z",
+        "durationMs": 15533,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 43690,
+          "outputTokens": 1386,
+          "cachedInputTokens": 32000
+        }
+      },
+      {
+        "eventId": 8533,
+        "id": "289accf1-83fa-428d-be2a-efabd058c819",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "domain-types",
+        "strategy": "assertion-diagnosis:e14e9d725e414435d07758aae734dad2d8976826e03ba8ff3c0423d90a56e805",
+        "startedAt": "2026-10-29T13:09:38.440Z",
+        "resultEventId": 8552,
+        "finishedAt": "2026-10-29T13:09:50.738Z",
+        "durationMs": 12298,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 79978,
+          "outputTokens": 526,
+          "cachedInputTokens": 60160
+        }
+      },
+      {
+        "eventId": 8564,
+        "id": "d031e968-d196-4115-abab-ef26d600a32d",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "assertion-recovery",
+        "taskId": "domain-types",
+        "strategy": "assertion-contract:repair:637255897b4991038a2575b337fe572bd912770ae722f030ca5367ee52752634",
+        "startedAt": "2026-10-29T13:09:52.875Z",
+        "resultEventId": 8572,
+        "finishedAt": "2026-10-29T13:09:59.570Z",
+        "durationMs": 6695,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 17458,
+          "outputTokens": 224,
+          "cachedInputTokens": 15360
+        }
+      },
+      {
+        "eventId": 8800,
+        "id": "b4027e5b-b711-4992-81e6-d51fe563e8af",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T13:10:59.772Z",
+        "resultEventId": 8808,
+        "finishedAt": "2026-10-29T13:11:12.668Z",
+        "durationMs": 12896,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 18191,
+          "outputTokens": 1438,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 8816,
+        "id": "6b577916-1729-4d94-a0b8-56ac13651bac",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "verification-recipe-recovery",
+        "taskId": "domain-types",
+        "strategy": "instrument:e22d4e3728919058c75e1ab7f36315e22f6ecdff25ecaa4813ef36d6552f246d",
+        "startedAt": "2026-10-29T13:11:14.353Z",
+        "resultEventId": 8831,
+        "finishedAt": "2026-10-29T13:11:29.858Z",
+        "durationMs": 15505,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 123276,
+          "outputTokens": 544,
+          "cachedInputTokens": 110720
+        }
+      },
+      {
+        "eventId": 9498,
+        "id": "71af0fdf-53a0-46e4-8396-ec39aab9b6b8",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "$acceptance",
+        "strategy": "provider-functional-artifacts:c4842aa8917121dde16c511e3b9b8df1f54099f06184e9df6629aca0e537d988",
+        "startedAt": "2026-10-29T13:21:10.488Z",
+        "resultEventId": 9512,
+        "finishedAt": "2026-10-29T13:21:38.097Z",
+        "durationMs": 27609,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 85224,
+          "outputTokens": 1500,
+          "cachedInputTokens": 70144
+        }
+      },
+      {
+        "eventId": 9734,
+        "id": "076322b3-9c29-416d-b8c5-5c5df3927541",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T13:23:19.815Z",
+        "resultEventId": 9742,
+        "finishedAt": "2026-10-29T13:23:25.887Z",
+        "durationMs": 6072,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 21565,
+          "outputTokens": 219,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 9803,
+        "id": "b3c10d2e-9f2c-4fd6-afdd-9fcf4dcd4908",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T13:23:43.416Z",
+        "resultEventId": 9814,
+        "finishedAt": "2026-10-29T13:23:51.563Z",
+        "durationMs": 8147,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 45624,
+          "outputTokens": 418,
+          "cachedInputTokens": 23040
+        }
+      },
+      {
+        "eventId": 9822,
+        "id": "db8678b6-ad7f-4186-be95-dc097ebcd963",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "verification-recipe-recovery",
+        "taskId": "release-verification",
+        "strategy": "instrument:c52f845b4fb412ba9f4b56bcad555d176b9fa9ccb3271e7237f43ac26e63e7e0",
+        "startedAt": "2026-10-29T13:23:54.351Z",
+        "resultEventId": 9835,
+        "finishedAt": "2026-10-29T13:24:14.907Z",
+        "durationMs": 20556,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 72181,
+          "outputTokens": 1143,
+          "cachedInputTokens": 56448
+        }
+      },
+      {
+        "eventId": 9905,
+        "id": "d3f5c4aa-9ddb-4ffe-89fd-0aeaa35b0fe7",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T13:24:31.762Z",
+        "resultEventId": 9915,
+        "finishedAt": "2026-10-29T13:24:42.669Z",
+        "durationMs": 10907,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 46279,
+          "outputTokens": 391,
+          "cachedInputTokens": 37888
+        }
+      },
+      {
+        "eventId": 10468,
+        "id": "c847305d-bbbb-4c8b-9423-c09bbc6100be",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "$acceptance:check-c2b2105d2544",
+        "strategy": "assertion-diagnosis:dbbd6d531ba06a7f48c50d5ae9ecafdead1755504e1262315fa16679b04b404b",
+        "startedAt": "2026-10-29T13:38:40.643Z",
+        "resultEventId": 10483,
+        "finishedAt": "2026-10-29T13:38:52.969Z",
+        "durationMs": 12326,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 81979,
+          "outputTokens": 622,
+          "cachedInputTokens": 74496
+        }
+      },
+      {
+        "eventId": 10659,
+        "id": "fa443cf2-0ab0-44d1-b471-dc117b5f101d",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "$acceptance:check-c2b2105d2544",
+        "strategy": "assertion-diagnosis:dbbd6d531ba06a7f48c50d5ae9ecafdead1755504e1262315fa16679b04b404b",
+        "startedAt": "2026-10-29T13:52:05.542Z",
+        "resultEventId": 10672,
+        "finishedAt": "2026-10-29T13:52:16.743Z",
+        "durationMs": 11201,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 50311,
+          "outputTokens": 484,
+          "cachedInputTokens": 38272
+        }
+      },
+      {
+        "eventId": 10684,
+        "id": "07d798b5-9020-404a-9d1b-245ecc4ca6cf",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "$acceptance:check-c2b2105d2544",
+        "strategy": "runner-contract-recovery:b330ab24bc1be1c1b4c6ce4541e497a9007206df80bc98d16b26699047ee6dc7",
+        "startedAt": "2026-10-29T13:52:22.082Z",
+        "resultEventId": 10699,
+        "finishedAt": "2026-10-29T13:52:35.965Z",
+        "durationMs": 13883,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 56920,
+          "outputTokens": 770,
+          "cachedInputTokens": 47104
+        }
+      },
+      {
+        "eventId": 10872,
+        "id": "cad38328-f16d-4b71-8fb0-d80640efcbe7",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "$acceptance:check-8920cb91a4fc",
+        "strategy": "assertion-diagnosis:214340f23c1bfdc1849519bff85175f398c972205446f73de94f0eeaa7c558cd",
+        "startedAt": "2026-10-29T13:54:10.742Z",
+        "resultEventId": 10884,
+        "finishedAt": "2026-10-29T13:54:30.354Z",
+        "durationMs": 19612,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 81114,
+          "outputTokens": 608,
+          "cachedInputTokens": 61184
+        }
+      },
+      {
+        "eventId": 10896,
+        "id": "3a087988-3541-4397-826a-f7cc4efcf883",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "$acceptance:check-8920cb91a4fc",
+        "strategy": "runner-contract-recovery:f94328afaa91e7f5f8fa19e8661837e64508912cccabba7fef7133b0f844091d",
+        "startedAt": "2026-10-29T13:54:36.467Z",
+        "resultEventId": 10907,
+        "finishedAt": "2026-10-29T13:54:50.876Z",
+        "durationMs": 14409,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 67298,
+          "outputTokens": 833,
+          "cachedInputTokens": 57984
+        }
+      },
+      {
+        "eventId": 11369,
+        "id": "0ea30a3a-687d-40ae-8c6e-4c7108127f49",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "implementation",
+        "taskId": "$acceptance",
+        "strategy": "provider-functional-artifacts:c4842aa8917121dde16c511e3b9b8df1f54099f06184e9df6629aca0e537d988",
+        "startedAt": "2026-10-29T14:13:25.016Z",
+        "resultEventId": 11382,
+        "finishedAt": "2026-10-29T14:13:48.953Z",
+        "durationMs": 23937,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 57228,
+          "outputTokens": 1602,
+          "cachedInputTokens": 45184
+        }
+      },
+      {
+        "eventId": 11396,
+        "id": "2aee6541-a945-4729-ae99-caf2c660f6ff",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T14:14:00.042Z",
+        "resultEventId": 11409,
+        "finishedAt": "2026-10-29T14:14:14.141Z",
+        "durationMs": 14099,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 68000,
+          "outputTokens": 764,
+          "cachedInputTokens": 54528
+        }
+      },
+      {
+        "eventId": 11548,
+        "id": "47d45908-8be8-4d4d-9d4b-55df074c79b7",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "sqlite-storage",
+        "strategy": "assertion-diagnosis:d97d8d944aa3f4f7223a5bb9c7ea3a2aeffac028adf2f9527833fbe9e7a43fbe",
+        "startedAt": "2026-10-29T14:15:33.092Z",
+        "resultEventId": 11560,
+        "finishedAt": "2026-10-29T14:15:42.536Z",
+        "durationMs": 9444,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 58115,
+          "outputTokens": 293,
+          "cachedInputTokens": 47744
+        }
+      },
+      {
+        "eventId": 11572,
+        "id": "c8af9928-2d4c-45e2-8973-e36d2d345890",
+        "role": "repair",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "assertion-recovery",
+        "taskId": "sqlite-storage",
+        "strategy": "assertion-contract:repair:223870914594474c1a3bbdee73d7c72ba2e59ca18b6f63f5b98770f7c914b454",
+        "startedAt": "2026-10-29T14:15:51.047Z",
+        "resultEventId": 11580,
+        "finishedAt": "2026-10-29T14:15:57.661Z",
+        "durationMs": 6614,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 17413,
+          "outputTokens": 36,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 11590,
+        "id": "2f81f874-31f5-44e4-b371-f414cfdf0fbe",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "assertion-recovery",
+        "taskId": "sqlite-storage",
+        "strategy": "assertion-contract:reviewer:2b51e49797b0a4a3b12800787d19827602a88183291a2038ce938231580778ab",
+        "startedAt": "2026-10-29T14:16:04.197Z",
+        "resultEventId": 11598,
+        "finishedAt": "2026-10-29T14:16:09.976Z",
+        "durationMs": 5779,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 17474,
+          "outputTokens": 36,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 11614,
+        "id": "6f146513-fc19-45a0-8752-82fed54f4425",
+        "role": "planner",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "planning",
+        "startedAt": "2026-10-29T14:16:19.186Z",
+        "resultEventId": 11622,
+        "finishedAt": "2026-10-29T14:16:26.568Z",
+        "durationMs": 7382,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 20860,
+          "outputTokens": 265,
+          "cachedInputTokens": 11520
+        }
+      },
+      {
+        "eventId": 11697,
+        "id": "b28e0cb5-1332-4b3c-8f3e-fded9458b428",
+        "role": "reviewer",
+        "provider": "codex",
+        "model": "gpt-6-luna",
+        "recordedStage": "build",
+        "phase": "review",
+        "taskId": "sqlite-storage",
+        "strategy": "review",
+        "startedAt": "2026-10-29T14:17:10.892Z",
+        "resultEventId": 11707,
+        "finishedAt": "2026-10-29T14:17:18.549Z",
+        "durationMs": 7657,
+        "status": "complete",
+        "usage": {
+          "inputTokens": 46856,
+          "outputTokens": 93,
+          "cachedInputTokens": 34048
+        }
+      }
+    ]
+  },
+  "limits": [
+    "Point-in-time read transaction; execution can progress after capture.",
+    "Persisted active counts do not establish OS process liveness.",
+    "No agent stdout, commands, input prompts, credentials or configuration exported.",
+    "Phase attribution uses role and the nearest persisted action within five seconds, when one exists.",
+    "Epochs end at recorded workflow waiting events; they do not infer unrecorded process stops or manual debugging duration.",
+    "Agent duration includes provider work and transport; financial cost is absent unless the provider reports it."
+  ]
+}

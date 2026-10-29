@@ -965,7 +965,6 @@ async function repairRestrictedWorkPlan(options: RepairPlanOptions, task: WorkUn
       const prepared=raw.map(candidate=>{
         const original=originals.find(check=>check.id===candidate.id)??(originals.length===1&&raw.length===1?originals[0]:undefined);
         const claim=candidate.conformance===undefined?original?.conformance:object(candidate.conformance)?{...original?.conformance,...candidate.conformance}:null;
-        if(candidate.conformance!==undefined&&!claim)throw new PlanningFailure('invalid-plan',['A correção não pode remover ou tornar ilegível uma declaração de conformidade.'],task.id);
         const proposed={...original,...candidate,...(original?{id:original.id,...(original.expected!==undefined?{expected:original.expected}:{})}:{}),requirementIds:uniqueStrings([...(original?.requirementIds??[]),...strings(candidate.requirementIds).map(id=>resolveRequirementAlias(brief,id)).filter(id=>task.requirementIds.includes(id))]),...(claim?{conformance:claim}:{})};
         if(candidate.conformance!==undefined){
           const parsed=normalizeChecks([proposed],brief)[0];
@@ -973,7 +972,20 @@ async function repairRestrictedWorkPlan(options: RepairPlanOptions, task: WorkUn
           const normalized=decoded?.check;
           const conformance=normalized?.conformance;
           const requirement=brief.requirements.find(item=>item.id===conformance?.requirementId);
-          if(!conformance||!requirement||!task.requirementIds.includes(requirement.id)||!plan.environment.some(node=>selected.has(node.id)&&obligationMatchesProvider(requirement,node.identity)&&matchesOperationalClaim(requirement,conformance,node.identity)))throw new PlanningFailure('invalid-plan',['A conformidade proposta não corresponde à obrigação literal e ao provedor operacional consumido pela unidade. Nenhuma declaração ou prova foi adotada.'],task.id);
+          if(!conformance||!requirement||!task.requirementIds.includes(requirement.id)||!plan.environment.some(node=>selected.has(node.id)&&obligationMatchesProvider(requirement,node.identity)&&matchesOperationalClaim(requirement,conformance,node.identity))){
+            // A new executable reproduction and its optional provider label
+            // have separate authority. Reject the label without discarding a
+            // usable operation; retain any previously valid declaration and
+            // require actual execution before its behavior can be accepted.
+            const fallback={...proposed};
+            delete fallback.conformance;
+            if(original?.conformance)fallback.conformance=structuredClone(original.conformance);
+            const recovered=normalizeChecks([fallback],brief)[0];
+            const operation=(check:Verification):string=>{const{conformance:_claim,conformanceClaims:_claims,requirementIds:_requirements,constraintIds:_constraints,expected:_description,id:_id,...technical}=check;return stableJson(technical);};
+            if(!recovered?.command||original&&operation(recovered)===operation(normalizeChecks([original],brief)[0]??original))throw new PlanningFailure('invalid-plan',['A conformidade proposta não corresponde à obrigação literal e ao provedor operacional consumido pela unidade. Nenhuma declaração ou prova foi adotada.'],task.id);
+            emitEvent(options.onEvent,{type:'verification-declaration-rejected',subject:task.id,message:'Metadado de conformidade rejeitado; a receita executável continua candidata e precisa produzir sua própria prova.',detail:{owner,checkId:recovered.id,original:structuredClone(candidate.conformance),retained:original?.conformance?structuredClone(original.conformance):null,reason:'The proposed declaration does not match a scoped literal provider obligation.',validation:'actual-execution-required'}});
+            return recovered;
+          }
           recordConformanceCorrection(plan,decoded?.correction);
           return normalized!;
         }

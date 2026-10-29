@@ -1,0 +1,1791 @@
+{
+  "schema": "capivara/control-measurement/1",
+  "generatedAt": "2026-10-29T14:53:32.929Z",
+  "before": {
+    "databaseSHA256": "39bb3c9223d27818e20a3d3581b796e7c4ece2d156db489f5d7cd2c9f20cca1c",
+    "status": "waiting",
+    "stage": "build",
+    "lastFailureKind": "planning",
+    "events": 3768,
+    "lastEventId": 3768,
+    "domainCalls": 11,
+    "roles": {
+      "analyst": {
+        "calls": 1,
+        "durationMs": 12566
+      },
+      "planner": {
+        "calls": 10,
+        "durationMs": 203619
+      },
+      "editor": {
+        "calls": 15,
+        "durationMs": 1322564
+      },
+      "reviewer": {
+        "calls": 20,
+        "durationMs": 179338
+      },
+      "repair": {
+        "calls": 11,
+        "durationMs": 168428
+      }
+    },
+    "calls": [
+      {
+        "eventId": 19,
+        "role": "analyst",
+        "status": "complete",
+        "durationMs": 12566
+      },
+      {
+        "eventId": 31,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 5510
+      },
+      {
+        "eventId": 58,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 16699
+      },
+      {
+        "eventId": 73,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 7285
+      },
+      {
+        "eventId": 91,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 43419
+      },
+      {
+        "eventId": 108,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 41237
+      },
+      {
+        "eventId": 119,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 8018
+      },
+      {
+        "eventId": 208,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 28192
+      },
+      {
+        "eventId": 262,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 7267
+      },
+      {
+        "eventId": 349,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 36483
+      },
+      {
+        "eventId": 412,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 6748
+      },
+      {
+        "eventId": 531,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 65651
+      },
+      {
+        "eventId": 594,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 7577
+      },
+      {
+        "eventId": 701,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 54169
+      },
+      {
+        "eventId": 766,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 22131
+      },
+      {
+        "eventId": 896,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 108475
+      },
+      {
+        "eventId": 965,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 10125
+      },
+      {
+        "eventId": 1003,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 14031
+      },
+      {
+        "eventId": 1068,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 7692
+      },
+      {
+        "eventId": 1240,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 56719
+      },
+      {
+        "eventId": 1304,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 70129
+      },
+      {
+        "eventId": 1341,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9506
+      },
+      {
+        "eventId": 1441,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9308
+      },
+      {
+        "eventId": 1495,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 22839
+      },
+      {
+        "eventId": 1571,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 48851
+      },
+      {
+        "eventId": 1597,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 11145
+      },
+      {
+        "eventId": 1663,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 8574
+      },
+      {
+        "eventId": 1748,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 36778
+      },
+      {
+        "eventId": 1813,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 6115
+      },
+      {
+        "eventId": 2005,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 396376
+      },
+      {
+        "eventId": 2063,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 8703
+      },
+      {
+        "eventId": 2131,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 23097
+      },
+      {
+        "eventId": 2142,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 28848
+      },
+      {
+        "eventId": 2153,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 18853
+      },
+      {
+        "eventId": 2270,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 23673
+      },
+      {
+        "eventId": 2309,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 34569
+      },
+      {
+        "eventId": 2373,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9163
+      },
+      {
+        "eventId": 2437,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9865
+      },
+      {
+        "eventId": 2525,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 90317
+      },
+      {
+        "eventId": 2587,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 5441
+      },
+      {
+        "eventId": 2729,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 202718
+      },
+      {
+        "eventId": 2784,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 6832
+      },
+      {
+        "eventId": 2910,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 6232
+      },
+      {
+        "eventId": 2990,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 11621
+      },
+      {
+        "eventId": 3060,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 7018
+      },
+      {
+        "eventId": 3148,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 34475
+      },
+      {
+        "eventId": 3234,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 22618
+      },
+      {
+        "eventId": 3297,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 8936
+      },
+      {
+        "eventId": 3317,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 4657
+      },
+      {
+        "eventId": 3384,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 3846
+      },
+      {
+        "eventId": 3486,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 71767
+      },
+      {
+        "eventId": 3590,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 10998
+      },
+      {
+        "eventId": 3610,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 4565
+      },
+      {
+        "eventId": 3682,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 11651
+      },
+      {
+        "eventId": 3710,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 18649
+      },
+      {
+        "eventId": 3737,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 10653
+      },
+      {
+        "eventId": 3757,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 17135
+      }
+    ],
+    "requirements": 16,
+    "uncoveredRequirementIds": [],
+    "interview": {
+      "gaps": 0,
+      "answered": 0,
+      "pending": false
+    },
+    "plan": {
+      "status": "ready",
+      "tasks": 14,
+      "obligations": [
+        {
+          "requirementId": "req-8091f8dde742",
+          "kind": "provider",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-699d2789af50",
+          "kind": "provider",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-da897ccf78da",
+          "kind": "provider",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-eec7b21a5dca",
+          "kind": "provider",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-567ded7e1dec",
+          "kind": "provider",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-aa53eb398162",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-1277259b7811",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        }
+      ]
+    },
+    "execution": {
+      "present": true,
+      "completed": 13,
+      "proofs": 28
+    }
+  },
+  "after": {
+    "databaseSHA256": "cb552fd186bad5ca17d9ea0f58f16fbeafb5652c3cdd28ffb43590bd0fd6aa94",
+    "status": "complete",
+    "stage": "build",
+    "lastFailureKind": null,
+    "events": 12570,
+    "lastEventId": 12570,
+    "domainCalls": 26,
+    "roles": {
+      "analyst": {
+        "calls": 1,
+        "durationMs": 12566
+      },
+      "planner": {
+        "calls": 25,
+        "durationMs": 360825
+      },
+      "editor": {
+        "calls": 15,
+        "durationMs": 1322564
+      },
+      "reviewer": {
+        "calls": 57,
+        "durationMs": 510253
+      },
+      "repair": {
+        "calls": 33,
+        "durationMs": 530900
+      }
+    },
+    "calls": [
+      {
+        "eventId": 19,
+        "role": "analyst",
+        "status": "complete",
+        "durationMs": 12566
+      },
+      {
+        "eventId": 31,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 5510
+      },
+      {
+        "eventId": 58,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 16699
+      },
+      {
+        "eventId": 73,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 7285
+      },
+      {
+        "eventId": 91,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 43419
+      },
+      {
+        "eventId": 108,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 41237
+      },
+      {
+        "eventId": 119,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 8018
+      },
+      {
+        "eventId": 208,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 28192
+      },
+      {
+        "eventId": 262,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 7267
+      },
+      {
+        "eventId": 349,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 36483
+      },
+      {
+        "eventId": 412,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 6748
+      },
+      {
+        "eventId": 531,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 65651
+      },
+      {
+        "eventId": 594,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 7577
+      },
+      {
+        "eventId": 701,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 54169
+      },
+      {
+        "eventId": 766,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 22131
+      },
+      {
+        "eventId": 896,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 108475
+      },
+      {
+        "eventId": 965,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 10125
+      },
+      {
+        "eventId": 1003,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 14031
+      },
+      {
+        "eventId": 1068,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 7692
+      },
+      {
+        "eventId": 1240,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 56719
+      },
+      {
+        "eventId": 1304,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 70129
+      },
+      {
+        "eventId": 1341,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9506
+      },
+      {
+        "eventId": 1441,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9308
+      },
+      {
+        "eventId": 1495,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 22839
+      },
+      {
+        "eventId": 1571,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 48851
+      },
+      {
+        "eventId": 1597,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 11145
+      },
+      {
+        "eventId": 1663,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 8574
+      },
+      {
+        "eventId": 1748,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 36778
+      },
+      {
+        "eventId": 1813,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 6115
+      },
+      {
+        "eventId": 2005,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 396376
+      },
+      {
+        "eventId": 2063,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 8703
+      },
+      {
+        "eventId": 2131,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 23097
+      },
+      {
+        "eventId": 2142,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 28848
+      },
+      {
+        "eventId": 2153,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 18853
+      },
+      {
+        "eventId": 2270,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 23673
+      },
+      {
+        "eventId": 2309,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 34569
+      },
+      {
+        "eventId": 2373,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9163
+      },
+      {
+        "eventId": 2437,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9865
+      },
+      {
+        "eventId": 2525,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 90317
+      },
+      {
+        "eventId": 2587,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 5441
+      },
+      {
+        "eventId": 2729,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 202718
+      },
+      {
+        "eventId": 2784,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 6832
+      },
+      {
+        "eventId": 2910,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 6232
+      },
+      {
+        "eventId": 2990,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 11621
+      },
+      {
+        "eventId": 3060,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 7018
+      },
+      {
+        "eventId": 3148,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 34475
+      },
+      {
+        "eventId": 3234,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 22618
+      },
+      {
+        "eventId": 3297,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 8936
+      },
+      {
+        "eventId": 3317,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 4657
+      },
+      {
+        "eventId": 3384,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 3846
+      },
+      {
+        "eventId": 3486,
+        "role": "editor",
+        "status": "complete",
+        "durationMs": 71767
+      },
+      {
+        "eventId": 3590,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 10998
+      },
+      {
+        "eventId": 3610,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 4565
+      },
+      {
+        "eventId": 3682,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 11651
+      },
+      {
+        "eventId": 3710,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 18649
+      },
+      {
+        "eventId": 3737,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 10653
+      },
+      {
+        "eventId": 3757,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 17135
+      },
+      {
+        "eventId": 3888,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 14017
+      },
+      {
+        "eventId": 3941,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 52056
+      },
+      {
+        "eventId": 3993,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 5525
+      },
+      {
+        "eventId": 4018,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 12451
+      },
+      {
+        "eventId": 4029,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 9369
+      },
+      {
+        "eventId": 4091,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 7598
+      },
+      {
+        "eventId": 4114,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 16347
+      },
+      {
+        "eventId": 4140,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 14954
+      },
+      {
+        "eventId": 4350,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9240
+      },
+      {
+        "eventId": 4370,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 4453
+      },
+      {
+        "eventId": 4388,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 4532
+      },
+      {
+        "eventId": 4412,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 5391
+      },
+      {
+        "eventId": 4565,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9587
+      },
+      {
+        "eventId": 4585,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 4354
+      },
+      {
+        "eventId": 4603,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 4840
+      },
+      {
+        "eventId": 4627,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 6138
+      },
+      {
+        "eventId": 4759,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 4652
+      },
+      {
+        "eventId": 4976,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 8026
+      },
+      {
+        "eventId": 5082,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9723
+      },
+      {
+        "eventId": 5200,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 8006
+      },
+      {
+        "eventId": 5308,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 10348
+      },
+      {
+        "eventId": 5435,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 10877
+      },
+      {
+        "eventId": 5541,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 8936
+      },
+      {
+        "eventId": 5644,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 8399
+      },
+      {
+        "eventId": 5694,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 36034
+      },
+      {
+        "eventId": 5741,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 7610
+      },
+      {
+        "eventId": 5847,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 7362
+      },
+      {
+        "eventId": 5961,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9498
+      },
+      {
+        "eventId": 6067,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 10241
+      },
+      {
+        "eventId": 6170,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 6544
+      },
+      {
+        "eventId": 6192,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 10837
+      },
+      {
+        "eventId": 6256,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9566
+      },
+      {
+        "eventId": 6299,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 55810
+      },
+      {
+        "eventId": 6363,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 8182
+      },
+      {
+        "eventId": 6383,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 4396
+      },
+      {
+        "eventId": 6401,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 6673
+      },
+      {
+        "eventId": 6427,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 8671
+      },
+      {
+        "eventId": 6510,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 3978
+      },
+      {
+        "eventId": 6639,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 6883
+      },
+      {
+        "eventId": 6747,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 11942
+      },
+      {
+        "eventId": 6767,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 4931
+      },
+      {
+        "eventId": 7354,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 16540
+      },
+      {
+        "eventId": 7441,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 15418
+      },
+      {
+        "eventId": 7461,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 7580
+      },
+      {
+        "eventId": 7528,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 4687
+      },
+      {
+        "eventId": 7692,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 10093
+      },
+      {
+        "eventId": 7711,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 9070
+      },
+      {
+        "eventId": 7818,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 10109
+      },
+      {
+        "eventId": 7838,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 6057
+      },
+      {
+        "eventId": 8063,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 13517
+      },
+      {
+        "eventId": 8175,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9599
+      },
+      {
+        "eventId": 8195,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 6385
+      },
+      {
+        "eventId": 8427,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 15533
+      },
+      {
+        "eventId": 8552,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 12298
+      },
+      {
+        "eventId": 8572,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 6695
+      },
+      {
+        "eventId": 8808,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 12896
+      },
+      {
+        "eventId": 8831,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 15505
+      },
+      {
+        "eventId": 9512,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 27609
+      },
+      {
+        "eventId": 9742,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 6072
+      },
+      {
+        "eventId": 9814,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 8147
+      },
+      {
+        "eventId": 9835,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 20556
+      },
+      {
+        "eventId": 9915,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 10907
+      },
+      {
+        "eventId": 10483,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 12326
+      },
+      {
+        "eventId": 10672,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 11201
+      },
+      {
+        "eventId": 10699,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 13883
+      },
+      {
+        "eventId": 10884,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 19612
+      },
+      {
+        "eventId": 10907,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 14409
+      },
+      {
+        "eventId": 11382,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 23937
+      },
+      {
+        "eventId": 11409,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 14099
+      },
+      {
+        "eventId": 11560,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9444
+      },
+      {
+        "eventId": 11580,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 6614
+      },
+      {
+        "eventId": 11598,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 5779
+      },
+      {
+        "eventId": 11622,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 7382
+      },
+      {
+        "eventId": 11707,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 7657
+      }
+    ],
+    "requirements": 16,
+    "uncoveredRequirementIds": [],
+    "interview": {
+      "gaps": 0,
+      "answered": 0,
+      "pending": false
+    },
+    "plan": {
+      "status": "ready",
+      "tasks": 14,
+      "obligations": [
+        {
+          "requirementId": "req-8091f8dde742",
+          "kind": "provider",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-699d2789af50",
+          "kind": "provider",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-da897ccf78da",
+          "kind": "provider",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-eec7b21a5dca",
+          "kind": "provider",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-567ded7e1dec",
+          "kind": "provider",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-aa53eb398162",
+          "kind": "interface",
+          "recipeStatus": "pending",
+          "recipes": [],
+          "verification": "required-in-build"
+        },
+        {
+          "requirementId": "req-1277259b7811",
+          "kind": "interface",
+          "recipeStatus": "planned",
+          "recipes": [
+            {
+              "taskId": "release-verification",
+              "checkId": "check-c2b2105d2544"
+            }
+          ],
+          "verification": "required-in-build"
+        }
+      ]
+    },
+    "execution": {
+      "present": true,
+      "completed": 14,
+      "proofs": 103
+    }
+  },
+  "delta": {
+    "domainCalls": 15,
+    "calls": [
+      {
+        "eventId": 3888,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 14017
+      },
+      {
+        "eventId": 3941,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 52056
+      },
+      {
+        "eventId": 3993,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 5525
+      },
+      {
+        "eventId": 4018,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 12451
+      },
+      {
+        "eventId": 4029,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 9369
+      },
+      {
+        "eventId": 4091,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 7598
+      },
+      {
+        "eventId": 4114,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 16347
+      },
+      {
+        "eventId": 4140,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 14954
+      },
+      {
+        "eventId": 4350,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9240
+      },
+      {
+        "eventId": 4370,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 4453
+      },
+      {
+        "eventId": 4388,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 4532
+      },
+      {
+        "eventId": 4412,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 5391
+      },
+      {
+        "eventId": 4565,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9587
+      },
+      {
+        "eventId": 4585,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 4354
+      },
+      {
+        "eventId": 4603,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 4840
+      },
+      {
+        "eventId": 4627,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 6138
+      },
+      {
+        "eventId": 4759,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 4652
+      },
+      {
+        "eventId": 4976,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 8026
+      },
+      {
+        "eventId": 5082,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9723
+      },
+      {
+        "eventId": 5200,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 8006
+      },
+      {
+        "eventId": 5308,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 10348
+      },
+      {
+        "eventId": 5435,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 10877
+      },
+      {
+        "eventId": 5541,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 8936
+      },
+      {
+        "eventId": 5644,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 8399
+      },
+      {
+        "eventId": 5694,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 36034
+      },
+      {
+        "eventId": 5741,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 7610
+      },
+      {
+        "eventId": 5847,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 7362
+      },
+      {
+        "eventId": 5961,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9498
+      },
+      {
+        "eventId": 6067,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 10241
+      },
+      {
+        "eventId": 6170,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 6544
+      },
+      {
+        "eventId": 6192,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 10837
+      },
+      {
+        "eventId": 6256,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9566
+      },
+      {
+        "eventId": 6299,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 55810
+      },
+      {
+        "eventId": 6363,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 8182
+      },
+      {
+        "eventId": 6383,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 4396
+      },
+      {
+        "eventId": 6401,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 6673
+      },
+      {
+        "eventId": 6427,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 8671
+      },
+      {
+        "eventId": 6510,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 3978
+      },
+      {
+        "eventId": 6639,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 6883
+      },
+      {
+        "eventId": 6747,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 11942
+      },
+      {
+        "eventId": 6767,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 4931
+      },
+      {
+        "eventId": 7354,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 16540
+      },
+      {
+        "eventId": 7441,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 15418
+      },
+      {
+        "eventId": 7461,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 7580
+      },
+      {
+        "eventId": 7528,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 4687
+      },
+      {
+        "eventId": 7692,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 10093
+      },
+      {
+        "eventId": 7711,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 9070
+      },
+      {
+        "eventId": 7818,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 10109
+      },
+      {
+        "eventId": 7838,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 6057
+      },
+      {
+        "eventId": 8063,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 13517
+      },
+      {
+        "eventId": 8175,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9599
+      },
+      {
+        "eventId": 8195,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 6385
+      },
+      {
+        "eventId": 8427,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 15533
+      },
+      {
+        "eventId": 8552,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 12298
+      },
+      {
+        "eventId": 8572,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 6695
+      },
+      {
+        "eventId": 8808,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 12896
+      },
+      {
+        "eventId": 8831,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 15505
+      },
+      {
+        "eventId": 9512,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 27609
+      },
+      {
+        "eventId": 9742,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 6072
+      },
+      {
+        "eventId": 9814,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 8147
+      },
+      {
+        "eventId": 9835,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 20556
+      },
+      {
+        "eventId": 9915,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 10907
+      },
+      {
+        "eventId": 10483,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 12326
+      },
+      {
+        "eventId": 10672,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 11201
+      },
+      {
+        "eventId": 10699,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 13883
+      },
+      {
+        "eventId": 10884,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 19612
+      },
+      {
+        "eventId": 10907,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 14409
+      },
+      {
+        "eventId": 11382,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 23937
+      },
+      {
+        "eventId": 11409,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 14099
+      },
+      {
+        "eventId": 11560,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 9444
+      },
+      {
+        "eventId": 11580,
+        "role": "repair",
+        "status": "complete",
+        "durationMs": 6614
+      },
+      {
+        "eventId": 11598,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 5779
+      },
+      {
+        "eventId": 11622,
+        "role": "planner",
+        "status": "complete",
+        "durationMs": 7382
+      },
+      {
+        "eventId": 11707,
+        "role": "reviewer",
+        "status": "complete",
+        "durationMs": 7657
+      }
+    ]
+  },
+  "limits": [
+    "A ready plan is not product acceptance.",
+    "Agent wall time is not financial cost.",
+    "Database hashes cover the named database file, not uncheckpointed WAL contents."
+  ]
+}

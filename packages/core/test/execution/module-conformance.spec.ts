@@ -137,6 +137,9 @@ it('does not turn cached module resolution or example import text into a product
 it('recovers one literal readiness import only after confirming the actual host protocol',async()=>{
   const root=await mkdtemp(join(tmpdir(),'capivara-module-declaration-'));temporary.push(root);
   expect(await inferProviderModule(root,[process.execPath,'-e',"require('node:sqlite')"],{})).toEqual({protocol:'node',specifier:'node:sqlite',runtimeCommand:[process.execPath]});
+  expect(await inferProviderModule(root,[process.execPath,'-e',"try { console.log(require.resolve('node:sqlite')) } catch { process.exit(1) }"],{})).toEqual({protocol:'node',specifier:'node:sqlite',runtimeCommand:[process.execPath]});
+  expect(await inferProviderModule(root,[process.execPath,'-e',"require.resolve('node:fs');require('node:sqlite')"],{})).toBeUndefined();
+  expect(await inferProviderModule(root,[process.execPath,'-e',"require.resolve(process.argv[1])"],{})).toBeUndefined();
   expect(await inferProviderModule(root,[process.execPath,'-e',"require('node:fs');require('node:sqlite')"],{})).toBeUndefined();
   expect(await inferProviderModule(root,[process.execPath,'-e',"require(process.argv[1])"],{})).toBeUndefined();
   if(process.platform!=='win32')expect(await inferProviderModule(root,['/bin/sh','-c',"require('node:sqlite')"],{})).toBeUndefined();

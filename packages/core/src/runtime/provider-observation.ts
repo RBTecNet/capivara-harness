@@ -10,7 +10,7 @@ import { executeCommand } from './command.js';
 
 /** Mechanical observation identity. These versions describe executable
  * instruments, independently from model prompts, inspection and user criteria. */
-export const PROVIDER_OBSERVATION_PROTOCOL={runtime:'node-load-hook/2',runtimePython:'python-runtime-load/1',modules:'provider-module-import/2',consumptions:'bounded-file-consumption/2',processes:'loaded-provider-entrypoint/1',writes:'observed-provider-write/1'} as const;
+export const PROVIDER_OBSERVATION_PROTOCOL={runtime:'node-load-hook/2',runtimePython:'python-runtime-load/1',modules:'provider-module-import/2',consumptions:'bounded-file-consumption/2',processes:'loaded-provider-entrypoint/1',writes:'observed-provider-write/2'} as const;
 
 export interface ProviderWitness {
   source: 'node-load-hook'|'python-profile-hook';
@@ -182,8 +182,8 @@ export async function inferProviderModule(cwd:string,argv:readonly string[],envi
   const index=argv.findIndex((value,index)=>index>0&&['-e','--eval','-c'].includes(value));
   if(index<1||index+2!==argv.length)return undefined;
   const code=argv[index+1]!,candidates:ProviderModule[]=[];
-  const nodeImports=[...code.matchAll(/\b(?:require|import)\s*\(\s*(['"])([^'"\\\n]+)\1\s*\)|\bimport\s+(?:[^;'"\n]*?\s+from\s+)?(['"])([^'"\\\n]+)\3/g)].map(match=>match[2]??match[4]!);
-  const nodeCalls=[...code.matchAll(/\b(?:require|import)\s*\(/g)].length;
+  const nodeImports=[...code.matchAll(/\b(?:require(?:\.resolve)?|import)\s*\(\s*(['"])([^'"\\\n]+)\1\s*\)|\bimport\s+(?:[^;'"\n]*?\s+from\s+)?(['"])([^'"\\\n]+)\3/g)].map(match=>match[2]??match[4]!);
+  const nodeCalls=[...code.matchAll(/\b(?:require(?:\.resolve)?|import)\s*\(/g)].length;
   if(nodeImports.length===1&&nodeCalls<=1)candidates.push({protocol:'node',specifier:nodeImports[0]!,runtimeCommand:argv.slice(0,index)});
   const pythonImports:string[]=[];
   for(const match of code.matchAll(/(?:^|[;\n])\s*(?:from\s+([\w.]+)\s+import\s+[^;\n]+|import\s+([^;\n]+))/g)){
@@ -362,6 +362,30 @@ const fileWritePreload=String.raw`
     const promise=fsp[name];fsp[name]=async function(input,...args){const result=await Reflect.apply(promise,this,[input,...args]);recordWrite(input);return result;};
   }
   const originalWriteStream=fs.createWriteStream;fs.createWriteStream=function(input,...args){const stream=Reflect.apply(originalWriteStream,this,[input,...args]);stream.once('finish',()=>recordWrite(input));return stream;};
+  // Compilers and other consumers may use open/write/close descriptors instead
+  // of writeFile. Keep actual descriptor ownership and emit the final hash only
+  // after a successful close, or while its still-owned descriptor exits.
+  const writeDescriptors=new Map(),originalFstat=fs.fstatSync.bind(fs),originalStat=fs.statSync.bind(fs);
+  const trackDescriptor=(fd,input,flags)=>{
+    const writable=typeof flags==='number'?Boolean(flags&(fs.constants.O_WRONLY|fs.constants.O_RDWR)):typeof flags==='string'&&/[wa+]/.test(flags);
+    if(!writable||writeDescriptors.size>=2048)return;
+    const file=writtenPath(input);if(!file)return;
+    const identity=originalFstat(fd);
+    const truncated=typeof flags==='number'?Boolean(flags&fs.constants.O_TRUNC):flags.startsWith('w');
+    writeDescriptors.set(fd,{input:file.actual,device:identity.dev,inode:identity.ino,dirty:truncated});
+  };
+  const dirtyDescriptor=fd=>{const record=writeDescriptors.get(fd);if(record)record.dirty=true;};
+  const flushDescriptor=(fd,record,closed=false)=>{
+    if(!record?.dirty)return;
+    try{const named=originalStat(record.input);if(!named.isFile()||named.dev!==record.device||named.ino!==record.inode)return;if(!closed){const descriptor=originalFstat(fd);if(!descriptor.isFile()||descriptor.dev!==named.dev||descriptor.ino!==named.ino)return;}recordWrite(record.input);}catch{}
+  };
+  const originalOpenSync=fs.openSync;fs.openSync=function(input,flags,...args){const fd=Reflect.apply(originalOpenSync,this,[input,flags,...args]);trackDescriptor(fd,input,flags);return fd;};
+  const originalOpen=fs.open;fs.open=function(input,flags,...args){const callback=args.at(-1);if(typeof callback!=='function')return Reflect.apply(originalOpen,this,[input,flags,...args]);args[args.length-1]=function(error,fd){if(!error)trackDescriptor(fd,input,flags);return Reflect.apply(callback,this,arguments);};return Reflect.apply(originalOpen,this,[input,flags,...args]);};
+  for(const name of ['writeSync','writevSync','ftruncateSync']){const original=fs[name];if(typeof original!=='function')continue;fs[name]=function(fd,...args){const result=Reflect.apply(original,this,[fd,...args]);if(name==='ftruncateSync'||result>0)dirtyDescriptor(fd);return result;};}
+  for(const name of ['write','writev','ftruncate']){const original=fs[name];if(typeof original!=='function')continue;fs[name]=function(fd,...args){const callback=args.at(-1);if(typeof callback!=='function')return Reflect.apply(original,this,[fd,...args]);args[args.length-1]=function(error,bytesWritten){if(!error&&(name==='ftruncate'||bytesWritten>0))dirtyDescriptor(fd);return Reflect.apply(callback,this,arguments);};return Reflect.apply(original,this,[fd,...args]);};}
+  const originalCloseSync=fs.closeSync;fs.closeSync=function(fd,...args){const record=writeDescriptors.get(fd),result=Reflect.apply(originalCloseSync,this,[fd,...args]);if(writeDescriptors.get(fd)===record)writeDescriptors.delete(fd);flushDescriptor(fd,record,true);return result;};
+  const originalClose=fs.close;fs.close=function(fd,...args){const callback=args.at(-1);if(typeof callback!=='function')return Reflect.apply(originalClose,this,[fd,...args]);const record=writeDescriptors.get(fd);args[args.length-1]=function(error){if(!error){if(writeDescriptors.get(fd)===record)writeDescriptors.delete(fd);flushDescriptor(fd,record,true);}return Reflect.apply(callback,this,arguments);};return Reflect.apply(originalClose,this,[fd,...args]);};
+  process.once('exit',()=>{for(const [fd,record] of writeDescriptors)flushDescriptor(fd,record);});
   Module.syncBuiltinESMExports();
 `;
 const modulePreload=String.raw`'use strict';

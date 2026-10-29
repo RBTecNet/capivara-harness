@@ -37,6 +37,8 @@ import { repositoryRecipeCandidate } from './recipe-candidates.js';
 import { repositoryVerificationCandidates, verificationSurfaces } from './verification-debt.js';
 import { cachedPositiveVerifications } from './verification-cache.js';
 import { VerificationMutationError, verificationMutationError } from './verification-mutations.js';
+import { closeVerificationGraph, VerificationGraphError } from './verification-graph.js';
+import { createVerificationRepairContext } from './verification-repair-context.js';
 import { candidateFromRecordedInterfaceProof, interfaceInvocationKey, narrowUnobservedWebRecipe } from './verification-interface-recovery.js';
 import { prepareBrowserResources, type BrowserResourceResult } from '../runtime/browser-resources.js';
 import { beginEnvironmentRecovery, commitEnvironmentRecovery, environmentRecoveryTask, environmentRecoveryContext, resumeEnvironmentRecovery } from './recovery-scope.js';
@@ -46,13 +48,15 @@ import type { ActionRecord, BuildIncident, BuildMetrics, BuildOptions, BuildOutc
 export { interpretReview } from './review.js';
 
 const now = (): string => new Date().toISOString();
-const executionProtocol = 'capivara-control/22';
+const executionProtocol = 'capivara-control/27';
 const external = (result: AgentResult): boolean => result.status === 'unavailable' && !result.issue || ['transport','authentication','rate-limit','capacity','configuration'].includes(result.issue?.kind ?? '');
 const definitionHash = (task: WorkUnit): string => digest(JSON.stringify(task));
+const instrumentKey=(check:Verification):string=>digest(JSON.stringify({kind:check.kind,level:verificationLevel(check),command:check.command,args:check.args,cwd:check.cwd??'.',input:check.input,steps:check.steps,closeInput:check.closeInput,assertion:verificationAssertionStatus(check).assertion,expectedExitCode:check.expectedExitCode??0}));
 const exists = (path: string): Promise<boolean> => access(path).then(() => true, () => false);
 const declaredOutputs = verificationOutputs;
 const taskWriteScopes = (task:WorkUnit,state:BuildState):string[] => [...new Set([...task.files,...(state.tasks[task.id]?.checks??task.checks).flatMap(declaredOutputs)])];
 class WorkPlanningError extends Error {}
+class ObservedProducerContract extends Error {}
 const operationalValue = (value: unknown): OperationalEnvironment | undefined => value && typeof value === 'object' && 'revision' in value && 'bindings' in value ? value as OperationalEnvironment : undefined;
 
 export function createBuildState(plan: DevelopmentPlan): BuildState {
@@ -128,6 +132,10 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     if(recovered&&(digest(JSON.stringify(node))===recovered.originalHash||digest(JSON.stringify(node))===digest(JSON.stringify(recovered.definition))))Object.assign(node,structuredClone(recovered.definition));
   }
   const metrics: BuildMetrics = state.metrics ??= { startedAt: now(), elapsedMs: 0, maxConcurrency: 0, active: 0, callsByRole: {}, timeByStageMs: {}, invalidations: [], repetitions: [], timeline: [] };
+  const authorityHash=digest(JSON.stringify({request:options.brief.request,decisions:options.brief.decisions.map(decision=>decision.source),constraints:options.brief.constraints.map(constraint=>constraint.source)}));
+  const retiredInstrument=(check:Verification):boolean=>state.retiredInstruments?.some(item=>item.authorityHash===authorityHash&&item.key===instrumentKey(check))??false;
+  for(const task of plan.tasks)task.checks=task.checks.filter(check=>!retiredInstrument(check));
+  if(plan.acceptance)plan.acceptance=plan.acceptance.filter(check=>!retiredInstrument(check));
   for(const restored of lineage.restored){metrics.repetitions.push({taskId:restored.previousTaskId,action:'restore-plan-lineage',reason:`Recovered exact checkpoint definition ${restored.previousDefinitionHash}; replaced ${restored.replacementTaskId} without replaying implementation.`,at:now()});emitEvent(options.onEvent,{type:'recovery',subject:restored.previousTaskId,message:'Contrato e proposta parcial recuperados por identidade exata; verificação e revisão continuam obrigatórias.',detail:restored});}
   metrics.active = 0;
   const started = Date.now(), elapsedBefore = metrics.elapsedMs;
@@ -165,7 +173,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     metrics.repetitions.push({taskId:id,action:'retire-replan',reason,at:now()});event('recovery','Reconciliação antiga aposentada com seu plano; causa histórica preservada.',id,{incidentId:problem.id,reason});
   }};
   recordRetiredReplans(retiredReplans);
-  const scheduleReplan=(task:WorkUnit,problem:BuildIncident):void=>{const consumers=plan.tasks.filter(unit=>unit.requirementIds.some(id=>task.requirementIds.includes(id)));const owner=plan.tasks.find(unit=>unit.id===task.id)??consumers.find(unit=>!consumers.some(other=>other.dependsOn.includes(unit.id)))??consumers[0]??plan.tasks[0];if(!problem.repairScope)problem.repairScope=state.tasks[task.id]?.checkpoint?.phase==='checking'?'verification':'delivery';if(owner){replans.set(owner.id,problem);state.pendingReplans??={};state.pendingReplans[owner.id]=structuredClone(problem);}else note(problem);};
+  const scheduleReplan=(task:WorkUnit,problem:BuildIncident):void=>{const consumers=plan.tasks.filter(unit=>unit.requirementIds.some(id=>task.requirementIds.includes(id)));const owner=plan.tasks.find(unit=>unit.id===task.id)??consumers.find(unit=>!consumers.some(other=>other.dependsOn.includes(unit.id)))??consumers[0]??plan.tasks[0];if(!problem.repairScope)problem.repairScope=problem.kind==='instrument'?'verification':problem.kind==='environment'?'environment':state.tasks[task.id]?.checkpoint?.phase==='checking'?'verification':'delivery';if(owner){replans.set(owner.id,problem);state.pendingReplans??={};state.pendingReplans[owner.id]=structuredClone(problem);}else note(problem);};
   const save = async (): Promise<void> => {
     state.planRevision = plan.revision; state.updatedAt = now(); metrics.elapsedMs = elapsedBefore + Date.now() - started;
     const value = structuredClone(state),currentPlan=structuredClone(plan);
@@ -380,6 +388,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       action.result=structuredClone(result);if(result.issue)action.failure=result.issue.message;
       metrics.timeByStageMs[role]=(metrics.timeByStageMs[role]??0)+agentDuration;
       progress.changedFiles=[...new Set([...progress.changedFiles,...result.changedFiles])];
+      if(!readOnly&&purpose==='implementation'&&progress.generatedFiles)progress.generatedFiles=progress.generatedFiles.filter(path=>!result.changedFiles.includes(path));
       await save();
     }
     return result;
@@ -569,16 +578,16 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     const problem=incident('planning',task.id,'The observed command has no executable assertion contract after independent interpretation. Reconcile only this proof; preserve implemented work.',JSON.stringify(observations));problem.repairScope='verification';scheduleReplan(task,problem);
     return false;
   };
-  const triageAssertionFailure = async(task:WorkUnit,workspace:string,operational:OperationalEnvironment,failures:VerificationOutcome[]):Promise<boolean>=>{
+  const triageAssertionFailure = async(task:WorkUnit,workspace:string,operational:OperationalEnvironment,failures:VerificationOutcome[],resolveInstrument?:()=>Promise<boolean>):Promise<boolean>=>{
     const checks=state.tasks[task.id]!.checks??task.checks;
     const candidates=failures.filter(failure=>{
       const check=checks.find(check=>check.id===failure.evidence.checkId),observed=failure.evidence.observation;
-      const instrument=check?.kind==='command'||check?.instrument?.output==='runner'||check?.kind==='cli'&&!options.brief.modes.includes('cli')||check?.kind==='web'&&usableProof(check,failure.evidence);
-      return instrument&&failure.classification==='product'&&failure.evidence.assertionStatus==='failed'&&observed&&!observed.issue&&!observed.cancelled&&!observed.timedOut&&observed.exitCode===(check!.expectedExitCode??0);
+      const instrument=Boolean(resolveInstrument)||check?.kind==='command'||check?.instrument?.output==='runner'||check?.kind==='cli'&&!options.brief.modes.includes('cli')||check?.kind==='web'&&usableProof(check,failure.evidence);
+      return instrument&&failure.classification==='product'&&failure.evidence.assertionStatus==='failed'&&observed&&!observed.issue&&!observed.cancelled&&!observed.timedOut&&(observed.exitCode===(check!.expectedExitCode??0)||inlineVerificationSyntaxRequired(check!)||Boolean(resolveInstrument));
     });
     if(!candidates.length)return false;
     const payload=JSON.stringify({criteria:task.criteria,checks:candidates.map(failure=>({definition:checks.find(check=>check.id===failure.evidence.checkId),observation:failure.evidence.observation}))});
-    const diagnosis=await invoke(task,workspace,'reviewer','Classify a successful verification command whose generated output assertion failed. Preserve the original negative proof. Distinguish an actual product failure from a wrong assertion or reporter format. Inspect the existing verification source when needed. Return JSON {kind:"product"|"instrument",cause,fix}. A product defect needs concrete expected/observed behavior; do not edit product code to match an invented test-runner summary.',payload,true,`assertion-diagnosis:${digest(payload)}`,operational,payload,'inspection');
+    const diagnosis=await invoke(task,workspace,'reviewer','Classify the observed verification failure before authorizing a product edit. Preserve the original negative proof. Distinguish an actual product defect from a generated runner, fixture, assertion or reporter error. Inspect the real source contract when needed. Return JSON {kind:"product"|"instrument",cause,fix}. A product defect needs concrete expected/observed behavior; a failing generated runner does not by itself establish a product defect.',payload,true,`assertion-diagnosis:${digest(payload)}`,operational,payload,'inspection');
     if(diagnosis.status==='cancelled'){cancelled=true;return false;}
     const value=jsonObject(diagnosis.text);
     if(value?.kind==='product')return false;
@@ -588,12 +597,17 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     state.proofInterpretations??=[];
     for(const failure of candidates)state.proofInterpretations.push({evidenceId:failure.evidence.id,at:now(),originalClassification:failure.classification??'product',classification:'instrument',reason:JSON.stringify(value),...(state.tasks[task.id]!.actions?.at(-1)?.id?{actionId:state.tasks[task.id]!.actions!.at(-1)!.id}:{})});
     await save();
+    if(resolveInstrument&&await resolveInstrument())return true;
+    const runnerFailures=candidates.filter(failure=>failure.evidence.observation!.exitCode!==(checks.find(check=>check.id===failure.evidence.checkId)!.expectedExitCode??0));
+    if(runnerFailures.length)return repairRecipe(task,workspace,operational,`${JSON.stringify(value)}\nOBSERVED NEGATIVE PROOFS\n${JSON.stringify(runnerFailures.map(failure=>({check:checks.find(check=>check.id===failure.evidence.checkId),observation:failure.evidence.observation})))}`,undefined,true,'runner-contract-recovery',undefined,false,runnerFailures.map(failure=>failure.evidence.checkId));
     const classified=candidates.map(failure=>({...failure,classification:'instrument' as const,evidence:{...failure.evidence,assertionStatus:'invalid' as const}}));
     return recoverAssertions(task,workspace,operational,classified,true);
   };
-  const repairRecipe = async (task: WorkUnit,workspace: string,operational: OperationalEnvironment,reason: string,requiredKind?: Verification['kind'],extend=false,strategy='instrument',packet?:string,behaviorRequired=false): Promise<boolean> => {
+  const repairRecipe = async (task: WorkUnit,workspace: string,operational: OperationalEnvironment,reason: string,requiredKind?: Verification['kind'],extend=false,strategy='instrument',packet?:string,behaviorRequired=false,replaceCheckIds?:string[]): Promise<boolean> => {
     const progress = state.tasks[task.id]!;
-    const answer = await invoke(task,workspace,'repair','Repair only the verification recipe for this existing work unit. Inspect the actual entrypoint and evidence; preserve product files, requirements and interface. Return JSON {checks:[{kind,command,args,expected,assertion:{type:"contains",value:"literal observable output"},expectedExitCode,input,steps,closeInput,requiredCapabilities,target,inputs,level}]}. expected is the human criterion; assertion is an executable object. An inline Node/Python runner may perform actual interaction and create temporary instruments under .capivara-verification in its private writable verification workspace; it is not delivered product code. TUI steps must observe literal ready output before input and a new literal state after input. Do not require more tests by count.',`INSTRUMENT TO RECOVER\n${reason}`,true,`${strategy}:${digest(reason)}`,operational,packet,packet?'inspection':undefined);
+    const limit=progress.contextChars??options.contextChars??24000;
+    const operationContext=packet&&packet.length<=limit?packet:await createVerificationRepairContext({workspace,brief:options.brief,task,checks:progress.checks??task.checks,reason:packet?`${reason}\n${packet}`:reason,limit});
+    const answer = await invoke(task,workspace,'repair','Repair only the verification recipe for this existing work unit. Inspect the actual entrypoint and evidence; preserve product files, requirements and interface. Return JSON {checks:[{kind,command,args,expected,assertion:{type:"contains",value:"literal observable output"},expectedExitCode,input,steps,closeInput,requiredCapabilities,target,inputs,level}]}. expected is the human criterion; assertion is an executable object. An inline Node/Python runner may perform actual interaction and create temporary instruments under .capivara-verification in its private writable verification workspace; it is not delivered product code. TUI steps must observe literal ready output before input and a new literal state after input. Do not require more tests by count.',`INSTRUMENT TO RECOVER\n${reason}`,true,`${strategy}:${digest(reason)}`,operational,operationContext,'inspection');
     if (answer.status === 'cancelled' || external(answer) || answer.issue) return false;
     const value = jsonObject(answer.text);
     const decoded=normalizeChecks(value?.checks,options.brief);
@@ -608,7 +622,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       });
     }
     const key = (items: Verification[]): string => digest(JSON.stringify(items.map(check=>{const {id:_id,expected:_criterion,assertionIssue:_issue,...item}=check;return {...item,assertion:verificationAssertionStatus(check).assertion??null};})));
-    const revised=reconcileChecks(extend?[...(progress.checks??task.checks),...checks]:checks);
+    const revised=reconcileChecks(extend?[...(progress.checks??task.checks).filter(check=>!replaceCheckIds?.includes(check.id)),...checks]:checks);
     if (!checks.length || key(revised) === key(progress.checks ?? task.checks)) return false;
     for(const original of decoded)if(original.kind==='command'&&checks.some(check=>check.id===original.id&&check.kind==='web'))metrics.repetitions.push({taskId:task.id,action:'verification-interface-decoding',reason:JSON.stringify({original,selectedKind:'web',basis:'The recovery operation explicitly requested web interaction and the declaration explicitly targets browser. No execution or approval is inferred.'}),at:now()});
     progress.checks = revised; progress.strategy = 'revalidate-only';if(progress.checkpoint)progress.checkpoint.phase='checking';event('recovery','Receita alterada; o código do produto permanece preservado.',task.id); await save(); return true;
@@ -658,9 +672,12 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     return repairRecipe(task,workspace,operational,`${reason}\nThe repository runner and prior interface proposals were unavailable. Compose a different executable instrument from the actual source${probe?' and the recorded entrypoint observation':''}.`,requiredKind,true,'compose-verification-runner',alternative,true);
   };
   const verify = async (task: WorkUnit,workspace: string,operational: OperationalEnvironment,checks: Verification[]): Promise<VerificationOutcome[]> => {
-    const order=ordered(checks.map(check=>({...check,dependsOn:check.dependsOn??[]})));
-    if(order.unresolved.length)throw new WorkPlanningError(`Verification dependencies are cyclic or missing: ${order.unresolved.map(check=>check.id).join(', ')}.`);
-    checks=order.ready.map(item=>checks.find(check=>check.id===item.id)!);
+    const closed=closeVerificationGraph(checks,[...plan.tasks.flatMap(unit=>(state.tasks[unit.id]?.checks??unit.checks).map(check=>({check,inputs:taskInputs(plan,unit)}))),...(state.acceptanceChecks??[]).map(check=>({check,inputs:[...new Set(plan.tasks.flatMap(unit=>taskInputs(plan,unit)))]}))]);
+    checks=closed.checks;
+    if(closed.imported.length&&state.tasks[task.id]&&plan.tasks.some(unit=>unit.id===task.id)){
+      state.tasks[task.id]!.checks=reconcileChecks([...(state.tasks[task.id]!.checks??task.checks),...checks.filter(check=>closed.imported.includes(check.id))]);
+      metrics.repetitions.push({taskId:task.id,action:'resolve-verification-dependencies',reason:JSON.stringify({imported:closed.imported,basis:'Resolve existing producers by their concrete recipe and original read-set; no dependency or required outcome was erased.'}),at:now()});await save();
+    }
     const owner=state.tasks[task.id];
     const invalidated=new Set(state.proofInterpretations?.filter(item=>item.classification==='invalidated').map(item=>item.evidenceId));
     const available=state.evidence.filter(item=>!invalidated.has(item.id));
@@ -729,7 +746,20 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         state.evidence.push(result.evidence); results.push(result); await save();
         }
       }
-      const result = results.at(-1)!; completed.push(result.evidence.passed ? 'complete' : result.classification === 'transport' || result.classification === 'environment' ? 'waiting' : 'returned');
+      const result = results.at(-1)!;
+      const nativeProducer=task.id==='$acceptance'&&state.nativeConformanceCheckIds?.includes(check.id)&&state.acceptanceChecks?.some(recipe=>recipe.id===check.id);
+      if(result.evidence.passed&&verificationLevel(check)==='build'&&(nativeProducer||owner&&plan.tasks.some(unit=>unit.id===task.id)&&owner.checks?.some(recipe=>recipe.id===check.id))){
+        const declaredInputs=await resolveInputDependencies(workspace,await verificationInputSelectors(workspace,plan,task,check));
+        const effects=await deriveObservedProducerOutputs({workspace,check,evidence:result.evidence,declaredInputs});
+        if(effects.transformation){
+          if(nativeProducer)state.acceptanceChecks=state.acceptanceChecks!.map(recipe=>recipe.id===check.id?effects.check:state.nativeConformanceCheckIds!.includes(recipe.id)&&verificationLevel(recipe)==='behavior'?{...recipe,dependsOn:[...new Set([...(recipe.dependsOn??[]),check.id])]}:recipe);
+          else if(owner){owner.checks=owner.checks!.map(recipe=>recipe.id===check.id?effects.check:recipe);owner.generatedFiles=[...new Set([...(owner.generatedFiles??[]),...effects.outputs.map(output=>output.path)])];}
+          metrics.repetitions.push({taskId:task.id,action:'observe-producer-outputs',reason:JSON.stringify(effects.transformation),at:now()});
+          event('recovery','Saídas reais do produtor separadas das fontes; a receita atualizada será executada antes de qualquer aceite.',task.id,effects.transformation);
+          await save();throw new ObservedProducerContract('The observed producer contract changed; reexecute its candidate without editing the product.');
+        }
+      }
+      completed.push(result.evidence.passed ? 'complete' : result.classification === 'transport' || result.classification === 'environment' ? 'waiting' : 'returned');
       gate(task,id,completed.includes('returned')?'returned':completed.includes('waiting')?'waiting':'complete',`${completed.filter(value=>value==='complete').length}/${completed.length} provas confirmadas.`);
       emitProgress(options.onEvent,{id:'verification',label:`${task.id}: verificações avaliadas`,completed:results.length,total:checks.length,status:results.length===checks.length?'complete':'running',stage:'build',unit:'verificações'});
       if (options.signal?.aborted) break;
@@ -760,6 +790,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     return requiredTaskInterfaces(options.brief,plan,task).find(mode=>!results.some(result=>result.evidence.passed&&result.evidence.kind===mode&&result.evidence.level==='behavior'&&checks.some(check=>check.id===result.evidence.checkId&&usableProof(check,result.evidence))));
   };
   const recoverAcceptance=async(failure:VerificationOutcome,check:Verification,work:WorkUnit,workspace:string,operational:OperationalEnvironment):Promise<boolean>=>{
+    if(state.proofInterpretations?.findLast(item=>item.evidenceId===failure.evidence.id)?.classification==='instrument')failure={...failure,classification:'instrument'};
     note(incident(failure.classification??'instrument',check.id,'Mandatory acceptance did not pass.',failure.evidence.output));
     const fingerprint=digest(JSON.stringify({protocol:executionProtocol,configuration:options.configurationRevision??'',check,input:failure.evidence.inputHash,classification:failure.classification}));state.acceptanceRecovery??={};
     const preceding=state.acceptanceRecovery[fingerprint];
@@ -777,14 +808,33 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     const scoped=paths.length?consumers.filter(task=>task.files.some(file=>paths.some(path=>pathScopesConflict(file,path)))):consumers;
     const leaves=scoped.filter(task=>!scoped.some(other=>other.dependsOn.includes(task.id)));
     const owner=leaves.length===1?leaves[0]:scoped.length===1?scoped[0]:undefined;
-    if(failure.classification==='instrument'){
-      const recovery:WorkUnit={...work,id:`$acceptance:${check.id}`,title:`Recover ${check.id}`,requirementIds:check.requirementIds,files:paths,inputs:paths,checks:[check],criteria:[check.expected??'Restore an executable proof of this mandatory outcome.']};
+    if(failure.classification==='instrument'||failure.classification==='product'&&(inlineVerificationSyntaxRequired(check)||state.nativeConformanceCheckIds?.includes(check.id))){
+      const recovery:WorkUnit={...work,id:`$acceptance:${check.id}`,title:`Recover ${check.id}`,requirementIds:check.requirementIds,files:paths,inputs:paths.length?paths:taskInputs(plan,work),checks:[check],criteria:[check.expected??'Restore an executable proof of this mandatory outcome.']};
       const progress=state.tasks[recovery.id]??=initialTask();progress.checks=[check];
-      const asserted=await recoverAssertions(recovery,workspace,operational,[failure]);
+      const retireGeneratedInstrument=async():Promise<boolean>=>{
+        if(verificationLevel(check)!=='behavior'||!state.nativeConformanceCheckIds?.includes(check.id)||(plan.acceptance??[]).some(required=>required.id===check.id))return false;
+        if([...(state.acceptanceChecks??[]),...plan.tasks.flatMap(unit=>state.tasks[unit.id]?.checks??unit.checks)].some(consumer=>consumer.dependsOn?.includes(check.id)))return false;
+        for(const alternative of state.acceptanceChecks??[]){
+          if(alternative.id===check.id||!state.nativeConformanceCheckIds.includes(alternative.id)||alternative.kind!==check.kind||verificationLevel(alternative)!=='behavior')continue;
+          const identity=await proofIdentity(work,alternative,workspace,operational);
+          const proof=state.evidence.findLast(item=>item.taskId===work.id&&item.checkId===alternative.id&&item.inputHash===identity.inputHash);
+          if(!proof?.passed||!usableProof(alternative,proof))continue;
+          state.acceptanceChecks=state.acceptanceChecks!.filter(item=>item.id!==check.id);
+          state.nativeConformanceCheckIds=state.nativeConformanceCheckIds.filter(id=>id!==check.id);progress.checks=[];
+          state.retiredInstruments??=[];state.retiredInstruments.push({key:instrumentKey(check),authorityHash,checkId:check.id,evidenceId:failure.evidence.id,at:now()});
+          metrics.repetitions.push({taskId:work.id,action:'retire-failed-generated-instrument',reason:JSON.stringify({failedEvidenceId:failure.evidence.id,retainedInterfaceEvidenceId:proof.id,classification:'instrument',basis:'An engine-generated observation candidate is not a new user acceptance criterion. Its classified instrument failure remains recorded; mandatory provider conformance still has to pass independently.'}),at:now()});
+          event('recovery','Instrumento adicional classificado como defeituoso aposentado; prova funcional atual preservada e conformidade obrigatória continua pendente.',check.id);await save();return true;
+        }
+        return false;
+      };
+      const asserted=failure.classification==='instrument'?await retireGeneratedInstrument()||await recoverAssertions(recovery,workspace,operational,[failure]):await triageAssertionFailure(recovery,workspace,operational,[failure],state.nativeConformanceCheckIds?.includes(check.id)?retireGeneratedInstrument:undefined);
       if(interrupted()){cancelled=true;return true;}
-      if(asserted||await repairRecipe(recovery,workspace,operational,failure.evidence.output)){
+      if(asserted||failure.classification==='instrument'&&await repairRecipe(recovery,workspace,operational,failure.evidence.output,check.kind==='command'?undefined:check.kind)){
         if(interrupted()){cancelled=true;return true;}
+        const native=state.nativeConformanceCheckIds?.includes(check.id);
+        if(native)progress.checks=(progress.checks??[check]).map(recipe=>({...recipe,requirementIds:[...new Set([...check.requirementIds,...recipe.requirementIds])],dependsOn:[...new Set([...(check.dependsOn??[]),...(recipe.dependsOn??[])])]}));
         state.acceptanceChecks=reconcileChecks((state.acceptanceChecks??[]).flatMap(item=>item.id===check.id?progress.checks??[item]:[item]));
+        if(native)state.nativeConformanceCheckIds=[...new Set([...state.nativeConformanceCheckIds!,...(progress.checks??[check]).map(recipe=>recipe.id)])];
         metrics.repetitions.push({taskId:recovery.id,action:'acceptance-instrument',reason:'An actual failed final recipe was replaced; the original verdict and code were preserved.',at:now()});await save();finished=true;return true;
       }
     }
@@ -806,6 +856,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
   const runTask = async (task: WorkUnit): Promise<void> => {
     const progress = state.tasks[task.id] ??= initialTask(); progress.actions ??= []; progress.reviews ??= [];
     progress.checks??=structuredClone(task.checks);
+    progress.checks=progress.checks.filter(check=>!retiredInstrument(check));
     try {
       if(options.retrySuspended&&progress.suspension&&['environment','transport'].includes(progress.suspension.action)){
         progress.retryGeneration=(progress.retryGeneration??0)+1;delete progress.suspension;
@@ -1009,7 +1060,22 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
               for(const finding of assessment.findings){
                 if(finding.disposition!=='defect'||!finding.file||finding.evidenceType==='verification'||finding.evidenceType==='inspection-command')continue;
                 const source=await substantiateSourceFinding(workspace,finding,coverage);
-                if(source.verified)continue;
+                if(source.verified){
+                  if(!source.receipt?.quote&&!finding.sourceLocation){
+                    const payload=JSON.stringify({finding:finding.original,sourceIdentity:source.receipt,currentEvidence:proofPacket.text});
+                    const diagnosis=await invoke(task,workspace,'reviewer','Classify the basis of this negative finding before authorizing an edit. A current file receipt establishes identity, not a source defect. Distinguish an actual source defect, a runtime defect needing reproduction, and missing execution evidence. Return JSON {basis:"source"|"runtime"|"verification-debt",cause,verification:{kind,command,args,level,assertion,inputs}}. Preserve the original finding and mandatory criterion; never approve it here. For runtime or missing evidence, provide a focused executable reproduction of the actual contract when possible.',payload,true,`classify-review-basis:${digest(payload)}`,operational,payload,'inspection');
+                    if(diagnosis.status==='cancelled'||options.signal?.aborted){cancelled=true;return;}
+                    const route=jsonObject(diagnosis.text);
+                    assessment.transformations.push({path:`findings.${finding.id}`,operation:'classify',reason:JSON.stringify({operation:'resolve-finding-basis',diagnosis:route??diagnosis.text}),original:structuredClone(finding)});
+                    if(route?.basis==='runtime'||route?.basis==='verification-debt'){
+                      finding.evidenceType='inspection-command';
+                      if(route.verification&&typeof route.verification==='object'&&!Array.isArray(route.verification))finding.reproduction=route.verification as Record<string,unknown>;
+                    }else if(route?.basis!=='source'){
+                      assessment.decision='unresolved';assessment.approved=false;
+                    }
+                  }
+                  continue;
+                }
                 assessment.decision='unresolved';assessment.approved=false;
                 assessment.transformations.push({path:`findings.${finding.id}`,operation:'unresolved',reason:source.reason,original:structuredClone(finding)});
                 if(finding.file)progress.contextFocus=[finding.file,...(progress.contextFocus??[]).filter(path=>path!==finding.file)];
@@ -1023,14 +1089,16 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
                   else scheduleReplan(task,incident('instrument',task.id,'The runtime finding has no executable reproduction yet; reconcile its focused proof contract without changing the delivery.',reviewFindingText(finding)));
                   continue;
                 }
-                const reproduced=(await verify(task,workspace,operational,recipes))[0]!;
+                progress.checks=reconcileChecks([...(progress.checks??task.checks),...recipes]);
+                const registered=recipes.map(recipe=>progress.checks!.find(check=>reconcileChecks([check,recipe]).length===1)??recipe);
+                const reproduced=(await verify(task,workspace,operational,registered))[0]!;
                 const prior=structuredClone(finding);
                 if(reproduced.evidence.passed){
                   finding.kind='instrument';finding.disposition='advisory';
                   finding.evidence=`${finding.evidence??''}\nWritable reproduction ${reproduced.evidence.checkId}:\n${reproduced.evidence.output}`;
                   assessment.decision='unresolved';assessment.approved=false;
-                  assessment.transformations.push({path:`findings.${finding.id}`,operation:'classify',reason:'The claimed inspection-command failure was not reproduced with the prepared provider in writable isolation. The original observation is retained as an instrument incident and requires explicit verdict resolution.',original:prior});
-                  note(incident('instrument',task.id,'A read-only inspection command was contradicted by its writable reproduction.',reproduced.evidence.output));
+                  assessment.transformations.push({path:`findings.${finding.id}`,operation:'classify',reason:'The focused scenario now has an observed positive receipt in writable isolation. The original negative verdict remains recorded; a fresh review of the current evidence must resolve it explicitly.',original:prior});
+                  progress.strategy='revalidate-only';progress.checkpoint.phase='checking';
                 }else{
                   finding.kind=reproduced.classification==='planning'?'planning':reproduced.classification??'product';finding.evidenceType='verification';finding.evidence=`${reproduced.evidence.checkId}:\n${reproduced.evidence.output}`;
                   assessment.transformations.push({path:`findings.${finding.id}`,operation:'classify',reason:'The claim was reproduced independently; its classified observed result now governs recovery.',original:prior});
@@ -1049,7 +1117,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
               if (assessment.decision === 'approved') { accepted = true; gate(task,'G3','complete','O revisor confirmou a unidade e suas provas.'); break; }
               const nonProduct = assessment.actionableFindings.find(finding=>finding.kind!=='product');
               if (nonProduct) {
-                if (nonProduct.kind === 'instrument' && await repairRecipe(task,workspace,operational,reviewFindingText(nonProduct))) { progress.checkpoint.phase='checking'; break; }
+                if (nonProduct.kind === 'instrument' && await repairRecipe(task,workspace,operational,reviewFindingText(nonProduct),undefined,true)) { progress.checkpoint.phase='checking'; break; }
                 const problem=incident(nonProduct.kind,task.id,`Review identified a ${nonProduct.kind} cause requiring its own recovery before further product edits.`,nonProduct.text);problem.repairScope=nonProduct.kind==='environment'?'environment':'verification';scheduleReplan(task,problem);
                 await suspend(task,nonProduct.kind,problem.message,problem.evidence); return;
               }
@@ -1062,11 +1130,11 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
                 const explanation=jsonObject(diagnosis.text);const fix=[explanation?.cause,explanation?.fix].filter(item=>typeof item==='string').join('\n');
                 if(explanation?.kind==='instrument'&&fix){
                   progress.contextFocus=[...new Set(assessment.actionableFindings.flatMap(finding=>finding.file?[finding.file]:[]))];
-                  if(await repairRecipe(task,workspace,operational,`${diagnosis.text}\n${assessment.original}`)){progress.checkpoint.phase='checking';break;}
+                  if(await repairRecipe(task,workspace,operational,`${diagnosis.text}\n${assessment.original}`,undefined,true)){progress.checkpoint.phase='checking';break;}
                   progress.strategy=`focused-inspection:${digest(fix)}`;progress.checkpoint.phase='reviewing';inspectAgain=true;await save();break;
                 }
                 if(explanation?.kind!=='product'||!fix){
-                  const problem=incident('planning',task.id,'Independent diagnosis requires a different context, instrument or ownership before any further product edit.',diagnosis.text);scheduleReplan(task,problem);await suspend(task,'planning',problem.message,problem.evidence);return;
+                  const problem=incident('planning',task.id,'Independent diagnosis requires a different context, instrument or ownership before any further product edit.',diagnosis.text);problem.repairScope=explanation?.kind==='environment'?'environment':'verification';scheduleReplan(task,problem);await suspend(task,'planning',problem.message,problem.evidence);return;
                 }
                 progress.findings=[fix];progress.strategy=`review-guided-repair:${digest(fix)}`;progress.checkpoint.phase='editing';break;
               }
@@ -1102,6 +1170,12 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       }
     } catch (error) {
       if (options.signal?.aborted) { cancelled = true; return; }
+      if(error instanceof ObservedProducerContract){
+        delete progress.verificationCheckpoint;progress.status='checking';progress.strategy='revalidate-only';if(progress.checkpoint)progress.checkpoint.phase='checking';attempted.delete(task.id);await save();return;
+      }
+      if(error instanceof VerificationGraphError){
+        const problem=incident('instrument',task.id,error.message,JSON.stringify({code:error.code,checkIds:error.checkIds}));problem.repairScope='verification';scheduleReplan(task,problem);await suspend(task,'instrument',problem.message,problem.evidence);return;
+      }
       if(error instanceof VerificationMutationError){
         const report=JSON.stringify(error.report);
         const problem=incident('instrument',task.id,error.message,report);problem.repairScope='verification';note(problem);
@@ -1122,8 +1196,8 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
       await suspend(task,error instanceof IntegrationConflict?'integration':'instrument',error instanceof Error?error.message:String(error),progress.checkpoint?.directory ?? '');
     }
   };
-  const finish = async (status: BuildOutcome['status']): Promise<BuildOutcome> => {
-    state.blockers = status === 'waiting' ? plan.tasks.flatMap(task => {
+  const finish = async (status: BuildOutcome['status'],currentBlockers?:BuildIncident[]): Promise<BuildOutcome> => {
+    state.blockers = status === 'waiting' ? currentBlockers??plan.tasks.flatMap(task => {
       const pending = state.tasks[task.id]?.suspension;
       if (!pending || state.tasks[task.id]?.status === 'complete') return [];
       return [incident(pending.action as BuildIncident['kind'], task.id, pending.reason,
@@ -1257,7 +1331,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
             if(problem.repairScope==='verification'){
               const workspace=progress.checkpoint&&await exists(progress.checkpoint.directory)?progress.checkpoint.directory:options.workspace;
               const operational=relocateOperationalEnvironment(canonicalOperational(task),options.workspace,workspace);
-              if(await repairRecipe(task,workspace,operational,`The scoped planner could not reconcile this instrument. Inspect the actual private files and observed results instead of repeating that plan proposal.\nORIGINAL CAUSE\n${problem.message}\n${problem.evidence}\nPLANNER FAILURE\n${action.failure}`)){
+              if(await repairRecipe(task,workspace,operational,`The scoped planner could not reconcile this instrument. Inspect the actual private files and observed results instead of repeating that plan proposal.\nORIGINAL CAUSE\n${problem.message}\n${problem.evidence}\nPLANNER FAILURE\n${action.failure}`,undefined,true)){
                 if(progress.checkpoint)progress.checkpoint.phase='checking';progress.status='checking';delete progress.suspension;attempted.delete(task.id);changed=true;
               }
             }
@@ -1332,9 +1406,9 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     // Only after ready work has drained do changes in shared inputs invalidate affected proof consumers.
     let invalidated=false;
     for(const task of plan.tasks){const progress=state.tasks[task.id]!;if(progress.status!=='complete')continue;
-      const operational=canonicalOperational(task);const current=await measured('proofRevalidation',()=>revision(task,options.workspace,operational));
+      const operational=canonicalOperational(task);const currentState=await measured('proofRevalidation',()=>revisionState(task,options.workspace,operational)),current=currentState.hash;
       const checks=progress.checks??task.checks;const stale:Verification[]=[];
-      for(const check of checks){const hash=await proofHash(task,check,options.workspace,operational);const latest=state.evidence.findLast(item=>item.taskId===task.id&&item.checkId===check.id&&item.inputHash===hash);if(!latest?.passed||!usableProof(check,latest))stale.push(check);}
+      for(const check of checks){const hash=currentState.proofs[check.id];const latest=state.evidence.findLast(item=>item.taskId===task.id&&item.checkId===check.id&&item.inputHash===hash);if(!latest?.passed||!usableProof(check,latest))stale.push(check);}
       if(!stale.length){
         delete progress.revalidationFingerprint;
         let currentInspection=false;
@@ -1344,7 +1418,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         }else progress.revision=current;
         continue;
       }
-      const repeated=digest(JSON.stringify({current,checks:await Promise.all(stale.map(async check=>({id:check.id,input:await proofHash(task,check,options.workspace,operational)})))}));
+      const repeated=digest(JSON.stringify({current,checks:stale.map(check=>({id:check.id,input:currentState.proofs[check.id]}))}));
       if(progress.revalidationFingerprint===repeated){await suspend(task,'instrument','No progress: proof identity did not stabilize after revalidation of unchanged declared inputs.',JSON.stringify(stale.map(check=>check.id)));return finish('waiting');}
       progress.revalidationFingerprint=repeated;
       metrics.invalidations.push(...stale.map(check=>({taskId:task.id,checkId:check.id,reason:'A declared relevant input changed after publication.',at:now()})));
@@ -1357,14 +1431,16 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     const acceptanceTask:WorkUnit={id:'$acceptance',title:'Final acceptance',goal:'Prove mandatory outcomes in the requested interface.',instructions:'Verify integrated deliveries without changing them.',requirementIds:options.brief.requirements.map(item=>item.id),dependsOn:[],environmentIds:plan.environment.map(item=>item.id),contractIds:plan.contracts.map(item=>item.id),files:[],inputs:[...new Set(plan.tasks.flatMap(task=>task.files))],criteria:['Every mandatory requirement has current appropriate evidence.'],checks:plan.acceptance??[],risk:'normal',blockedBy:[]};
     const operational=canonicalOperational(acceptanceTask);
     const production=(plan.acceptance??[]).some(check=>verificationLevel(check)==='build')?[]:(await derivedChecks(options.workspace,acceptanceTask)).filter(check=>verificationLevel(check)==='build');
-    const proposedFinal=reconcileChecks([...(plan.acceptance??[]),...production]);const acceptanceHash=digest(JSON.stringify(proposedFinal));
+    const proposedFinal=reconcileChecks([...(plan.acceptance??[]),...production].filter(check=>!retiredInstrument(check)));const acceptanceHash=digest(JSON.stringify(proposedFinal));
+    if(state.acceptanceChecks)state.acceptanceChecks=state.acceptanceChecks.filter(check=>!retiredInstrument(check));
     if(state.acceptancePlanHash!==acceptanceHash){state.acceptancePlanHash=acceptanceHash;state.acceptanceChecks=proposedFinal;delete state.nativeConformanceCheckIds;}
     let effectsChanged=false;
     for(const producer of state.acceptanceChecks??[]){
       if(!state.nativeConformanceCheckIds?.includes(producer.id)||verificationLevel(producer)!=='build')continue;
       const observation=state.evidence.findLast(proof=>proof.taskId==='$acceptance'&&proof.checkId===producer.id&&proof.passed&&proof.level==='build');
       if(!observation)continue;
-      const effects=await deriveObservedProducerOutputs({workspace:options.workspace,check:producer,evidence:observation,sourceFiles:[...new Set(plan.tasks.flatMap(unit=>deliveryWriteSet(unit.id,state.tasks[unit.id],state.integrations)??unit.files))]});
+      const declaredInputs=await resolveInputDependencies(options.workspace,await verificationInputSelectors(options.workspace,plan,acceptanceTask,producer));
+      const effects=await deriveObservedProducerOutputs({workspace:options.workspace,check:producer,evidence:observation,declaredInputs,sourceFiles:plan.tasks.flatMap(unit=>unit.files)});
       if(!effects.transformation)continue;
       state.acceptanceChecks=(state.acceptanceChecks??[]).map(check=>check.id===producer.id?effects.check:state.nativeConformanceCheckIds!.includes(check.id)&&verificationLevel(check)==='behavior'?{...check,dependsOn:[...new Set([...(check.dependsOn??[]).filter(id=>state.acceptanceChecks!.some(candidate=>candidate.id===id)),producer.id])]}:check);
       metrics.repetitions.push({taskId:'$acceptance',action:'declare-observed-producer-effects',reason:JSON.stringify(effects.transformation),at:now()});
@@ -1404,7 +1480,7 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
         const failed=results.find(result=>!result.evidence.passed);if(failed){const check=finalChecks.find(item=>item.id===failed.evidence.checkId)!;if(await recoverAcceptance(failed,check,acceptanceTask,area.directory,local))continue;return finish('waiting');}
         const outputs=finalChecks.flatMap(declaredOutputs);
         if(outputs.length)await serial('acceptanceIntegration',async()=>{const transaction=await prepareIntegration(options.workspace,acceptanceTask.id,area,outputs);state.integrations!.push(transaction);await save();if(persistenceFailed)return;transaction.phase='applying';await save();try{await publishIntegration(options.workspace,transaction);transaction.phase='applied';await save();}catch(error){integrationBlocked=true;throw error;}});
-      }catch(error){note(incident(error instanceof WorkPlanningError?'planning':'integration',acceptanceTask.id,error instanceof Error?error.message:String(error)));return finish('waiting');}
+      }catch(error){if(error instanceof ObservedProducerContract){await save();continue execution;}note(incident(error instanceof WorkPlanningError?'planning':'integration',acceptanceTask.id,error instanceof Error?error.message:String(error)));return finish('waiting');}
       }
     }
     const currentProofs:VerificationEvidence[]=[];
@@ -1447,6 +1523,21 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
     const effectivePlan:DevelopmentPlan={...plan,tasks:plan.tasks.map(task=>({...task,checks:state.tasks[task.id]?.checks??task.checks})),acceptance:observedFinalChecks};
     const conformity=await measured('conformance',()=>validateConformance(options.brief,effectivePlan,operational,currentProofs,options.workspace));
     if(conformity.length){
+      const conformanceSource=await inputHash(options.workspace,await resolveInputDependencies(options.workspace,acceptanceTask.inputs??[]),operational.revision);
+      for(const issue of conformity){
+        const requirement=options.brief.requirements.find(item=>item.id===issue.requirementId);
+        if(!requirement?.binding||!['library','driver'].includes(requirement.binding.kind))continue;
+        const providers=plan.environment.filter(node=>obligationMatchesProvider(requirement,node.identity));
+        if(!providers.length||Object.values(operational.bindings).some(binding=>binding.ready&&obligationMatchesProvider(requirement,binding)&&(binding.modules?.length||binding.inputs?.length)))continue;
+        const key=`provider-consumption-interface:${digest(JSON.stringify({protocol:executionProtocol,source:conformanceSource,requirementId:requirement.id,providers:providers.map(node=>({id:node.id,check:node.check}))}))}`;
+        state.acceptanceRecovery??={};if(state.acceptanceRecovery[key])continue;
+        const owner=plan.tasks.find(unit=>unit.requirementIds.includes(requirement.id)&&unit.environmentIds.some(id=>providers.some(node=>node.id===id)));
+        if(options.repairPlan&&owner){
+          state.acceptanceRecovery[key]='planning:provider-consumption-interface';
+          const problem=incident('environment',requirement.id,'The prepared library/driver has no module or provider-file consumption contract. Reconcile its actual ready interface before requesting another product verification.',JSON.stringify({issue,providers:providers.map(node=>({id:node.id,identity:node.identity,readiness:node.check,provides:node.provides}))}));
+          problem.repairScope='environment';scheduleReplan(owner,problem);await save();continue execution;
+        }
+      }
       if(!state.nativeConformanceCheckIds?.length&&conformity.some(issue=>issue.code!=='provider-unavailable')){
         const requirements=options.brief.requirements.filter(requirement=>requirement.binding).map(requirement=>requirement.id);
         const native:Verification[]=[];
@@ -1477,10 +1568,38 @@ export async function runBuild(options: BuildOptions): Promise<BuildOutcome> {
           event('recovery','Certificação nativa dos provedores preparada em lote; os cenários atuais serão observados sem novas receitas de modelo.',undefined,{checkIds:state.nativeConformanceCheckIds,requirementIds:requirements});await save();continue execution;
         }
       }
+      if(state.nativeConformanceCheckIds?.length&&conformity.some(issue=>issue.code!=='provider-unavailable')){
+        const producer=finalChecks.find(check=>state.nativeConformanceCheckIds!.includes(check.id)&&verificationLevel(check)==='build');
+        const kind=options.brief.modes.find(mode=>mode==='web'||mode==='tui'||mode==='cli'||mode==='desktop') as Verification['kind']|undefined;
+        const sdk=conformity.find(issue=>options.brief.requirements.find(requirement=>requirement.id===issue.requirementId)?.binding?.kind==='sdk');
+        const focused=sdk?[sdk]:conformity;
+        const key=`compiled-product-runtime/2:${digest(JSON.stringify({protocol:executionProtocol,source:conformanceSource,issues:focused.map(issue=>({code:issue.code,requirementId:issue.requirementId})),producer:producer&&{command:producer.command,args:producer.args,outputs:declaredOutputs(producer)}}))}`;
+        state.acceptanceRecovery??={};
+        if(!state.acceptanceRecovery[key]&&producer&&declaredOutputs(producer).length){
+          state.acceptanceRecovery[key]='running:provider-functional-artifacts';
+          const progress=state.tasks[acceptanceTask.id]??=initialTask();
+          progress.checks=structuredClone(state.acceptanceChecks??finalChecks);
+          const surfaces=await verificationSurfaces(options.workspace,acceptanceTask);
+          const packet=JSON.stringify({operation:'execute-compiled-product',issues:focused,requiredArtifactInputs:declaredOutputs(producer),producer,existingInteraction:finalChecks.filter(check=>verificationLevel(check)==='behavior'),sourceIndex:surfaces,requirements:options.brief.requirements.filter(requirement=>focused.some(issue=>issue.requirementId===requirement.id))});
+          await save();
+          if(await repairRecipe(acceptanceTask,options.workspace,operational,'The integrated code already exists. Recover only the functional verification instrument so it consumes the exact existing production artifacts, not a different source/development build. Use actual local startup commands and existing scenarios; temporary verifier configuration belongs to the private verification area. Keep mandatory provider and interface criteria unchanged. An available compiler or an imported library inside the verifier does not establish product usage.',kind,true,'provider-functional-artifacts',packet,true)){
+            const previousIds=new Set((state.acceptanceChecks??[]).map(check=>check.id));
+            const additions=(progress.checks??[]).filter(check=>!previousIds.has(check.id)).map(check=>({...check,dependsOn:[...new Set([...(check.dependsOn??[]),producer.id])]}));
+            if(additions.length){
+              state.acceptanceChecks=reconcileChecks([...(state.acceptanceChecks??[]),...additions]);
+              state.nativeConformanceCheckIds=[...new Set([...state.nativeConformanceCheckIds,...additions.map(check=>check.id)])];
+              state.acceptanceRecovery[key]='complete:provider-functional-candidate';
+              event('recovery','Consumo funcional dos artefatos preparado como prova final; nenhuma entrega será reaberta por metadados de certificação.',undefined,{checkIds:additions.map(check=>check.id)});await save();continue execution;
+            }
+          }
+          if(options.signal?.aborted||cancelled)return finish('cancelled');
+          state.acceptanceRecovery[key]='complete:provider-functional-unresolved';await save();
+        }
+      }
       for(const issue of conformity)note(incident('planning',issue.requirementId,issue.message,issue.code));
-      const fingerprint=digest(JSON.stringify({protocol:executionProtocol,issues:conformity,proofs:currentProofs.map(proof=>proof.inputHash)}));state.acceptanceRecovery??={};
+      const fingerprint=digest(JSON.stringify({protocol:executionProtocol,issues:conformity.map(issue=>({code:issue.code,requirementId:issue.requirementId})),source:conformanceSource,environment:operational.revision}));state.acceptanceRecovery??={};
       if(options.repairPlan&&!state.acceptanceRecovery[fingerprint]){state.acceptanceRecovery[fingerprint]='planning';const issue=conformity[0]!,owner=plan.tasks.find(task=>task.requirementIds.includes(issue.requirementId))??plan.tasks[0];if(owner){const problem=incident(issue.code==='provider-unavailable'?'environment':'instrument',issue.requirementId,'Mandatory provider usage is not yet proved; reconcile its actual provider and verification contract before changing any delivery.',issue.message);problem.repairScope=issue.code==='provider-unavailable'?'environment':'verification';scheduleReplan(owner,problem);await save();continue;}}
-      return finish('waiting');
+      return finish('waiting',conformity.map(issue=>incident('planning',issue.requirementId,issue.message,issue.code)));
     }
     // Moving an integration finding never proves it. Only the current final
     // owner's acknowledgement and a fresh appropriate receipt can discharge it.

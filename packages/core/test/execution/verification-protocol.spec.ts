@@ -26,3 +26,20 @@ it('recovers a generic browser behavior protocol before spawning while preservin
     expect(failure.classification).toBe('product');expect(failure.needsInstrument).toBe(false);expect(failure.evidence.passed).toBe(false);expect(failure.evidence.output).toContain('actual material failure');expect(failure.result!.exitCode).toBe(2);
   }finally{await rm(workspace,{recursive:true,force:true});}
 });
+
+it('executa uma prova técnica na plataforma browser sem promovê-la a interação web',async()=>{
+  const workspace=await mkdtemp(join(tmpdir(),'capivara-platform-proof-'));
+  try{
+    const brief:ProductBrief={schema:'capivara/product/1',id:'p',revision:1,status:'ready',name:'App',summary:'Persist records.',request:'Persist records in a web application.',modes:['web'],targets:['browser'],requirements:[],constraints:[],decisions:[],gaps:[]};
+    const script="const{execFileSync}=require('node:child_process');execFileSync(process.execPath,['-e',\"require('node:fs').writeFileSync('record.txt','saved')\"]);const value=execFileSync(process.execPath,['-e',\"process.stdout.write(require('node:fs').readFileSync('record.txt','utf8'))\"],{encoding:'utf8'});if(value!=='saved')throw Error('Record missing in new process');console.log('RESTORED');";
+    const check:Verification={id:'restart',kind:'command',command:process.execPath,args:['-e',script],target:'browser',level:'behavior',assertion:{type:'contains',source:'stdout',value:'RESTORED'},requirementIds:[],requiredCapabilities:[]};
+    const task:WorkUnit={id:'persistence',title:'Persistence',goal:brief.summary,instructions:brief.summary,requirementIds:[],dependsOn:[],environmentIds:[],contractIds:[],files:[],inputs:[],criteria:[brief.summary],checks:[check],risk:'normal',blockedBy:[]};
+    const plan:DevelopmentPlan={schema:'capivara/plan/1',status:'ready',revision:1,briefId:brief.id,briefRevision:1,environment:[],contracts:[],tasks:[task]};
+    expect(selectVerifications(brief,task)[0]!.replaced).toBeUndefined();
+    const result=await runVerification(workspace,brief,task,plan,check,executeCommand,async()=>{throw Error('No terminal required.');});
+    expect(result.evidence.passed,result.evidence.output).toBe(true);
+    expect(result.evidence.kind).toBe('command');
+    const web=await runVerification(workspace,brief,task,plan,{...check,kind:'web'},executeCommand,async()=>{throw Error('No terminal required.');});
+    expect(web.evidence.passed).toBe(false);expect(web.classification).toBe('instrument');
+  }finally{await rm(workspace,{recursive:true,force:true});}
+});
